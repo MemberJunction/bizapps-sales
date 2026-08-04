@@ -38,8 +38,7 @@
 > There is no schema, no migration, no package code. **This README is the specification we are
 > building to, not a description of what exists.** Every table, operation and behaviour below is a
 > commitment, not a claim. The design is settled — see
-> [`sales-deal-management/plans/03-bizapps-sales.md`](https://github.com/BlueCypress/new-products/blob/main/sales-deal-management/plans/03-bizapps-sales.md)
-> and its [parent plan](https://github.com/BlueCypress/new-products/blob/main/sales-deal-management/plan.md)
+> [`plans/bizapps-sales-master.md`](plans/bizapps-sales-master.md)
 > (decisions **L-1…L-4**, **L-7**, **L-8**, **L-13…L-19**, **L-21**).
 
 CRM is the most crowded software category on earth, and this is not an entry into it.
@@ -717,9 +716,7 @@ bizapps-sales/
 
 | Document | Description |
 |---|---|
-| [Sales sub-plan](https://github.com/BlueCypress/new-products/blob/main/sales-deal-management/plans/03-bizapps-sales.md) | The buildable spec this README summarizes |
-| [Parent plan](https://github.com/BlueCypress/new-products/blob/main/sales-deal-management/plan.md) | Strategy, architecture, the three-app split, decision log L-1…L-21 |
-| [Activity spine spec](https://github.com/BlueCypress/new-products/blob/main/sales-deal-management/plans/01-common-activity.md) | The `bizapps-common` prerequisite |
+| [Master plan](plans/bizapps-sales-master.md) | **The app's source of truth** — data model, close routing, forecasting, build sequence |
 | [BizApps Contracts](https://github.com/MemberJunction/bizapps-contracts) | The agreement envelope a won deal creates |
 | [BizApps Orders](https://github.com/MemberJunction/bizapps-orders) | The catalog and pricing engine every number comes from |
 | [BizApps Tasks](https://github.com/MemberJunction/bizapps-tasks) | The approval substrate |
