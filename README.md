@@ -55,9 +55,13 @@ billing through recognition — on one schema, with one Person graph, one catalo
 
 > ### 1. The sales app never computes money.
 >
-> It records **intent** — product, quantity, requested discount, term — and asks
+> It records **intent** — product, quantity, requested discount, override price, term — and asks
 > [`bizapps-orders`](https://github.com/MemberJunction/bizapps-orders). No pricing arithmetic, no tax
 > logic, no proration, no total that was not returned by `Orders.PreviewOrder`.
+>
+> **This is not a rule against overriding prices.** Overriding is expected, and it is
+> [modelled in full below](#overriding-a-price-is-an-input-not-an-exception). The rule is against
+> *computing* — see the distinction, because misreading it in either direction causes real damage.
 >
 > ### 2. Domain vocabulary is data, never a `CHECK` constraint.
 >
@@ -65,8 +69,13 @@ billing through recognition — on one schema, with one Person graph, one catalo
 > loss reasons, lead sources and lifecycle stages are all **type tables carrying the behaviour flags
 > the engine branches on**. The engine reads `DealStatusType.IsWon`. It never compares a string.
 
-**What sales must never do:** multiply quantity by price · apply a discount percentage · compute tax
-· prorate a partial period · sum lines into a header total · round anything.
+| ✅ Sales may absolutely | ❌ Sales must never |
+|---|---|
+| Set `OverrideUnitPrice` on a line | Multiply quantity by price |
+| Request a discount (`RequestedDiscountPct`) | **Apply** a discount percentage |
+| Name a term, a service period, a quantity | Prorate a partial period |
+| Choose a `PriceListID` | Compute tax |
+| Display any number orders returned | Sum lines into a header total, or round anything |
 
 Both rules fail the same way — **by accretion.** "Just this one rounding case." "Just this one
 `Status === 'Won'`." So both are enforced by tests that fail, not paragraphs that ask nicely:
@@ -277,6 +286,46 @@ DealLine[]  ──map──▶  HydratableLine[]  ──▶  Orders.PreviewOrder
 
 On close, **the same draft** goes to `Orders.CreateOrderInState`. The quote and the invoice cannot
 disagree, because they are **the same computation run twice**.
+
+### Overriding a price is an input, not an exception
+
+A rep negotiating a number is the normal case, not a workaround, and orders already models it with a
+full audit and authority trail — `OrderAdjustment` carries `Amount`, a **required** `Reason` when it
+is not a promotion, `AppliedByUserID`, `AuthorizedBySalesAuthorityID` and the `ApprovedByUserID` /
+`ApprovedAt` pair; `SalesAuthority` carries the per-rep caps (`MaxDiscountPct`, `MaxOrderValue`,
+allowed payment terms, allowed product categories).
+
+**The override is an input to the pipeline, never a replacement for it.** Sales sets
+`OverrideUnitPrice` or `RequestedDiscountPct` on the line; `Orders.PreviewOrder` honours it and then
+**still** computes extended amount, charges, tax and proration on top, and returns the totals. Sales
+stamps what came back.
+
+```
+DealLine.OverrideUnitPrice = 50,000     ← a human decided this
+        │
+        ▼
+Orders.PreviewOrder                     ← honours the override, THEN applies
+        │                                  charges + tax + proration on top
+        ▼
+Deal.Amount = 53,240                    ← stamped, never derived here
+```
+
+Computing `quantity × override` locally would produce **50,000** — quietly dropping tax and charges,
+so the quote and the invoice disagree by an amount nobody can trace. That, and not the human
+judgement, is what the rule exists to prevent.
+
+The same logic covers contracted pricing, which is cleaner still: `ContractPriceResolver` registers
+**inside** orders' `BasePriceResolver` walk, so contracts does not override orders from outside — it
+participates in orders' own computation as a plugin. That is why contracted prices reach ad-hoc
+orders for free.
+
+> **Approval level is data, and it varies by organization.** Exceeding a rep's `SalesAuthority` raises
+> an Approval Request Task routed to an approver role — configured per org, never hardcoded.
+> **Open question:** `SalesAuthority` is a *flat cap per rep*, which expresses single-gate approval
+> well but cannot express an escalation ladder (">20% to the manager, >40% to the CFO") as
+> configuration. If an org needs tiers, that is a threshold→role table belonging in **orders** beside
+> `SalesAuthority` — because ad-hoc order confirm needs it too, not just deals. Not built until
+> confirmed.
 
 **Two clean modes, not a spectrum** *(L-2)*:
 
