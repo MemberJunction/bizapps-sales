@@ -110,6 +110,70 @@ local database whose `bizapps-common` is missing all five patches — most visib
 
 ---
 
+## 🟠 KI-6 — One CHECK constraint does not survive the PostgreSQL conversion
+
+**The baseline converts and applies to PostgreSQL 16 in full, with exactly one exception.** Production
+is PostgreSQL, so this is worth knowing precisely rather than vaguely.
+
+### What was actually tested
+
+The hand-authored half of `migrations/V202608042101__v0.1.x__Tables_and_Objects.sql` was converted with
+`mj sql-convert --from tsql --to postgres` and the result **applied to a real PostgreSQL 16 instance**
+(dependency tables stubbed, since `__mj` and `__mj_BizAppsCommon` do not exist there yet). Result:
+
+| | SQL Server | PostgreSQL |
+|---|---|---|
+| Tables | 19 | **19** |
+| Foreign keys | 47 | **47** |
+| Unique constraints | — | 15 |
+
+Type mapping is clean: `UNIQUEIDENTIFIER → UUID DEFAULT gen_random_uuid()`, `BIT → BOOLEAN`,
+`NVARCHAR(MAX) → TEXT`, `NEWSEQUENTIALID() → gen_random_uuid()`. All 54 extended-property comments carry
+through into `COMMENT ON` statements, so the reasoning survives into the PG artifact too.
+
+### The one failure
+
+`CK_DealStatusType_NotWonAndLost` — `CHECK (NOT (IsWon = 1 AND IsLost = 1))`.
+
+The converter maps the `BIT` column to `BOOLEAN` but leaves the `= 1` comparison untouched, emitting
+`"IsWon" = 1`. PostgreSQL has no implicit integer-to-boolean cast and refuses it:
+
+```
+ERROR:  operator does not exist: boolean = integer
+```
+
+**There is no portable rewrite**, which is the part worth recording:
+
+- `CAST(IsWon AS int) + CAST(IsLost AS int) <= 1` is valid in *both* dialects — but the converter's
+  identifier-quoting pass mangles it to `"CAST"("IsWon" "AS" INTEGER)`, quoting the keywords as
+  identifiers. Syntax error.
+- `IsWon + IsLost <= 1` is not an option: T-SQL refuses arithmetic on `BIT` outright.
+
+So the constraint stays idiomatic T-SQL, and the PG path is a **documented one-line post-edit**:
+
+```sql
+-- after conversion, replace:
+CHECK (NOT ("IsWon" = 1 AND "IsLost" = 1))
+-- with:
+CHECK (NOT ("IsWon" AND "IsLost"))
+```
+
+With that single edit applied, **every other statement applies cleanly**.
+
+### The wider lesson — "0 errors" is not "it works"
+
+`mj sql-convert` reported **`Errors: 0`** for every one of these runs, including the ones whose output
+PostgreSQL rejected outright. That count means *"statements I was able to transform"*, not *"output that
+applies"*. **Converting is not verifying.** The only thing that caught this was applying the result to a
+real PostgreSQL instance, and any future claim that the schema is PG-ready should be backed by an apply,
+not by a conversion summary.
+
+Two converter defects worth reporting upstream: (1) `BIT` comparisons inside `CHECK` are not rewritten
+when the column becomes `BOOLEAN`; (2) the identifier-quoting pass quotes `CAST`/`AS` as identifiers
+inside `CHECK` expressions.
+
+---
+
 ## 🟡 KI-3 — CodeGen's AI enrichment is skipped locally
 
 `npm run mj:codegen` logs a wall of:

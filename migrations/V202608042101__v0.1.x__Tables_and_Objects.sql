@@ -125,6 +125,25 @@ CREATE TABLE __mj_BizAppsSales.DealStatusType (
     CONSTRAINT UQ_DealStatusType_Code UNIQUE (Code),
     -- STRUCTURAL, not vocabulary: a status cannot be simultaneously won and lost
     -- whatever an organization chooses to call it.
+    --
+    -- ⚠️ THE ONE STATEMENT IN THIS BASELINE THAT DOES NOT SURVIVE THE POSTGRESQL CONVERSION.
+    -- Correct T-SQL, and correct on the source-of-truth platform — but see docs/KNOWN-ISSUES.md KI-6.
+    -- Verified by converting this file and applying the result to a real PostgreSQL 16 instance:
+    --
+    --   * `@memberjunction/sql-converter` maps the BIT column to BOOLEAN but leaves `= 1` alone, so it
+    --     emits `"IsWon" = 1`. PostgreSQL has no implicit integer-to-boolean cast and refuses it:
+    --     `operator does not exist: boolean = integer`.
+    --   * The obvious portable rewrite does not work either. `CAST(IsWon AS int) + CAST(IsLost AS int)`
+    --     is valid in BOTH dialects, but the converter's identifier-quoting pass mangles it into
+    --     `"CAST"("IsWon" "AS" INTEGER)` — quoting the keywords as identifiers — which is a syntax error.
+    --   * `IsWon + IsLost <= 1` is not an option: T-SQL refuses arithmetic on BIT outright.
+    --
+    -- AND THE CONVERTER REPORTS "0 errors" THROUGHOUT, because that count means "statements I could
+    -- transform", not "output that applies". Nothing warns you; only applying the result does.
+    --
+    -- Every other statement in this file converts AND applies cleanly. Rather than contort the schema
+    -- around a converter defect, this stays idiomatic T-SQL and the PG story is a documented one-line
+    -- post-edit (`"IsWon" AND "IsLost"`). Revisit when the converter handles BIT comparisons.
     CONSTRAINT CK_DealStatusType_NotWonAndLost CHECK (NOT (IsWon = 1 AND IsLost = 1))
 );
 GO

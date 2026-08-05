@@ -183,7 +183,47 @@ npm run build
 
 ### Integration tests
 **`RUN_MUTATION_TESTS=1` is mandatory** or the suites run ZERO checks and pass vacuously.
-Integration checks hit a LIVE database with nothing mocked; each check rolls back.
+Integration checks hit a LIVE database with nothing mocked; each check rolls back. None exist yet — the
+two the definition of done requires are specified in `packages/IntegrationTests/src/index.ts` and land
+with S2.
+
+### Explorer UI harness (`test-harnesses/playwright/`)
+Proves create/read/update/delete **through the real Explorer UI**, which no API-level test can: a
+generated form can fail to render a field, a lookup can fail to resolve, a save can silently no-op, and
+all three look identical to a passing GraphQL test.
+
+```bash
+npm run start:api                 # MJAPI      → 4141
+npm run start:explorer:msal       # MJExplorer → 4341 with MSAL (see below — NOT plain start:explorer)
+npm run test:explorer:auth        # ONE TIME: headed, a human logs in. Session is then reused forever
+npm run test:explorer             # the CRUD run
+PW_HEADLESS=1 npm run test:explorer   # unattended
+```
+
+- **Use `start:explorer:msal` for anything involving a human login.** Plain `ng serve` defaults to
+  Angular's `development` configuration, which selects the **Auth0 automation tenant** — service accounts,
+  not staff SSO, so your own credentials are rejected there. `local_msal` keeps `environment.ts`'s
+  `AUTH_TYPE: 'msal'` active instead.
+- Session reuse works because both auth providers cache in `localStorage`. **`.auth/user.json` is a live
+  bearer token — it is gitignored and must never be committed.**
+- Read `test-harnesses/playwright/README.md` before changing selectors; it records the delete-affordance
+  and view-vs-edit-mode traps that cost real time to find.
+
+### CI (`.github/workflows/ci.yml`)
+Two hard gates on every PR and every push to `next`:
+
+1. **`npm run test:vocabulary-gate`** — the master plan §3 grep. This is what makes "enforced by a CI
+   grep" true rather than aspirational. Audited against injected violations: it catches 7 of 8, and its
+   one measured blind spot is documented in the script.
+2. **`npm run build`** — all 8 turbo tasks including the Angular Explorer.
+
+The Explorer UI harness is deliberately **not** in CI: it needs a live database, running servers and a
+one-time interactive human login. Run it locally before merging.
+
+### Changesets
+**A PR that adds or edits anything under `migrations/`, or changes a published package, must carry a
+changeset with at least a `minor` bump** — `npx changeset`. CI warns rather than fails, so treat the
+warning as a review item. `baseBranch` is `next`.
 
 ---
 

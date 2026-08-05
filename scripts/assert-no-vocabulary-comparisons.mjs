@@ -23,6 +23,25 @@
  * string comparison in the codebase. A false positive is a real cost here: the fastest way to kill a
  * CI rule is to make it noisy enough that people learn to skip it.
  *
+ * ---------------------------------------------------------------------------------------------------
+ * KNOWN BLIND SPOT, measured rather than assumed.
+ *
+ * Audited by injecting eight deliberate violations: it catches seven. The one it cannot catch is a
+ * comparison where NEITHER the variable nor the property carries a vocabulary word:
+ *
+ *     return 'Closed Won' === s.Name;        // `s` and `Name` — no textual signal at all
+ *
+ * Detecting that would mean treating any `.Name` comparison as suspect, which would fire on
+ * `user.firstName`, `product.Name` and every other legitimate name check in the codebase — noise that
+ * would get the whole gate ignored. So this is a deliberate limit, not an oversight: the grep is a
+ * high-value tripwire for the tempting shortcut, not a proof of absence. Code review still owns the
+ * cases where a rep-named local hides the vocabulary.
+ *
+ * Verified NOT to fire on legitimate code: `deploymentStage === 'build'`, `o.stageName === 'x'`,
+ * `u.firstName === 'Dana'`, `t.statusCode === 404`, and — importantly — `s.IsWon === true`, since
+ * comparing a behaviour FLAG is precisely what this rule wants people to do.
+ * ---------------------------------------------------------------------------------------------------
+ *
  * Usage: node scripts/assert-no-vocabulary-comparisons.mjs
  * Exit 0 = clean. Exit 1 = violations, listed with file:line.
  */
@@ -71,25 +90,40 @@ const VOCAB = [
  * naive equality check.
  */
 const VOCAB_ALT = VOCAB.join('|');
+
+/**
+ * CASE-INSENSITIVE, AND THAT IS NOT COSMETIC — it was a real hole, found by auditing the gate against
+ * deliberately-injected violations rather than by reading it.
+ *
+ * The vocabulary token is as likely to appear in a LOWERCASE variable name as in a PascalCase property:
+ * `stage.Name === 'Closed Won'` and `d.status === 'Won'` are exactly what real code looks like, and a
+ * case-sensitive matcher sails straight past both. The capitalised `Stage.Name === 'Closed Won'` was
+ * caught while its lowercase twin was not — meaning the gate missed the very example master plan §3
+ * uses to state the rule.
+ *
+ * The `\b…\b` boundaries keep this from over-reaching: `stage` does not match inside `deploymentStage`
+ * or `stageName`, so an unrelated build-stage comparison stays quiet. Where it does fire on something
+ * genuinely unrelated, the `vocabulary-grep-allow:` escape hatch is the intended answer.
+ */
 const PATTERNS = [
     {
-        // deal.Status === 'Won'   |   stage.Name !== "Closed Won"
-        re: new RegExp(`\\b(?:${VOCAB_ALT})\\b(?:\\s*\\.\\s*(?:Name|Code|Label))?\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*['"\`]`),
+        // deal.Status === 'Won'   |   stage.Name !== "Closed Won"   |   d.status == 'Won'
+        re: new RegExp(`\\b(?:${VOCAB_ALT})\\b(?:\\s*\\.\\s*(?:Name|Code|Label))?\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*['"\`]`, 'i'),
         why: 'compares a vocabulary value to a string literal',
     },
     {
-        // 'Won' === deal.Status
-        re: new RegExp(`['"\`]\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*\\b(?:${VOCAB_ALT})\\b`),
+        // 'Won' === deal.Status   |   'Closed Won' === stage.Name
+        re: new RegExp(`['"\`]\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*[A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[\\w$]+)*\\b(?:${VOCAB_ALT})\\b|['"\`]\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*\\b(?:${VOCAB_ALT})\\b(?:\\s*\\.\\s*(?:Name|Code|Label))?`, 'i'),
         why: 'compares a string literal to a vocabulary value',
     },
     {
         // ['Won','Lost'].includes(deal.Status)
-        re: new RegExp(`\\[[^\\]]*['"\`][^\\]]*\\]\\s*\\.\\s*includes\\s*\\(\\s*[^)]*\\b(?:${VOCAB_ALT})\\b`),
+        re: new RegExp(`\\[[^\\]]*['"\`][^\\]]*\\]\\s*\\.\\s*includes\\s*\\(\\s*[^)]*\\b(?:${VOCAB_ALT})\\b`, 'i'),
         why: 'tests a vocabulary value for membership in a literal list',
     },
     {
         // switch (deal.Status) — the multi-arm form of the same mistake
-        re: new RegExp(`\\bswitch\\s*\\(\\s*[^)]*\\b(?:${VOCAB_ALT})\\b(?:\\s*\\.\\s*(?:Name|Code|Label))?\\s*\\)`),
+        re: new RegExp(`\\bswitch\\s*\\(\\s*[^)]*\\b(?:${VOCAB_ALT})\\b(?:\\s*\\.\\s*(?:Name|Code|Label))?\\s*\\)`, 'i'),
         why: 'switches on a vocabulary value',
     },
 ];
