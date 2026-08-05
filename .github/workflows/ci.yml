@@ -1,0 +1,105 @@
+name: CI
+
+# WHAT THIS GATE IS, AND WHAT IT DELIBERATELY IS NOT.
+#
+# It runs the two things a hosted runner can honestly check for this app with no environment at all:
+#
+#   1. THE VOCABULARY GREP — a hard gate, and the reason this file exists at all.
+#      Master plan §3: "no server file may contain `Status === 'Won'` or `Stage.Name === 'Closed Won'`.
+#      It reads `DealStatusType.IsWon`. This is enforceable with a grep in CI and worth adding, because
+#      the shortcut is tempting exactly once and permanent thereafter."
+#      Until this workflow existed, that grep was a script nobody ran — the plan claimed an enforcement
+#      that did not exist, which is worse than no rule at all. Now it fails the build.
+#
+#   2. THE BUILD — all 8 turbo tasks, including the Angular Explorer. This is what catches a broken
+#      generated-code import, a package that does not typecheck, or a tsconfig that only worked because
+#      of something stale in a local node_modules.
+#
+# WHAT IT CANNOT COVER, stated plainly rather than faked:
+#
+#   THE EXPLORER UI HARNESS (test-harnesses/playwright) needs a SQL Server with MJ core migrated,
+#   bizapps-common installed, a metadata push, a running MJAPI + MJExplorer, and a ONE-TIME INTERACTIVE
+#   HUMAN LOGIN against a real identity provider. That last item is not something a runner can provide,
+#   and pretending otherwise would produce a red X everybody learns to ignore — which is worse than a
+#   documented manual step. Run it locally before merging:
+#
+#       npm run start:api  &&  npm run start:explorer:msal
+#       npm run test:explorer:auth      # once, you log in
+#       npm run test:explorer
+#
+#   INTEGRATION CHECKS do not exist yet (S2). When they do, remember RUN_MUTATION_TESTS=1 is MANDATORY:
+#   MJ's driver contains `if (check.RequiresMutation && !mutationEnabled) continue;`, so a run without
+#   it executes NOTHING and reports success.
+
+on:
+  pull_request:
+  push:
+    branches: [next]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: vocabulary gate + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24 rather than the sibling repo's 22: this is the version the lockfile was produced with
+      # (npm 11 / Node 24) and the version the build is actually developed against. Matching it keeps CI
+      # resolving the same tree a developer gets.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # postinstall runs scripts/link-local-apps.mjs, which is a clean no-op while .mj-links.json has an
+      # empty `links` map. That changes at S2, when the unpublished siblings get linked — at which point
+      # this step will need a decision, because CI cannot check out private sibling repos.
+      - run: npm ci
+
+      # ===================================================================================
+      # GATE 1 — the rule the app is built around. Fails the build; not advisory.
+      # ===================================================================================
+      - name: Vocabulary gate (domain vocabulary is DATA, never a string compare)
+        run: npm run test:vocabulary-gate
+
+      # ===================================================================================
+      # GATE 2 — everything compiles, including the generated code.
+      # ===================================================================================
+      - name: Build all packages and apps
+        run: npm run build
+
+      # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
+      # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a
+      # permanent red X asserting nothing. Guarded rather than omitted, so the first real test file
+      # switches this on with no workflow edit.
+      - name: Unit tests (if any exist)
+        run: |
+          if find packages -path '*/src/*' \( -name '*.test.ts' -o -name '*.spec.ts' \) -print -quit | grep -q .; then
+            echo "Test files found — running vitest."
+            npx vitest run
+          else
+            echo "::notice title=No unit tests yet::No *.test.ts / *.spec.ts under packages/*/src. This step self-enables when the first one lands."
+          fi
+
+      # Advisory, matching the sibling repo's judgement. migrations/_README.md requires a changeset on
+      # any PR touching a migration, and that rule sat unenforced through several schema changes there.
+      # A warning is honest about what it is — a reminder in review — rather than a red X on a docs-only
+      # PR that legitimately has no version impact.
+      - name: Changeset present?
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ ! -d .changeset ] || [ -z "$(find .changeset -name '*.md' ! -name 'README.md' -print -quit)" ]; then
+            echo "::warning title=No changeset::This PR carries no changeset. One is required for any change to migrations/ or a published package — run 'npx changeset'."
+          else
+            echo "Changeset present."
+          fi
+
+      - name: State plainly what this gate does not cover
+        if: always()
+        run: |
+          echo "::notice title=Explorer UI CRUD is not run here::test-harnesses/playwright needs a live database, running servers and a one-time human login. Run 'npm run test:explorer' locally before merging — see the comment block at the top of this workflow for why it is not automated."
