@@ -222,12 +222,43 @@ export async function openSalesApp(page: Page): Promise<void> {
  * hardcoded selectors rot.
  */
 export async function openAllEntities(page: Page): Promise<void> {
-  const breadcrumb = page.getByText(/^\s*All\s*$/).first();
-  if (await breadcrumb.count()) {
-    await breadcrumb.click();
-    await page.waitForTimeout(3500);
+  /**
+   * THE PANEL REMEMBERS ITS TOGGLE, AND THAT IS A TRAP — for tests and for a live demo alike.
+   *
+   * The entity panel has an "All Entities" / "My Favorites" pair, and the selection PERSISTS across
+   * navigations and sessions. Leave it on "My Favorites" while favourites are empty and the panel shows
+   * "0 entities · No entities found" — every card gone. That is exactly what happened here: a favourites
+   * experiment left the toggle flipped, and the next run failed with a click timeout on "Deals" and a
+   * missing "Sales Accounts", as though the app had broken.
+   *
+   * So this always forces the toggle back to All Entities rather than trusting whatever state it was in.
+   * If a demo ever shows an empty entity panel, this is why — click "All Entities".
+   */
+  const forceAllEntities = async (): Promise<void> => {
+    const allToggle = page.getByText(/^\s*All Entities\s*$/i).first();
+    if ((await allToggle.count()) && (await allToggle.isVisible().catch(() => false))) {
+      await allToggle.click().catch(() => undefined);
+      await page.waitForTimeout(2000);
+    }
+  };
+
+  // ALREADY ON THE PANEL? Just make sure the right toggle is active. The app's landing screen VARIES —
+  // sometimes a grid (the default entity), sometimes this panel — depending on what was last visited, and
+  // an earlier version hunted for an "All" breadcrumb that does not exist on the panel.
+  const onPanel = page.getByText(/All Entities/i).first();
+  if ((await onPanel.count()) && (await onPanel.isVisible().catch(() => false))) {
+    await forceAllEntities();
     return;
   }
+
+  const breadcrumb = page.getByText(/^\s*All\s*$/).first();
+  if ((await breadcrumb.count()) && (await breadcrumb.isVisible().catch(() => false))) {
+    await breadcrumb.click();
+    await page.waitForTimeout(3500);
+    await forceAllEntities();
+    return;
+  }
+
   // Fallback: expand the collapsed rail, then take its entities item.
   const chevron = page.locator('.k-icon, [class*="chevron"], [class*="expand"]').first();
   if (await chevron.count()) {
@@ -240,6 +271,7 @@ export async function openAllEntities(page: Page): Promise<void> {
   });
   await link.click();
   await page.waitForTimeout(3500);
+  await forceAllEntities();
 }
 
 /**
