@@ -29,27 +29,34 @@ curl -s http://localhost:4341/main.js | grep -o 'AUTH_TYPE: "[a-z]*"'    # want:
 
 Then open <http://localhost:4341> and log in.
 
-### The one manual step — 30 seconds, and it's the highest-impact thing you'll do
+### Grid columns are already configured — nothing to do
 
-**Add columns to the Deals grid before you present.** Out of the box the grid shows only a truncated
-`Name` column, which undersells it badly — six rows of "Northwind Health…" and nothing else.
+All six demo grids have had their columns set up and **saved**, so they open ready to present. Verified
+by `specs/30-demo-setup-columns.spec.ts`, which drives the real *Configure View* panel and asserts each
+column actually appears in the grid afterwards.
 
-1. Open **Deals**
-2. Click the **column-settings icon** (the sliders, left of the `+`, labelled *"Configure view settings
-   (columns, filters, sorting)"*)
-3. Add: **Stage · Status · Amount · Prob % · Forecast · Close date · Owner · Company**
-4. It persists — do it once and it's there for every later run
+| Grid | Columns, and why |
+|---|---|
+| **Deals** | Status · Amount · Close date · Probability · Pipeline · Stage · Company — a deal legible at a glance |
+| **Pipeline Stages** | Order · Probability · Rotting Days · Pipeline · Forecast Category · **Deal Status Type** ← the whole argument |
+| **Deal Team Members** | **Person ID** · Attribution · Deal · **Employee** · Role — the two ID columns adjacent, so D-6 is visible |
+| **Deal Lines** | Quantity · Requested Discount · Line Type · **Resolved Unit Price · Resolved Extended · Priced At** ← deliberately empty |
+| **Deal Stage Events** | Changed At · **Amount At Transition** · Probability At Transition · Days In Previous Stage |
+| **Deal Status Types** | Code · Is Open · Is Closed · **Is Won · Is Lost · Locks Deal** — the behaviour flags themselves |
 
-Do the same on **Pipeline Stages** (add **Deal Status Type** — that's the column the whole
-vocabulary-is-data story hangs on) and on **Deal Team Members** (add **Employee** *and* **Person**, side
-by side, so the D-6 case is visible).
+If the columns are ever lost (a reset user profile, a different login), re-apply them with:
 
-> **Why this isn't seeded for you.** It was attempted and it does not work. MJ's per-user UI state is
-> owned by the client, not the database: seeding `__mj.UserApplicationEntity`, `__mj.UserFavorite`
-> (against the `MJ: Entities` meta-entity) and a shared `IsDefault` `__mj.UserView` with a full
-> `GridState.columnSettings` all left the UI unchanged — the grid still showed `(Default)` with one
-> column, even after restarting MJAPI to clear its metadata cache. Those rows were removed rather than
-> left in place pretending to work. Clicking the gear takes half a minute and definitely works.
+```bash
+PW_HEADLESS=1 npx playwright test --config test-harnesses/playwright/playwright.config.ts \
+  --project crud --grep "demo setup"
+```
+
+> **This had to be done through the UI, not seeded.** Three SQL routes were tried and all left the grid
+> unchanged, even after restarting MJAPI to clear its metadata cache: `__mj.UserApplicationEntity`,
+> `__mj.UserFavorite` against the `MJ: Entities` meta-entity, and a shared `IsDefault` `__mj.UserView`
+> carrying a complete `GridState.columnSettings`. MJ owns this state client-side. The inert rows were
+> removed rather than left looking functional, and the Playwright route drives the same panel a human
+> would — which is why it persists.
 
 Seed (or re-seed) the demo data — idempotent, safe to re-run:
 
@@ -102,6 +109,33 @@ real, but it cannot be seeded from SQL — both `__mj.UserApplicationEntity` and
 (against the `MJ: Entities` meta-entity) were tried and the panel still reported "0 entities". Whatever
 backs it isn't reachable that way. If you want a short list, click the **star** on each entity in the UI
 once and it sticks.
+
+---
+
+## Click-by-click script
+
+Nine clicks, ~6 minutes. Screenshots of every step are in
+`test-harnesses/playwright/artifacts/demo-*.png` — regenerate them any time with the `demo tour` spec.
+Reaching a grid is always the same two moves, so it's written once here:
+
+> **`[GO]` = click the "All" breadcrumb (top-left) → press `/` → type 3–4 letters → click the card.**
+> The panel is a 19-card alphabetical grid; typing is much faster than hunting, and looks it.
+
+| # | Click | On screen | Say |
+|---|---|---|---|
+| **0** | Open `localhost:4341/app/mjbizappssales` | The Sales app | *"This is generated from the schema. Nobody wrote a form."* |
+| **1** | `[GO]` → `deals` | **6 deals** · Status · **Amount** · Close · Prob · Pipeline · Stage · Company | *"Two companies, two pipelines, one Won, one Lost."* |
+| **2** | — *(stay here)* | Row 5: **Won**, stage **Signed** | *"Note the winning stage is called Signed."* |
+| **3** | `[GO]` → `pipe` → **Pipeline Stages** | 9 stages. **"Booked" → Won** and **"Signed" → Won** | **The keystone.** *"Two stages, different names, both map to status Won. There is no string 'Closed Won' anywhere in the code — behaviour comes from `DealStatusType.IsWon`. Rename the stage, nothing changes."* |
+| **4** | `[GO]` → `deal stat` → **Deal Status Types** | `Is Open · Is Closed · Is Won · Is Lost · Locks Deal` | *"That's the configuration layer. On Hold is neither open nor closed — which is why those two aren't inverses. And a CI grep fails the build if any server file ever compares a status name."* |
+| **5** | `[GO]` → `sales acc` → **Sales Accounts** | Northwind / Cascade / Beacon | *"These names aren't columns in this table — they come from the parent Organization row. Sales extends the shared Person/Organization graph instead of forking identity."* |
+| **6** | `[GO]` → `deal li` → **Deal Lines** | Qty 250, Disc 12 — **Resolved Unit Price / Resolved Extended / Priced At all `—`** | *"That emptiness is the feature. Sales records intent and asks `Orders.PreviewOrder` for the number. It never multiplies quantity by price."* |
+| **7** | `[GO]` → `deal team` → **Deal Team Members** | Last row: **Person ID set, Employee empty**, role Partner Manager | *"That's D-6. A partner rep isn't an employee, so the table takes either — with a database constraint enforcing exactly one. Also: three rows on one deal, so summing Amount here triple-counts it."* |
+| **8** | `[GO]` → `deal stage` → **Deal Stage Events** | **Amount At Transition: 120,000 → 120,000 → 150,000 → 185,000** | *"The deal is 185k today. In May it was 120k, and this table knows, because each transition stamped its own amount. Append-only, never edited."* |
+| **9** | `[GO]` → `deals` → click **Northwind — Platform Rollout** → the **pencil** | The record form, then edit mode | *"Pipeline and Company resolve to names, not UUIDs — that's the generated base view. And these three: `Amount Is Computed`, `Amount Computed At`, `Amount Source Hash` — Amount is a cached answer with a receipt. Right now it's 0: a human typed it."* |
+
+**If you only have two minutes:** steps 1 → 3 → 6. Deals for credibility, Pipeline Stages for the design
+argument, Deal Lines for the money guarantee.
 
 ---
 
