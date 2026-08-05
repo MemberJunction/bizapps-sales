@@ -1,0 +1,93 @@
+{
+  "$schema": "https://schema.memberjunction.org/mj-app/v1.json",
+  "manifestVersion": 1,
+  "name": "mj-bizapps-sales",
+  "displayName": "BizApps Sales",
+  "description": "Deal pipeline management for MemberJunction — accounts, contacts, pipelines, deals with priced lines, deal teams, stage history and forecasting. Sits at the top of the revenue stack: sales records intent and asks BizApps Orders for every number, so a closed deal becomes a contract and an order in one transaction rather than a notification to re-key it by hand.",
+  "version": "0.1.0",
+  "license": "ISC",
+  "icon": "fa-solid fa-chart-line",
+  "publisher": {
+    "name": "MemberJunction",
+    "url": "https://memberjunction.com"
+  },
+  "repository": "https://github.com/MemberJunction/bizapps-sales",
+  "mjVersionRange": ">=5.50.0 <6.0.0",
+  "dependencies": {
+    "mj-bizapps-common": {
+      "version": ">=1.0.0 <2.0.0",
+      "repository": "https://github.com/MemberJunction/bizapps-common"
+    },
+    "mj-bizapps-tasks": {
+      "version": ">=1.0.0 <2.0.0",
+      "repository": "https://github.com/MemberJunction/bizapps-tasks"
+    },
+    "mj-bizapps-accounting": {
+      "version": ">=0.1.0 <1.0.0",
+      "repository": "https://github.com/MemberJunction/bizapps-accounting"
+    },
+    "mj-bizapps-orders": {
+      "version": ">=0.1.0 <1.0.0",
+      "repository": "https://github.com/MemberJunction/bizapps-orders"
+    },
+    "mj-bizapps-contracts": {
+      "version": ">=0.1.0 <1.0.0",
+      "repository": "https://github.com/MemberJunction/bizapps-contracts"
+    }
+  },
+  "schema": {
+    "name": "__mj_BizAppsSales",
+    "createIfNotExists": true
+  },
+  "migrations": {
+    "directory": "migrations",
+    "engine": "skyway"
+  },
+  "metadata": {
+    "directory": "metadata"
+  },
+  "packages": {
+    "server": [
+      {
+        "name": "@mj-biz-apps/sales-server",
+        "role": "bootstrap",
+        "startupExport": "LoadBizAppsSalesServer"
+      }
+    ],
+    "client": [
+      {
+        "name": "@mj-biz-apps/sales-ng",
+        "role": "bootstrap",
+        "startupExport": "LoadBizAppsSalesClient"
+      }
+    ],
+    "shared": [
+      {
+        "name": "@mj-biz-apps/sales-entities",
+        "role": "library"
+      },
+      {
+        "name": "@mj-biz-apps/sales-actions",
+        "role": "library"
+      }
+    ]
+  },
+  "code": {
+    "visibility": "public",
+    "sourceDirectory": "packages"
+  },
+  "categories": [
+    "Business",
+    "Sales",
+    "CRM"
+  ],
+  "tags": [
+    "sales",
+    "crm",
+    "deals",
+    "pipeline",
+    "forecasting",
+    "opportunity-management",
+    "deal-desk"
+  ]
+}

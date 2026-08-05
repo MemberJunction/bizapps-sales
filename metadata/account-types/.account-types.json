@@ -1,0 +1,78 @@
+[
+  {
+    "fields": {
+      "Code": "PROSPECT",
+      "Name": "Prospect",
+      "Description": "We want to sell to them and have not yet.",
+      "IsCustomer": false,
+      "IsProspect": true,
+      "IsPartner": false,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "92F4C6A8-0001-4398-F6B9-D446F5A1BE99"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:22.693Z",
+      "checksum": "30966ba203d03161cbb958f2eceb945016b05ff591d6601d50402a9f09f1359a"
+    }
+  },
+  {
+    "fields": {
+      "Code": "CUSTOMER",
+      "Name": "Customer",
+      "Description": "They buy from us today.",
+      "IsCustomer": true,
+      "IsProspect": false,
+      "IsPartner": false,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "92F4C6A8-0002-4398-F6B9-D446F5A1BE99"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:22.759Z",
+      "checksum": "e55199d88d91fe296b1001cde31911dd9fd2b109eb61a2f2ef037166f65d8068"
+    }
+  },
+  {
+    "fields": {
+      "Code": "PARTNER",
+      "Name": "Partner",
+      "Description": "They sell with or for us. THE FLAGS ARE NOT MUTUALLY EXCLUSIVE ON PURPOSE — a partner that also buys should carry IsCustomer as well, and forcing a single-valued 'type' is exactly what makes CRMs grow a second field called 'is also a partner'. Edit the flags on a row, or add a row; either is metadata.",
+      "IsCustomer": false,
+      "IsProspect": false,
+      "IsPartner": true,
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "92F4C6A8-0003-4398-F6B9-D446F5A1BE99"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:22.826Z",
+      "checksum": "a599f31120f38c3ccaf54f0b18cc393dc48cc4ff137e6f4e8def81dfa3e3fe3c"
+    }
+  },
+  {
+    "fields": {
+      "Code": "FORMERCUST",
+      "Name": "Former Customer",
+      "Description": "They bought once and no longer do. No flags set: they are not current revenue, and treating them as a prospect erases the fact that we already know why they left. Win-back reporting keys on this row plus SalesAccount.FirstClosedWonDate.",
+      "IsCustomer": false,
+      "IsProspect": false,
+      "IsPartner": false,
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "92F4C6A8-0004-4398-F6B9-D446F5A1BE99"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:22.889Z",
+      "checksum": "e763820eaf850c74170fefbf3e14a3339e51c98d9acb826cfaf7d5f245670c12"
+    }
+  }
+]

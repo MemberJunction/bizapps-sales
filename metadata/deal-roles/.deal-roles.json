@@ -1,0 +1,117 @@
+[
+  {
+    "fields": {
+      "Code": "OWNER",
+      "Name": "Owner / AE",
+      "Description": "The account executive who owns the deal. THE OWNER ROLE: exactly one member per deal may hold it, and Deal.OwnerEmployeeID is the server-maintained stamp of whoever does. DefaultAttributionPct is 100 because owner-role attribution is the only default that reconciles to total bookings.",
+      "IsOwnerRole": true,
+      "AllowsMultiplePerDeal": false,
+      "DefaultAttributionPct": 100,
+      "IsQuotaCarrying": true,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "3C9E6042-0001-4D32-9053-7E0C9F4B8233"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.438Z",
+      "checksum": "202d4fe1085cc7b3ff97476f15bd51ba46e5bcf0ac936c0e64e5ecbe20d129b2"
+    }
+  },
+  {
+    "fields": {
+      "Code": "SE",
+      "Name": "Sales Engineer",
+      "Description": "Technical validation and solution design. AllowsMultiplePerDeal is 1 — two SEs on one deal is normal, which is exactly the case that makes this a flag rather than a hardcoded rule.",
+      "IsOwnerRole": false,
+      "AllowsMultiplePerDeal": true,
+      "IsQuotaCarrying": false,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "3C9E6042-0002-4D32-9053-7E0C9F4B8233"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.507Z",
+      "checksum": "43fa438ee4b7f92c4221fcfae64faafdc62aa805c7928fb396db383c95abade1"
+    }
+  },
+  {
+    "fields": {
+      "Code": "SDR",
+      "Name": "SDR",
+      "Description": "Sourced or qualified the opportunity. Present on the team for attribution and coverage reporting even after handoff.",
+      "IsOwnerRole": false,
+      "AllowsMultiplePerDeal": true,
+      "IsQuotaCarrying": false,
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "3C9E6042-0003-4D32-9053-7E0C9F4B8233"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.572Z",
+      "checksum": "fab328dcc4ba826ebd0773b34e47464f5c963d2cc77202c5877fd21b38fdcdc2"
+    }
+  },
+  {
+    "fields": {
+      "Code": "EXECSPONSOR",
+      "Name": "Executive Sponsor",
+      "Description": "Internal executive cover for a strategic deal.",
+      "IsOwnerRole": false,
+      "AllowsMultiplePerDeal": true,
+      "IsQuotaCarrying": false,
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "3C9E6042-0004-4D32-9053-7E0C9F4B8233"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.636Z",
+      "checksum": "6718000c9ab62f5dd0b1caca5196ee6db907c94b9c3b6135b0316dcdda4aea72"
+    }
+  },
+  {
+    "fields": {
+      "Code": "PARTNERMGR",
+      "Name": "Partner Manager",
+      "Description": "Manages the partner relationship on a partner-sourced deal. THIS IS THE ROLE THAT FORCED D-6: the holder is routinely a partner rep or contractor rather than an Employee, which is why DealTeamMember carries a nullable PersonID beside EmployeeID with an exactly-one-of CHECK.",
+      "IsOwnerRole": false,
+      "AllowsMultiplePerDeal": true,
+      "IsQuotaCarrying": false,
+      "DisplayRank": 50,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "3C9E6042-0005-4D32-9053-7E0C9F4B8233"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.704Z",
+      "checksum": "748d247d0baf387b206f31466c34f3766fc89c5df9a727e8f2fb481d25c0836b"
+    }
+  },
+  {
+    "fields": {
+      "Code": "CSLEAD",
+      "Name": "CS Lead",
+      "Description": "Customer-success owner brought in pre-close, typically on renewals and expansions.",
+      "IsOwnerRole": false,
+      "AllowsMultiplePerDeal": true,
+      "IsQuotaCarrying": false,
+      "DisplayRank": 60,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "3C9E6042-0006-4D32-9053-7E0C9F4B8233"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.767Z",
+      "checksum": "4ab21d9c8700fc706960cc3ef16bd41c7146e937447468c646dec5efb04d38e7"
+    }
+  }
+]

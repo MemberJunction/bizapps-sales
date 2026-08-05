@@ -1,0 +1,116 @@
+[
+  {
+    "fields": {
+      "Code": "PRICE",
+      "Name": "Price",
+      "Description": "Too expensive, or a competitor undercut us.",
+      "Category": "Commercial",
+      "RequiresNotes": false,
+      "IsCompetitive": false,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "5EB08264-0001-4F54-B275-9002B16DA455"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.859Z",
+      "checksum": "155c6e9103e9983cd5ff11c758bdf311496dbae64d42a4482f67702b9c207b41"
+    }
+  },
+  {
+    "fields": {
+      "Code": "PRODUCTGAP",
+      "Name": "Product Gap",
+      "Description": "We could not do something the customer required. RequiresNotes is 1 because the reason is worthless to product without the specific gap named.",
+      "Category": "Product",
+      "RequiresNotes": true,
+      "IsCompetitive": false,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "5EB08264-0002-4F54-B275-9002B16DA455"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.925Z",
+      "checksum": "549465578f1f0c3287f1b1d75c00b46048e594b3f2bb622b460e7e6d8fa53772"
+    }
+  },
+  {
+    "fields": {
+      "Code": "COMPETITOR",
+      "Name": "Competitor",
+      "Description": "Lost to a named competitor. RequiresNotes is 1 so the competitor is actually recorded — 'lost to a competitor' without the name is the single most common piece of useless CRM data.",
+      "Category": "Competitive",
+      "RequiresNotes": true,
+      "IsCompetitive": true,
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "5EB08264-0003-4F54-B275-9002B16DA455"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.989Z",
+      "checksum": "27ae4843e88be14e1ecf13a35c926cf4aa8156e05342837815bb1183623e59a0"
+    }
+  },
+  {
+    "fields": {
+      "Code": "TIMING",
+      "Name": "Timing",
+      "Description": "Right fit, wrong quarter. Distinct from No Decision because this one is worth re-engaging on a date.",
+      "Category": "Timing",
+      "RequiresNotes": false,
+      "IsCompetitive": false,
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "5EB08264-0004-4F54-B275-9002B16DA455"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:21.052Z",
+      "checksum": "cea14e5836e14fc7166290284ef371abf191ac909ab980335e95c027da45053d"
+    }
+  },
+  {
+    "fields": {
+      "Code": "NODECISION",
+      "Name": "No Decision",
+      "Description": "The customer never chose anything. Tracking this separately from a competitive loss is what reveals a qualification problem rather than a product one.",
+      "Category": "Process",
+      "RequiresNotes": false,
+      "IsCompetitive": false,
+      "DisplayRank": 50,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "5EB08264-0005-4F54-B275-9002B16DA455"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:21.119Z",
+      "checksum": "3b3f5e08e84ee818f35fc1818f015ef2087e5c5f88a32b87ab3bb8b26fef5afb"
+    }
+  },
+  {
+    "fields": {
+      "Code": "INTERNAL",
+      "Name": "Internal",
+      "Description": "We lost it to ourselves — no capacity, credit refused, deal desk declined, wrong fit accepted too late. RequiresNotes is 1 because this category only earns its keep if it is specific.",
+      "Category": "Internal",
+      "RequiresNotes": true,
+      "IsCompetitive": false,
+      "DisplayRank": 60,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "5EB08264-0006-4F54-B275-9002B16DA455"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:21.182Z",
+      "checksum": "055cb4c6502b2e1c12860ae6e52ad6fe294fa7eba4dcc98e39262cbcadecdba9"
+    }
+  }
+]

@@ -1,0 +1,92 @@
+[
+  {
+    "fields": {
+      "Code": "NEWBIZ",
+      "Name": "New Business",
+      "Description": "A first sale to a new customer.",
+      "RequiresContract": true,
+      "RequiresRenewalSource": false,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "2B8D5F31-0001-4C21-8F42-6D9B8E3A7122"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.110Z",
+      "checksum": "c4d84cc7438f127151bee59d977f46b75d6a453971bb571f41720135d818ee2d"
+    }
+  },
+  {
+    "fields": {
+      "Code": "RENEWAL",
+      "Name": "Renewal",
+      "Description": "Continuation of an existing agreement. RequiresRenewalSource is what makes the chain enforceable: the deal must name the contract it renews (Deal.RenewsContractID), and closing it routes to Contracts.RenewTerm rather than Contracts.CreateFromDeal.",
+      "RequiresContract": true,
+      "RequiresRenewalSource": true,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "2B8D5F31-0002-4C21-8F42-6D9B8E3A7122"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.132Z",
+      "checksum": "29b33438053d4f9e22f27fb2a4cf83a00ac24bdb0a68250c8afd8aa57d0dbdc3"
+    }
+  },
+  {
+    "fields": {
+      "Code": "EXPANSION",
+      "Name": "Expansion",
+      "Description": "More of what the customer already buys — seats, volume, tier. A separate deal against the same contract, which is why it is one contract to many deals.",
+      "RequiresContract": true,
+      "RequiresRenewalSource": false,
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "2B8D5F31-0003-4C21-8F42-6D9B8E3A7122"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.198Z",
+      "checksum": "3d6f9d120d8db911838b2334d56623f0cbb2982d5d5c12489272e8bf49b95ec8"
+    }
+  },
+  {
+    "fields": {
+      "Code": "CROSSSELL",
+      "Name": "Cross-Sell",
+      "Description": "A different product line to an existing customer.",
+      "RequiresContract": true,
+      "RequiresRenewalSource": false,
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "2B8D5F31-0004-4C21-8F42-6D9B8E3A7122"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.265Z",
+      "checksum": "f63a5141620f95f390c6f46c2c94d588a9ba611b17470004ef253bf2c2bcab6a"
+    }
+  },
+  {
+    "fields": {
+      "Code": "PARTNER",
+      "Name": "Partner-Sourced",
+      "Description": "Originated by a partner. RequiresContract is 0 as a SEED DEFAULT, not a rule — a referral that resolves to a single one-time order needs no agreement envelope. Set it to 1 if your partner motion is contracted; that is a metadata edit, not a migration.",
+      "RequiresContract": false,
+      "RequiresRenewalSource": false,
+      "DisplayRank": 50,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "2B8D5F31-0005-4C21-8F42-6D9B8E3A7122"
+    },
+    "sync": {
+      "lastModified": "2026-08-04T21:37:20.327Z",
+      "checksum": "739b48245cbbf2de4ccc20f4a02948f2f4b9f318bbd583817bb25627cf403dce"
+    }
+  }
+]

@@ -1,0 +1,76 @@
+/**
+ * MJExplorer Application-Specific Styles
+ *
+ * The MJ Explorer design system is now imported from @memberjunction/ng-explorer-app
+ * This file should only contain MJExplorer-specific customizations and overrides.
+ *
+ * Core styles (Golden Layout, Kendo theme, MJ components) are in the package.
+ * MD3 design tokens are now in @memberjunction/ng-explorer-app styles/_md3-theme.scss
+ */
+
+ @use "@memberjunction/ng-explorer-app/dist/styles.scss" as *;
+
+/**
+ * THE BIZAPPS SALES COMPONENT KIT GOES HERE — and does not exist yet, deliberately.
+ *
+ * At S1 every screen in this app is a CodeGen-generated entity form, and those are styled entirely
+ * by @memberjunction/ng-* at runtime. A kit stylesheet would have nothing to define. It arrives with
+ * S3, when the pipeline board and the deal workspace are hand-built.
+ *
+ * When it does, restore the import below and add the matching `exports` subpath plus a `build:styles`
+ * step to packages/Angular/package.json (copy bizapps-orders' orders-kit.css wiring verbatim):
+ *
+ *     @use "@mj-biz-apps/sales-ng/styles/sales-kit.css";
+ *
+ * Two things that wiring gets right and are easy to get wrong:
+ *   - It is loaded HERE rather than in angular.json's styles array, because entries there resolve
+ *     from the workspace root (apps/MJExplorer) while the package is hoisted to the repo root, so a
+ *     `node_modules/...` path would not resolve.
+ *   - The path must be the package's declared `exports` SUBPATH, not a reach into dist. Angular's
+ *     sass plugin honours the exports map, so a dist path fails even though a bare
+ *     `sass --load-path` run accepts it.
+ *
+ * The kit must only define classes MJ does not ship, and must use semantic `--mj-*` tokens — no
+ * hardcoded colours, verified in dark mode.
+ */
+
+/* Application-specific layout adjustments */
+html,
+body,
+my-app {
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+my-app {
+    display: flex;
+    flex-direction: column;
+}
+
+kendo-drawer-container {
+    flex: 1 1 auto;
+    overflow-y: auto;
+}
+
+.k-icon {
+    font-size: 20px;
+}
+
+/* Application-specific toolbar styles */
+.custom-toolbar {
+    width: 100%;
+    background-color: #f6f6f6;
+    line-height: 10px;
+    border-bottom: inset;
+    border-bottom-width: 1px;
+    padding: 3px 8px;
+    color: #656565;
+}
+
+.mail-box {
+    margin-left: 20px;
+    font-weight: bold;
+    font-size: 17px;
+}
+
