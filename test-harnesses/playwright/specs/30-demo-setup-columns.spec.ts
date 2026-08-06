@@ -39,9 +39,24 @@ const SETUP: Array<{ entity: string; columns: string[] }> = [
     columns: ['Deal', 'Deal Role', 'Employee', 'Person ID', 'Attribution Pct'],
   },
   {
+    // `Line Type` was a free-text column and is now a FK to the DealLineType type table, so the
+    // offered column is `Deal Line Type`. The signed figures sit beside the EMPTY Resolved* columns
+    // on purpose: that contrast — three numbers a human transcribed, four the pricing engine has not
+    // filled in yet — is what "sales never computes money" looks like as data.
     entity: 'Deal Lines',
-    columns: ['Deal', 'Quantity', 'Requested Discount Pct', 'Line Type',
+    columns: ['Deal', 'Product Name', 'Deal Line Type', 'Quantity',
+              'Annual Gross Fees', 'Discount Amount', 'Total', 'Requested Discount Pct',
               'Resolved Unit Price', 'Resolved Extended Amount', 'Priced At'],
+  },
+  {
+    // The exception payment schedule. Only DEAL-9001 has rows, which IS the point — no rows means
+    // standard terms, so "did this deal negotiate payment terms?" is a row count.
+    entity: 'Deal Payment Schedules',
+    columns: ['Deal', 'Payment Date', 'Amount', 'Description', 'Display Order'],
+  },
+  {
+    entity: 'Deal Line Types',
+    columns: ['Code', 'Is Recurring', 'Display Rank'],
   },
   {
     entity: 'Deal Stage Events',
