@@ -391,56 +391,6 @@
          RELATED ENTITY PANELS
          ======================================== -->
 
-    <!-- Deal Contact Roles Section -->
-    <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDealContactRoles"
-        SectionName="Deal Contact Roles"
-        Icon="fa fa-table"
-        Variant="related-entity"
-        [Form]="this"
-        [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealContactRoles')"
-        [DefaultExpanded]="false">
-        @if (record.IsSaved) {
-        <div>
-            <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Contact Roles','DealID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Contact Roles')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealContactRoles')"
-                [ShowToolbar]="false"
-                (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealContactRoles', $event.totalRowCount)"
-                >
-            </mj-explorer-entity-data-grid>
-        </div>
-        }
-    </mj-collapsible-panel>
-
-    <!-- Deal Team Members Section -->
-    <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDealTeamMembers"
-        SectionName="Deal Team Members"
-        Icon="fa fa-table"
-        Variant="related-entity"
-        [Form]="this"
-        [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealTeamMembers')"
-        [DefaultExpanded]="false">
-        @if (record.IsSaved) {
-        <div>
-            <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Team Members','DealID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Team Members')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealTeamMembers')"
-                [ShowToolbar]="false"
-                (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealTeamMembers', $event.totalRowCount)"
-                >
-            </mj-explorer-entity-data-grid>
-        </div>
-        }
-    </mj-collapsible-panel>
-
     <!-- Deal Payment Schedules Section -->
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesDealPaymentSchedules"
@@ -485,6 +435,56 @@
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealStageEvents', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Deal Team Members Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsSalesDealTeamMembers"
+        SectionName="Deal Team Members"
+        Icon="fa fa-table"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealTeamMembers')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Team Members','DealID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Team Members')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealTeamMembers')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealTeamMembers', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Deal Contact Roles Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsSalesDealContactRoles"
+        SectionName="Deal Contact Roles"
+        Icon="fa fa-table"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealContactRoles')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Contact Roles','DealID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Contact Roles')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealContactRoles')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealContactRoles', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

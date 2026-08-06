@@ -241,3 +241,57 @@ asserting the wrong thing — "gone from the grid" is correct.
 Scoped in the harness as `KNOWN_POST_DELETE_ERRORS` (`lib/explorer.ts`) so it is tolerated **only**
 during the delete steps and still fails the console-error keystone anywhere else. Deliberately not added
 to the global allowlist, which would hide it forever and everywhere.
+
+---
+
+## 🟠 KI-7 — A second FULL CodeGen pass corrupts the database (IsA lookup drift)
+
+**Found the hard way in Phase 1, and it presents as a total inability to create a Deal.**
+
+Running `mj codegen` a second time against an already-generated database regenerated `vwDeals` with
+**eleven** virtual lookup columns where the first pass produced **ten**. The extra one was `Account`, a
+name-lookup join derived from `SalesAccount` — an **IsA child** — that pass 1 had not been able to resolve
+yet. Pass 2 added the column to the VIEW but did **not** add the matching `EntityField` row.
+
+The consequence is not cosmetic. `SQLServerDataProvider` builds its `@ResultTable` from **entity
+metadata** and then runs `INSERT INTO @ResultTable EXEC spCreateDeal`. With 55 registered fields and a
+56-column result set, every insert fails:
+
+```
+Column name or number of supplied values does not match table definition.
+```
+
+…inside a transaction that then aborts, so the rollback also errors. Nothing about the message points at
+CodeGen.
+
+**Why a second pass happens at all:** remote operations generate from *metadata rows*, so a pass before
+`mj sync push` cannot see them and every `Sales.*` operation shell is silently missing from
+`remote_operations.ts`.
+
+**The fix, now in the documented loop:** pass 2 must be `npm run mj:codegen:files` (`codegen --skipdb`),
+which regenerates TypeScript/Angular/GraphQL only and provably leaves the database untouched — verified by
+re-counting fields and view columns before and after.
+
+A single pass is self-consistent. Two full passes are not. Expect this to bite hardest around
+`SalesAccount` / `SalesContact` and anything else extending a parent entity.
+
+---
+
+## 🟠 KI-8 — FKs to IsA CHILD entities get no virtual name column
+
+`vwDeals` resolves ten FKs to a display name (`Pipeline`, `DealType`, `Company`, `OwnerEmployee`, …) but
+**not** `AccountID`, `PrimaryContactID` or `BillingContactID`. All three point at IsA children
+(`SalesAccount` IS-A `Organization`, `SalesContact` IS-A `Person`) whose `Name` lives on the **parent**
+table, and CodeGen does not generate the lookup join through the IsA edge.
+
+Consequences to design around rather than fight:
+
+- A `Deal` row read on its own **cannot** display its customer's name. Any surface that needs it — the
+  deal workspace's persistent customer-context header, a grid column, a report — must read
+  `MJ_BizApps_Sales: Sales Accounts` separately. Batch it with `RunViews`, never per row.
+- This is also why requesting `Fields: ['Account']` on the Deals entity logs
+  `Field Account not found in entity MJ_BizApps_Sales: Deals` rather than returning null.
+
+Not a bug in this app's schema, and not worth working around with a hand-authored view: the baseline's
+view is CodeGen output, so any edit is overwritten on the next run. Related to KI-7 — the same unresolved
+IsA edge is what pass 2 partially "fixed" into an inconsistent state.

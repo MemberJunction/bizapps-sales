@@ -167,7 +167,7 @@ scripts/rebuild-db.sh                    # drop+create, MJ core, bizapps-common,
 npm run mj:codegen                       # PASS 1 — entity metadata + SQL objects
 scripts/append-codegen.sh                # fold generated SQL below the baseline's banner
 npm run mj -- sync push --dir metadata    # seed the type tables + remote-operation rows
-npm run mj:codegen                       # PASS 2 — remote-operation shells (see below)
+npm run mj:codegen:files                 # PASS 2 — FILES ONLY (--skipdb). See the warning below.
 npm run build
 scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped all data
 ```
@@ -177,14 +177,31 @@ scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped al
   sibling repo and is unrecoverable without another full rebuild.
 - `rebuild-db.sh` **trims** the generated half before applying, so CodeGen regenerates it in full.
   Skip the trim and CodeGen emits only a delta, which `append-codegen.sh` rightly refuses.
-- **CODEGEN RUNS TWICE, and the second pass is not busywork.** Remote operations are generated *from
-  metadata rows*, not from the schema, so pass 1 cannot see an operation that `sync push` has not
-  inserted yet — `remote_operations.ts` comes out holding only MJ's core operations and every
-  `Sales.*` shell is silently missing. Pass 2, after the push, emits them. The symptom if you skip it
-  is a compile error naming an operation class that plainly exists in metadata.
-  **Do NOT re-run `append-codegen.sh` after pass 2**: with the generated half already in place, pass 2
-  emits only a delta, and appending a delta on top of a full copy is exactly what the script refuses.
-  Remote operations produce no SQL objects, so there is nothing to fold in anyway.
+- **CODEGEN RUNS TWICE, and pass 2 MUST be `--skipdb`.** Remote operations generate *from metadata
+  rows*, not from the schema, so pass 1 cannot see an operation `sync push` has not inserted yet —
+  `remote_operations.ts` comes out holding only MJ's core operations and every `Sales.*` shell is
+  silently missing. The symptom is a compile error naming an operation class that plainly exists in
+  metadata. Pass 2 emits them, and `--skipdb` (`npm run mj:codegen:files`) restricts it to TypeScript,
+  Angular and GraphQL files.
+
+  > ### ⚠️ A FULL SECOND CODEGEN PASS CORRUPTS THE DATABASE. Measured, not theoretical.
+  >
+  > Running plain `mj:codegen` a second time regenerated `vwDeals` with **eleven** virtual lookup
+  > columns where pass 1 produced ten — it added an `Account` join, derived from the `SalesAccount`
+  > IsA child, that pass 1 had not been able to resolve yet. It did **not** add the matching
+  > `EntityField` row. The result: `vwDeals`/`spCreateDeal` return 56 columns while `Deal` has 55
+  > registered fields, and since `SQLServerDataProvider` builds its `@ResultTable` from *entity
+  > metadata* and then does `INSERT INTO @ResultTable EXEC spCreateDeal`, **every Deal insert fails**
+  > with *"Column name or number of supplied values does not match table definition"* — inside a
+  > transaction that then aborts. It also silently drifts the live DB away from the baseline, because
+  > `append-codegen.sh` is (correctly) not re-run.
+  >
+  > A single pass is self-consistent; two full passes are not. This is an IsA-ordering effect, so it
+  > will bite hardest on `SalesAccount`/`SalesContact` and anything else extending a parent entity.
+
+  **Do NOT re-run `append-codegen.sh` after pass 2** either: with the generated half already in place
+  a full pass emits only a delta, which the script rightly refuses — and with `--skipdb` there is no
+  SQL to fold in at all.
 - Never add `__mj_CreatedAt`/`__mj_UpdatedAt` columns or FK indexes — CodeGen does both.
 - Switch to **additive-only** migrations at first publish.
 - **Author for PostgreSQL from day one.** Production is PG; keep the T-SQL converter-friendly and

@@ -22,6 +22,7 @@
     "mj": "node node_modules/@memberjunction/cli/bin/run.js",
     "mj:migrate": "node node_modules/@memberjunction/cli/bin/run.js migrate",
     "mj:codegen": "node node_modules/@memberjunction/cli/bin/run.js codegen",
+    "mj:codegen:files": "node node_modules/@memberjunction/cli/bin/run.js codegen --skipdb",
     "postinstall": "node scripts/link-local-apps.mjs",
     "link:local": "node scripts/link-local-apps.mjs",
     "install:deps": "npm install",

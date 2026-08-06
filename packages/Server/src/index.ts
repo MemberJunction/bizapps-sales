@@ -10,9 +10,10 @@
 import '@mj-biz-apps/sales-entities';
 import '@mj-biz-apps/sales-actions';
 
-// Server-side entity subclasses — MUST come after sales-entities so @RegisterClass
-// auto-increment gives these higher priority than the generated classes. Empty at S1;
-// this is where the close lock and the OwnerEmployeeID stamp land at S4.
+// Server-side entity subclasses and remote operations — MUST come after sales-entities so
+// @RegisterClass auto-increment gives these higher priority than the generated classes. As of
+// Phase 1 this carries DealEntityServer (header + lines + payment schedule in one transaction,
+// and the OwnerEmployeeID stamp) and Sales.SaveDeal. The close lock lands at S4.
 import '@mj-biz-apps/sales-core-entities-server';
 import { LoadSalesCoreEntitiesServer } from '@mj-biz-apps/sales-core-entities-server';
 
@@ -46,8 +47,9 @@ export const RESOLVER_PATHS = [
  */
 export function LoadBizAppsSalesServer(): void {
     // Static imports above ensure the generated classes are registered; this anchors the
-    // server-only subclasses against tree-shaking. At S1 it is a no-op by design — see
-    // sales-core-entities-server's index for what arrives here and why the anchor exists now.
+    // server-only subclasses against tree-shaking. Load-bearing as of Phase 1: without it a bundler
+    // is right to drop the imports, ClassFactory then resolves the GENERATED Deal entity instead of
+    // DealEntityServer, and the whole transaction/owner-stamp layer silently stops applying.
     LoadSalesCoreEntitiesServer();
 
     // Referenced so the manifest import is not elided; MJ reads it during registration.
