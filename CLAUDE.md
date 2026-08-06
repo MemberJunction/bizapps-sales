@@ -170,7 +170,21 @@ npm run mj -- sync push --dir metadata    # seed the type tables + remote-operat
 npm run mj:codegen:files                 # PASS 2 — FILES ONLY (--skipdb). See the warning below.
 npm run build
 scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped all data
+# THEN RESTART MJAPI **AND** MJExplorer — see below.
 ```
+
+- **RESTART BOTH SERVERS AFTER A REBUILD.** They cache entity metadata at startup, and a rebuild
+  re-mints every entity ID and Application row — so a server started before the rebuild is holding IDs
+  that no longer exist. The symptom is not an error: MJExplorer pops an **`mj-app-access-dialog`**
+  saying *the application doesn't exist*, which reads exactly like a broken permission or a bad
+  `DriverClass`. It cost a Playwright debugging cycle in Phase 2 chasing the spec instead of the
+  servers. `ng serve`'s watch mode rebuilds the BUNDLE on a package change but does not re-read
+  metadata, so a reload is not enough — restart the process.
+- **Do not run the seeds twice concurrently.** Both scripts take table locks; two copies deadlock on
+  each other and present as a hang, not an error. If it happens, kill the `sqlcmd` processes and then
+  clear any session left holding a transaction (`KILL <spid>` for sleeping sessions with
+  `open_transaction_count > 0`), or the next provider startup times out at 15s with
+  `Cannot read properties of undefined (reading 'find')`.
 
 - **`append-codegen.sh` is NOT optional.** The generated half of the baseline is what makes a fresh
   `mj migrate` produce a *working* database rather than bare tables. It has been lost once in the

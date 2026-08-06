@@ -481,6 +481,34 @@ export const mjBizAppsSalesDealRoleSchema = z.object({
 export type mjBizAppsSalesDealRoleEntityType = z.infer<typeof mjBizAppsSalesDealRoleSchema>;
 
 /**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Sequences
+ */
+export const mjBizAppsSalesDealSequenceSchema = z.object({
+    ID: z.number().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: int
+        * * Default Value: 1`),
+    NextSequenceNumber: z.number().describe(`
+        * * Field Name: NextSequenceNumber
+        * * Display Name: Next Sequence Number
+        * * SQL Data Type: int
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesDealSequenceEntityType = z.infer<typeof mjBizAppsSalesDealSequenceSchema>;
+
+/**
  * zod schema definition for the entity MJ_BizApps_Sales: Deal Stage Events
  */
 export const mjBizAppsSalesDealStageEventSchema = z.object({
@@ -3118,6 +3146,83 @@ export class mjBizAppsSalesDealRoleEntity extends BaseEntity<mjBizAppsSalesDealR
     }
     set IsActive(value: boolean) {
         this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Sales: Deal Sequences - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: DealSequence
+ * * Base View: vwDealSequences
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Sequences')
+export class mjBizAppsSalesDealSequenceEntity extends BaseEntity<mjBizAppsSalesDealSequenceEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Deal Sequences record from the database
+    * @param ID: number - primary key value to load the MJ_BizApps_Sales: Deal Sequences record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesDealSequenceEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: number, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: int
+    * * Default Value: 1
+    */
+    get ID(): number {
+        return this.Get('ID');
+    }
+    set ID(value: number) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: NextSequenceNumber
+    * * Display Name: Next Sequence Number
+    * * SQL Data Type: int
+    * * Default Value: 1
+    */
+    get NextSequenceNumber(): number {
+        return this.Get('NextSequenceNumber');
+    }
+    set NextSequenceNumber(value: number) {
+        this.Set('NextSequenceNumber', value);
     }
 
     /**

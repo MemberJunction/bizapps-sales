@@ -22,6 +22,7 @@ import { mjBizAppsSalesDealLineTypeFormComponent } from "./Entities/mjBizAppsSal
 import { mjBizAppsSalesDealLineFormComponent } from "./Entities/mjBizAppsSalesDealLine/mjbizappssalesdealline.form.component";
 import { mjBizAppsSalesDealPaymentScheduleFormComponent } from "./Entities/mjBizAppsSalesDealPaymentSchedule/mjbizappssalesdealpaymentschedule.form.component";
 import { mjBizAppsSalesDealRoleFormComponent } from "./Entities/mjBizAppsSalesDealRole/mjbizappssalesdealrole.form.component";
+import { mjBizAppsSalesDealSequenceFormComponent } from "./Entities/mjBizAppsSalesDealSequence/mjbizappssalesdealsequence.form.component";
 import { mjBizAppsSalesDealStageEventFormComponent } from "./Entities/mjBizAppsSalesDealStageEvent/mjbizappssalesdealstageevent.form.component";
 import { mjBizAppsSalesDealStatusTypeFormComponent } from "./Entities/mjBizAppsSalesDealStatusType/mjbizappssalesdealstatustype.form.component";
 import { mjBizAppsSalesDealTeamMemberFormComponent } from "./Entities/mjBizAppsSalesDealTeamMember/mjbizappssalesdealteammember.form.component";
@@ -47,6 +48,7 @@ declarations: [
     mjBizAppsSalesDealLineFormComponent,
     mjBizAppsSalesDealPaymentScheduleFormComponent,
     mjBizAppsSalesDealRoleFormComponent,
+    mjBizAppsSalesDealSequenceFormComponent,
     mjBizAppsSalesDealStageEventFormComponent,
     mjBizAppsSalesDealStatusTypeFormComponent,
     mjBizAppsSalesDealTeamMemberFormComponent,
@@ -58,8 +60,7 @@ declarations: [
     mjBizAppsSalesLifecycleStageTypeFormComponent,
     mjBizAppsSalesLossReasonFormComponent,
     mjBizAppsSalesPipelineStageFormComponent,
-    mjBizAppsSalesPipelineFormComponent,
-    mjBizAppsSalesSalesAccountFormComponent],
+    mjBizAppsSalesPipelineFormComponent],
 imports: [
     CommonModule,
     FormsModule,
@@ -76,6 +77,7 @@ export class GeneratedForms_SubModule_0 { }
 
 @NgModule({
 declarations: [
+    mjBizAppsSalesSalesAccountFormComponent,
     mjBizAppsSalesSalesContactFormComponent],
 imports: [
     CommonModule,

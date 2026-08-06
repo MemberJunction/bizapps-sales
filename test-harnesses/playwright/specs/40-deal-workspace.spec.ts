@@ -14,8 +14,10 @@
  * All four look identical to a passing GraphQL test, and all four make the app unusable.
  *
  * WHAT IT PROVES, in order:
- *   1. The hand-authored **Sales** application exists and its Deals nav item resolves to the workspace
- *      (i.e. `DriverClass: 'DealWorkspaceResource'` was registered and not tree-shaken away).
+ *   1. The hand-authored **Sales** application exists and its Deals nav item reaches the workspace.
+ *      (Phase 2 put a section shell in front of it, so the nav item's `DriverClass` is now
+ *      `SalesDealsSectionResource` and the workspace is one of its three rail pages —
+ *      `50-sales-shell.spec.ts` covers the shell itself.)
  *   2. All five panes render and are reachable.
  *   3. A deal can be composed ACROSS panes — header on one, lines on a second, instalments on a third —
  *      and the panes keep their state while switching, because they are one draft and not five forms.
@@ -104,6 +106,18 @@ async function selectFirstRealOption(
   throw new Error(`select "${label}" offered no real options — its lookup did not load`);
 }
 
+/** The REAL option labels of a select, skipping the em-dash placeholder. */
+async function realOptionLabels(select: import('@playwright/test').Locator): Promise<string[]> {
+  const labels: string[] = [];
+  for (const option of await select.locator('option').all()) {
+    const text = ((await option.textContent()) ?? '').trim();
+    if (text && !text.startsWith('—')) {
+      labels.push(text);
+    }
+  }
+  return labels;
+}
+
 test.describe('deal workspace — Phase 1 definition of done', () => {
   test('compose a complete deal through the custom form, and read it back', async ({ page }) => {
     test.setTimeout(300_000);
@@ -187,6 +201,27 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
         { name: `${RUN_TAG} Platform seats`, qty: '100', gross: '120000', disc: '12000', total: '108000' },
         { name: `${RUN_TAG} Onboarding`, qty: '1', gross: '20000', disc: '0', total: '20000' },
       ];
+      /**
+       * THE TWO ROWS TAKE DIFFERENT LINE TYPES, which an earlier version did not.
+       *
+       * It picked the FIRST real option for every row, so both lines came out One-Time and the
+       * recurring path — the one that produces MRR/ARR and a renewal — was never exercised through the
+       * UI at all. Row 0 now takes the LAST offered type and row 1 the FIRST, which guarantees they
+       * differ whatever the seeded vocabulary happens to be.
+       *
+       * NOTE what is deliberately NOT asserted here: that a particular row is "Recurring". The meaning
+       * of a line type lives in its `IsRecurring` FLAG, not its label, and a UI test cannot see flags —
+       * so hardcoding the name would couple this spec to a renameable string while proving nothing
+       * about behaviour. The flag semantics are asserted server-side by integration check SD12, which
+       * joins to the type row and reads `IsRecurring` directly.
+       */
+      const typeLabels = await realOptionLabels(rows.nth(0).locator('select').first());
+      expect(
+        typeLabels.length,
+        'the line-type selector must offer at least two types, or the recurring path cannot be exercised',
+      ).toBeGreaterThanOrEqual(2);
+
+      const chosenTypes: string[] = [];
       for (let i = 0; i < values.length; i++) {
         const row = rows.nth(i);
         const inputs = row.locator('input');
@@ -195,18 +230,18 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
         await inputs.nth(2).fill(values[i].gross);         // Annual gross fees
         await inputs.nth(3).fill(values[i].disc);          // Discount
         await inputs.nth(4).fill(values[i].total);         // Total
+
         // Line type is a real type table now, so it is a select and not free text.
-        const typeSelect = row.locator('select').first();
-        const options = await typeSelect.locator('option').all();
-        for (const option of options) {
-          const text = ((await option.textContent()) ?? '').trim();
-          if (text && text !== '—') {
-            await typeSelect.selectOption({ label: text });
-            break;
-          }
-        }
+        const label = i === 0 ? typeLabels[typeLabels.length - 1] : typeLabels[0];
+        await row.locator('select').first().selectOption({ label });
+        chosenTypes.push(label);
         await page.waitForTimeout(250);
       }
+
+      expect(
+        new Set(chosenTypes).size,
+        'the two lines must carry DIFFERENT types, so both branches are covered',
+      ).toBe(2);
       await shot(page, '40-04-lines');
     });
 

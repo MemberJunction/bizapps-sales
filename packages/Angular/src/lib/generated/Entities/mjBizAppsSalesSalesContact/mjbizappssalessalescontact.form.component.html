@@ -230,25 +230,25 @@
          RELATED ENTITY PANELS
          ======================================== -->
 
-    <!-- Deals (Primary Contact ID) Section -->
+    <!-- Deal Contact Roles Section -->
     <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDealsPrimaryContactID"
-        SectionName="Deals (Primary Contact ID)"
+        SectionKey="mJBizAppsSalesDealContactRoles"
+        SectionName="Deal Contact Roles"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealsPrimaryContactID')"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealContactRoles')"
         [DefaultExpanded]="false">
         @if (record.IsSaved) {
         <div>
             <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','PrimaryContactID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealsPrimaryContactID')"
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Contact Roles','SalesContactID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Contact Roles')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealContactRoles')"
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealsPrimaryContactID', $event.totalRowCount)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealContactRoles', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>
@@ -280,25 +280,25 @@
         }
     </mj-collapsible-panel>
 
-    <!-- Deal Contact Roles Section -->
+    <!-- Deals (Primary Contact ID) Section -->
     <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDealContactRoles"
-        SectionName="Deal Contact Roles"
+        SectionKey="mJBizAppsSalesDealsPrimaryContactID"
+        SectionName="Deals (Primary Contact ID)"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealContactRoles')"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealsPrimaryContactID')"
         [DefaultExpanded]="false">
         @if (record.IsSaved) {
         <div>
             <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Contact Roles','SalesContactID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Contact Roles')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealContactRoles')"
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','PrimaryContactID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealsPrimaryContactID')"
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealContactRoles', $event.totalRowCount)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealsPrimaryContactID', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

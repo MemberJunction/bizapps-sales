@@ -29,8 +29,9 @@
  *     through `Sales.ReopenDeal` with a recorded reason.
  *   - S4: `DealStageEvent` append on stage transition, stamping `AmountAtTransition` and
  *     `ProbabilityAtTransition`.
- *   - `DealNumber` sequence assignment (DEAL-{seq}), mirroring accounting's `getNextJournalEntryNumber`.
  * Each of those is a behaviour change with its own tests, so none of them is faked here.
+ *
+ * `DealNumber` assignment landed in Phase 2 — see step 0 of {@link DealEntityServer.Save}.
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */
@@ -50,6 +51,8 @@ import {
     mjBizAppsSalesDealPaymentScheduleEntity,
     mjBizAppsSalesDealTeamMemberEntity,
 } from '@mj-biz-apps/sales-entities';
+
+import { getNextDealNumber } from './SequenceService.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_LINE_ENTITY = 'MJ_BizApps_Sales: Deal Lines';
@@ -227,6 +230,25 @@ export class DealEntityServer extends mjBizAppsSalesDealEntity {
 
         try {
             await dbProvider.BeginTransaction();
+
+            /**
+             * 0. DEAL NUMBER, for a new deal that has none.
+             *
+             * INSIDE the transaction and BEFORE the header insert, both deliberately. Inside, so a save
+             * that rolls back releases the number and the next deal reuses it — the counter stays
+             * gap-free, which is the whole point of taking it from a locked row rather than from
+             * `MAX(DealNumber) + 1`. Before, because `DealNumber` carries a filtered UNIQUE index and
+             * assigning it after the insert would mean a second write to a row that is already visible.
+             *
+             * Only ever assigned once: an existing number is never regenerated, so re-saving a deal
+             * cannot renumber it — a deal number appears in contracts, orders and people's email.
+             */
+            if (!this.IsSaved && !this.DealNumber) {
+                this.DealNumber = await getNextDealNumber(
+                    this.ContextCurrentUser,
+                    this.ProviderToUse as unknown as IMetadataProvider,
+                );
+            }
 
             // 1. Header first — children need this.ID.
             const savedHeader = await super.Save(options);
