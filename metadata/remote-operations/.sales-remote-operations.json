@@ -1,0 +1,48 @@
+[
+  {
+    "_comments": [
+      "The Sales API surface, declared as metadata. CodeGen reads these rows and emits one typed",
+      "BaseRemotableOperation subclass per row into packages/Entities/src/generated/remote_operations.ts —",
+      "a browser-safe package, which is the whole point: the client imports the CONTRACT without pulling",
+      "the server engine in behind it.",
+      "",
+      "GenerationType=Manual, so CodeGen emits a typed SHELL and a hand-authored server subclass in",
+      "packages/CoreEntitiesServer supplies InternalExecute and registers under the operation key. The",
+      "server subclass registers LAST (it extends the generated base), so it wins ClassFactory dispatch.",
+      "AI generation is deliberately not used: this body orchestrates a multi-table transaction where",
+      "being subtly wrong produces a numbered deal with nothing under it — the exact failure the",
+      "operation exists to prevent.",
+      "",
+      "KNOWN NOISE, inherited from the same CodeGen behaviour orders documents: remote operations carry",
+      "no schema, so CodeGen has no core/non-core partition for them the way it does for entities. The",
+      "configured target therefore receives the FULL operation set and this app's generated file also",
+      "picks up MJ's own core operations. Harmless — they are all GenerationType=Manual, which emits an",
+      "unregistered type shell: dead exported interfaces, no @RegisterClass, no runtime effect."
+    ],
+    "fields": {
+      "Name": "Save Deal",
+      "OperationKey": "Sales.SaveDeal",
+      "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Deal Lifecycle",
+      "Description": "Create or update a deal together with its lines and its negotiated payment schedule, in ONE transaction. This is the operation that makes browser-side deal entry possible at all: a browser holds the generated DealEntity rather than DealEntityServer, so line and schedule collections are transient properties on the server entity and cannot cross the entity-save boundary as scalars. Saving the header and then each child as separate round trips is the alternative, and a failure partway through it leaves a numbered deal with nothing under it. Prices nothing — every figure it accepts is either an INPUT to the pricing engine or a transcription of what was signed.",
+      "InputTypeName": "SalesSaveDealInput",
+      "InputTypeDefinition": "@file:types/sales-save-deal.input.ts",
+      "InputTypeIsArray": false,
+      "OutputTypeName": "SalesSaveDealOutput",
+      "OutputTypeDefinition": "@file:types/sales-save-deal.output.ts",
+      "OutputTypeIsArray": false,
+      "ExecutionMode": "Sync",
+      "RequiredScope": "sales:write",
+      "RequiresSystemUser": false,
+      "GenerationType": "Manual",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "D4F8A162-0001-4E71-B0A8-3F17C5E2D802"
+    },
+    "sync": {
+      "lastModified": "2026-08-06T06:56:03.683Z",
+      "checksum": "47f3e9b73a7f310c127d61faaebd2cbf6e9c1c71f4b98c3f182d9aa9cea73ac6"
+    }
+  }
+]

@@ -16,16 +16,25 @@
     "cannot, since a Pipeline needs a real __mj.Company. Pipelines are per-deployment data, not",
     "vocabulary, so they are not seeded here at all."
   ],
+  "_comment_remote_operations": [
+    "remote-operation-categories MUST precede remote-operations: the operation rows resolve their",
+    "CategoryID with @lookup against a category by Name, so the category has to exist first. This is",
+    "the first entry in this list where the ordering is genuinely load-bearing rather than",
+    "precautionary — get it wrong and the push fails on an unresolvable lookup."
+  ],
   "directoryOrder": [
     "deal-status-types",
     "forecast-category-types",
     "deal-types",
+    "deal-line-types",
     "deal-roles",
     "loss-reasons",
     "lead-source-types",
     "lifecycle-stage-types",
     "buying-role-types",
-    "account-types"
+    "account-types",
+    "remote-operation-categories",
+    "remote-operations"
   ],
   "sqlLogging": {
     "enabled": true,

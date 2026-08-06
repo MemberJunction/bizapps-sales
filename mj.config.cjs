@@ -66,6 +66,22 @@ module.exports = {
     { type: 'GraphQLServer', directory: './packages/Server/src/generated' },
     { type: 'ActionSubclasses', directory: './packages/Actions/src/generated' },
     { type: 'EntitySubclasses', directory: './packages/Entities/src/generated' },
+    /**
+     * Remote operations — the typed, browser-safe CONTRACT for every Sales.* call,
+     * emitted from the rows in metadata/remote-operations/. It lands in the Entities
+     * package deliberately: the client must be able to import the operation and its
+     * input/output types WITHOUT pulling the server engine in behind it.
+     *
+     * KNOWN NOISE, and the same noise orders documents. Remote operations carry no
+     * schema, so CodeGen has no core/non-core partition for them the way it does for
+     * entities (which key on SchemaName). Every configured target therefore receives
+     * the FULL operation set, so this file also picks up MJ's own core operations.
+     * Harmless here: they are all GenerationType=Manual, which emits an unregistered
+     * type shell — dead exported interfaces, no `@RegisterClass`, no runtime effect
+     * and no duplicate ClassFactory registration. Upstream names a per-operation
+     * core/non-core marker as the open decision that would remove it.
+     */
+    { type: 'RemoteOperations', directory: './packages/Entities/src/generated' },
     { type: 'DBSchemaJSON', directory: './Schema Files' },
   ],
 

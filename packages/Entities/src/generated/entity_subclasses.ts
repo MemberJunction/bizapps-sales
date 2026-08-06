@@ -182,6 +182,57 @@ export const mjBizAppsSalesDealContactRoleSchema = z.object({
 export type mjBizAppsSalesDealContactRoleEntityType = z.infer<typeof mjBizAppsSalesDealContactRoleSchema>;
 
 /**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Line Types
+ */
+export const mjBizAppsSalesDealLineTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    IsRecurring: z.boolean().describe(`
+        * * Field Name: IsRecurring
+        * * Display Name: Is Recurring
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: The behaviour flag. 1 for lines that carry into MRR/ARR and become a renewable subscription; 0 for lines billed once. Branch on this, never on Name or Code.`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesDealLineTypeEntityType = z.infer<typeof mjBizAppsSalesDealLineTypeSchema>;
+
+/**
  * zod schema definition for the entity MJ_BizApps_Sales: Deal Lines
  */
 export const mjBizAppsSalesDealLineSchema = z.object({
@@ -200,6 +251,11 @@ export const mjBizAppsSalesDealLineSchema = z.object({
         * * Display Name: Product ID
         * * SQL Data Type: uniqueidentifier
         * * Description: SOFT reference (no FK) to a bizapps-orders Product. Soft because orders' migrations may not have run — which is exactly what lets this app stand up independently.`),
+    ProductName: z.string().nullable().describe(`
+        * * Field Name: ProductName
+        * * Display Name: Product Name
+        * * SQL Data Type: nvarchar(500)
+        * * Description: The product/service name AS WRITTEN ON THE SIGNED DOCUMENT — transcription, not a denormalized cache of the catalog name, and never auto-synced from it. Needed twice over: ProductID points at the orders catalog, which is not installed yet, so without this a line is an unreadable GUID; and once orders IS present, renaming a catalog product must not retroactively reword what a customer signed.`),
     Quantity: z.number().describe(`
         * * Field Name: Quantity
         * * Display Name: Quantity
@@ -226,10 +282,12 @@ export const mjBizAppsSalesDealLineSchema = z.object({
         * * Field Name: ServicePeriodEnd
         * * Display Name: Service Period End
         * * SQL Data Type: date`),
-    LineType: z.string().nullable().describe(`
-        * * Field Name: LineType
-        * * Display Name: Line Type
-        * * SQL Data Type: nvarchar(40)`),
+    DealLineTypeID: z.string().nullable().describe(`
+        * * Field Name: DealLineTypeID
+        * * Display Name: Deal Line Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Line Types (vwDealLineTypes.ID)
+        * * Description: Whether this line is a one-time charge or a recurring one. A FK to DealLineType, replacing what was a free-text LineType column: recurring lines are what produce MRR/ARR and a renewal, and the moment code needs to tell them apart a string forces exactly the name comparison the vocabulary rule forbids. Branch on DealLineType.IsRecurring, never on the name.`),
     DisplayOrder: z.number().describe(`
         * * Field Name: DisplayOrder
         * * Display Name: Display Order
@@ -239,6 +297,21 @@ export const mjBizAppsSalesDealLineSchema = z.object({
         * * Field Name: Description
         * * Display Name: Description
         * * SQL Data Type: nvarchar(MAX)`),
+    AnnualGrossFees: z.number().nullable().describe(`
+        * * Field Name: AnnualGrossFees
+        * * Display Name: Annual Gross Fees
+        * * SQL Data Type: decimal(19, 4)
+        * * Description: Annual gross fees for this line AS WRITTEN ON THE SIGNED DOCUMENT. An INPUT the AD transcribes, not a figure this app derives. Once orders is wired in, Orders.PreviewOrder's answer lands in the Resolved* columns and becomes the authority on what the deal is worth; this remains the record of what was signed.`),
+    DiscountAmount: z.number().nullable().describe(`
+        * * Field Name: DiscountAmount
+        * * Display Name: Discount Amount
+        * * SQL Data Type: decimal(19, 4)
+        * * Description: The discount as a CURRENCY AMOUNT, as the order form expresses it. Coexists with RequestedDiscountPct deliberately — the template speaks in amounts, the pricing engine takes a percent — and there is no exactly-one-of constraint, because a deal can legitimately carry a negotiated percentage as engine input AND the figure printed on the signed page.`),
+    Total: z.number().nullable().describe(`
+        * * Field Name: Total
+        * * Display Name: Total
+        * * SQL Data Type: decimal(19, 4)
+        * * Description: THE SIGNED FIGURE for this line, transcribed from the executed document. On the PDF it equals AnnualGrossFees minus DiscountAmount, but THAT SUBTRACTION IS THE CUSTOMER'S AND THE AD'S, NOT THIS APP'S: nothing here computes, defaults or back-fills it, which is how the no-arithmetic rule stays literally true. Deliberately unconstrained in sign — a credit or concession line is legitimately negative, and bounding it would mean asserting the arithmetic.`),
     ResolvedUnitPrice: z.number().nullable().describe(`
         * * Field Name: ResolvedUnitPrice
         * * Display Name: Resolved Unit Price
@@ -278,6 +351,10 @@ export const mjBizAppsSalesDealLineSchema = z.object({
         * * Field Name: Deal
         * * Display Name: Deal
         * * SQL Data Type: nvarchar(500)`),
+    DealLineType: z.string().nullable().describe(`
+        * * Field Name: DealLineType
+        * * Display Name: Deal Line Type
+        * * SQL Data Type: nvarchar(200)`),
     Company: z.string().nullable().describe(`
         * * Field Name: Company
         * * Display Name: Company
@@ -285,6 +362,57 @@ export const mjBizAppsSalesDealLineSchema = z.object({
 });
 
 export type mjBizAppsSalesDealLineEntityType = z.infer<typeof mjBizAppsSalesDealLineSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Payment Schedules
+ */
+export const mjBizAppsSalesDealPaymentScheduleSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    DealID: z.string().describe(`
+        * * Field Name: DealID
+        * * Display Name: Deal ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deals (vwDeals.ID)`),
+    PaymentDate: z.date().nullable().describe(`
+        * * Field Name: PaymentDate
+        * * Display Name: Payment Date
+        * * SQL Data Type: date`),
+    Amount: z.number().nullable().describe(`
+        * * Field Name: Amount
+        * * Display Name: Amount
+        * * SQL Data Type: decimal(19, 4)
+        * * Description: The instalment amount as agreed. Unconstrained in sign: a refund or credit instalment is legitimately negative, and this table records what was agreed rather than asserting a shape for it.`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(1000)`),
+    DisplayOrder: z.number().describe(`
+        * * Field Name: DisplayOrder
+        * * Display Name: Display Order
+        * * SQL Data Type: int
+        * * Default Value: 0
+        * * Description: Explicit ordering, because instalment order is not always date order — "on execution" and "on signature of SOW 2" can share a date or have none yet. Server-maintained and re-sequenced on every save, mirroring how accounting re-sequences JournalEntryLine.LineNumber.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Deal: z.string().describe(`
+        * * Field Name: Deal
+        * * Display Name: Deal
+        * * SQL Data Type: nvarchar(500)`),
+});
+
+export type mjBizAppsSalesDealPaymentScheduleEntityType = z.infer<typeof mjBizAppsSalesDealPaymentScheduleSchema>;
 
 /**
  * zod schema definition for the entity MJ_BizApps_Sales: Deal Roles
@@ -718,6 +846,12 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Primary Contact ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)`),
+    BillingContactID: z.string().nullable().describe(`
+        * * Field Name: BillingContactID
+        * * Display Name: Billing Contact ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+        * * Description: The contact who receives the invoice, which is routinely NOT the person negotiating. NULL means the billing contact IS the primary contact — a real default, not "unknown" — so an AD never types the same name twice and changing the primary contact leaves no stale billing copy.`),
     CompanyID: z.string().describe(`
         * * Field Name: CompanyID
         * * Display Name: Company ID
@@ -766,6 +900,21 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: TermMonths
         * * Display Name: Term Months
         * * SQL Data Type: int`),
+    EstimatedProjectWeeks: z.number().nullable().describe(`
+        * * Field Name: EstimatedProjectWeeks
+        * * Display Name: Estimated Project Weeks
+        * * SQL Data Type: int
+        * * Description: Estimated project timeline in WEEKS, from the SOW template. A separate column from TermMonths on purpose: a subscription term is a COMMITMENT that drives renewal dates and escalation, a project estimate is a FORECAST that drives neither. One column plus a unit flag would force every consumer to branch on the unit before using the number.`),
+    ExecutionDate: z.date().nullable().describe(`
+        * * Field Name: ExecutionDate
+        * * Display Name: Execution Date
+        * * SQL Data Type: date
+        * * Description: The date the agreement was signed. Deliberately NOT constrained against StartDate: work that begins before signature is common and legitimate, so ordering the two would reject real deals.`),
+    StartDate: z.date().nullable().describe(`
+        * * Field Name: StartDate
+        * * Display Name: Start Date
+        * * SQL Data Type: date
+        * * Description: The date service or the subscription actually begins (order-form / SOW start). May precede ExecutionDate for backdated work — see that column.`),
     ExpectedCloseDate: z.date().nullable().describe(`
         * * Field Name: ExpectedCloseDate
         * * Display Name: Expected Close Date
@@ -811,6 +960,33 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Renews Contract ID
         * * SQL Data Type: uniqueidentifier
         * * Description: SOFT reference (no FK) to the contract this deal RENEWS. What makes the renewal chain navigable from the sales side without contracts knowing anything about it. Required when DealType.RequiresRenewalSource is set.`),
+    AutoRenew: z.boolean().describe(`
+        * * Field Name: AutoRenew
+        * * Display Name: Auto Renew
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: Whether the resulting agreement renews automatically at the end of its term.`),
+    AnnualIncreasePctOverride: z.number().nullable().describe(`
+        * * Field Name: AnnualIncreasePctOverride
+        * * Display Name: Annual Increase Pct Override
+        * * SQL Data Type: decimal(5, 2)
+        * * Description: An OVERRIDE, and NULL is meaningful: it means "use the standard annual increase", whose default (5%) lives on the contracts ContractType, not here. That is a different fact from "we negotiated a number that happens to equal today's standard", and only the NULL survives a later change to policy. Copying the default in at write time would freeze this year's terms into next year's renewals silently.`),
+    CancellationNoticeDaysOverride: z.number().nullable().describe(`
+        * * Field Name: CancellationNoticeDaysOverride
+        * * Display Name: Cancellation Notice Days Override
+        * * SQL Data Type: int
+        * * Description: An OVERRIDE of the standard cancellation-notice period (default 90 days, owned by the contracts ContractType). NULL means "use the standard" — see AnnualIncreasePctOverride for why that distinction is load-bearing.`),
+    PaymentMethod: z.string().nullable().describe(`
+        * * Field Name: PaymentMethod
+        * * Display Name: Payment Method
+        * * SQL Data Type: nvarchar(50)
+        * * Default Value: ACH
+        * * Description: PLACEHOLDER LABEL (default ACH), and a string only for as long as nothing branches on it. Payment method becomes vocabulary the moment code cares — ACH and card differ in settlement timing and fees — but ORDERS owns that concept and will expose PaymentType. Pointing at orders' vocabulary later beats standing up a competing copy here and reconciling two. No code may branch on this value.`),
+    ContractVariances: z.string().nullable().describe(`
+        * * Field Name: ContractVariances
+        * * Display Name: Contract Variances
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Free-text summary of what this deal negotiated AWAY from standard terms — the red-line list, in the AD's own words. The input to a human legal review; nothing should attempt to parse it.`),
     Description: z.string().nullable().describe(`
         * * Field Name: Description
         * * Display Name: Description
@@ -2160,6 +2336,147 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
 
 
 /**
+ * MJ_BizApps_Sales: Deal Line Types - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: DealLineType
+ * * Base View: vwDealLineTypes
+ * * @description Whether a deal line is a ONE-TIME charge or a RECURRING one. A type table rather than a string column because recurring lines are what produce MRR/ARR and a renewal while one-time lines produce neither — so the distinction is behaviour, and behaviour belongs in a flag. IsRecurring is what the engine reads, which is what lets a customer call the concept Subscription or Implementation with no code aware of the rename.
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Line Types')
+export class mjBizAppsSalesDealLineTypeEntity extends BaseEntity<mjBizAppsSalesDealLineTypeEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Deal Line Types record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Deal Line Types record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesDealLineTypeEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: Code
+    * * Display Name: Code
+    * * SQL Data Type: nvarchar(40)
+    */
+    get Code(): string {
+        return this.Get('Code');
+    }
+    set Code(value: string) {
+        this.Set('Code', value);
+    }
+
+    /**
+    * * Field Name: Name
+    * * Display Name: Name
+    * * SQL Data Type: nvarchar(200)
+    */
+    get Name(): string {
+        return this.Get('Name');
+    }
+    set Name(value: string) {
+        this.Set('Name', value);
+    }
+
+    /**
+    * * Field Name: Description
+    * * Display Name: Description
+    * * SQL Data Type: nvarchar(MAX)
+    */
+    get Description(): string | null {
+        return this.Get('Description');
+    }
+    set Description(value: string | null) {
+        this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: IsRecurring
+    * * Display Name: Is Recurring
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: The behaviour flag. 1 for lines that carry into MRR/ARR and become a renewable subscription; 0 for lines billed once. Branch on this, never on Name or Code.
+    */
+    get IsRecurring(): boolean {
+        return this.Get('IsRecurring');
+    }
+    set IsRecurring(value: boolean) {
+        this.Set('IsRecurring', value);
+    }
+
+    /**
+    * * Field Name: DisplayRank
+    * * Display Name: Display Rank
+    * * SQL Data Type: int
+    * * Default Value: 0
+    */
+    get DisplayRank(): number {
+        return this.Get('DisplayRank');
+    }
+    set DisplayRank(value: number) {
+        this.Set('DisplayRank', value);
+    }
+
+    /**
+    * * Field Name: IsActive
+    * * Display Name: Is Active
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    */
+    get IsActive(): boolean {
+        return this.Get('IsActive');
+    }
+    set IsActive(value: boolean) {
+        this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+}
+
+
+/**
  * MJ_BizApps_Sales: Deal Lines - strongly typed entity sub-class
  * * Schema: __mj_BizAppsSales
  * * Base Table: DealLine
@@ -2226,6 +2543,19 @@ export class mjBizAppsSalesDealLineEntity extends BaseEntity<mjBizAppsSalesDealL
     }
     set ProductID(value: string | null) {
         this.Set('ProductID', value);
+    }
+
+    /**
+    * * Field Name: ProductName
+    * * Display Name: Product Name
+    * * SQL Data Type: nvarchar(500)
+    * * Description: The product/service name AS WRITTEN ON THE SIGNED DOCUMENT — transcription, not a denormalized cache of the catalog name, and never auto-synced from it. Needed twice over: ProductID points at the orders catalog, which is not installed yet, so without this a line is an unreadable GUID; and once orders IS present, renaming a catalog product must not retroactively reword what a customer signed.
+    */
+    get ProductName(): string | null {
+        return this.Get('ProductName');
+    }
+    set ProductName(value: string | null) {
+        this.Set('ProductName', value);
     }
 
     /**
@@ -2303,15 +2633,17 @@ export class mjBizAppsSalesDealLineEntity extends BaseEntity<mjBizAppsSalesDealL
     }
 
     /**
-    * * Field Name: LineType
-    * * Display Name: Line Type
-    * * SQL Data Type: nvarchar(40)
+    * * Field Name: DealLineTypeID
+    * * Display Name: Deal Line Type ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Line Types (vwDealLineTypes.ID)
+    * * Description: Whether this line is a one-time charge or a recurring one. A FK to DealLineType, replacing what was a free-text LineType column: recurring lines are what produce MRR/ARR and a renewal, and the moment code needs to tell them apart a string forces exactly the name comparison the vocabulary rule forbids. Branch on DealLineType.IsRecurring, never on the name.
     */
-    get LineType(): string | null {
-        return this.Get('LineType');
+    get DealLineTypeID(): string | null {
+        return this.Get('DealLineTypeID');
     }
-    set LineType(value: string | null) {
-        this.Set('LineType', value);
+    set DealLineTypeID(value: string | null) {
+        this.Set('DealLineTypeID', value);
     }
 
     /**
@@ -2337,6 +2669,45 @@ export class mjBizAppsSalesDealLineEntity extends BaseEntity<mjBizAppsSalesDealL
     }
     set Description(value: string | null) {
         this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: AnnualGrossFees
+    * * Display Name: Annual Gross Fees
+    * * SQL Data Type: decimal(19, 4)
+    * * Description: Annual gross fees for this line AS WRITTEN ON THE SIGNED DOCUMENT. An INPUT the AD transcribes, not a figure this app derives. Once orders is wired in, Orders.PreviewOrder's answer lands in the Resolved* columns and becomes the authority on what the deal is worth; this remains the record of what was signed.
+    */
+    get AnnualGrossFees(): number | null {
+        return this.Get('AnnualGrossFees');
+    }
+    set AnnualGrossFees(value: number | null) {
+        this.Set('AnnualGrossFees', value);
+    }
+
+    /**
+    * * Field Name: DiscountAmount
+    * * Display Name: Discount Amount
+    * * SQL Data Type: decimal(19, 4)
+    * * Description: The discount as a CURRENCY AMOUNT, as the order form expresses it. Coexists with RequestedDiscountPct deliberately — the template speaks in amounts, the pricing engine takes a percent — and there is no exactly-one-of constraint, because a deal can legitimately carry a negotiated percentage as engine input AND the figure printed on the signed page.
+    */
+    get DiscountAmount(): number | null {
+        return this.Get('DiscountAmount');
+    }
+    set DiscountAmount(value: number | null) {
+        this.Set('DiscountAmount', value);
+    }
+
+    /**
+    * * Field Name: Total
+    * * Display Name: Total
+    * * SQL Data Type: decimal(19, 4)
+    * * Description: THE SIGNED FIGURE for this line, transcribed from the executed document. On the PDF it equals AnnualGrossFees minus DiscountAmount, but THAT SUBTRACTION IS THE CUSTOMER'S AND THE AD'S, NOT THIS APP'S: nothing here computes, defaults or back-fills it, which is how the no-arithmetic rule stays literally true. Deliberately unconstrained in sign — a credit or concession line is legitimately negative, and bounding it would mean asserting the arithmetic.
+    */
+    get Total(): number | null {
+        return this.Get('Total');
+    }
+    set Total(value: number | null) {
+        this.Set('Total', value);
     }
 
     /**
@@ -2434,12 +2805,159 @@ export class mjBizAppsSalesDealLineEntity extends BaseEntity<mjBizAppsSalesDealL
     }
 
     /**
+    * * Field Name: DealLineType
+    * * Display Name: Deal Line Type
+    * * SQL Data Type: nvarchar(200)
+    */
+    get DealLineType(): string | null {
+        return this.Get('DealLineType');
+    }
+
+    /**
     * * Field Name: Company
     * * Display Name: Company
     * * SQL Data Type: nvarchar(50)
     */
     get Company(): string | null {
         return this.Get('Company');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Sales: Deal Payment Schedules - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: DealPaymentSchedule
+ * * Base View: vwDealPaymentSchedules
+ * * @description The EXCEPTION payment schedule for a deal. THE ABSENCE OF ROWS IS THE COMMON CASE and that is the design: the standard term is 100% payable on execution, so a deal on standard terms carries no rows here and rows exist only where something else was negotiated. Storing the default on every deal would let a later change to "default" silently rewrite history, and would turn "did this deal negotiate payment terms?" into arithmetic instead of a row count. This app does NOT check that the schedule sums to the deal amount — that is computing money, and the authoritative total lives in orders.
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Payment Schedules')
+export class mjBizAppsSalesDealPaymentScheduleEntity extends BaseEntity<mjBizAppsSalesDealPaymentScheduleEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Deal Payment Schedules record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Deal Payment Schedules record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesDealPaymentScheduleEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: DealID
+    * * Display Name: Deal ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deals (vwDeals.ID)
+    */
+    get DealID(): string {
+        return this.Get('DealID');
+    }
+    set DealID(value: string) {
+        this.Set('DealID', value);
+    }
+
+    /**
+    * * Field Name: PaymentDate
+    * * Display Name: Payment Date
+    * * SQL Data Type: date
+    */
+    get PaymentDate(): Date | null {
+        return this.Get('PaymentDate');
+    }
+    set PaymentDate(value: Date | null) {
+        this.Set('PaymentDate', value);
+    }
+
+    /**
+    * * Field Name: Amount
+    * * Display Name: Amount
+    * * SQL Data Type: decimal(19, 4)
+    * * Description: The instalment amount as agreed. Unconstrained in sign: a refund or credit instalment is legitimately negative, and this table records what was agreed rather than asserting a shape for it.
+    */
+    get Amount(): number | null {
+        return this.Get('Amount');
+    }
+    set Amount(value: number | null) {
+        this.Set('Amount', value);
+    }
+
+    /**
+    * * Field Name: Description
+    * * Display Name: Description
+    * * SQL Data Type: nvarchar(1000)
+    */
+    get Description(): string | null {
+        return this.Get('Description');
+    }
+    set Description(value: string | null) {
+        this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: DisplayOrder
+    * * Display Name: Display Order
+    * * SQL Data Type: int
+    * * Default Value: 0
+    * * Description: Explicit ordering, because instalment order is not always date order — "on execution" and "on signature of SOW 2" can share a date or have none yet. Server-maintained and re-sequenced on every save, mirroring how accounting re-sequences JournalEntryLine.LineNumber.
+    */
+    get DisplayOrder(): number {
+        return this.Get('DisplayOrder');
+    }
+    set DisplayOrder(value: number) {
+        this.Set('DisplayOrder', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: Deal
+    * * Display Name: Deal
+    * * SQL Data Type: nvarchar(500)
+    */
+    get Deal(): string {
+        return this.Get('Deal');
     }
 }
 
@@ -3615,6 +4133,20 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
+    * * Field Name: BillingContactID
+    * * Display Name: Billing Contact ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+    * * Description: The contact who receives the invoice, which is routinely NOT the person negotiating. NULL means the billing contact IS the primary contact — a real default, not "unknown" — so an AD never types the same name twice and changing the primary contact leaves no stale billing copy.
+    */
+    get BillingContactID(): string | null {
+        return this.Get('BillingContactID');
+    }
+    set BillingContactID(value: string | null) {
+        this.Set('BillingContactID', value);
+    }
+
+    /**
     * * Field Name: CompanyID
     * * Display Name: Company ID
     * * SQL Data Type: uniqueidentifier
@@ -3743,6 +4275,45 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
+    * * Field Name: EstimatedProjectWeeks
+    * * Display Name: Estimated Project Weeks
+    * * SQL Data Type: int
+    * * Description: Estimated project timeline in WEEKS, from the SOW template. A separate column from TermMonths on purpose: a subscription term is a COMMITMENT that drives renewal dates and escalation, a project estimate is a FORECAST that drives neither. One column plus a unit flag would force every consumer to branch on the unit before using the number.
+    */
+    get EstimatedProjectWeeks(): number | null {
+        return this.Get('EstimatedProjectWeeks');
+    }
+    set EstimatedProjectWeeks(value: number | null) {
+        this.Set('EstimatedProjectWeeks', value);
+    }
+
+    /**
+    * * Field Name: ExecutionDate
+    * * Display Name: Execution Date
+    * * SQL Data Type: date
+    * * Description: The date the agreement was signed. Deliberately NOT constrained against StartDate: work that begins before signature is common and legitimate, so ordering the two would reject real deals.
+    */
+    get ExecutionDate(): Date | null {
+        return this.Get('ExecutionDate');
+    }
+    set ExecutionDate(value: Date | null) {
+        this.Set('ExecutionDate', value);
+    }
+
+    /**
+    * * Field Name: StartDate
+    * * Display Name: Start Date
+    * * SQL Data Type: date
+    * * Description: The date service or the subscription actually begins (order-form / SOW start). May precede ExecutionDate for backdated work — see that column.
+    */
+    get StartDate(): Date | null {
+        return this.Get('StartDate');
+    }
+    set StartDate(value: Date | null) {
+        this.Set('StartDate', value);
+    }
+
+    /**
     * * Field Name: ExpectedCloseDate
     * * Display Name: Expected Close Date
     * * SQL Data Type: date
@@ -3865,6 +4436,73 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
     set RenewsContractID(value: string | null) {
         this.Set('RenewsContractID', value);
+    }
+
+    /**
+    * * Field Name: AutoRenew
+    * * Display Name: Auto Renew
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: Whether the resulting agreement renews automatically at the end of its term.
+    */
+    get AutoRenew(): boolean {
+        return this.Get('AutoRenew');
+    }
+    set AutoRenew(value: boolean) {
+        this.Set('AutoRenew', value);
+    }
+
+    /**
+    * * Field Name: AnnualIncreasePctOverride
+    * * Display Name: Annual Increase Pct Override
+    * * SQL Data Type: decimal(5, 2)
+    * * Description: An OVERRIDE, and NULL is meaningful: it means "use the standard annual increase", whose default (5%) lives on the contracts ContractType, not here. That is a different fact from "we negotiated a number that happens to equal today's standard", and only the NULL survives a later change to policy. Copying the default in at write time would freeze this year's terms into next year's renewals silently.
+    */
+    get AnnualIncreasePctOverride(): number | null {
+        return this.Get('AnnualIncreasePctOverride');
+    }
+    set AnnualIncreasePctOverride(value: number | null) {
+        this.Set('AnnualIncreasePctOverride', value);
+    }
+
+    /**
+    * * Field Name: CancellationNoticeDaysOverride
+    * * Display Name: Cancellation Notice Days Override
+    * * SQL Data Type: int
+    * * Description: An OVERRIDE of the standard cancellation-notice period (default 90 days, owned by the contracts ContractType). NULL means "use the standard" — see AnnualIncreasePctOverride for why that distinction is load-bearing.
+    */
+    get CancellationNoticeDaysOverride(): number | null {
+        return this.Get('CancellationNoticeDaysOverride');
+    }
+    set CancellationNoticeDaysOverride(value: number | null) {
+        this.Set('CancellationNoticeDaysOverride', value);
+    }
+
+    /**
+    * * Field Name: PaymentMethod
+    * * Display Name: Payment Method
+    * * SQL Data Type: nvarchar(50)
+    * * Default Value: ACH
+    * * Description: PLACEHOLDER LABEL (default ACH), and a string only for as long as nothing branches on it. Payment method becomes vocabulary the moment code cares — ACH and card differ in settlement timing and fees — but ORDERS owns that concept and will expose PaymentType. Pointing at orders' vocabulary later beats standing up a competing copy here and reconciling two. No code may branch on this value.
+    */
+    get PaymentMethod(): string | null {
+        return this.Get('PaymentMethod');
+    }
+    set PaymentMethod(value: string | null) {
+        this.Set('PaymentMethod', value);
+    }
+
+    /**
+    * * Field Name: ContractVariances
+    * * Display Name: Contract Variances
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: Free-text summary of what this deal negotiated AWAY from standard terms — the red-line list, in the AD's own words. The input to a human legal review; nothing should attempt to parse it.
+    */
+    get ContractVariances(): string | null {
+        return this.Get('ContractVariances');
+    }
+    set ContractVariances(value: string | null) {
+        this.Set('ContractVariances', value);
     }
 
     /**

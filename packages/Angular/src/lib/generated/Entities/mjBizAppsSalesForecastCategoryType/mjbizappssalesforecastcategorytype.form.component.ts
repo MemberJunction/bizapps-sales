@@ -18,8 +18,8 @@ export class mjBizAppsSalesForecastCategoryTypeFormComponent extends BaseFormCom
         this.initSections([
             { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
             { sectionKey: 'mJBizAppsSalesDeals', sectionName: 'Deals', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesPipelineStages', sectionName: 'Pipeline Stages', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesPipelines', sectionName: 'Pipelines', isExpanded: false }
+            { sectionKey: 'mJBizAppsSalesPipelines', sectionName: 'Pipelines', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesPipelineStages', sectionName: 'Pipeline Stages', isExpanded: false }
         ]);
     }
 }

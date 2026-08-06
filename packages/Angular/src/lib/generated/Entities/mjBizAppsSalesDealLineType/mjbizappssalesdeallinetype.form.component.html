@@ -44,27 +44,10 @@
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="RequiresContract"
+            FieldName="IsRecurring"
             Type="checkbox"
             [EditMode]="EditMode"
             [FormContext]="formContext"
-        ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
-            FieldName="RequiresRenewalSource"
-            Type="checkbox"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-        ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
-            FieldName="DefaultPipelineID"
-            Type="textbox"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-            LinkType="Record"
         ></mj-form-field>
         <mj-form-field 
             [Record]="record"
@@ -107,50 +90,25 @@
          RELATED ENTITY PANELS
          ======================================== -->
 
-    <!-- Pipelines Section -->
+    <!-- Deal Lines Section -->
     <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesPipelines"
-        SectionName="Pipelines"
+        SectionKey="mJBizAppsSalesDealLines"
+        SectionName="Deal Lines"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesPipelines')"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealLines')"
         [DefaultExpanded]="false">
         @if (record.IsSaved) {
         <div>
             <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Pipelines','DealTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Pipelines')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesPipelines')"
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Lines','DealLineTypeID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Lines')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealLines')"
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesPipelines', $event.totalRowCount)"
-                >
-            </mj-explorer-entity-data-grid>
-        </div>
-        }
-    </mj-collapsible-panel>
-
-    <!-- Deals Section -->
-    <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDeals"
-        SectionName="Deals"
-        Icon="fa fa-table"
-        Variant="related-entity"
-        [Form]="this"
-        [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDeals')"
-        [DefaultExpanded]="false">
-        @if (record.IsSaved) {
-        <div>
-            <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','DealTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDeals')"
-                [ShowToolbar]="false"
-                (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDeals', $event.totalRowCount)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealLines', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

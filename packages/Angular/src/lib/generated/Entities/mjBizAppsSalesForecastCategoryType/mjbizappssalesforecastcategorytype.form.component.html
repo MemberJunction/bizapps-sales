@@ -131,31 +131,6 @@
         }
     </mj-collapsible-panel>
 
-    <!-- Pipeline Stages Section -->
-    <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesPipelineStages"
-        SectionName="Pipeline Stages"
-        Icon="fa fa-table"
-        Variant="related-entity"
-        [Form]="this"
-        [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesPipelineStages')"
-        [DefaultExpanded]="false">
-        @if (record.IsSaved) {
-        <div>
-            <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Pipeline Stages','ForecastCategoryTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Pipeline Stages')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesPipelineStages')"
-                [ShowToolbar]="false"
-                (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesPipelineStages', $event.totalRowCount)"
-                >
-            </mj-explorer-entity-data-grid>
-        </div>
-        }
-    </mj-collapsible-panel>
-
     <!-- Pipelines Section -->
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesPipelines"
@@ -175,6 +150,31 @@
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesPipelines', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Pipeline Stages Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsSalesPipelineStages"
+        SectionName="Pipeline Stages"
+        Icon="fa fa-table"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesPipelineStages')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Pipeline Stages','ForecastCategoryTypeID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Pipeline Stages')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesPipelineStages')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesPipelineStages', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

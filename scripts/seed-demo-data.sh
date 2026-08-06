@@ -62,11 +62,12 @@ SET NOCOUNT ON;
 DELETE FROM __mj_BizAppsSales.DealStageEvent  WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.DealTeamMember  WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.DealLine        WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
+DELETE FROM __mj_BizAppsSales.DealPaymentSchedule WHERE DealID IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.DealContactRole WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.Deal            WHERE DealNumber LIKE 'DEAL-9%';
 DELETE FROM __mj_BizAppsSales.ForecastSnapshot WHERE SnapshotJSON LIKE '%"demo":true%';
-DELETE FROM __mj_BizAppsSales.PipelineStage   WHERE PipelineID IN (SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE Code IN ('ENT-NEWBIZ','PARTNER-REF'));
-DELETE FROM __mj_BizAppsSales.Pipeline        WHERE Code IN ('ENT-NEWBIZ','PARTNER-REF');
+DELETE FROM __mj_BizAppsSales.PipelineStage   WHERE PipelineID IN (SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE Code IN ('B2B','D2C','ENT-NEWBIZ','PARTNER-REF'));
+DELETE FROM __mj_BizAppsSales.Pipeline        WHERE Code IN ('B2B','D2C','ENT-NEWBIZ','PARTNER-REF');
 DELETE FROM __mj_BizAppsSales.SalesContact    WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
 DELETE FROM __mj_BizAppsCommon.Person         WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
 DELETE FROM __mj_BizAppsSales.SalesAccount    WHERE ID IN ('A0111111-0000-4000-A000-000000000001','A0111111-0000-4000-A000-000000000002','A0111111-0000-4000-A000-000000000003');
@@ -113,9 +114,11 @@ IF NOT EXISTS (SELECT 1 FROM __mj.Employee WHERE ID=@emp3)
 DECLARE @stOpen UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealStatusType WHERE Code='OPEN');
 DECLARE @stWon  UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealStatusType WHERE Code='WON');
 DECLARE @stLost UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealStatusType WHERE Code='LOST');
-DECLARE @dtNew  UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealType WHERE Code='NEWBIZ');
+-- Deal-type codes are NEW / UPSELL / RENEWAL — master plan §4.2's exact vocabulary.
+-- S1 seeded NEWBIZ/EXPANSION/CROSSSELL/PARTNER instead; re-seeded to the plan's three.
+DECLARE @dtNew  UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealType WHERE Code='NEW');
 DECLARE @dtRen  UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealType WHERE Code='RENEWAL');
-DECLARE @dtPart UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealType WHERE Code='PARTNER');
+DECLARE @dtUps  UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealType WHERE Code='UPSELL');
 DECLARE @fcPipe UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.ForecastCategoryType WHERE Code='PIPELINE');
 DECLARE @fcBest UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.ForecastCategoryType WHERE Code='BESTCASE');
 DECLARE @fcComm UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.ForecastCategoryType WHERE Code='COMMIT');
@@ -194,8 +197,8 @@ DECLARE @pipe1 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000001';
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe1)
   INSERT INTO __mj_BizAppsSales.Pipeline (ID, CompanyID, Name, Code, Description, DealTypeID, DefaultForecastCategoryTypeID,
         RequiresDealLines, CloseWonPolicy, IsDefault, DisplayRank, IsActive)
-    VALUES (@pipe1, @co1, N'Enterprise New Business', N'ENT-NEWBIZ',
-      N'The main motion. NOTE the winning stage is called "Signed", not "Closed Won" — the app still knows it is a win because the stage points at a DealStatusType with IsWon=1.',
+    VALUES (@pipe1, @co1, N'B2B', N'B2B',
+      N'The main motion, per master plan §4.2. NOTE the winning stage is called "Signed", not "Closed Won" — the app still knows it is a win because the stage points at a DealStatusType with IsWon=1.',
       @dtNew, @fcPipe, 1,
       N'{"CreateContract":true,"ContractTypeCode":"Standard","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","OrderState":"Confirmed","RequireApprovalTaskTypeCode":null}',
       1, 10, 1);
@@ -221,9 +224,9 @@ DECLARE @pipe2 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000002';
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe2)
   INSERT INTO __mj_BizAppsSales.Pipeline (ID, CompanyID, Name, Code, Description, DealTypeID, DefaultForecastCategoryTypeID,
         RequiresDealLines, CloseWonPolicy, IsDefault, DisplayRank, IsActive)
-    VALUES (@pipe2, @co2, N'Partner Referrals', N'PARTNER-REF',
-      N'A different company, a different motion. RequiresDealLines = 0: these deals never carry catalog lines, so the amount is entered by hand and AmountIsComputed stays 0.',
-      @dtPart, @fcPipe, 0, N'{"CreateContract":false,"OneTimeLinesTo":"Order","OrderState":"Draft"}', 1, 20, 1);
+    VALUES (@pipe2, @co2, N'D2C', N'D2C',
+      N'A different company, a different motion (master plan §4.2). RequiresDealLines = 0: these deals never carry catalog lines, so the amount is entered by hand and AmountIsComputed stays 0.',
+      @dtNew, @fcPipe, 0, N'{"CreateContract":false,"OneTimeLinesTo":"Order","OrderState":"Draft"}', 1, 20, 1);
 
 DECLARE @t1 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000001';
 DECLARE @t2 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000002';
@@ -256,13 +259,13 @@ INSERT INTO __mj_BizAppsSales.Deal (ID, DealNumber, Name, PipelineID, PipelineSt
   @acc1, @c1, @co1, @emp2, 96000.0000, 0, 12, '2026-10-31', 50, @fcBest, @lsRef,
   N'RENEWAL: DealType.RequiresRenewalSource=1, so closing this routes to Contracts.RenewTerm rather than CreateFromDeal.',
   N'Confirm seat count for the coming year', '2026-08-20'),
- (@d4, N'DEAL-9004', N'Beacon Charter Schools — District Licence', @pipe2, @t2, @dtPart, @stOpen,
+ (@d4, N'DEAL-9004', N'Beacon Charter Schools — District Licence', @pipe2, @t2, @dtNew, @stOpen,
   @acc3, @c3, @co2, @emp2, 28000.0000, 0, 12, '2026-10-01', 60, @fcComm, @lsPart,
-  N'SIMPLE deal on a header-only pipeline: no catalog lines, amount entered by hand.', N'Partner to introduce the superintendent', '2026-08-15'),
- (@d5, N'DEAL-9005', N'Cascade Manufacturing — Line 2 Expansion', @pipe1, @s5, @dtNew, @stWon,
+  N'SIMPLE deal on a header-only pipeline: no catalog lines, amount entered by hand. Partner-SOURCED (see LeadSourceType) but type NEW — how it was originated and what kind of motion it is are two different facts, which is why they are two different columns.', N'Partner to introduce the superintendent', '2026-08-15'),
+ (@d5, N'DEAL-9005', N'Cascade Manufacturing — Line 2 Expansion', @pipe1, @s5, @dtUps, @stWon,
   @acc2, @c2, @co1, @emp1, 64000.0000, 0, 12, '2026-07-31', 100, @fcClos, @lsOut,
-  N'WON — and note the stage is called "Signed". Behaviour comes from DealStatusType.IsWon, not the label.', NULL, NULL),
- (@d6, N'DEAL-9006', N'Beacon Charter Schools — Add-on Modules', @pipe1, @s6, @dtNew, @stLost,
+  N'WON — and note the stage is called "Signed". Behaviour comes from DealStatusType.IsWon, not the label. Type UPSELL: more of what Cascade already buys.', NULL, NULL),
+ (@d6, N'DEAL-9006', N'Beacon Charter Schools — Add-on Modules', @pipe1, @s6, @dtUps, @stLost,
   @acc3, @c3, @co1, @emp3, 15000.0000, 0, 12, '2026-07-15', 0, @fcClos, @lsPart,
   N'LOST on price. Loss reason is the app''s only mandatory field.', NULL, NULL);
 
@@ -270,12 +273,37 @@ UPDATE __mj_BizAppsSales.Deal SET ActualCloseDate='2026-07-28', ClosedAt='2026-0
 UPDATE __mj_BizAppsSales.Deal SET ActualCloseDate='2026-07-14', ClosedAt='2026-07-14T11:05:00Z', LossReasonID=@lrPrice,
        LossNotes=N'Incumbent discounted 30% at the last minute; we declined to match.' WHERE ID=@d6 AND LossReasonID IS NULL;
 
--- ============================ DEAL LINES — intent only, Resolved* deliberately NULL ============================
+-- ============================ DEAL LINES — intent + the signed figures; Resolved* deliberately NULL ============================
+--
+-- LineType WAS a free-text column here, and the seed data made the case for changing it: these three
+-- rows carried 'Subscription' and 'OneTime' — two different naming conventions in three rows, which is
+-- what a string column always eventually holds. It is now a FK to DealLineType, and code branches on
+-- that row's IsRecurring rather than on either spelling.
+--
+-- AnnualGrossFees / DiscountAmount / Total are the SIGNED FIGURES, transcribed. Nothing computes them,
+-- and they deliberately do NOT tie to Deal.Amount: on these demo deals AmountIsComputed = 0, so the
+-- header amount is a human's stated figure. Once Orders.PreviewOrder is wired in, the authoritative
+-- number lands in the Resolved* columns and the two can be compared — which is the point of keeping
+-- both rather than reconciling them by overwriting.
+DECLARE @ltRecur UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealLineType WHERE Code='RECURRING');
+DECLARE @ltOnce  UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealLineType WHERE Code='ONETIME');
+
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealLine WHERE DealID=@d1)
-INSERT INTO __mj_BizAppsSales.DealLine (DealID, Quantity, RequestedDiscountPct, TermMonths, LineType, DisplayOrder, Description) VALUES
- (@d1, 250, 12.00, 24, N'Subscription', 10, N'Platform seats — 250 @ 12% requested discount'),
- (@d1,   1, NULL,  NULL, N'OneTime',     20, N'Implementation & data migration (SOW)'),
- (@d3, 180, 5.00,  12, N'Subscription', 10, N'Renewal seats — 180 @ 5% requested discount');
+INSERT INTO __mj_BizAppsSales.DealLine (DealID, ProductName, Quantity, RequestedDiscountPct, TermMonths,
+       DealLineTypeID, AnnualGrossFees, DiscountAmount, Total, DisplayOrder, Description) VALUES
+ (@d1, N'Platform — Enterprise Seat',        250, 12.00, 24,   @ltRecur, 200000.0000, 24000.0000, 176000.0000, 10, N'Platform seats — 250 @ 12% requested discount'),
+ (@d1, N'Implementation & Data Migration',     1, NULL,  NULL, @ltOnce,   25000.0000,     0.0000,  25000.0000, 20, N'Implementation & data migration (SOW)'),
+ (@d3, N'Platform — Enterprise Seat',        180,  5.00, 12,   @ltRecur, 101000.0000,  5050.0000,  95950.0000, 10, N'Renewal seats — 180 @ 5% requested discount');
+
+-- ============================ PAYMENT SCHEDULE — the EXCEPTION case, on one deal only ============================
+-- Five of the six demo deals carry NO rows here, and that is the design: no rows means standard terms
+-- (100% on execution). Only DEAL-9001 negotiated instalments, so only DEAL-9001 has a schedule. "Did
+-- this deal negotiate payment terms?" is therefore a row count, not arithmetic.
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealPaymentSchedule WHERE DealID=@d1)
+INSERT INTO __mj_BizAppsSales.DealPaymentSchedule (DealID, PaymentDate, Amount, Description, DisplayOrder) VALUES
+ (@d1, '2026-10-01', 80400.0000,  N'40% on execution',                    10),
+ (@d1, '2027-01-01', 60300.0000,  N'30% on completion of Phase 1 rollout', 20),
+ (@d1, '2027-04-01', 60300.0000,  N'30% on final acceptance',              30);
 
 -- ============================ DEAL TEAM — including the D-6 partner rep ============================
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealTeamMember WHERE DealID=@d1)
@@ -365,6 +393,7 @@ UNION ALL SELECT '  accounts         ' + CAST(COUNT(*) AS varchar) FROM __mj_Biz
 UNION ALL SELECT '  contacts         ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.SalesContact
 UNION ALL SELECT '  deals            ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal
 UNION ALL SELECT '  deal lines       ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealLine
+UNION ALL SELECT '  payment sched.   ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealPaymentSchedule
 UNION ALL SELECT '  team members     ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealTeamMember
 UNION ALL SELECT '  buying committee ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealContactRole
 UNION ALL SELECT '  stage events     ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealStageEvent

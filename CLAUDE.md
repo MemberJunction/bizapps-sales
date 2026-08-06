@@ -164,10 +164,12 @@ safe because rebuilding from zero is routine:
 
 ```bash
 scripts/rebuild-db.sh                    # drop+create, MJ core, bizapps-common, this app's DDL
-npm run mj:codegen                       # regenerate entity metadata + SQL objects
+npm run mj:codegen                       # PASS 1 — entity metadata + SQL objects
 scripts/append-codegen.sh                # fold generated SQL below the baseline's banner
-npm run mj -- sync push --dir metadata    # seed the type tables
+npm run mj -- sync push --dir metadata    # seed the type tables + remote-operation rows
+npm run mj:codegen                       # PASS 2 — remote-operation shells (see below)
 npm run build
+scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped all data
 ```
 
 - **`append-codegen.sh` is NOT optional.** The generated half of the baseline is what makes a fresh
@@ -175,6 +177,14 @@ npm run build
   sibling repo and is unrecoverable without another full rebuild.
 - `rebuild-db.sh` **trims** the generated half before applying, so CodeGen regenerates it in full.
   Skip the trim and CodeGen emits only a delta, which `append-codegen.sh` rightly refuses.
+- **CODEGEN RUNS TWICE, and the second pass is not busywork.** Remote operations are generated *from
+  metadata rows*, not from the schema, so pass 1 cannot see an operation that `sync push` has not
+  inserted yet — `remote_operations.ts` comes out holding only MJ's core operations and every
+  `Sales.*` shell is silently missing. Pass 2, after the push, emits them. The symptom if you skip it
+  is a compile error naming an operation class that plainly exists in metadata.
+  **Do NOT re-run `append-codegen.sh` after pass 2**: with the generated half already in place, pass 2
+  emits only a delta, and appending a delta on top of a full copy is exactly what the script refuses.
+  Remote operations produce no SQL objects, so there is nothing to fold in anyway.
 - Never add `__mj_CreatedAt`/`__mj_UpdatedAt` columns or FK indexes — CodeGen does both.
 - Switch to **additive-only** migrations at first publish.
 - **Author for PostgreSQL from day one.** Production is PG; keep the T-SQL converter-friendly and
