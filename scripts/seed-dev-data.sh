@@ -126,6 +126,35 @@ IF NOT EXISTS (SELECT 1 FROM __mj.UserRole WHERE UserID = @uid AND RoleID = '${R
 IF NOT EXISTS (SELECT 1 FROM __mj.UserRole WHERE UserID = @uid AND RoleID = '${ROLE_INTEGRATION}')
     EXEC __mj.spCreateUserRole @UserID = @uid, @RoleID = '${ROLE_INTEGRATION}';
 PRINT '  = Roles ensured (Developer, UI, Integration)';
+
+-- 5. Application access. Roles grant ENTITY permissions; they do not put an app in the switcher —
+--    __mj.UserApplication does, and MJ does not create those rows on its own. Without this the
+--    hand-authored "Sales" application (and its Deals nav item, which is the ONLY way to reach the
+--    deal workspace) is invisible in Explorer even though the row exists and the user can read every
+--    table behind it. Both sales apps are granted: the hand-authored one for the workspace, and the
+--    CodeGen-generated one because it is the entity browser the demo walkthrough uses.
+--    USER-SPECIFIC, so it belongs here and not in metadata/ — a UserApplication row is not part of
+--    the app, it is a statement about one person's Explorer.
+DECLARE @appSeq INT = (SELECT ISNULL(MAX(Sequence), 0) FROM __mj.UserApplication WHERE UserID = @uid);
+DECLARE @appID UNIQUEIDENTIFIER;
+
+DECLARE appCur CURSOR LOCAL FAST_FORWARD FOR
+    SELECT ID FROM __mj.Application WHERE Name IN (N'Sales', N'__mj_BizAppsSales');
+OPEN appCur;
+FETCH NEXT FROM appCur INTO @appID;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM __mj.UserApplication WHERE UserID = @uid AND ApplicationID = @appID)
+    BEGIN
+        SET @appSeq = @appSeq + 1;
+        EXEC __mj.spCreateUserApplication @UserID = @uid, @ApplicationID = @appID,
+                                          @Sequence = @appSeq, @IsActive = 1;
+    END
+    FETCH NEXT FROM appCur INTO @appID;
+END
+CLOSE appCur;
+DEALLOCATE appCur;
+PRINT '  = Application access ensured (Sales, __mj_BizAppsSales)';
 "
 
 say "Summary"
@@ -136,6 +165,11 @@ SELECT 'employees=' + CAST(COUNT(*) AS varchar) FROM __mj.Employee;
 SELECT 'user=' + Email + ' type=' + Type + ' roles=' +
        CAST((SELECT COUNT(*) FROM __mj.UserRole ur WHERE ur.UserID = u.ID) AS varchar)
   FROM __mj.[User] u WHERE u.Email = N'${DEV_EMAIL}';
+SELECT 'apps=' + STRING_AGG(a.Name, ', ')
+  FROM __mj.UserApplication ua
+  JOIN __mj.Application a ON a.ID = ua.ApplicationID
+  JOIN __mj.[User] u ON u.ID = ua.UserID
+ WHERE u.Email = N'${DEV_EMAIL}' AND ua.IsActive = 1;
 "
 
 cat <<'NEXT'

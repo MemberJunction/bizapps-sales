@@ -34,7 +34,8 @@
     "buying-role-types",
     "account-types",
     "remote-operation-categories",
-    "remote-operations"
+    "remote-operations",
+    "applications"
   ],
   "sqlLogging": {
     "enabled": true,

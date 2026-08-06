@@ -143,8 +143,12 @@ argument, Deal Lines for the money guarantee.
 
 ### 1. Deals — the pipeline (start here; it's already on screen)
 
-Six deals across two companies and two pipelines: one in Negotiation at £185k, an early-stage pilot, a
-renewal, a partner-sourced deal, one **Won**, one **Lost**.
+Six deals across two companies and two pipelines (**B2B** and **D2C**): one in Negotiation at £185k, an
+early-stage pilot, a renewal, a partner-SOURCED deal typed `New`, one **Won** upsell, one **Lost**.
+
+Worth pointing at if asked: how a deal was *originated* (`LeadSourceType` = Partner) and what *kind of
+motion* it is (`DealType` = New) are two different facts in two different columns — which is why a
+partner-sourced deal is not a "partner" deal type.
 
 **Say:** *"Every one of these screens is generated from the schema. Nobody wrote a form."*
 

@@ -80,7 +80,7 @@ prorate a partial period · sum lines into a header total · round anything.
 
 ### 2. Domain vocabulary is DATA, never code
 
-Nine type tables carry the **behaviour flags** the engine branches on. The engine reads
+Ten type tables carry the **behaviour flags** the engine branches on. The engine reads
 `DealStatusType.IsWon`; it **never** compares a status or stage name.
 
 - **`npm run test:vocabulary-gate` enforces this.** It is green today and must stay green. Read

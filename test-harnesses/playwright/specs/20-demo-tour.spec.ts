@@ -78,7 +78,9 @@ test('demo tour: every screen the demo shows, with its seeded data', async ({ pa
   });
 
   await test.step('Pipelines — one per company', async () => {
-    await tour(page, 'Pipelines', 'demo-03-pipelines', ['Enterprise New Business', 'Partner Referrals']);
+    // Named B2B / D2C per master plan §4.2 — re-seeded from S1's 'Enterprise New Business' /
+      // 'Partner Referrals' when the plan's exact vocabulary was adopted (D7).
+      await tour(page, 'Pipelines', 'demo-03-pipelines', ['B2B', 'D2C']);
   });
 
   // IsA: the name comes from the parent Organization row, not from a column here.
@@ -126,7 +128,7 @@ test('demo tour: every screen the demo shows, with its seeded data', async ({ pa
       // shell's tab/app state is sticky enough that a miss here says nothing about the app's health —
       // the ten grid screens above are what this spec exists to guarantee. The FK-resolution claim is
       // asserted properly in 10-deal-crud.spec.ts, on a record this harness created itself.
-      if (detail.includes('Enterprise New Business')) {
+      if (detail.includes('B2B')) {
         console.log('  record view: Pipeline FK resolved to its name');
       } else {
         console.log('  record view: did not open (shell state) — see 10-deal-crud.spec.ts for the asserted version');

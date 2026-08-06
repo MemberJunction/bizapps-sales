@@ -43,6 +43,7 @@
  *
  * @module @mj-biz-apps/sales-entities
  */
+import type { SalesSaveDealInput } from './generated/remote_operations';
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Validation — the shape the UI reads
@@ -392,25 +393,19 @@ export class DealDraft {
     /* ── Serialization ──────────────────────────────────────────────────── */
 
     /**
-     * Becomes the `Sales.SaveDeal` input. Returns a plain object rather than anything MJ-aware, so
-     * this class stays testable and the caller stays in charge of transport.
+     * Becomes the `Sales.SaveDeal` input.
      *
-     * `Lines` and `PaymentSchedule` are ALWAYS included, even when empty, because the operation
-     * treats a present array as the complete desired set and an absent one as "leave the children
-     * alone". A workspace that holds the whole tree always means the former — if it is showing the
-     * user zero lines, zero lines is the intent.
+     * TYPED AS THE GENERATED CONTRACT, not as a loose bag. `SalesSaveDealInput` comes from the
+     * operation's own metadata, so binding to it here means a field renamed on the server breaks this
+     * method at compile time instead of silently dropping out of the payload at runtime. That is the
+     * only reason this otherwise framework-free class imports anything.
      *
-     * Return type is intentionally left to inference against the operation's generated input type:
-     * see `SalesSaveDealInput` in the generated remote operations.
+     * `Lines` and `PaymentSchedule` are ALWAYS included, even when empty, because the operation treats
+     * a present array as the complete desired set and an absent one as "leave the children alone". A
+     * workspace that holds the whole tree always means the former — if it is showing the user zero
+     * lines, zero lines is the intent.
      */
-    public ToSaveInput(): {
-        ID?: string | null;
-        Name: string;
-        PipelineID: string;
-        Lines: Array<Record<string, unknown>>;
-        PaymentSchedule: Array<Record<string, unknown>>;
-        [key: string]: unknown;
-    } {
+    public ToSaveInput(): SalesSaveDealInput {
         if (!this.Header.PipelineID) {
             throw new Error('DealDraft.ToSaveInput: PipelineID is required. Call Validate() first and show the issues.');
         }

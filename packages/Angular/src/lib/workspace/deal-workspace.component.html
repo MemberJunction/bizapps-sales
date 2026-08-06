@@ -1,0 +1,434 @@
+<!--
+  The deal workspace.
+
+  STRUCTURE: `mj-workspace-card` supplies the OUTER strip (open deals) plus the standardized footer;
+  everything inside `[workspaceHeader]` is the persistent customer-context band, and the default slot
+  holds the inner pane tabs and the active pane. See the component header for why there are two
+  tabbing systems.
+
+  Every input calls `Touch()`, which revalidates and marks the tab dirty. One entry point, so a field
+  added later cannot forget to do either.
+-->
+@if (Loading()) {
+  <mj-loading></mj-loading>
+} @else {
+  <mj-workspace-card
+    AriaLabel="Deal workspace"
+    NewTabLabel="New deal"
+    [Tabs]="Tabs"
+    [ActiveId]="ActiveId"
+    [ShowFooter]="true"
+    ConfirmLabel="Save deal"
+    ConfirmIcon="fa-solid fa-check"
+    [ConfirmDisabled]="!CanSave"
+    [ConfirmTitle]="SaveBlockedReason"
+    [ConfirmBusy]="Saving()"
+    ConfirmBusyLabel="Saving…"
+    [ShowDraft]="false"
+    DiscardLabel="Discard changes"
+    (TabSelected)="SelectTab($event)"
+    (TabClosed)="CloseTab($event)"
+    (NewTabRequested)="NewDeal()"
+    (TabReordered)="ReorderTabs($event)"
+    (Confirm)="Save()"
+    (Discard)="Discard()">
+
+    <!-- PERSISTENT CUSTOMER CONTEXT. Always visible, on every pane: an AD editing the terms tab must
+         never have to go back to check which account they are quoting. -->
+    <div workspaceHeader class="dw-context">
+      <span class="dw-context__customer" [class.dw-context__customer--empty]="!Draft?.Header?.AccountID">
+        <i class="fa-solid fa-building" aria-hidden="true"></i>
+        {{ CustomerName }}
+      </span>
+      @if (CompanyName) {
+        <span class="dw-context__chip" title="The selling company, taken from the pipeline">
+          <i class="fa-solid fa-briefcase" aria-hidden="true"></i> {{ CompanyName }}
+        </span>
+      }
+      @if (Draft?.Header?.PipelineID) {
+        <span class="dw-context__chip">{{ NameOf(Lookups.Pipelines, Draft!.Header.PipelineID) }}</span>
+      }
+      @if (Draft?.Header?.DealTypeID) {
+        <span class="dw-context__chip">{{ NameOf(Lookups.DealTypes, Draft!.Header.DealTypeID) }}</span>
+      }
+      @if (Draft?.IsNew) {
+        <span class="dw-context__chip dw-context__chip--new">Unsaved</span>
+      }
+    </div>
+
+    @if (Draft; as draft) {
+      <!-- INNER TABS — panes of THIS deal. Fixed set of five; badges show error counts only, because a
+           warning is not a reason to decorate a tab. -->
+      <nav class="dw-panes" role="tablist" aria-label="Deal sections">
+        @for (pane of Panes; track pane.Key) {
+          <button type="button" class="dw-panes__tab" role="tab"
+                  [class.dw-panes__tab--active]="ActivePane === pane.Key"
+                  [attr.aria-selected]="ActivePane === pane.Key"
+                  (click)="SelectPane(pane.Key)">
+            <i [class]="pane.Icon" aria-hidden="true"></i>
+            {{ pane.Label }}
+            @if (ErrorCount(pane.Key) > 0) {
+              <span class="dw-panes__badge" [attr.aria-label]="ErrorCount(pane.Key) + ' problems'">{{ ErrorCount(pane.Key) }}</span>
+            }
+          </button>
+        }
+      </nav>
+
+      @if (Message) {
+        <p class="dw-msg" [class.dw-msg--error]="MessageIsError" role="status">{{ Message }}</p>
+      }
+
+      <!-- ══════════════════════════ PARTY INFO ══════════════════════════ -->
+      @if (ActivePane === 'party') {
+        <section class="dw-pane">
+          <div class="dw-grid">
+            <label class="dw-field dw-field--wide">
+              <span class="dw-field__label">Deal name <em>*</em></span>
+              <input type="text" [(ngModel)]="draft.Header.Name" (ngModelChange)="Touch()"
+                     placeholder="e.g. Northwind Health — Platform Rollout" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Pipeline <em>*</em></span>
+              <!-- Pipeline is not a plain binding: it decides the selling company AND the stage list. -->
+              <select [ngModel]="draft.Header.PipelineID"
+                      (ngModelChange)="SelectPipeline(draft, $event); Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (p of Lookups.Pipelines; track p.ID) {
+                  <option [ngValue]="p.ID">{{ p.Name }}</option>
+                }
+              </select>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Stage</span>
+              <select [ngModel]="draft.Header.PipelineStageID"
+                      (ngModelChange)="OnStageChange(draft, $event)"
+                      [disabled]="!draft.Header.PipelineID">
+                <option [ngValue]="null">— choose —</option>
+                @for (s of StagesFor(draft.Header.PipelineID); track s.ID) {
+                  <option [ngValue]="s.ID">{{ s.Name }}</option>
+                }
+              </select>
+              <small class="dw-field__hint">Sets probability and forecast category; both stay editable.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Deal type</span>
+              <select [(ngModel)]="draft.Header.DealTypeID" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (t of Lookups.DealTypes; track t.ID) {
+                  <option [ngValue]="t.ID">{{ t.Name }}</option>
+                }
+              </select>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Status</span>
+              <select [(ngModel)]="draft.Header.DealStatusTypeID" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (s of Lookups.DealStatusTypes; track s.ID) {
+                  <option [ngValue]="s.ID">{{ s.Name }}</option>
+                }
+              </select>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Customer</span>
+              <select [(ngModel)]="draft.Header.AccountID" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (a of Lookups.Accounts; track a.ID) {
+                  <option [ngValue]="a.ID">{{ a.Name }}</option>
+                }
+              </select>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Primary contact</span>
+              <select [(ngModel)]="draft.Header.PrimaryContactID" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (c of Lookups.Contacts; track c.ID) {
+                  <option [ngValue]="c.ID">{{ c.Name }}</option>
+                }
+              </select>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Billing contact</span>
+              <select [(ngModel)]="draft.Header.BillingContactID" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— same as primary —</option>
+                @for (c of Lookups.Contacts; track c.ID) {
+                  <option [ngValue]="c.ID">{{ c.Name }}</option>
+                }
+              </select>
+              <!-- Empty is a real answer here, not a missing one — see the column note on
+                   Deal.BillingContactID. -->
+              <small class="dw-field__hint">Leave empty when the invoice goes to the primary contact.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Sales rep (owner)</span>
+              <select [(ngModel)]="draft.Header.OwnerEmployeeID" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (e of Lookups.Employees; track e.ID) {
+                  <option [ngValue]="e.ID">{{ e.Name }}</option>
+                }
+              </select>
+              <!-- Deal.OwnerEmployeeID is a server-maintained stamp; this is the INTENT that makes the
+                   server write the DealTeamMember row it is derived from. -->
+              <small class="dw-field__hint">Recorded as a deal-team member under the owner role.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Execution date</span>
+              <input type="date" [(ngModel)]="draft.Header.ExecutionDate" (ngModelChange)="Touch()" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Start date</span>
+              <input type="date" [(ngModel)]="draft.Header.StartDate" (ngModelChange)="Touch()" />
+              <small class="dw-field__hint">May precede execution — backdated work is allowed.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Expected close</span>
+              <input type="date" [(ngModel)]="draft.Header.ExpectedCloseDate" (ngModelChange)="Touch()" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Term (months)</span>
+              <input type="number" min="0" step="1" [(ngModel)]="draft.Header.TermMonths" (ngModelChange)="Touch()" />
+              <small class="dw-field__hint">Subscription commitment — drives renewal.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Estimated timeline (weeks)</span>
+              <input type="number" min="0" step="1" [(ngModel)]="draft.Header.EstimatedProjectWeeks" (ngModelChange)="Touch()" />
+              <small class="dw-field__hint">SOW estimate — a forecast, not a commitment.</small>
+            </label>
+          </div>
+          <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'party' }"></ng-container>
+        </section>
+      }
+
+      <!-- ══════════════════════════ PRODUCT LINES ══════════════════════════ -->
+      @if (ActivePane === 'lines') {
+        <section class="dw-pane">
+          <!-- THE FIGURES BELOW ARE TRANSCRIBED, NOT CALCULATED. There is deliberately no total row and
+               no auto-fill of Total from gross minus discount: those numbers come off a signed document,
+               and the arithmetic on that page is the customer's. -->
+          <p class="dw-note">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            Enter the figures <strong>as written on the signed order form</strong>. Nothing here is
+            calculated — pricing is resolved by the orders engine in a later phase.
+          </p>
+
+          @if (draft.Lines.length === 0) {
+            <p class="dw-empty">No lines yet.</p>
+          } @else {
+            <div class="dw-table-scroll">
+              <table class="dw-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Product / service <em>*</em></th>
+                    <th scope="col">Type</th>
+                    <th scope="col" class="dw-num">Qty</th>
+                    <th scope="col" class="dw-num">Annual gross fees</th>
+                    <th scope="col" class="dw-num">Discount</th>
+                    <th scope="col" class="dw-num">Total</th>
+                    <th scope="col" class="dw-num">Disc %</th>
+                    <th scope="col"><span class="dw-sr">Remove</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (line of draft.Lines; track line.ClientKey) {
+                    <tr [class.dw-row--bad]="IssuesForRow(line.ClientKey).length > 0">
+                      <td>
+                        <input type="text" [(ngModel)]="line.ProductName" (ngModelChange)="Touch()"
+                               placeholder="e.g. Platform — Enterprise Seat" />
+                      </td>
+                      <td>
+                        <select [(ngModel)]="line.DealLineTypeID" (ngModelChange)="Touch()">
+                          <option [ngValue]="null">—</option>
+                          @for (lt of Lookups.LineTypes; track lt.ID) {
+                            <option [ngValue]="lt.ID">{{ lt.Name }}</option>
+                          }
+                        </select>
+                      </td>
+                      <td class="dw-num"><input type="number" min="0" step="1" [(ngModel)]="line.Quantity" (ngModelChange)="Touch()" /></td>
+                      <td class="dw-num"><input type="number" min="0" step="0.01" [(ngModel)]="line.AnnualGrossFees" (ngModelChange)="Touch()" /></td>
+                      <td class="dw-num"><input type="number" min="0" step="0.01" [(ngModel)]="line.DiscountAmount" (ngModelChange)="Touch()" /></td>
+                      <td class="dw-num"><input type="number" step="0.01" [(ngModel)]="line.Total" (ngModelChange)="Touch()" /></td>
+                      <td class="dw-num"><input type="number" min="0" max="100" step="0.01" [(ngModel)]="line.RequestedDiscountPct" (ngModelChange)="Touch()" /></td>
+                      <td>
+                        <button type="button" class="dw-iconbtn" title="Remove this line" (click)="RemoveLine(line)">
+                          <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+
+          <button type="button" class="dw-addbtn" (click)="AddLine()">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add line
+          </button>
+          <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'lines' }"></ng-container>
+        </section>
+      }
+
+      <!-- ══════════════════════════ PAYMENT SCHEDULE ══════════════════════════ -->
+      @if (ActivePane === 'schedule') {
+        <section class="dw-pane">
+          <!-- NO ROWS IS THE NORMAL CASE. Standard terms are 100% on execution, so an empty schedule
+               means "standard" rather than "unfinished" — which is why nothing is pre-filled here. -->
+          <p class="dw-note">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            Leave this empty for standard terms — <strong>100% payable on execution</strong>. Add rows
+            only when the customer negotiated instalments.
+          </p>
+
+          @if (draft.Schedule.length === 0) {
+            <p class="dw-empty">Standard terms — no instalment schedule.</p>
+          } @else {
+            <div class="dw-table-scroll">
+              <table class="dw-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col" class="dw-num">Amount</th>
+                    <th scope="col">Description</th>
+                    <th scope="col"><span class="dw-sr">Remove</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of draft.Schedule; track row.ClientKey) {
+                    <tr [class.dw-row--bad]="IssuesForRow(row.ClientKey).length > 0">
+                      <td><input type="date" [(ngModel)]="row.PaymentDate" (ngModelChange)="Touch()" /></td>
+                      <td class="dw-num"><input type="number" step="0.01" [(ngModel)]="row.Amount" (ngModelChange)="Touch()" /></td>
+                      <td><input type="text" [(ngModel)]="row.Description" (ngModelChange)="Touch()" placeholder="e.g. 40% on execution" /></td>
+                      <td>
+                        <button type="button" class="dw-iconbtn" title="Remove this instalment" (click)="RemoveScheduleRow(row)">
+                          <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+
+          <button type="button" class="dw-addbtn" (click)="AddScheduleRow()">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add instalment
+          </button>
+          <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'schedule' }"></ng-container>
+        </section>
+      }
+
+      <!-- ══════════════════════════ TERMS ══════════════════════════ -->
+      @if (ActivePane === 'terms') {
+        <section class="dw-pane">
+          <!-- THE STANDARD VALUES ARE PLACEHOLDERS, NOT DEFAULTS. Empty means "use the standard term",
+               whose real value lives on the contracts ContractType. Writing 5 and 90 into every deal
+               would freeze this year's policy into next year's renewals. -->
+          <p class="dw-note">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            Leave a field empty to accept the standard term. Type a value only to
+            <strong>override</strong> it — an empty field and a typed 5 are different statements.
+          </p>
+
+          <div class="dw-grid">
+            <label class="dw-field dw-field--check">
+              <input type="checkbox" [(ngModel)]="draft.Header.AutoRenew" (ngModelChange)="Touch()" />
+              <span class="dw-field__label">Auto-renew at end of term</span>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Annual increase % (override)</span>
+              <input type="number" min="0" max="100" step="0.01"
+                     [(ngModel)]="draft.Header.AnnualIncreasePctOverride" (ngModelChange)="Touch()"
+                     [attr.placeholder]="'standard — ' + StandardAnnualIncreasePct + '%'" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Cancellation notice, days (override)</span>
+              <input type="number" min="0" step="1"
+                     [(ngModel)]="draft.Header.CancellationNoticeDaysOverride" (ngModelChange)="Touch()"
+                     [attr.placeholder]="'standard — ' + StandardCancellationNoticeDays + ' days'" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Payment method</span>
+              <input type="text" [(ngModel)]="draft.Header.PaymentMethod" (ngModelChange)="Touch()" placeholder="ACH" />
+              <small class="dw-field__hint">A label for now; becomes orders' PaymentType later.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Probability %</span>
+              <input type="number" min="0" max="100" step="1" [(ngModel)]="draft.Header.Probability" (ngModelChange)="Touch()" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Forecast category</span>
+              <select [(ngModel)]="draft.Header.ForecastCategoryTypeID" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (f of Lookups.ForecastCategoryTypes; track f.ID) {
+                  <option [ngValue]="f.ID">{{ f.Name }}</option>
+                }
+              </select>
+            </label>
+          </div>
+          <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'terms' }"></ng-container>
+        </section>
+      }
+
+      <!-- ══════════════════════════ VARIANCES ══════════════════════════ -->
+      @if (ActivePane === 'variances') {
+        <section class="dw-pane">
+          <p class="dw-note">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            What this deal negotiated <strong>away from standard terms</strong>, in your own words. This
+            is the input to a human legal review — nothing parses it.
+          </p>
+          <label class="dw-field dw-field--wide">
+            <span class="dw-field__label">Contract variances</span>
+            <textarea rows="10" [(ngModel)]="draft.Header.ContractVariances" (ngModelChange)="Touch()"
+                      placeholder="e.g. Annual increase capped at 3% for years 2–3. Termination for convenience with 60 days' notice."></textarea>
+          </label>
+          <label class="dw-field dw-field--wide">
+            <span class="dw-field__label">Description / notes</span>
+            <textarea rows="5" [(ngModel)]="draft.Header.Description" (ngModelChange)="Touch()"></textarea>
+          </label>
+          <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'variances' }"></ng-container>
+        </section>
+      }
+    }
+
+    <span workspaceFooterNote>
+      @if (SaveBlockedReason) {
+        <span class="dw-blocked">{{ SaveBlockedReason }}</span>
+      } @else {
+        Saves the deal, its lines and its schedule in one transaction.
+      }
+    </span>
+  </mj-workspace-card>
+}
+
+<!-- Shared issue list for whichever pane is showing. Warnings render alongside errors, distinguished by
+     class rather than hidden, because "look at this" is worth surfacing where the user already is. -->
+<ng-template #paneIssues let-key="key">
+  @if (IssuesForPane(key).length > 0) {
+    <ul class="dw-issues">
+      @for (issue of IssuesForPane(key); track issue.Message + issue.ClientKey) {
+        <li [class.dw-issues__warn]="issue.Severity === 'warning'">
+          <i [class]="issue.Severity === 'warning' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-exclamation'"
+             aria-hidden="true"></i>
+          {{ issue.Message }}
+        </li>
+      }
+    </ul>
+  }
+</ng-template>

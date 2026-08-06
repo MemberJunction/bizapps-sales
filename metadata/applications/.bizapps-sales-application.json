@@ -1,0 +1,46 @@
+[
+  {
+    "_comments": [
+      "The HAND-AUTHORED Sales application — the one KI-4 said did not exist yet.",
+      "",
+      "It does not replace the generated application. CodeGen auto-creates one MJ Application per schema,",
+      "and sales' is `__mj_BizAppsSales` at /app/mjbizappssales: a working entity browser with a full",
+      "generated CRUD form per record. That stays, and the demo walkthrough still uses it. This one is",
+      "additive and JOB-SHAPED — it opens on the work an account director actually does rather than on a",
+      "list of 19 tables.",
+      "",
+      "Why there is only ONE nav item. KI-4 recorded that custom nav items had nothing to point at,",
+      "because `ResourceType: 'Custom'` needs a registered `DriverClass` and sales had no such component.",
+      "Phase 1 adds exactly one: the deal workspace. The pipeline board, the account/contact 360 and the",
+      "reports live at S3, and a nav item pointing at a component that does not exist yet resolves to a",
+      "blank tab with no error — so they are added when they can work, not now.",
+      "",
+      "DefaultSequence 2020 sits after accounting's 2010, keeping the revenue stack in reading order in",
+      "the app switcher: accounting, then sales."
+    ],
+    "fields": {
+      "Name": "Sales",
+      "Description": "Deal pipeline management — compose a deal with its product lines, payment schedule and negotiated terms, and hand it to contracts and orders.",
+      "Icon": "fa-solid fa-handshake",
+      "DefaultForNewUser": false,
+      "Color": "#0f8a5f",
+      "DefaultSequence": 2020,
+      "DefaultNavItems": [
+        {
+          "Label": "Deals",
+          "Icon": "fa-solid fa-handshake",
+          "ResourceType": "Custom",
+          "DriverClass": "DealWorkspaceResource",
+          "isDefault": true
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "D4F8A162-A001-4E71-B0A8-3F17C5E2D803"
+    },
+    "sync": {
+      "lastModified": "2026-08-06T07:53:07.886Z",
+      "checksum": "dd82c4c97ad74b70aeae08adf68b6550f0c3d23160ef246e9ec5ccfb8039811d"
+    }
+  }
+]
