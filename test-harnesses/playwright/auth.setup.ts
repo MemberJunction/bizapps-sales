@@ -31,6 +31,128 @@ import {
 } from './lib/env';
 import { captureConsoleErrors, isAuthenticated, probeEntityRoutes, shot, waitForAuthenticatedShell } from './lib/explorer';
 
+/**
+ * OPT-IN ASSIST, OFF BY DEFAULT: `PW_AUTH_ASSIST_PICK_ACCOUNT=1`.
+ *
+ * WHAT IT DOES AND DOES NOT DO. When the identity provider is already showing an account tile marked
+ * "Signed in" — the "Pick an account" screen you get when an SSO session already exists — this clicks
+ * that tile. It types NOTHING, reads NOTHING from any field, and cannot create an account or supply a
+ * password: if there is no already-signed-in tile it does nothing at all and the human still logs in.
+ *
+ * WHY IT EXISTS. The default flow expects a person to click in the browser window Playwright opened.
+ * When the run is launched from a non-interactive/background process that window does not reliably
+ * surface, and the setup then times out on a page that is one click from done — which is exactly what
+ * happened twice on 2026-08-06.
+ *
+ * REQUIRES EXPLICIT OPT-IN, and the default is unchanged, because "the harness never touches the
+ * login" is a property worth keeping true unless someone deliberately says otherwise for one run.
+ */
+const ASSIST_PICK_ACCOUNT = process.env.PW_AUTH_ASSIST_PICK_ACCOUNT === '1';
+
+/**
+ * Clicks an ALREADY-AUTHENTICATED account tile, and answers the "Stay signed in?" prompt with **No**.
+ *
+ * "No" rather than "Yes" on purpose: it completes the login without adding a persistent-session cookie
+ * to the account. The harness saves `storageState` itself, so persistence buys nothing here and the
+ * more conservative answer is free.
+ */
+async function pickAlreadySignedInAccount(page: import('@playwright/test').Page): Promise<void> {
+    /**
+     * MUST POLL, NOT CHECK ONCE. The first version looked exactly once, immediately after
+     * `page.goto`, and found nothing — because MSAL had not redirected yet. The run then timed out
+     * four minutes later on a "Pick an account" page that had appeared a second after the check.
+     * The states below arrive in sequence and each takes a network round trip, so the only correct
+     * shape is a loop.
+     */
+    /**
+     * SEARCHES EVERY FRAME, and every open page in the context, not just the top document.
+     *
+     * The previous version used `page.locator(...)` and reported "no tile on screen" for two minutes
+     * while the failure screenshot plainly showed one. Two reasons that can happen and both are real
+     * here: identity providers commonly render inside an IFRAME (and Playwright locators do not pierce
+     * frames), and MSAL can open the login in a POPUP page rather than navigating the top page. The
+     * error-context a11y snapshot traverses frames, which is exactly why the snapshot and the locator
+     * disagreed.
+     */
+    const deadline = Date.now() + 150_000;
+    let clickedTile = false;
+    let lastSeen = '';
+
+    /** Every frame of every page in the context — the full surface a click could be waiting on. */
+    const allFrames = (): import('@playwright/test').Frame[] =>
+        page.context().pages().flatMap((p) => p.frames());
+
+    /** First visible match for a selector across all frames, or null. */
+    const findAcross = async (
+        build: (f: import('@playwright/test').Frame) => import('@playwright/test').Locator,
+    ): Promise<import('@playwright/test').Locator | null> => {
+        for (const frame of allFrames()) {
+            const loc = build(frame).first();
+            const count = await loc.count().catch(() => 0);
+            if (count && (await loc.isVisible().catch(() => false))) {
+                return loc;
+            }
+        }
+        return null;
+    };
+
+    while (Date.now() < deadline) {
+        if (await isAuthenticated(page)) {
+            console.log('  assist: authenticated shell reached.');
+            return;
+        }
+
+        // Log what we are looking at, once per change. Guessing cost two failed runs; this is cheap.
+        const where = page.context().pages().map((p) => p.url()).join(' | ');
+        if (where !== lastSeen) {
+            console.log(`  assist: pages -> ${where}`);
+            lastSeen = where;
+        }
+
+        // 1. An already-signed-in account tile — the one thing this assist exists to click.
+        if (!clickedTile) {
+            const tile = await findAcross((f) => f.locator('button, div[role="button"]').filter({ hasText: /Signed in/i }));
+            if (tile) {
+                const label = ((await tile.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+                console.log(`  assist: clicking the already-signed-in account tile [${label}]`);
+                await tile.click().catch(() => undefined);
+                clickedTile = true;
+                await page.waitForTimeout(3000);
+                continue;
+            }
+        }
+
+        // 2. "Stay signed in?" — a convenience prompt, not consent or terms. Answered NO: it completes
+        //    the login without adding a persistent-session cookie to the account, and the harness saves
+        //    storageState itself so persistence buys nothing.
+        const stayPrompt = await findAcross((f) => f.getByText(/Stay signed in\?/i));
+        if (stayPrompt) {
+            const no = await findAcross((f) => f.locator('input#idBtn_Back, button').filter({ hasText: /^\s*No\s*$/ }));
+            if (no) {
+                console.log('  assist: answering "Stay signed in?" with No');
+                await no.click().catch(() => undefined);
+                await page.waitForTimeout(3000);
+                continue;
+            }
+        }
+
+        // 3. Explorer's OWN "Log in" button, which precedes any redirect to the provider. Clicking it
+        //    starts the flow; it is not a credential prompt.
+        const login = await findAcross((f) =>
+            f.locator('button, a').filter({ hasText: /^\s*(Log ?in|Sign ?in|Sign in with Microsoft)\s*$/i }),
+        );
+        if (login) {
+            console.log('  assist: clicking a "Log in" control to start the flow');
+            await login.click().catch(() => undefined);
+            await page.waitForTimeout(4000);
+            continue;
+        }
+
+        await page.waitForTimeout(2000);
+    }
+    console.log(`  assist: gave up. Last pages seen -> ${lastSeen}`);
+}
+
 setup('capture an authenticated Explorer session (human logs in)', async ({ page, context }) => {
   const sink = captureConsoleErrors(page);
 
@@ -58,6 +180,9 @@ setup('capture an authenticated Explorer session (human logs in)', async ({ page
       ].join('\n'),
     );
     await shot(page, '00-login-screen');
+    if (ASSIST_PICK_ACCOUNT) {
+      await pickAlreadySignedInAccount(page);
+    }
     await waitForAuthenticatedShell(page, LOGIN_TIMEOUT_MS);
     console.log('  Authenticated shell detected — capturing session.\n');
   }
