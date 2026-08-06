@@ -20,14 +20,6 @@
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="Code"
-            Type="textbox"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-        ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
             FieldName="Name"
             Type="textbox"
             [EditMode]="EditMode"
@@ -44,26 +36,29 @@
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="IsInbound"
-            Type="checkbox"
+            FieldName="CompanyID"
+            Type="textbox"
             [EditMode]="EditMode"
             [FormContext]="formContext"
+            LinkType="Record"
         ></mj-form-field>
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="IsPaid"
-            Type="checkbox"
+            FieldName="PipelineID"
+            Type="textbox"
             [EditMode]="EditMode"
             [FormContext]="formContext"
+            LinkType="Record"
         ></mj-form-field>
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="AttributionWindowDays"
-            Type="number"
+            FieldName="TriggerTypeID"
+            Type="textbox"
             [EditMode]="EditMode"
             [FormContext]="formContext"
+            LinkType="Record"
         ></mj-form-field>
         <mj-form-field 
             [Record]="record"
@@ -78,6 +73,22 @@
             [ShowLabel]="true"
             FieldName="IsActive"
             Type="checkbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="EffectiveFrom"
+            Type="datepicker"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="EffectiveTo"
+            Type="datepicker"
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>
@@ -106,75 +117,25 @@
          RELATED ENTITY PANELS
          ======================================== -->
 
-    <!-- Sales Contacts Section -->
+    <!-- Automation Rule Actions Section -->
     <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesSalesContacts"
-        SectionName="Sales Contacts"
+        SectionKey="mJBizAppsSalesAutomationRuleActions"
+        SectionName="Automation Rule Actions"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesSalesContacts')"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesAutomationRuleActions')"
         [DefaultExpanded]="false">
         @if (record.IsSaved) {
         <div>
             <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Sales Contacts','LeadSourceTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Sales Contacts')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesSalesContacts')"
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Automation Rule Actions','AutomationRuleID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Automation Rule Actions')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesAutomationRuleActions')"
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesSalesContacts', $event.totalRowCount)"
-                >
-            </mj-explorer-entity-data-grid>
-        </div>
-        }
-    </mj-collapsible-panel>
-
-    <!-- Sales Accounts Section -->
-    <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesSalesAccounts"
-        SectionName="Sales Accounts"
-        Icon="fa fa-table"
-        Variant="related-entity"
-        [Form]="this"
-        [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesSalesAccounts')"
-        [DefaultExpanded]="false">
-        @if (record.IsSaved) {
-        <div>
-            <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Sales Accounts','LeadSourceTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Sales Accounts')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesSalesAccounts')"
-                [ShowToolbar]="false"
-                (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesSalesAccounts', $event.totalRowCount)"
-                >
-            </mj-explorer-entity-data-grid>
-        </div>
-        }
-    </mj-collapsible-panel>
-
-    <!-- Deals Section -->
-    <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDeals"
-        SectionName="Deals"
-        Icon="fa fa-table"
-        Variant="related-entity"
-        [Form]="this"
-        [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDeals')"
-        [DefaultExpanded]="false">
-        @if (record.IsSaved) {
-        <div>
-            <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','LeadSourceTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDeals')"
-                [ShowToolbar]="false"
-                (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDeals', $event.totalRowCount)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesAutomationRuleActions', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

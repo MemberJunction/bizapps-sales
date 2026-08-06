@@ -133,25 +133,75 @@
          RELATED ENTITY PANELS
          ======================================== -->
 
-    <!-- Deal Types Section -->
+    <!-- Forecast Snapshots Section -->
     <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDealTypes"
-        SectionName="Deal Types"
+        SectionKey="mJBizAppsSalesForecastSnapshots"
+        SectionName="Forecast Snapshots"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealTypes')"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesForecastSnapshots')"
         [DefaultExpanded]="false">
         @if (record.IsSaved) {
         <div>
             <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Types','DefaultPipelineID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Types')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealTypes')"
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Forecast Snapshots','PipelineID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Forecast Snapshots')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesForecastSnapshots')"
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealTypes', $event.totalRowCount)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesForecastSnapshots', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Automation Rules Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsSalesAutomationRules"
+        SectionName="Automation Rules"
+        Icon="fa fa-table"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesAutomationRules')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Automation Rules','PipelineID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Automation Rules')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesAutomationRules')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesAutomationRules', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Deals Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsSalesDeals"
+        SectionName="Deals"
+        Icon="fa fa-table"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDeals')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','PipelineID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDeals')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDeals', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>
@@ -183,50 +233,25 @@
         }
     </mj-collapsible-panel>
 
-    <!-- Forecast Snapshots Section -->
+    <!-- Deal Types Section -->
     <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesForecastSnapshots"
-        SectionName="Forecast Snapshots"
+        SectionKey="mJBizAppsSalesDealTypes"
+        SectionName="Deal Types"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesForecastSnapshots')"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealTypes')"
         [DefaultExpanded]="false">
         @if (record.IsSaved) {
         <div>
             <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Forecast Snapshots','PipelineID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Forecast Snapshots')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesForecastSnapshots')"
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Types','DefaultPipelineID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Types')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealTypes')"
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesForecastSnapshots', $event.totalRowCount)"
-                >
-            </mj-explorer-entity-data-grid>
-        </div>
-        }
-    </mj-collapsible-panel>
-
-    <!-- Deals Section -->
-    <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDeals"
-        SectionName="Deals"
-        Icon="fa fa-table"
-        Variant="related-entity"
-        [Form]="this"
-        [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDeals')"
-        [DefaultExpanded]="false">
-        @if (record.IsSaved) {
-        <div>
-            <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','PipelineID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDeals')"
-                [ShowToolbar]="false"
-                (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDeals', $event.totalRowCount)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealTypes', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

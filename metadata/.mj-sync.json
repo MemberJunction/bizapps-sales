@@ -33,6 +33,8 @@
     "lifecycle-stage-types",
     "buying-role-types",
     "account-types",
+    "automation-rule-trigger-types",
+    "automation-rule-action-types",
     "remote-operation-categories",
     "remote-operations",
     "applications"

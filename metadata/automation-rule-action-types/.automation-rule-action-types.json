@@ -1,0 +1,81 @@
+[
+  {
+    "_comments": [
+      "WHAT an automation rule does. PROTOTYPE vocabulary for tracker issue #31 — nothing executes",
+      "these yet.",
+      "",
+      "The first two are the actions Pipeline.CloseWonPolicy ALREADY implies, which is the whole reason",
+      "the overlap between that column and these tables is an open question (PHASE3-DECISIONS-QUEUE.md",
+      "Q1). They name capabilities only bizapps-contracts and bizapps-orders can perform, and sales is",
+      "standalone today — so they are listed because the policy JSON already asks for them, not because",
+      "anything here can run them.",
+      "",
+      "SET_FIELD is deliberately absent. An action that writes an arbitrary column is a rules engine",
+      "with unrestricted write access to the deal, and it would let a rule bypass every guarantee the",
+      "entity server exists to enforce — the close lock, the OwnerEmployeeID stamp, the no-arithmetic",
+      "rule. That is a design decision, not an oversight, and it is queued (Q2) rather than assumed."
+    ],
+    "fields": {
+      "Code": "CREATE_CONTRACT",
+      "Name": "Create a contract",
+      "Description": "Hand the deal to bizapps-contracts as the provenance of an agreement. Exactly what CloseWonPolicy's CreateContract / ContractTypeCode keys already declare. Cannot run until contracts is installed.",
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "C7A2E940-1001-4F63-9D18-4B0E7C39A502"
+    },
+    "sync": {
+      "lastModified": "2026-08-06T23:14:59.786Z",
+      "checksum": "cb37614ad200937bf7590b74c8158246c0673a596f6a918e9aa7f00b5ea3c669"
+    }
+  },
+  {
+    "fields": {
+      "Code": "CREATE_ORDER",
+      "Name": "Create an order",
+      "Description": "Materialize the deal's lines into bizapps-orders. CloseWonPolicy's OneTimeLinesTo / SubscriptionLinesTo / OrderState keys already say where and in what state. Cannot run until orders is installed.",
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "C7A2E940-1002-4F63-9D18-4B0E7C39A502"
+    },
+    "sync": {
+      "lastModified": "2026-08-06T23:14:59.847Z",
+      "checksum": "5df3189eb0be0fd645e5dc8a579a9e2339616b639e155354595865247417dc30"
+    }
+  },
+  {
+    "fields": {
+      "Code": "NOTIFY",
+      "Name": "Notify someone",
+      "Description": "Tell a person something happened — the deal owner, the team, a manager. The only seeded action with no cross-app dependency, so the only one a prototype engine could plausibly implement first.",
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "C7A2E940-1003-4F63-9D18-4B0E7C39A502"
+    },
+    "sync": {
+      "lastModified": "2026-08-06T23:14:59.908Z",
+      "checksum": "f50c928680de7416532cf6bf6f0fa44245046e2c32036cc3ac7c1539befc583b"
+    }
+  },
+  {
+    "fields": {
+      "Code": "CREATE_TASK",
+      "Name": "Create a follow-up task",
+      "Description": "Put work on somebody's list. Has no target table in sales today — there is no Task entity here, and whether one belongs in sales or in common is the same question the Activities prototype raises (queue Q4). Listed as vocabulary, not as a capability.",
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "C7A2E940-1004-4F63-9D18-4B0E7C39A502"
+    },
+    "sync": {
+      "lastModified": "2026-08-06T23:14:59.965Z",
+      "checksum": "8925d9d0391d242164f35651547cd740cce6d4a60d0039164d9cab423ab8c644"
+    }
+  }
+]

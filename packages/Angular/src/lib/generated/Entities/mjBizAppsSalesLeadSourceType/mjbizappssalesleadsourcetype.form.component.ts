@@ -18,8 +18,8 @@ export class mjBizAppsSalesLeadSourceTypeFormComponent extends BaseFormComponent
         this.initSections([
             { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
             { sectionKey: 'mJBizAppsSalesSalesContacts', sectionName: 'Sales Contacts', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesDeals', sectionName: 'Deals', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesSalesAccounts', sectionName: 'Sales Accounts', isExpanded: false }
+            { sectionKey: 'mJBizAppsSalesSalesAccounts', sectionName: 'Sales Accounts', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesDeals', sectionName: 'Deals', isExpanded: false }
         ]);
     }
 }

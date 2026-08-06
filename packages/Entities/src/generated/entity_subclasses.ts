@@ -69,6 +69,234 @@ export const mjBizAppsSalesAccountTypeSchema = z.object({
 export type mjBizAppsSalesAccountTypeEntityType = z.infer<typeof mjBizAppsSalesAccountTypeSchema>;
 
 /**
+ * zod schema definition for the entity MJ_BizApps_Sales: Automation Rule Action Types
+ */
+export const mjBizAppsSalesAutomationRuleActionTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesAutomationRuleActionTypeEntityType = z.infer<typeof mjBizAppsSalesAutomationRuleActionTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Automation Rule Actions
+ */
+export const mjBizAppsSalesAutomationRuleActionSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    AutomationRuleID: z.string().describe(`
+        * * Field Name: AutomationRuleID
+        * * Display Name: Automation Rule ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Automation Rules (vwAutomationRules.ID)`),
+    ActionTypeID: z.string().describe(`
+        * * Field Name: ActionTypeID
+        * * Display Name: Action Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Automation Rule Action Types (vwAutomationRuleActionTypes.ID)`),
+    ConfigJSON: z.string().nullable().describe(`
+        * * Field Name: ConfigJSON
+        * * Display Name: Config JSON
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: The action's parameters. JSON deliberately, not laziness: it is the SAME shape Pipeline.CloseWonPolicy already uses, so if the overlap resolves in favour of these tables, migrating that column is a copy rather than a translation.`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(1000)`),
+    DisplayOrder: z.number().describe(`
+        * * Field Name: DisplayOrder
+        * * Display Name: Display Order
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    AutomationRule: z.string().describe(`
+        * * Field Name: AutomationRule
+        * * Display Name: Automation Rule
+        * * SQL Data Type: nvarchar(200)`),
+    ActionType: z.string().describe(`
+        * * Field Name: ActionType
+        * * Display Name: Action Type
+        * * SQL Data Type: nvarchar(200)`),
+});
+
+export type mjBizAppsSalesAutomationRuleActionEntityType = z.infer<typeof mjBizAppsSalesAutomationRuleActionSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Automation Rule Trigger Types
+ */
+export const mjBizAppsSalesAutomationRuleTriggerTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesAutomationRuleTriggerTypeEntityType = z.infer<typeof mjBizAppsSalesAutomationRuleTriggerTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Automation Rules
+ */
+export const mjBizAppsSalesAutomationRuleSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    CompanyID: z.string().nullable().describe(`
+        * * Field Name: CompanyID
+        * * Display Name: Company ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+        * * Description: Scope: NULL means EVERY company, not "unknown". A global rule is the absence of a scope rather than a sentinel row, so adding a company later narrows this rule instead of needing a new one. Deliberately unlike Pipeline.CompanyID, which is NOT NULL (D5) so forecast rollups slice by company — a rule is not a reporting dimension.`),
+    PipelineID: z.string().nullable().describe(`
+        * * Field Name: PipelineID
+        * * Display Name: Pipeline ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Pipelines (vwPipelines.ID)
+        * * Description: Scope: NULL means EVERY pipeline. Same reasoning as CompanyID.`),
+    TriggerTypeID: z.string().describe(`
+        * * Field Name: TriggerTypeID
+        * * Display Name: Trigger Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Automation Rule Trigger Types (vwAutomationRuleTriggerTypes.ID)`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    EffectiveFrom: z.date().nullable().describe(`
+        * * Field Name: EffectiveFrom
+        * * Display Name: Effective From
+        * * SQL Data Type: date`),
+    EffectiveTo: z.date().nullable().describe(`
+        * * Field Name: EffectiveTo
+        * * Display Name: Effective To
+        * * SQL Data Type: date`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Company: z.string().nullable().describe(`
+        * * Field Name: Company
+        * * Display Name: Company
+        * * SQL Data Type: nvarchar(50)`),
+    Pipeline: z.string().nullable().describe(`
+        * * Field Name: Pipeline
+        * * Display Name: Pipeline
+        * * SQL Data Type: nvarchar(200)`),
+    TriggerType: z.string().describe(`
+        * * Field Name: TriggerType
+        * * Display Name: Trigger Type
+        * * SQL Data Type: nvarchar(200)`),
+});
+
+export type mjBizAppsSalesAutomationRuleEntityType = z.infer<typeof mjBizAppsSalesAutomationRuleSchema>;
+
+/**
  * zod schema definition for the entity MJ_BizApps_Sales: Buying Role Types
  */
 export const mjBizAppsSalesBuyingRoleTypeSchema = z.object({
@@ -2049,6 +2277,627 @@ export class mjBizAppsSalesAccountTypeEntity extends BaseEntity<mjBizAppsSalesAc
     */
     get __mj_UpdatedAt(): Date {
         return this.Get('__mj_UpdatedAt');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Sales: Automation Rule Action Types - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: AutomationRuleActionType
+ * * Base View: vwAutomationRuleActionTypes
+ * * @description WHAT a rule does. Seeded conservatively; note CREATE_CONTRACT and CREATE_ORDER name capabilities only bizapps-contracts and bizapps-orders can perform, and sales is standalone today — they are listed because CloseWonPolicy already implies them, not because anything can run them.
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Automation Rule Action Types')
+export class mjBizAppsSalesAutomationRuleActionTypeEntity extends BaseEntity<mjBizAppsSalesAutomationRuleActionTypeEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Automation Rule Action Types record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Automation Rule Action Types record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesAutomationRuleActionTypeEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: Code
+    * * Display Name: Code
+    * * SQL Data Type: nvarchar(40)
+    */
+    get Code(): string {
+        return this.Get('Code');
+    }
+    set Code(value: string) {
+        this.Set('Code', value);
+    }
+
+    /**
+    * * Field Name: Name
+    * * Display Name: Name
+    * * SQL Data Type: nvarchar(200)
+    */
+    get Name(): string {
+        return this.Get('Name');
+    }
+    set Name(value: string) {
+        this.Set('Name', value);
+    }
+
+    /**
+    * * Field Name: Description
+    * * Display Name: Description
+    * * SQL Data Type: nvarchar(MAX)
+    */
+    get Description(): string | null {
+        return this.Get('Description');
+    }
+    set Description(value: string | null) {
+        this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: DisplayRank
+    * * Display Name: Display Rank
+    * * SQL Data Type: int
+    * * Default Value: 0
+    */
+    get DisplayRank(): number {
+        return this.Get('DisplayRank');
+    }
+    set DisplayRank(value: number) {
+        this.Set('DisplayRank', value);
+    }
+
+    /**
+    * * Field Name: IsActive
+    * * Display Name: Is Active
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    */
+    get IsActive(): boolean {
+        return this.Get('IsActive');
+    }
+    set IsActive(value: boolean) {
+        this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Sales: Automation Rule Actions - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: AutomationRuleAction
+ * * Base View: vwAutomationRuleActions
+ * * @description The ordered actions one rule performs. A child table rather than one action column on the rule, because one trigger routinely fans out to several actions — and the one-action-per-row alternative forces the same trigger to be duplicated across N rules, which is a data migration to fix later rather than one extra table now.
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Automation Rule Actions')
+export class mjBizAppsSalesAutomationRuleActionEntity extends BaseEntity<mjBizAppsSalesAutomationRuleActionEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Automation Rule Actions record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Automation Rule Actions record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesAutomationRuleActionEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: AutomationRuleID
+    * * Display Name: Automation Rule ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Automation Rules (vwAutomationRules.ID)
+    */
+    get AutomationRuleID(): string {
+        return this.Get('AutomationRuleID');
+    }
+    set AutomationRuleID(value: string) {
+        this.Set('AutomationRuleID', value);
+    }
+
+    /**
+    * * Field Name: ActionTypeID
+    * * Display Name: Action Type ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Automation Rule Action Types (vwAutomationRuleActionTypes.ID)
+    */
+    get ActionTypeID(): string {
+        return this.Get('ActionTypeID');
+    }
+    set ActionTypeID(value: string) {
+        this.Set('ActionTypeID', value);
+    }
+
+    /**
+    * * Field Name: ConfigJSON
+    * * Display Name: Config JSON
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: The action's parameters. JSON deliberately, not laziness: it is the SAME shape Pipeline.CloseWonPolicy already uses, so if the overlap resolves in favour of these tables, migrating that column is a copy rather than a translation.
+    */
+    get ConfigJSON(): string | null {
+        return this.Get('ConfigJSON');
+    }
+    set ConfigJSON(value: string | null) {
+        this.Set('ConfigJSON', value);
+    }
+
+    /**
+    * * Field Name: Description
+    * * Display Name: Description
+    * * SQL Data Type: nvarchar(1000)
+    */
+    get Description(): string | null {
+        return this.Get('Description');
+    }
+    set Description(value: string | null) {
+        this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: DisplayOrder
+    * * Display Name: Display Order
+    * * SQL Data Type: int
+    * * Default Value: 0
+    */
+    get DisplayOrder(): number {
+        return this.Get('DisplayOrder');
+    }
+    set DisplayOrder(value: number) {
+        this.Set('DisplayOrder', value);
+    }
+
+    /**
+    * * Field Name: IsActive
+    * * Display Name: Is Active
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    */
+    get IsActive(): boolean {
+        return this.Get('IsActive');
+    }
+    set IsActive(value: boolean) {
+        this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: AutomationRule
+    * * Display Name: Automation Rule
+    * * SQL Data Type: nvarchar(200)
+    */
+    get AutomationRule(): string {
+        return this.Get('AutomationRule');
+    }
+
+    /**
+    * * Field Name: ActionType
+    * * Display Name: Action Type
+    * * SQL Data Type: nvarchar(200)
+    */
+    get ActionType(): string {
+        return this.Get('ActionType');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Sales: Automation Rule Trigger Types - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: AutomationRuleTriggerType
+ * * Base View: vwAutomationRuleTriggerTypes
+ * * @description WHEN a rule fires. A type table rather than a string column because vocabulary is data (Rule 2) — DealLine.LineType was once free text and had to be converted precisely because a string column is where a vocabulary rots; its own seed data had already drifted into two conventions in three rows. Carries NO behaviour flags yet: flags are what an engine branches on, and there is no engine, so any flag here would be a guess (queue Q2).
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Automation Rule Trigger Types')
+export class mjBizAppsSalesAutomationRuleTriggerTypeEntity extends BaseEntity<mjBizAppsSalesAutomationRuleTriggerTypeEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Automation Rule Trigger Types record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Automation Rule Trigger Types record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesAutomationRuleTriggerTypeEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: Code
+    * * Display Name: Code
+    * * SQL Data Type: nvarchar(40)
+    */
+    get Code(): string {
+        return this.Get('Code');
+    }
+    set Code(value: string) {
+        this.Set('Code', value);
+    }
+
+    /**
+    * * Field Name: Name
+    * * Display Name: Name
+    * * SQL Data Type: nvarchar(200)
+    */
+    get Name(): string {
+        return this.Get('Name');
+    }
+    set Name(value: string) {
+        this.Set('Name', value);
+    }
+
+    /**
+    * * Field Name: Description
+    * * Display Name: Description
+    * * SQL Data Type: nvarchar(MAX)
+    */
+    get Description(): string | null {
+        return this.Get('Description');
+    }
+    set Description(value: string | null) {
+        this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: DisplayRank
+    * * Display Name: Display Rank
+    * * SQL Data Type: int
+    * * Default Value: 0
+    */
+    get DisplayRank(): number {
+        return this.Get('DisplayRank');
+    }
+    set DisplayRank(value: number) {
+        this.Set('DisplayRank', value);
+    }
+
+    /**
+    * * Field Name: IsActive
+    * * Display Name: Is Active
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    */
+    get IsActive(): boolean {
+        return this.Get('IsActive');
+    }
+    set IsActive(value: boolean) {
+        this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Sales: Automation Rules - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: AutomationRule
+ * * Base View: vwAutomationRules
+ * * @description PROTOTYPE / CRUD SCAFFOLD ONLY — there is no engine. Nothing reads these rows, evaluates a trigger or executes an action. Note the unresolved overlap with Pipeline.CloseWonPolicy, which already declares as JSON what winning a deal should do: that is an automation rule with one hardcoded trigger, and which of the two survives is an open design decision (PHASE3-DECISIONS-QUEUE.md Q1). This scaffold is deliberately ADDITIVE and touches CloseWonPolicy in no way, so either outcome costs nothing to unwind.
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Automation Rules')
+export class mjBizAppsSalesAutomationRuleEntity extends BaseEntity<mjBizAppsSalesAutomationRuleEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Automation Rules record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Automation Rules record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesAutomationRuleEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: Name
+    * * Display Name: Name
+    * * SQL Data Type: nvarchar(200)
+    */
+    get Name(): string {
+        return this.Get('Name');
+    }
+    set Name(value: string) {
+        this.Set('Name', value);
+    }
+
+    /**
+    * * Field Name: Description
+    * * Display Name: Description
+    * * SQL Data Type: nvarchar(MAX)
+    */
+    get Description(): string | null {
+        return this.Get('Description');
+    }
+    set Description(value: string | null) {
+        this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: CompanyID
+    * * Display Name: Company ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+    * * Description: Scope: NULL means EVERY company, not "unknown". A global rule is the absence of a scope rather than a sentinel row, so adding a company later narrows this rule instead of needing a new one. Deliberately unlike Pipeline.CompanyID, which is NOT NULL (D5) so forecast rollups slice by company — a rule is not a reporting dimension.
+    */
+    get CompanyID(): string | null {
+        return this.Get('CompanyID');
+    }
+    set CompanyID(value: string | null) {
+        this.Set('CompanyID', value);
+    }
+
+    /**
+    * * Field Name: PipelineID
+    * * Display Name: Pipeline ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Pipelines (vwPipelines.ID)
+    * * Description: Scope: NULL means EVERY pipeline. Same reasoning as CompanyID.
+    */
+    get PipelineID(): string | null {
+        return this.Get('PipelineID');
+    }
+    set PipelineID(value: string | null) {
+        this.Set('PipelineID', value);
+    }
+
+    /**
+    * * Field Name: TriggerTypeID
+    * * Display Name: Trigger Type ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Automation Rule Trigger Types (vwAutomationRuleTriggerTypes.ID)
+    */
+    get TriggerTypeID(): string {
+        return this.Get('TriggerTypeID');
+    }
+    set TriggerTypeID(value: string) {
+        this.Set('TriggerTypeID', value);
+    }
+
+    /**
+    * * Field Name: DisplayRank
+    * * Display Name: Display Rank
+    * * SQL Data Type: int
+    * * Default Value: 0
+    */
+    get DisplayRank(): number {
+        return this.Get('DisplayRank');
+    }
+    set DisplayRank(value: number) {
+        this.Set('DisplayRank', value);
+    }
+
+    /**
+    * * Field Name: IsActive
+    * * Display Name: Is Active
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    */
+    get IsActive(): boolean {
+        return this.Get('IsActive');
+    }
+    set IsActive(value: boolean) {
+        this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: EffectiveFrom
+    * * Display Name: Effective From
+    * * SQL Data Type: date
+    */
+    get EffectiveFrom(): Date | null {
+        return this.Get('EffectiveFrom');
+    }
+    set EffectiveFrom(value: Date | null) {
+        this.Set('EffectiveFrom', value);
+    }
+
+    /**
+    * * Field Name: EffectiveTo
+    * * Display Name: Effective To
+    * * SQL Data Type: date
+    */
+    get EffectiveTo(): Date | null {
+        return this.Get('EffectiveTo');
+    }
+    set EffectiveTo(value: Date | null) {
+        this.Set('EffectiveTo', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: Company
+    * * Display Name: Company
+    * * SQL Data Type: nvarchar(50)
+    */
+    get Company(): string | null {
+        return this.Get('Company');
+    }
+
+    /**
+    * * Field Name: Pipeline
+    * * Display Name: Pipeline
+    * * SQL Data Type: nvarchar(200)
+    */
+    get Pipeline(): string | null {
+        return this.Get('Pipeline');
+    }
+
+    /**
+    * * Field Name: TriggerType
+    * * Display Name: Trigger Type
+    * * SQL Data Type: nvarchar(200)
+    */
+    get TriggerType(): string {
+        return this.Get('TriggerType');
     }
 }
 

@@ -1,0 +1,78 @@
+[
+  {
+    "_comments": [
+      "WHEN an automation rule fires. PROTOTYPE vocabulary for tracker issue #31 — nothing evaluates",
+      "these yet.",
+      "",
+      "Seeded ONLY with events this app can already observe, every one of which is recorded by a table",
+      "that exists: DealStageEvent logs stage transitions, and Deal's status/close columns record the",
+      "rest. A trigger naming an event sales cannot detect would be vocabulary describing a capability",
+      "that does not exist, which is worse than an empty table — it reads as a promise.",
+      "",
+      "Fixed UUIDs, like every other type table here, so a re-push against a rebuilt database resolves",
+      "to the same rows instead of creating duplicates. This repo rebuilds from zero routinely."
+    ],
+    "fields": {
+      "Code": "DEAL_CREATED",
+      "Name": "Deal created",
+      "Description": "A new deal row was inserted. The broadest trigger, and the one most likely to want a scope — an unscoped rule on this fires for every deal in every pipeline.",
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "C7A2E940-0001-4F63-9D18-4B0E7C39A501"
+    },
+    "sync": {
+      "lastModified": "2026-08-06T23:14:59.519Z",
+      "checksum": "588a11ddc73b2bd65b1bb51d767694a083299f841e3261590762c6a8de080973"
+    }
+  },
+  {
+    "fields": {
+      "Code": "DEAL_STAGE_CHANGED",
+      "Name": "Deal stage changed",
+      "Description": "The deal moved between pipeline stages. Already captured by the append-only DealStageEvent table, which stamps the amount and probability at transition — so a rule on this trigger has point-in-time context available to it rather than only the current state.",
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "C7A2E940-0002-4F63-9D18-4B0E7C39A501"
+    },
+    "sync": {
+      "lastModified": "2026-08-06T23:14:59.583Z",
+      "checksum": "26ece1e17e7a78f4e03542f77fe60ffbcb55dcaf07466a492ac8b7c5b53e739d"
+    }
+  },
+  {
+    "fields": {
+      "Code": "DEAL_STATUS_CHANGED",
+      "Name": "Deal status changed",
+      "Description": "The deal's DealStatusType changed. Deliberately ONE trigger rather than separate won/lost triggers: won-ness and lost-ness live in the status row's IsWon / IsLost flags, so a rule that cares which way it went reads the flag. Splitting this into DEAL_WON and DEAL_LOST would bake two status names into the vocabulary and break the moment somebody renames a status.",
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "C7A2E940-0003-4F63-9D18-4B0E7C39A501"
+    },
+    "sync": {
+      "lastModified": "2026-08-06T23:14:59.642Z",
+      "checksum": "7e0c3f9864273c6ae44da0a6db306a8211d82ca3a46502b3d91dd059926bb8cb"
+    }
+  },
+  {
+    "fields": {
+      "Code": "DEAL_CLOSE_DATE_PASSED",
+      "Name": "Expected close date passed",
+      "Description": "An open deal's ExpectedCloseDate is in the past. Unlike the others this is not an event anything emits — it becomes true with the passage of time, so it needs something to notice it on a schedule rather than a hook on a write. Listed because the roster and dashboard already compute exactly this condition, so the app can answer it today.",
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "C7A2E940-0004-4F63-9D18-4B0E7C39A501"
+    },
+    "sync": {
+      "lastModified": "2026-08-06T23:14:59.706Z",
+      "checksum": "a238da53ab2d1a82158cd69033b4b245a3bc0d2910e4f12c962146c6d1dddada"
+    }
+  }
+]

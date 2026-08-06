@@ -149,25 +149,25 @@
          RELATED ENTITY PANELS
          ======================================== -->
 
-    <!-- Deal Stage Events (To Stage ID) Section -->
+    <!-- Deals Section -->
     <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDealStageEventsToStageID"
-        SectionName="Deal Stage Events (To Stage ID)"
+        SectionKey="mJBizAppsSalesDeals"
+        SectionName="Deals"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealStageEventsToStageID')"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDeals')"
         [DefaultExpanded]="false">
         @if (record.IsSaved) {
         <div>
             <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Stage Events','ToStageID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Stage Events')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealStageEventsToStageID')"
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','PipelineStageID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDeals')"
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealStageEventsToStageID', $event.totalRowCount)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDeals', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>
@@ -199,25 +199,25 @@
         }
     </mj-collapsible-panel>
 
-    <!-- Deals Section -->
+    <!-- Deal Stage Events (To Stage ID) Section -->
     <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDeals"
-        SectionName="Deals"
+        SectionKey="mJBizAppsSalesDealStageEventsToStageID"
+        SectionName="Deal Stage Events (To Stage ID)"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDeals')"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealStageEventsToStageID')"
         [DefaultExpanded]="false">
         @if (record.IsSaved) {
         <div>
             <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','PipelineStageID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDeals')"
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Stage Events','ToStageID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Stage Events')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealStageEventsToStageID')"
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDeals', $event.totalRowCount)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealStageEventsToStageID', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

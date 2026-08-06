@@ -17,9 +17,9 @@ export class mjBizAppsSalesForecastCategoryTypeFormComponent extends BaseFormCom
         await super.ngOnInit();
         this.initSections([
             { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
-            { sectionKey: 'mJBizAppsSalesPipelines', sectionName: 'Pipelines', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesPipelineStages', sectionName: 'Pipeline Stages', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDeals', sectionName: 'Deals', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesPipelineStages', sectionName: 'Pipeline Stages', isExpanded: false }
+            { sectionKey: 'mJBizAppsSalesPipelines', sectionName: 'Pipelines', isExpanded: false }
         ]);
     }
 }

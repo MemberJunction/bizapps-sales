@@ -16,6 +16,10 @@ import { LinkDirectivesModule } from '@memberjunction/ng-link-directives';
 
 // Import Generated Components
 import { mjBizAppsSalesAccountTypeFormComponent } from "./Entities/mjBizAppsSalesAccountType/mjbizappssalesaccounttype.form.component";
+import { mjBizAppsSalesAutomationRuleActionTypeFormComponent } from "./Entities/mjBizAppsSalesAutomationRuleActionType/mjbizappssalesautomationruleactiontype.form.component";
+import { mjBizAppsSalesAutomationRuleActionFormComponent } from "./Entities/mjBizAppsSalesAutomationRuleAction/mjbizappssalesautomationruleaction.form.component";
+import { mjBizAppsSalesAutomationRuleTriggerTypeFormComponent } from "./Entities/mjBizAppsSalesAutomationRuleTriggerType/mjbizappssalesautomationruletriggertype.form.component";
+import { mjBizAppsSalesAutomationRuleFormComponent } from "./Entities/mjBizAppsSalesAutomationRule/mjbizappssalesautomationrule.form.component";
 import { mjBizAppsSalesBuyingRoleTypeFormComponent } from "./Entities/mjBizAppsSalesBuyingRoleType/mjbizappssalesbuyingroletype.form.component";
 import { mjBizAppsSalesDealContactRoleFormComponent } from "./Entities/mjBizAppsSalesDealContactRole/mjbizappssalesdealcontactrole.form.component";
 import { mjBizAppsSalesDealLineTypeFormComponent } from "./Entities/mjBizAppsSalesDealLineType/mjbizappssalesdeallinetype.form.component";
@@ -42,6 +46,10 @@ import { mjBizAppsSalesSalesContactFormComponent } from "./Entities/mjBizAppsSal
 @NgModule({
 declarations: [
     mjBizAppsSalesAccountTypeFormComponent,
+    mjBizAppsSalesAutomationRuleActionTypeFormComponent,
+    mjBizAppsSalesAutomationRuleActionFormComponent,
+    mjBizAppsSalesAutomationRuleTriggerTypeFormComponent,
+    mjBizAppsSalesAutomationRuleFormComponent,
     mjBizAppsSalesBuyingRoleTypeFormComponent,
     mjBizAppsSalesDealContactRoleFormComponent,
     mjBizAppsSalesDealLineTypeFormComponent,
@@ -56,11 +64,7 @@ declarations: [
     mjBizAppsSalesDealFormComponent,
     mjBizAppsSalesForecastCategoryTypeFormComponent,
     mjBizAppsSalesForecastSnapshotFormComponent,
-    mjBizAppsSalesLeadSourceTypeFormComponent,
-    mjBizAppsSalesLifecycleStageTypeFormComponent,
-    mjBizAppsSalesLossReasonFormComponent,
-    mjBizAppsSalesPipelineStageFormComponent,
-    mjBizAppsSalesPipelineFormComponent],
+    mjBizAppsSalesLeadSourceTypeFormComponent],
 imports: [
     CommonModule,
     FormsModule,
@@ -77,6 +81,10 @@ export class GeneratedForms_SubModule_0 { }
 
 @NgModule({
 declarations: [
+    mjBizAppsSalesLifecycleStageTypeFormComponent,
+    mjBizAppsSalesLossReasonFormComponent,
+    mjBizAppsSalesPipelineStageFormComponent,
+    mjBizAppsSalesPipelineFormComponent,
     mjBizAppsSalesSalesAccountFormComponent,
     mjBizAppsSalesSalesContactFormComponent],
 imports: [
