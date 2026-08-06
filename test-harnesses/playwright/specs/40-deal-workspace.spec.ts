@@ -114,6 +114,22 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
       await page.goto(`${EXPLORER_BASE_URL}${SALES_WORKSPACE_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(6000);
 
+      /**
+       * NAVIGATE TO THE WORKSPACE FIRST. Phase 2 put a section shell around this surface, so `/app/sales`
+       * now lands on the DASHBOARD and the workspace is one of three rail pages. Before that it was the
+       * whole app and rendered immediately — which is exactly what this step used to assume, and why the
+       * Phase 2 change broke a passing spec.
+       *
+       * The rail item is a BUTTON whose accessible name is "<label> <description>", so this is a prefix
+       * match by role: `mj-left-nav` also emits hidden switcher-label spans carrying the same words.
+       */
+      await page
+        .locator('mj-left-nav')
+        .getByRole('button', { name: /^Workspace/i })
+        .first()
+        .click({ timeout: 30_000 });
+      await page.waitForTimeout(3000);
+
       // The workspace's own root — proof the resource registration resolved. If `DriverClass` had been
       // tree-shaken out, the nav item would render an empty tab with no error anywhere.
       const workspace = page.locator('mjs-deal-workspace');

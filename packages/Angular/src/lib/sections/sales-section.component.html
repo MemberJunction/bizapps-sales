@@ -1,0 +1,187 @@
+<!--
+  The Sales section shell. Structure mirrors bizapps-contracts / bizapps-orders:
+  page-layout > page-header (+ [actions]) > page-body row > left-nav + left-nav-content >
+  ONE page-body-interior wrapping every page.
+
+  Read the component header before changing the nesting — `mj-left-nav-content` clips any direct child
+  that is not `mj-page-body-interior`, and the symptom is a page whose layout depends on window height.
+-->
+<mj-page-layout>
+  <mj-page-header [Title]="Title" Icon="fa-solid fa-handshake" [Subtitle]="Subtitle">
+    <div actions>
+      <!-- The shape is orders': an icon-only OUTLINE refresh, then ONE primary whose label follows the
+           page. Every page here is about deals, so it is always "New deal" — but it is resolved from the
+           nav model rather than hardcoded, so a page that should not offer it simply returns null and no
+           button renders (better than a disabled one nobody can explain). -->
+      <button type="button" mjButton variant="outline" (click)="Refresh()" aria-label="Refresh this page">
+        <i class="fa-solid fa-arrow-rotate-right" aria-hidden="true"></i>
+      </button>
+      @if (PrimaryAction; as action) {
+        <button type="button" mjButton variant="primary" (click)="StartPrimary()">
+          <i [class]="action.Icon" aria-hidden="true"></i> {{ action.Label }}
+        </button>
+      }
+    </div>
+  </mj-page-header>
+
+  <mj-page-body [Flex]="true" [Padding]="false" Direction="row">
+    <mj-left-nav
+      [Sections]="NavSections"
+      [ActiveId]="Page"
+      MobileTitle="Sales"
+      (ItemClicked)="OnNav($event)">
+    </mj-left-nav>
+
+    <mj-left-nav-content>
+      <mj-page-body-interior [Padding]="false">
+
+        @if (Message) {
+          <p class="msg" role="status">{{ Message }}</p>
+        }
+
+        <!-- ═════════════════════════ DASHBOARD ═════════════════════════ -->
+        <div class="wrap wrap--dashboard" [hidden]="Page !== 'dashboard'">
+          <div class="sechead"><h2>Dashboard</h2></div>
+
+          @if (Loading) {
+            <mj-loading></mj-loading>
+          } @else {
+            <div class="kpis">
+              @for (kpi of Kpis; track kpi.Label) {
+                <div class="kpi">
+                  <div class="l">{{ kpi.Label }}</div>
+                  <div class="v" [class.warn]="kpi.Tone === 'warn'" [class.err]="kpi.Tone === 'err'">{{ kpi.Value }}</div>
+                  <div class="f">{{ kpi.Footnote }}</div>
+                </div>
+              }
+            </div>
+
+            <div class="card">
+              <div class="ch">
+                Closing soonest
+                <span class="r">{{ ClosingSoon.length }} shown</span>
+              </div>
+              @if (!ClosingSoon.length) {
+                <div class="empty">No open deals with an expected close date.</div>
+              } @else {
+                <div class="tscroll">
+                  <table class="wl">
+                    <thead>
+                      <tr>
+                        <th scope="col">Deal</th>
+                        <th scope="col">Customer</th>
+                        <th scope="col">Stage</th>
+                        <th scope="col" class="num">Amount</th>
+                        <th scope="col">Expected close</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (d of ClosingSoon; track d.ID) {
+                        <tr (click)="OpenDeal(d)" [title]="'Open ' + d.Name + ' in the workspace'"
+                            [class.slipped]="IsSlipped(d)">
+                          <td class="where">{{ d.Name }}</td>
+                          <td class="muted">{{ d.CustomerName }}</td>
+                          <td class="muted">{{ d.PipelineStage || '—' }}</td>
+                          <td class="num">{{ Money(d.Amount) }}</td>
+                          <td class="muted">
+                            {{ d.ExpectedCloseDate ? (d.ExpectedCloseDate | date: 'mediumDate') : '—' }}
+                            @if (IsSlipped(d)) { <span class="flag">past</span> }
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- ═════════════════════════ ALL DEALS ═════════════════════════ -->
+        <div class="wrap wrap--list" [hidden]="Page !== 'list'">
+          <div class="sechead"><h2>All deals</h2></div>
+
+          @if (Loading) {
+            <mj-loading></mj-loading>
+          } @else {
+            <div class="card">
+              <div class="ch">
+                Deals
+                <span class="r">{{ Deals.length }} total</span>
+              </div>
+
+              @if (!Deals.length) {
+                <!-- A first-run database genuinely has no deals, so this is a starting point rather than
+                     an error state — it offers the action instead of just reporting emptiness. -->
+                <div class="empty">
+                  No deals yet.
+                  <button type="button" mjButton variant="primary" (click)="StartPrimary()">
+                    <i class="fa-solid fa-plus" aria-hidden="true"></i> New deal
+                  </button>
+                </div>
+              } @else {
+                <div class="tscroll">
+                  <table class="wl">
+                    <thead>
+                      <tr>
+                        <th scope="col">Deal</th>
+                        <th scope="col">Customer</th>
+                        <th scope="col">Pipeline</th>
+                        <th scope="col">Stage</th>
+                        <th scope="col">Status</th>
+                        <th scope="col" class="num">Amount</th>
+                        <th scope="col" class="num">Prob</th>
+                        <th scope="col">Expected close</th>
+                        <th scope="col">Owner</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <!-- EVERY ROW OPENS THE WORKSPACE. This is the affordance Phase 1 was missing: the
+                           workspace could create a deal but nothing could open one. -->
+                      @for (d of Deals; track d.ID) {
+                        <tr (click)="OpenDeal(d)" [title]="'Open ' + d.Name + ' in the workspace'"
+                            [class.slipped]="IsSlipped(d)">
+                          <td class="where">
+                            {{ d.Name }}
+                            @if (d.DealNumber) { <span class="num-chip">{{ d.DealNumber }}</span> }
+                          </td>
+                          <td class="muted">{{ d.CustomerName }}</td>
+                          <td class="muted">{{ d.Pipeline || '—' }}</td>
+                          <td class="muted">{{ d.PipelineStage || '—' }}</td>
+                          <td><span class="pill" [class]="StatusTone(d)">{{ d.DealStatusType || '—' }}</span></td>
+                          <td class="num">
+                            {{ Money(d.Amount) }}
+                            <!-- Provenance, visible. A hand-entered amount and a PreviewOrder answer are
+                                 different kinds of fact, and the grid is where that difference matters. -->
+                            @if (d.Amount !== null && !d.AmountIsComputed) {
+                              <span class="flag" title="Entered by hand — not priced by the orders engine">stated</span>
+                            }
+                          </td>
+                          <td class="num muted">{{ d.Probability !== null ? d.Probability + '%' : '—' }}</td>
+                          <td class="muted">
+                            {{ d.ExpectedCloseDate ? (d.ExpectedCloseDate | date: 'mediumDate') : '—' }}
+                            @if (IsSlipped(d)) { <span class="flag">past</span> }
+                          </td>
+                          <td class="muted">{{ d.OwnerEmployee || '—' }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- ═════════════════════════ WORKSPACE ═════════════════════════ -->
+        <!-- MOUNTED ONCE, HIDDEN WHEN ANOTHER PAGE SHOWS. The open-documents strip lives inside this
+             component, so destroying it would throw away every open deal — switching to the list and
+             back has to keep your drafts. See the component header. -->
+        <div class="wrap wrap--flush wrap--workspace" [hidden]="!ShowWorkspace">
+          <mjs-deal-workspace></mjs-deal-workspace>
+        </div>
+
+      </mj-page-body-interior>
+    </mj-left-nav-content>
+  </mj-page-body>
+</mj-page-layout>

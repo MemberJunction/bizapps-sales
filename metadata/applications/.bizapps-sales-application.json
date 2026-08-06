@@ -11,9 +11,13 @@
       "",
       "Why there is only ONE nav item. KI-4 recorded that custom nav items had nothing to point at,",
       "because `ResourceType: 'Custom'` needs a registered `DriverClass` and sales had no such component.",
-      "Phase 1 adds exactly one: the deal workspace. The pipeline board, the account/contact 360 and the",
-      "reports live at S3, and a nav item pointing at a component that does not exist yet resolves to a",
-      "blank tab with no error — so they are added when they can work, not now.",
+      "Phase 1 added the deal workspace; Phase 2 replaced that direct mount with a SECTION that owns a",
+      "dashboard, the roster and the workspace — matching the shape contracts and orders use, where a nav",
+      "item is a section and the left rail moves within it.",
+      "",
+      "Accounts, forecasting and the pipeline board are real sections later. They are absent rather than",
+      "stubbed because a nav item pointing at an unregistered component resolves to a BLANK TAB with no",
+      "error anywhere, so a dead item is worse than a missing one.",
       "",
       "DefaultSequence 2020 sits after accounting's 2010, keeping the revenue stack in reading order in",
       "the app switcher: accounting, then sales."
@@ -30,7 +34,7 @@
           "Label": "Deals",
           "Icon": "fa-solid fa-handshake",
           "ResourceType": "Custom",
-          "DriverClass": "DealWorkspaceResource",
+          "DriverClass": "SalesDealsSectionResource",
           "isDefault": true
         }
       ]
@@ -39,8 +43,8 @@
       "ID": "D4F8A162-A001-4E71-B0A8-3F17C5E2D803"
     },
     "sync": {
-      "lastModified": "2026-08-06T07:53:07.886Z",
-      "checksum": "dd82c4c97ad74b70aeae08adf68b6550f0c3d23160ef246e9ec5ccfb8039811d"
+      "lastModified": "2026-08-06T14:25:53.356Z",
+      "checksum": "be462a1c1446eb679ea63ab036b4d7d4c4902932a2384dc43bfc10f83e5c8b9f"
     }
   }
 ]

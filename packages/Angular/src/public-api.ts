@@ -31,31 +31,41 @@ import './lib/generated/generated-forms.module';
 // Import generated class registrations manifest
 import { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
 
-// Hand-authored surfaces. The resource import is what registers the nav item's DriverClass.
-import { LoadDealWorkspaceResource } from './lib/workspace/deal-workspace-resource.component';
+// Hand-authored surfaces. Importing the section is what registers the nav item's DriverClass.
+import { MJSSalesSectionComponent, SalesDealsSectionResource } from './lib/sections/sales-section.component';
 
 // Re-export for consumers
 export { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
 export { GeneratedFormsModule } from './lib/generated/generated-forms.module';
 
-// The deal workspace and the pieces a host might legitimately reuse.
-export { DealWorkspaceModule } from './lib/workspace/deal-workspace.module';
+/*
+ * THE EXPLORER TAB. `SalesDealsSectionResource`'s @RegisterClass key must match the `DriverClass` in
+ * metadata/applications/.bizapps-sales-application.json — that pairing is the entire wiring, and both
+ * halves are required: metadata naming an unregistered class renders a dead tab, and a registered class
+ * with no metadata never appears. `MJSSalesSectionComponent` is the implementation it mounts; it is
+ * exported for reuse but is NOT itself a nav item.
+ */
+export { MJSSalesSectionComponent, SalesDealsSectionResource, LoadSalesSection } from './lib/sections/sales-section.component';
+export * from './lib/nav/sales-nav.model';
+
+// The deal workspace and the pieces a host might legitimately reuse. The workspace is a standalone
+// component the section mounts; it has no resource shim of its own any more — the section owns the tab.
 export { DealWorkspaceComponent } from './lib/workspace/deal-workspace.component';
-export { DealWorkspaceResourceComponent, LoadDealWorkspaceResource } from './lib/workspace/deal-workspace-resource.component';
 export { DealWorkspaceService } from './lib/workspace/deal-workspace.service';
-export type { DealSaveOutcome } from './lib/workspace/deal-workspace.service';
+export type { DealSaveOutcome, DealRosterRow } from './lib/workspace/deal-workspace.service';
 export * from './lib/workspace/deal-workspace.types';
 
 /**
  * Bootstrap function called during MJExplorer startup — the `startupExport` named in mj-app.json.
  * The static imports above do the registering; this is the anchor that keeps them in the bundle.
  *
- * `LoadDealWorkspaceResource()` is load-bearing, not decorative: nothing references
- * `DealWorkspaceResourceComponent` by name, so without this call a bundler correctly drops it, the
- * `DealWorkspaceResource` registration never happens, and the Sales nav item resolves to nothing —
- * with no error to explain why.
+ * The `void` references below are load-bearing, not decorative: nothing references these classes by
+ * name, so without them a production build correctly drops the imports, the registrations never fire,
+ * and the Sales nav item mounts nothing — with no error anywhere to explain why. One anchor PER
+ * registered class, for the same reason contracts keeps one per resource.
  */
 export function LoadBizAppsSalesClient(): void {
     void CLASS_REGISTRATIONS;
-    LoadDealWorkspaceResource();
+    void MJSSalesSectionComponent;
+    void SalesDealsSectionResource;
 }

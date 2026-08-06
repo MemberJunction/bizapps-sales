@@ -18,6 +18,7 @@ import {
 import {
     EmptyLookups,
     type DealLookup,
+    type DealStatusLookup,
     type DealWorkspaceLookups,
     type LineTypeLookup,
     type PipelineLookup,
@@ -37,6 +38,44 @@ const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_DEAL_LINE = 'MJ_BizApps_Sales: Deal Lines';
 const E_SCHEDULE = 'MJ_BizApps_Sales: Deal Payment Schedules';
 
+/**
+ * One row of the deal roster.
+ *
+ * `CustomerName` is resolved by this service, not read off the deal: `AccountID` points at an IsA child
+ * whose `Name` lives on the parent, and CodeGen generates no lookup join across that edge (KI-8). So the
+ * roster reads accounts once and joins in memory — which is also why this lives here rather than in the
+ * component, so the workaround exists in exactly one place.
+ */
+export interface DealRosterRow {
+    ID: string;
+    DealNumber: string | null;
+    Name: string;
+    AccountID: string | null;
+    CustomerName: string;
+    Amount: number | null;
+    AmountIsComputed: boolean;
+    Probability: number | null;
+    ExpectedCloseDate: string | null;
+    /** Virtual name columns that DO resolve on the Deal view. */
+    Pipeline: string | null;
+    PipelineStage: string | null;
+    DealType: string | null;
+    DealStatusType: string | null;
+    OwnerEmployee: string | null;
+    ForecastCategoryType: string | null;
+    /** Kept so anything downstream can branch on the STATUS FLAGS rather than the status name. */
+    DealStatusTypeID: string | null;
+}
+
+/** Raw roster shape before the account name is joined in. */
+interface DealRosterQueryRow {
+    ID: string; DealNumber: string | null; Name: string; AccountID: string | null;
+    Amount: number | null; AmountIsComputed: boolean; Probability: number | null;
+    ExpectedCloseDate: string | null; Pipeline: string | null; PipelineStage: string | null;
+    DealType: string | null; DealStatusType: string | null; OwnerEmployee: string | null;
+    ForecastCategoryType: string | null; DealStatusTypeID: string | null;
+}
+
 /** What a save attempt reports back. Mirrors the operation's own output rather than flattening it. */
 export interface DealSaveOutcome {
     Success: boolean;
@@ -53,6 +92,7 @@ interface PipelineRow { ID: string; Name: string; CompanyID: string; Company: st
 interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null }
 interface NamedRow { ID: string; Name: string }
 interface LineTypeRow extends NamedRow { IsRecurring: boolean }
+interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean }
 interface ContactRow { ID: string; FirstName: string | null; LastName: string | null; Email: string | null }
 interface EmployeeRow { ID: string; FirstLast: string | null }
 interface DealRow {
@@ -99,7 +139,10 @@ export class DealWorkspaceService {
             { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'CompanyID', 'Company'] },
             { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID'] },
             { EntityName: E_DEAL_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
-            { EntityName: E_STATUS_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+            // The FLAGS come back with the status, because the dashboard counts open/won deals and the
+            // only permitted way to decide either is to read the flag. Comparing a status name is what
+            // the vocabulary gate forbids, and it also breaks the moment somebody renames "Won".
+            { EntityName: E_STATUS_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsOpen', 'IsClosed', 'IsWon', 'IsLost'] },
             { EntityName: E_FORECAST_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
             { EntityName: E_LINE_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsRecurring'] },
             // KI-8: a Deal row cannot resolve its own account or contact name, because both FKs point at
@@ -130,7 +173,14 @@ export class DealWorkspaceService {
             Probability: s.Probability, ForecastCategoryTypeID: s.ForecastCategoryTypeID,
         }));
         lookups.DealTypes = rows<NamedRow>(2).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
-        lookups.DealStatusTypes = rows<NamedRow>(3).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        lookups.DealStatusTypes = rows<StatusRow>(3).map<DealStatusLookup>((r) => ({
+            ID: r.ID,
+            Name: r.Name,
+            IsOpen: r.IsOpen === true,
+            IsClosed: r.IsClosed === true,
+            IsWon: r.IsWon === true,
+            IsLost: r.IsLost === true,
+        }));
         lookups.ForecastCategoryTypes = rows<NamedRow>(4).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
         lookups.LineTypes = rows<LineTypeRow>(5).map<LineTypeLookup>((r) => ({
             ID: r.ID, Name: r.Name, IsRecurring: r.IsRecurring === true,
@@ -145,6 +195,48 @@ export class DealWorkspaceService {
         }));
 
         return lookups;
+    }
+
+    /**
+     * The deal roster — what the dashboard and the list both read.
+     *
+     * ONE `RunViews` call for deals AND accounts. The account read exists only to resolve customer
+     * names (KI-8); doing it per row would be the "never query in a loop" rule broken in the most
+     * expensive possible place.
+     *
+     * Returns an empty array on failure rather than throwing, because a roster that cannot load should
+     * render as an empty list with a message, not take the whole section down.
+     */
+    public async LoadRoster(): Promise<DealRosterRow[]> {
+        const rv = new RunView();
+        const results = await rv.RunViews([
+            {
+                EntityName: E_DEAL,
+                OrderBy: 'ExpectedCloseDate ASC, Name ASC',
+                ResultType: 'simple',
+                Fields: [
+                    'ID', 'DealNumber', 'Name', 'AccountID', 'Amount', 'AmountIsComputed', 'Probability',
+                    'ExpectedCloseDate', 'Pipeline', 'PipelineStage', 'DealType', 'DealStatusType',
+                    'OwnerEmployee', 'ForecastCategoryType', 'DealStatusTypeID',
+                ],
+            },
+            { EntityName: E_ACCOUNT, ResultType: 'simple', Fields: ['ID', 'Name'] },
+        ]);
+
+        if (!results?.[0]?.Success) {
+            return [];
+        }
+        const accounts = new Map<string, string>(
+            (results[1]?.Success ? ((results[1].Results ?? []) as NamedRow[]) : []).map((a) => [a.ID, a.Name]),
+        );
+
+        return ((results[0].Results ?? []) as DealRosterQueryRow[]).map<DealRosterRow>((d) => ({
+            ...d,
+            AmountIsComputed: d.AmountIsComputed === true,
+            // "—" rather than a blank cell: an unattached deal is a state, and an empty cell reads as a
+            // rendering fault.
+            CustomerName: (d.AccountID ? accounts.get(d.AccountID) : null) ?? '—',
+        }));
     }
 
     /**

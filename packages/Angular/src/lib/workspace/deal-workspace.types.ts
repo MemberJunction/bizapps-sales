@@ -41,12 +41,27 @@ export interface LineTypeLookup extends DealLookup {
     IsRecurring: boolean;
 }
 
+/**
+ * A deal status plus its BEHAVIOUR FLAGS.
+ *
+ * The flags are here because the dashboard has to answer "how many are open" and "how many did we win",
+ * and the only permitted way to do that is to read `IsOpen` / `IsWon` off this row. Comparing a status
+ * NAME is exactly what `npm run test:vocabulary-gate` exists to catch, and it is also just wrong: a
+ * deployment can rename "Won" to "Signed" and every name-based count silently reports zero.
+ */
+export interface DealStatusLookup extends DealLookup {
+    IsOpen: boolean;
+    IsClosed: boolean;
+    IsWon: boolean;
+    IsLost: boolean;
+}
+
 /** Everything the surface needs to render its pickers. Loaded once per session. */
 export interface DealWorkspaceLookups {
     Pipelines: PipelineLookup[];
     Stages: StageLookup[];
     DealTypes: DealLookup[];
-    DealStatusTypes: DealLookup[];
+    DealStatusTypes: DealStatusLookup[];
     ForecastCategoryTypes: DealLookup[];
     LineTypes: LineTypeLookup[];
     Accounts: DealLookup[];

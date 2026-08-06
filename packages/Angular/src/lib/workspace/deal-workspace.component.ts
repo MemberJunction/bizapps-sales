@@ -139,12 +139,18 @@ export class DealWorkspaceComponent implements OnInit {
         this.Revalidate();
     }
 
-    /** Opens an existing deal, or focuses it if it is already open. */
-    public async OpenDeal(dealID: string): Promise<void> {
+    /**
+     * Opens an existing deal, or focuses it if it is already open.
+     *
+     * Returns whether it opened, so a caller that owns a list can say something useful about the
+     * failure — the likeliest cause is that the deal was deleted since that list loaded, and a silent
+     * no-op is indistinguishable from a dead control.
+     */
+    public async OpenDeal(dealID: string): Promise<boolean> {
         const tabId = `deal-${dealID}`;
         if (this.store.Activate(tabId)) {
             this.cdr.detectChanges();
-            return;
+            return true;
         }
         this.Loading.set(true);
         this.cdr.detectChanges();
@@ -154,7 +160,7 @@ export class DealWorkspaceComponent implements OnInit {
 
         if (!draft) {
             this.Fail(`Deal ${dealID} could not be loaded.`);
-            return;
+            return false;
         }
         this.store.Open({
             Id: tabId,
@@ -165,6 +171,7 @@ export class DealWorkspaceComponent implements OnInit {
         });
         this.store.MarkClean(tabId);
         this.Revalidate();
+        return true;
     }
 
     public SelectTab(id: string): void {
