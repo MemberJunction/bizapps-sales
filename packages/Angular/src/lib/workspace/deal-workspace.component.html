@@ -217,12 +217,6 @@
           <!-- THE FIGURES BELOW ARE TRANSCRIBED, NOT CALCULATED. There is deliberately no total row and
                no auto-fill of Total from gross minus discount: those numbers come off a signed document,
                and the arithmetic on that page is the customer's. -->
-          <p class="dw-note">
-            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-            Enter the figures <strong>as written on the signed order form</strong>. Nothing here is
-            calculated — pricing is resolved by the orders engine in a later phase.
-          </p>
-
           @if (draft.Lines.length === 0) {
             <p class="dw-empty">No lines yet.</p>
           } @else {
@@ -284,12 +278,6 @@
         <section class="dw-pane">
           <!-- NO ROWS IS THE NORMAL CASE. Standard terms are 100% on execution, so an empty schedule
                means "standard" rather than "unfinished" — which is why nothing is pre-filled here. -->
-          <p class="dw-note">
-            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-            Leave this empty for standard terms — <strong>100% payable on execution</strong>. Add rows
-            only when the customer negotiated instalments.
-          </p>
-
           @if (draft.Schedule.length === 0) {
             <p class="dw-empty">Standard terms — no instalment schedule.</p>
           } @else {
@@ -334,12 +322,6 @@
           <!-- THE STANDARD VALUES ARE PLACEHOLDERS, NOT DEFAULTS. Empty means "use the standard term",
                whose real value lives on the contracts ContractType. Writing 5 and 90 into every deal
                would freeze this year's policy into next year's renewals. -->
-          <p class="dw-note">
-            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-            Leave a field empty to accept the standard term. Type a value only to
-            <strong>override</strong> it — an empty field and a typed 5 are different statements.
-          </p>
-
           <div class="dw-grid">
             <label class="dw-field dw-field--check">
               <input type="checkbox" [(ngModel)]="draft.Header.AutoRenew" (ngModelChange)="Touch()" />
@@ -363,7 +345,6 @@
             <label class="dw-field">
               <span class="dw-field__label">Payment method</span>
               <input type="text" [(ngModel)]="draft.Header.PaymentMethod" (ngModelChange)="Touch()" placeholder="ACH" />
-              <small class="dw-field__hint">A label for now; becomes orders' PaymentType later.</small>
             </label>
 
             <label class="dw-field">
@@ -388,11 +369,6 @@
       <!-- ══════════════════════════ VARIANCES ══════════════════════════ -->
       @if (ActivePane === 'variances') {
         <section class="dw-pane">
-          <p class="dw-note">
-            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-            What this deal negotiated <strong>away from standard terms</strong>, in your own words. This
-            is the input to a human legal review — nothing parses it.
-          </p>
           <label class="dw-field dw-field--wide">
             <span class="dw-field__label">Contract variances</span>
             <textarea rows="10" [(ngModel)]="draft.Header.ContractVariances" (ngModelChange)="Touch()"
@@ -410,8 +386,6 @@
     <span workspaceFooterNote>
       @if (SaveBlockedReason) {
         <span class="dw-blocked">{{ SaveBlockedReason }}</span>
-      } @else {
-        Saves the deal, its lines and its schedule in one transaction.
       }
     </span>
   </mj-workspace-card>
