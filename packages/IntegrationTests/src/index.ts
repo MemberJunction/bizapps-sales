@@ -8,9 +8,12 @@
  *     testing: { checkModules: ['@mj-biz-apps/sales-integration-tests'] }
  *
  * BUNDLES
- *   save-deal   SD1–SD14   Saving a deal and its children: four tables in one transaction, numbering,
+ *   save-deal   SD1–SD16   Saving a deal and its children: four tables in one transaction, numbering,
  *                          the explicit-removal semantics of the child collections, and the no-pricing
  *                          guarantee — against a live database with nothing mocked
+ *   close-deal  CD1–CD13   Sales.CloseDeal / Sales.ReopenDeal / the close lock: routing follows the
+ *                          POLICY rather than any name, and a closed deal refuses a raw save — including
+ *                          one made only against its CHILD COLLECTIONS (CD13)
  *
  * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` — this suite exists to
  * write to the database. Without that variable the suite runs ZERO checks and PASSES, which is the
@@ -25,13 +28,16 @@
  *
  * ── STILL SPECIFIED, NOT YET BUILT ──────────────────────────────────────────────────────────────
  *
- * The two checks the definition of done named at S1 are still absent, and both need code that does not
- * exist yet — they are listed here rather than stubbed, so the gap stays visible:
+ * The definition of done named two checks at S1. The second is now BUILT — `close-deal.CD5` proves a
+ * closed deal is immutable at the entity-server level with a direct `BaseEntity.Save()` that is refused
+ * (§7.3, L-17). One remains, and it needs code that does not exist yet, so it is listed rather than
+ * stubbed to keep the gap visible:
  *   1. `Deal.Amount` for a lined deal equals the `Orders.PreviewOrder` result for the same draft (§6).
  *      Needs the pricing bridge — S2, blocked on orders' C0 seam.
- *   2. A closed deal is immutable at the ENTITY-SERVER level, proven by a direct `BaseEntity.Save()`
- *      that is refused (§7.3, L-17). Needs the close lock — S4. Asserting it through the UI would prove
- *      nothing; the point of the lock is that an Action or an agent hits the same wall.
+ *
+ * One check is also deliberately WEAKER than it will eventually be: `close-deal.CD7` asserts that a
+ * stubbed downstream reports `Executed: false` with a reason and invents no ID. When orders links, CD7
+ * is the check that should start failing — and that failure is the signal to write the real one.
  */
 
 // ─── Register the code under test ──────────────────────────────────────────────────────────────
@@ -48,6 +54,8 @@ LoadBizAppsSalesServer();
 
 // ─── The bundles ───────────────────────────────────────────────────────────────────────────────
 import './checks/save-deal.checks.js';
+import './checks/close-deal.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
+export { CloseDealChecks } from './checks/close-deal.checks.js';
 export * from './fixture.js';

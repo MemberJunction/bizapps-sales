@@ -90,7 +90,10 @@ const { IntegrationCheckRegistry } = await import('@memberjunction/testing-integ
 await import('@mj-biz-apps/sales-integration-tests'); // side effect: registers the bundles
 
 const registry = IntegrationCheckRegistry.Instance;
-const ALL_BUNDLES = ['save-deal'];
+// Listed explicitly rather than taken from `registry.GetBundleNames()`, so that a bundle which fails to
+// register — the failure mode a discovered list would hide as a shorter, still-green run — is a hard
+// "no checks matched" instead.
+const ALL_BUNDLES = ['save-deal', 'close-deal'];
 
 /**
  * `Storage` is only read by MJ's own cache bundles. A stub is honest here — ours never touch it, and
