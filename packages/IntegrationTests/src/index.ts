@@ -10,10 +10,16 @@
  * BUNDLES
  *   save-deal   SD1–SD12   Sales.SaveDeal: three tables in one transaction, numbering, and the
  *                          no-pricing guarantee, against a live database with nothing mocked
+ *   product-ref PR1–PR7    DealLine.ProductID end-to-end, and the order-readiness warning derived
+ *                          from `ProductID IS NULL` — the sales half of the D2C product-identity gap
  *
- * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` — this suite exists to
- * write to the database. Without that variable the suite runs ZERO checks and PASSES, which is the
- * vacuous pass this repo's definition of done calls out. Treat "0 checks" as a failure wearing a pass.
+ * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY** for everything that writes. Every `save-deal` check and
+ * PR1–PR3 are `RequiresMutation`; without that variable they are SKIPPED and counted as such, never
+ * silently dropped. Treat a run reporting mostly-skipped as a failure wearing a pass.
+ *
+ * PR4–PR7 are the exception and are marked `RequiresMutation: false` honestly: they exercise
+ * `DealDraft.Validate()`, which is pure client-side logic with no provider behind it. Gating them behind
+ * a database flag they do not need would only hide them.
  *
  * They are safe to run repeatedly because each one rolls its transaction back; see `fixture.ts`.
  *
@@ -47,6 +53,8 @@ LoadBizAppsSalesServer();
 
 // ─── The bundles ───────────────────────────────────────────────────────────────────────────────
 import './checks/save-deal.checks.js';
+import './checks/product-ref.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
+export { ProductRefChecks } from './checks/product-ref.checks.js';
 export * from './fixture.js';
