@@ -20,6 +20,13 @@ export * from './generated/remote_operations';
 export * from './deal-entity';
 
 /**
+ * The typed seams the close flow calls downstream, plus the stub that stands in while neither sibling
+ * is reachable. Read the file header before wiring anything: the blockers are recorded there, and the
+ * `IsLive` flag is what tells a caller whether a routing result means "created" or only "planned".
+ */
+export * from './downstream-seams';
+
+/**
  * Forces the generated entity subclasses to be loaded. Without an explicit
  * import + call, tree-shaking drops the generated entities because they are not
  * directly referenced. Import and call this from the app bootstrap so the
