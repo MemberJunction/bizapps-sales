@@ -54,6 +54,15 @@
       @if (Draft?.IsNew) {
         <span class="dw-context__chip dw-context__chip--new">Unsaved</span>
       }
+      <!-- Order readiness. Present only when something is missing: a chip that said "order-ready" on
+           every healthy deal would be noise on the majority of screens. -->
+      @if (LinesNeedingProduct > 0) {
+        <span class="dw-context__chip dw-context__chip--unready"
+              [title]="OrderReadinessTitle">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+          Not order-ready
+        </span>
+      }
     </div>
 
     @if (Draft; as draft) {

@@ -221,6 +221,25 @@ export class DealWorkspaceComponent implements OnInit {
         return this.Validation.Issues.filter((i) => i.ClientKey === clientKey);
     }
 
+    /**
+     * How many lines still have no catalog product — the deal-level order-readiness signal.
+     *
+     * Derived from the draft on every read rather than cached, matching how `ErrorCount` and
+     * `IssuesForPane` already work. The full explanation of what readiness means lives on
+     * `DealDraft.LinesMissingCatalogProduct`; this is only the binding.
+     */
+    public get LinesNeedingProduct(): number {
+        return this.Draft?.LinesMissingCatalogProduct().length ?? 0;
+    }
+
+    /**
+     * The chip's tooltip. Taken from the draft, which is the SAME call the validation warning uses, so
+     * the tooltip and the sentence listed in the lines pane cannot drift apart.
+     */
+    public get OrderReadinessTitle(): string {
+        return this.Draft?.OrderReadinessMessage() ?? '';
+    }
+
     // ── Editing ────────────────────────────────────────────────────────────────
 
     /**

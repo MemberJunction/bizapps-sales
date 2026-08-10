@@ -372,6 +372,21 @@ export class DealDraft {
             // app computing money, which is the one thing it must never do.
         }
 
+        // ── Order readiness ──
+        //
+        // A WARNING, and deliberately not an error. An early-stage deal legitimately has no resolved
+        // products yet — the rep is transcribing an order form, and the catalog reference arrives at the
+        // hand-off, not at entry. Blocking the save would make the app unusable for the case it is meant
+        // to serve. What this does instead is make the gap VISIBLE, so nobody discovers it at close.
+        //
+        // ONE aggregate issue rather than one per line: the reader's question is "can this deal become an
+        // order", and N copies of the same sentence answers it worse than a count does. Per-line
+        // attribution is already available through the row's own ProductID being empty.
+        const readiness = this.OrderReadinessMessage();
+        if (readiness) {
+            warn('lines', 'ProductID', readiness);
+        }
+
         // ── Payment schedule ──
         for (const row of this.Schedule) {
             if (row.Amount === null && !row.Description) {
@@ -388,6 +403,59 @@ export class DealDraft {
     public IssuesFor(section: DealDraftSection, validation?: DealDraftValidation): DealDraftIssue[] {
         const v = validation ?? this.Validate();
         return v.Issues.filter((i) => i.Section === section);
+    }
+
+    /* ── Order readiness ────────────────────────────────────────────────────── */
+
+    /**
+     * The lines that have no catalog product behind them yet.
+     *
+     * WHY THIS EXISTS. Orders requires a real catalog `ProductID` on every order line, and a sales deal
+     * line carries a transcribed `ProductName` with `ProductID` left null — because sales records what
+     * was written on the order form and defers all product authority to orders, which is the source of
+     * truth. That separation is deliberate, and its cost is a resolution step at the hand-off. Until a
+     * line has been resolved, the deal cannot become an order, and this is the count that says so.
+     *
+     * DERIVED, NOT STORED. There is no readiness column and there must not be one: readiness is just
+     * "does every line have a `ProductID`", and a stored flag would be a second copy of the answer that
+     * can disagree with the lines.
+     *
+     * EVERY line counts, because every deal line is something sold — the two line types are One-Time
+     * and Recurring, and both need a catalog product. If a future line type ever represents something
+     * that is NOT a catalog item, this is where it gets excluded, and it must be excluded by a FLAG on
+     * `DealLineType` rather than by a name.
+     */
+    public LinesMissingCatalogProduct(): DealDraftLine[] {
+        return this.Lines.filter((l) => !l.ProductID);
+    }
+
+    /**
+     * Whether every line could be handed to orders as-is.
+     *
+     * A deal with NO LINES reports ready, which is worth stating because it looks wrong at first
+     * glance. Readiness answers one narrow question — "is any line missing its product reference" —
+     * and an empty deal has no such line. Whether an empty deal should become an order is a different
+     * question, and answering it here would overload one signal with two meanings.
+     */
+    public get IsOrderReady(): boolean {
+        return this.LinesMissingCatalogProduct().length === 0;
+    }
+
+    /**
+     * The one sentence that describes the gap, or null when there is none.
+     *
+     * Lives here so the validation issue and the workspace's readiness chip render IDENTICAL text from
+     * one source. Two copies of a user-facing sentence drift the moment one of them is reworded, and the
+     * drift is invisible until someone notices the tooltip disagrees with the list underneath it.
+     */
+    public OrderReadinessMessage(): string | null {
+        const n = this.LinesMissingCatalogProduct().length;
+        if (n === 0) {
+            return null;
+        }
+        return n === 1
+            ? '1 line needs a catalog product before this deal can become an order.'
+            : `${n} lines need a catalog product before this deal can become an order.`;
     }
 
     /* ── Serialization ──────────────────────────────────────────────────── */

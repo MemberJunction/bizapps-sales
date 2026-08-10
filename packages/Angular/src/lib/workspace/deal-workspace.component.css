@@ -62,6 +62,13 @@
     color: var(--mj-status-warning);
 }
 
+/* Order readiness. Same warning treatment as --new, because it carries the same weight: something is
+   outstanding, nothing is wrong. An error palette here would overstate a deal that is simply early. */
+.dw-context__chip--unready {
+    border-color: var(--mj-status-warning-border);
+    color: var(--mj-status-warning);
+}
+
 /* ── Inner pane tabs ──────────────────────────────────────────────────────── */
 
 .dw-panes {
