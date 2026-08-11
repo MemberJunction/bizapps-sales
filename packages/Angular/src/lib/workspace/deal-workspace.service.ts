@@ -73,6 +73,9 @@ export interface DealRosterRow {
     ForecastCategoryType: string | null;
     /** Kept so anything downstream can branch on the STATUS FLAGS rather than the status name. */
     DealStatusTypeID: string | null;
+    /** Grouping keys for the board. Names render; IDs group. */
+    PipelineID: string | null;
+    PipelineStageID: string | null;
 }
 
 /** Raw roster shape before the account name is joined in. */
@@ -82,6 +85,7 @@ interface DealRosterQueryRow {
     ExpectedCloseDate: string | Date | null; Pipeline: string | null; PipelineStage: string | null;
     DealType: string | null; DealStatusType: string | null; OwnerEmployee: string | null;
     ForecastCategoryType: string | null; DealStatusTypeID: string | null;
+    PipelineID: string | null; PipelineStageID: string | null;
 }
 
 /** What a save attempt reports back. Structured, so the caller can badge tabs and mark fields. */
@@ -97,9 +101,9 @@ export interface DealSaveOutcome {
 
 /** Row shapes as they come back from RunView with `ResultType: 'simple'`. */
 interface PipelineRow { ID: string; Name: string; CompanyID: string; Company: string | null }
-interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null }
+interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null }
 interface NamedRow { ID: string; Name: string }
-interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean }
+interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean; LocksDeal: boolean }
 interface LossReasonRow extends NamedRow { RequiresNotes: boolean }
 interface ContactRow { ID: string; FirstName: string | null; LastName: string | null; Email: string | null }
 interface EmployeeRow { ID: string; FirstLast: string | null }
@@ -158,12 +162,12 @@ export class DealWorkspaceService {
         const rv = new RunView();
         const params: RunViewParams[] = [
             { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'CompanyID', 'Company'] },
-            { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID'] },
+            { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'] },
             { EntityName: E_DEAL_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
             // The FLAGS come back with the status, because the dashboard counts open/won deals and the
             // only permitted way to decide either is to read the flag. Comparing a status name is what
             // the vocabulary gate forbids, and it also breaks the moment somebody renames "Won".
-            { EntityName: E_STATUS_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsOpen', 'IsClosed', 'IsWon', 'IsLost'] },
+            { EntityName: E_STATUS_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsOpen', 'IsClosed', 'IsWon', 'IsLost', 'LocksDeal'] },
             { EntityName: E_FORECAST_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
             // KI-8: a Deal row cannot resolve its own account or contact name, because both FKs point at
             // IsA CHILDREN whose Name lives on the parent and CodeGen generates no lookup join through
@@ -218,6 +222,7 @@ export class DealWorkspaceService {
         lookups.Stages = rows<StageRow>(at('Stages')).map<StageLookup>((s) => ({
             ID: s.ID, Name: s.Name, PipelineID: s.PipelineID, DisplayOrder: s.DisplayOrder,
             Probability: s.Probability, ForecastCategoryTypeID: s.ForecastCategoryTypeID,
+            DealStatusTypeID: s.DealStatusTypeID ?? null,
         }));
         lookups.DealTypes = rows<NamedRow>(at('DealTypes')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
         lookups.DealStatusTypes = rows<StatusRow>(at('DealStatusTypes')).map<DealStatusLookup>((r) => ({
@@ -227,6 +232,7 @@ export class DealWorkspaceService {
             IsClosed: r.IsClosed === true,
             IsWon: r.IsWon === true,
             IsLost: r.IsLost === true,
+            LocksDeal: r.LocksDeal === true,
         }));
         lookups.ForecastCategoryTypes = rows<NamedRow>(at('ForecastCategoryTypes')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
         // Index 9 — the loss reasons queried above. The close panel cannot demand a reason it has no
@@ -268,6 +274,9 @@ export class DealWorkspaceService {
                     'ID', 'DealNumber', 'Name', 'AccountID', 'Amount', 'AmountIsComputed', 'Probability',
                     'ExpectedCloseDate', 'Pipeline', 'PipelineStage', 'DealType', 'DealStatusType',
                     'OwnerEmployee', 'ForecastCategoryType', 'DealStatusTypeID',
+                    // The IDs, not just the display names: a board groups deals into stage columns and
+                    // filters by pipeline, and neither can be done from a rendered name.
+                    'PipelineID', 'PipelineStageID',
                 ],
             },
             { EntityName: E_ACCOUNT, ResultType: 'simple', Fields: ['ID', 'Name'] },

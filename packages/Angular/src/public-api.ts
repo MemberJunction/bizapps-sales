@@ -69,6 +69,11 @@ export { DealStageEventFormComponentExtended } from './lib/custom/deal-stage-eve
 export { DirtyServerOwnedFields, RefuseServerOwnedEdits } from './lib/custom/server-owned-fields';
 
 export { DealWorkspaceComponent } from './lib/workspace/deal-workspace.component';
+
+// The board. Exported for reuse and no more: it needs no resource shim and no anchor, because the section
+// imports it directly as a standalone component rather than resolving it through the ClassFactory.
+export { DealBoardComponent } from './lib/board/deal-board.component';
+export type { BoardColumn } from './lib/board/deal-board.component';
 export { DealWorkspaceService } from './lib/workspace/deal-workspace.service';
 export type { DealSaveOutcome, DealRosterRow } from './lib/workspace/deal-workspace.service';
 export * from './lib/workspace/deal-workspace.types';

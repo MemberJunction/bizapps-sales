@@ -72,9 +72,10 @@ import {
     type SalesNavBadges,
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
+import { DealBoardComponent } from '../board/deal-board.component';
 import { DealWorkspaceComponent } from '../workspace/deal-workspace.component';
 import { DealWorkspaceService, type DealRosterRow } from '../workspace/deal-workspace.service';
-import type { DealStatusLookup } from '../workspace/deal-workspace.types';
+import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
 
 /**
  * The account entity, for opening a customer as its own Explorer tab.
@@ -130,6 +131,7 @@ function UtcDatePart(value: string | Date): string {
         MJLeftNavContentComponent,
         MJButtonDirective,
         DealWorkspaceComponent,
+        DealBoardComponent,
     ],
     changeDetection: ChangeDetectionStrategy.OnPush,
     templateUrl: './sales-section.component.html',
@@ -162,6 +164,16 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** Status flags, so nothing here has to compare a status NAME. */
     private statuses: DealStatusLookup[] = [];
+
+    /**
+     * Pipelines, stages and statuses the BOARD renders from.
+     *
+     * Public because they are `@Input()`s on the board; held here rather than fetched by the board so the
+     * two pages read one roster and one lookup set, and cannot disagree about what exists.
+     */
+    public Pipelines: PipelineLookup[] = [];
+    public Stages: StageLookup[] = [];
+    public DealStatusTypes: DealStatusLookup[] = [];
 
     public async ngOnInit(): Promise<void> {
         this.Page = DefaultPageFor(this.Section);
@@ -214,6 +226,9 @@ export class MJSSalesSectionComponent implements OnInit {
         ]);
         this.Deals = roster;
         this.statuses = lookups.DealStatusTypes;
+        this.Pipelines = lookups.Pipelines;
+        this.Stages = lookups.Stages;
+        this.DealStatusTypes = lookups.DealStatusTypes;
         this.Loading = false;
         if (!roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
