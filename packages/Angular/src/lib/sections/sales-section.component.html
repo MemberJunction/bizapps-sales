@@ -173,6 +173,26 @@
           }
         </div>
 
+        <!-- ═════════════════════════ BOARD ═════════════════════════ -->
+        <!-- Rendered with @if rather than [hidden]: unlike the workspace it holds no unsaved state, so
+             there is nothing to lose by tearing it down, and a hidden board with a horizontal scroller
+             is a layout hazard on the pages that are showing. -->
+        <div class="wrap wrap--board" [hidden]="Page !== 'board'">
+          <div class="sechead"><h2>Board</h2></div>
+
+          @if (Loading) {
+            <mj-loading></mj-loading>
+          } @else if (Page === 'board') {
+            <mjs-deal-board
+              [Deals]="Deals"
+              [Pipelines]="Pipelines"
+              [Stages]="Stages"
+              [DealStatusTypes]="DealStatusTypes"
+              (DealOpened)="OpenDeal($event)"
+              (StageMoved)="Refresh()"></mjs-deal-board>
+          }
+        </div>
+
         <!-- ═════════════════════════ WORKSPACE ═════════════════════════ -->
         <!-- MOUNTED ONCE, HIDDEN WHEN ANOTHER PAGE SHOWS. The open-documents strip lives inside this
              component, so destroying it would throw away every open deal — switching to the list and

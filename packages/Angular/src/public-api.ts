@@ -51,6 +51,11 @@ export * from './lib/nav/sales-nav.model';
 // The deal workspace and the pieces a host might legitimately reuse. The workspace is a standalone
 // component the section mounts; it has no resource shim of its own any more — the section owns the tab.
 export { DealWorkspaceComponent } from './lib/workspace/deal-workspace.component';
+
+// The board. Exported for reuse and no more: it needs no resource shim and no anchor, because the section
+// imports it directly as a standalone component rather than resolving it through the ClassFactory.
+export { DealBoardComponent } from './lib/board/deal-board.component';
+export type { BoardColumn } from './lib/board/deal-board.component';
 export { DealWorkspaceService } from './lib/workspace/deal-workspace.service';
 export type { DealSaveOutcome, DealRosterRow } from './lib/workspace/deal-workspace.service';
 export * from './lib/workspace/deal-workspace.types';
