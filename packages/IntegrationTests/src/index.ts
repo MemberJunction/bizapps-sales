@@ -10,6 +10,8 @@
  * BUNDLES
  *   save-deal   SD1–SD12   Sales.SaveDeal: three tables in one transaction, numbering, and the
  *                          no-pricing guarantee, against a live database with nothing mocked
+ *   board-move  BD1–BD4    a stage move appends EXACTLY ONE DealStageEvent, stamped with the values the
+ *                          deal held on the way OUT — the pipeline board's one destructive gesture
  *
  * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` — this suite exists to
  * write to the database. Without that variable the suite runs ZERO checks and PASSES, which is the
@@ -47,6 +49,8 @@ LoadBizAppsSalesServer();
 
 // ─── The bundles ───────────────────────────────────────────────────────────────────────────────
 import './checks/save-deal.checks.js';
+import './checks/board-move.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
+export { BoardMoveChecks } from './checks/board-move.checks.js';
 export * from './fixture.js';
