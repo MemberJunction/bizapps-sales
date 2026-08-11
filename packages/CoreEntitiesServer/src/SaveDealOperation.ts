@@ -22,6 +22,7 @@
 import {
     BaseEntity,
     BaseRemotableOperation,
+    DatabaseProviderBase,
     IMetadataProvider,
     IRunViewProvider,
     LogError,
@@ -37,12 +38,14 @@ import {
     type SalesSaveDealOutput,
     type mjBizAppsSalesDealLineEntity,
     type mjBizAppsSalesDealPaymentScheduleEntity,
+    type mjBizAppsSalesDealStageEventEntity,
 } from '@mj-biz-apps/sales-entities';
 
 import { DealEntityServer } from './DealEntityServer.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
+const STAGE_EVENT_ENTITY = 'MJ_BizApps_Sales: Deal Stage Events';
 
 /** Header fields copied straight through. Listed rather than spread so an unexpected key cannot ride in. */
 const HEADER_FIELDS = [
@@ -136,6 +139,9 @@ export class SaveDealOperation extends SalesSaveDealOperationBase {
             return { ...empty, Issues: [issue('party', 'A deal needs a pipeline.', 'PipelineID')] };
         }
 
+        const db = provider as unknown as DatabaseProviderBase;
+        let transactionOpen = false;
+
         try {
             const deal = await provider.GetEntityObject<DealEntityServer>(DEAL_ENTITY, user);
             const created = !input.ID;
@@ -145,6 +151,13 @@ export class SaveDealOperation extends SalesSaveDealOperationBase {
             } else if (!(await deal.Load(input.ID as string))) {
                 return { ...empty, Issues: [issue('party', `Deal ${input.ID} was not found.`, 'ID')] };
             }
+
+            // The PERSISTED stage, captured before the payload overwrites it. This is the only moment it
+            // is still readable, and it is what makes the transition detectable at all.
+            const priorStageID = created ? null : (deal.PipelineStageID ?? null);
+            const priorStatusID = created ? null : (deal.DealStatusTypeID ?? null);
+            const priorAmount = created ? null : (deal.Amount ?? null);
+            const priorProbability = created ? null : (deal.Probability ?? null);
 
             assignFields(deal, input, HEADER_FIELDS);
 
@@ -170,14 +183,36 @@ export class SaveDealOperation extends SalesSaveDealOperationBase {
                 await this.applySchedule(deal, input.PaymentSchedule, provider, user);
             }
 
+            // A stage transition has to land with its provenance row or not at all — a moved deal with no
+            // event is a hole in an append-only log, and an event for a move that failed is worse. So the
+            // save and the append share ONE explicit transaction. Nesting is fine: `DealEntityServer.Save`
+            // opens its own inside this one as a savepoint, which the integration suite already relies on.
+            const stageChanged = !created && (deal.PipelineStageID ?? null) !== priorStageID;
+
+            await db.BeginTransaction();
+            transactionOpen = true;
+
             if (!(await deal.Save())) {
+                const message = deal.LatestResult?.CompleteMessage ?? 'unknown error';
+                await db.RollbackTransaction();
+                transactionOpen = false;
                 return {
                     ...empty,
-                    Issues: [
-                        issue('party', `The deal could not be saved: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`),
-                    ],
+                    Issues: [issue('party', `The deal could not be saved: ${message}`)],
                 };
             }
+
+            if (stageChanged) {
+                await this.appendStageEvent(
+                    deal,
+                    { StageID: priorStageID, StatusID: priorStatusID, Amount: priorAmount, Probability: priorProbability },
+                    provider,
+                    user,
+                );
+            }
+
+            await db.CommitTransaction();
+            transactionOpen = false;
 
             // The owner is expressed as INTENT and materialized as a DealTeamMember row, from which the
             // denormalized Deal.OwnerEmployeeID stamp is derived. It runs after the save because the
@@ -212,8 +247,56 @@ export class SaveDealOperation extends SalesSaveDealOperationBase {
                 })),
             };
         } catch (err) {
+            if (transactionOpen) {
+                try {
+                    await db.RollbackTransaction();
+                } catch (rollbackErr) {
+                    LogError(`Sales.SaveDeal: rollback failed: ${rollbackErr}`);
+                }
+            }
             LogError(`Sales.SaveDeal failed: ${err}`);
             return { ...empty, Issues: [issue('party', `The deal could not be saved: ${err}`)] };
+        }
+    }
+
+    /**
+     * Append the `DealStageEvent` for a stage transition.
+     *
+     * APPEND-ONLY, and it stamps `AmountAtTransition` / `ProbabilityAtTransition` from the values the deal
+     * carried as it left the old stage. Without those stamps, "what did we think this was worth when it
+     * moved" is unanswerable the moment an amount changes — which is the whole reason the table exists.
+     *
+     * The stamps come from the PRIOR values, not the new ones. A board drag applies the target stage's
+     * probability default, so reading `deal.Probability` here would record the number the deal acquired by
+     * arriving rather than the one it held on the way out, and every velocity report built on it would be
+     * quietly wrong.
+     *
+     * Note what is NOT here: no close, no routing, no downstream call. A stage change is a stage change.
+     * Closing is `Sales.CloseDeal` and stays an explicit act.
+     */
+    private async appendStageEvent(
+        deal: DealEntityServer,
+        prior: { StageID: string | null; StatusID: string | null; Amount: number | null; Probability: number | null },
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<void> {
+        const event = await provider.GetEntityObject<mjBizAppsSalesDealStageEventEntity>(STAGE_EVENT_ENTITY, user);
+        event.NewRecord();
+        event.DealID = deal.ID;
+        event.FromStageID = prior.StageID;
+        event.ToStageID = deal.PipelineStageID;
+        event.FromDealStatusTypeID = prior.StatusID;
+        event.ToDealStatusTypeID = deal.DealStatusTypeID;
+        event.ChangedByUserID = user.ID;
+        event.ChangedAt = new Date();
+        event.AmountAtTransition = prior.Amount;
+        event.ProbabilityAtTransition = prior.Probability;
+
+        if (!(await event.Save())) {
+            // Thrown, not returned: the caller's transaction must roll the deal move back with it.
+            throw new Error(
+                `the stage event could not be written: ${event.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+            );
         }
     }
 
