@@ -13,7 +13,9 @@
  *                          guarantee — against a live database with nothing mocked
  *   close-deal  CD1–CD13   Sales.CloseDeal / Sales.ReopenDeal / the close lock: routing follows the
  *                          POLICY rather than any name, and a closed deal refuses a raw save — including
- *                          one made only against its CHILD COLLECTIONS (CD13)
+ *                          one made only against its CHILD COLLECTIONS (CD13)
+ *   board-move  BD1–BD4    a stage move appends EXACTLY ONE DealStageEvent, stamped with the values the
+ *                          deal held on the way OUT — the pipeline board's one destructive gesture
  *
  * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` — this suite exists to
  * write to the database. Without that variable the suite runs ZERO checks and PASSES, which is the
@@ -55,12 +57,14 @@ LoadBizAppsSalesServer();
 // ─── The bundles ───────────────────────────────────────────────────────────────────────────────
 import './checks/save-deal.checks.js';
 import './checks/close-deal.checks.js';
+import './checks/board-move.checks.js';
 import './checks/product-picker.checks.js';
 import './checks/close-won-order.checks.js';
 import './checks/close-won-contract.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
+export { BoardMoveChecks } from './checks/board-move.checks.js';
 export { ProductPickerChecks } from './checks/product-picker.checks.js';
 export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
 export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
