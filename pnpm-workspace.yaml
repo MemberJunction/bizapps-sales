@@ -36,10 +36,6 @@ onlyBuiltDependencies:
   - tesseract.js
 
 packages:
-  # NOTE the extra glob versus accounting/orders: sales is the only app in the family that
-  # ships apps/ (MJAPI + MJExplorer). Copying their list verbatim would leave both out of the
-  # workspace, and pnpm would try to resolve their workspace deps from the registry.
-  - 'apps/*'
   - 'packages/*'
 
 # Dependency overrides live in package.json under `pnpm.overrides`, matching
