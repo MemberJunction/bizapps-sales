@@ -441,31 +441,6 @@
         }
     </mj-collapsible-panel>
 
-    <!-- Deal Payment Schedules Section -->
-    <mj-collapsible-panel
-        SectionKey="mJBizAppsSalesDealPaymentSchedules"
-        SectionName="Deal Payment Schedules"
-        Icon="fa fa-table"
-        Variant="related-entity"
-        [Form]="this"
-        [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealPaymentSchedules')"
-        [DefaultExpanded]="false">
-        @if (record.IsSaved) {
-        <div>
-            <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Payment Schedules','DealID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Payment Schedules')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealPaymentSchedules')"
-                [ShowToolbar]="false"
-                (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealPaymentSchedules', $event.totalRowCount)"
-                >
-            </mj-explorer-entity-data-grid>
-        </div>
-        }
-    </mj-collapsible-panel>
-
     <!-- Deal Stage Events Section -->
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesDealStageEvents"
@@ -510,6 +485,31 @@
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealTeamMembers', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Deal Payment Schedules Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsSalesDealPaymentSchedules"
+        SectionName="Deal Payment Schedules"
+        Icon="fa fa-table"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealPaymentSchedules')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Payment Schedules','DealID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Payment Schedules')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealPaymentSchedules')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealPaymentSchedules', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

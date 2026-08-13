@@ -17,9 +17,9 @@ export class mjBizAppsSalesDealStatusTypeFormComponent extends BaseFormComponent
         await super.ngOnInit();
         this.initSections([
             { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
-            { sectionKey: 'mJBizAppsSalesDeals', sectionName: 'Deals', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealStageEventsFromDealStatusTypeID', sectionName: 'Deal Stage Events (From Deal Status Type ID)', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealStageEventsToDealStatusTypeID', sectionName: 'Deal Stage Events (To Deal Status Type ID)', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesDeals', sectionName: 'Deals', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesPipelineStages', sectionName: 'Pipeline Stages', isExpanded: false }
         ]);
     }

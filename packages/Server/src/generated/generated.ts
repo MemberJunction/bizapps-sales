@@ -2039,14 +2039,14 @@ export class mjBizAppsSalesDealStatusType_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_DealStatusTypeIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
     @Field(() => [mjBizAppsSalesDealStageEvent_])
     mjBizAppsSalesDealStageEvents_FromDealStatusTypeIDArray: mjBizAppsSalesDealStageEvent_[]; // Link to mjBizAppsSalesDealStageEvents
     
     @Field(() => [mjBizAppsSalesDealStageEvent_])
     mjBizAppsSalesDealStageEvents_ToDealStatusTypeIDArray: mjBizAppsSalesDealStageEvent_[]; // Link to mjBizAppsSalesDealStageEvents
+    
+    @Field(() => [mjBizAppsSalesDeal_])
+    mjBizAppsSalesDeals_DealStatusTypeIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
     
     @Field(() => [mjBizAppsSalesPipelineStage_])
     mjBizAppsSalesPipelineStages_DealStatusTypeIDArray: mjBizAppsSalesPipelineStage_[]; // Link to mjBizAppsSalesPipelineStages
@@ -2198,16 +2198,6 @@ export class mjBizAppsSalesDealStatusTypeResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_DealStatusTypeIDArray(@Root() mjbizappssalesdealstatustype_: mjBizAppsSalesDealStatusType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('DealStatusTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealstatustype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @FieldResolver(() => [mjBizAppsSalesDealStageEvent_])
     async mjBizAppsSalesDealStageEvents_FromDealStatusTypeIDArray(@Root() mjbizappssalesdealstatustype_: mjBizAppsSalesDealStatusType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Stage Events', userPayload);
@@ -2225,6 +2215,16 @@ export class mjBizAppsSalesDealStatusTypeResolver extends ResolverBase {
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealStageEvents')} WHERE ${provider.QuoteIdentifier('ToDealStatusTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Stage Events', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealstatustype_.ID], undefined, this.GetUserFromPayload(userPayload));
         const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Stage Events', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsSalesDeal_])
+    async mjBizAppsSalesDeals_DealStatusTypeIDArray(@Root() mjbizappssalesdealstatustype_: mjBizAppsSalesDealStatusType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('DealStatusTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealstatustype_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         
@@ -2545,11 +2545,11 @@ export class mjBizAppsSalesDealType_ {
     @MaxLength(200)
     DefaultPipeline?: string;
         
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_DealTypeIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
     @Field(() => [mjBizAppsSalesPipeline_])
     mjBizAppsSalesPipelines_DealTypeIDArray: mjBizAppsSalesPipeline_[]; // Link to mjBizAppsSalesPipelines
+    
+    @Field(() => [mjBizAppsSalesDeal_])
+    mjBizAppsSalesDeals_DealTypeIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
     
 }
 
@@ -2686,16 +2686,6 @@ export class mjBizAppsSalesDealTypeResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_DealTypeIDArray(@Root() mjbizappssalesdealtype_: mjBizAppsSalesDealType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('DealTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealtype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @FieldResolver(() => [mjBizAppsSalesPipeline_])
     async mjBizAppsSalesPipelines_DealTypeIDArray(@Root() mjbizappssalesdealtype_: mjBizAppsSalesDealType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipelines', userPayload);
@@ -2703,6 +2693,16 @@ export class mjBizAppsSalesDealTypeResolver extends ResolverBase {
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelines')} WHERE ${provider.QuoteIdentifier('DealTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipelines', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealtype_.ID], undefined, this.GetUserFromPayload(userPayload));
         const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipelines', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsSalesDeal_])
+    async mjBizAppsSalesDeals_DealTypeIDArray(@Root() mjbizappssalesdealtype_: mjBizAppsSalesDealType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('DealTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealtype_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         
@@ -2944,14 +2944,14 @@ export class mjBizAppsSalesDeal_ {
     @Field(() => [mjBizAppsSalesDealLine_])
     mjBizAppsSalesDealLines_DealIDArray: mjBizAppsSalesDealLine_[]; // Link to mjBizAppsSalesDealLines
     
-    @Field(() => [mjBizAppsSalesDealPaymentSchedule_])
-    mjBizAppsSalesDealPaymentSchedules_DealIDArray: mjBizAppsSalesDealPaymentSchedule_[]; // Link to mjBizAppsSalesDealPaymentSchedules
-    
     @Field(() => [mjBizAppsSalesDealStageEvent_])
     mjBizAppsSalesDealStageEvents_DealIDArray: mjBizAppsSalesDealStageEvent_[]; // Link to mjBizAppsSalesDealStageEvents
     
     @Field(() => [mjBizAppsSalesDealTeamMember_])
     mjBizAppsSalesDealTeamMembers_DealIDArray: mjBizAppsSalesDealTeamMember_[]; // Link to mjBizAppsSalesDealTeamMembers
+    
+    @Field(() => [mjBizAppsSalesDealPaymentSchedule_])
+    mjBizAppsSalesDealPaymentSchedules_DealIDArray: mjBizAppsSalesDealPaymentSchedule_[]; // Link to mjBizAppsSalesDealPaymentSchedules
     
 }
 
@@ -3312,16 +3312,6 @@ export class mjBizAppsSalesDealResolver extends ResolverBase {
         return result;
     }
         
-    @FieldResolver(() => [mjBizAppsSalesDealPaymentSchedule_])
-    async mjBizAppsSalesDealPaymentSchedules_DealIDArray(@Root() mjbizappssalesdeal_: mjBizAppsSalesDeal_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Payment Schedules', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealPaymentSchedules')} WHERE ${provider.QuoteIdentifier('DealID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Payment Schedules', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdeal_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Payment Schedules', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @FieldResolver(() => [mjBizAppsSalesDealStageEvent_])
     async mjBizAppsSalesDealStageEvents_DealIDArray(@Root() mjbizappssalesdeal_: mjBizAppsSalesDeal_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Stage Events', userPayload);
@@ -3339,6 +3329,16 @@ export class mjBizAppsSalesDealResolver extends ResolverBase {
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealTeamMembers')} WHERE ${provider.QuoteIdentifier('DealID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Team Members', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdeal_.ID], undefined, this.GetUserFromPayload(userPayload));
         const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Team Members', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsSalesDealPaymentSchedule_])
+    async mjBizAppsSalesDealPaymentSchedules_DealIDArray(@Root() mjbizappssalesdeal_: mjBizAppsSalesDeal_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Payment Schedules', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealPaymentSchedules')} WHERE ${provider.QuoteIdentifier('DealID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Payment Schedules', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdeal_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Payment Schedules', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         
@@ -3412,14 +3412,14 @@ export class mjBizAppsSalesForecastCategoryType_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => [mjBizAppsSalesPipeline_])
-    mjBizAppsSalesPipelines_DefaultForecastCategoryTypeIDArray: mjBizAppsSalesPipeline_[]; // Link to mjBizAppsSalesPipelines
+    @Field(() => [mjBizAppsSalesPipelineStage_])
+    mjBizAppsSalesPipelineStages_ForecastCategoryTypeIDArray: mjBizAppsSalesPipelineStage_[]; // Link to mjBizAppsSalesPipelineStages
     
     @Field(() => [mjBizAppsSalesDeal_])
     mjBizAppsSalesDeals_ForecastCategoryTypeIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
     
-    @Field(() => [mjBizAppsSalesPipelineStage_])
-    mjBizAppsSalesPipelineStages_ForecastCategoryTypeIDArray: mjBizAppsSalesPipelineStage_[]; // Link to mjBizAppsSalesPipelineStages
+    @Field(() => [mjBizAppsSalesPipeline_])
+    mjBizAppsSalesPipelines_DefaultForecastCategoryTypeIDArray: mjBizAppsSalesPipeline_[]; // Link to mjBizAppsSalesPipelines
     
 }
 
@@ -3556,13 +3556,13 @@ export class mjBizAppsSalesForecastCategoryTypeResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesPipeline_])
-    async mjBizAppsSalesPipelines_DefaultForecastCategoryTypeIDArray(@Root() mjbizappssalesforecastcategorytype_: mjBizAppsSalesForecastCategoryType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipelines', userPayload);
+    @FieldResolver(() => [mjBizAppsSalesPipelineStage_])
+    async mjBizAppsSalesPipelineStages_ForecastCategoryTypeIDArray(@Root() mjbizappssalesforecastcategorytype_: mjBizAppsSalesForecastCategoryType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipeline Stages', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelines')} WHERE ${provider.QuoteIdentifier('DefaultForecastCategoryTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipelines', userPayload, EntityPermissionType.Read, 'AND');
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelineStages')} WHERE ${provider.QuoteIdentifier('ForecastCategoryTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipeline Stages', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesforecastcategorytype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipelines', rows, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipeline Stages', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         
@@ -3576,13 +3576,13 @@ export class mjBizAppsSalesForecastCategoryTypeResolver extends ResolverBase {
         return result;
     }
         
-    @FieldResolver(() => [mjBizAppsSalesPipelineStage_])
-    async mjBizAppsSalesPipelineStages_ForecastCategoryTypeIDArray(@Root() mjbizappssalesforecastcategorytype_: mjBizAppsSalesForecastCategoryType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipeline Stages', userPayload);
+    @FieldResolver(() => [mjBizAppsSalesPipeline_])
+    async mjBizAppsSalesPipelines_DefaultForecastCategoryTypeIDArray(@Root() mjbizappssalesforecastcategorytype_: mjBizAppsSalesForecastCategoryType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipelines', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelineStages')} WHERE ${provider.QuoteIdentifier('ForecastCategoryTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipeline Stages', userPayload, EntityPermissionType.Read, 'AND');
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelines')} WHERE ${provider.QuoteIdentifier('DefaultForecastCategoryTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipelines', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesforecastcategorytype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipeline Stages', rows, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipelines', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         
@@ -4926,14 +4926,14 @@ export class mjBizAppsSalesPipeline_ {
     @Field(() => [mjBizAppsSalesDealType_])
     mjBizAppsSalesDealTypes_DefaultPipelineIDArray: mjBizAppsSalesDealType_[]; // Link to mjBizAppsSalesDealTypes
     
-    @Field(() => [mjBizAppsSalesPipelineStage_])
-    mjBizAppsSalesPipelineStages_PipelineIDArray: mjBizAppsSalesPipelineStage_[]; // Link to mjBizAppsSalesPipelineStages
+    @Field(() => [mjBizAppsSalesDeal_])
+    mjBizAppsSalesDeals_PipelineIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
     
     @Field(() => [mjBizAppsSalesForecastSnapshot_])
     mjBizAppsSalesForecastSnapshots_PipelineIDArray: mjBizAppsSalesForecastSnapshot_[]; // Link to mjBizAppsSalesForecastSnapshots
     
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_PipelineIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
+    @Field(() => [mjBizAppsSalesPipelineStage_])
+    mjBizAppsSalesPipelineStages_PipelineIDArray: mjBizAppsSalesPipelineStage_[]; // Link to mjBizAppsSalesPipelineStages
     
 }
 
@@ -5098,13 +5098,13 @@ export class mjBizAppsSalesPipelineResolver extends ResolverBase {
         return result;
     }
         
-    @FieldResolver(() => [mjBizAppsSalesPipelineStage_])
-    async mjBizAppsSalesPipelineStages_PipelineIDArray(@Root() mjbizappssalespipeline_: mjBizAppsSalesPipeline_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipeline Stages', userPayload);
+    @FieldResolver(() => [mjBizAppsSalesDeal_])
+    async mjBizAppsSalesDeals_PipelineIDArray(@Root() mjbizappssalespipeline_: mjBizAppsSalesPipeline_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelineStages')} WHERE ${provider.QuoteIdentifier('PipelineID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipeline Stages', userPayload, EntityPermissionType.Read, 'AND');
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('PipelineID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalespipeline_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipeline Stages', rows, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         
@@ -5118,13 +5118,13 @@ export class mjBizAppsSalesPipelineResolver extends ResolverBase {
         return result;
     }
         
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_PipelineIDArray(@Root() mjbizappssalespipeline_: mjBizAppsSalesPipeline_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
+    @FieldResolver(() => [mjBizAppsSalesPipelineStage_])
+    async mjBizAppsSalesPipelineStages_PipelineIDArray(@Root() mjbizappssalespipeline_: mjBizAppsSalesPipeline_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipeline Stages', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('PipelineID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelineStages')} WHERE ${provider.QuoteIdentifier('PipelineID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipeline Stages', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalespipeline_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipeline Stages', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         
@@ -5681,14 +5681,14 @@ export class mjBizAppsSalesSalesContact_ {
     @MaxLength(200)
     LeadSourceType?: string;
         
-    @Field(() => [mjBizAppsSalesDealContactRole_])
-    mjBizAppsSalesDealContactRoles_SalesContactIDArray: mjBizAppsSalesDealContactRole_[]; // Link to mjBizAppsSalesDealContactRoles
-    
     @Field(() => [mjBizAppsSalesDeal_])
     mjBizAppsSalesDeals_BillingContactIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
     
     @Field(() => [mjBizAppsSalesDeal_])
     mjBizAppsSalesDeals_PrimaryContactIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
+    
+    @Field(() => [mjBizAppsSalesDealContactRole_])
+    mjBizAppsSalesDealContactRoles_SalesContactIDArray: mjBizAppsSalesDealContactRole_[]; // Link to mjBizAppsSalesDealContactRoles
     
 }
 
@@ -5915,16 +5915,6 @@ export class mjBizAppsSalesSalesContactResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDealContactRole_])
-    async mjBizAppsSalesDealContactRoles_SalesContactIDArray(@Root() mjbizappssalessalescontact_: mjBizAppsSalesSalesContact_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Contact Roles', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealContactRoles')} WHERE ${provider.QuoteIdentifier('SalesContactID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Contact Roles', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalessalescontact_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Contact Roles', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @FieldResolver(() => [mjBizAppsSalesDeal_])
     async mjBizAppsSalesDeals_BillingContactIDArray(@Root() mjbizappssalessalescontact_: mjBizAppsSalesSalesContact_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
@@ -5942,6 +5932,16 @@ export class mjBizAppsSalesSalesContactResolver extends ResolverBase {
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('PrimaryContactID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalessalescontact_.ID], undefined, this.GetUserFromPayload(userPayload));
         const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsSalesDealContactRole_])
+    async mjBizAppsSalesDealContactRoles_SalesContactIDArray(@Root() mjbizappssalessalescontact_: mjBizAppsSalesSalesContact_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Contact Roles', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealContactRoles')} WHERE ${provider.QuoteIdentifier('SalesContactID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Contact Roles', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalessalescontact_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Contact Roles', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         
