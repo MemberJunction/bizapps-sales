@@ -27,12 +27,12 @@
     "zod": "~3.24.4"
   },
   "peerDependencies": {
-    "@memberjunction/actions": "^5.50.0",
-    "@memberjunction/actions-base": "^5.50.0",
-    "@memberjunction/core": "^5.50.0",
-    "@memberjunction/core-entities": "^5.50.0",
-    "@memberjunction/core-entities-server": "^5.50.0",
-    "@memberjunction/global": "^5.50.0"
+    "@memberjunction/actions": "^6.1.0-edge.2",
+    "@memberjunction/actions-base": "^6.1.0-edge.2",
+    "@memberjunction/core": "^6.1.0-edge.2",
+    "@memberjunction/core-entities": "^6.1.0-edge.2",
+    "@memberjunction/core-entities-server": "^6.1.0-edge.2",
+    "@memberjunction/global": "^6.1.0-edge.2"
   },
   "repository": {
     "type": "git",
