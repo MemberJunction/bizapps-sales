@@ -40,7 +40,7 @@
 # AFTER THIS, still by hand (they need judgement, not automation):
 #   npm run mj:codegen                     # regenerate entity metadata + SQL objects
 #   scripts/append-codegen.sh              # append the generated SQL below the migration's banner
-#   npm run mj -- sync push --dir metadata # seed the type tables
+#   pnpm mj sync push --dir metadata # seed the type tables
 #
 # Usage: scripts/rebuild-db.sh
 set -euo pipefail
@@ -130,6 +130,6 @@ cat <<'NEXT'
 Next, in order:
   npm run mj:codegen
   scripts/append-codegen.sh
-  npm run mj -- sync push --dir metadata
+  pnpm mj sync push --dir metadata
   npm run build
 NEXT

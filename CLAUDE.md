@@ -166,7 +166,7 @@ safe because rebuilding from zero is routine:
 scripts/rebuild-db.sh                    # drop+create, MJ core, bizapps-common, this app's DDL
 npm run mj:codegen                       # PASS 1 — entity metadata + SQL objects
 scripts/append-codegen.sh                # fold generated SQL below the baseline's banner
-npm run mj -- sync push --dir metadata    # seed the type tables + remote-operation rows
+pnpm mj sync push --dir metadata    # seed the type tables + remote-operation rows
 npm run mj:codegen:files                 # PASS 2 — FILES ONLY (--skipdb). See the warning below.
 npm run build
 scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped all data

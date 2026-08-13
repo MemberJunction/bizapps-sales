@@ -56,9 +56,18 @@ const pool = await new sql.ConnectionPool({
     requestTimeout: 60_000,
 }).connect();
 
-const { setupSQLServerClient, SQLServerProviderConfigData, UserCache } = await import(
+const { setupSQLServerClient, SQLServerProviderConfigData } = await import(
     '@memberjunction/sqlserver-dataprovider'
 );
+/**
+ * MJ v6 MOVED `UserCache` out of the SQL Server provider into the generic database provider.
+ *
+ * Destructuring it from `sqlserver-dataprovider` now silently yields `undefined`, and the first symptom
+ * arrives several lines later as `Cannot read properties of undefined (reading 'Instance')` — which
+ * reads like a broken cache rather than a moved import. bizapps-common hit the same wall and fixed it
+ * the same way (302ea92, "import UserCache from generic-database-provider").
+ */
+const { UserCache } = await import('@memberjunction/generic-database-provider');
 const provider = await setupSQLServerClient(
     new SQLServerProviderConfigData(pool, process.env.MJ_CORE_SCHEMA || '__mj'),
 );

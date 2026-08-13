@@ -49,20 +49,26 @@
     "@memberjunction/core": "6.1.0-edge.2",
     "@memberjunction/core-entities": "6.1.0-edge.2",
     "@memberjunction/core-entities-server": "6.1.0-edge.2",
+    "@memberjunction/generic-database-provider": "6.1.0-edge.2",
     "@memberjunction/global": "6.1.0-edge.2",
     "@memberjunction/graphql-dataprovider": "6.1.0-edge.2",
     "@memberjunction/ng-base-forms": "6.1.0-edge.2",
     "@memberjunction/ng-entity-viewer": "6.1.0-edge.2",
     "@memberjunction/ng-link-directives": "6.1.0-edge.2",
     "@memberjunction/ng-shared": "6.1.0-edge.2",
+    "@memberjunction/ng-shared-generic": "6.1.0-edge.2",
     "@memberjunction/ng-ui-components": "6.1.0-edge.2",
     "@memberjunction/server": "6.1.0-edge.2",
     "@memberjunction/sqlserver-dataprovider": "6.1.0-edge.2",
     "@memberjunction/testing-integration": "6.1.0-edge.2",
+    "@mj-biz-apps/sales-integration-tests": "^5.0.0",
+    "@mj-biz-apps/sales-server": "^5.0.0",
     "@playwright/test": "^1.50.0",
     "@types/node": "^22.20.1",
     "beasties": "0.3.5",
+    "dotenv": "^17.2.3",
     "mrmime": "2.0.1",
+    "mssql": "^11.0.1",
     "rolldown": "1.0.0-beta.58",
     "rollup": "^4.43.0",
     "tsc-alias": "^1.8.16",
@@ -93,7 +99,8 @@
       "graphql": "16.14.2",
       "type-graphql": "2.0.0-beta.3",
       "reflect-metadata": "0.2.2",
-      "@types/node": "^22.20.1"
+      "@types/node": "^22.20.1",
+      "zod": "^3.25.76"
     }
   }
 }
