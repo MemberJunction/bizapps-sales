@@ -12,8 +12,9 @@ foundation is where the app's guarantees live.
 ## Before you start
 
 ```bash
-npm run start:api             # MJAPI      → http://localhost:4141
-npm run start:explorer:msal   # MJExplorer → http://localhost:4341   ← NOTE :msal
+# Sales runs inside an MJ host and has no shells of its own (apps/ was retired). Start the HOST's
+# MJAPI and MJExplorer from your MJ checkout — see docs/QA-GUIDE.md for the full setup.
+#   MJExplorer must serve on 4341: that is the port the Entra redirect URI is registered for.
 ```
 
 **Use `start:explorer:msal`, not `start:explorer`.** Plain `ng serve` defaults to Angular's

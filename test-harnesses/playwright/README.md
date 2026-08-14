@@ -21,8 +21,12 @@ The harness does **not** start servers. `lib/global-setup.ts` asserts they are r
 the exact fix command if not:
 
 ```bash
-npm run start:api             # MJAPI      → 4141
-npm run start:explorer:msal   # MJExplorer → 4341, with MSAL active  (see "Auth" below)
+# Sales ships no shells (apps/ was retired — an Open App runs inside an MJ host), so the servers
+# are the HOST's. From your MJ checkout, with bizapps-sales linked in:
+#   MJAPI      -> the port in the host's packages/MJAPI/.env  (4143 in the linking spike)
+#   MJExplorer -> MUST be 4341, the port the Entra redirect URI is registered for:
+#                 cd <MJ>/packages/MJExplorer && pnpm exec ng serve --port 4341
+# Full setup: docs/QA-GUIDE.md. The harness reads MJEXPLORER_URL / MJEXPLORER_PORT if you differ.
 ```
 
 ## Auth — how login works, and why it is the way it is
@@ -54,7 +58,7 @@ configuration instead — it is `development` minus the environment-file replace
 tenant:
 
 ```bash
-npm run start:explorer:msal
+cd <MJ-checkout>/packages/MJExplorer && pnpm exec ng serve --port 4341
 ```
 
 The harness itself is **provider-agnostic** — it waits for the app shell, not for a particular login

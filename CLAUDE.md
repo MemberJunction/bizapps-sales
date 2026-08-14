@@ -142,8 +142,10 @@ Ten type tables carry the **behaviour flags** the engine branches on. The engine
 
 ## Environment & Database
 
-- Repo-root `.env` holds all configuration. `apps/MJAPI/.env` is a **symlink** to `../../.env` — do
-  not create a separate file there.
+- Repo-root `.env` holds this repo's configuration — the CLI (`mj migrate`, `mj codegen`, `mj sync`) and
+  `scripts/*.sh` read it from here. Sales no longer ships an MJAPI, so there is no `apps/MJAPI/.env`
+  symlink any more: the SERVER's env belongs to the MJ host you link into (`packages/MJAPI/.env` there),
+  and the CLI reads it from the host's repo root. See `docs/QA-GUIDE.md`.
 - Local dev DB: **`MJ_BizAppsSales`** on SQL Server, MJ core pinned by `MJ_CORE_VERSION` in `.env`.
   That version must satisfy `mj-app.json`'s `mjVersionRange` **and** match what `@memberjunction/*`
   actually resolved to — a DB behind the packages driving it produces "column does not exist" on core
@@ -234,11 +236,11 @@ generated form can fail to render a field, a lookup can fail to resolve, a save 
 all three look identical to a passing GraphQL test.
 
 ```bash
-npm run start:api                 # MJAPI      → 4141
-npm run start:explorer:msal       # MJExplorer → 4341 with MSAL (see below — NOT plain start:explorer)
-npm run test:explorer:auth        # ONE TIME: headed, a human logs in. Session is then reused forever
-npm run test:explorer             # the CRUD run
-PW_HEADLESS=1 npm run test:explorer   # unattended
+# Sales runs inside an MJ host — start the HOST's MJAPI (4143 in the linking spike) and its
+# MJExplorer on 4341, the port the Entra redirect URI is registered for. See docs/QA-GUIDE.md.
+pnpm run test:explorer:auth        # ONE TIME: headed, a human logs in. Session is then reused forever
+pnpm run test:explorer             # the CRUD run
+PW_HEADLESS=1 pnpm run test:explorer   # unattended
 ```
 
 - **Use `start:explorer:msal` for anything involving a human login.** Plain `ng serve` defaults to
@@ -273,9 +275,9 @@ warning as a review item. `baseBranch` is `next`.
   repository root**. **Never** run `npm install` inside a package directory.
 
 ## Build Commands
-- `npm run build` (all, Turborepo) · `build:generated` · `build:packages` · `build:api` · `build:explorer`
-- `npm run start:api` (4141) · `npm run start:explorer` (4341) · `npm start` (both)
-- `npm run verify` — the vocabulary gate plus a full build
+- `pnpm run build` (all, Turborepo) · `build:generated` · `build:packages`
+- **No `start:*` scripts.** Sales ships no shells; the MJ host runs MJAPI/MJExplorer (`docs/QA-GUIDE.md`)
+- `pnpm run verify` — the vocabulary gate plus a full build
 
 ---
 
