@@ -23,11 +23,13 @@ name: CI
 #   and pretending otherwise would produce a red X everybody learns to ignore — which is worse than a
 #   documented manual step. Run it locally before merging:
 #
-#       npm run start:api  &&  npm run start:explorer:msal
-#       npm run test:explorer:auth      # once, you log in
-#       npm run test:explorer
+#       # Sales has no shells of its own any more — apps/ was retired, because an Open App runs
+#       # INSIDE an MJ host. Start the host's MJAPI + MJExplorer (see docs/QA-GUIDE.md), then:
+#       pnpm run test:explorer:auth      # once, you log in
+#       pnpm run test:explorer
 #
-#   INTEGRATION CHECKS do not exist yet (S2). When they do, remember RUN_MUTATION_TESTS=1 is MANDATORY:
+#   INTEGRATION CHECKS now exist (save-deal SD1-SD12) but still need a live database, so they are not
+#   run here either. RUN_MUTATION_TESTS=1 is MANDATORY when you run them locally:
 #   MJ's driver contains `if (check.RequiresMutation && !mutationEnabled) continue;`, so a run without
 #   it executes NOTHING and reports success.
 
@@ -51,27 +53,31 @@ jobs:
       # Node 24 rather than the sibling repo's 22: this is the version the lockfile was produced with
       # (npm 11 / Node 24) and the version the build is actually developed against. Matching it keeps CI
       # resolving the same tree a developer gets.
+      # Must precede setup-node: `cache: 'pnpm'` needs pnpm already on PATH. Version comes from
+      # package.json's `packageManager: pnpm@10.33.0`, so CI and every developer resolve one pnpm.
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
+          cache: pnpm
 
       # postinstall runs scripts/link-local-apps.mjs, which is a clean no-op while .mj-links.json has an
       # empty `links` map. That changes at S2, when the unpublished siblings get linked — at which point
       # this step will need a decision, because CI cannot check out private sibling repos.
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
       # ===================================================================================
       # GATE 1 — the rule the app is built around. Fails the build; not advisory.
       # ===================================================================================
       - name: Vocabulary gate (domain vocabulary is DATA, never a string compare)
-        run: npm run test:vocabulary-gate
+        run: pnpm run test:vocabulary-gate
 
       # ===================================================================================
       # GATE 2 — everything compiles, including the generated code.
       # ===================================================================================
       - name: Build all packages and apps
-        run: npm run build
+        run: pnpm run build
 
       # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
       # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a
@@ -102,4 +108,4 @@ jobs:
       - name: State plainly what this gate does not cover
         if: always()
         run: |
-          echo "::notice title=Explorer UI CRUD is not run here::test-harnesses/playwright needs a live database, running servers and a one-time human login. Run 'npm run test:explorer' locally before merging — see the comment block at the top of this workflow for why it is not automated."
+          echo "::notice title=Explorer UI CRUD is not run here::test-harnesses/playwright needs a live database, running servers and a one-time human login. Run 'pnpm run test:explorer' locally before merging — see the comment block at the top of this workflow for why it is not automated."
