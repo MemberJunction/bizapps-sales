@@ -1,0 +1,28 @@
+{
+  "$comment": [
+    "EMPTY ON PURPOSE — and that is a fact about WHERE SALES IS, not an oversight.",
+    "",
+    "Sales' only current dependency that ships code is bizapps-common, and common IS published to",
+    "npm (@mj-biz-apps/common-* at 5.32.0). So the registry resolves everything the S0/S1 scaffold",
+    "needs and there is nothing to symlink. link-local-apps.mjs exits 0 on an empty `links` map, so",
+    "postinstall stays a no-op rather than a warning.",
+    "",
+    "WHEN THIS FILE STARTS EARNING ITS KEEP: at S2, the pricing bridge. `Orders.PreviewOrder` is the",
+    "only thing allowed to produce a number in this app (master plan §6), and bizapps-orders is NOT",
+    "published — neither is bizapps-accounting, which orders itself hard-requires. At that point sales",
+    "is three symlink-hops deep (sales -> orders -> accounting -> common) and every caveat in the",
+    "sibling copy of this file applies with more force, not less: type-graphql / graphql /",
+    "reflect-metadata must collapse to ONE copy or buildSchema dies on a decorator that is perfectly",
+    "correct. See bizapps-orders/.mj-links.json SHARED_IDENTITY for the full account.",
+    "",
+    "The entries that will go here, in dependency order, once those repos are built locally:",
+    "  mj-bizapps-accounting -> ../bizapps-accounting  (scope: server)",
+    "  mj-bizapps-orders     -> ../bizapps-orders      (scope: server)",
+    "  mj-bizapps-contracts  -> ../bizapps-contracts   (scope: server)",
+    "",
+    "Do NOT add them speculatively. An entry whose target is not BUILT produces a 'not built (missing",
+    "dist/index.js)' warning on every install and a resolution failure at boot, which is worse than",
+    "the honest 404 you get from not declaring it at all."
+  ],
+  "links": {}
+}

@@ -162,9 +162,10 @@ vocabulary **without a migration and without a code change**.
 | Type table | Behaviour flags the engine reads | Seeded with |
 |---|---|---|
 | **`DealStatusType`** | `IsOpen` · `IsClosed` · `IsWon` · `IsLost` · `LocksDeal` | Open, Won, Lost, Abandoned, On Hold |
-| **`DealType`** | `RequiresContract` · `RequiresRenewalSource` · `DefaultPipelineID` | New Business, Renewal, Expansion, Cross-Sell, Partner-Sourced |
+| **`DealType`** | `RequiresContract` · `RequiresRenewalSource` · `DefaultPipelineID` | New, Upsell, Renewal |
 | **`DealRole`** | `IsOwnerRole` · `AllowsMultiplePerDeal` · `DefaultAttributionPct` · `IsQuotaCarrying` | Owner/AE, Sales Engineer, SDR, Exec Sponsor, Partner Manager, CS Lead |
 | **`ForecastCategoryType`** | `IncludeInCommit` · `IncludeInBestCase` · `IncludeInPipeline` · `DisplayRank` | Omitted, Pipeline, Best Case, Commit, Closed |
+| **`DealLineType`** | `IsRecurring` | One-Time, Recurring |
 | **`LossReason`** | `Category` · `RequiresNotes` · `IsCompetitive` | Price, Product Gap, Competitor, Timing, No Decision, Internal |
 | **`LeadSourceType`** | `IsInbound` · `IsPaid` · `AttributionWindowDays` | Referral, Website, Event, Outbound, Partner, Existing Customer |
 | **`LifecycleStageType`** | `IsMarketingQualified` · `IsSalesQualified` · `IsCustomer` · `DisplayRank` | Subscriber, Lead, MQL, SQL, Opportunity, Customer, Evangelist, Disqualified |
@@ -647,7 +648,7 @@ bizapps-sales/
 │   └── Angular/                   # @mj-biz-apps/sales-ng
 ├── migrations/                    # T-SQL migrations (source of truth)
 ├── migrations-pg/                 # PG migrations (converter output)
-├── metadata/                      # The nine type tables + pipelines, synced via mj-sync
+├── metadata/                      # The ten type tables, remote operations + the Sales app, synced via mj-sync
 ├── metadata-tests/                # MJ: Tests + Test Suite records
 ├── scripts/                       # rebuild-db.sh, append-codegen.sh, link-local-apps.mjs
 ├── test-harnesses/                # standalone dispatchers

@@ -1,0 +1,378 @@
+/*
+  Deal workspace styles.
+
+  SEMANTIC TOKENS ONLY — every colour here is a `--mj-*` variable, no hex literals. That is what makes
+  the surface correct in dark mode without a second stylesheet: the tokens flip, the rules do not. The
+  set used below is exactly the set the vendored workspace card already relies on, so nothing here
+  depends on a token that might not be defined.
+
+  Layout intent: the card owns the scroll (its body is the flex:1 scroller), so this file must not
+  introduce a second scrolling container — only the wide tables scroll, horizontally, in place.
+*/
+
+:host {
+    display: block;
+    height: 100%;
+}
+
+/* ── Persistent customer context ───────────────────────────────────────────── */
+
+.dw-context {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.dw-context__customer {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 600;
+    color: var(--mj-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 22rem;
+}
+
+/* No customer chosen is a state worth looking different, not just empty. */
+.dw-context__customer--empty {
+    color: var(--mj-text-muted);
+    font-weight: 500;
+    font-style: italic;
+}
+
+.dw-context__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 999px;
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-secondary);
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.dw-context__chip--new {
+    border-color: var(--mj-status-warning-border);
+    color: var(--mj-status-warning);
+}
+
+/* ── Inner pane tabs ──────────────────────────────────────────────────────── */
+
+.dw-panes {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--mj-border-default);
+    padding: 0 0 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.dw-panes__tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--mj-text-secondary);
+    font: inherit;
+    font-size: 0.88rem;
+    cursor: pointer;
+}
+
+.dw-panes__tab:hover {
+    background: var(--mj-bg-surface-hover);
+    color: var(--mj-text-primary);
+}
+
+.dw-panes__tab:focus-visible {
+    outline: 2px solid var(--mj-border-focus);
+    outline-offset: 1px;
+}
+
+.dw-panes__tab--active {
+    background: var(--mj-bg-surface-card);
+    border-color: var(--mj-border-default);
+    color: var(--mj-brand-primary);
+    font-weight: 600;
+}
+
+/* Error count only. A warning does not earn a badge — see the template comment. */
+.dw-panes__badge {
+    min-width: 1.15rem;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: var(--mj-status-warning);
+    color: var(--mj-bg-surface-card);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+/* ── Panes ────────────────────────────────────────────────────────────────── */
+
+.dw-pane {
+    display: block;
+    padding-bottom: 1rem;
+}
+
+.dw-grid {
+    display: grid;
+    /* Fields find their own column count; nothing is pinned to a pixel width. */
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 0.9rem 1.1rem;
+}
+
+.dw-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+    min-width: 0;
+}
+
+.dw-field--wide {
+    grid-column: 1 / -1;
+}
+
+.dw-field--check {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.dw-field__label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--mj-text-secondary);
+}
+
+.dw-field__label em {
+    color: var(--mj-status-warning);
+    font-style: normal;
+}
+
+.dw-field__hint {
+    font-size: 0.74rem;
+    color: var(--mj-text-muted);
+}
+
+.dw-field input,
+.dw-field select,
+.dw-field textarea {
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 5px;
+    background: var(--mj-bg-surface-card);
+    color: var(--mj-text-primary);
+    font: inherit;
+    font-size: 0.88rem;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.dw-field input:focus,
+.dw-field select:focus,
+.dw-field textarea:focus {
+    outline: none;
+    border-color: var(--mj-border-focus);
+}
+
+.dw-field textarea {
+    resize: vertical;
+}
+
+/* ── Notes, empties, messages ─────────────────────────────────────────────── */
+
+.dw-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin: 0 0 1rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--mj-border-default);
+    border-left: 3px solid var(--mj-brand-primary);
+    border-radius: 4px;
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-secondary);
+    font-size: 0.82rem;
+}
+
+.dw-empty {
+    margin: 0 0 0.75rem;
+    color: var(--mj-text-muted);
+    font-size: 0.86rem;
+    font-style: italic;
+}
+
+.dw-msg {
+    margin: 0 0 1rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: 4px;
+    background: var(--mj-bg-surface);
+    border-left: 3px solid var(--mj-status-success);
+    color: var(--mj-text-primary);
+    font-size: 0.85rem;
+}
+
+.dw-msg--error {
+    border-left-color: var(--mj-status-warning);
+}
+
+.dw-blocked {
+    color: var(--mj-status-warning);
+}
+
+/* ── Line / instalment tables ─────────────────────────────────────────────── */
+
+/*
+  The table scrolls HORIZONTALLY inside its own container. The page body must never scroll sideways,
+  and a line grid with eight numeric columns will otherwise force it to on a narrow window.
+*/
+.dw-table-scroll {
+    overflow-x: auto;
+    margin-bottom: 0.75rem;
+}
+
+.dw-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.dw-table th {
+    text-align: left;
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--mj-border-default);
+    color: var(--mj-text-secondary);
+    font-size: 0.76rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.dw-table th em {
+    color: var(--mj-status-warning);
+    font-style: normal;
+}
+
+.dw-table td {
+    padding: 0.25rem 0.3rem;
+    border-bottom: 1px solid var(--mj-border-default);
+    vertical-align: middle;
+}
+
+.dw-table input,
+.dw-table select {
+    width: 100%;
+    min-width: 6rem;
+    padding: 0.32rem 0.4rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 4px;
+    background: var(--mj-bg-surface-card);
+    color: var(--mj-text-primary);
+    font: inherit;
+    font-size: 0.85rem;
+}
+
+.dw-table input:focus,
+.dw-table select:focus {
+    outline: none;
+    border-color: var(--mj-border-focus);
+}
+
+.dw-num {
+    text-align: right;
+}
+
+.dw-num input {
+    text-align: right;
+    min-width: 5.5rem;
+}
+
+/* A row the validator objected to. Marked on the row, so it is findable without reading the list. */
+.dw-row--bad td {
+    background: var(--mj-bg-surface-hover);
+}
+
+.dw-row--bad td:first-child {
+    box-shadow: inset 3px 0 0 0 var(--mj-status-warning);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+
+.dw-addbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    border: 1px dashed var(--mj-border-default);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--mj-text-link);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.dw-addbtn:hover {
+    background: var(--mj-bg-surface-hover);
+    border-style: solid;
+}
+
+.dw-iconbtn {
+    padding: 0.25rem 0.4rem;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--mj-text-muted);
+    cursor: pointer;
+}
+
+.dw-iconbtn:hover {
+    background: var(--mj-bg-surface-hover);
+    color: var(--mj-status-warning);
+}
+
+/* ── Issue list ───────────────────────────────────────────────────────────── */
+
+.dw-issues {
+    margin: 1rem 0 0;
+    padding: 0.5rem 0.7rem 0.5rem 1.6rem;
+    list-style: none;
+    border: 1px solid var(--mj-status-warning-border);
+    border-radius: 4px;
+    background: var(--mj-bg-surface);
+    font-size: 0.82rem;
+    color: var(--mj-text-primary);
+}
+
+.dw-issues li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    padding: 0.12rem 0;
+    color: var(--mj-status-warning);
+}
+
+.dw-issues__warn {
+    color: var(--mj-text-secondary);
+}
+
+/* Visually hidden but available to screen readers — for header cells with only an icon below them. */
+.dw-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}

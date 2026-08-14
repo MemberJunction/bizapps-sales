@@ -1,0 +1,50 @@
+[
+  {
+    "_comments": [
+      "The HAND-AUTHORED Sales application — the one KI-4 said did not exist yet.",
+      "",
+      "It does not replace the generated application. CodeGen auto-creates one MJ Application per schema,",
+      "and sales' is `__mj_BizAppsSales` at /app/mjbizappssales: a working entity browser with a full",
+      "generated CRUD form per record. That stays, and the demo walkthrough still uses it. This one is",
+      "additive and JOB-SHAPED — it opens on the work an account director actually does rather than on a",
+      "list of 19 tables.",
+      "",
+      "Why there is only ONE nav item. KI-4 recorded that custom nav items had nothing to point at,",
+      "because `ResourceType: 'Custom'` needs a registered `DriverClass` and sales had no such component.",
+      "Phase 1 added the deal workspace; Phase 2 replaced that direct mount with a SECTION that owns a",
+      "dashboard, the roster and the workspace — matching the shape contracts and orders use, where a nav",
+      "item is a section and the left rail moves within it.",
+      "",
+      "Accounts, forecasting and the pipeline board are real sections later. They are absent rather than",
+      "stubbed because a nav item pointing at an unregistered component resolves to a BLANK TAB with no",
+      "error anywhere, so a dead item is worse than a missing one.",
+      "",
+      "DefaultSequence 2020 sits after accounting's 2010, keeping the revenue stack in reading order in",
+      "the app switcher: accounting, then sales."
+    ],
+    "fields": {
+      "Name": "Sales",
+      "Description": "Deal pipeline management — compose a deal with its product lines, payment schedule and negotiated terms, and hand it to contracts and orders.",
+      "Icon": "fa-solid fa-handshake",
+      "DefaultForNewUser": false,
+      "Color": "#0f8a5f",
+      "DefaultSequence": 2020,
+      "DefaultNavItems": [
+        {
+          "Label": "Deals",
+          "Icon": "fa-solid fa-handshake",
+          "ResourceType": "Custom",
+          "DriverClass": "SalesDealsSectionResource",
+          "isDefault": true
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "D4F8A162-A001-4E71-B0A8-3F17C5E2D803"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:29.821Z",
+      "checksum": "be462a1c1446eb679ea63ab036b4d7d4c4902932a2384dc43bfc10f83e5c8b9f"
+    }
+  }
+]

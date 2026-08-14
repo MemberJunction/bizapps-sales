@@ -1,0 +1,56 @@
+[
+  {
+    "fields": {
+      "Code": "NEW",
+      "Name": "New",
+      "Description": "A first sale to a new customer. (Was seeded as code NEWBIZ / name \"New Business\" in S1; renamed to match master plan §4.2, which specifies exactly New, Upsell and Renewal. A rename costs nothing precisely because no code was ever aware of either name — that is Rule 2 paying for itself.)",
+      "RequiresContract": true,
+      "RequiresRenewalSource": false,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "2B8D5F31-0001-4C21-8F42-6D9B8E3A7122"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:26.863Z",
+      "checksum": "0045e344cd964f41b754dc3dacd795964a3d9be3f4eb3d62a641e0fff1014aa6"
+    }
+  },
+  {
+    "fields": {
+      "Code": "UPSELL",
+      "Name": "Upsell",
+      "Description": "More of what the customer already buys, or a step up in tier — seats, volume, edition. A separate deal against the same contract, which is why the relationship is one contract to many deals. (Reuses the row seeded in S1 as EXPANSION: the same concept under the plan's word for it.)",
+      "RequiresContract": true,
+      "RequiresRenewalSource": false,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "2B8D5F31-0003-4C21-8F42-6D9B8E3A7122"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:26.934Z",
+      "checksum": "c3e21475f7cb285ac29391eb3feea20bf25f2c3a969b6f688838506b168cd899"
+    }
+  },
+  {
+    "fields": {
+      "Code": "RENEWAL",
+      "Name": "Renewal",
+      "Description": "Continuation of an existing agreement. RequiresRenewalSource is what makes the chain enforceable: the deal must name the contract it renews (Deal.RenewsContractID), and closing it routes to Contracts.RenewTerm rather than Contracts.CreateFromDeal.",
+      "RequiresContract": true,
+      "RequiresRenewalSource": true,
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "2B8D5F31-0002-4C21-8F42-6D9B8E3A7122"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:26.999Z",
+      "checksum": "b66044cd4c8647e7e31f502d7c22cbf0618cd290baa8b41906e3077003eab5bb"
+    }
+  }
+]

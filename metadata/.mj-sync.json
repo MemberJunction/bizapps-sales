@@ -1,0 +1,44 @@
+{
+  "version": "1.0.0",
+  "push": {
+    "autoCreateMissingRecords": true
+  },
+  "_comment": [
+    "directoryOrder exists for dependency ordering. The nine type tables are mutually independent —",
+    "no seeded row in one references a row in another — so any order would apply cleanly today. They",
+    "are listed anyway, because the ordering becomes load-bearing the moment pipelines are seeded:",
+    "Pipeline references DealType and ForecastCategoryType, and PipelineStage references",
+    "DealStatusType and ForecastCategoryType. Establishing the list now means adding pipelines later",
+    "is one line rather than a debugging session.",
+    "",
+    "DealType.DefaultPipelineID is deliberately left NULL in the seeds. It is the other half of the",
+    "DealType <-> Pipeline cycle, and seeding it would require pipelines to exist first — which they",
+    "cannot, since a Pipeline needs a real __mj.Company. Pipelines are per-deployment data, not",
+    "vocabulary, so they are not seeded here at all."
+  ],
+  "_comment_remote_operations": [
+    "remote-operation-categories MUST precede remote-operations: the operation rows resolve their",
+    "CategoryID with @lookup against a category by Name, so the category has to exist first. This is",
+    "the first entry in this list where the ordering is genuinely load-bearing rather than",
+    "precautionary — get it wrong and the push fails on an unresolvable lookup."
+  ],
+  "directoryOrder": [
+    "deal-status-types",
+    "forecast-category-types",
+    "deal-types",
+    "deal-line-types",
+    "deal-roles",
+    "loss-reasons",
+    "lead-source-types",
+    "lifecycle-stage-types",
+    "buying-role-types",
+    "account-types",
+    "remote-operation-categories",
+    "remote-operations",
+    "applications"
+  ],
+  "sqlLogging": {
+    "enabled": true,
+    "outputDirectory": "./sql_logging"
+  }
+}

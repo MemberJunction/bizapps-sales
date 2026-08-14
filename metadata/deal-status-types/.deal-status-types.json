@@ -1,0 +1,107 @@
+[
+  {
+    "fields": {
+      "Code": "OPEN",
+      "Name": "Open",
+      "Description": "The deal is live and progressing. The only status a new deal starts in.",
+      "IsOpen": true,
+      "IsClosed": false,
+      "IsWon": false,
+      "IsLost": false,
+      "LocksDeal": false,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "1A7C4E20-0001-4B10-9E31-5C8A7D2F6011"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:26.167Z",
+      "checksum": "53e2590bf3535cb1f66fc5c83709662a1f565ab5286f0ead807b4f797c308462"
+    }
+  },
+  {
+    "fields": {
+      "Code": "WON",
+      "Name": "Won",
+      "Description": "The customer committed. This is the status whose transition creates a contract and/or orders in one transaction — and it LOCKS the deal, because the deal is now the provenance of both.",
+      "IsOpen": false,
+      "IsClosed": true,
+      "IsWon": true,
+      "IsLost": false,
+      "LocksDeal": true,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "1A7C4E20-0002-4B10-9E31-5C8A7D2F6011"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:26.202Z",
+      "checksum": "e4346119610ff85c3721c61a1c3b06f18d2c8ff1041cbab14de5e10667f44c21"
+    }
+  },
+  {
+    "fields": {
+      "Code": "LOST",
+      "Name": "Lost",
+      "Description": "The customer chose otherwise. Requires a LossReason; locks the deal so the reason cannot be quietly revised later.",
+      "IsOpen": false,
+      "IsClosed": true,
+      "IsWon": false,
+      "IsLost": true,
+      "LocksDeal": true,
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "1A7C4E20-0003-4B10-9E31-5C8A7D2F6011"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:26.274Z",
+      "checksum": "21aa4fb322dd9b22f1f72a9ba678ce1abe82729008674efa3a8bc8e2b3a38871"
+    }
+  },
+  {
+    "fields": {
+      "Code": "ABANDONED",
+      "Name": "Abandoned",
+      "Description": "We walked away, or the deal went dark. Counts as lost for win-rate and forecast purposes — the distinction from Lost is diagnostic, not behavioural, which is exactly why it is a separate ROW rather than a separate code path.",
+      "IsOpen": false,
+      "IsClosed": true,
+      "IsWon": false,
+      "IsLost": true,
+      "LocksDeal": true,
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "1A7C4E20-0004-4B10-9E31-5C8A7D2F6011"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:26.341Z",
+      "checksum": "760d6c09c446943eaba365684785961a2bf0c9f93971a3bae67adb9c1e6a07bc"
+    }
+  },
+  {
+    "fields": {
+      "Code": "ONHOLD",
+      "Name": "On Hold",
+      "Description": "Paused — neither progressing nor concluded, which is why it is neither IsOpen nor IsClosed. That combination is the reason those two flags are not each other's inverse: a rollup asking 'still live' and one asking 'not yet concluded' want different answers here.",
+      "IsOpen": false,
+      "IsClosed": false,
+      "IsWon": false,
+      "IsLost": false,
+      "LocksDeal": false,
+      "DisplayRank": 50,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "1A7C4E20-0005-4B10-9E31-5C8A7D2F6011"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:26.401Z",
+      "checksum": "1851343c1d2f76020313ddb15f2cf75bb9e81f0afa4d2f9cf67b8c9bf7c4a56a"
+    }
+  }
+]

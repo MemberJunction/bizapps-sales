@@ -1,0 +1,116 @@
+[
+  {
+    "fields": {
+      "Code": "CHAMPION",
+      "Name": "Champion",
+      "Description": "Wants this to happen and will spend internal capital to make it so. High influence without formal authority — which is why IsDecisionMaker is 0 and InfluenceWeight is high.",
+      "IsDecisionMaker": false,
+      "IsBlocker": false,
+      "InfluenceWeight": 80,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "81E3B597-0001-4287-E5A8-C335E490AD88"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:29.024Z",
+      "checksum": "e52706cc1b61d7cd76d3a6cea77061026fe0cdf2ea8ee79b36f897ff92fc8df1"
+    }
+  },
+  {
+    "fields": {
+      "Code": "ECONBUYER",
+      "Name": "Economic Buyer",
+      "Description": "Controls the budget and can say yes on their own. The single most important contact to have identified before forecasting a deal as Commit.",
+      "IsDecisionMaker": true,
+      "IsBlocker": false,
+      "InfluenceWeight": 100,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "81E3B597-0002-4287-E5A8-C335E490AD88"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:29.088Z",
+      "checksum": "49caa07b291e87a6ee1232e6a7b9b057646436fba5195e1f0cd09747b1dc5ced"
+    }
+  },
+  {
+    "fields": {
+      "Code": "TECHBUYER",
+      "Name": "Technical Buyer",
+      "Description": "Owns the technical decision and can veto on those grounds.",
+      "IsDecisionMaker": true,
+      "IsBlocker": false,
+      "InfluenceWeight": 70,
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "81E3B597-0003-4287-E5A8-C335E490AD88"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:29.154Z",
+      "checksum": "a6aac5a405dbfdfe08c4cc1f8232637b927f48a9c7873918b049c93d27e925af"
+    }
+  },
+  {
+    "fields": {
+      "Code": "INFLUENCER",
+      "Name": "Influencer",
+      "Description": "Consulted and listened to, but decides nothing.",
+      "IsDecisionMaker": false,
+      "IsBlocker": false,
+      "InfluenceWeight": 40,
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "81E3B597-0004-4287-E5A8-C335E490AD88"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:29.221Z",
+      "checksum": "26fea0b7d396d51ee54d37679114b4be8bc3b0e50147538833c41fb3d41ce0b7"
+    }
+  },
+  {
+    "fields": {
+      "Code": "BLOCKER",
+      "Name": "Blocker",
+      "Description": "Opposed, or structurally in the way — procurement, security review, an incumbent's advocate. Weighted substantially, because an unmanaged blocker is the most common cause of a Commit deal slipping.",
+      "IsDecisionMaker": false,
+      "IsBlocker": true,
+      "InfluenceWeight": 60,
+      "DisplayRank": 50,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "81E3B597-0005-4287-E5A8-C335E490AD88"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:29.286Z",
+      "checksum": "53869b2fd4e67e49043cba7222b642019aeb93947b37bab4774e5cfc248b1681"
+    }
+  },
+  {
+    "fields": {
+      "Code": "ENDUSER",
+      "Name": "End User",
+      "Description": "Will use the product day to day. Low weight on the DECISION, which is not the same as low importance to renewal.",
+      "IsDecisionMaker": false,
+      "IsBlocker": false,
+      "InfluenceWeight": 20,
+      "DisplayRank": 60,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "81E3B597-0006-4287-E5A8-C335E490AD88"
+    },
+    "sync": {
+      "lastModified": "2026-08-13T02:38:29.348Z",
+      "checksum": "9f921a11d8d0c99209f146a754716ac5dedada7060bebfcf19fa95efbf498ba9"
+    }
+  }
+]
