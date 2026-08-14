@@ -110,7 +110,32 @@ below stops matching — it is the map, and it is cheaper than guessing.
 | `specs/00-recon.spec.ts` | Living diagnostic: maps shell → app → entity → form. |
 | `specs/01-probe-form-dom.spec.ts` | Dumps form DOM around known labels (`PW_PROBE=1`). |
 | `specs/02-probe-delete-affordance.spec.ts` | Enumerates delete controls with geometry (`PW_PROBE=1`). |
-| `specs/10-deal-crud.spec.ts` | **The actual verification.** |
+| `specs/10-deal-crud.spec.ts` | **The actual verification** — CRUD through the *generated* entity browser. |
+| `specs/40-deal-workspace.spec.ts` | Composes a deal across all five workspace panes and reads it back through a **different** surface. |
+| `specs/41-deal-roundtrip.spec.ts` | **The related-record-collection round trip** — save, RE-OPEN, and prove the lines, instalment, dates and owner all came back; then remove a line and prove the removal survives another re-open. |
+| `specs/50-sales-shell.spec.ts` | The Phase 2 section layout, the rail, and the roster opening the workspace. |
+
+### Three traps these specs have already hit
+
+None of them looks like a selector bug when it fires — all three read as data bugs, which is why they cost
+real time:
+
+1. **Every rail page stays in the DOM — hidden, not removed**, so the workspace's open documents survive a
+   page change. An unscoped `tr` / `.wl` locator therefore matches a HIDDEN roster row and fails on
+   visibility while the grid it meant to read is perfectly correct. Scope by page, or filter to `:visible`.
+2. **`innerText` cannot see an `<input>`'s value.** The workspace grids hold their data in inputs, so a
+   text assertion silently matches nothing but the `<select>` option labels. Read `inputValue()` instead —
+   `41-deal-roundtrip.spec.ts` has a `lineNames()` helper for exactly this.
+3. **The roster does not re-read after a save.** It loads its rows when the rail page mounts, so a deal
+   created in the same session is absent from it until the page is reloaded. A spec that saves and then
+   looks for its deal in the roster will fail in a way that reads exactly like a lost save. Reload first —
+   which is also the stronger test, since it discards all client state.
+
+**Both specs leave their deals behind on purpose** (tagged `PW-…` / `RT-…`, unique per run) and only
+`PW-VERIFY*` rows are auto-cleaned. Re-running them repeatedly during debugging accumulates deals, and
+enough of them push a newly created one off the first page of the Deals grid — at which point the
+read-back assertion in `40` fails for a reason that has nothing to do with the code. Each spec's header
+carries the SQL to clear its own rows.
 
 `.auth/`, `artifacts/`, `playwright-report/` and `test-results/` are all gitignored.
 **`.auth/user.json` is a live bearer token for a real account — never commit it.**

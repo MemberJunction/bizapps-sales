@@ -3,10 +3,10 @@
  *
  * Two conventions here are load-bearing rather than stylistic:
  *
- * 1. **The pane keys ARE the `DealDraftSection` keys.** `DealDraft.Validate()` tags every issue with a
+ * 1. **The pane keys ARE the `DealWorkspaceSection` keys.** `ProjectValidation()` tags every issue with a
  *    `Section`, and the tabs below key off the same strings, so one validation pass drives both the tab
  *    badges and the field markers with no mapping table in between. Rename a key here and you must
- *    rename it in `deal-draft.ts`; anything else silently stops badging.
+ *    rename it in `deal-workspace.validation.ts`; anything else silently stops badging.
  *
  * 2. **Lookups are plain `{ ID, Name }`.** The workspace never queries — the service loads reference
  *    data once and hands it in, mirroring how bizapps-contracts keeps its workspace presentational.
@@ -14,7 +14,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import type { DealDraftSection } from '@mj-biz-apps/sales-entities';
+import type { DealWorkspaceSection } from './deal-workspace.validation';
 
 /** The minimum a picker needs. Anything richer belongs in a dedicated shape below. */
 export interface DealLookup {
@@ -83,9 +83,9 @@ export function EmptyLookups(): DealWorkspaceLookups {
     };
 }
 
-/** One pane of the workspace. `Key` matches a `DealDraftSection` exactly — see the file header. */
+/** One pane of the workspace. `Key` matches a `DealWorkspaceSection` exactly — see the file header. */
 export interface DealWorkspacePane {
-    Key: DealDraftSection;
+    Key: DealWorkspaceSection;
     Label: string;
     Icon: string;
 }

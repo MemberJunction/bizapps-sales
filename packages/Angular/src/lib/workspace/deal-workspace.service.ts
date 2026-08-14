@@ -1,19 +1,23 @@
 /**
  * @fileoverview All data access for the deal workspace, so the component itself does none.
  *
- * The workspace component stays presentational: it takes lookups and a draft, and emits a save. That
- * split is copied from bizapps-contracts, and the payoff is that the surface can be rendered and
- * reasoned about without a provider behind it.
+ * The workspace component stays presentational: it takes lookups and a `DealEntity`, and asks this
+ * service to save it. That split is copied from bizapps-contracts, and the payoff is that the surface can
+ * be rendered and reasoned about without a provider behind it.
+ *
+ * WHAT CHANGED WITH RELATED RECORD COLLECTIONS. This service used to build a `DealDraft` — a UI-side
+ * model with its own line and instalment arrays — and send it through the `Sales.SaveDeal` remote
+ * operation, because the entity a browser held had no child collections to save. It does now, so the
+ * service hands out the real entity and its children, and saving is `deal.Save()`. The two places that
+ * needed care are both here rather than in the component: LOADING the collections exactly once
+ * ({@link DealWorkspaceService.LoadDeal}) and forcing a full write-out on save
+ * ({@link DealWorkspaceService.Save}).
  *
  * @module @mj-biz-apps/sales-ng
  */
 import { Injectable } from '@angular/core';
-import { RunView, RunViewParams } from '@memberjunction/core';
-import {
-    DealDraft,
-    SalesSaveDealOperation,
-    type SalesDealIssue,
-} from '@mj-biz-apps/sales-entities';
+import { EntitySaveOptions, Metadata, RunView, RunViewParams } from '@memberjunction/core';
+import { DealEntity } from '@mj-biz-apps/sales-entities';
 
 import {
     EmptyLookups,
@@ -24,6 +28,11 @@ import {
     type PipelineLookup,
     type StageLookup,
 } from './deal-workspace.types';
+import {
+    EmptyValidation,
+    ProjectValidation,
+    type DealWorkspaceValidation,
+} from './deal-workspace.validation';
 
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
@@ -35,8 +44,6 @@ const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 const E_EMPLOYEE = 'MJ: Employees';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
-const E_DEAL_LINE = 'MJ_BizApps_Sales: Deal Lines';
-const E_SCHEDULE = 'MJ_BizApps_Sales: Deal Payment Schedules';
 
 /**
  * One row of the deal roster.
@@ -76,14 +83,14 @@ interface DealRosterQueryRow {
     ForecastCategoryType: string | null; DealStatusTypeID: string | null;
 }
 
-/** What a save attempt reports back. Mirrors the operation's own output rather than flattening it. */
+/** What a save attempt reports back. Structured, so the caller can badge tabs and mark fields. */
 export interface DealSaveOutcome {
     Success: boolean;
     DealID: string | null;
     Created: boolean;
-    /** Structured, so the caller can badge tabs and mark fields. Never a joined string. */
-    Issues: SalesDealIssue[];
-    /** Set only when the call itself failed (transport, auth) rather than the draft being invalid. */
+    /** Pane-addressed problems, when the record was refused for being invalid. Never a joined string. */
+    Validation: DealWorkspaceValidation;
+    /** Set only when the save itself failed (transport, a database error) rather than being invalid. */
     ErrorMessage: string | null;
 }
 
@@ -95,54 +102,14 @@ interface LineTypeRow extends NamedRow { IsRecurring: boolean }
 interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean }
 interface ContactRow { ID: string; FirstName: string | null; LastName: string | null; Email: string | null }
 interface EmployeeRow { ID: string; FirstLast: string | null }
-interface DealRow {
-    ID: string; Name: string; PipelineID: string; PipelineStageID: string | null; DealTypeID: string | null;
-    DealStatusTypeID: string | null; AccountID: string | null; PrimaryContactID: string | null;
-    BillingContactID: string | null; CompanyID: string; OwnerEmployeeID: string | null;
-    Amount: number | null; TermMonths: number | null; EstimatedProjectWeeks: number | null;
-    ExecutionDate: string | Date | null; StartDate: string | Date | null; ExpectedCloseDate: string | Date | null;
-    Probability: number | null; ForecastCategoryTypeID: string | null; AutoRenew: boolean;
-    AnnualIncreasePctOverride: number | null; CancellationNoticeDaysOverride: number | null;
-    PaymentMethod: string | null; ContractVariances: string | null; Description: string | null;
-    NextStep: string | null; NextStepDate: string | Date | null;
-}
-interface DealLineRow {
-    ID: string; ProductID: string | null; ProductName: string | null; DealLineTypeID: string | null;
-    Quantity: number; RequestedDiscountPct: number | null; OverrideUnitPrice: number | null;
-    AnnualGrossFees: number | null; DiscountAmount: number | null; Total: number | null;
-    TermMonths: number | null; ServicePeriodStart: string | Date | null; ServicePeriodEnd: string | Date | null;
-    Description: string | null; DisplayOrder: number;
-}
-interface ScheduleRow {
-    ID: string; PaymentDate: string | Date | null; Amount: number | null; Description: string | null; DisplayOrder: number;
-}
-
 /**
- * The `yyyy-MM-dd` an `<input type="date">` binds to, from a value that may be an ISO string OR a `Date`.
+ * The collections the workspace edits, named once.
  *
- * MJ v6 CHANGED THE SHAPE. On v5 a DATE column arrived as a full ISO timestamp string, so slicing the
- * first ten characters was right. On v6 the same read can hand back a real `Date`, on which `.length` is
- * `undefined` — the old `value.length >= 10` test was therefore false and the function returned the
- * `Date` object itself, which an `<input type="date">` cannot bind and renders as an EMPTY field.
- *
- * That is the nastiest form of this bug: no error, no warning — every date in the workspace silently
- * blank while the roster beside it shows the same value correctly. It was found exactly that way, by
- * eye, in the v6 host.
- *
- * Both shapes are accepted rather than picking one, because the type now depends on how the row was
- * fetched. UTC getters throughout: everything stored is UTC, and local-time getters would shift the day
- * for anyone west of Greenwich.
+ * Passed to `LoadRelatedRecords` so the load is EXPLICIT about what it wants rather than taking
+ * "everything declared". A collection added to the entity later should not start being fetched by a
+ * surface that does not render it.
  */
-function toDateInput(value: string | Date | null): string | null {
-    if (!value) {
-        return null;
-    }
-    if (value instanceof Date) {
-        return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`;
-    }
-    const s = String(value);
-    return s.length >= 10 ? s.slice(0, 10) : s;
-}
+const WORKSPACE_COLLECTIONS = ['Lines', 'PaymentSchedule', 'Team'] as const;
 
 @Injectable({ providedIn: 'root' })
 export class DealWorkspaceService {
@@ -258,125 +225,105 @@ export class DealWorkspaceService {
         }));
     }
 
-    /**
-     * Reads an existing deal into a draft — header, lines and schedule together.
-     *
-     * Returns null when the deal cannot be read, rather than an empty draft: an empty draft would look
-     * like a deal with no lines, and saving it would then DELETE the real ones, because the operation
-     * treats a present array as the complete desired set.
-     */
-    public async LoadDraft(dealID: string): Promise<DealDraft | null> {
-        const rv = new RunView();
-        const results = await rv.RunViews([
-            { EntityName: E_DEAL, ExtraFilter: `ID = '${dealID}'`, ResultType: 'simple' },
-            { EntityName: E_DEAL_LINE, ExtraFilter: `DealID = '${dealID}'`, OrderBy: 'DisplayOrder ASC', ResultType: 'simple' },
-            { EntityName: E_SCHEDULE, ExtraFilter: `DealID = '${dealID}'`, OrderBy: 'DisplayOrder ASC', ResultType: 'simple' },
-        ]);
-
-        if (!results?.[0]?.Success || !results[1]?.Success || !results[2]?.Success) {
-            return null;
-        }
-        const deal = ((results[0].Results ?? []) as DealRow[])[0];
-        if (!deal) {
-            return null;
-        }
-
-        const draft = new DealDraft({
-            ID: deal.ID,
-            Name: deal.Name,
-            PipelineID: deal.PipelineID,
-            PipelineStageID: deal.PipelineStageID,
-            DealTypeID: deal.DealTypeID,
-            DealStatusTypeID: deal.DealStatusTypeID,
-            AccountID: deal.AccountID,
-            PrimaryContactID: deal.PrimaryContactID,
-            BillingContactID: deal.BillingContactID,
-            CompanyID: deal.CompanyID,
-            OwnerEmployeeID: deal.OwnerEmployeeID,
-            Amount: deal.Amount,
-            TermMonths: deal.TermMonths,
-            EstimatedProjectWeeks: deal.EstimatedProjectWeeks,
-            ExecutionDate: toDateInput(deal.ExecutionDate),
-            StartDate: toDateInput(deal.StartDate),
-            ExpectedCloseDate: toDateInput(deal.ExpectedCloseDate),
-            Probability: deal.Probability,
-            ForecastCategoryTypeID: deal.ForecastCategoryTypeID,
-            AutoRenew: deal.AutoRenew === true,
-            AnnualIncreasePctOverride: deal.AnnualIncreasePctOverride,
-            CancellationNoticeDaysOverride: deal.CancellationNoticeDaysOverride,
-            PaymentMethod: deal.PaymentMethod,
-            ContractVariances: deal.ContractVariances,
-            Description: deal.Description,
-            NextStep: deal.NextStep,
-            NextStepDate: toDateInput(deal.NextStepDate),
-        });
-
-        for (const line of (results[1].Results ?? []) as DealLineRow[]) {
-            draft.AddLine({
-                ID: line.ID,
-                ProductID: line.ProductID,
-                ProductName: line.ProductName,
-                DealLineTypeID: line.DealLineTypeID,
-                Quantity: line.Quantity,
-                RequestedDiscountPct: line.RequestedDiscountPct,
-                OverrideUnitPrice: line.OverrideUnitPrice,
-                AnnualGrossFees: line.AnnualGrossFees,
-                DiscountAmount: line.DiscountAmount,
-                Total: line.Total,
-                TermMonths: line.TermMonths,
-                ServicePeriodStart: toDateInput(line.ServicePeriodStart),
-                ServicePeriodEnd: toDateInput(line.ServicePeriodEnd),
-                Description: line.Description,
-            });
-        }
-
-        for (const row of (results[2].Results ?? []) as ScheduleRow[]) {
-            draft.AddScheduleRow({
-                ID: row.ID,
-                PaymentDate: toDateInput(row.PaymentDate),
-                Amount: row.Amount,
-                Description: row.Description,
-            });
-        }
-
-        return draft;
+    /** A blank deal, ready to bind to. Its collections start empty and are never loaded — there is nothing to load. */
+    public async NewDeal(): Promise<DealEntity> {
+        const md = new Metadata();
+        const deal = await md.GetEntityObject<DealEntity>(E_DEAL);
+        deal.NewRecord();
+        return deal;
     }
 
     /**
-     * Sends the whole draft through `Sales.SaveDeal` — one transactional call, all-or-none.
+     * Reads an existing deal and its children — header, lines, schedule and roster together.
      *
-     * A draft the server refuses comes back as `Success: false` WITH issues, which is an ordinary
-     * outcome and not an error. Only a transport or auth failure produces `ErrorMessage`.
+     * THIS IS THE ONLY PLACE THE COLLECTIONS ARE LOADED, and that is a data-loss guard rather than a
+     * tidiness preference. All three are declared `Load: 'explicit'`, so nothing populates them lazily;
+     * a second load arriving mid-edit is what would replace the user's unsaved rows with whatever is in
+     * the database. `LoadRelatedRecords` is itself guarded — it skips a collection that is already loaded
+     * or holds staged work — and it batches all three into ONE `RunViews` rather than three round trips.
+     *
+     * Returns null when the deal or any of its collections could not be read. That distinction matters:
+     * `LoadRelatedRecords` logs a failed collection and leaves it EMPTY rather than throwing, so without
+     * the `IsLoaded` check below, a failed read would present as a deal that genuinely has no lines.
      */
-    public async Save(draft: DealDraft): Promise<DealSaveOutcome> {
-        try {
-            const op = new SalesSaveDealOperation();
-            const result = await op.Execute(draft.ToSaveInput());
-            const output = result?.Output;
+    public async LoadDeal(dealID: string): Promise<DealEntity | null> {
+        const md = new Metadata();
+        const deal = await md.GetEntityObject<DealEntity>(E_DEAL);
+        if (!(await deal.Load(dealID))) {
+            return null;
+        }
 
-            if (!output) {
+        await deal.LoadRelatedRecords(...WORKSPACE_COLLECTIONS);
+
+        // A collection only reports IsLoaded once its rows actually arrived, so this catches the silent
+        // failure above. An empty deal and an unreadable one must never look the same.
+        if (!deal.Lines.IsLoaded || !deal.PaymentSchedule.IsLoaded || !deal.Team.IsLoaded) {
+            return null;
+        }
+        return deal;
+    }
+
+    /**
+     * Saves the deal and its children as ONE unit of work.
+     *
+     * `Save()` on a record carrying related-record collections is not a single-row write: MJ builds a
+     * save plan, ships the whole graph in one `MJ.SaveEntityGraph` mutation, and the server executes it
+     * inside one transaction — header first, then removals, then children. So either the deal and
+     * everything under it landed, or nothing did. There is no path here that leaves a numbered deal with
+     * nothing beneath it, which is exactly what the retired `Sales.SaveDeal` operation existed to
+     * guarantee.
+     *
+     * `IgnoreDirtyState` is deliberate and load-bearing: without it, a child that is loaded and unchanged
+     * contributes no work, which is normally right — but this surface re-sequences `DisplayOrder` from
+     * array position on every add and remove, so a row that merely MOVED is clean by field-comparison and
+     * would keep its old position in the database.
+     *
+     * A record the server refuses for being invalid is an ORDINARY outcome, reported through `Validation`
+     * rather than `ErrorMessage`. Only a transport or database failure produces the latter.
+     */
+    public async Save(deal: DealEntity): Promise<DealSaveOutcome> {
+        const wasNew = !deal.IsSaved;
+        try {
+            const validation = ProjectValidation(deal.Validate());
+            if (!validation.IsValid) {
                 return {
-                    Success: false, DealID: null, Created: false, Issues: [],
-                    ErrorMessage: result?.ErrorMessage ?? 'The deal could not be saved.',
+                    Success: false,
+                    DealID: deal.IsSaved ? deal.ID : null,
+                    Created: false,
+                    Validation: validation,
+                    ErrorMessage: null,
                 };
             }
 
-            if (output.Success) {
-                // Fold the server's IDs back into the SAME draft instance, so the surface keeps editing
-                // the record it just created instead of a rebuilt copy.
-                draft.ApplySaveResult(output);
+            const options = new EntitySaveOptions();
+            options.IgnoreDirtyState = true;
+
+            const saved = await deal.Save(options);
+            if (!saved) {
+                return {
+                    Success: false,
+                    DealID: deal.IsSaved ? deal.ID : null,
+                    Created: false,
+                    Validation: EmptyValidation(),
+                    ErrorMessage: deal.LatestResult?.CompleteMessage ?? 'The deal could not be saved.',
+                };
             }
 
+            // The SAME instance now carries the server's IDs, so the surface keeps editing the record it
+            // just created rather than a rebuilt copy — the job `ApplySaveResult` used to do by hand.
             return {
-                Success: output.Success === true,
-                DealID: output.DealID ?? null,
-                Created: output.Created === true,
-                Issues: output.Issues ?? [],
+                Success: true,
+                DealID: deal.ID,
+                Created: wasNew,
+                Validation: EmptyValidation(),
                 ErrorMessage: null,
             };
         } catch (err) {
             return {
-                Success: false, DealID: null, Created: false, Issues: [],
+                Success: false,
+                DealID: deal.IsSaved ? deal.ID : null,
+                Created: false,
+                Validation: EmptyValidation(),
                 ErrorMessage: err instanceof Error ? err.message : String(err),
             };
         }

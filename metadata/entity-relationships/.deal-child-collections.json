@@ -1,0 +1,67 @@
+[
+  {
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "Lines",
+        "Source": "database",
+        "Load": "explicit",
+        "OnRemove": "delete",
+        "OrderBy": "DisplayOrder ASC",
+        "Sequence": {
+          "Field": "DisplayOrder",
+          "From": 1
+        },
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deals&RelatedEntity=MJ_BizApps_Sales: Deal Lines"
+    },
+    "sync": {
+      "lastModified": "2026-08-14T19:49:37.967Z",
+      "checksum": "f095a2f2d28b8d529db165f74b7baaa4f30725b3a9ee1be4ddc6006d11ded135"
+    }
+  },
+  {
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "PaymentSchedule",
+        "Source": "database",
+        "Load": "explicit",
+        "OnRemove": "delete",
+        "OrderBy": "DisplayOrder ASC",
+        "Sequence": {
+          "Field": "DisplayOrder",
+          "From": 1
+        },
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deals&RelatedEntity=MJ_BizApps_Sales: Deal Payment Schedules"
+    },
+    "sync": {
+      "lastModified": "2026-08-14T19:49:38.002Z",
+      "checksum": "cc798952db1210f873c9f21ca3ffa23ec5369b5a8b294aae7c03ac9ce9685fc6"
+    }
+  },
+  {
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "Team",
+        "Source": "database",
+        "Load": "explicit",
+        "OnRemove": "delete",
+        "OrderBy": "__mj_CreatedAt ASC",
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deals&RelatedEntity=MJ_BizApps_Sales: Deal Team Members"
+    },
+    "sync": {
+      "lastModified": "2026-08-14T19:49:38.072Z",
+      "checksum": "75df9ca112202413d5d8bd3eb20e93c45be4dc22ffd60466cd13d3dbcbca092e"
+    }
+  }
+]

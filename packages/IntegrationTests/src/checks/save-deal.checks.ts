@@ -1,11 +1,24 @@
 /**
- * @fileoverview `save-deal` — SD1–SD12. `Sales.SaveDeal` against a live database, nothing mocked.
+ * @fileoverview `save-deal` — SD1–SD14. Saving a deal and its children against a live database.
  *
- * WHY THIS BUNDLE EXISTS. Composing a deal is the one write in this app that spans three tables, and the
+ * WHY THIS BUNDLE EXISTS. Composing a deal is the one write in this app that spans four tables, and the
  * failure it exists to prevent — a numbered deal with no lines under it — is invisible to a unit test and
- * to any check that mocks the provider. These checks were developed as a scratch script during Phase 1,
- * proved the operation worked, and were then promoted here so they run on every `mj test` instead of
- * living in a file only one person knew about.
+ * to any check that mocks the provider.
+ *
+ * ── WHAT CHANGED WHEN `Sales.SaveDeal` WAS RETIRED, AND WHY THESE CHECKS STILL MATTER ───────────
+ *
+ * These checks used to drive the `Sales.SaveDeal` remote operation, which rehydrated a client `DealDraft`
+ * into a server-side entity tree. The deal now carries `Lines`, `PaymentSchedule` and `Team` as Related
+ * Record Collections, so the path under test is `deal.Save()` — MJ builds a save plan and executes it in
+ * one transaction. The operation is gone; the GUARANTEES are unchanged, which is exactly why the bundle
+ * survived the rewrite rather than being deleted with the thing it tested.
+ *
+ * **ONE GUARANTEE DID CHANGE, and SD6/SD13 are the pair that pins it down.** The operation treated a
+ * submitted `Lines` array as the COMPLETE DESIRED SET: a stored line absent from it was deleted. A
+ * collection does not work that way — it deletes only what was explicitly `Remove()`d, and a row merely
+ * missing from the array survives. That is a deliberate adoption of the framework's native semantics
+ * rather than an oversight, so SD6 proves removal works and SD13 proves omission does NOT delete. Read
+ * both before "fixing" either.
  *
  * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check below is `RequiresMutation`, so without that
  * variable the bundle runs ZERO checks and reports success — the vacuous pass `assert-check-count.mjs`
@@ -15,14 +28,18 @@
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
-import { Metadata, RunView } from '@memberjunction/core';
+import { Metadata, RunView, ValidationErrorType } from '@memberjunction/core';
 import {
     Assert,
     AssertEqual,
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
-import { SalesSaveDealOperation, type SalesSaveDealInput, type SalesSaveDealOutput } from '@mj-biz-apps/sales-entities';
+import type {
+    DealEntity,
+    mjBizAppsSalesDealLineEntity,
+    mjBizAppsSalesDealPaymentScheduleEntity,
+} from '@mj-biz-apps/sales-entities';
 
 import {
     E_DEAL,
@@ -30,66 +47,103 @@ import {
     E_SCHEDULE,
     E_TEAM,
     InRolledBackTransaction,
+    ProviderOf,
     ResolveSalesFixture,
     SALES_SCHEMA,
     TxOne,
     type SalesFixture,
 } from '../fixture.js';
 
-/** A minimal valid draft. Callers override what their check is about and nothing else. */
-function draft(f: SalesFixture, overrides: Partial<SalesSaveDealInput> = {}): SalesSaveDealInput {
-    return {
-        Name: 'IT deal',
-        PipelineID: f.PipelineID,
-        PipelineStageID: f.StageID,
-        DealTypeID: f.DealTypeID,
-        DealStatusTypeID: f.OpenStatusID,
-        AccountID: f.AccountID,
-        TermMonths: 12,
-        Lines: [],
-        PaymentSchedule: [],
-        ...overrides,
-    };
-}
+/** The collections these checks read and write. */
+const COLLECTIONS = ['Lines', 'PaymentSchedule', 'Team'] as const;
 
-/** Two lines: one recurring, one one-time, with figures transcribed as an AD would type them. */
-function twoLines(f: SalesFixture): SalesSaveDealInput['Lines'] {
-    return [
-        {
-            ClientKey: 'l1',
-            ProductName: 'Platform — Enterprise Seat',
-            DealLineTypeID: f.RecurringLineTypeID,
-            Quantity: 100,
-            AnnualGrossFees: 120000,
-            DiscountAmount: 12000,
-            Total: 108000,
-        },
-        {
-            ClientKey: 'l2',
-            ProductName: 'Onboarding',
-            DealLineTypeID: f.OneTimeLineTypeID,
-            Quantity: 1,
-            AnnualGrossFees: 20000,
-            DiscountAmount: 0,
-            Total: 20000,
-        },
-    ];
-}
-
-/** Runs the operation the way a resolver does, and asserts it did not fail outright. */
-async function save(
+/**
+ * A minimal valid deal, not yet saved. `shape` mutates it for whatever the check is about.
+ *
+ * Built through the PROVIDER rather than a global `Metadata`, so the entity rides the same connection as
+ * the check's open transaction — otherwise its writes would be invisible to the reads below and would not
+ * be rolled back with everything else.
+ *
+ * `CompanyID` is set to the pipeline's here only so the record is coherent before it is saved. The server
+ * overwrites it from the pipeline regardless; SD2 is the check that proves it.
+ */
+async function newDeal(
     ctx: Parameters<NamedCheck['Fn']>[0],
-    input: SalesSaveDealInput,
-): Promise<SalesSaveDealOutput> {
-    const op = new SalesSaveDealOperation();
-    // `provider` and `user` are the whole of the server-side invoke contract — `RemoteOpInvokeOptions`
-    // has no `contextUser`. Passing the provider explicitly is what puts the operation on the SAME
-    // connection as the check's open transaction, so its writes are visible to the reads below and get
-    // rolled back with everything else.
-    const result = await op.Execute(input, { provider: ctx.Provider, user: ctx.User });
-    const output = (result as { Output?: SalesSaveDealOutput })?.Output;
-    Assert(!!output, `Sales.SaveDeal returned no Output envelope: ${JSON.stringify(result).slice(0, 300)}`);
-    return output as SalesSaveDealOutput;
+    f: SalesFixture,
+    shape?: (deal: DealEntity) => void,
+): Promise<DealEntity> {
+    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+    deal.NewRecord();
+    deal.Name = 'IT deal';
+    deal.PipelineID = f.PipelineID;
+    deal.PipelineStageID = f.StageID;
+    deal.DealTypeID = f.DealTypeID;
+    deal.DealStatusTypeID = f.OpenStatusID;
+    deal.AccountID = f.AccountID;
+    deal.CompanyID = f.PipelineCompanyID;
+    deal.TermMonths = 12;
+    shape?.(deal);
+    return deal;
+}
+
+/** Re-reads a saved deal with its collections populated — what a surface does when it opens one. */
+async function reopen(ctx: Parameters<NamedCheck['Fn']>[0], dealID: string): Promise<DealEntity> {
+    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+    Assert(await deal.Load(dealID), `deal ${dealID} could not be re-read`);
+    await deal.LoadRelatedRecords(...COLLECTIONS);
+    Assert(deal.Lines.IsLoaded, 'the Lines collection did not load');
+    Assert(deal.PaymentSchedule.IsLoaded, 'the PaymentSchedule collection did not load');
+    Assert(deal.Team.IsLoaded, 'the Team collection did not load');
+    return deal;
+}
+
+/** Saves and asserts it worked, reporting the entity's own message rather than a generic failure. */
+async function saveOk(deal: DealEntity, what: string): Promise<void> {
+    const ok = await deal.Save();
+    Assert(ok, `${what} failed: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`);
+}
+
+/** Adds one line with figures transcribed as an account director would type them. */
+async function addLine(
+    deal: DealEntity,
+    seed: Partial<Record<keyof mjBizAppsSalesDealLineEntity, unknown>> & { ProductName: string },
+): Promise<mjBizAppsSalesDealLineEntity> {
+    const line = await deal.Lines.Create();
+    for (const [field, value] of Object.entries(seed)) {
+        line.Set(field, value);
+    }
+    return line;
+}
+
+async function addInstalment(
+    deal: DealEntity,
+    seed: Partial<Record<keyof mjBizAppsSalesDealPaymentScheduleEntity, unknown>>,
+): Promise<mjBizAppsSalesDealPaymentScheduleEntity> {
+    const row = await deal.PaymentSchedule.Create();
+    for (const [field, value] of Object.entries(seed)) {
+        row.Set(field, value);
+    }
+    return row;
+}
+
+/** Two lines: one recurring, one one-time. The shape most checks want. */
+async function twoLines(deal: DealEntity, f: SalesFixture): Promise<void> {
+    await addLine(deal, {
+        ProductName: 'Platform — Enterprise Seat',
+        DealLineTypeID: f.RecurringLineTypeID,
+        Quantity: 100,
+        AnnualGrossFees: 120000,
+        DiscountAmount: 12000,
+        Total: 108000,
+    });
+    await addLine(deal, {
+        ProductName: 'Onboarding',
+        DealLineTypeID: f.OneTimeLineTypeID,
+        Quantity: 1,
+        AnnualGrossFees: 20000,
+        DiscountAmount: 0,
+        Total: 20000,
+    });
 }
 
 /**
@@ -130,42 +184,42 @@ const seqOf = (dealNumber: string): number => Number(dealNumber.replace(/^DEAL-/
 export const SaveDealChecks: NamedCheck[] = [
     {
         Id: 'save-deal.SD1',
-        Name: 'SD1: a deal, its lines and its instalments are written by ONE call',
+        Name: 'SD1: a deal, its lines and its instalments are written by ONE save',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
-                const out = await save(ctx, draft(f, {
-                    Name: 'SD1 composed deal',
-                    Lines: twoLines(f),
-                    PaymentSchedule: [
-                        { ClientKey: 'p1', PaymentDate: '2026-10-01', Amount: 64000, Description: '50% on execution' },
-                        { ClientKey: 'p2', PaymentDate: '2027-01-01', Amount: 64000, Description: '50% on go-live' },
-                    ],
-                }));
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD1 composed deal'; });
+                await twoLines(deal, f);
+                await addInstalment(deal, { PaymentDate: new Date('2026-10-01T00:00:00Z'), Amount: 64000, Description: '50% on execution' });
+                await addInstalment(deal, { PaymentDate: new Date('2027-01-01T00:00:00Z'), Amount: 64000, Description: '50% on go-live' });
 
-                Assert(out.Success, `the save failed: ${JSON.stringify(out.Issues)}`);
-                Assert(out.Created === true, 'a deal with no ID must report Created');
-                AssertEqual((await children(ctx, E_DEAL_LINE, out.DealID as string, ['ID'], ORDERED)).length, 2, 'two lines landed');
-                AssertEqual((await children(ctx, E_SCHEDULE, out.DealID as string, ['ID'], ORDERED)).length, 2, 'two instalments landed');
+                await saveOk(deal, 'the composed save');
+                Assert(deal.IsSaved, 'the deal reports itself saved');
+
+                AssertEqual((await children(ctx, E_DEAL_LINE, deal.ID, ['ID'], ORDERED)).length, 2, 'two lines landed');
+                AssertEqual((await children(ctx, E_SCHEDULE, deal.ID, ['ID'], ORDERED)).length, 2, 'two instalments landed');
             }),
     },
     {
         Id: 'save-deal.SD2',
-        Name: 'SD2: CompanyID comes from the PIPELINE, not from whatever the client sent',
+        Name: 'SD2: CompanyID comes from the PIPELINE, not from whatever the client set',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
                 // A deliberately wrong company. Deal.CompanyID must equal Pipeline.CompanyID and a CHECK
-                // cannot reach across the FK to compare them, so the server resolves it — and a client
-                // that gets it wrong (or lies) must not be able to store a mismatch.
+                // cannot reach across the FK to compare them, so the server resolves it on every save —
+                // and a client that gets it wrong (or lies) must not be able to store a mismatch.
                 const bogus = '00000000-0000-0000-0000-000000000001';
-                const out = await save(ctx, draft(f, { Name: 'SD2 company override', CompanyID: bogus }));
-                Assert(out.Success, `the save failed: ${JSON.stringify(out.Issues)}`);
+                const deal = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD2 company override';
+                    d.CompanyID = bogus;
+                });
+                await saveOk(deal, 'the save');
 
                 const row = await TxOne<{ CompanyID: string }>(
-                    ctx, `SELECT CompanyID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${out.DealID}'`,
+                    ctx, `SELECT CompanyID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
                 );
                 AssertEqual(
                     String(row.CompanyID).toLowerCase(),
@@ -181,25 +235,26 @@ export const SaveDealChecks: NamedCheck[] = [
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
-                const out = await save(ctx, draft(f, { Name: 'SD3 owner', OwnerEmployeeID: f.EmployeeID }));
-                Assert(out.Success, `the save failed: ${JSON.stringify(out.Issues)}`);
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD3 owner'; });
+                await deal.SetOwner(f.EmployeeID);
+                await saveOk(deal, 'the save');
 
                 // DealTeamMember is the SOURCE OF TRUTH for who is on a deal, including the owner; the
                 // column is only a denormalized stamp so "my deals" needs no join. So the row must exist,
                 // and the stamp must match it.
-                const team = await children(ctx, E_TEAM, out.DealID as string, ['ID', 'EmployeeID']);
+                const team = await children(ctx, E_TEAM, deal.ID, ['ID', 'EmployeeID']);
                 AssertEqual(team.length, 1, 'exactly one team member was created for the owner');
                 AssertEqual(
                     String(team[0].EmployeeID).toLowerCase(),
                     f.EmployeeID.toLowerCase(),
-                    'the team row names the employee that was sent as the owner',
+                    'the team row names the employee that was set as the owner',
                 );
 
-                const deal = await TxOne<{ OwnerEmployeeID: string }>(
-                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${out.DealID}'`,
+                const stored = await TxOne<{ OwnerEmployeeID: string }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
                 );
                 AssertEqual(
-                    String(deal.OwnerEmployeeID).toLowerCase(),
+                    String(stored.OwnerEmployeeID).toLowerCase(),
                     f.EmployeeID.toLowerCase(),
                     'the denormalized stamp agrees with the team row it is derived from',
                 );
@@ -212,13 +267,14 @@ export const SaveDealChecks: NamedCheck[] = [
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
-                const out = await save(ctx, draft(f, { Name: 'SD4 no pricing', Lines: twoLines(f) }));
-                Assert(out.Success, `the save failed: ${JSON.stringify(out.Issues)}`);
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD4 no pricing'; });
+                await twoLines(deal, f);
+                await saveOk(deal, 'the save');
 
                 // THE RULE MADE A TEST. The four Resolved* columns are write-only from an
                 // Orders.PreviewOrder response. If a future change starts computing them locally — the
                 // exact accretion Rule 1 exists to stop — this check is what notices.
-                const lines = await children(ctx, E_DEAL_LINE, out.DealID as string, [
+                const lines = await children(ctx, E_DEAL_LINE, deal.ID, [
                     'ID', 'ResolvedUnitPrice', 'ResolvedExtendedAmount', 'PriceComponentsJSON', 'PricedAt',
                 ], ORDERED);
                 for (const line of lines) {
@@ -239,102 +295,108 @@ export const SaveDealChecks: NamedCheck[] = [
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
                 // Deliberately INCONSISTENT figures: 100 − 10 is not 999. A server that "helpfully"
-                // recomputed Total would overwrite 999, and a server that validated the relationship
-                // would refuse the save. Neither is allowed: the three numbers are transcribed from a
-                // signed document, and the arithmetic on that page is the customer's.
-                const out = await save(ctx, draft(f, {
-                    Name: 'SD5 verbatim total',
-                    Lines: [{
-                        ClientKey: 'l1', ProductName: 'Odd figures', DealLineTypeID: f.OneTimeLineTypeID,
-                        Quantity: 1, AnnualGrossFees: 100, DiscountAmount: 10, Total: 999,
-                    }],
-                }));
-                Assert(out.Success, `the save was refused — the server must not validate the arithmetic: ${JSON.stringify(out.Issues)}`);
+                // recomputed Total would overwrite 999, and one that validated the relationship would
+                // refuse the save. Neither is allowed: the three numbers are transcribed from a signed
+                // document, and the arithmetic on that page is the customer's.
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD5 verbatim total'; });
+                await addLine(deal, {
+                    ProductName: 'Odd figures',
+                    DealLineTypeID: f.OneTimeLineTypeID,
+                    Quantity: 1,
+                    AnnualGrossFees: 100,
+                    DiscountAmount: 10,
+                    Total: 999,
+                });
+                await saveOk(deal, 'the save (the server must not validate the arithmetic)');
 
-                const lines = await children(ctx, E_DEAL_LINE, out.DealID as string, [
+                const lines = await children(ctx, E_DEAL_LINE, deal.ID, [
                     'AnnualGrossFees', 'DiscountAmount', 'Total',
                 ], ORDERED);
-                AssertEqual(Number(lines[0].Total), 999, 'Total was stored exactly as sent');
-                AssertEqual(Number(lines[0].AnnualGrossFees), 100, 'gross fees stored as sent');
-                AssertEqual(Number(lines[0].DiscountAmount), 10, 'discount stored as sent');
+                AssertEqual(Number(lines[0].Total), 999, 'Total was stored exactly as set');
+                AssertEqual(Number(lines[0].AnnualGrossFees), 100, 'gross fees stored as set');
+                AssertEqual(Number(lines[0].DiscountAmount), 10, 'discount stored as set');
             }),
     },
     {
         Id: 'save-deal.SD6',
-        Name: 'SD6: a line absent from the payload is DELETED — the array is the complete desired set',
+        Name: 'SD6: Remove() DELETES the line, in the same transaction as the rest of the save',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
-                const created = await save(ctx, draft(f, { Name: 'SD6 complete set', Lines: twoLines(f) }));
-                Assert(created.Success, `create failed: ${JSON.stringify(created.Issues)}`);
-                AssertEqual(created.Lines.length, 2, 'two lines to start with');
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD6 explicit removal'; });
+                await twoLines(created, f);
+                await saveOk(created, 'create');
+                AssertEqual((await children(ctx, E_DEAL_LINE, created.ID, ['ID'], ORDERED)).length, 2, 'two lines to start with');
 
-                const keep = created.Lines.find((l) => l.ClientKey === 'l1');
-                Assert(!!keep, 'the first line came back with its ClientKey echoed');
+                // REMOVAL IS EXPLICIT. This is the semantics the collection actually implements, and the
+                // reason it is right: `Remove()` records the row in the collection's removal list, which
+                // is contributed to the save plan BEFORE the inserts and updates — so the delete, the
+                // re-sequencing of what remains, and the header update are one atomic unit. Dropping the
+                // row from the array instead would leave it in the database; SD13 is that case.
+                const deal = await reopen(ctx, created.ID);
+                const doomed = deal.Lines.Items.find((l) => l.ProductName === 'Onboarding');
+                Assert(!!doomed, 'the line to remove was found after re-reading');
+                deal.Lines.Remove(doomed!);
+                AssertEqual(deal.Lines.Count, 1, 'the collection reports one line remaining before the save');
 
-                const updated = await save(ctx, {
-                    ID: created.DealID as string,
-                    Name: 'SD6 complete set',
-                    PipelineID: f.PipelineID,
-                    Lines: [{
-                        ClientKey: 'l1', ID: keep!.ID, ProductName: 'Platform — Enterprise Seat',
-                        DealLineTypeID: f.RecurringLineTypeID, Quantity: 100,
-                    }],
-                });
-                Assert(updated.Success, `update failed: ${JSON.stringify(updated.Issues)}`);
-                Assert(updated.Created === false, 'an update must not report Created');
+                await saveOk(deal, 'the save after removal');
 
-                const after = await children(ctx, E_DEAL_LINE, created.DealID as string, ['ID'], ORDERED);
-                AssertEqual(after.length, 1, 'the omitted line was deleted, not left behind');
+                const after = await children(ctx, E_DEAL_LINE, created.ID, ['ID', 'ProductName', 'DisplayOrder'], ORDERED);
+                AssertEqual(after.length, 1, 'the removed line was deleted');
+                AssertEqual(String(after[0].ProductName), 'Platform — Enterprise Seat', 'the surviving line is the one that was kept');
+                AssertEqual(Number(after[0].DisplayOrder), 1, 'what remains was re-sequenced, so no gap was left behind');
             }),
     },
     {
         Id: 'save-deal.SD7',
-        Name: 'SD7: children are re-sequenced from array order on every save',
+        Name: 'SD7: children are sequenced from collection position, contiguously from 1',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
-                const out = await save(ctx, draft(f, {
-                    Name: 'SD7 ordering',
-                    Lines: twoLines(f),
-                    PaymentSchedule: [
-                        { ClientKey: 'p1', Amount: 1, Description: 'first' },
-                        { ClientKey: 'p2', Amount: 2, Description: 'second' },
-                        { ClientKey: 'p3', Amount: 3, Description: 'third' },
-                    ],
-                }));
-                Assert(out.Success, `the save failed: ${JSON.stringify(out.Issues)}`);
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD7 ordering'; });
+                await twoLines(deal, f);
+                await addInstalment(deal, { Amount: 1, Description: 'first' });
+                await addInstalment(deal, { Amount: 2, Description: 'second' });
+                await addInstalment(deal, { Amount: 3, Description: 'third' });
+                await saveOk(deal, 'the save');
 
-                const lines = await children(ctx, E_DEAL_LINE, out.DealID as string, ['DisplayOrder'], ORDERED);
-                AssertEqual(lines.map((l) => Number(l.DisplayOrder)).join(','), '10,20', 'lines sequenced 10,20');
-                const sched = await children(ctx, E_SCHEDULE, out.DealID as string, ['DisplayOrder', 'Description'], ORDERED);
-                AssertEqual(sched.map((s) => Number(s.DisplayOrder)).join(','), '10,20,30', 'instalments sequenced 10,20,30');
-                AssertEqual(String(sched[0].Description), 'first', 'submitted order is the stored order');
+                // FROM 1, STEP 1 — not 10/20/30 as the hand-rolled implementation used. The collection's
+                // sequencer is `from + index` with no increment option, and the old 10-step was cosmetic
+                // anyway: it looks like room to insert between two rows, but every add and remove
+                // re-sequenced the whole collection, so a gap never survived the next mutation.
+                const lines = await children(ctx, E_DEAL_LINE, deal.ID, ['DisplayOrder'], ORDERED);
+                AssertEqual(lines.map((l) => Number(l.DisplayOrder)).join(','), '1,2', 'lines sequenced 1,2');
+                const sched = await children(ctx, E_SCHEDULE, deal.ID, ['DisplayOrder', 'Description'], ORDERED);
+                AssertEqual(sched.map((s) => Number(s.DisplayOrder)).join(','), '1,2,3', 'instalments sequenced 1,2,3');
+                AssertEqual(String(sched[0].Description), 'first', 'collection order is the stored order');
             }),
     },
     {
         Id: 'save-deal.SD8',
-        Name: 'SD8: an invalid draft is refused with a STRUCTURED issue and writes nothing',
+        Name: 'SD8: an invalid deal is refused with a STRUCTURED error and writes nothing',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
                 const before = await TxOne<{ N: number }>(ctx, `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.Deal`);
 
-                const out = await save(ctx, draft(f, { Name: '' }));
-                Assert(out.Success === false, 'a nameless deal must be refused');
-                // STRUCTURED, not a joined string: Section is what lets a tab badge itself and Field is
-                // what lets the field mark itself. A refusal that only carried prose would force the UI
-                // to parse it.
-                Assert(out.Issues.length > 0, 'the refusal must carry issues');
-                AssertEqual(out.Issues[0].Section, 'party', 'the issue names the pane it belongs to');
-                AssertEqual(out.Issues[0].Field, 'Name', 'the issue names the offending field');
-                AssertEqual(out.Issues[0].Severity, 'error', 'a blocker, not an advisory');
+                const deal = await newDeal(ctx, f, (d) => { d.Name = ''; });
+
+                // STRUCTURED, not a joined string: `Source` is what lets a field mark itself and a tab
+                // badge itself. A refusal carrying only prose would force the UI to parse it. The rules
+                // live on the ENTITY, so this is the same code the browser runs before it ever calls out.
+                const validation = deal.Validate();
+                Assert(validation.Success === false, 'a nameless deal must not validate');
+                const nameError = validation.Errors.find((e) => e.Source === 'Name');
+                Assert(!!nameError, `the refusal must name the offending field, got ${JSON.stringify(validation.Errors)}`);
+                AssertEqual(nameError!.Type, ValidationErrorType.Failure, 'a blocker, not an advisory');
+
+                AssertEqual(await deal.Save(), false, 'the save must be refused');
 
                 const after = await TxOne<{ N: number }>(ctx, `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.Deal`);
-                AssertEqual(Number(after.N), Number(before.N), 'a refused draft wrote no deal row');
+                AssertEqual(Number(after.N), Number(before.N), 'a refused deal wrote no row');
             }),
     },
     {
@@ -344,17 +406,17 @@ export const SaveDealChecks: NamedCheck[] = [
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
-                const out = await save(ctx, draft(f, { Name: 'SD9 numbering' }));
-                Assert(out.Success, `the save failed: ${JSON.stringify(out.Issues)}`);
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD9 numbering'; });
+                await saveOk(deal, 'the save');
 
                 const row = await TxOne<{ DealNumber: string }>(
-                    ctx, `SELECT DealNumber FROM ${SALES_SCHEMA}.Deal WHERE ID = '${out.DealID}'`,
+                    ctx, `SELECT DealNumber FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
                 );
                 Assert(
                     /^DEAL-\d{6}$/.test(String(row.DealNumber)),
                     `expected DEAL-{6 digits}, got ${String(row.DealNumber)}`,
                 );
-                AssertEqual(out.DealNumber, row.DealNumber, 'the operation reports the number it stored');
+                AssertEqual(deal.DealNumber, row.DealNumber, 'the in-memory record carries the number it stored');
             }),
     },
     {
@@ -364,19 +426,18 @@ export const SaveDealChecks: NamedCheck[] = [
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
-                const created = await save(ctx, draft(f, { Name: 'SD10 stable number' }));
-                Assert(created.Success, `create failed: ${JSON.stringify(created.Issues)}`);
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD10 stable number'; });
+                await saveOk(created, 'create');
                 const first = created.DealNumber;
 
                 // A deal number travels: it appears on a contract, in an order, and in people's email.
                 // Renumbering on edit would silently break every one of those references.
-                const updated = await save(ctx, {
-                    ID: created.DealID as string, Name: 'SD10 renamed', PipelineID: f.PipelineID,
-                });
-                Assert(updated.Success, `update failed: ${JSON.stringify(updated.Issues)}`);
+                const deal = await reopen(ctx, created.ID);
+                deal.Name = 'SD10 renamed';
+                await saveOk(deal, 'update');
 
                 const row = await TxOne<{ DealNumber: string }>(
-                    ctx, `SELECT DealNumber FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.DealID}'`,
+                    ctx, `SELECT DealNumber FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
                 );
                 AssertEqual(row.DealNumber, first, 'the number survived the update unchanged');
             }),
@@ -392,9 +453,10 @@ export const SaveDealChecks: NamedCheck[] = [
                     ctx, `SELECT NextSequenceNumber AS N FROM ${SALES_SCHEMA}.DealSequence WHERE ID = 1`,
                 );
 
-                const a = await save(ctx, draft(f, { Name: 'SD11 first' }));
-                const b = await save(ctx, draft(f, { Name: 'SD11 second' }));
-                Assert(a.Success && b.Success, 'both saves succeeded');
+                const a = await newDeal(ctx, f, (d) => { d.Name = 'SD11 first'; });
+                await saveOk(a, 'the first save');
+                const b = await newDeal(ctx, f, (d) => { d.Name = 'SD11 second'; });
+                await saveOk(b, 'the second save');
 
                 const after = await TxOne<{ N: number }>(
                     ctx, `SELECT NextSequenceNumber AS N FROM ${SALES_SCHEMA}.DealSequence WHERE ID = 1`,
@@ -417,8 +479,9 @@ export const SaveDealChecks: NamedCheck[] = [
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
-                const out = await save(ctx, draft(f, { Name: 'SD12 recurring', Lines: twoLines(f) }));
-                Assert(out.Success, `the save failed: ${JSON.stringify(out.Issues)}`);
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD12 recurring'; });
+                await twoLines(deal, f);
+                await saveOk(deal, 'the save');
 
                 /**
                  * THE FLAG, NOT THE NAME. This is the assertion that makes `DealLineType` worth being a
@@ -432,10 +495,183 @@ export const SaveDealChecks: NamedCheck[] = [
                         SUM(CASE WHEN lt.IsRecurring = 0 THEN 1 ELSE 0 END) AS OneTime
                     FROM ${SALES_SCHEMA}.DealLine dl
                     JOIN ${SALES_SCHEMA}.DealLineType lt ON lt.ID = dl.DealLineTypeID
-                    WHERE dl.DealID = '${out.DealID}'`);
+                    WHERE dl.DealID = '${deal.ID}'`);
 
                 AssertEqual(Number(joined.Recurring), 1, 'exactly one line is of a recurring type');
                 AssertEqual(Number(joined.OneTime), 1, 'exactly one line is of a one-time type');
+            }),
+    },
+    {
+        Id: 'save-deal.SD13',
+        Name: 'SD13: a header-only save leaves the children ALONE — omission is not deletion',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                const f = await ResolveSalesFixture(ctx);
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD13 omission'; });
+                await twoLines(created, f);
+                await addInstalment(created, { Amount: 500, Description: 'deposit' });
+                await saveOk(created, 'create');
+
+                /**
+                 * THE COMPLEMENT OF SD6, AND THE ONE BEHAVIOUR THAT CHANGED. The retired `Sales.SaveDeal`
+                 * treated a submitted array as the complete desired set and DELETED anything missing from
+                 * it. A collection deletes only what was explicitly removed.
+                 *
+                 * That difference is what makes this save safe: an Action that renames a deal, an agent
+                 * that nudges `NextStep`, a header-only form — none of them has to know the deal has lines,
+                 * and none of them can destroy them by not mentioning them. Under the old semantics every
+                 * such caller had to load and re-send the full tree, and forgetting to was silent data
+                 * loss.
+                 */
+                const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await deal.Load(created.ID), 're-read the deal without touching its collections');
+                AssertEqual(deal.Lines.Count, 0, 'the collection is unloaded, so it holds nothing');
+                Assert(deal.Lines.IsLoaded === false, 'and it knows it was never loaded — which is why it contributes no deletions');
+
+                deal.NextStep = 'Send the redline';
+                await saveOk(deal, 'the header-only save');
+
+                AssertEqual((await children(ctx, E_DEAL_LINE, created.ID, ['ID'], ORDERED)).length, 2, 'both lines survived');
+                AssertEqual((await children(ctx, E_SCHEDULE, created.ID, ['ID'], ORDERED)).length, 1, 'the instalment survived');
+            }),
+    },
+    {
+        Id: 'save-deal.SD16',
+        Name: 'SD16: a caller-set Resolved* value is REFUSED — the pricing block is write-only',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                const f = await ResolveSalesFixture(ctx);
+                const before = await TxOne<{ N: number }>(ctx, `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.Deal`);
+
+                /**
+                 * SD4'S COMPLEMENT, and the one with teeth.
+                 *
+                 * SD4 proves the four provenance columns come back NULL when nobody touches them — which a
+                 * save path that merely ignored them would also satisfy. This proves the stronger claim: a
+                 * caller that DELIBERATELY sets one is refused.
+                 *
+                 * It matters because the guard is new. `Sales.SaveDeal` protected these columns with a
+                 * field whitelist, and retiring the operation retired the whitelist; the generated Deal
+                 * Lines form had always exposed them anyway. The rule now lives on the ENTITY, so it binds
+                 * the browser, an Action, an agent and a raw `BaseEntity.Save()` identically.
+                 */
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD16 forged pricing'; });
+                const line = await addLine(deal, {
+                    ProductName: 'Forged price',
+                    DealLineTypeID: f.OneTimeLineTypeID,
+                    Quantity: 1,
+                });
+
+                // FIRST: prove the line subclass is live at all. Every other check sets a valid line, so
+                // nothing until now has exercised a LINE-level rule — if the class factory were handing
+                // back the generated entity, every rule in DealLineEntity would be silently absent and the
+                // provenance assertion below would fail for a reason that has nothing to do with pricing.
+                line.ProductName = '';
+                const probe = deal.Validate();
+                Assert(
+                    probe.Errors.some((e) => e.Source?.endsWith('ProductName')),
+                    'DealLineEntity.Validate is not running — the class factory resolved the generated entity',
+                );
+                line.ProductName = 'Forged price';
+
+                line.ResolvedUnitPrice = 4200;
+
+                const validation = deal.Validate();
+                Assert(validation.Success === false, 'a forged ResolvedUnitPrice must not validate');
+                const refusal = validation.Errors.find((e) => e.Source?.endsWith('ResolvedUnitPrice'));
+                Assert(
+                    !!refusal,
+                    `the refusal must name the offending column, got ${JSON.stringify(validation.Errors.map((e) => e.Source))}`,
+                );
+                // Labelled through the collection, so a surface can point at the ROW as well as the field.
+                Assert(
+                    refusal!.Source.startsWith('Lines['),
+                    `the refusal must identify WHICH line, got '${refusal!.Source}'`,
+                );
+
+                AssertEqual(await deal.Save(), false, 'and the save must be refused');
+                const after = await TxOne<{ N: number }>(ctx, `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.Deal`);
+                AssertEqual(Number(after.N), Number(before.N), 'a refused deal wrote no row at all');
+            }),
+    },
+    {
+        Id: 'save-deal.SD15',
+        Name: 'SD15: the defaults the retired draft pre-filled now come from ENTITY METADATA',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                const f = await ResolveSalesFixture(ctx);
+
+                /**
+                 * A HIDDEN INVARIANT THE RETIREMENT COULD HAVE DROPPED IN SILENCE.
+                 *
+                 * `DealDraft`'s constructor pre-filled `PaymentMethod: 'ACH'`, and `AddLine` pre-filled
+                 * `Quantity: 1`. Nothing replaced those in the component, because nothing needed to: both
+                 * columns carry a database DEFAULT, CodeGen records it on `EntityField.DefaultValue`, and
+                 * `NewRecord()` applies it. So the values still arrive — from metadata rather than from a
+                 * UI model, which is the better place for them.
+                 *
+                 * "Still arrive" was an inference along a four-step chain, though, and the failure mode if
+                 * any link broke is a quiet one: a deal saved with a NULL payment method, or a line saved
+                 * with quantity NULL. This check is what turns the inference into a fact.
+                 *
+                 * It also pins the SQL-syntax stripping. The stored default is literally `('ACH')`, and an
+                 * unstripped value would give every deal the payment method `('ACH')` — wrong in a way that
+                 * looks like a typo rather than a framework detail.
+                 */
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD15 metadata defaults'; });
+                AssertEqual(deal.PaymentMethod, 'ACH', 'PaymentMethod defaults from metadata, not from a UI model');
+
+                const line = await deal.Lines.Create();
+                line.ProductName = 'Defaulted line';
+                line.DealLineTypeID = f.OneTimeLineTypeID;
+                AssertEqual(Number(line.Quantity), 1, 'Quantity defaults to 1 without anyone setting it');
+
+                await saveOk(deal, 'the save');
+
+                const stored = await TxOne<{ PaymentMethod: string }>(
+                    ctx, `SELECT PaymentMethod FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
+                );
+                AssertEqual(String(stored.PaymentMethod), 'ACH', 'and it is what actually reached the database');
+
+                const lines = await children(ctx, E_DEAL_LINE, deal.ID, ['Quantity'], ORDERED);
+                AssertEqual(Number(lines[0].Quantity), 1, 'the line stored quantity 1');
+            }),
+    },
+    {
+        Id: 'save-deal.SD14',
+        Name: 'SD14: a line EDIT round-trips, and a position change is written even though the row is clean',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                const f = await ResolveSalesFixture(ctx);
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD14 edit and reorder'; });
+                await twoLines(created, f);
+                await saveOk(created, 'create');
+
+                const deal = await reopen(ctx, created.ID);
+                AssertEqual(deal.Lines.Count, 2, 'both lines came back');
+
+                // An ordinary field edit on a loaded child.
+                const first = deal.Lines.Items.find((l) => l.ProductName === 'Platform — Enterprise Seat');
+                Assert(!!first, 'the recurring line was found');
+                first!.Quantity = 150;
+
+                // AND a REPOSITIONING, which is the subtle case. Removing the other line re-sequences what
+                // remains; the surviving row's DisplayOrder changes without any field the user touched. It
+                // is `IgnoreDirtyState`-independent here because the sequence write itself dirties the row —
+                // this check exists to notice if that ever stops being true.
+                const other = deal.Lines.Items.find((l) => l.ProductName === 'Onboarding');
+                deal.Lines.Remove(other!);
+
+                await saveOk(deal, 'the save after edit and removal');
+
+                const after = await children(ctx, E_DEAL_LINE, created.ID, ['Quantity', 'DisplayOrder'], ORDERED);
+                AssertEqual(after.length, 1, 'one line remains');
+                AssertEqual(Number(after[0].Quantity), 150, 'the field edit was written');
+                AssertEqual(Number(after[0].DisplayOrder), 1, 'and the surviving row took position 1');
             }),
     },
 ];

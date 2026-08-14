@@ -9,11 +9,12 @@
 // Import entity and action packages to trigger @RegisterClass decorators
 import '@mj-biz-apps/sales-entities';
 import '@mj-biz-apps/sales-actions';
+import { LoadSalesDealEntities } from '@mj-biz-apps/sales-entities';
 
-// Server-side entity subclasses and remote operations — MUST come after sales-entities so
-// @RegisterClass auto-increment gives these higher priority than the generated classes. As of
-// Phase 1 this carries DealEntityServer (header + lines + payment schedule in one transaction,
-// and the OwnerEmployeeID stamp) and Sales.SaveDeal. The close lock lands at S4.
+// Server-side entity subclasses — MUST come after sales-entities so @RegisterClass auto-increment gives
+// these higher priority. This carries DealEntityServer: deal numbering inside the save's transaction and
+// the OwnerEmployeeID stamp derived from the team roster. The deal's own child collections are Related
+// Record Collections now, so no hand-rolled tree lives here any more. The close lock lands at S4.
 import '@mj-biz-apps/sales-core-entities-server';
 import { LoadSalesCoreEntitiesServer } from '@mj-biz-apps/sales-core-entities-server';
 
@@ -46,10 +47,16 @@ export const RESOLVER_PATHS = [
  * startupExport entry point named in mj-app.json.
  */
 export function LoadBizAppsSalesServer(): void {
+    // The SHARED subclasses (DealEntity / DealLineEntity / DealPaymentScheduleEntity) carry the
+    // validation rules that must hold on both tiers. Anchored explicitly, and BEFORE the server-only
+    // anchor below, because DealEntityServer extends DealEntity — dropping this import would leave the
+    // server enforcing nothing but the database's own constraints.
+    LoadSalesDealEntities();
+
     // Static imports above ensure the generated classes are registered; this anchors the
-    // server-only subclasses against tree-shaking. Load-bearing as of Phase 1: without it a bundler
-    // is right to drop the imports, ClassFactory then resolves the GENERATED Deal entity instead of
-    // DealEntityServer, and the whole transaction/owner-stamp layer silently stops applying.
+    // server-only subclasses against tree-shaking. Load-bearing: without it a bundler is right to drop
+    // the imports, ClassFactory then resolves a less-derived Deal class instead of DealEntityServer,
+    // and deal numbering plus the owner stamp silently stop applying.
     LoadSalesCoreEntitiesServer();
 
     // Referenced so the manifest import is not elided; MJ reads it during registration.

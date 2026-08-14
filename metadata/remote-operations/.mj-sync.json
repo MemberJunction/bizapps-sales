@@ -1,6 +1,25 @@
 {
   "entity": "MJ: Remote Operations",
   "filePattern": "**/.*.json",
+  "_comment": [
+    "THIS DIRECTORY IS DELIBERATELY EMPTY. Sales has no remote operations right now.",
+    "",
+    "It held exactly one, `Sales.SaveDeal`, whose entire job was to let a browser save a deal together",
+    "with its lines and payment schedule atomically -- something a client could not do while the child",
+    "collections existed only as transient arrays on a SERVER entity subclass. MJ v6's Related Record",
+    "Collections put those collections on the generated entity instead, so the same graph now exists in",
+    "the browser and persists through `MJ.SaveEntityGraph` in one transaction. The operation had nothing",
+    "left to do and was retired, along with the `DealDraft` payload model it existed to accept.",
+    "",
+    "The scaffolding is kept rather than deleted because the operations that DO need this shape are",
+    "queued behind it: `Sales.CloseDeal` and `Sales.ReopenDeal` at S4 are genuine multi-table units of",
+    "work with policy evaluation and an audited lock bypass -- not a save the entity graph can express.",
+    "They resolve their CategoryID with @lookup against remote-operation-categories, which is why that",
+    "directory still carries its row and still precedes this one in directoryOrder.",
+    "",
+    "A remote operation is an ATOMIC UNIT OF WORK, not a way to reach the server. That distinction is",
+    "the whole lesson of retiring this one."
+  ],
   "pull": {
     "createNewFileIfNotFound": true,
     "newFileName": ".sales-remote-operations.json",

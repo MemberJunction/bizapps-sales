@@ -4105,6 +4105,65 @@ export class mjBizAppsSalesDealTypeEntity extends BaseEntity<mjBizAppsSalesDealT
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deals')
 export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntityType> {
+
+  /**
+  * Related records: MJ_BizApps_Sales: Deal Lines
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Sales: Deals record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Sales: Deals → MJ_BizApps_Sales: Deal Lines' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Lines = this.DeclareRelatedRecords<mjBizAppsSalesDealLineEntity>({
+      Name: 'Lines',
+        RelatedEntity: 'MJ_BizApps_Sales: Deal Lines',
+        RelatedEntityJoinField: 'DealID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'explicit',
+        OnRemove: 'delete',
+        Source: 'database',
+        Sequence: { Field: 'DisplayOrder', From: 1 },
+  });
+
+
+  /**
+  * Related records: MJ_BizApps_Sales: Deal Team Members
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Sales: Deals record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Sales: Deals → MJ_BizApps_Sales: Deal Team Members' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Team = this.DeclareRelatedRecords<mjBizAppsSalesDealTeamMemberEntity>({
+      Name: 'Team',
+        RelatedEntity: 'MJ_BizApps_Sales: Deal Team Members',
+        RelatedEntityJoinField: 'DealID',
+        OrderBy: '__mj_CreatedAt ASC',
+        Load: 'explicit',
+        OnRemove: 'delete',
+        Source: 'database',
+  });
+
+
+  /**
+  * Related records: MJ_BizApps_Sales: Deal Payment Schedules
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Sales: Deals record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Sales: Deals → MJ_BizApps_Sales: Deal Payment Schedules' relationship; edit that row, not this file.
+  *
+  */
+  public readonly PaymentSchedule = this.DeclareRelatedRecords<mjBizAppsSalesDealPaymentScheduleEntity>({
+      Name: 'PaymentSchedule',
+        RelatedEntity: 'MJ_BizApps_Sales: Deal Payment Schedules',
+        RelatedEntityJoinField: 'DealID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'explicit',
+        OnRemove: 'delete',
+        Source: 'database',
+        Sequence: { Field: 'DisplayOrder', From: 1 },
+  });
+
     /**
     * Loads the MJ_BizApps_Sales: Deals record from the database
     * @param ID: string - primary key value to load the MJ_BizApps_Sales: Deals record.

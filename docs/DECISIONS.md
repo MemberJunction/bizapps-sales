@@ -147,3 +147,136 @@ Master plan §15.5 flagged this **schema-blocking** and left it unbuilt. Ruled 2
 **Why:** `Partner Manager` is a seeded `DealRole`, and an `__mj.Employee` row cannot express a partner
 rep or a contractor — so this bites on the first partner-sourced deal. The cost is one column and one
 structural constraint; retrofitting it after attribution data exists would cost far more.
+
+---
+
+## Related Record Collections — decisions taken during the RRC conversion (2026-08-14)
+
+Converting `Deal` to MJ v6 Related Record Collections retired `DealDraft` and the `Sales.SaveDeal`
+remote operation. These are the calls made while doing it. Read
+`metadata/entity-relationships/README.md` for the collection shapes themselves.
+
+---
+
+### D-RRC1 — Removal is EXPLICIT. Delete-by-omission was not reimplemented on top
+
+**Decision:** adopt the collection's native semantics. `Remove()` / `Clear()` delete; a child merely
+absent from the array **survives**. No reconciliation layer was added to restore the old behaviour.
+
+**Why:** `Sales.SaveDeal` treated a submitted `Lines` array as the complete desired set — a stored line
+absent from it was deleted. That is a coherent contract for one caller that always holds the whole tree,
+and a hazard for every other caller: an Action that renames a deal, an agent that nudges `NextStep`, or a
+header-only form all had to load and re-send the full tree, and forgetting to was **silent data loss**.
+Explicit removal inverts the failure mode — the worst case becomes a row that should have gone and did
+not, which is visible on the next read rather than gone forever.
+
+**Verified before adopting:** nothing else depended on the old contract. The only consumers were the
+operation's own `applyLines` / `applySchedule` and integration check SD6. The seed scripts do not touch
+deal children and there are no import fixtures yet.
+
+**Pinned by two checks, deliberately as a pair:** **SD6** proves `Remove()` deletes; **SD13** proves a
+header-only save leaves children alone. SD13 is the one guarding the behaviour that actually changed.
+
+---
+
+### D-RRC2 — `DisplayOrder` is now `1, 2, 3`, not `10, 20, 30`
+
+**Decision:** accept the framework's sequencing and update the assertions.
+
+**Why:** `RelatedRecordCollection` sequences as `from + index`; the step is fixed at 1, with no increment
+option. The old 10-step was cosmetic — it *looks* like room to insert a row between two others, but the
+hand-rolled code re-sequenced the whole collection on every add and remove, so a gap never survived the
+next mutation. Ordering comes from `OrderBy` either way, and rows written before this change keep their
+old values until the deal is next saved.
+
+---
+
+### D-RRC3 — The form-shaped rules moved ONTO the entity, on both tiers
+
+**Decision:** `DealEntity`, `DealLineEntity` and `DealPaymentScheduleEntity` in `sales-entities` carry
+the validation rules. `DealEntityServer` **extends `DealEntity`** rather than the generated class.
+
+**Why:** the rules lived on `DealDraft`, a UI-side model — so an Action, an agent or a second surface
+bypassed them entirely. On the entity they run in the browser *and* on the server, on the one path every
+write takes. The inheritance detail is load-bearing: extend the generated entity instead and every rule
+in that file silently stops applying on the server.
+
+**What did NOT move:** anything needing a database — deal numbering, the company stamp, the owner stamp.
+Those stay server-only. And the *pane* an issue belongs to stays in the Angular package
+(`deal-workspace.validation.ts`), because an entity should not know a tab exists.
+
+**One accepted limitation:** `RelatedRecordCollection.Validate()` pushes a child's errors only when the
+child's own result FAILED, so a warning on an otherwise-valid line never reaches the parent. Per-line
+advisories are therefore presentational rather than entity rules. Header warnings are unaffected.
+
+---
+
+### D-RRC4 — Two rules were being enforced ONLY by the retired operation
+
+Found by the integration suite rather than by reading, which is the argument for having had it.
+
+- **`Deal.CompanyID` must equal `Pipeline.CompanyID`.** A CHECK constraint cannot reach across the
+  foreign key to compare them, so `Sales.SaveDeal` resolved it. Moved to
+  `DealEntityServer.stampCompanyFromPipeline()`, which runs on every save for every caller and
+  **overwrites** rather than rejects a supplied value — a client stating this is stating something it has
+  no standing to know. **SD2** is the check that caught it.
+- **The owner stamp.** `SetOwner` moved to the shared `DealEntity` (the workspace's owner picker must
+  express the same intent, and two implementations would disagree about the unique index eventually).
+  `DealEntityServer` keeps only the derivation, guarded on `Team.IsLoaded || Team.Count > 0` so a
+  header-only save cannot silently clear `OwnerEmployeeID`.
+
+---
+
+### D-RRC5 — `Sales.SaveDeal`'s field whitelist is gone, so the rule it enforced moved ONTO the entity
+
+**Decision:** refuse any caller-originated write to the four pricing-provenance columns in
+`DealLineEntity.Validate()`. **This reverses an earlier ruling on this same point**, which proposed
+accepting the loss and deferring the fix to S2. The reversal is recorded rather than edited away, because
+the reasoning that produced the wrong answer is the part worth not repeating.
+
+**What was lost.** `SaveDealOperation` copied a listed set of fields, and `ResolvedUnitPrice`,
+`ResolvedExtendedAmount`, `PriceComponentsJSON` and `PricedAt` were deliberately absent from that list —
+so the operation could not be the hole through which locally computed money entered the app. A direct
+entity save has no whitelist.
+
+**Why deferring was wrong.** The original argument was that this is only a defence-in-depth loss, since
+the generated Deal Lines form already exposed those columns to any Explorer user. That is true and it is
+not a reason to defer — it is a reason the fix is *more* valuable, because it closes a door that was
+already open. The decisive question is the one that should have been asked first: **is anything
+recomputing these columns on save?** Nothing is. No pricing bridge exists yet, so the whitelist was the
+only guard on that path, and removing it left forged or stale values with nothing to stop them.
+
+**Why not `AllowUpdateAPI = 0`,** which is the obvious-looking answer: `EntityFieldInfo.IsSPParameter`
+excludes such fields from the `spCreate` / `spUpdate` parameter list entirely, so the S2 pricing bridge —
+the one caller that MUST write these — would be locked out too and would need raw SQL. Refusing at
+validation keeps the column writable by design and closed by rule, and it binds the browser, an Action,
+an agent and a raw `BaseEntity.Save()` identically.
+
+**A trap found while building it, worth knowing before writing any similar guard.** A dirty-check alone
+is not sufficient. `EntityField`'s setter treats the FIRST write to a never-set field as record setup and
+copies the incoming value into `_OldValue` as well as `_Value`, so on a NEW record
+`line.ResolvedUnitPrice = 4200` leaves `Dirty` reporting **false**. A guard built on `Dirty` alone passes
+every forged value on a create — the case that matters most — while looking correct. The test is
+therefore "new with a value, **or** dirty". This was caught by the check failing, not by reading the code.
+
+**Pinned by SD16**, which also asserts the refusal names *which* line, and carries a probe proving
+`DealLineEntity` is resolved by the class factory at all — no other check exercises a line-level rule, so
+a silently-unregistered subclass would otherwise make the whole file dead code.
+
+**The seam for S2** is `DealLineEntityServer`, which will override the guard to permit writes originating
+from a verified `Orders.PreviewOrder` response. Until it exists the rule is absolute, which is correct
+rather than a gap.
+
+### D-RRC6 — The remote-operations directory is kept, empty
+
+**Decision:** delete the `Sales.SaveDeal` row and its type files; keep `metadata/remote-operations/` and
+its `.mj-sync.json`.
+
+**Why:** `Sales.CloseDeal` and `Sales.ReopenDeal` at S4 are genuine multi-table units of work with policy
+evaluation and an audited lock bypass — not a save an entity graph can express. They resolve their
+`CategoryID` by `@lookup` against `remote-operation-categories`, which is why that directory still carries
+its row and still precedes this one in `directoryOrder`.
+
+The lesson worth keeping: **a remote operation is an atomic unit of work, not a way to reach the
+server.** `Sales.SaveDeal` was the latter, and stopped being necessary the moment the entity graph could
+cross the wire.
