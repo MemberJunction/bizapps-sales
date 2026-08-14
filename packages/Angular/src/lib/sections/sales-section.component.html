@@ -84,7 +84,7 @@
                           <td class="muted">{{ d.PipelineStage || '—' }}</td>
                           <td class="num">{{ Money(d.Amount) }}</td>
                           <td class="muted">
-                            {{ d.ExpectedCloseDate ? (d.ExpectedCloseDate | date: 'mediumDate') : '—' }}
+                            {{ d.ExpectedCloseDate ? (d.ExpectedCloseDate | date: 'mediumDate' : 'UTC') : '—' }}
                             @if (IsSlipped(d)) { <span class="flag">past</span> }
                           </td>
                         </tr>
@@ -159,7 +159,7 @@
                           </td>
                           <td class="num muted">{{ d.Probability !== null ? d.Probability + '%' : '—' }}</td>
                           <td class="muted">
-                            {{ d.ExpectedCloseDate ? (d.ExpectedCloseDate | date: 'mediumDate') : '—' }}
+                            {{ d.ExpectedCloseDate ? (d.ExpectedCloseDate | date: 'mediumDate' : 'UTC') : '—' }}
                             @if (IsSlipped(d)) { <span class="flag">past</span> }
                           </td>
                           <td class="muted">{{ d.OwnerEmployee || '—' }}</td>
