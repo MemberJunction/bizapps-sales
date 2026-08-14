@@ -83,6 +83,29 @@ interface SalesKpi {
     Tone?: 'warn' | 'err';
 }
 
+/**
+ * The UTC date part of a value that may be an ISO string OR a `Date`.
+ *
+ * MJ v6 CHANGED THIS UNDER US. On v5 a `RunView` with `ResultType: 'simple'` handed back the raw
+ * database shape, so a DATE column arrived as an ISO string and `.slice(0, 10)` was safe. On v6 the
+ * same read can hand back a real `Date`, and the old code died with
+ * `TypeError: d.ExpectedCloseDate.slice is not a function` — which took the whole Sales dashboard down
+ * with it, because the getter runs during render.
+ *
+ * Accepting BOTH is deliberate rather than picking one: the value's type now depends on how the row was
+ * fetched, and a KPI getter is the wrong place to care. Compared as a UTC date-only string because
+ * everything stored is UTC — local-time getters would move the boundary by a day west of Greenwich.
+ *
+ * See bizapps-accounting docs/ui-architecture.md on `ResultType: 'entity_object'` vs `'simple'`; this is
+ * the same hazard, and orders shipped it wrong for months.
+ */
+function UtcDatePart(value: string | Date): string {
+    if (value instanceof Date) {
+        return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`;
+    }
+    return String(value).slice(0, 10);
+}
+
 @Component({
     selector: 'mjs-sales-section',
     standalone: true,
@@ -267,7 +290,7 @@ export class MJSSalesSectionComponent implements OnInit {
         const today = new Date();
         const todayUtc = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
         return this.Deals.filter(
-            (d) => this.hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate && d.ExpectedCloseDate.slice(0, 10) < todayUtc,
+            (d) => this.hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate && UtcDatePart(d.ExpectedCloseDate) < todayUtc,
         );
     }
 

@@ -55,7 +55,7 @@ export interface DealRosterRow {
     Amount: number | null;
     AmountIsComputed: boolean;
     Probability: number | null;
-    ExpectedCloseDate: string | null;
+    ExpectedCloseDate: string | Date | null;
     /** Virtual name columns that DO resolve on the Deal view. */
     Pipeline: string | null;
     PipelineStage: string | null;
@@ -71,7 +71,7 @@ export interface DealRosterRow {
 interface DealRosterQueryRow {
     ID: string; DealNumber: string | null; Name: string; AccountID: string | null;
     Amount: number | null; AmountIsComputed: boolean; Probability: number | null;
-    ExpectedCloseDate: string | null; Pipeline: string | null; PipelineStage: string | null;
+    ExpectedCloseDate: string | Date | null; Pipeline: string | null; PipelineStage: string | null;
     DealType: string | null; DealStatusType: string | null; OwnerEmployee: string | null;
     ForecastCategoryType: string | null; DealStatusTypeID: string | null;
 }
@@ -100,29 +100,48 @@ interface DealRow {
     DealStatusTypeID: string | null; AccountID: string | null; PrimaryContactID: string | null;
     BillingContactID: string | null; CompanyID: string; OwnerEmployeeID: string | null;
     Amount: number | null; TermMonths: number | null; EstimatedProjectWeeks: number | null;
-    ExecutionDate: string | null; StartDate: string | null; ExpectedCloseDate: string | null;
+    ExecutionDate: string | Date | null; StartDate: string | Date | null; ExpectedCloseDate: string | Date | null;
     Probability: number | null; ForecastCategoryTypeID: string | null; AutoRenew: boolean;
     AnnualIncreasePctOverride: number | null; CancellationNoticeDaysOverride: number | null;
     PaymentMethod: string | null; ContractVariances: string | null; Description: string | null;
-    NextStep: string | null; NextStepDate: string | null;
+    NextStep: string | null; NextStepDate: string | Date | null;
 }
 interface DealLineRow {
     ID: string; ProductID: string | null; ProductName: string | null; DealLineTypeID: string | null;
     Quantity: number; RequestedDiscountPct: number | null; OverrideUnitPrice: number | null;
     AnnualGrossFees: number | null; DiscountAmount: number | null; Total: number | null;
-    TermMonths: number | null; ServicePeriodStart: string | null; ServicePeriodEnd: string | null;
+    TermMonths: number | null; ServicePeriodStart: string | Date | null; ServicePeriodEnd: string | Date | null;
     Description: string | null; DisplayOrder: number;
 }
 interface ScheduleRow {
-    ID: string; PaymentDate: string | null; Amount: number | null; Description: string | null; DisplayOrder: number;
+    ID: string; PaymentDate: string | Date | null; Amount: number | null; Description: string | null; DisplayOrder: number;
 }
 
-/** A DATE column arrives as a full timestamp; the `<input type="date">` wants only the day part. */
-function toDateInput(value: string | null): string | null {
+/**
+ * The `yyyy-MM-dd` an `<input type="date">` binds to, from a value that may be an ISO string OR a `Date`.
+ *
+ * MJ v6 CHANGED THE SHAPE. On v5 a DATE column arrived as a full ISO timestamp string, so slicing the
+ * first ten characters was right. On v6 the same read can hand back a real `Date`, on which `.length` is
+ * `undefined` — the old `value.length >= 10` test was therefore false and the function returned the
+ * `Date` object itself, which an `<input type="date">` cannot bind and renders as an EMPTY field.
+ *
+ * That is the nastiest form of this bug: no error, no warning — every date in the workspace silently
+ * blank while the roster beside it shows the same value correctly. It was found exactly that way, by
+ * eye, in the v6 host.
+ *
+ * Both shapes are accepted rather than picking one, because the type now depends on how the row was
+ * fetched. UTC getters throughout: everything stored is UTC, and local-time getters would shift the day
+ * for anyone west of Greenwich.
+ */
+function toDateInput(value: string | Date | null): string | null {
     if (!value) {
         return null;
     }
-    return value.length >= 10 ? value.slice(0, 10) : value;
+    if (value instanceof Date) {
+        return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`;
+    }
+    const s = String(value);
+    return s.length >= 10 ? s.slice(0, 10) : s;
 }
 
 @Injectable({ providedIn: 'root' })
