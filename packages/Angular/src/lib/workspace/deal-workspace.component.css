@@ -433,4 +433,26 @@
 
 .dw-routing__row--failed {
   color: var(--mj-color-text-secondary, inherit);
+/* Related-record controls under a picker.
+
+   A <button>, not an <a>: there is no href — NavigationService opens an Explorer tab and the form
+   presenter opens a slide-in, so a link would be a lie to a screen reader and a broken middle-click to
+   everyone else. Sized down and set on the hint line so it reads as secondary to the picker above it. */
+.dw-related {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+.dw-linkbtn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--mj-brand-primary);
+  cursor: pointer;
+}
+.dw-linkbtn:hover,
+.dw-linkbtn:focus-visible {
+  text-decoration: underline;
 }

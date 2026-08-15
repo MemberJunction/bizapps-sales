@@ -47,8 +47,9 @@
  */
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { CompositeKey } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
-import { BaseResourceComponent } from '@memberjunction/ng-shared';
+import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 import type { ResourceData } from '@memberjunction/core-entities';
 import {
@@ -74,6 +75,15 @@ import {
 import { DealWorkspaceComponent } from '../workspace/deal-workspace.component';
 import { DealWorkspaceService, type DealRosterRow } from '../workspace/deal-workspace.service';
 import type { DealStatusLookup } from '../workspace/deal-workspace.types';
+
+/**
+ * The account entity, for opening a customer as its own Explorer tab.
+ *
+ * `Sales Accounts` rather than common's `Organizations`: the deal's `AccountID` points at the IsA CHILD,
+ * and that is the record a rep expects to land on — the sales-specific columns are the reason the child
+ * exists. Explorer resolves the parent chain from there.
+ */
+const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 
 /** One KPI tile. `Tone` drives colour only — no behaviour hangs off it. */
 interface SalesKpi {
@@ -131,6 +141,15 @@ export class MJSSalesSectionComponent implements OnInit {
 
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
+    /**
+     * Opens a RECORD as its own Explorer tab.
+     *
+     * Used for the SECONDARY surface only — the account behind a deal. A deal itself never comes through
+     * here: {@link OpenDeal} puts it in the workspace, because editing a deal with its lines and terms is
+     * what this app is for, and a generated record form is a worse place to do it. The distinction is the
+     * whole point of wiring this in narrowly rather than routing every row through it.
+     */
+    private readonly nav = inject(NavigationService);
 
     /** The workspace is mounted once and hidden — see the file header. */
     @ViewChild(DealWorkspaceComponent) private workspace?: DealWorkspaceComponent;
@@ -235,6 +254,25 @@ export class MJSSalesSectionComponent implements OnInit {
             return;
         }
         this.cdr.detectChanges();
+    }
+
+    /**
+     * Opens the CUSTOMER behind a deal as its own Explorer tab.
+     *
+     * `stopPropagation` is load-bearing, not defensive: this cell sits inside a row whose click handler
+     * opens the deal in the workspace. Without it a click here would do BOTH — open the account tab and
+     * switch the page underneath it — which reads as the app losing your place.
+     *
+     * A row with no account is not a failure. `AccountID` is nullable by design (an early-stage
+     * opportunity legitimately has no account yet), so the affordance simply is not offered — see the
+     * template's `@if`.
+     */
+    public OpenCustomer(row: DealRosterRow, event: Event): void {
+        event.stopPropagation();
+        if (!row.AccountID) {
+            return;
+        }
+        this.nav.OpenEntityRecord(E_ACCOUNT, CompositeKey.FromID(row.AccountID));
     }
 
     // ── Dashboard ──────────────────────────────────────────────────────────────
