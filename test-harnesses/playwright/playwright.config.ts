@@ -14,7 +14,23 @@ import { EXPLORER_BASE_URL, LOGIN_TIMEOUT_MS, STORAGE_STATE_PATH } from './lib/e
  * Checked at config-load time on purpose: `storageState` cannot be conditional per-run, and pointing
  * a project at a non-existent state file is a hard error rather than a graceful miss.
  */
-const HAVE_SESSION = existsSync(STORAGE_STATE_PATH);
+/**
+ * ⚠️ EXISTENCE IS NOT VALIDITY, AND THE DIFFERENCE COSTS A DEBUGGING SESSION.
+ *
+ * This flag drives `headless` on `auth-setup`, so a session file that EXISTS but has EXPIRED puts the
+ * project in the worst possible state: headless, seeded with a dead session, waiting for a human to
+ * complete a login in a window that was never drawn. It then fails with
+ * `Timed out waiting for the authenticated Explorer shell` — which reads as "the app is broken" and is
+ * really "your token expired". That happened, three times in a row, and the app was fine.
+ *
+ * Validity cannot be checked here: `storageState` is a config-load-time decision and the only way to
+ * know whether a token still works is to try it against a running Explorer. So the escape hatch is
+ * explicit instead — set `PW_FORCE_LOGIN=1` to force a headed run and ignore whatever is on disk.
+ *
+ * The other half of the fix is in `auth.setup.ts`, which now says so in its failure message.
+ */
+const FORCE_LOGIN = process.env.PW_FORCE_LOGIN === '1';
+const HAVE_SESSION = !FORCE_LOGIN && existsSync(STORAGE_STATE_PATH);
 
 /**
  * Playwright config for the bizapps-sales Explorer GUI harness.

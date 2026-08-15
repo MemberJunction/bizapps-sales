@@ -151,7 +151,11 @@ export async function waitForAuthenticatedShell(page: Page, timeoutMs: number): 
     await page.waitForTimeout(1000);
   }
   throw new Error(
-    `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the authenticated Explorer shell at ${EXPLORER_BASE_URL}.`,
+    `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the authenticated Explorer shell at ${EXPLORER_BASE_URL}.\n\n` +
+      `  IF NO BROWSER WINDOW EVER APPEARED, this is an EXPIRED SESSION rather than a broken app.\n` +
+      `  playwright.config.ts decides headed-vs-headless from whether .auth/user.json EXISTS, not from\n` +
+      `  whether it still works — so a stale file runs this HEADLESS and then waits for a login nobody\n` +
+      `  can perform. Re-run with PW_FORCE_LOGIN=1 to force a headed window.`,
   );
 }
 
