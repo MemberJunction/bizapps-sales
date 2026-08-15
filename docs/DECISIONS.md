@@ -280,3 +280,73 @@ its row and still precedes this one in `directoryOrder`.
 The lesson worth keeping: **a remote operation is an atomic unit of work, not a way to reach the
 server.** `Sales.SaveDeal` was the latter, and stopped being necessary the moment the entity graph could
 cross the wire.
+
+---
+
+## The close-flow port onto Related Record Collections (2026-08-15)
+
+---
+
+### D-CF6 — The close lock covers the CHILD COLLECTIONS, not just the header
+
+**Decision:** `checkCloseLock()` refuses a save when **any companion is dirty**, under the same
+already-closed guard as the header-field check.
+
+**Why the original lock could not have covered this.** It was written before the collections existed. It
+refuses a save when any field outside `{Description, NextStep}` is dirty — and `Lines`,
+`PaymentSchedule` and `Team` are **companions, not fields**. They never appear in `this.Fields`, so a
+closed deal could have a line edited or removed and the lock would not see it.
+
+**That is the more damaging edit of the two.** A deal's lines are exactly what the contract and the order
+were derived from, so changing one after close falsifies the same provenance the header lock exists to
+protect. Left as it was, the lock would refuse a *renamed* deal and accept a *deleted line*.
+
+**Enumerated as `this.Companions` rather than by name.** Naming `Lines` / `PaymentSchedule` / `Team`
+individually would leave a collection added later silently unprotected, and the rule is really "anything
+that contributes work to this save is something the lock must see."
+
+**The closing transition is still allowed to carry final collection state**, and that falls out of the
+existing design rather than needing a special case: the check keys on the **persisted** status via
+`OldValue`, so a deal moving open → closed is still OPEN in the database and passes. A close that writes
+its last line is legal; editing that line tomorrow is not. Reading the in-memory status instead would make
+a deal impossible to close at all.
+
+**Pinned by CD13**, which asserts both directions — the pre-close collection edit succeeds, and a
+post-close removal *and* edit are both refused with the rows unchanged. Both halves are needed because
+they pull in opposite directions and getting either wrong is silent.
+
+---
+
+### D-CF7 — The close checks build their fixture through the entity graph, not a retired operation
+
+**Decision:** `close-deal.checks.ts` builds its "open deal to close" with `GetEntityObject` +
+`deal.Lines.Create()` + one `deal.Save()`.
+
+**Why it changed at all:** the checks used `Sales.SaveDeal`, which PR #8 retired. The *reason* for using
+it survives the port unchanged and is worth restating — building the fixture through the **real save
+path** means these checks exercise the same rows a user would produce, including the server-maintained
+stamps, rather than a hand-assembled shape that happens to satisfy them. Only the path changed.
+
+`ClientKey` and `DisplayOrder` disappeared from the seed shape because both were payload concerns of the
+operation: the collection sequences from array position, and identity is the entity's own primary key.
+
+---
+
+### D-CF8 — D-BD2 is narrower than KI-9 assumed, and is NOT closed by this port
+
+Investigating the port established that the two `DealStageEvent` append sites in `CloseDealOperation` are
+**not** equivalent, which changes what consolidating them means:
+
+- **`stampClose`** is a status transition, and is exactly what a `DealEntityServer.Save()`-level stamp
+  would also produce. This is the true double-write, and it is the one that must be deleted when the
+  Save()-level stamp lands.
+- **The reopen append is not.** It runs inside `BeginReopen()` with the lock suppressed and writes
+  `Notes: 'REOPENED: <reason>'`. A generic transition stamp cannot produce that, and CD11 asserts the
+  reopen event exists alongside a preserved close event.
+
+**So consolidation is: move ordinary transition stamping into `Save()`'s `IsGraphNodeSave` branch, delete
+`stampClose`'s append, KEEP the reopen append — and guard the new stamp so it does not also fire during
+`BeginReopen`, or reopening double-stamps in the other direction.**
+
+**Not done here.** Nothing on this lineage stamps an ordinary transition yet, so there is no double-write
+to fix today; `Sales.CloseDeal` remains the single writer. KI-9 stands, with this refinement.
