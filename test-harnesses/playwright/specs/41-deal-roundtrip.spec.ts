@@ -268,7 +268,12 @@ test.describe('deal workspace — the related-record-collection round trip', () 
             const doomedRow = before.indexOf(LINE_DOOMED);
             expect(doomedRow, 'the line to remove must be present').toBeGreaterThanOrEqual(0);
 
-            await page.locator('.dw-table tbody tr').nth(doomedRow).locator('.dw-iconbtn').first().click();
+            // Targeted by TITLE, not by position. A line row now carries TWO icon buttons — open-detail
+            // and remove — so `.dw-iconbtn.first()` silently became "open the slide-in", the removal never
+            // happened, and the failure surfaced one assertion later as a wrong row count. A positional
+            // selector says "wherever it happens to be"; this says which control.
+            await page.locator('.dw-table tbody tr').nth(doomedRow)
+                .locator('.dw-iconbtn[title="Remove this line"]').click();
             await page.waitForTimeout(600);
 
             await expect(page.locator('.dw-table tbody tr'), 'the grid must show one line after the removal')
