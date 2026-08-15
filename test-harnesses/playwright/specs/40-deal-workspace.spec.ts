@@ -342,7 +342,25 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
        * since the last rebuild. The record view always renders every field, so that is where the claim
        * belongs.
        */
-      const row = page.locator('tr, .ag-row, [role="row"]').filter({ hasText: DEAL_NAME }).first();
+      /**
+       * SCOPED TO A VISIBLE ROW, which this originally was not.
+       *
+       * The Sales section's roster stays in the DOM when you navigate away — hidden, not removed, so the
+       * workspace's open documents survive a page change. Its rows are `<tr>` too, and they carry the deal
+       * name. So an unscoped `tr, .ag-row, [role="row"]` filter can resolve to a HIDDEN roster row instead
+       * of the entity-browser grid, and then fail on visibility while the grid beside it is perfectly
+       * correct. It is timing-dependent — whether the roster happens to have loaded this deal decides it —
+       * which is the worst kind of spec failure to read.
+       *
+       * `:visible` is the fix, and `title` excludes the roster explicitly: its rows are titled
+       * "Open <name> in the workspace", which the entity browser's are not. Same trap `50-sales-shell`
+       * documents for `.wl`; scope by page, always.
+       */
+      const row = page
+        .locator('tr:visible, .ag-row:visible, [role="row"]:visible')
+        .filter({ hasText: DEAL_NAME })
+        .filter({ hasNot: page.locator('[title^="Open "]') })
+        .first();
       await expect(row, 'a grid row for the new deal must exist').toBeVisible({ timeout: 20_000 });
       const link = row.locator('a').first();
       if (await link.count()) {

@@ -22,6 +22,12 @@
     "the first entry in this list where the ordering is genuinely load-bearing rather than",
     "precautionary — get it wrong and the push fails on an unresolvable lookup."
   ],
+  "_comment_entity_relationships": [
+    "entity-relationships is the odd one out: it does not seed rows at all. It fills in one column on",
+    "three EntityRelationship rows CodeGen already created, turning them into typed writable child",
+    "collections on Deal. It is listed last because it depends on nothing, and because reading it last",
+    "matches when it matters — CodeGen pass 2 is what consumes it. See its README."
+  ],
   "directoryOrder": [
     "deal-status-types",
     "forecast-category-types",
@@ -35,7 +41,8 @@
     "account-types",
     "remote-operation-categories",
     "remote-operations",
-    "applications"
+    "applications",
+    "entity-relationships"
   ],
   "sqlLogging": {
     "enabled": true,

@@ -24,6 +24,7 @@
 
 // Import entity package to trigger @RegisterClass decorators for entity subclasses
 import '@mj-biz-apps/sales-entities';
+import { LoadSalesDealEntities } from '@mj-biz-apps/sales-entities';
 
 // Import generated form components (triggers @RegisterClass for form components)
 import './lib/generated/generated-forms.module';
@@ -54,6 +55,8 @@ export { DealWorkspaceComponent } from './lib/workspace/deal-workspace.component
 export { DealWorkspaceService } from './lib/workspace/deal-workspace.service';
 export type { DealSaveOutcome, DealRosterRow } from './lib/workspace/deal-workspace.service';
 export * from './lib/workspace/deal-workspace.types';
+export * from './lib/workspace/deal-workspace.validation';
+export * from './lib/workspace/deal-workspace.dates';
 
 /**
  * Bootstrap function called during MJExplorer startup — the `startupExport` named in mj-app.json.
@@ -65,6 +68,12 @@ export * from './lib/workspace/deal-workspace.types';
  * registered class, for the same reason contracts keeps one per resource.
  */
 export function LoadBizAppsSalesClient(): void {
+    // The shared Deal / DealLine / DealPaymentSchedule subclasses. Without this the class factory hands
+    // the workspace a GENERATED entity, which still saves correctly — the child collections are on the
+    // generated class — but validates against nothing except the database's own constraints. The user
+    // would then get a server rejection where the form should have marked the field.
+    LoadSalesDealEntities();
+
     void CLASS_REGISTRATIONS;
     void MJSSalesSectionComponent;
     void SalesDealsSectionResource;

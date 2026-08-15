@@ -295,3 +295,54 @@ Consequences to design around rather than fight:
 Not a bug in this app's schema, and not worth working around with a hand-authored view: the baseline's
 view is CodeGen output, so any edit is overwritten on the next run. Related to KI-7 — the same unresolved
 IsA edge is what pass 2 partially "fixed" into an inconsistent state.
+
+---
+
+## 🔴 KI-9 — `DealStageEvent` stamping WILL be lost or doubled when the sibling branches converge
+
+**This is a merge hazard, not a defect in any branch. Each branch is internally correct; the damage
+happens at the point they meet, and in both directions it is silent.**
+
+`feature/deal-rrc-conversion` **deleted `SaveDealOperation.ts`** — the file that, on one sibling branch,
+is where the stage-event append lives. Nothing on `next` appends a stage event today (verified
+2026-08-14: the only mentions on this lineage are TODO comments in `DealEntityServer.ts` and
+`CoreEntitiesServer/src/index.ts`), so nothing here is broken. The exposure is entirely in what happens
+next.
+
+### Where the append lives, per branch
+
+| Branch | Site | What convergence has to do |
+|---|---|---|
+| `next` (post-RRC) | — nothing | — |
+| `feature/pipeline-board` | `SaveDealOperation.ts:283`, gated by a `stageChanged` comparison against a `priorStageID` captured before the field is assigned | **RE-HOME IT.** Its host file no longer exists |
+| `feature/close-flow` | `CloseDealOperation.ts` — two append sites | **DELETE ITS APPEND**, once the append below exists |
+
+### The two failure modes
+
+**Losing it.** `feature/pipeline-board` puts the append inside a file this branch deleted. Git resolves a
+delete-versus-modify conflict in favour of the delete readily, and the board's own checks
+(`board-move.checks.ts`) are what would catch it — *if* they are run. Merged carelessly, stage transitions
+stop being recorded, and nothing errors. The provenance trail is append-only precisely because it cannot
+be reconstructed afterwards, so this is unrecoverable rather than inconvenient.
+
+**Doubling it.** The append's correct home is `DealEntityServer.Save()`, because a stage change can arrive
+from any caller — a board drag, a workspace save, an Action, an agent. Once it is there,
+`CloseDealOperation`'s own appends become a **second** stamp for the same transition. Two events for one
+move corrupts every velocity and stage-duration measure computed from the table.
+
+### Where it must go, and why the location is specific
+
+Inside `DealEntityServer.Save()`, in the **`IsGraphNodeSave` branch** — not the outer one. Read the
+comment on that method first: it is called twice per composite save, and only the flagged call runs inside
+the save graph's transaction. An append on the outer call would survive a rolled-back save, leaving an
+event that claims a transition which never happened.
+
+### Convergence checklist
+
+1. Move the append into `DealEntityServer.Save()`'s `IsGraphNodeSave` branch, keeping the
+   `AmountAtTransition` / `ProbabilityAtTransition` stamps and the prior-stage capture.
+2. Delete `CloseDealOperation`'s two appends in the same change — never as a follow-up.
+3. Add a check asserting **exactly one** event per transition. There is none today, and its absence is
+   why this issue is red rather than orange.
+
+Until step 3 exists, the doubling failure has no automated witness at all.

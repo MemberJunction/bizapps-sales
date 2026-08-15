@@ -8,12 +8,16 @@ export * from './generated/entity_subclasses';
 export * from './generated/remote_operations';
 
 /**
- * `DealDraft` — the client-side model of a deal being composed, and the only way a browser can save a
- * deal together with its lines and payment schedule atomically. Read the file header before using it;
- * the short version is that the client holds the GENERATED entity, not the server subclass, so
- * transient child collections cannot cross the entity-save boundary as scalars.
+ * The shared `Deal` / `DealLine` / `DealPaymentSchedule` subclasses — the rules a form can check
+ * without a database, on the entity itself so they run in the browser AND on the server.
+ *
+ * These replaced `DealDraft` and `Sales.SaveDeal`. A deal now carries `Lines`, `PaymentSchedule` and
+ * `Team` as Related Record Collections, so the object graph is the same on both tiers and persists
+ * atomically over `MJ.SaveEntityGraph` — which is precisely what the draft and the operation existed
+ * to work around. Read `deal-entity.ts`'s header, and
+ * `metadata/entity-relationships/README.md` for the collection shapes.
  */
-export * from './deal-draft';
+export * from './deal-entity';
 
 /**
  * Forces the generated entity subclasses to be loaded. Without an explicit

@@ -8,6 +8,18 @@
 
   Every input calls `Touch()`, which revalidates and marks the tab dirty. One entry point, so a field
   added later cannot forget to do either.
+
+  THREE BINDINGS HERE ARE DELIBERATELY NOT `[(ngModel)]`:
+
+    · DATE inputs bind `[ngModel]="DateInput(...)"` with a `Set*Date` handler. An `<input type="date">`
+      reads and writes `yyyy-MM-dd` strings while the entity field holds a `Date` — and handing an input
+      a `Date` renders it BLANK, with no error anywhere. See `deal-workspace.dates.ts`.
+    · PIPELINE also decides the selling company and the stage list, so it cannot be a plain field write.
+    · SALES REP writes the deal-team ROSTER, not the column beside it: `OwnerEmployeeID` is a
+      server-maintained stamp derived from whichever team member holds the owner role.
+
+  Row deletes call `RemoveLine` / `RemoveScheduleRow`, which call the collection's `Remove()`. A row that
+  merely disappeared from the array would still exist in the database.
 -->
 @if (Loading()) {
   <mj-loading></mj-loading>
@@ -36,7 +48,7 @@
     <!-- PERSISTENT CUSTOMER CONTEXT. Always visible, on every pane: an AD editing the terms tab must
          never have to go back to check which account they are quoting. -->
     <div workspaceHeader class="dw-context">
-      <span class="dw-context__customer" [class.dw-context__customer--empty]="!Draft?.Header?.AccountID">
+      <span class="dw-context__customer" [class.dw-context__customer--empty]="!Deal?.AccountID">
         <i class="fa-solid fa-building" aria-hidden="true"></i>
         {{ CustomerName }}
       </span>
@@ -45,18 +57,18 @@
           <i class="fa-solid fa-briefcase" aria-hidden="true"></i> {{ CompanyName }}
         </span>
       }
-      @if (Draft?.Header?.PipelineID) {
-        <span class="dw-context__chip">{{ NameOf(Lookups.Pipelines, Draft!.Header.PipelineID) }}</span>
+      @if (Deal?.PipelineID) {
+        <span class="dw-context__chip">{{ NameOf(Lookups.Pipelines, Deal!.PipelineID) }}</span>
       }
-      @if (Draft?.Header?.DealTypeID) {
-        <span class="dw-context__chip">{{ NameOf(Lookups.DealTypes, Draft!.Header.DealTypeID) }}</span>
+      @if (Deal?.DealTypeID) {
+        <span class="dw-context__chip">{{ NameOf(Lookups.DealTypes, Deal!.DealTypeID) }}</span>
       }
-      @if (Draft?.IsNew) {
+      @if (IsNew) {
         <span class="dw-context__chip dw-context__chip--new">Unsaved</span>
       }
     </div>
 
-    @if (Draft; as draft) {
+    @if (Deal; as deal) {
       <!-- INNER TABS — panes of THIS deal. Fixed set of five; badges show error counts only, because a
            warning is not a reason to decorate a tab. -->
       <nav class="dw-panes" role="tablist" aria-label="Deal sections">
@@ -84,15 +96,15 @@
           <div class="dw-grid">
             <label class="dw-field dw-field--wide">
               <span class="dw-field__label">Deal name <em>*</em></span>
-              <input type="text" [(ngModel)]="draft.Header.Name" (ngModelChange)="Touch()"
+              <input type="text" [(ngModel)]="deal.Name" (ngModelChange)="Touch()"
                      placeholder="e.g. Northwind Health — Platform Rollout" />
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Pipeline <em>*</em></span>
               <!-- Pipeline is not a plain binding: it decides the selling company AND the stage list. -->
-              <select [ngModel]="draft.Header.PipelineID"
-                      (ngModelChange)="SelectPipeline(draft, $event); Touch()">
+              <select [ngModel]="deal.PipelineID"
+                      (ngModelChange)="SelectPipeline(deal, $event); Touch()">
                 <option [ngValue]="null">— choose —</option>
                 @for (p of Lookups.Pipelines; track p.ID) {
                   <option [ngValue]="p.ID">{{ p.Name }}</option>
@@ -102,11 +114,11 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Stage</span>
-              <select [ngModel]="draft.Header.PipelineStageID"
-                      (ngModelChange)="OnStageChange(draft, $event)"
-                      [disabled]="!draft.Header.PipelineID">
+              <select [ngModel]="deal.PipelineStageID"
+                      (ngModelChange)="OnStageChange(deal, $event)"
+                      [disabled]="!deal.PipelineID">
                 <option [ngValue]="null">— choose —</option>
-                @for (s of StagesFor(draft.Header.PipelineID); track s.ID) {
+                @for (s of StagesFor(deal.PipelineID); track s.ID) {
                   <option [ngValue]="s.ID">{{ s.Name }}</option>
                 }
               </select>
@@ -115,7 +127,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Deal type</span>
-              <select [(ngModel)]="draft.Header.DealTypeID" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.DealTypeID" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— choose —</option>
                 @for (t of Lookups.DealTypes; track t.ID) {
                   <option [ngValue]="t.ID">{{ t.Name }}</option>
@@ -125,7 +137,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Status</span>
-              <select [(ngModel)]="draft.Header.DealStatusTypeID" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.DealStatusTypeID" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— choose —</option>
                 @for (s of Lookups.DealStatusTypes; track s.ID) {
                   <option [ngValue]="s.ID">{{ s.Name }}</option>
@@ -135,7 +147,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Customer</span>
-              <select [(ngModel)]="draft.Header.AccountID" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.AccountID" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— choose —</option>
                 @for (a of Lookups.Accounts; track a.ID) {
                   <option [ngValue]="a.ID">{{ a.Name }}</option>
@@ -145,7 +157,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Primary contact</span>
-              <select [(ngModel)]="draft.Header.PrimaryContactID" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.PrimaryContactID" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— choose —</option>
                 @for (c of Lookups.Contacts; track c.ID) {
                   <option [ngValue]="c.ID">{{ c.Name }}</option>
@@ -155,7 +167,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Billing contact</span>
-              <select [(ngModel)]="draft.Header.BillingContactID" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.BillingContactID" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— same as primary —</option>
                 @for (c of Lookups.Contacts; track c.ID) {
                   <option [ngValue]="c.ID">{{ c.Name }}</option>
@@ -168,7 +180,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Sales rep (owner)</span>
-              <select [(ngModel)]="draft.Header.OwnerEmployeeID" (ngModelChange)="Touch()">
+              <select [ngModel]="deal.OwnerEmployeeID" (ngModelChange)="OnOwnerChange(deal, $event)">
                 <option [ngValue]="null">— choose —</option>
                 @for (e of Lookups.Employees; track e.ID) {
                   <option [ngValue]="e.ID">{{ e.Name }}</option>
@@ -181,29 +193,32 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Execution date</span>
-              <input type="date" [(ngModel)]="draft.Header.ExecutionDate" (ngModelChange)="Touch()" />
+              <input type="date" [ngModel]="DateInput(deal.ExecutionDate)"
+                     (ngModelChange)="SetDealDate(deal, 'ExecutionDate', $event)" />
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Start date</span>
-              <input type="date" [(ngModel)]="draft.Header.StartDate" (ngModelChange)="Touch()" />
+              <input type="date" [ngModel]="DateInput(deal.StartDate)"
+                     (ngModelChange)="SetDealDate(deal, 'StartDate', $event)" />
               <small class="dw-field__hint">May precede execution — backdated work is allowed.</small>
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Expected close</span>
-              <input type="date" [(ngModel)]="draft.Header.ExpectedCloseDate" (ngModelChange)="Touch()" />
+              <input type="date" [ngModel]="DateInput(deal.ExpectedCloseDate)"
+                     (ngModelChange)="SetDealDate(deal, 'ExpectedCloseDate', $event)" />
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Term (months)</span>
-              <input type="number" min="0" step="1" [(ngModel)]="draft.Header.TermMonths" (ngModelChange)="Touch()" />
+              <input type="number" min="0" step="1" [(ngModel)]="deal.TermMonths" (ngModelChange)="Touch()" />
               <small class="dw-field__hint">Subscription commitment — drives renewal.</small>
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Estimated timeline (weeks)</span>
-              <input type="number" min="0" step="1" [(ngModel)]="draft.Header.EstimatedProjectWeeks" (ngModelChange)="Touch()" />
+              <input type="number" min="0" step="1" [(ngModel)]="deal.EstimatedProjectWeeks" (ngModelChange)="Touch()" />
               <small class="dw-field__hint">SOW estimate — a forecast, not a commitment.</small>
             </label>
           </div>
@@ -217,7 +232,7 @@
           <!-- THE FIGURES BELOW ARE TRANSCRIBED, NOT CALCULATED. There is deliberately no total row and
                no auto-fill of Total from gross minus discount: those numbers come off a signed document,
                and the arithmetic on that page is the customer's. -->
-          @if (draft.Lines.length === 0) {
+          @if (Lines.length === 0) {
             <p class="dw-empty">No lines yet.</p>
           } @else {
             <div class="dw-table-scroll">
@@ -235,8 +250,8 @@
                   </tr>
                 </thead>
                 <tbody>
-                  @for (line of draft.Lines; track line.ClientKey) {
-                    <tr [class.dw-row--bad]="IssuesForRow(line.ClientKey).length > 0">
+                  @for (line of Lines; track line.ID; let i = $index) {
+                    <tr [class.dw-row--bad]="IssuesForRow('lines', i).length > 0">
                       <td>
                         <input type="text" [(ngModel)]="line.ProductName" (ngModelChange)="Touch()"
                                placeholder="e.g. Platform — Enterprise Seat" />
@@ -278,7 +293,7 @@
         <section class="dw-pane">
           <!-- NO ROWS IS THE NORMAL CASE. Standard terms are 100% on execution, so an empty schedule
                means "standard" rather than "unfinished" — which is why nothing is pre-filled here. -->
-          @if (draft.Schedule.length === 0) {
+          @if (Schedule.length === 0) {
             <p class="dw-empty">Standard terms — no instalment schedule.</p>
           } @else {
             <div class="dw-table-scroll">
@@ -292,9 +307,9 @@
                   </tr>
                 </thead>
                 <tbody>
-                  @for (row of draft.Schedule; track row.ClientKey) {
-                    <tr [class.dw-row--bad]="IssuesForRow(row.ClientKey).length > 0">
-                      <td><input type="date" [(ngModel)]="row.PaymentDate" (ngModelChange)="Touch()" /></td>
+                  @for (row of Schedule; track row.ID; let i = $index) {
+                    <tr [class.dw-row--bad]="IssuesForRow('schedule', i).length > 0">
+                      <td><input type="date" [ngModel]="DateInput(row.PaymentDate)" (ngModelChange)="SetPaymentDate(row, $event)" /></td>
                       <td class="dw-num"><input type="number" step="0.01" [(ngModel)]="row.Amount" (ngModelChange)="Touch()" /></td>
                       <td><input type="text" [(ngModel)]="row.Description" (ngModelChange)="Touch()" placeholder="e.g. 40% on execution" /></td>
                       <td>
@@ -324,37 +339,37 @@
                would freeze this year's policy into next year's renewals. -->
           <div class="dw-grid">
             <label class="dw-field dw-field--check">
-              <input type="checkbox" [(ngModel)]="draft.Header.AutoRenew" (ngModelChange)="Touch()" />
+              <input type="checkbox" [(ngModel)]="deal.AutoRenew" (ngModelChange)="Touch()" />
               <span class="dw-field__label">Auto-renew at end of term</span>
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Annual increase % (override)</span>
               <input type="number" min="0" max="100" step="0.01"
-                     [(ngModel)]="draft.Header.AnnualIncreasePctOverride" (ngModelChange)="Touch()"
+                     [(ngModel)]="deal.AnnualIncreasePctOverride" (ngModelChange)="Touch()"
                      [attr.placeholder]="'standard — ' + StandardAnnualIncreasePct + '%'" />
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Cancellation notice, days (override)</span>
               <input type="number" min="0" step="1"
-                     [(ngModel)]="draft.Header.CancellationNoticeDaysOverride" (ngModelChange)="Touch()"
+                     [(ngModel)]="deal.CancellationNoticeDaysOverride" (ngModelChange)="Touch()"
                      [attr.placeholder]="'standard — ' + StandardCancellationNoticeDays + ' days'" />
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Payment method</span>
-              <input type="text" [(ngModel)]="draft.Header.PaymentMethod" (ngModelChange)="Touch()" placeholder="ACH" />
+              <input type="text" [(ngModel)]="deal.PaymentMethod" (ngModelChange)="Touch()" placeholder="ACH" />
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Probability %</span>
-              <input type="number" min="0" max="100" step="1" [(ngModel)]="draft.Header.Probability" (ngModelChange)="Touch()" />
+              <input type="number" min="0" max="100" step="1" [(ngModel)]="deal.Probability" (ngModelChange)="Touch()" />
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Forecast category</span>
-              <select [(ngModel)]="draft.Header.ForecastCategoryTypeID" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.ForecastCategoryTypeID" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— choose —</option>
                 @for (f of Lookups.ForecastCategoryTypes; track f.ID) {
                   <option [ngValue]="f.ID">{{ f.Name }}</option>
@@ -371,12 +386,12 @@
         <section class="dw-pane">
           <label class="dw-field dw-field--wide">
             <span class="dw-field__label">Contract variances</span>
-            <textarea rows="10" [(ngModel)]="draft.Header.ContractVariances" (ngModelChange)="Touch()"
+            <textarea rows="10" [(ngModel)]="deal.ContractVariances" (ngModelChange)="Touch()"
                       placeholder="e.g. Annual increase capped at 3% for years 2–3. Termination for convenience with 60 days' notice."></textarea>
           </label>
           <label class="dw-field dw-field--wide">
             <span class="dw-field__label">Description / notes</span>
-            <textarea rows="5" [(ngModel)]="draft.Header.Description" (ngModelChange)="Touch()"></textarea>
+            <textarea rows="5" [(ngModel)]="deal.Description" (ngModelChange)="Touch()"></textarea>
           </label>
           <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'variances' }"></ng-container>
         </section>
@@ -396,7 +411,7 @@
 <ng-template #paneIssues let-key="key">
   @if (IssuesForPane(key).length > 0) {
     <ul class="dw-issues">
-      @for (issue of IssuesForPane(key); track issue.Message + issue.ClientKey) {
+      @for (issue of IssuesForPane(key); track issue.Message + issue.Field + issue.RowIndex) {
         <li [class.dw-issues__warn]="issue.Severity === 'warning'">
           <i [class]="issue.Severity === 'warning' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-exclamation'"
              aria-hidden="true"></i>

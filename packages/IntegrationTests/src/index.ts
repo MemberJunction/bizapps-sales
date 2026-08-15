@@ -8,8 +8,9 @@
  *     testing: { checkModules: ['@mj-biz-apps/sales-integration-tests'] }
  *
  * BUNDLES
- *   save-deal   SD1–SD12   Sales.SaveDeal: three tables in one transaction, numbering, and the
- *                          no-pricing guarantee, against a live database with nothing mocked
+ *   save-deal   SD1–SD14   Saving a deal and its children: four tables in one transaction, numbering,
+ *                          the explicit-removal semantics of the child collections, and the no-pricing
+ *                          guarantee — against a live database with nothing mocked
  *
  * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` — this suite exists to
  * write to the database. Without that variable the suite runs ZERO checks and PASSES, which is the
@@ -36,10 +37,10 @@
 // ─── Register the code under test ──────────────────────────────────────────────────────────────
 //
 // `mj test` loads ONLY the modules named in `testing.checkModules` — it has no reason to know about this
-// app's server packages. Without these imports the ClassFactory never sees `DealEntityServer` or
-// `SaveDealOperation`: every save would run against the plain generated entity and the suite would
+// app's server packages. Without these imports the ClassFactory never sees `DealEntity` or
+// `DealEntityServer`: every save would run against the plain generated entity and the suite would
 // silently measure nothing. Worse than nothing — a check expecting a REFUSAL would still pass, because a
-// save with no logic behind it fails too. So the check package owns the registration.
+// save with no rules behind it fails too. So the check package owns the registration.
 import '@mj-biz-apps/sales-server';
 import { LoadBizAppsSalesServer } from '@mj-biz-apps/sales-server';
 

@@ -7,8 +7,8 @@
  * Every mutating check runs inside its own provider transaction and **ROLLS BACK**, so deals, lines,
  * instalments and team members never reach disk. Teardown is therefore nothing at all, and a mid-run
  * crash leaves the database exactly as it was. Copied from bizapps-orders, which validated the model —
- * including that the nesting works: `Sales.SaveDeal` opens its own transaction inside the check's, and
- * `DealEntityServer.Save` opens one inside that, so a check is up to three savepoints deep.
+ * including that the nesting works: `DealEntityServer.Save` opens one for the deal number inside the
+ * check's, and the save graph opens one inside that, so a check is up to three savepoints deep.
  *
  * ── IT DISCOVERS ITS FIXTURE RATHER THAN CREATING ONE ───────────────────────────────────────────
  *
@@ -16,7 +16,7 @@
  * with stages, the vocabulary rows and one employee — all of which `scripts/seed-dev-data.sh` and
  * `scripts/seed-demo-data.sh` already create, and which are the same rows a developer clicks through in
  * Explorer. Discovering them has the safest possible teardown (there is none) and means a check failure
- * is about `Sales.SaveDeal` rather than about fixture construction.
+ * is about the save path rather than about fixture construction.
  *
  * The cost is a real precondition: the seeds must have been run. {@link ResolveSalesFixture} therefore
  * fails with an instruction rather than a null-reference twelve frames deep.
