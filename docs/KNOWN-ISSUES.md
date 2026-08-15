@@ -349,7 +349,47 @@ Until step 3 exists, the doubling failure has no automated witness at all.
 
 ---
 
-## 🟠 KI-10 — The shared v6 host cannot hold orders' schema, and app CodeGen must exclude Sales
+## 🟢 KI-10 — RESOLVED: the orders chain assembles; app CodeGen must still exclude Sales
+
+> **RESOLVED 2026-08-15, by building the thing rather than reasoning about it.** The two hazards below
+> were written when Sales was the only app on the host, and the first of them turned out to be a
+> statement about *that host*, not about orders. Both are kept, unedited, because the reasoning is still
+> how you get from a Sales-only host to a working one — and because the CodeGen exclusion rule at the
+> bottom is **not** resolved and never will be.
+>
+> ### What actually works
+>
+> A six-repo pnpm workspace at a common parent (`MJ`, `bizapps-common`, `bizapps-tasks`,
+> `bizapps-accounting`, `bizapps-orders`, `bizapps-sales`), built with `mj dev workspace`, then migrated
+> **in dependency order**:
+>
+> | Step | Schema | Applied |
+> |---|---|---|
+> | 1 | `__mj_BizAppsTasks` | 4 migrations |
+> | 2 | `__mj_BizAppsAccounting` | 2 migrations |
+> | 3 | `__mj_BizAppsOrders` | 9 migrations |
+>
+> The Msg 1767 failure below was never orders being unapplyable — it was orders applied to a host that
+> had neither of the two schemas it points at. Supply them first and it just works.
+>
+> **CodeGen then registers the entity properly**, which hand-inserted metadata rows never did:
+> `MJ_BizApps_Orders: Products` with 30 fields and a real generated `vwProducts`. With that in place,
+> integration checks **PP1–PP4 pass 4/4** and the full sales suite stays green at **20/20** on the same
+> host.
+>
+> ### Two things that will bite the next person
+>
+> 1. **The stand-in leaves a row behind that the schema drop does not take.** Tearing down the dev-only
+>    `__mj_BizAppsOrders` stand-in drops its tables, views and FKs — but its `__mj.SchemaInfo` row
+>    survives, and because the stand-in was transcribed verbatim it carries **orders' own hardcoded
+>    UUID**. Orders' first migration then dies on a primary-key violation. Delete the `SchemaInfo` row
+>    for the schema as part of any stand-in teardown.
+> 2. **Orders' CodeGen exits non-zero on a clean run.** It fails to apply permissions for
+>    `spCreateEventOrderLine` / `spUpdateEventOrderLine` — sprocs that do not exist because
+>    `EventOrderLine` is an IsA child. Entity metadata is still written and post-CodeGen CRUD validation
+>    still passes. Judge it on the entity rows, not the exit code.
+
+## 🟠 KI-10 (as originally recorded) — The shared v6 host cannot hold orders' schema, and app CodeGen must exclude Sales
 
 **Two separate hazards on `MJ_V6_Host`, both found the hard way and both cheap to avoid once known.**
 
