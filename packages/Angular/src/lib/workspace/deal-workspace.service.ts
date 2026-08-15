@@ -33,6 +33,7 @@ import {
     ProjectValidation,
     type DealWorkspaceValidation,
 } from './deal-workspace.validation';
+import { E_ORDERS_PRODUCT, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
 
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
@@ -223,6 +224,52 @@ export class DealWorkspaceService {
             // rendering fault.
             CustomerName: (d.AccountID ? accounts.get(d.AccountID) : null) ?? '—',
         }));
+    }
+
+    /**
+     * The products a rep may put on a line, for one selling company.
+     *
+     * SEPARATE FROM `LoadLookups`, deliberately. The other pickers are session-wide and load once; this
+     * one depends on the DEAL'S company, so it is fetched when a deal opens and again if its pipeline
+     * changes. Folding it into the session lookups would either fetch every company's catalogue or
+     * silently show the first deal's.
+     *
+     * Returns an empty list on failure rather than throwing: a picker that cannot load should offer
+     * nothing and let the rest of the line editor keep working. The consequence — a rep unable to select
+     * a product — is visible, whereas a half-loaded catalogue silently missing rows is not.
+     */
+    public async LoadProducts(companyID: string | null, asOf: Date = new Date()): Promise<ProductLookup[]> {
+        if (!companyID) {
+            return [];
+        }
+
+        /**
+         * ORDERS MAY NOT BE PRESENT AT ALL, and that is a supported state rather than an error.
+         *
+         * Sales is designed to run standalone: `DealLine.ProductID` is a SOFT reference and no foreign
+         * key crosses into orders' schema, so a deployment can install Sales without orders and every
+         * other part of this surface still works. Asking `RunView` for an unregistered entity does not
+         * return `Success: false` — it logs `Entity ... not found in metadata`, and the Playwright
+         * keystone (correctly) treats a console error as a broken screen. That is how this was found:
+         * the picker took the whole workspace gate down on a host where orders is absent.
+         *
+         * So the entity is checked in metadata FIRST, and its absence simply means no picker.
+         */
+        const md = new Metadata();
+        const known = md.Entities.some((e) => e.Name === E_ORDERS_PRODUCT);
+        if (!known) {
+            return [];
+        }
+
+        const rv = new RunView();
+        const result = await rv.RunView<ProductLookup>({
+            EntityName: E_ORDERS_PRODUCT,
+            ExtraFilter: ProductFilterFor(companyID, asOf),
+            OrderBy: 'Name ASC',
+            ResultType: 'simple',
+            Fields: ['ID', 'Name', 'SKU'],
+        });
+        return result?.Success ? (result.Results ?? []) : [];
     }
 
     /** A blank deal, ready to bind to. Its collections start empty and are never loaded — there is nothing to load. */

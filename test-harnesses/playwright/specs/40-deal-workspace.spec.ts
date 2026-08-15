@@ -215,7 +215,9 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
        * about behaviour. The flag semantics are asserted server-side by integration check SD12, which
        * joins to the type row and reads `IsRecurring` directly.
        */
-      const typeLabels = await realOptionLabels(rows.nth(0).locator('select').first());
+      // Targeted by CLASS, not position: a line row now holds a product picker AND a line-type
+      // select, so `.first()` silently became the product one when that column was added.
+      const typeLabels = await realOptionLabels(rows.nth(0).locator('select.dw-cell-linetype'));
       expect(
         typeLabels.length,
         'the line-type selector must offer at least two types, or the recurring path cannot be exercised',
@@ -233,7 +235,7 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
 
         // Line type is a real type table now, so it is a select and not free text.
         const label = i === 0 ? typeLabels[typeLabels.length - 1] : typeLabels[0];
-        await row.locator('select').first().selectOption({ label });
+        await row.locator('select.dw-cell-linetype').selectOption({ label });
         chosenTypes.push(label);
         await page.waitForTimeout(250);
       }
