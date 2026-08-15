@@ -63,10 +63,12 @@ import {
     type DealLockState,
 } from '@mj-biz-apps/sales-entities';
 
-import { WorkspaceCardComponent } from '../vendored/workspace-tabs/workspace-card.component';
-import { WorkspaceTabStore } from '../vendored/workspace-tabs/workspace-tab-store';
-import type { WorkspaceTab } from '../vendored/workspace-tabs/workspace-tabs.types';
-import type { TabReorder } from '../vendored/workspace-tabs/workspace-tab-strip.component';
+import {
+    MJWorkspaceCardComponent,
+    MJWorkspaceTabStore,
+    type MJTabReorder,
+    type MJWorkspaceTab,
+} from '@memberjunction/ng-ui-components';
 import { DealWorkspaceService } from './deal-workspace.service';
 import { FromDateInput, ToDateInput } from './deal-workspace.dates';
 import type { ProductLookup } from '@mj-biz-apps/sales-entities';
@@ -122,7 +124,7 @@ type DealDateField = 'ExecutionDate' | 'StartDate' | 'ExpectedCloseDate' | 'Next
 @Component({
     standalone: true,
     selector: 'mjs-deal-workspace',
-    imports: [CommonModule, FormsModule, SharedGenericModule, WorkspaceCardComponent],
+    imports: [CommonModule, FormsModule, SharedGenericModule, MJWorkspaceCardComponent],
     changeDetection: ChangeDetectionStrategy.OnPush,
     templateUrl: './deal-workspace.component.html',
     styleUrls: ['./deal-workspace.component.css'],
@@ -132,7 +134,7 @@ export class DealWorkspaceComponent implements OnInit {
     private readonly cdr = inject(ChangeDetectorRef);
 
     /** The outer strip's state: which deals are open, and which is in front. */
-    private readonly store = new WorkspaceTabStore<OpenDeal>();
+    private readonly store = new MJWorkspaceTabStore<OpenDeal>();
 
     public readonly Panes: readonly DealWorkspacePane[] = DEAL_WORKSPACE_PANES;
     public readonly StandardAnnualIncreasePct = STANDARD_ANNUAL_INCREASE_PCT;
@@ -168,7 +170,7 @@ export class DealWorkspaceComponent implements OnInit {
 
     // ── The outer strip: open deals ─────────────────────────────────────────────
 
-    public get Tabs(): WorkspaceTab<OpenDeal>[] {
+    public get Tabs(): MJWorkspaceTab<OpenDeal>[] {
         return this.store.Tabs;
     }
 
@@ -260,7 +262,7 @@ export class DealWorkspaceComponent implements OnInit {
         this.Revalidate();
     }
 
-    public ReorderTabs(move: TabReorder): void {
+    public ReorderTabs(move: MJTabReorder): void {
         this.store.Reorder(move.previousIndex, move.currentIndex);
         this.cdr.detectChanges();
     }
