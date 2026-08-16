@@ -90,7 +90,7 @@ interface SaveContractPayload {
             Status: string;
             BillingFrequency: string;
             CommittedAmount?: number | null;
-            Lines: Array<{ ProductID: string; Quantity: number; Description?: string | null }>;
+            Lines: Array<{ ProductID: string; Quantity: number; LineType: string; Description?: string | null }>;
         }>;
     };
 }
@@ -209,6 +209,21 @@ export class LiveContractsSeam {
                         Lines: (input.Lines ?? []).map((l) => ({
                             ProductID: String(l.ProductID ?? ''),
                             Quantity: Number(l.Quantity ?? 1),
+                            /**
+                             * `Minimum`, and NOT `Subscription`, for a reason worth recording.
+                             *
+                             * `CK_ContractLine_LineType` allows Minimum / Usage / Milestone / OneTime /
+                             * Subscription, and a second constraint requires `SubscriptionTypeID` to be
+                             * set whenever the type IS `Subscription`. Sales does not hold a
+                             * subscription type — that is orders' vocabulary and no deal field carries
+                             * it — so claiming `Subscription` would either violate the constraint or
+                             * make sales invent an instrument it knows nothing about.
+                             *
+                             * `Minimum` says what sales actually knows: a committed recurring line.
+                             * When the deal one day carries a subscription type, pass it through and
+                             * this becomes `Subscription` honestly.
+                             */
+                            LineType: 'Minimum',
                             Description: l.Description ?? null,
                         })),
                     },
