@@ -29,7 +29,7 @@ whatever you like, but keep the six repos as direct children.
 ```bash
 mkdir C:\ws && cd C:\ws
 git clone --branch next https://github.com/MemberJunction/MJ.git
-for r in bizapps-common bizapps-tasks bizapps-accounting bizapps-orders bizapps-sales; do
+for r in bizapps-common bizapps-tasks bizapps-accounting bizapps-orders bizapps-sales bizapps-contracts; do
   git clone --branch next https://github.com/MemberJunction/$r.git
 done
 ```
@@ -112,7 +112,15 @@ in this order — it is the dependency order, and it is not negotiable:
 | 3 | tasks | `… migrate --schema __mj_BizAppsTasks --dir ./migrations` | 4 |
 | 4 | accounting | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 2 |
 | 5 | orders | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 9 |
-| 6 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 2 |
+| 6 | **contracts** | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 1 — **see the warning below** |
+| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 2 |
+
+> ⚠️ **Contracts migrates LAST, and does not currently install on a fresh database.** It FKs into
+> common, tasks, orders AND accounting — the full stack — so nothing else may follow it. More
+> importantly its baseline hardcodes other apps' entity UUIDs and fails on any machine but the one its
+> CodeGen ran on. Read `docs/KNOWN-ISSUES.md` **KI-13** before attempting it: the first error names the
+> wrong table, and three of the six broken references fail *silently* as a column-count mismatch that
+> breaks every insert. Always column-diff contracts' ten entities after installing.
 
 > **Sales' `mj:migrate` now passes `--schema` itself**, so `npm run mj:migrate` is safe. It did not until
 > this pass: the bare form wrote flyway history into `__mj` — where MJ core's newer migrations already sit
