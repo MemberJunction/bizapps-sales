@@ -34,6 +34,12 @@ export * from './downstream-seams';
 export * from './product-filter';
 
 /**
+ * The close lock's field rule, shared by `DealEntityServer.Save()` and the Explorer Deal form so the
+ * form cannot offer a field the server will refuse. Pinned by integration check CD14.
+ */
+export * from './close-lock';
+
+/**
  * Forces the generated entity subclasses to be loaded. Without an explicit
  * import + call, tree-shaking drops the generated entities because they are not
  * directly referenced. Import and call this from the app bootstrap so the

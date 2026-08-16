@@ -51,7 +51,7 @@ import {
     LogError,
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
-import { DealEntity } from '@mj-biz-apps/sales-entities';
+import { DEAL_FIELDS_EDITABLE_WHILE_LOCKED, DealEntity } from '@mj-biz-apps/sales-entities';
 
 import { getNextDealNumber } from './SequenceService.js';
 
@@ -205,13 +205,13 @@ export class DealEntityServer extends DealEntity {
     private _reopenInProgress = false;
 
     /**
-     * The two fields that stay editable on a locked deal.
+     * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.
      *
-     * The lock is field-by-field rather than a wall because a closed deal still needs notes — someone
-     * has to be able to write "customer asked about renewal" without reopening the deal and falsifying
-     * its provenance. Everything that a contract or an order was derived from is frozen.
+     * It moved to `@mj-biz-apps/sales-entities` so the Explorer Deal form can apply the same list. A
+     * second copy here would drift, and the drift would only ever surface as a user typing into a field
+     * the server then refuses. See `close-lock.ts` for the reasoning; CD14 pins it to real behaviour.
      */
-    private static readonly LOCK_EDITABLE_FIELDS = new Set<string>(['Description', 'NextStep']);
+    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;
 
     /**
      * Runs `body` with the close lock suppressed, and always restores it.

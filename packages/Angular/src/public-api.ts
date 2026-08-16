@@ -35,6 +35,19 @@ import { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifes
 // Hand-authored surfaces. Importing the section is what registers the nav item's DriverClass.
 import { MJSSalesSectionComponent, SalesDealsSectionResource } from './lib/sections/sales-section.component';
 
+/**
+ * PER-ENTITY FORMS (#89 P3). Each registers at explicit priority 2 against the same key its generated
+ * form uses, so the custom one wins by declared precedence rather than by bundler import order.
+ *
+ * Only three entities have one, and only because BEHAVIOUR — not layout — required it: the close lock,
+ * and the server-owned fields on lines and stage events. Everything else about how these forms look is
+ * metadata (`metadata/entities/.form-chrome.json`), which is where layout belongs.
+ */
+import './lib/custom/custom-forms.module';
+import { DealFormComponentExtended } from './lib/custom/deal-form.component';
+import { DealLineFormComponentExtended } from './lib/custom/deal-line-form.component';
+import { DealStageEventFormComponentExtended } from './lib/custom/deal-stage-event-form.component';
+
 // Re-export for consumers
 export { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
 export { GeneratedFormsModule } from './lib/generated/generated-forms.module';
@@ -51,6 +64,12 @@ export * from './lib/nav/sales-nav.model';
 
 // The deal workspace and the pieces a host might legitimately reuse. The workspace is a standalone
 // component the section mounts; it has no resource shim of its own any more — the section owns the tab.
+export { SalesCustomFormsModule } from './lib/custom/custom-forms.module';
+export { DealFormComponentExtended } from './lib/custom/deal-form.component';
+export { DealLineFormComponentExtended } from './lib/custom/deal-line-form.component';
+export { DealStageEventFormComponentExtended } from './lib/custom/deal-stage-event-form.component';
+export { DirtyServerOwnedFields, RefuseServerOwnedEdits } from './lib/custom/server-owned-fields';
+
 export { DealWorkspaceComponent } from './lib/workspace/deal-workspace.component';
 export { DealWorkspaceService } from './lib/workspace/deal-workspace.service';
 export type { DealSaveOutcome, DealRosterRow } from './lib/workspace/deal-workspace.service';
@@ -73,6 +92,13 @@ export function LoadBizAppsSalesClient(): void {
     // generated class — but validates against nothing except the database's own constraints. The user
     // would then get a server rejection where the form should have marked the field.
     LoadSalesDealEntities();
+
+    // One anchor PER custom form, for the reason given above: a production build drops an import that
+    // nothing references, the priority-2 registration never fires, and the GENERATED form silently wins.
+    // The symptom would be a Deal form that lets you edit a locked deal — a missing guard, not an error.
+    void DealFormComponentExtended;
+    void DealLineFormComponentExtended;
+    void DealStageEventFormComponentExtended;
 
     void CLASS_REGISTRATIONS;
     void MJSSalesSectionComponent;

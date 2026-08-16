@@ -1,0 +1,522 @@
+[
+  {
+    "_comments": [
+      "The deals this person is the PRIMARY contact on -- the reason you open a contact.",
+      "Primary, and named by its role so it does not collide with the billing grid below."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "Primary",
+          "FormRole": "Primary"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=PrimaryContactID"
+    }
+  },
+  {
+    "_comments": [
+      "The same entity again, joined on a DIFFERENT column: deals where this person is billing contact.",
+      "Without an explicit inclusion the form renders two grids both titled \"Deals\" and the user cannot",
+      "tell them apart. Billing is the rarer question, so it goes to More rather than competing."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=BillingContactID"
+    }
+  },
+  {
+    "_comments": [
+      "What this person actually does on the deals they touch -- the buying-role join. First-class."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "Primary"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Deal Contact Roles&RelatedEntityJoinField=SalesContactID"
+    }
+  },
+  {
+    "_comments": [
+      "A pipeline IS its ordered stages. This is the one child you open a pipeline to see."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "Primary",
+          "FormRole": "Primary"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipelines&RelatedEntity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntityJoinField=PipelineID"
+    }
+  },
+  {
+    "_comments": [
+      "Every deal ever run through this pipeline. Unbounded, and not what the form is for."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipelines&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=PipelineID"
+    }
+  },
+  {
+    "_comments": [
+      "Historical forecast readings. Provenance, not composition."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipelines&RelatedEntity=MJ_BizApps_Sales: Forecast Snapshots&RelatedEntityJoinField=PipelineID"
+    }
+  },
+  {
+    "_comments": [
+      "Deal types that default INTO this pipeline -- a configuration back-reference, not content."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipelines&RelatedEntity=MJ_BizApps_Sales: Deal Types&RelatedEntityJoinField=DefaultPipelineID"
+    }
+  },
+  {
+    "_comments": [
+      "An account's deals are the point of opening the account."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "Primary",
+          "FormRole": "Primary"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Accounts&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=AccountID"
+    }
+  },
+  {
+    "_comments": [
+      "The deals sitting in this stage right now -- the live question a stage answers."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "Primary",
+          "FormRole": "Primary"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=PipelineStageID"
+    }
+  },
+  {
+    "_comments": [
+      "Transitions INTO this stage. History; and it shares a form with the FromStageID grid below, so",
+      "both are explicitly placed rather than left to collide."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntity=MJ_BizApps_Sales: Deal Stage Events&RelatedEntityJoinField=ToStageID"
+    }
+  },
+  {
+    "_comments": [
+      "Transitions OUT of this stage. Same entity, different join column -- the Sales Contacts problem",
+      "in miniature, and disambiguated the same way."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntity=MJ_BizApps_Sales: Deal Stage Events&RelatedEntityJoinField=FromStageID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Sales Accounts reference this Account Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Account Types&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=AccountTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Deal Contact Roles reference this Buying Role Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Buying Role Types&RelatedEntity=MJ_BizApps_Sales: Deal Contact Roles&RelatedEntityJoinField=BuyingRoleTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Sales Contacts reference this Buying Role Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Buying Role Types&RelatedEntity=MJ_BizApps_Sales: Sales Contacts&RelatedEntityJoinField=BuyingRoleTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Deal Lines reference this Deal Line Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Line Types&RelatedEntity=MJ_BizApps_Sales: Deal Lines&RelatedEntityJoinField=DealLineTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Deal Team Members reference this Deal Role.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Roles&RelatedEntity=MJ_BizApps_Sales: Deal Team Members&RelatedEntityJoinField=DealRoleID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Deals reference this Deal Status Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Status Types&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=DealStatusTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Pipeline Stages reference this Deal Status Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Status Types&RelatedEntity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntityJoinField=DealStatusTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Deal Stage Events reference this Deal Status Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Status Types&RelatedEntity=MJ_BizApps_Sales: Deal Stage Events&RelatedEntityJoinField=ToDealStatusTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Deal Stage Events reference this Deal Status Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Status Types&RelatedEntity=MJ_BizApps_Sales: Deal Stage Events&RelatedEntityJoinField=FromDealStatusTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Deals reference this Deal Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Types&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=DealTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Pipelines reference this Deal Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Types&RelatedEntity=MJ_BizApps_Sales: Pipelines&RelatedEntityJoinField=DealTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Deals reference this Forecast Category Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Forecast Category Types&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=ForecastCategoryTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Pipeline Stages reference this Forecast Category Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Forecast Category Types&RelatedEntity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntityJoinField=ForecastCategoryTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Pipelines reference this Forecast Category Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Forecast Category Types&RelatedEntity=MJ_BizApps_Sales: Pipelines&RelatedEntityJoinField=DefaultForecastCategoryTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Deals reference this Lead Source Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Lead Source Types&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=LeadSourceTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Sales Accounts reference this Lead Source Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Lead Source Types&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=LeadSourceTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Sales Contacts reference this Lead Source Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Lead Source Types&RelatedEntity=MJ_BizApps_Sales: Sales Contacts&RelatedEntityJoinField=LeadSourceTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Sales Accounts reference this Lifecycle Stage Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Lifecycle Stage Types&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=LifecycleStageTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Sales Contacts reference this Lifecycle Stage Type.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Lifecycle Stage Types&RelatedEntity=MJ_BizApps_Sales: Sales Contacts&RelatedEntityJoinField=LifecycleStageTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Usage back-reference: which Deals reference this Loss Reason.",
+      "A config record should not be dominated by a grid of everything pointing at it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "inclusion": "More",
+          "FormRole": "Detail"
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Loss Reasons&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=LossReasonID"
+    }
+  }
+]
