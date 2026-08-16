@@ -30,13 +30,15 @@
  * than the generated entity is load-bearing: extend the generated one and every rule in that file
  * silently stops applying on the server.
  *
+ *   - The CLOSE LOCK (S4). Once the deal's status carries `DealStatusType.LocksDeal = 1`, the header
+ *     (except Description / NextStep), its lines, its instalments and its team are immutable, and
+ *     reopening goes through `Sales.ReopenDeal`, which records a reason.
+ *
  * ── STILL TO COME (deliberately not stubbed) ────────────────────────────────────────────────────
- *   - S4: the CLOSE LOCK. When the deal's status has `DealStatusType.LocksDeal = 1`, the header
- *     (except Description / NextStep), its lines and its team become immutable, and reopening goes
- *     through `Sales.ReopenDeal` with a recorded reason.
- *   - S4: `DealStageEvent` append on stage transition, stamping `AmountAtTransition` and
- *     `ProbabilityAtTransition`. **This is the one to be careful with** — see the note on
- *     {@link DealEntityServer.Save} about where it has to go.
+ *   - `DealStageEvent` append on ORDINARY stage transition, stamping `AmountAtTransition` and
+ *     `ProbabilityAtTransition`. `Sales.CloseDeal` already stamps the CLOSE transition; consolidating
+ *     the two into a single writer here is D-BD2, and it must land in the `IsGraphNodeSave` branch so
+ *     the event is inside the graph's transaction — see the note on {@link DealEntityServer.Save}.
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */
@@ -55,6 +57,7 @@ import { getNextDealNumber } from './SequenceService.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
+const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
 /**
  * The one column the pipeline lookup selects. `CompanyID` is NOT NULL on `Pipeline`, so a successful read
@@ -102,6 +105,29 @@ export class DealEntityServer extends DealEntity {
         // on the outer call; doing it again here would double it.
         if (options?.IsGraphNodeSave) {
             return super.Save(options);
+        }
+
+        /**
+         * THE CLOSE LOCK (L-17, master plan §7.3) — enforced HERE and nowhere else.
+         *
+         * Once a deal enters a status where `DealStatusType.LocksDeal = 1` it is the provenance of a
+         * contract and an order, and editing it retroactively falsifies both. Putting the check in the
+         * entity server rather than the UI is the whole point: an Action, an agent and a raw
+         * `BaseEntity.Save()` all hit the same wall.
+         *
+         * ON THE OUTER CALL ONLY, and that placement is load-bearing twice over. The graph-node branch
+         * above returns before reaching this, so the check runs once per save rather than twice — and a
+         * childless deal, which never takes the graph path at all, is still covered because the outer
+         * call always happens.
+         *
+         * Runs BEFORE any transaction opens: a refused save should cost nothing.
+         */
+        if (this.IsSaved && !this._reopenInProgress) {
+            const refusal = await this.checkCloseLock();
+            if (refusal) {
+                LogError(`DealEntityServer.Save refused: ${refusal}`);
+                return false;
+            }
         }
 
         try {
@@ -166,6 +192,120 @@ export class DealEntityServer extends DealEntity {
             }
             return false;
         }
+    }
+
+    /* ── The close lock (L-17, master plan §7.3) ────────────────────────────── */
+
+    /**
+     * Set only for the duration of {@link BeginReopen}, which is the ONE audited path through the lock.
+     *
+     * Deliberately NOT public: a caller that could set this could bypass the lock, which would make the
+     * lock advisory. `Sales.ReopenDeal` records a reason; nothing else may get through.
+     */
+    private _reopenInProgress = false;
+
+    /**
+     * The two fields that stay editable on a locked deal.
+     *
+     * The lock is field-by-field rather than a wall because a closed deal still needs notes — someone
+     * has to be able to write "customer asked about renewal" without reopening the deal and falsifying
+     * its provenance. Everything that a contract or an order was derived from is frozen.
+     */
+    private static readonly LOCK_EDITABLE_FIELDS = new Set<string>(['Description', 'NextStep']);
+
+    /**
+     * Runs `body` with the close lock suppressed, and always restores it.
+     *
+     * The `finally` is the point: an exception inside the reopen must not leave the lock disabled for
+     * the rest of this entity's life, which would silently turn every later save into an unguarded one.
+     */
+    public async BeginReopen<T>(body: () => Promise<T>): Promise<T> {
+        this._reopenInProgress = true;
+        try {
+            return await body();
+        } finally {
+            this._reopenInProgress = false;
+        }
+    }
+
+    /**
+     * Why this save is refused, or null if it is allowed.
+     *
+     * KEYED ON THE **PERSISTED** STATUS, via `OldValue` — not on the in-memory one. That is what makes
+     * the closing transition itself legal: a deal moving open → closed still has an OPEN status in the
+     * database, so it passes, and only saves made once the deal is ALREADY closed are refused. Reading
+     * the current value instead would make a deal impossible to close.
+     */
+    private async checkCloseLock(): Promise<string | null> {
+        const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
+        if (!persistedStatusID) {
+            return null;
+        }
+        if (!(await this.statusLocksDeal(persistedStatusID))) {
+            return null;
+        }
+
+        const changed = this.Fields.filter(
+            (f) => f.Dirty && !DealEntityServer.LOCK_EDITABLE_FIELDS.has(f.Name),
+        ).map((f) => f.Name);
+
+        /**
+         * THE CHILD COLLECTIONS COUNT AS CHANGES TOO, and this half did not exist when the lock was
+         * written — the collections did not exist either.
+         *
+         * A deal's lines are exactly what a contract and an order were derived from, so editing or
+         * removing one on a closed deal falsifies the same provenance the header lock protects. But
+         * `Lines`, `PaymentSchedule` and `Team` are COMPANIONS, not fields: they never appear in
+         * `this.Fields`, so the header check above cannot see them. Without this the lock would refuse a
+         * renamed deal and happily accept a deleted line, which is the more damaging edit of the two.
+         *
+         * Enumerated as `Companions` rather than as the three collections by name, deliberately: anything
+         * that contributes work to this record's save is something the lock has to see, and naming them
+         * individually would mean a collection added later is silently unprotected.
+         *
+         * Guarded by the same already-closed test, so the closing transition may still carry final
+         * collection state — a close that writes its last line is legal; editing that line tomorrow is
+         * not.
+         */
+        const dirtyCollections = this.Companions
+            .filter((c) => c.Dirty)
+            .map((c) => c.Name);
+
+        const all = [...changed, ...dirtyCollections];
+        if (all.length === 0) {
+            return null;
+        }
+        return (
+            `this deal is closed and locked; ${all.join(', ')} cannot be changed. ` +
+            `Reopen it through Sales.ReopenDeal, which records a reason.`
+        );
+    }
+
+    /**
+     * Whether a status carries `LocksDeal`.
+     *
+     * THE FLAG, never the name — a deployment may call its winning status "Signed", and this must keep
+     * working. It is also why the lock is a property of the STATUS TYPE rather than of the stage.
+     */
+    private async statusLocksDeal(statusID: string): Promise<boolean> {
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await provider.RunView(
+            {
+                EntityName: DEAL_STATUS_ENTITY,
+                ExtraFilter: `ID = '${statusID}'`,
+                ResultType: 'simple',
+                Fields: ['LocksDeal'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            // FAIL CLOSED. If the status cannot be read we cannot prove the deal is unlocked, and
+            // wrongly allowing an edit to a closed deal is the more expensive mistake.
+            LogError(`DealEntityServer.statusLocksDeal: could not read status ${statusID}: ${result.ErrorMessage}`);
+            return true;
+        }
+        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean } | undefined;
+        return row?.LocksDeal === true;
     }
 
     /* ── Selling company ────────────────────────────────────────────────────── */

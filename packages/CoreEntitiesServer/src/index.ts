@@ -37,8 +37,10 @@
  *     response (§6) — S2. Until it exists, nothing enforces that at the entity level.
  */
 export * from './DealEntityServer.js';
+export * from './CloseDealOperation.js';
 
 import { DealEntityServer } from './DealEntityServer.js';
+import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 
 /**
  * Anchor for the server-side entity subclasses, called from the sales-server bootstrap.
@@ -51,7 +53,7 @@ import { DealEntityServer } from './DealEntityServer.js';
  */
 export function LoadSalesCoreEntitiesServer(): void {
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer];
+    const anchors: unknown[] = [DealEntityServer, CloseDealOperation, ReopenDealOperation];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }

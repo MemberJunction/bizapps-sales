@@ -20,6 +20,13 @@ export * from './generated/remote_operations';
 export * from './deal-entity';
 
 /**
+ * The typed seams the close flow calls downstream, plus the stub that stands in while neither sibling
+ * is reachable. Read the file header before wiring anything: the blockers are recorded there, and the
+ * `IsLive` flag is what tells a caller whether a routing result means "created" or only "planned".
+ */
+export * from './downstream-seams';
+
+/**
  * The rule deciding which of orders' products a deal line may reference — company, sellable status and
  * availability window. Framework-free so the UI, the integration suite and (later) the close-won handoff
  * all apply the same one.

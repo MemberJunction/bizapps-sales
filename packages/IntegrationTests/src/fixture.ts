@@ -48,6 +48,8 @@ export const E_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 export const E_LINE_TYPE = 'MJ_BizApps_Sales: Deal Line Types';
 export const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 export const E_EMPLOYEE = 'MJ: Employees';
+export const E_STAGE_EVENT = 'MJ_BizApps_Sales: Deal Stage Events';
+export const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
 
 /** The rows the checks build payloads from. All discovered, none created. */
 export interface SalesFixture {
@@ -62,6 +64,33 @@ export interface SalesFixture {
     OneTimeLineTypeID: string;
     AccountID: string;
     EmployeeID: string;
+
+    /* ── The close flow (§7) ─────────────────────────────────────────────────────────────────────
+     *
+     * Every one of these is resolved by a FLAG or by the pipeline's POLICY, never by a name. That is
+     * the vocabulary rule applied to test code: a check that looked up `Name = 'Won'` would keep
+     * passing after somebody renamed the row while quietly testing nothing, and a check that looked up
+     * `Name = 'B2B'` would be asserting the very coupling the close flow exists to avoid.
+     */
+
+    /** The winning status, by `IsWon`. It also locks — that is what makes CD3 possible. */
+    WonStatusID: string;
+    /** The losing status, by `IsLost`. */
+    LostStatusID: string;
+    /** A NON-locking, non-open status (`On Hold` as seeded) — used to prove the lock is flag-driven. */
+    UnlockedNonOpenStatusID: string | null;
+
+    /** The pipeline whose `CloseWonPolicy` says `CreateContract: true`. B2B, as seeded. */
+    ContractPolicyPipelineID: string;
+    ContractPolicyStageID: string;
+    /** The pipeline whose policy does NOT create a contract. D2C, as seeded. */
+    OrderOnlyPolicyPipelineID: string;
+    OrderOnlyPolicyStageID: string;
+
+    /** A loss reason that does NOT require notes, by `RequiresNotes = 0`. */
+    LossReasonPlainID: string;
+    /** A loss reason that DOES require notes, by `RequiresNotes = 1`. */
+    LossReasonNeedsNotesID: string;
 }
 
 let cached: SalesFixture | null = null;
@@ -121,6 +150,21 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
     const account = await one<{ ID: string }>(ctx, E_ACCOUNT, 'IsActive = 1', ['ID'], 'sales account');
     const employee = await one<{ ID: string }>(ctx, E_EMPLOYEE, 'Active = 1', ['ID'], 'active employee');
 
+    const wonStatus = await one<{ ID: string }>(
+        ctx, E_STATUS_TYPE, 'IsWon = 1 AND IsActive = 1', ['ID'], 'WON deal status (by IsWon flag)',
+    );
+    const lostStatus = await one<{ ID: string }>(
+        ctx, E_STATUS_TYPE, 'IsLost = 1 AND IsActive = 1', ['ID'], 'LOST deal status (by IsLost flag)',
+    );
+    const lossPlain = await one<{ ID: string }>(
+        ctx, E_LOSS_REASON, 'RequiresNotes = 0 AND IsActive = 1', ['ID'], 'loss reason not requiring notes',
+    );
+    const lossNeedsNotes = await one<{ ID: string }>(
+        ctx, E_LOSS_REASON, 'RequiresNotes = 1 AND IsActive = 1', ['ID'], 'loss reason REQUIRING notes',
+    );
+
+    const { withContract, withoutContract } = await resolvePipelinesByPolicy(ctx);
+
     cached = {
         PipelineID: pipeline.ID,
         PipelineCompanyID: pipeline.CompanyID,
@@ -131,8 +175,94 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
         OneTimeLineTypeID: oneTime.ID,
         AccountID: account.ID,
         EmployeeID: employee.ID,
+
+        WonStatusID: wonStatus.ID,
+        LostStatusID: lostStatus.ID,
+        UnlockedNonOpenStatusID: await optionalStatusID(ctx, 'IsOpen = 0 AND LocksDeal = 0 AND IsActive = 1'),
+
+        ContractPolicyPipelineID: withContract.ID,
+        ContractPolicyStageID: withContract.StageID,
+        OrderOnlyPolicyPipelineID: withoutContract.ID,
+        OrderOnlyPolicyStageID: withoutContract.StageID,
+
+        LossReasonPlainID: lossPlain.ID,
+        LossReasonNeedsNotesID: lossNeedsNotes.ID,
     };
     return cached;
+}
+
+/** A status that may legitimately not be seeded. Returns null rather than failing the whole fixture. */
+async function optionalStatusID(ctx: IntegrationCheckContext, filter: string): Promise<string | null> {
+    const rv = new RunView();
+    const r = await rv.RunView<{ ID: string }>(
+        { EntityName: E_STATUS_TYPE, ExtraFilter: filter, ResultType: 'simple', Fields: ['ID'] },
+        ctx.User,
+    );
+    return r.Success ? ((r.Results ?? [])[0]?.ID ?? null) : null;
+}
+
+/**
+ * The two pipelines the routing checks need, chosen by what their POLICY SAYS.
+ *
+ * This is the part of the fixture most worth reading. The seeded pipelines happen to be called "B2B" and
+ * "D2C", and picking them by those names would be the easiest thing to write — and would make the whole
+ * routing bundle a lie, because the property under test is precisely that routing follows
+ * `CloseWonPolicy` and not the pipeline's name. So the fixture parses the policy and picks the pipeline
+ * that CREATES A CONTRACT versus the one that does not. Rename both pipelines to "Left" and "Right" and
+ * every routing check still passes, which is the whole point.
+ */
+async function resolvePipelinesByPolicy(
+    ctx: IntegrationCheckContext,
+): Promise<{ withContract: PolicyPipeline; withoutContract: PolicyPipeline }> {
+    const rv = new RunView();
+    const r = await rv.RunView<{ ID: string; CloseWonPolicy: string | null }>(
+        { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', ResultType: 'simple', Fields: ['ID', 'CloseWonPolicy'] },
+        ctx.User,
+    );
+    Assert(r.Success, `fixture: reading pipelines failed — ${r.ErrorMessage}`);
+
+    let withContract: PolicyPipeline | null = null;
+    let withoutContract: PolicyPipeline | null = null;
+
+    for (const row of r.Results ?? []) {
+        const creates = policyCreatesContract(row.CloseWonPolicy);
+        if (creates && !withContract) {
+            withContract = { ID: row.ID, StageID: await firstStageOf(ctx, row.ID) };
+        } else if (!creates && !withoutContract) {
+            withoutContract = { ID: row.ID, StageID: await firstStageOf(ctx, row.ID) };
+        }
+    }
+
+    Assert(
+        !!withContract && !!withoutContract,
+        'fixture: the close-flow checks need TWO active pipelines — one whose CloseWonPolicy sets ' +
+            '"CreateContract": true and one that does not. Run scripts/seed-dev-data.sh, which seeds both.',
+    );
+    return { withContract: withContract as PolicyPipeline, withoutContract: withoutContract as PolicyPipeline };
+}
+
+interface PolicyPipeline {
+    ID: string;
+    StageID: string;
+}
+
+/** A pipeline with no policy, or an unparseable one, routes nothing — so it counts as "no contract". */
+function policyCreatesContract(raw: string | null): boolean {
+    if (!raw) {
+        return false;
+    }
+    try {
+        return (JSON.parse(raw) as { CreateContract?: boolean }).CreateContract === true;
+    } catch {
+        return false;
+    }
+}
+
+async function firstStageOf(ctx: IntegrationCheckContext, pipelineID: string): Promise<string> {
+    const stage = await one<{ ID: string }>(
+        ctx, E_STAGE, `PipelineID = '${pipelineID}' AND IsActive = 1`, ['ID'], `stage on pipeline ${pipelineID}`,
+    );
+    return stage.ID;
 }
 
 /**

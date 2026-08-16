@@ -1,0 +1,72 @@
+[
+  {
+    "_comments": [
+      "Sales.CloseDeal — master plan §7.2. Named for the OUTCOME TYPE, not for 'won': the operation",
+      "resolves its entire path from the target DealStatusType's flags (IsWon / IsLost / LocksDeal),",
+      "so a deployment that calls its winning status 'Signed' needs no code change.",
+      "",
+      "ONE TRANSACTION, all-or-none. A partial close — contract created, order missing — is exactly",
+      "the failure the transaction exists to prevent (§7.2).",
+      "",
+      "GenerationType=Manual: CodeGen emits the typed shell, CloseDealOperation supplies the body."
+    ],
+    "fields": {
+      "Name": "Close Deal",
+      "OperationKey": "Sales.CloseDeal",
+      "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Deal Lifecycle",
+      "Description": "Close a deal into a target status, in ONE transaction: validate it is closeable, resolve the effective CloseWonPolicy (pipeline default + caller overrides), route lines to a contract and/or an order per that policy, append the DealStageEvent, stamp ActualCloseDate/ClosedAt/ClosedByUserID, and apply the close lock when the status carries LocksDeal. Routing is decided by the policy and by DealStatusType FLAGS — never by a pipeline or status NAME. Sales passes intent only; every figure is computed downstream by orders.",
+      "InputTypeName": "SalesCloseDealInput",
+      "InputTypeDefinition": "@file:types/sales-close-deal.input.ts",
+      "InputTypeIsArray": false,
+      "OutputTypeName": "SalesCloseDealOutput",
+      "OutputTypeDefinition": "@file:types/sales-close-deal.output.ts",
+      "OutputTypeIsArray": false,
+      "ExecutionMode": "Sync",
+      "RequiredScope": "sales:write",
+      "RequiresSystemUser": false,
+      "GenerationType": "Manual",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "D4F8A162-0002-4E71-B0A8-3F17C5E2D802"
+    },
+    "sync": {
+      "lastModified": "2026-08-15T04:29:09.629Z",
+      "checksum": "7ad081c33477243af381ac1ed861f6ed8fff9bab4618eb531868005497704cae"
+    }
+  },
+  {
+    "_comments": [
+      "Sales.ReopenDeal — master plan §7.3. The ONLY sanctioned way out of the close lock.",
+      "Reason is required: a lock exists because the deal is now the provenance of a contract and an",
+      "order, so undoing it has to be explainable. The reopen is itself appended to DealStageEvent,",
+      "so the fact that a close happened survives the close being undone."
+    ],
+    "fields": {
+      "Name": "Reopen Deal",
+      "OperationKey": "Sales.ReopenDeal",
+      "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Deal Lifecycle",
+      "Description": "Reopen a locked deal into a non-locking status, recording a mandatory reason. Appends a DealStageEvent, clears the close stamps, and releases the immutability enforced by DealEntityServer.Save(). The only sanctioned exit from the close lock (§7.3).",
+      "InputTypeName": "SalesReopenDealInput",
+      "InputTypeDefinition": "@file:types/sales-close-deal.input.ts",
+      "InputTypeIsArray": false,
+      "OutputTypeName": "SalesReopenDealOutput",
+      "OutputTypeDefinition": "@file:types/sales-close-deal.output.ts",
+      "OutputTypeIsArray": false,
+      "ExecutionMode": "Sync",
+      "RequiredScope": "sales:write",
+      "RequiresSystemUser": false,
+      "GenerationType": "Manual",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "D4F8A162-0003-4E71-B0A8-3F17C5E2D802"
+    },
+    "sync": {
+      "lastModified": "2026-08-15T04:29:09.662Z",
+      "checksum": "3f0377f9b66168a7d4b771d18ed80e47ff760049e22a0b1bbb33ea69c3626c60"
+    }
+  }
+]
