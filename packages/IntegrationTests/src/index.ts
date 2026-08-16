@@ -55,7 +55,9 @@ LoadBizAppsSalesServer();
 // ─── The bundles ───────────────────────────────────────────────────────────────────────────────
 import './checks/save-deal.checks.js';
 import './checks/close-deal.checks.js';
+import './checks/product-picker.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
+export { ProductPickerChecks } from './checks/product-picker.checks.js';
 export * from './fixture.js';

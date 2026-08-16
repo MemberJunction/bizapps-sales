@@ -239,6 +239,7 @@
               <table class="dw-table">
                 <thead>
                   <tr>
+                    <th scope="col">Product</th>
                     <th scope="col">Product / service <em>*</em></th>
                     <th scope="col">Type</th>
                     <th scope="col" class="dw-num">Qty</th>
@@ -253,11 +254,29 @@
                   @for (line of Lines; track line.ID; let i = $index) {
                     <tr [class.dw-row--bad]="IssuesForRow('lines', i).length > 0">
                       <td>
+                        <!-- Identity is Product.ID. The catalogue is already filtered to this deal's
+                             selling company, Active status and today's availability window, so anything
+                             offered here is sellable — see deal-workspace.products.ts. -->
+                        <select class="dw-cell-product" [ngModel]="line.ProductID"
+                                (ngModelChange)="OnProductChange(line, $event)"
+                                [title]="ProductLabel(line)">
+                          <option [ngValue]="null">— not linked —</option>
+                          @for (p of Products; track p.ID) {
+                            <option [ngValue]="p.ID">{{ p.SKU ? p.Name + ' (' + p.SKU + ')' : p.Name }}</option>
+                          }
+                        </select>
+                        @if (line.ProductID && ProductLabel(line) === '(no longer offered)') {
+                          <!-- Quoted before the product was withdrawn. Saying so beats showing a blank
+                               picker, which reads as "never linked". -->
+                          <small class="dw-field__hint">no longer offered</small>
+                        }
+                      </td>
+                      <td>
                         <input type="text" [(ngModel)]="line.ProductName" (ngModelChange)="Touch()"
                                placeholder="e.g. Platform — Enterprise Seat" />
                       </td>
                       <td>
-                        <select [(ngModel)]="line.DealLineTypeID" (ngModelChange)="Touch()">
+                        <select class="dw-cell-linetype" [(ngModel)]="line.DealLineTypeID" (ngModelChange)="Touch()">
                           <option [ngValue]="null">—</option>
                           @for (lt of Lookups.LineTypes; track lt.ID) {
                             <option [ngValue]="lt.ID">{{ lt.Name }}</option>

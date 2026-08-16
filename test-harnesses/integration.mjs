@@ -93,6 +93,23 @@ const registry = IntegrationCheckRegistry.Instance;
 // Listed explicitly rather than taken from `registry.GetBundleNames()`, so that a bundle which fails to
 // register — the failure mode a discovered list would hide as a shorter, still-green run — is a hard
 // "no checks matched" instead.
+
+/**
+ * `product-picker` is DELIBERATELY ABSENT from the default gate, and this is not an oversight.
+ *
+ * PP1–PP4 read `MJ_BizApps_Orders: Products`, which needs orders' entity metadata registered in the
+ * host. Orders' full schema cannot be applied here — it has hard foreign keys into
+ * `__mj_BizAppsAccounting`, which has one into `__mj_BizAppsTasks` — and hand-registering the entity
+ * does not make it resolvable to `Metadata`. So the checks are committed, compiled and runnable, but
+ * they cannot pass on this host yet.
+ *
+ * They are LEFT OUT rather than made to pass vacuously, which is the failure mode this repo's own
+ * `assert-check-count.mjs` exists to catch. Run them explicitly once orders' metadata is present:
+ *
+ *     RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs product-picker
+ *
+ * and add 'product-picker' back to this list in the same change.
+ */
 const ALL_BUNDLES = ['save-deal', 'close-deal'];
 
 /**

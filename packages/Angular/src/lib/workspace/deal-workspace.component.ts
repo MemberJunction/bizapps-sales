@@ -59,6 +59,7 @@ import type { WorkspaceTab } from '../vendored/workspace-tabs/workspace-tabs.typ
 import type { TabReorder } from '../vendored/workspace-tabs/workspace-tab-strip.component';
 import { DealWorkspaceService } from './deal-workspace.service';
 import { FromDateInput, ToDateInput } from './deal-workspace.dates';
+import type { ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
     EmptyValidation,
     ProjectValidation,
@@ -112,6 +113,14 @@ export class DealWorkspaceComponent implements OnInit {
     public readonly StandardCancellationNoticeDays = STANDARD_CANCELLATION_NOTICE_DAYS;
 
     public Lookups: DealWorkspaceLookups = EmptyLookups();
+
+    /**
+     * The products the ACTIVE deal may reference, refreshed when its selling company changes.
+     *
+     * Per-deal rather than per-session: products are per-company, and the company comes from the deal's
+     * pipeline. A session-wide list would show the first-opened deal's catalogue on every other deal.
+     */
+    public Products: ProductLookup[] = [];
     public readonly Loading = signal(true);
     public readonly Saving = signal(false);
     /** Last outcome, shown verbatim. The server's words, not a paraphrase of them. */
@@ -169,6 +178,7 @@ export class DealWorkspaceComponent implements OnInit {
             Status: 'draft',
             State: { Deal: deal, ActivePane: 'party' },
         });
+        await this.RefreshProducts();
         this.Revalidate();
     }
 
@@ -203,6 +213,7 @@ export class DealWorkspaceComponent implements OnInit {
             State: { Deal: deal, ActivePane: 'party' },
         });
         this.store.MarkClean(tabId);
+        await this.RefreshProducts();
         this.Revalidate();
         return true;
     }
@@ -301,6 +312,10 @@ export class DealWorkspaceComponent implements OnInit {
             deal.PipelineStageID = stages[0]?.ID ?? null;
             this.ApplyStageDefaults(deal, deal.PipelineStageID);
         }
+
+        // The company just moved, so the catalogue has too. Not awaited: this runs from a template
+        // event handler, and the picker filling a moment later is better than blocking the select.
+        void this.RefreshProducts();
     }
 
     public StagesFor(pipelineID: string | null): StageLookup[] {
@@ -543,6 +558,51 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     // ── Internals ──────────────────────────────────────────────────────────────
+
+    /**
+     * Reloads the product catalogue for whichever company the active deal sells for.
+     *
+     * Called when a deal is opened and when its pipeline changes, because those are the only two moments
+     * `CompanyID` can move. Failure yields an empty list rather than an error: the picker then offers
+     * nothing, which is visible, instead of a partial catalogue, which is not.
+     */
+    private async RefreshProducts(): Promise<void> {
+        const deal = this.Deal;
+        this.Products = deal ? await this.service.LoadProducts(deal.CompanyID) : [];
+        this.cdr.detectChanges();
+    }
+
+    /**
+     * The label a line shows for the product it references.
+     *
+     * Resolved from the loaded catalogue rather than stored on the line, so a renamed product reads
+     * correctly next time the deal is opened. A line whose product is no longer offered — discontinued
+     * since it was quoted — still shows its ID rather than silently reading as unset, because "this line
+     * references something you can no longer sell" is a fact the rep needs.
+     */
+    public ProductLabel(line: mjBizAppsSalesDealLineEntity): string {
+        if (!line.ProductID) {
+            return '';
+        }
+        const hit = this.Products.find((x) => x.ID === line.ProductID);
+        return hit ? (hit.SKU ? `${hit.Name} (${hit.SKU})` : hit.Name) : '(no longer offered)';
+    }
+
+    /**
+     * Records the product a line references — the ID, never the name or SKU.
+     *
+     * `ProductName` is kept in step as a TRANSCRIPTION for the quote, not as identity: it is what the
+     * line says it sells, and it must survive the product being renamed or withdrawn later. That is why
+     * both are written rather than deriving the name at read time.
+     */
+    public OnProductChange(line: mjBizAppsSalesDealLineEntity, productID: string | null): void {
+        line.ProductID = productID;
+        const hit = productID ? this.Products.find((x) => x.ID === productID) : undefined;
+        if (hit) {
+            line.ProductName = hit.Name;
+        }
+        this.Touch();
+    }
 
     private Revalidate(): void {
         const deal = this.Deal;

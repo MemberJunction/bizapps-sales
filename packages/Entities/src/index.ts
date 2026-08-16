@@ -27,6 +27,13 @@ export * from './deal-entity';
 export * from './downstream-seams';
 
 /**
+ * The rule deciding which of orders' products a deal line may reference — company, sellable status and
+ * availability window. Framework-free so the UI, the integration suite and (later) the close-won handoff
+ * all apply the same one.
+ */
+export * from './product-filter';
+
+/**
  * Forces the generated entity subclasses to be loaded. Without an explicit
  * import + call, tree-shaking drops the generated entities because they are not
  * directly referenced. Import and call this from the app bootstrap so the
