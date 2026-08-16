@@ -438,3 +438,82 @@ regenerate Sales' entities, which is the KI-7 corruption case with a second app 
 **Before running any sibling's CodeGen against `MJ_V6_Host`, add every other app's schema to its
 `excludeSchemas`,** and snapshot the other apps' entity rows before and after — entity ID, base
 table/view, parent, and a checksum over every field — then confirm byte-identical before proceeding.
+
+---
+
+## 🟡 KI-11 — Standing up the full revenue stack: what has to be TRUE, not just migrated
+
+**Migrating the schemas is the easy half.** A won deal that becomes a booked order crosses four apps, and
+each one refuses at a different layer with a message that names its own layer and not the missing data.
+This is the list, in the order the failures arrive, so the next person can seed forward instead of
+diagnosing backward.
+
+Every item below was hit for real getting `close-won-handoff` to 4/4.
+
+### The six data layers, in failure order
+
+| # | Missing | How it presents |
+|---|---|---|
+| 1 | `ProductPrice` rules | *"cannot be priced: no price rule was found for this product, and no UnitPrice was supplied"* — orders correctly refuses to invent a price |
+| 2 | `GLAccountRole` rows | push accounting's `metadata/gl-account-roles` |
+| 3 | `GLAccount` + `GLAccountLink` at COMPANY level | *"No GL account is linked for role 'Accounts Receivable'"* — the resolver walks product → category → type → **company default**, and the company default is where the walk ends |
+| 4 | Journal-entry types (`OrderBooking`) | *"journal-entry type 'OrderBooking' does not exist — its owning app must seed it first"*; push **orders'** `metadata/journal-entry-types` |
+| 5 | `JournalEntrySequence` per company × fiscal year | *"EntryNumber assignment failed"* |
+| 6 | `AccountingCompanyProfile` | *"the company must be accounting-enabled before JEs can be numbered"*. It is an **IsA child of `__mj.Company`, so `ID = Company.ID`** — not a new key. Needs `FunctionalCurrencyCode` to exist, so push accounting's `metadata/currencies` first |
+
+`sync push` discovers entity directories **beneath** `--dir`, so pointing it at a leaf (`metadata/gl-account-roles`)
+fails with *"No entity directories found"*. Assemble a temporary parent holding the dirs you want and point
+at that — it keeps the blast radius small on a shared host.
+
+### Re-run CodeGen for entities with IsA children
+
+Orders' first CodeGen died at its permissions step (see KI-10) and left **`vwOrderLines` at 41 columns
+against 39 registered `EntityField` rows** — KI-7's signature, on the entity that has an IsA child
+(`EventOrderLine`). The symptom is far from the cause: *"Column name or number of supplied values does not
+match table definition"* on `spCreateOrderLine`, because `SQLServerDataProvider` builds its `@ResultTable`
+from entity metadata.
+
+A second run reconciled it to 41 = 41. **Verify with a column diff, not by trusting the exit code** — and
+snapshot the other apps' entities before and after, which is how we know Sales stayed byte-identical
+(`fcda8cb8…`) across both runs.
+
+### Load ACCOUNTING BEFORE ORDERS
+
+Orders books through accounting's engine, and that engine serves `GLAccountLinks` from a cache it fills on
+load. Without accounting loaded, every booking reports *"No GL account is linked"* **while the links sit
+visibly in the table** — the resolver is reading an empty cache, not an empty database, and the message
+cannot tell you which.
+
+Two related traps in the same loader:
+- Sibling packages are **not resolvable by name** from another repo. pnpm gives a repo no `node_modules`
+  entry for a package it does not depend on, and the cross-repo workspace does not hoist `@mj-biz-apps/*`
+  either. Resolve by scanning sibling repos for a `package.json` carrying the name.
+- **Do not call every exported `Load*`.** Orders exports `LoadPaymentProviderConfig`, which is a real
+  configuration loader that THROWS when no provider is configured — it takes the run down before a single
+  check executes. Call named anchors only, and never swallow a load failure: a sibling that is present but
+  fails to load must not read as "not installed".
+
+### Test fixtures written for a stub do not survive the downstream going live
+
+`close-deal` seeded lines with `ProductName` only, which was right when `DealLine.ProductID` was null
+everywhere. On a host with orders installed the handoff is live and the same seed produces a line orders
+cannot price.
+
+**The visible error names the wrong thing, so the chain is worth knowing.** The absent `ProductID` is an
+empty **string**, not null — so it passes the not-null check and reaches orders' price lookup as `ID = ''`
+against a `uniqueidentifier` column, which is a SQL conversion error. Orders handles that correctly: it
+catches, rolls back its own savepoint, and returns false carrying the real message. The
+**`FK_DealStageEvent_Deal` conflict that follows is the CALLER continuing to write after a save had already
+failed** — not a broken or out-of-band transaction.
+
+Worth stating plainly because the first reading of this was wrong: **orders keeps the work inside the
+caller's transaction by design.** It uses `this.ProviderToUse` throughout pricing and booking precisely so
+that a fresh `Metadata` cannot open a second connection and break atomicity. The lookup runs as a nested
+savepoint, not out of band.
+
+Fixtures now attach a real `ProductID` when orders is installed. The fix belongs in the test input, not in
+orders.
+
+Likewise, a check ABOUT stub behaviour must pin the stub (`SetDownstreamSeam`) rather than assume one, and
+restore with `ResetDownstreamSeam()` — `SetDownstreamSeam` latches, so restoring the old value alone leaves
+every later check in the process pinned to it.

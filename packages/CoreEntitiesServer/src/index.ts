@@ -39,6 +39,12 @@
 export * from './DealEntityServer.js';
 export * from './CloseDealOperation.js';
 
+/**
+ * The REAL orders handoff. Selected automatically when orders' entities are registered; see
+ * `resolveSeam` in CloseDealOperation. Exported so a test can install it deliberately.
+ */
+export * from './LiveOrdersSeam.js';
+
 import { DealEntityServer } from './DealEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 

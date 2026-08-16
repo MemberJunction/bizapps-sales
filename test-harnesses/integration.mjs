@@ -86,6 +86,110 @@ if (!user) {
 // the suite measures nothing — see the note in packages/IntegrationTests/src/index.ts.
 await import('@mj-biz-apps/sales-server').then((m) => m.LoadBizAppsSalesServer?.());
 
+/**
+ * ORDERS, IF IT IS THERE — optional on purpose, and dynamic on purpose.
+ *
+ * The `close-won-handoff` bundle drives a real order through orders' own entity graph, and that needs
+ * orders LOADED, not merely migrated: `OrderHeader.Lines` only exists on orders' generated subclass,
+ * and `Orders.PriceOrder` only resolves once its `@RegisterClass` side effect has run. Without this the
+ * failures are both misleading — `Cannot read properties of undefined (reading 'Create')` and a
+ * ClassFactory falling back to the abstract base.
+ *
+ * A STATIC import would make orders a hard dependency of the sales test harness, which is precisely
+ * what `DealLine.ProductID` being a soft reference exists to avoid: sales must still build, test and
+ * run on a host where orders was never installed. So this is tried and shrugged off — the handoff
+ * checks detect orders' absence themselves and skip rather than fail.
+ */
+const ORDERS_PACKAGES = [
+    // [package, anti-tree-shaking anchor or null when the import's side effects are enough]
+    //
+    // ACCOUNTING COMES FIRST, and it is not optional padding. Orders BOOKS an order through
+    // accounting's engine, and that engine serves `GLAccountLinks` from a cache it populates on load.
+    // Without it every booking fails with `No GL account is linked for role 'Accounts Receivable'`
+    // even when the links are sitting in the table — the resolver is reading an empty cache, not an
+    // empty database, and the message cannot tell you which.
+    ['@mj-biz-apps/accounting-entities', 'LoadGeneratedEntities'],
+    ['@mj-biz-apps/accounting-engine-base', null],
+    ['@mj-biz-apps/accounting-core-entities-server', null],
+    ['@mj-biz-apps/orders-entities', 'LoadGeneratedEntities'],
+    ['@mj-biz-apps/orders-core-entities-server', null],
+];
+const optionalLoads = [];
+
+/**
+ * Find a sibling workspace package by NAME, without depending on it.
+ *
+ * pnpm gives sales no `node_modules` entry for a package it does not declare, and the cross-repo
+ * workspace does not hoist `@mj-biz-apps/*` to its root either — they live in a virtual store. So a
+ * plain `import` of a sibling fails from here, and the useful fallback is to look for the package the
+ * way a human would: scan the neighbouring repos for a `package.json` carrying that name.
+ *
+ * Folder names are NOT assumed (`EngineBase` vs `engine-base` vs `Entities`) — the name in
+ * package.json is the only thing checked, so this keeps working when a sibling reorganises.
+ */
+async function resolveSiblingPackage(name) {
+    const { readdirSync, existsSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const parent = join(process.cwd(), '..');
+    let repos = [];
+    try {
+        repos = readdirSync(parent, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+    } catch {
+        return null;
+    }
+    for (const repo of repos) {
+        const pkgDir = join(parent, repo, 'packages');
+        if (!existsSync(pkgDir)) continue;
+        let subs = [];
+        try {
+            subs = readdirSync(pkgDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+        } catch {
+            continue;
+        }
+        for (const sub of subs) {
+            const manifest = join(pkgDir, sub, 'package.json');
+            if (!existsSync(manifest)) continue;
+            try {
+                if (JSON.parse(readFileSync(manifest, 'utf8')).name !== name) continue;
+            } catch {
+                continue;
+            }
+            const entry = join(pkgDir, sub, 'dist', 'index.js');
+            return existsSync(entry) ? entry : null;
+        }
+    }
+    return null;
+}
+
+// Escape hatch for bisecting: run the same host WITHOUT the downstream apps loaded, to tell a
+// handoff problem apart from a host-data problem.
+for (const [pkg, anchor] of (process.env.MJ_SKIP_DOWNSTREAM === '1' ? [] : ORDERS_PACKAGES)) {
+    let mod = null;
+    try {
+        mod = await import(pkg);
+    } catch {
+        const entry = await resolveSiblingPackage(pkg);
+        if (!entry) {
+            optionalLoads.push(`${pkg}: absent`);
+            continue;
+        }
+        try {
+            const { pathToFileURL } = await import('node:url');
+            mod = await import(pathToFileURL(entry).href);
+        } catch (e) {
+            // Reported, never swallowed: a sibling that is PRESENT but fails to load is a real problem
+            // and must not read as "not installed".
+            optionalLoads.push(`${pkg}: FAILED (${String(e.message).slice(0, 70)})`);
+            continue;
+        }
+    }
+    // NAMED anchors only. Calling every exported `Load*` looks tidier and is wrong: orders exports
+    // `LoadPaymentProviderConfig`, a real configuration loader that THROWS when none is configured.
+    if (anchor && typeof mod[anchor] === 'function') mod[anchor]();
+    optionalLoads.push(`${pkg}: loaded`);
+}
+console.log(`  downstream packages -> ${optionalLoads.join(' | ')}`);
+
 const { IntegrationCheckRegistry } = await import('@memberjunction/testing-integration');
 await import('@mj-biz-apps/sales-integration-tests'); // side effect: registers the bundles
 
