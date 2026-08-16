@@ -37,7 +37,7 @@ import {
     StubDownstreamSeam,
     type ContractsCreateFromDealSeamInput,
     type IDownstreamSeam,
-    type OrdersCreateOrderInStateSeamInput,
+    type OrdersOrderHandoffInput,
     type OrdersOrderLineSeamInput,
     type SalesCloseDealInput,
     type SalesCloseDealOutput,
@@ -51,6 +51,7 @@ import {
 } from '@mj-biz-apps/sales-entities';
 
 import { DealEntityServer } from './DealEntityServer.js';
+import { LiveOrdersSeam, OrdersIsInstalled } from './LiveOrdersSeam.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_LINE_ENTITY = 'MJ_BizApps_Sales: Deal Lines';
@@ -90,16 +91,37 @@ function issue(Section: SalesCloseIssue['Section'], Message: string, Field: stri
  * implementation — replaces it.
  */
 let downstreamSeam: IDownstreamSeam = new StubDownstreamSeam();
+/** Set once a caller overrides the seam explicitly, so auto-selection stops second-guessing them. */
+let seamWasSetExplicitly = false;
 
 /** Swap the downstream implementation. Returns the previous one so a test can restore it. */
 export function SetDownstreamSeam(seam: IDownstreamSeam): IDownstreamSeam {
     const previous = downstreamSeam;
     downstreamSeam = seam;
+    seamWasSetExplicitly = true;
     return previous;
 }
 
 export function GetDownstreamSeam(): IDownstreamSeam {
     return downstreamSeam;
+}
+
+/**
+ * Choose the seam for THIS execution.
+ *
+ * Deployment decides, not configuration: if orders' entities are registered, the live handoff is used;
+ * if they are not — sales installed standalone, which is supported — the stub records the intent and
+ * reports `Executed: false`. An explicit {@link SetDownstreamSeam} always wins, because a test that
+ * installed a fake must not have it silently replaced by the real thing.
+ *
+ * Built per call rather than cached because it closes over the acting user, and a seam that reused the
+ * first caller's identity would write orders' records as the wrong person.
+ */
+function resolveSeam(user: UserInfo, provider: IMetadataProvider): IDownstreamSeam {
+    if (seamWasSetExplicitly) {
+        return downstreamSeam;
+    }
+    return OrdersIsInstalled() ? new LiveOrdersSeam(user, provider) : downstreamSeam;
 }
 
 @RegisterClass(BaseRemotableOperation, 'Sales.CloseDeal')
@@ -372,7 +394,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<void> {
-        const seam = GetDownstreamSeam();
+        const seam = resolveSeam(user, provider);
 
         if (plan.Target === 'Contract') {
             // A renewal takes a different door: RenewTerm against the contract being renewed, not a
@@ -397,7 +419,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         }
 
         if (plan.Target === 'Order') {
-            const result = await seam.CreateOrderInState(await this.buildOrderInput(deal, policy, provider, user));
+            const result = await seam.CreateOrder(await this.buildOrderInput(deal, policy, provider, user));
             plan.Executed = result.Success === true;
             plan.RecordID = result.OrderID ?? null;
             plan.Reason = result.Success ? null : result.Message ?? 'not executed';
@@ -593,30 +615,31 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         policy: SalesCloseWonPolicy,
         provider: IMetadataProvider,
         user: UserInfo,
-    ): Promise<OrdersCreateOrderInStateSeamInput> {
+    ): Promise<OrdersOrderHandoffInput> {
         const { oneTime } = await this.splitLinesByRecurrence(deal.ID, provider, user);
         return {
-            Draft: {
-                Header: {
-                    CompanyID: deal.CompanyID,
-                    OrganizationID: deal.AccountID,
-                    PersonID: deal.PrimaryContactID,
-                    CurrencyID: deal.CurrencyID,
-                    Description: deal.Name,
-                },
-                Lines: oneTime.map<OrdersOrderLineSeamInput>((l) => ({
+            Header: {
+                CompanyID: deal.CompanyID,
+                OrganizationID: deal.AccountID,
+                PersonID: deal.PrimaryContactID,
+                CurrencyID: deal.CurrencyID,
+                Description: deal.Name,
+            },
+            Lines: oneTime.map<OrdersOrderLineSeamInput>((l) => ({
                     ClientKey: String(l.ID),
                     ProductID: String(l.ProductID ?? ''),
                     Quantity: Number(l.Quantity ?? 1),
                     ...(l.RequestedDiscountPct === null || l.RequestedDiscountPct === undefined
                         ? {}
                         : { DiscountPct: Number(l.RequestedDiscountPct) }),
-                    ServicePeriodStart: (l.ServicePeriodStart as string) ?? null,
-                    ServicePeriodEnd: (l.ServicePeriodEnd as string) ?? null,
-                    Description: (l.Description as string) ?? (l.ProductName as string) ?? null,
-                })),
-            },
-            TargetStatus: policy.OrderState ?? 'Draft',
+                ServicePeriodStart: (l.ServicePeriodStart as string) ?? null,
+                ServicePeriodEnd: (l.ServicePeriodEnd as string) ?? null,
+                Description: (l.Description as string) ?? (l.ProductName as string) ?? null,
+            })),
+            // The policy's OrderState is stated on the HEADER now — `TargetStatus` went away with
+            // `CreateOrderInState`, which orders' `next` does not ship. See downstream-seams.ts.
+            Status: policy.OrderState ?? 'Draft',
+            OrderType: 'Sale',
             Reason: `Created by Sales.CloseDeal from deal ${deal.DealNumber ?? deal.ID}`,
         };
     }

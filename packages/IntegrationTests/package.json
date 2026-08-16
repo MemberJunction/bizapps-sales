@@ -23,7 +23,8 @@
   },
   "dependencies": {
     "@mj-biz-apps/sales-entities": "5.0.0",
-    "@mj-biz-apps/sales-server": "5.0.0"
+    "@mj-biz-apps/sales-server": "5.0.0",
+    "@mj-biz-apps/sales-core-entities-server": "5.0.0"
   },
   "peerDependencies": {
     "@memberjunction/core": "^6.1.0-edge.2",

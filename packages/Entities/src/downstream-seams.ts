@@ -60,18 +60,48 @@ export interface OrdersOrderHeaderSeamInput {
     Description?: string | null;
 }
 
-export interface OrdersOrderDraftSeamInput {
+/**
+ * What sales hands orders when a won deal produces an order.
+ *
+ * ── WHY THIS IS NOT A `CreateOrderInState` PAYLOAD ANY MORE ─────────────────────────────────────
+ *
+ * This seam originally mirrored `Orders.CreateOrderInState`, transcribed from
+ * `origin/mjdev/orders-flow`. **That operation does not exist on orders' `next`** — that branch never
+ * merged, and orders ships no create-order operation of any name. Eleven operations are registered
+ * (`Price Order`, `Preview Price`, `Advance Order State`, …) and none of them creates an order.
+ *
+ * Orders' own canonical creation path is the **entity graph** — `OrderEntityServer.Save()`, which is
+ * what `order-builder.ts` drives. So sales creates the order the same way orders does: get the entity,
+ * set the payer and the lines, save, and let orders' server code mint the order number, price the
+ * lines through its engine and raise the initial payment. Creating it any other way would be the
+ * divergent choice, not this one.
+ *
+ * `TargetStatus` is gone with the operation: the status is stated on the header (`Status`), because
+ * that is where the entity graph takes it.
+ */
+export interface OrdersOrderHandoffInput {
     Header: OrdersOrderHeaderSeamInput;
     Lines: OrdersOrderLineSeamInput[];
-}
-
-/** Mirrors `OrdersCreateOrderInStateInput`. `TargetStatus` carries the policy's `OrderState`. */
-export interface OrdersCreateOrderInStateSeamInput {
-    Draft: OrdersOrderDraftSeamInput;
-    /** `Draft` | `Confirmed` — supplied by `CloseWonPolicy.OrderState`. */
-    TargetStatus: string;
+    /** `Draft` | `Confirmed` — supplied by `CloseWonPolicy.OrderState`. Set on the header. */
+    Status: string;
+    /** Orders' own vocabulary for what kind of order this is. Sales always books a `Sale`. */
+    OrderType: string;
     OrderDate?: string | null;
     Reason?: string | null;
+}
+
+/**
+ * What the money preview returns.
+ *
+ * `Amount` is ORDERS' number, carried back verbatim. Sales stores it as a cached answer with
+ * provenance and never derives anything from it — no rounding, no summing, no re-deriving a line from
+ * a total. See the money-boundary rule in the file header.
+ */
+export interface OrdersPreviewResult {
+    Success: boolean;
+    Amount?: number | null;
+    CurrencyID?: string | null;
+    Message?: string | null;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -144,7 +174,9 @@ export interface OrdersSeamResult {
 export interface IDownstreamSeam {
     /** True when this implementation actually reaches the sibling app. */
     readonly IsLive: boolean;
-    CreateOrderInState(input: OrdersCreateOrderInStateSeamInput): Promise<OrdersSeamResult>;
+    /** Prices a draft WITHOUT creating anything. The only place an order amount may come from. */
+    PreviewOrderMoney(input: OrdersOrderHandoffInput): Promise<OrdersPreviewResult>;
+    CreateOrder(input: OrdersOrderHandoffInput): Promise<OrdersSeamResult>;
     CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult>;
     RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult>;
 }
@@ -163,14 +195,23 @@ export class StubDownstreamSeam implements IDownstreamSeam {
     /** Everything the close flow tried to send, in call order — for the run report and for tests. */
     public readonly Attempts: Array<{ Target: string; Payload: unknown }> = [];
 
-    public async CreateOrderInState(input: OrdersCreateOrderInStateSeamInput): Promise<OrdersSeamResult> {
+    public async PreviewOrderMoney(input: OrdersOrderHandoffInput): Promise<OrdersPreviewResult> {
+        this.Attempts.push({ Target: 'OrderPreview', Payload: input });
+        return {
+            Success: false,
+            Message:
+                'Orders.PriceOrder is not reachable: bizapps-orders is not present in this deployment. ' +
+                'See CLOSE-FLOW-DECISIONS.md D-CF3.',
+        };
+    }
+
+    public async CreateOrder(input: OrdersOrderHandoffInput): Promise<OrdersSeamResult> {
         this.Attempts.push({ Target: 'Order', Payload: input });
         return {
             Success: false,
             Message:
-                'Orders.CreateOrderInState is not wired: bizapps-orders is not built as a peer, its ' +
-                'Subscription.BillingMode (C0) seam is missing, and OrderLineInput.ProductID is required ' +
-                'while DealLine.ProductID is null on every line. See CLOSE-FLOW-DECISIONS.md D-CF3.',
+                'The order handoff is not wired: bizapps-orders is not present in this deployment, so ' +
+                'its Order Headers entity cannot be resolved. See CLOSE-FLOW-DECISIONS.md D-CF3.',
         };
     }
 
