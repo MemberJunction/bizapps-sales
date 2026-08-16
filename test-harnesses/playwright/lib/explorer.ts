@@ -205,10 +205,47 @@ export async function probeEntityRoutes(page: Page, entityName: string): Promise
  */
 export const SALES_APP_ROUTE = '/app/mjbizappssales';
 
+/**
+ * Close every record tab the shell restored, and return how many were closed.
+ *
+ * THE SHELL REOPENS WHAT YOU LOOKED AT LAST, AND THAT MAKES THE SUITE ORDER-DEPENDENT.
+ *
+ * MJ's v6 shell keeps a server-side list of recently-opened records (`__mj.UserRecordLog`) and restores
+ * them as tabs on load — so navigating to `/app/mjbizappssales` can land on a RECORD rather than the
+ * app, and even the direct `/app/entity/...` routes redirect into the restored tab. Nothing about that
+ * is client state: a brand-new browser context with a fresh profile lands on it too.
+ *
+ * The failure this produces is genuinely misleading. Run specs 40/41/50 alone and they pass; run the
+ * full suite and 40 fails, because the earlier specs opened three records and the last step then reads
+ * a pipeline record's text while asserting a deal name is in the Deals grid. The spec looks flaky and
+ * is not — it is reading a different screen than it thinks.
+ *
+ * So every entry point closes the restored tabs FIRST. Bounded, never throwing: a shell with no tabs is
+ * the normal case, and failing to close one must not fail the caller's test.
+ */
+export async function closeRestoredRecordTabs(page: Page): Promise<number> {
+  let closed = 0;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const closer = page.getByRole('button', { name: /^Close\s+.+/i }).first();
+    if (!(await closer.count().catch(() => 0))) break;
+    if (!(await closer.isVisible().catch(() => false))) break;
+    await closer.click().catch(() => undefined);
+    await page.waitForTimeout(400);
+    closed++;
+  }
+  if (closed) await page.waitForTimeout(1200);
+  return closed;
+}
+
 /** Navigate into the generated Sales application. */
 export async function openSalesApp(page: Page): Promise<void> {
   await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(4000);
+  // Restored tabs hijack the landing — see closeRestoredRecordTabs. Clear them, then re-enter the app.
+  if (await closeRestoredRecordTabs(page)) {
+    await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(3000);
+  }
   expect(page.url(), 'should be inside the generated Sales application').toContain('mjbizappssales');
 }
 
