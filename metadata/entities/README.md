@@ -32,10 +32,14 @@ once the host has those migrations, and verify in the Explorer rather than assum
 
 **Nineteen of the twenty-two Sales entities are configured here.** Layout is metadata; it does not belong
 in a component. The three that are absent — `Deals`, `Deal Lines`, `Deal Stage Events` — have
-hand-authored form components because *behaviour* required it (the close lock, and fields the server
-owns), and their layout is deliberately left at the generated default pending a decision on whether the
-Deal form should move to `left-nav` given that the deal **workspace** already exists as the composing
-surface. That is a judgement call, not an oversight.
+hand-authored form components because *behaviour* required it (the close lock, and fields the server owns),
+and their layout stays at the generated default **by decision, not by omission**.
+
+**Ruled 2026-08-16: the Deal form stays a contextual record view, and gets no `left-nav` entry.** The deal
+**workspace** is the composing surface — where lines are added, products picked and the roster edited. A
+Deal form promoted to `left-nav` would read as a second place to build a deal, and two surfaces that must
+agree forever is exactly the cost this split exists to avoid. The form's job is to show one record in
+context and refuse the edits the server would refuse.
 
 ## The two things worth knowing before editing
 
