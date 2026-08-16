@@ -570,3 +570,70 @@ Whether to raise the budgets (recon at 6.9 minutes implies 15+ minutes per spec,
 over an hour), speed the shell up, or point the harness at a lighter host. **That is a judgement call and
 has deliberately not been made here** — inflating the timeouts would turn a measured regression into a
 silent cost, and the numbers above are the input to that decision.
+
+---
+
+## 🟠 KI-13 — bizapps-contracts cannot be installed on a fresh database
+
+**Found while proving the close-won contract seam end to end. Not caused by the pnpm/v6 conversion — it
+fails identically on npm/v5.** Recorded here because Sales' contract path cannot be demonstrated on any
+new environment until it is fixed upstream, and because the failure disguises itself twice.
+
+### The defect
+
+Contracts' baseline hardcodes **other apps'** entity UUIDs in `EntityField.RelatedEntityID`. Orders and
+accounting mint their entity IDs per database, so the baseline only applies to the machine its CodeGen
+ran on. Six cross-app references are affected:
+
+| Field | Must point at |
+|---|---|
+| `ProductID` | `MJ_BizApps_Orders: Products` |
+| `SubscriptionTypeID` | `MJ_BizApps_Orders: Subscription Types` |
+| `PaymentTermsTypeID` | `MJ_BizApps_Orders: Payment Terms Types` |
+| `SubscriptionID` | `MJ_BizApps_Orders: Subscriptions` |
+| `OrderID` | `MJ_BizApps_Orders: Order Headers` |
+| `CurrencyID` | `MJ_BizApps_Accounting: Currencies` |
+
+**Upstream fix:** resolve these by NAME at migration time rather than baking a UUID.
+
+### Why it is hard to recognise
+
+1. **The first error names the wrong table.** Flyway rolls the migration back and reports
+   `FK_EntityRelationship_EntityID`. The true first failure is `FK_EntityField_RelatedEntity`, and it
+   only appears if you render the baseline and apply it outside a transaction.
+2. **Three of the six fail SILENTLY.** The migration "succeeds" while `Contract Terms`, `Contract Lines`
+   and `Contract Billing Events` are each one field short. Per KI-7 that mismatch breaks every insert
+   through the CRUD sprocs — so contracts looks installed and is not.
+
+**Always column-diff after installing contracts**: registered `EntityField` count vs `INFORMATION_SCHEMA`
+column count, per entity. All ten must match.
+
+### Local workaround
+
+`C:\v6\contracts-baseline-portability-fixup.mjs` resolves all six by name against the live database and
+rewrites the rendered baseline. It refuses to run against anything but the isolated DB, and is
+**deliberately not part of the contracts conversion patch**, which stays a clean reviewable PR.
+
+## 🟢 Contracts' minimum bootstrap — what a contract needs before it can be created
+
+Discovered the way KI-11's six layers were: in the order the failures arrive. Each is a hard stop.
+
+| # | Requirement | How it presents |
+|---|---|---|
+| 1 | Contracts' `metadata` pushed | 6 `ContractType` rows; without them no type code resolves |
+| 2 | `Contract.Status` from its own vocabulary | `CK_Contract_Status` — Draft / PendingSignature / Active / Expired / Terminated / Superseded. **`Pending` is a TERM status, not a contract one** |
+| 3 | `ContractTerm.CommittedAmount` NOT NULL | *"State the amount committed for this term. Zero is a valid answer; blank is not."* It is a **negotiated commitment**, not a computed price |
+| 4 | `ContractLine.LineType` NOT NULL | `Minimum` / `Usage` / `Milestone` / `OneTime` / `Subscription`; choosing `Subscription` additionally requires `SubscriptionTypeID` |
+
+### One trap worth more than the rest
+
+**`RemoteOpResult.Success` means the operation RAN, not that it worked.** Contracts' operations carry
+their own `Success` + `Message` inside the payload:
+
+```
+{ Success: true, Output: { Success: false, Message: "Could not save contract: …" } }
+```
+
+Sales' first seam checked only the envelope and returned `Success: true` with a null `ContractID` for a
+contract that was never written — a routing result claiming `Executed` for nothing. Any caller of a
+bizapps remote operation must check **both**.

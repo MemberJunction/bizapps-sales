@@ -36,6 +36,8 @@ import {
     SalesReopenDealOperation as SalesReopenDealOperationBase,
     StubDownstreamSeam,
     type ContractsCreateFromDealSeamInput,
+    type ContractsRenewTermSeamInput,
+    type ContractsSeamResult,
     type IDownstreamSeam,
     type OrdersOrderHandoffInput,
     type OrdersOrderLineSeamInput,
@@ -52,6 +54,7 @@ import {
 
 import { DealEntityServer } from './DealEntityServer.js';
 import { LiveOrdersSeam, OrdersIsInstalled } from './LiveOrdersSeam.js';
+import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_LINE_ENTITY = 'MJ_BizApps_Sales: Deal Lines';
@@ -134,7 +137,46 @@ function resolveSeam(user: UserInfo, provider: IMetadataProvider): IDownstreamSe
     if (seamWasSetExplicitly) {
         return downstreamSeam;
     }
-    return OrdersIsInstalled() ? new LiveOrdersSeam(user, provider) : downstreamSeam;
+
+    /**
+     * THE TWO DOWNSTREAMS ARE RESOLVED INDEPENDENTLY, which is the whole point.
+     *
+     * All four combinations are real deployments: neither sibling, orders only, contracts only, or
+     * both. A single seam that assumed they arrive together would make the contract path depend on
+     * orders being installed, which is not true of any of them. So orders' half comes from
+     * `LiveOrdersSeam` when orders is registered, contracts' half from `LiveContractsSeam` when
+     * contracts is, and either falls back to the stub on its own.
+     */
+    const contracts = ContractsIsInstalled()
+        ? new LiveContractsSeam(user, provider)
+        : new StubDownstreamSeam();
+
+    return OrdersIsInstalled() ? new LiveOrdersSeam(user, provider, contracts) : new StubOrdersWithContracts(contracts);
+}
+
+/**
+ * Stub orders, live (or stub) contracts.
+ *
+ * Needed because the contract path must work on a host that has contracts and NOT orders — a
+ * subscription-only deployment. Without this, `resolveSeam` would hand back the all-stub seam the
+ * moment orders was absent and silently disable a contract route that was perfectly available.
+ */
+class StubOrdersWithContracts extends StubDownstreamSeam {
+    public constructor(
+        private readonly contracts: Pick<IDownstreamSeam, 'CreateContractFromDeal' | 'RenewContractTerm'>,
+    ) {
+        super();
+    }
+
+    public override CreateContractFromDeal(
+        input: ContractsCreateFromDealSeamInput,
+    ): Promise<ContractsSeamResult> {
+        return this.contracts.CreateContractFromDeal(input);
+    }
+
+    public override RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult> {
+        return this.contracts.RenewContractTerm(input);
+    }
 }
 
 @RegisterClass(BaseRemotableOperation, 'Sales.CloseDeal')
@@ -677,6 +719,12 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             CancellationNoticeDaysOverride: deal.CancellationNoticeDaysOverride,
             ExecutionDate: deal.ExecutionDate ? String(deal.ExecutionDate) : null,
             StartDate: deal.StartDate ? String(deal.StartDate) : null,
+            // The buying party, so contracts can stamp the customer without looking back at the deal.
+            AccountID: deal.AccountID,
+            PrimaryContactID: deal.PrimaryContactID,
+            // NOT SET. `CloseWonPolicy` carries no billing frequency, and it is generated code — so
+            // rather than invent one here, the seam applies its own default and contracts owns the
+            // vocabulary. Add it to the policy first if a deployment needs to vary it.
             Lines:
                 policy.SubscriptionLinesTo === 'Contract'
                     ? recurring.map<OrdersOrderLineSeamInput>((l) => ({
