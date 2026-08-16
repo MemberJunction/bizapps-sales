@@ -14,7 +14,24 @@ import { EXPLORER_BASE_URL, LOGIN_TIMEOUT_MS, STORAGE_STATE_PATH } from './lib/e
  * Checked at config-load time on purpose: `storageState` cannot be conditional per-run, and pointing
  * a project at a non-existent state file is a hard error rather than a graceful miss.
  */
-const HAVE_SESSION = existsSync(STORAGE_STATE_PATH);
+/**
+ * ⚠️ A STALE SESSION FILE USED TO MAKE RE-AUTH IMPOSSIBLE, and the failure was silent.
+ *
+ * `headless` below is driven by whether a session file EXISTS — not by whether it still works. Once the
+ * saved MSAL token expires, the file is still on disk, so `auth-setup` runs HEADLESS, lands on Microsoft's
+ * "Pick an account" page, and waits five minutes for a human who is never shown a window. The run then
+ * fails with a timeout that says nothing about why, and every spec after it is skipped.
+ *
+ * That cost a full overnight cycle: the harness reported "timed out waiting for the authenticated shell"
+ * while the browser sat on an account picker nobody could see.
+ *
+ * `PW_FORCE_LOGIN=1` is the way out: it ignores the stored state and forces a HEADED window, so the
+ * expired session can be replaced. Use it whenever auth-setup times out.
+ *
+ *     PW_FORCE_LOGIN=1 npm run test:explorer:auth
+ */
+const FORCE_LOGIN = process.env.PW_FORCE_LOGIN === '1';
+const HAVE_SESSION = existsSync(STORAGE_STATE_PATH) && !FORCE_LOGIN;
 
 /**
  * Playwright config for the bizapps-sales Explorer GUI harness.

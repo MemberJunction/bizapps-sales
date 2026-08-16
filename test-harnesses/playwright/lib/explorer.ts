@@ -151,7 +151,17 @@ export async function waitForAuthenticatedShell(page: Page, timeoutMs: number): 
     await page.waitForTimeout(1000);
   }
   throw new Error(
-    `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the authenticated Explorer shell at ${EXPLORER_BASE_URL}.`,
+      [
+        `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the authenticated Explorer shell at ${EXPLORER_BASE_URL}.`,
+        '',
+        'MOST LIKELY CAUSE: the saved MSAL session expired. The stored file still EXISTS, so the config',
+        'ran this HEADLESS — the browser is sitting on the Microsoft account picker and no window was',
+        'ever shown for you to log into. The timeout says nothing about that, which is why this note',
+        'exists.',
+        '',
+        'Fix it by forcing a headed re-login, which ignores the stored state:',
+        '    PW_FORCE_LOGIN=1 npm run test:explorer:auth',
+      ].join(String.fromCharCode(10)),
   );
 }
 
