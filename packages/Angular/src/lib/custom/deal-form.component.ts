@@ -114,7 +114,15 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         }
 
         const rv = new RunView();
-        const result = await rv.RunView<{ __mj_UpdatedAt: string }>({
+        /**
+         * `__mj_UpdatedAt` is typed as `string | Date` because BOTH arrive.
+         *
+         * MJ v6 hands back real `Date` objects where v5 handed back ISO strings, and this repo has already
+         * been caught by that once (`7e55bae`, "dates arrive as Date, not string — the Sales UI assumed
+         * string"). Typing it `string` compiles perfectly and would be wrong at runtime the moment the
+         * value is used as one. `new Date()` accepts either, so the comparison below is safe on both.
+         */
+        const result = await rv.RunView<{ __mj_UpdatedAt: string | Date }>({
             EntityName: E_DEAL_LINE,
             ExtraFilter: `DealID = '${String(this.record.Get('ID')).replace(/'/g, "''")}'`,
             OrderBy: '__mj_UpdatedAt DESC',
@@ -126,7 +134,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return;
         }
 
-        if (new Date(newest).getTime() > new Date(computedAt as string).getTime()) {
+        if (new Date(newest).getTime() > new Date(computedAt).getTime()) {
             this.StaleAmountNotice =
                 'A line has changed since this amount was priced, so the total shown is out of date. ' +
                 'Reprice the deal to get a current figure from Orders — Sales does not recalculate it here.';
