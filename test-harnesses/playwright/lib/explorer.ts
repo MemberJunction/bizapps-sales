@@ -358,9 +358,24 @@ export function gridRows(page: Page): Locator {
 // assert that NOT NULL columns actually surface as required in the UI rather than failing on save.
 // =================================================================================================
 
-/** The field container for a given visible label. */
+/**
+ * The field container for a given visible label.
+ *
+ * `visible=true` IS LOAD-BEARING, and leaving it off produced one of the more confusing failures this
+ * harness has had. MJ's shell keeps every open tab's form in the DOM and merely HIDES the inactive ones.
+ * So while spec 10 was partway through its Pipelines walk — with a "New Deals Record" tab still open —
+ * a plain `.first()` matched the DEAL form's `Name` input, which is in the DOM and hidden, rather than
+ * the Pipeline form's, which is the one on screen.
+ *
+ * The failure then read `field "Name" must be editable … Received: hidden`, which sounds like the field
+ * is disabled or the form is read-only. It is neither: the form is fine, and the locator was pointed at
+ * a different form entirely. Filtering to visible elements first makes the match follow the active tab.
+ */
 export function formField(page: Page, label: string): Locator {
-  return page.locator(`.mj-forms-field:has(> label.mj-forms-field-label:text-is("${label}"))`).first();
+  return page
+    .locator(`.mj-forms-field:has(> label.mj-forms-field-label:text-is("${label}"))`)
+    .locator('visible=true')
+    .first();
 }
 
 /** True when the form marks this field required-and-empty. */

@@ -18,7 +18,7 @@
  * Screenshots land in artifacts/ — one per step, for the demo.
  */
 import { test, expect } from '@playwright/test';
-import { ARTIFACTS_DIR, DEV_COMPANY_NAME, TEST_PREFIX } from '../lib/env';
+import { ARTIFACTS_DIR, DEV_COMPANY_NAME, EXPLORER_BASE_URL, TEST_PREFIX } from '../lib/env';
 import {
   captureConsoleErrors,
   clickNew,
@@ -32,6 +32,7 @@ import {
   fieldLabelVisible,
   isRequiredEmpty,
   openAllEntities,
+  closeRestoredRecordTabs,
   openSalesApp,
   readField,
   saveForm,
@@ -74,6 +75,23 @@ test.describe.configure({ mode: 'serial' });
 
 test('Deal CRUD through the Explorer UI', async ({ page }) => {
   const sink = captureConsoleErrors(page);
+
+  /**
+   * START FROM A CLEAN TAB STRIP, for correctness AND for speed.
+   *
+   * MJ's shell restores every recently-opened record as a tab and keeps each one's form in the DOM,
+   * merely hiding the inactive ones. Two consequences, both of which bit this spec:
+   *
+   *   - Field lookups could resolve against a HIDDEN form belonging to another tab. That produced
+   *     `field "Name" must be editable … Received: hidden` while the visible form was perfectly fine.
+   *     `formField` now filters to visible elements, but starting clean removes the ambiguity entirely.
+   *   - Every extra tab is another full form kept live, and this walk renders a lot of them. The run
+   *     grew until it hit the 8-minute budget with real work still to do.
+   */
+  await page.goto(EXPLORER_BASE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(3000);
+  const closed = await closeRestoredRecordTabs(page);
+  if (closed) console.log(`  closed ${closed} restored tab(s) before starting`);
 
   // =============================================================================================
   // 1. CREATE a Pipeline (Deal.PipelineID is NOT NULL, so this must exist first)

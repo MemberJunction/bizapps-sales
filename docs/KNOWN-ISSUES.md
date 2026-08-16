@@ -517,3 +517,56 @@ orders.
 Likewise, a check ABOUT stub behaviour must pin the stub (`SetDownstreamSeam`) rather than assume one, and
 restore with `ResetDownstreamSeam()` — `SetDownstreamSeam` latches, so restoring the old value alone leaves
 every later check in the process pinned to it.
+
+---
+
+## 🟠 KI-12 — The Explorer harness runs against MJ core's shell now, and its timeouts predate that
+
+**Specs 10, 20 and 30 fail on time, not on behaviour.** Every assertion they reach passes; they run out of
+budget partway through.
+
+### The measurements
+
+| | Historical | 2026-08-16 |
+|---|---|---|
+| `10-deal-crud` | ~200s (the config raised its budget to 480s to fit it) | **exceeds 480s in step 1 of 7** |
+| `00-recon` | seconds | **6.9 minutes** (passes) |
+| `20-demo-tour` | — | times out on its FIRST `waitForURL`, 60s |
+| `30-demo-setup-columns` | — | exceeds its 600s budget |
+
+Spec 10's last artifact is `13-pipeline-saved.png`: it completed **create a Pipeline** and nothing else.
+Steps 2–7 — create the Deal, read it back, update, grid check, delete both — never ran.
+
+### Why
+
+`b98603f` retired `apps/` — "Sales runs inside an MJ host, not its own shell". The harness's timeouts were
+calibrated against **this app's own lightweight Explorer**. Port 4341 is now served by
+`C:\v6\MJ\packages\MJExplorer` under `ng serve` — MJ core's full Explorer, in unoptimised dev mode. Every
+navigation costs several times what it used to, and the budgets were never revisited.
+
+**It is not the servers.** Both answer in milliseconds (`4341` 200 in 0.21s, `4141` 401 in 0.002s). The
+cost is entirely in the browser rendering a much larger Angular app.
+
+**It is not restored tabs**, though those made it worse and are worth clearing: `__mj.UserRecordLog` holds
+only 3 rows, yet a run accumulated **12 open tabs**, each keeping a full form live in the DOM. Spec 10 now
+closes them before starting.
+
+### What was actually fixed
+
+Two real bugs, both found once auth was restored:
+
+1. **`formField` matched hidden forms.** MJ's shell keeps every open tab's form in the DOM and merely
+   hides the inactive ones, so `.first()` could resolve the *Deals* form's `Name` input while the
+   *Pipelines* form was on screen. The failure read `field "Name" must be editable … Received: hidden`,
+   which sounds like a disabled field and was a locator pointing at another form. Now filtered to
+   `visible=true`.
+2. **A stale session made re-login impossible** — see the harness config; `PW_FORCE_LOGIN=1` is the way out.
+
+`00-recon` passes with both fixes in place, which is the evidence that the *navigation still works*.
+
+### What is NOT decided
+
+Whether to raise the budgets (recon at 6.9 minutes implies 15+ minutes per spec, so a five-spec suite runs
+over an hour), speed the shell up, or point the harness at a lighter host. **That is a judgement call and
+has deliberately not been made here** — inflating the timeouts would turn a measured regression into a
+silent cost, and the numbers above are the input to that decision.
