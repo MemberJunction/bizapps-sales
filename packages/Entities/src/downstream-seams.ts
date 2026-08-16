@@ -131,6 +131,14 @@ export interface ContractsCreateFromDealSeamInput {
     CancellationNoticeDaysOverride?: number | null;
     ExecutionDate?: string | null;
     StartDate?: string | null;
+    /**
+     * The buying party. `AccountID` is sales' `Deal.AccountID`, an IsA child of common's Organization,
+     * which is what contracts stores as `CustomerOrganizationID`.
+     */
+    AccountID?: string | null;
+    PrimaryContactID?: string | null;
+    /** How the term bills. A CODE contracts understands; sales does not invent billing schedules. */
+    BillingFrequency?: string | null;
     /** Recurring lines, when the policy routes them to the contract. */
     Lines?: OrdersOrderLineSeamInput[];
 }

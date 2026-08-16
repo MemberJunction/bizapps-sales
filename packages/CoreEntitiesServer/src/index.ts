@@ -45,6 +45,9 @@ export * from './CloseDealOperation.js';
  */
 export * from './LiveOrdersSeam.js';
 
+/** The REAL contracts handoff — selected automatically when contracts' entities are registered. */
+export * from './LiveContractsSeam.js';
+
 import { DealEntityServer } from './DealEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 

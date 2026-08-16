@@ -93,13 +93,21 @@ export function OrdersIsInstalled(): boolean {
 export class LiveOrdersSeam implements IDownstreamSeam {
     public readonly IsLive = true;
 
-    /** Contracts is genuinely not wired — delegated rather than reimplemented. See D-CF4. */
-    private readonly contractsStub = new StubDownstreamSeam();
+    /**
+     * The contract half is delegated to whatever the composer supplied — the live contracts seam when
+     * contracts is installed, the stub when it is not. This class owns ORDERS and nothing else; it used
+     * to hold a private stub, which quietly made it the authority on a downstream it knows nothing
+     * about. See `CompositeDownstreamSeam`.
+     */
+    private readonly contracts: Pick<IDownstreamSeam, 'CreateContractFromDeal' | 'RenewContractTerm'>;
 
     public constructor(
         private readonly user: UserInfo,
         private readonly provider: IMetadataProvider,
-    ) {}
+        contracts?: Pick<IDownstreamSeam, 'CreateContractFromDeal' | 'RenewContractTerm'>,
+    ) {
+        this.contracts = contracts ?? new StubDownstreamSeam();
+    }
 
     /**
      * Ask orders what this draft costs, creating nothing.
@@ -207,11 +215,11 @@ export class LiveOrdersSeam implements IDownstreamSeam {
     }
 
     public CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {
-        return this.contractsStub.CreateContractFromDeal(input);
+        return this.contracts.CreateContractFromDeal(input);
     }
 
     public RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult> {
-        return this.contractsStub.RenewContractTerm(input);
+        return this.contracts.RenewContractTerm(input);
     }
 }
 
