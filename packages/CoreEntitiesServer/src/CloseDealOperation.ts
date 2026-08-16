@@ -107,6 +107,19 @@ export function GetDownstreamSeam(): IDownstreamSeam {
 }
 
 /**
+ * Undo {@link SetDownstreamSeam} and return to DEPLOYMENT-BASED selection.
+ *
+ * Needed because `SetDownstreamSeam` latches: it records that a caller took control, so auto-selection
+ * stops second-guessing them. A test that installs a fake and then merely sets the old value back would
+ * leave that latch on, and every later check in the process would keep using whatever it restored —
+ * silently, and only on hosts where the live seam would otherwise have been chosen.
+ */
+export function ResetDownstreamSeam(): void {
+    downstreamSeam = new StubDownstreamSeam();
+    seamWasSetExplicitly = false;
+}
+
+/**
  * Choose the seam for THIS execution.
  *
  * Deployment decides, not configuration: if orders' entities are registered, the live handoff is used;

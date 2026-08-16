@@ -37,6 +37,9 @@ import {
     type NamedCheck,
 } from '@memberjunction/testing-integration';
 import {
+    E_ORDERS_PRODUCT,
+    ProductFilterFor,
+    StubDownstreamSeam,
     SalesCloseDealOperation,
     SalesReopenDealOperation,
     type SalesCloseDealInput,
@@ -48,6 +51,11 @@ import {
     type mjBizAppsSalesDealEntity,
     type mjBizAppsSalesDealLineEntity,
 } from '@mj-biz-apps/sales-entities';
+import {
+    OrdersIsInstalled,
+    ResetDownstreamSeam,
+    SetDownstreamSeam,
+} from '@mj-biz-apps/sales-core-entities-server';
 
 import {
     E_DEAL,
@@ -100,11 +108,33 @@ async function openDeal(
     deal.CompanyID = f.PipelineCompanyID;
     deal.TermMonths = 12;
 
-    for (const seed of lines) {
+    /**
+     * A REAL ProductID when orders is installed, and only then.
+     *
+     * This bundle was written when `DealLine.ProductID` was null on every row and the close routed to a
+     * stub, so `ProductName` alone was enough. On a host where orders IS installed the handoff is live
+     * and the same seed produces a line orders cannot price.
+     *
+     * WHAT THAT LOOKED LIKE, because the visible error named the wrong thing entirely. The empty
+     * `ProductID` is an empty STRING rather than null, so it passes the not-null check and reaches the
+     * price lookup as `ID = ''` against a `uniqueidentifier` column — a SQL conversion error. Orders
+     * handles it correctly: it catches, rolls back its own savepoint, and returns false with the real
+     * message. The `FK_DealStageEvent_Deal` conflict that follows is the CALLER continuing to write
+     * after a save had already failed, not evidence of a broken transaction.
+     *
+     * So the fix is here, in the fixture, and not in orders: give the line a product that exists.
+     *
+     * Sales-only hosts are unaffected: no orders, no products, `ProductName` as before.
+     */
+    const productIDs = await sellableProductIDs(ctx, f.PipelineCompanyID, lines.length);
+    for (const [i, seed] of lines.entries()) {
         const line: mjBizAppsSalesDealLineEntity = await deal.Lines.Create();
         line.DealLineTypeID = seed.DealLineTypeID;
         line.ProductName = seed.ProductName;
         line.Quantity = seed.Quantity;
+        if (productIDs[i]) {
+            line.ProductID = productIDs[i];
+        }
     }
 
     Assert(
@@ -112,6 +142,34 @@ async function openDeal(
         `setup: the deal could not be saved — ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
     );
     return deal.ID;
+}
+
+/**
+ * Sellable products for this company, or an empty list when orders is not installed.
+ *
+ * Uses the PICKER'S OWN filter, so this fixture cannot drift from the rule the product picker applies.
+ */
+async function sellableProductIDs(ctx: Ctx, companyID: string, count: number): Promise<string[]> {
+    if (!OrdersIsInstalled()) {
+        return [];
+    }
+    const rv = new RunView();
+    const r = await rv.RunView<{ ID: string }>(
+        {
+            EntityName: E_ORDERS_PRODUCT,
+            ExtraFilter: ProductFilterFor(companyID, new Date()),
+            OrderBy: 'Name ASC',
+            ResultType: 'simple',
+            Fields: ['ID'],
+        },
+        ctx.User,
+    );
+    if (!r.Success) {
+        return [];
+    }
+    const ids = (r.Results ?? []).map((x) => x.ID);
+    // Repeat rather than run short: every line needs one, and which product is irrelevant here.
+    return Array.from({ length: count }, (_, i) => ids[i % Math.max(ids.length, 1)]).filter(Boolean);
 }
 
 /** One recurring line and one one-time line, so the policy has both kinds to route. */
@@ -342,6 +400,17 @@ export const CloseDealChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
+                /**
+                 * PINS THE STUB, rather than assuming one.
+                 *
+                 * This check is about STUB HONESTY — that an unreachable downstream reports
+                 * `Executed: false` with a reason and fabricates no ID. On a host where orders is
+                 * installed the seam selects the LIVE implementation and the order really is created,
+                 * so the check would fail while both the seam and the close were behaving correctly.
+                 * Installing the stub for the duration keeps the check testing what it names.
+                 */
+                const previousSeam = SetDownstreamSeam(new StubDownstreamSeam());
+                try {
                 const f = await ResolveSalesFixture(ctx);
                 const dealID = await openDeal(
                     ctx, f, f.ContractPolicyPipelineID, f.ContractPolicyStageID, 'CD7 stub honesty',
@@ -365,6 +434,12 @@ export const CloseDealChecks: NamedCheck[] = [
                     ctx, `SELECT ContractID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
                 );
                 Assert(!row.ContractID, 'and no fabricated contract was stamped onto the deal');
+                } finally {
+                    // Back to DEPLOYMENT-based selection. Restoring `previousSeam` alone would leave
+                    // `SetDownstreamSeam`'s latch on and pin every later check in this process to it.
+                    void previousSeam;
+                    ResetDownstreamSeam();
+                }
             }),
     },
     {
