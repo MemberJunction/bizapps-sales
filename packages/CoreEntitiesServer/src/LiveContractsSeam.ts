@@ -115,9 +115,23 @@ export class LiveContractsSeam {
             // Required by the context and unused by a Sync operation.
             emitProgress: () => undefined,
         });
-        return result?.Success
-            ? { ok: true, output: result.Output }
-            : { ok: false, message: result?.ErrorMessage ?? `${key} failed.` };
+        if (!result?.Success) {
+            return { ok: false, message: result?.ErrorMessage ?? `${key} failed.` };
+        }
+        /**
+         * THE ENVELOPE IS NOT THE ANSWER, and trusting it silently reports success on a failure.
+         *
+         * `RemoteOpResult.Success` means "the operation ran". Contracts' operations carry their OWN
+         * `Success` + `Message` in the payload, and a refused save comes back as
+         * `{ Success: true, Output: { Success: false, Message: "Could not save contract: …" } }`.
+         * An earlier version of this seam checked only the envelope and cheerfully returned
+         * `Success: true` with a null ContractID for a contract that was never written.
+         */
+        const inner = (result.Output ?? {}) as { Success?: boolean; Message?: string };
+        if (inner.Success === false) {
+            return { ok: false, message: inner.Message ?? `${key} reported failure.` };
+        }
+        return { ok: true, output: result.Output };
     }
 
     /**
@@ -160,7 +174,13 @@ export class LiveContractsSeam {
                 // No OwnerUserID: sales holds an EMPLOYEE (Deal.OwnerEmployeeID), and guessing a
                 // user from it would be a mapping sales cannot make correctly. Left for contracts.
                 OwnerUserID: null,
-                Status: 'Pending',
+                /**
+                 * `Draft`, not `Pending` — `CK_Contract_Status` allows Draft / PendingSignature /
+                 * Active / Expired / Terminated / Superseded, and `Pending` is a TERM status, not a
+                 * contract one. Draft is the §7.2 intent: the agreement exists, nothing fires, and a
+                 * human moves it on.
+                 */
+                Status: 'Draft',
                 Description: input.ContractVariances ?? null,
                 EffectiveDate: input.ExecutionDate ?? null,
                 AutoRenew: input.AutoRenew ?? false,
@@ -192,12 +212,14 @@ export class LiveContractsSeam {
         if (!r.ok) {
             return { Success: false, Message: r.message };
         }
-        const out = (r.output ?? {}) as { ContractID?: string; ID?: string; ContractNumber?: string; Status?: string };
+        // `SaveContractOutput` nests the record under `Contract` — not flat, as an earlier guess had it.
+        const out = (r.output ?? {}) as { Contract?: { ID?: string; ContractNumber?: string; Status?: string } };
+        const c = out.Contract ?? {};
         return {
             Success: true,
-            ContractID: out.ContractID ?? out.ID ?? null,
-            Status: out.Status ?? 'Pending',
-            Message: `Contract ${out.ContractNumber ?? out.ContractID ?? ''} created by Sales.CloseDeal.`.trim(),
+            ContractID: c.ID ?? null,
+            Status: c.Status ?? 'Draft',
+            Message: `Contract ${c.ContractNumber ?? c.ID ?? ''} created by Sales.CloseDeal.`.trim(),
         };
     }
 
@@ -234,12 +256,13 @@ export class LiveContractsSeam {
         if (!r.ok) {
             return { Success: false, Message: r.message };
         }
-        const out = (r.output ?? {}) as { ContractID?: string; Status?: string; ContractNumber?: string };
+        const out = (r.output ?? {}) as { Contract?: { ID?: string; ContractNumber?: string; Status?: string } };
+        const c = out.Contract ?? {};
         return {
             Success: true,
-            ContractID: out.ContractID ?? input.ContractID,
-            Status: out.Status ?? null,
-            Message: `Term renewed on contract ${out.ContractNumber ?? input.ContractID}.`,
+            ContractID: c.ID ?? input.ContractID,
+            Status: c.Status ?? null,
+            Message: `Term renewed on contract ${c.ContractNumber ?? input.ContractID}.`,
         };
     }
 }
