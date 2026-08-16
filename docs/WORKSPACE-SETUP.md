@@ -114,9 +114,10 @@ in this order — it is the dependency order, and it is not negotiable:
 | 5 | orders | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 9 |
 | 6 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 2 |
 
-> **Pass `--schema` explicitly for sales.** Its own `npm run mj:migrate` omits it, and on a shared host the
-> bare form writes flyway history into `__mj` — where MJ core's newer migrations already sit — and dies
-> with *"Detected resolved migration not applied to database"*. The other four apps pass it already.
+> **Sales' `mj:migrate` now passes `--schema` itself**, so `npm run mj:migrate` is safe. It did not until
+> this pass: the bare form wrote flyway history into `__mj` — where MJ core's newer migrations already sit
+> — and died with *"Detected resolved migration not applied to database"*, an error that names a migration
+> and tells you nothing about the schema. Fixed to match the other four apps.
 
 **No CodeGen run is needed.** Each app's baseline carries its generated half, so after step 6 the database
 already has all ~500 entities registered (22 sales, 49 orders, 23 accounting, 19 tasks, 10 common). If you
