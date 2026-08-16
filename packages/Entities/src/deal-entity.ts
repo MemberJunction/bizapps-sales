@@ -79,7 +79,12 @@ interface DealRoleIDRow {
  *
  * @see DealLineEntity.Validate — the guard, and why it lives there rather than in field permissions.
  */
-const PRICING_PROVENANCE_FIELDS = [
+/**
+ * Exported so the Explorer Deal Line form can refuse these edits BEFORE the round-trip, using the same
+ * list the entity server refuses them with. Same reasoning as `close-lock.ts`: two copies would drift,
+ * and the drift would only surface as a save the user did not expect to fail.
+ */
+export const PRICING_PROVENANCE_FIELDS = [
     'ResolvedUnitPrice',
     'ResolvedExtendedAmount',
     'PriceComponentsJSON',

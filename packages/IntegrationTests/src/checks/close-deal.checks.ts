@@ -37,6 +37,7 @@ import {
     type NamedCheck,
 } from '@memberjunction/testing-integration';
 import {
+    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
     E_ORDERS_PRODUCT,
     ProductFilterFor,
     StubDownstreamSeam,
@@ -392,6 +393,69 @@ export const CloseDealChecks: NamedCheck[] = [
                 deal.Description = 'Signed at the eleventh hour.';
 
                 Assert(await deal.Save(), 'Description is editable after close');
+            }),
+    },
+    {
+        Id: 'close-deal.CD14',
+        Name: 'CD14: the SHARED editable-while-locked set is exactly what the server enforces',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * PINS THE CONSTANT THE EXPLORER FORM READS.
+                 *
+                 * `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` moved into `sales-entities` so the Deal form can
+                 * grey out exactly what `DealEntityServer.Save()` refuses. That sharing is only worth
+                 * anything if the constant still describes real behaviour — a list that drifts from the
+                 * server turns into a form that offers a field the server rejects, or greys out one it
+                 * would have accepted. Neither shows up until a user hits it.
+                 *
+                 * CD6 proves the carve-out exists for `Description`. This proves the WHOLE set, in both
+                 * directions, so adding a field to the constant without teaching the server is a failure
+                 * here rather than a surprise in the UI.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const md = new Metadata();
+
+                for (const field of DEAL_FIELDS_EDITABLE_WHILE_LOCKED) {
+                    const dealID = await openDeal(
+                        ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, `CD14 ${field}`,
+                    );
+                    Assert(
+                        (await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID })).Success,
+                        `the close ran for ${field}`,
+                    );
+
+                    const deal = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                    Assert(await deal.Load(dealID), `the closed deal loads for ${field}`);
+                    deal.Set(field, `CD14 touched ${field}`);
+                    Assert(
+                        await deal.Save(),
+                        `'${field}' is in DEAL_FIELDS_EDITABLE_WHILE_LOCKED but the server REFUSED it — ` +
+                            'the shared constant no longer matches the lock',
+                    );
+                }
+
+                // And the other direction: a field OUTSIDE the set must still be refused, or the set is
+                // describing a lock that is not actually holding anything.
+                const lockedID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD14 negative',
+                );
+                Assert(
+                    (await close(ctx, { DealID: lockedID, DealStatusTypeID: f.WonStatusID })).Success,
+                    'the close ran for the negative case',
+                );
+                const locked = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await locked.Load(lockedID), 'the locked deal loads');
+                Assert(
+                    !DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has('Name'),
+                    'this check assumes Name is NOT carved out; update it if that ever changes',
+                );
+                locked.Name = 'CD14 should not be allowed to rename a closed deal';
+                Assert(
+                    !(await locked.Save()),
+                    'a field outside the shared set must still be refused — otherwise the lock is advisory',
+                );
             }),
     },
     {
