@@ -40,7 +40,13 @@
  */
 import { expect, test } from '@playwright/test';
 import { EXPLORER_BASE_URL } from '../lib/env';
-import { captureConsoleErrors, expectOnlyKnownErrors, KNOWN_POST_DELETE_ERRORS, shot } from '../lib/explorer';
+import {
+  captureConsoleErrors,
+  closeRestoredRecordTabs,
+  expectOnlyKnownErrors,
+  KNOWN_POST_DELETE_ERRORS,
+  shot,
+} from '../lib/explorer';
 
 /** The hand-authored app's route. Distinct from the GENERATED entity browser at /app/mjbizappssales. */
 const SALES_WORKSPACE_APP_ROUTE = '/app/sales';
@@ -324,6 +330,18 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
     await test.step('reads back with FKs resolved to names', async () => {
       await page.goto(`${EXPLORER_BASE_URL}/app/mjbizappssales`, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(5000);
+
+      /**
+       * CLOSE WHAT THE SHELL REOPENED BEFORE READING ANYTHING.
+       *
+       * Without this the step reads a restored RECORD tab and asserts a deal name against a pipeline's
+       * detail view — which fails while looking like a save bug. It is also why this spec passed when
+       * run alone and failed in the full suite: the earlier specs are what leave the records open.
+       */
+      if (await closeRestoredRecordTabs(page)) {
+        await page.goto(`${EXPLORER_BASE_URL}/app/mjbizappssales`, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(4000);
+      }
 
       const deals = page.getByText(/^\s*Deals\s*$/i).first();
       await expect(deals).toBeVisible({ timeout: 25_000 });
