@@ -191,13 +191,21 @@ export class LiveContractsSeam {
                         Status: 'Pending',
                         BillingFrequency: input.BillingFrequency ?? 'Monthly',
                         /**
-                         * DELIBERATELY NULL. `Deal.Amount` is a cached answer from ORDERS, not a
-                         * negotiated commitment, and passing it here would be sales asserting a
-                         * contract value it did not compute and cannot vouch for. Contracts prices the
-                         * term from its lines. A genuinely negotiated commitment would be a separate
-                         * field on the deal, captured as intent — it does not exist yet.
+                         * ZERO MEANS "NOTHING WAS COMMITTED", AND THAT IS A STATEMENT, NOT A PRICE.
+                         *
+                         * Contracts requires this and says why in its own validation: "State the amount
+                         * committed for this term. Zero is a valid answer; blank is not." So
+                         * `CommittedAmount` is a NEGOTIATED COMMITMENT — what the customer undertakes to
+                         * spend — not a computed value. Contracts still prices the lines from ProductID.
+                         *
+                         * Sales does not compute it and must not pass `Deal.Amount`: that is ORDERS'
+                         * cached figure for the WHOLE deal, including one-time lines routed to an order,
+                         * so using it here would both overstate the contract and launder an orders number
+                         * into a contracts field. A deal that negotiated no minimum commits nothing, and
+                         * 0 says exactly that. A real negotiated commitment would be captured on the deal
+                         * as its own intent field — which does not exist yet.
                          */
-                        CommittedAmount: null,
+                        CommittedAmount: input.CommittedAmount ?? 0,
                         Lines: (input.Lines ?? []).map((l) => ({
                             ProductID: String(l.ProductID ?? ''),
                             Quantity: Number(l.Quantity ?? 1),

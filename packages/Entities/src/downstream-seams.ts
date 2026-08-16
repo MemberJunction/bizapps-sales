@@ -139,6 +139,12 @@ export interface ContractsCreateFromDealSeamInput {
     PrimaryContactID?: string | null;
     /** How the term bills. A CODE contracts understands; sales does not invent billing schedules. */
     BillingFrequency?: string | null;
+    /**
+     * What the customer COMMITS to spend over the term — a negotiated undertaking, not a price.
+     * Contracts requires it and treats zero as a valid answer meaning "no minimum". Sales never
+     * computes it; it is only ever passed through when a deal actually negotiated one.
+     */
+    CommittedAmount?: number | null;
     /** Recurring lines, when the policy routes them to the contract. */
     Lines?: OrdersOrderLineSeamInput[];
 }
