@@ -47,6 +47,18 @@ async function sellableProduct(ctx: Ctx, companyID: string): Promise<{ ID: strin
     return (r.Results ?? [])[0];
 }
 
+/**
+ * A date column as a UTC `YYYY-MM-DD`, whatever shape it arrives in.
+ *
+ * MJ v6 returns real `Date` objects where v5 returned ISO strings, so `String(value).slice(0, 10)`
+ * yields "Mon Aug 31" — and worse, LOCAL-time formatting shifts a UTC 2026-09-01 back a day. This repo
+ * has been caught by the v6 shape change once already (7e55bae) and by local-time getters before that;
+ * everything stored is UTC and must be compared as UTC.
+ */
+function isoDate(value: unknown): string {
+    return new Date(value as string | Date).toISOString().slice(0, 10);
+}
+
 async function rows(ctx: Ctx, entity: string, filter: string): Promise<Record<string, unknown>[]> {
     const r = await new RunView().RunView({ EntityName: entity, ExtraFilter: filter, ResultType: 'simple' }, ctx.User);
     Assert(r.Success, `reading ${entity} failed — ${r.ErrorMessage}`);
@@ -106,12 +118,12 @@ export const CloseWonContractChecks: NamedCheck[] = [
                 AssertEqual(terms.length, 1, 'one term should have been created for the deal');
                 const term = terms[0];
                 AssertEqual(
-                    String(term['StartDate']).slice(0, 10),
+                    isoDate(term['StartDate']),
                     '2026-09-01',
                     'the term must start on the date the deal stated',
                 );
                 AssertEqual(
-                    String(term['EndDate']).slice(0, 10),
+                    isoDate(term['EndDate']),
                     '2027-09-01',
                     'the term must end TermMonths after it starts — 12 months, computed from the deal',
                 );
