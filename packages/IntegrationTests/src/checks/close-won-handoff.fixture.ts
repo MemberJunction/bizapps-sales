@@ -78,25 +78,35 @@ async function wonStatusID(ctx: Ctx): Promise<string> {
     return (r.Results ?? [])[0].ID;
 }
 
+/** Which pipeline to seed on, and with how many one-time lines. */
+export interface SeedTarget {
+    PipelineID: string;
+    StageID: string;
+    /** The pipeline's OWN company — products are per-company, so this drives the picker's filter. */
+    CompanyID: string;
+    /** Zero is meaningful: a header-only deal, which is the whole point on a lineless motion. */
+    LineCount: number;
+}
+
 /**
- * A saved, open deal with two ONE-TIME lines naming real products.
+ * A saved, open deal on a NAMED pipeline, with `LineCount` one-time lines naming real products.
  *
- * Both lines are one-time deliberately: the recurring path routes to a contract, which is still
- * stubbed (D-CF4), so a recurring line here would test the half we cannot reach.
+ * All lines are one-time deliberately: the recurring path routes to a contract, and this fixture feeds
+ * the ORDER checks.
  */
-export async function SeedDealWithLines(ctx: Ctx, f: SalesFixture): Promise<SeededHandoffDeal> {
-    const products = await sellableProducts(ctx, f.PipelineCompanyID, 2);
-    const quantities = [3, 5];
+export async function SeedDealOnPipeline(ctx: Ctx, f: SalesFixture, target: SeedTarget): Promise<SeededHandoffDeal> {
+    const products = target.LineCount > 0 ? await sellableProducts(ctx, target.CompanyID, target.LineCount) : [];
+    const quantities = [3, 5, 7].slice(0, target.LineCount);
 
     const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
     deal.NewRecord();
     deal.Name = `Handoff seam ${Math.abs(Date.now() % 100000)}`;
-    deal.PipelineID = f.PipelineID;
-    deal.PipelineStageID = f.StageID;
+    deal.PipelineID = target.PipelineID;
+    deal.PipelineStageID = target.StageID;
     deal.DealTypeID = f.DealTypeID;
     deal.DealStatusTypeID = f.OpenStatusID;
     deal.AccountID = f.AccountID;
-    deal.CompanyID = f.PipelineCompanyID;
+    deal.CompanyID = target.CompanyID;
     deal.TermMonths = 12;
 
     for (let i = 0; i < products.length; i++) {
@@ -116,10 +126,25 @@ export async function SeedDealWithLines(ctx: Ctx, f: SalesFixture): Promise<Seed
 
     return {
         DealID: deal.ID,
-        CompanyID: f.PipelineCompanyID,
+        CompanyID: target.CompanyID,
         AccountID: f.AccountID,
         WonStatusID: await wonStatusID(ctx),
         ExpectedOrderProductIDs: products.map((p) => p.ID),
         ExpectedOrderQuantities: quantities,
     };
+}
+
+/**
+ * A saved, open deal with two ONE-TIME lines naming real products, on the DEFAULT pipeline.
+ *
+ * Both lines are one-time deliberately: the recurring path routes to a contract, which is still
+ * stubbed (D-CF4), so a recurring line here would test the half we cannot reach.
+ */
+export async function SeedDealWithLines(ctx: Ctx, f: SalesFixture): Promise<SeededHandoffDeal> {
+    return SeedDealOnPipeline(ctx, f, {
+        PipelineID: f.PipelineID,
+        StageID: f.StageID,
+        CompanyID: f.PipelineCompanyID,
+        LineCount: 2,
+    });
 }
