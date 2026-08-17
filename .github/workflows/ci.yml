@@ -28,10 +28,16 @@ name: CI
 #       pnpm run test:explorer:auth      # once, you log in
 #       pnpm run test:explorer
 #
-#   INTEGRATION CHECKS now exist (save-deal SD1-SD12) but still need a live database, so they are not
-#   run here either. RUN_MUTATION_TESTS=1 is MANDATORY when you run them locally:
-#   MJ's driver contains `if (check.RequiresMutation && !mutationEnabled) continue;`, so a run without
-#   it executes NOTHING and reports success.
+#   INTEGRATION CHECKS need a live database, so they are not run here either. There are 30 that need
+#   only sales (save-deal SD1-SD16, close-deal CD1-CD14) and 16 more that need a linked sibling —
+#   product-picker PP1-PP4, close-won-handoff CW1-CW4 and close-won-d2c D1-D4 need orders,
+#   close-won-contract CT1-CT4 needs contracts. `test:integration` runs whichever of those this host
+#   can support; scripts/expected-check-counts.json is the source of truth for the numbers.
+#
+#   RUN_MUTATION_TESTS=1 is MANDATORY when you run them locally: the runner contains
+#   `c.RequiresMutation ? RUN_MUTATIONS : true`, so a run without it executes NOTHING and reports
+#   success. Follow the suite with `pnpm run test:coverage-gate`, which turns exactly that into a
+#   failure that names the gap.
 
 on:
   pull_request:

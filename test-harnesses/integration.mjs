@@ -22,10 +22,48 @@
  * PRECONDITION: the seeds must have been run (`scripts/seed-dev-data.sh`, then
  * `scripts/seed-demo-data.sh`). The checks DISCOVER their fixture from those rows.
  */
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import dotenv from 'dotenv';
 import sql from 'mssql';
 
 dotenv.config();
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * The bundle manifest — the SINGLE source of truth for how many checks each bundle holds and which
+ * sibling app it needs. Shared with `scripts/assert-check-count.mjs` so the runner and the gate cannot
+ * disagree about what this host should run.
+ */
+const MANIFEST = JSON.parse(readFileSync(join(REPO_ROOT, 'scripts', 'expected-check-counts.json'), 'utf8'));
+
+/**
+ * Everything printed is ALSO captured to a log file, because the coverage gate reads it.
+ *
+ * Done here rather than with a shell `| tee` on purpose: `tee` does not exist on a plain Windows shell,
+ * and a pipe would make the runner's exit code the exit code of `tee`, so a failing suite would report
+ * success. Capturing in-process keeps both the exit code and the log honest on every platform.
+ */
+const LOG_PATH = process.env.MJ_INTEGRATION_LOG ?? join(REPO_ROOT, 'test-harnesses', '.integration-log.txt');
+const logLines = [];
+for (const level of ['log', 'error', 'warn']) {
+    const original = console[level].bind(console);
+    console[level] = (...parts) => {
+        logLines.push(parts.map((p) => (typeof p === 'string' ? p : String(p))).join(' '));
+        original(...parts);
+    };
+}
+function flushLog() {
+    try {
+        writeFileSync(LOG_PATH, `${logLines.join('\n')}\n`, 'utf8');
+    } catch {
+        // A log we cannot write must never fail a suite that otherwise passed — the gate will say so
+        // for itself when it finds no log.
+    }
+}
 
 const args = process.argv.slice(2);
 const only = args.filter((a) => !a.startsWith('-'));
@@ -113,6 +151,14 @@ const ORDERS_PACKAGES = [
     ['@mj-biz-apps/accounting-core-entities-server', null],
     ['@mj-biz-apps/orders-entities', 'LoadGeneratedEntities'],
     ['@mj-biz-apps/orders-core-entities-server', null],
+    // CONTRACTS, for the same reason and with the same ordering logic: `close-won-contract` resolves
+    // contracts' entities by name, and `ContractsIsInstalled()` answers false until they are
+    // registered. These were missing until now, which meant CT1–CT4 could not pass on ANY host — the
+    // bundle reported a vacuous "4 passed" before the loud precondition landed, and a bare failure
+    // after it. Absence here reads exactly like "contracts is not installed", which is why it went
+    // unnoticed.
+    ['@mj-biz-apps/contracts-entities', 'LoadGeneratedEntities'],
+    ['@mj-biz-apps/contracts-core-entities-server', null],
 ];
 const optionalLoads = [];
 
@@ -214,7 +260,30 @@ const registry = IntegrationCheckRegistry.Instance;
  *
  * and add 'product-picker' back to this list in the same change.
  */
-const ALL_BUNDLES = ['save-deal', 'close-deal'];
+/**
+ * The default run ADAPTS to what this host has linked.
+ *
+ * `save-deal` and `close-deal` always run — they need nothing but sales. The rest declare a `requires`
+ * in the manifest and are included only when that app actually loaded above, which is what makes a
+ * single `test:integration` mean "everything this host can prove": 30 checks standalone, 46 fully
+ * linked.
+ *
+ * This replaced a hardcoded two-bundle list. That list was correct when orders could not be linked at
+ * all, but it had become the reason a fully-linked host still ran only the default gate — the
+ * conditional bundles existed, passed, and were never invoked by anything automatic.
+ *
+ * Note what is NOT done here: the list is still driven by the MANIFEST, not by
+ * `registry.GetBundleNames()`. A bundle that fails to register must surface as "no checks matched",
+ * not quietly shorten a still-green run.
+ */
+const linkedApps = new Set(
+    Object.entries(MANIFEST.probes)
+        .filter(([, pkg]) => optionalLoads.includes(`${pkg}: loaded`))
+        .map(([app]) => app),
+);
+const ALL_BUNDLES = Object.entries(MANIFEST.bundles)
+    .filter(([, spec]) => spec.requires === null || linkedApps.has(spec.requires))
+    .map(([bundle]) => bundle);
 
 /**
  * `Storage` is only read by MJ's own cache bundles. A stub is honest here — ours never touch it, and
@@ -312,9 +381,11 @@ if (selected === 0) {
             'RUN_MUTATION_TESTS is not set.\n' +
             '  Re-run as:  RUN_MUTATION_TESTS=1 npm run test:integration\n',
     );
+    flushLog();
     await pool.close();
     process.exit(2);
 }
 
+flushLog();
 await pool.close();
 process.exit(fail === 0 ? 0 : 1);
