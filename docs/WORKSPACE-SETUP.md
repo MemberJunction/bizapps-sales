@@ -66,9 +66,19 @@ packages:
 ```
 
 ```bash
+# turbo refuses to run without a config at the parent, and the bootstrap has none yet.
+# Borrow a member's — which is exactly what the generator does in step 3
+# ("turbo.json copied from bizapps-accounting"). Without this you get:
+#   x Could not find turbo.json or turbo.jsonc.
+cp bizapps-accounting/turbo.json turbo.json
+
 cd C:\ws && pnpm install
 pnpm exec turbo run build --filter "@memberjunction/cli..." --continue
 ```
+
+> **Build with `--filter`, not bare `turbo run build`.** An unfiltered whole-workspace build reads MJ's
+> own `turbo.json`, which uses `globalDependencies` — a key turbo 2.10.x rejects outright
+> (`Found an unknown key`). Every build in this guide is filtered for that reason.
 
 `--continue` is required, not defensive: **MJ `next` does not currently build clean.** Four packages fail
 (see §7). The CLI's own output is still emitted and runs fine.
