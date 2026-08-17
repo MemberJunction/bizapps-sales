@@ -1,0 +1,29 @@
+{
+  "$comment": [
+    "THE SINGLE SOURCE OF TRUTH for how many integration checks each bundle must contain.",
+    "",
+    "Read by scripts/assert-check-count.mjs (the coverage gate) and by test-harnesses/integration.mjs,",
+    "which uses `requires` to decide which bundles the default run should include on this host. Adding a",
+    "bundle means adding one row here and nowhere else; the number living in exactly one place is what",
+    "stops the gate and the suite from drifting into agreeing on a wrong figure.",
+    "",
+    "`requires` names the sibling app a bundle needs. null means it always runs — those are the default",
+    "gate. A bundle whose app is not linked is NOT expected to run, which is why a straight port of",
+    "orders' gate would fail on a sales-only host: it would demand bundles that cannot exist there.",
+    "",
+    "`count` is the number of checks REGISTERED in the bundle, not the number that ran. The gate compares",
+    "both, because the interesting failure is a bundle that registers 4 and runs 0."
+  ],
+  "bundles": {
+    "save-deal": { "count": 16, "requires": null, "ids": "SD1-SD16" },
+    "close-deal": { "count": 14, "requires": null, "ids": "CD1-CD14" },
+    "product-picker": { "count": 4, "requires": "orders", "ids": "PP1-PP4" },
+    "close-won-handoff": { "count": 4, "requires": "orders", "ids": "CW1-CW4" },
+    "close-won-d2c": { "count": 4, "requires": "orders", "ids": "D1-D4" },
+    "close-won-contract": { "count": 4, "requires": "contracts", "ids": "CT1-CT4" }
+  },
+  "probes": {
+    "orders": "@mj-biz-apps/orders-entities",
+    "contracts": "@mj-biz-apps/contracts-entities"
+  }
+}
