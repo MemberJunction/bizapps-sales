@@ -16,6 +16,18 @@
  * ⚠️ **REQUIRES bizapps-contracts.** Held out of the default gate for the same reason `product-picker`
  * and `close-won-handoff` are.
  *
+ * ── AND IT REFUSES TO RUN WITHOUT IT, LOUDLY ────────────────────────────────────────────────────
+ *
+ * An earlier version began each check with `if (!ContractsIsInstalled()) return;`. On a host without
+ * contracts the bundle then reported **"4 passed"** having tested nothing — a vacuous pass, which is the
+ * exact failure mode `assert-check-count.mjs` exists to catch, and which a tester would reasonably read
+ * as "the contract path works here".
+ *
+ * There is no per-check skip in this harness — `skipped` is driven solely by `RequiresMutation`
+ * filtering. So the honest behaviour for a bundle that is ONLY ever run deliberately is to fail with a
+ * message naming the precondition. Silence that looks like success is worse than a red line that
+ * explains itself.
+ *
  * @module @mj-biz-apps/sales-integration-tests
  */
 import { RunView } from '@memberjunction/core';
@@ -30,6 +42,21 @@ type Ctx = Parameters<NamedCheck['Fn']>[0];
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_TERM = 'MJ_BizApps_Contracts: Contract Terms';
 const E_LINE = 'MJ_BizApps_Contracts: Contract Lines';
+
+/**
+ * Refuses the run when contracts is absent, instead of quietly passing.
+ *
+ * This bundle is never in the default gate, so reaching it at all means someone asked for it — and the
+ * only useful answer on a host without contracts is to say so.
+ */
+function requireContracts(): void {
+    Assert(
+        ContractsIsInstalled(),
+        'bizapps-contracts is NOT installed on this host, so these checks cannot prove anything. ' +
+            'Run this bundle only against a stack that includes contracts — see docs/WORKSPACE-SETUP.md. ' +
+            '(Reporting a pass here would be a vacuous one.)',
+    );
+}
 
 /** A sellable product, chosen by the PICKER's own filter so the fixture cannot drift from it. */
 async function sellableProduct(ctx: Ctx, companyID: string): Promise<{ ID: string; Name: string }> {
@@ -89,7 +116,7 @@ export const CloseWonContractChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
-                if (!ContractsIsInstalled()) return;
+                requireContracts();
                 const { result } = await createContract(ctx);
                 Assert(result.Success, `the contract was not created — ${result.Message}`);
                 Assert(!!result.ContractID, 'the seam reported success without a contract ID');
@@ -110,7 +137,7 @@ export const CloseWonContractChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
-                if (!ContractsIsInstalled()) return;
+                requireContracts();
                 const { result, product } = await createContract(ctx);
                 Assert(result.Success, `the contract was not created — ${result.Message}`);
 
@@ -144,7 +171,7 @@ export const CloseWonContractChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
-                if (!ContractsIsInstalled()) return;
+                requireContracts();
                 const { result } = await createContract(ctx);
                 Assert(result.Success, `the contract was not created — ${result.Message}`);
 
@@ -183,7 +210,7 @@ export const CloseWonContractChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
-                if (!ContractsIsInstalled()) return;
+                requireContracts();
                 const f = await ResolveSalesFixture(ctx);
                 const seam = new LiveContractsSeam(ctx.User, ProviderOf(ctx));
 
