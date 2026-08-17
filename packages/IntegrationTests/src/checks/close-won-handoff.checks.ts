@@ -16,8 +16,13 @@
  * independent `Orders.PriceOrder` preview of the same draft, because two numbers agreeing is evidence
  * and one number existing is not.
  *
- * ⚠️ **REQUIRES bizapps-orders.** These checks are meaningless without it and are held out of the
- * default gate for the same reason `product-picker` is — see `test-harnesses/integration.mjs`.
+ * ⚠️ **REQUIRES bizapps-orders**, and REFUSES loudly without it rather than passing vacuously. These
+ * checks are meaningless without orders and are held out of the default gate for the same reason
+ * `product-picker` is — see `test-harnesses/integration.mjs`, and `requireOrders` below for why the
+ * refusal is an assertion rather than a skip.
+ *
+ * These four all exercise the CONFIRMED order path. The Draft path — a different route through orders,
+ * with no ledger posting — is covered by `close-won-d2c`, which pins the differences explicitly.
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
@@ -40,13 +45,26 @@ const E_ORDER_HEADER = 'MJ_BizApps_Orders: Order Headers';
 const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
 
 /**
- * Skips the body when orders is absent, rather than failing.
+ * Refuses the run when orders is absent, instead of quietly passing.
  *
- * Deliberately NOT a silent pass: it asserts loudly the moment orders IS installed, so the bundle
- * cannot rot into a no-op on the very host it was written for.
+ * ── THIS USED TO BE A SILENT SKIP, AND THAT WAS A BUG ───────────────────────────────────────────
+ *
+ * Each check opened with a guard that RETURNED when orders was missing, so on a host without orders
+ * the bundle reported **"4 passed"** having tested nothing — the same vacuous pass fixed in
+ * `close-won-contract.checks.ts` (PR #16), and the exact failure mode `assert-check-count.mjs` exists
+ * to catch. A reader would reasonably take that green as "the order handoff works here".
+ *
+ * There is no per-check skip in this harness — `skipped` is driven solely by `RequiresMutation`
+ * filtering — and this bundle is held out of the default gate, so reaching it at all means someone
+ * asked for it. The only useful answer on a host without orders is to say so.
  */
-async function requireOrders(): Promise<boolean> {
-    return OrdersIsInstalled();
+function requireOrders(): void {
+    Assert(
+        OrdersIsInstalled(),
+        'bizapps-orders is NOT installed on this host, so these checks cannot prove anything. ' +
+            'Run this bundle only against a stack that includes orders — see docs/WORKSPACE-SETUP.md. ' +
+            '(Reporting a pass here would be a vacuous one.)',
+    );
 }
 
 async function close(ctx: Ctx, input: SalesCloseDealInput): Promise<SalesCloseDealOutput> {
@@ -95,7 +113,7 @@ export const CloseWonHandoffChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
-                if (!(await requireOrders())) return;
+                requireOrders();
                 const f = await ResolveSalesFixture(ctx);
                 const seeded = await SeedDealWithLines(ctx, f);
 
@@ -125,7 +143,7 @@ export const CloseWonHandoffChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
-                if (!(await requireOrders())) return;
+                requireOrders();
                 const f = await ResolveSalesFixture(ctx);
                 const seeded = await SeedDealWithLines(ctx, f);
 
@@ -159,7 +177,7 @@ export const CloseWonHandoffChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
-                if (!(await requireOrders())) return;
+                requireOrders();
                 const f = await ResolveSalesFixture(ctx);
                 const seeded = await SeedDealWithLines(ctx, f);
 
@@ -208,7 +226,7 @@ export const CloseWonHandoffChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
-                if (!(await requireOrders())) return;
+                requireOrders();
                 const f = await ResolveSalesFixture(ctx);
                 const seeded = await SeedDealWithLines(ctx, f);
 

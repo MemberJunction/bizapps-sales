@@ -86,6 +86,14 @@ export interface SalesFixture {
     /** The pipeline whose policy does NOT create a contract. D2C, as seeded. */
     OrderOnlyPolicyPipelineID: string;
     OrderOnlyPolicyStageID: string;
+    /**
+     * The order-only pipeline's OWN company — which is NOT the same company as the contract pipeline's.
+     *
+     * It has to be carried separately because products are per-company: a deal seeded on the order-only
+     * pipeline must pick products from THAT company's catalogue, or the picker's own filter returns
+     * nothing and the seed fails for a reason that has nothing to do with the path under test.
+     */
+    OrderOnlyPolicyCompanyID: string;
 
     /** A loss reason that does NOT require notes, by `RequiresNotes = 0`. */
     LossReasonPlainID: string;
@@ -184,6 +192,7 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
         ContractPolicyStageID: withContract.StageID,
         OrderOnlyPolicyPipelineID: withoutContract.ID,
         OrderOnlyPolicyStageID: withoutContract.StageID,
+        OrderOnlyPolicyCompanyID: withoutContract.CompanyID,
 
         LossReasonPlainID: lossPlain.ID,
         LossReasonNeedsNotesID: lossNeedsNotes.ID,
@@ -215,8 +224,13 @@ async function resolvePipelinesByPolicy(
     ctx: IntegrationCheckContext,
 ): Promise<{ withContract: PolicyPipeline; withoutContract: PolicyPipeline }> {
     const rv = new RunView();
-    const r = await rv.RunView<{ ID: string; CloseWonPolicy: string | null }>(
-        { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', ResultType: 'simple', Fields: ['ID', 'CloseWonPolicy'] },
+    const r = await rv.RunView<{ ID: string; CompanyID: string; CloseWonPolicy: string | null }>(
+        {
+            EntityName: E_PIPELINE,
+            ExtraFilter: 'IsActive = 1',
+            ResultType: 'simple',
+            Fields: ['ID', 'CompanyID', 'CloseWonPolicy'],
+        },
         ctx.User,
     );
     Assert(r.Success, `fixture: reading pipelines failed — ${r.ErrorMessage}`);
@@ -227,9 +241,9 @@ async function resolvePipelinesByPolicy(
     for (const row of r.Results ?? []) {
         const creates = policyCreatesContract(row.CloseWonPolicy);
         if (creates && !withContract) {
-            withContract = { ID: row.ID, StageID: await firstStageOf(ctx, row.ID) };
+            withContract = { ID: row.ID, CompanyID: row.CompanyID, StageID: await firstStageOf(ctx, row.ID) };
         } else if (!creates && !withoutContract) {
-            withoutContract = { ID: row.ID, StageID: await firstStageOf(ctx, row.ID) };
+            withoutContract = { ID: row.ID, CompanyID: row.CompanyID, StageID: await firstStageOf(ctx, row.ID) };
         }
     }
 
@@ -243,6 +257,7 @@ async function resolvePipelinesByPolicy(
 
 interface PolicyPipeline {
     ID: string;
+    CompanyID: string;
     StageID: string;
 }
 
