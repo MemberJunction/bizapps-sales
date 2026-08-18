@@ -2,18 +2,25 @@
  * @fileoverview The typed seams sales calls when a deal closes — and the honest state of each.
  *
  * WHY THIS FILE EXISTS RATHER THAN DIRECT CALLS. `Sales.CloseDeal` routes a won deal to a contract
- * and/or an order, but **neither downstream is callable today**:
+ * and/or an order, and it must work whether or not those apps are installed. The seam is the boundary
+ * that makes both true: one interface, a LIVE implementation per downstream, and a stub for a
+ * deployment that has neither.
  *
- *   · `Contracts.CreateFromDeal` and `Contracts.RenewTerm` DO NOT EXIST — contracts ships neither
- *     operation. The shapes below are what §7 and contracts' plans say sales should expect.
- *   · `Orders.CreateOrderInState` DOES exist (`origin/mjdev/orders-flow`), and the input shape below
- *     is transcribed from its real `orders-create-order-in-state.input.ts` — but orders is not built
- *     as a peer, its C0 seam (`Subscription.BillingMode`) is still missing, and, decisively, its
- *     `OrderLineInput.ProductID` is REQUIRED while every `DealLine.ProductID` we hold is NULL.
+ * BOTH DOWNSTREAMS ARE LIVE NOW, and this header used to say the opposite:
  *
- * So the close flow is built against these interfaces and the calls are stubbed. That is a deliberate
- * decision (CLOSE-FLOW-DECISIONS.md D-CF3/D-CF4), and it is what makes connecting them later a
- * DELETION rather than a redesign: the operation already speaks the right contract.
+ *   · ORDERS — `LiveOrdersSeam` creates the order through orders' own ENTITY GRAPH
+ *     (`OrderEntityServer.Save()`), because orders ships no create-order operation on `next`;
+ *     `Orders.CreateOrderInState` was on a branch that never merged. Money comes back from
+ *     `Orders.PriceOrder`.
+ *   · CONTRACTS — `LiveContractsSeam` calls `Contracts.SaveContract` and `Contracts.RenewTerm`. Both
+ *     operations EXIST. Earlier revisions of this file said they did not, and the stub still said so
+ *     long after it stopped being true; a message that misstates why a route did not fire sends the
+ *     reader to fix the wrong thing.
+ *
+ * SO WHAT THE STUB MEANS NOW is narrower and it is the only thing it should claim: the sibling app is
+ * **not installed in this deployment**. Not missing, not unbuilt — absent from this host. Every stub
+ * method returns `Success: false` with that reason and fabricates nothing, so a close still commits and
+ * still records its routing intent while `Executed` comes back false.
  *
  * ── THE RULE THIS FILE PROTECTS ─────────────────────────────────────────────────────────────────
  *
@@ -25,8 +32,7 @@
  */
 
 /* ────────────────────────────────────────────────────────────────────────────
- * ORDERS — transcribed from bizapps-orders @ origin/mjdev/orders-flow
- * metadata/remote-operations/types/orders-create-order-in-state.input.ts
+ * ORDERS — the shape `LiveOrdersSeam` sends into orders' entity graph
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /**
@@ -105,7 +111,7 @@ export interface OrdersPreviewResult {
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * CONTRACTS — the interface sales expects; the operation does not exist yet
+ * CONTRACTS — the interface sales expects; served by `Contracts.SaveContract` when installed
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /**
@@ -113,8 +119,10 @@ export interface OrdersPreviewResult {
  *
  * Shaped from §7.2 and contracts' plans. The two properties that matter for review:
  *
- *   · the contract is created **Pending** and NOTHING fires until Pending → Approved, so a close
- *     cannot accidentally start billing;
+ *   · the contract is created **Draft** and NOTHING fires from it, so a close cannot accidentally
+ *     start billing. `Draft`, not `Pending`: §7.2 asks for a status that fires nothing, and `Pending`
+ *     is a TERM status which violates `CK_Contract_Status` on the contract itself. Pinned by CT3;
+ *     earlier revisions of this comment said Pending and were wrong about contracts, not about intent;
  *   · it carries the deal's negotiated red-lines (`ContractVariances`) so the human legal review has
  *     the context the AD typed, rather than a contract that silently drops it.
  */
@@ -161,7 +169,7 @@ export interface ContractsRenewTermSeamInput {
 export interface ContractsSeamResult {
     Success: boolean;
     ContractID?: string | null;
-    /** Expected to be the contract's Pending status on creation. */
+    /** The contract's status on creation — `Draft`, the status that fires nothing. See above. */
     Status?: string | null;
     Message?: string | null;
 }
@@ -234,8 +242,8 @@ export class StubDownstreamSeam implements IDownstreamSeam {
         return {
             Success: false,
             Message:
-                'Contracts.CreateFromDeal does not exist yet — contracts ships no such operation. ' +
-                'See CLOSE-FLOW-DECISIONS.md D-CF4.',
+                'The contract route was planned but not executed: bizapps-contracts is not installed in ' +
+                'this deployment, so its entities cannot be resolved.',
         };
     }
 
@@ -243,7 +251,9 @@ export class StubDownstreamSeam implements IDownstreamSeam {
         this.Attempts.push({ Target: 'ContractRenewal', Payload: input });
         return {
             Success: false,
-            Message: 'Contracts.RenewTerm does not exist yet. See CLOSE-FLOW-DECISIONS.md D-CF4.',
+            Message:
+                'The renewal route was planned but not executed: bizapps-contracts is not installed in ' +
+                'this deployment, so its entities cannot be resolved.',
         };
     }
 }
