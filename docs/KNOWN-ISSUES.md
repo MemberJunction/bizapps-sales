@@ -637,3 +637,61 @@ their own `Success` + `Message` inside the payload:
 Sales' first seam checked only the envelope and returned `Success: true` with a null `ContractID` for a
 contract that was never written — a routing result claiming `Executed` for nothing. Any caller of a
 bizapps remote operation must check **both**.
+
+---
+
+## 🟠 KI-14 — A deal line with a free-text product fails close-won, and leaves the deal Won anyway
+
+**Found while making the demo roster click-safe.** A `DealLine` that carries a `ProductName` string with
+**`ProductID` NULL** cannot be closed to an order. Worse than a refusal: the close reports failure but the
+deal is already marked **Won**, so the roster is left in a state no order backs.
+
+### What happens
+
+`CloseDealOperation.buildOrderInput` maps each one-time line with
+
+```ts
+ProductID: String(l.ProductID ?? ''),
+```
+
+so a NULL becomes the **empty string**. Orders' `OrderLine` types `ProductID` as a `uniqueidentifier`, and
+`''` is not a null — it is a value that fails conversion. The failure happens *inside* orders' save, which
+rolls back its savepoint and returns false; the enclosing close transaction is already torn down by then.
+The observed symptom on a demo host was `No active transaction to commit`, which names nothing useful and
+reads like a transaction-management bug rather than a data problem. This is the same empty-GUID mechanism
+recorded in KI-11, reached by a different route.
+
+**Only ONE-TIME lines trigger it** — they are the ones routed to an order. A recurring line with a NULL
+`ProductID` routes to a contract and does not hit this path.
+
+### Where this shape comes from — and why it is not hypothetical
+
+Any line captured before the product picker existed. In this repo that was every seeded line, because
+`DealLine.ProductID` is a **soft reference** and `ProductName` is transcription: a deal is meant to remain
+readable on a host where orders was never installed. `scripts/seed-demo-data.sh` now resolves catalogue IDs
+by company so the seeded roster is safe, but the shape is legitimate and will recur.
+
+**The migration implication is the real one. Deals imported from HubSpot will have exactly this shape**
+(tracker **#60**) — a product *name* from HubSpot's line items and no MemberJunction catalogue ID. Closing
+an imported deal would therefore fail in precisely this way, on the records a cutover produces most of.
+
+Two ways out, and they are not equivalent:
+
+1. **The importer resolves products to catalogue IDs.** Correct where a confident match exists, but names
+   are not unique and `SKU`'s unique index is filtered (`WHERE SKU IS NOT NULL`), so matching is a
+   *suggestion a human confirms*, never an identity mechanism — see `product-filter.ts`. Some rows will
+   have no match at all.
+2. **The close path handles a null `ProductID` rather than passing `''`.** Either omit the field so orders'
+   own validation refuses it by name, or refuse the close up front with a message naming the offending
+   line. Both beat an empty string reaching a `uniqueidentifier` column.
+
+Most likely both: resolve what can be resolved, and refuse the rest legibly instead of corrupting a close.
+
+### Not fixed here, deliberately
+
+The fix belongs in the close-won routing path, which **Andrew's design updates may touch** — changing it now
+risks colliding with that work. Recorded rather than patched. The seed-data change that made the demo roster
+safe is not a fix for this; it only removes the shape from *our* fixtures.
+
+**Whatever the fix, the deal must not end up Won when no order was created.** That half is independent of
+how `ProductID` is resolved, and it is the part that corrupts data rather than merely failing.

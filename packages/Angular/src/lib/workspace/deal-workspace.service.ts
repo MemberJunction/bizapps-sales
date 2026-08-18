@@ -23,6 +23,7 @@ import {
     EmptyLookups,
     type DealLookup,
     type DealStatusLookup,
+    type LossReasonLookup,
     type DealWorkspaceLookups,
     type LineTypeLookup,
     type PipelineLookup,
@@ -45,6 +46,7 @@ const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 const E_EMPLOYEE = 'MJ: Employees';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
+const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
 
 /**
  * One row of the deal roster.
@@ -101,6 +103,7 @@ interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder:
 interface NamedRow { ID: string; Name: string }
 interface LineTypeRow extends NamedRow { IsRecurring: boolean }
 interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean }
+interface LossReasonRow extends NamedRow { RequiresNotes: boolean }
 interface ContactRow { ID: string; FirstName: string | null; LastName: string | null; Email: string | null }
 interface EmployeeRow { ID: string; FirstLast: string | null }
 /**
@@ -120,6 +123,39 @@ export class DealWorkspaceService {
      * `RunViews` (plural) rather than nine awaited `RunView` calls — the house rule against querying in
      * a loop applies just as much to a fixed list of nine as to an unbounded one.
      */
+    /**
+     * The human-facing NUMBER of a record a close routed to.
+     *
+     * `SalesCloseRoutingResult.RecordID` is an ID; a user needs the number orders or contracts minted.
+     * Soft-resolved by target so the workspace degrades to showing nothing rather than erroring when the
+     * downstream app is not installed — the routing result already explains that case in its own words.
+     *
+     * This is a READ of the downstream record's own value. Nothing is computed here; see the money rule.
+     */
+    public async LookupRoutedRecordNumber(target: string, recordID: string): Promise<string | null> {
+        const map: Record<string, { Entity: string; Field: string }> = {
+            Order: { Entity: 'MJ_BizApps_Orders: Order Headers', Field: 'OrderNumber' },
+            Contract: { Entity: 'MJ_BizApps_Contracts: Contracts', Field: 'ContractNumber' },
+        };
+        const spec = map[target];
+        if (!spec) {
+            return null;
+        }
+        try {
+            const r = await new RunView().RunView<Record<string, unknown>>({
+                EntityName: spec.Entity,
+                ExtraFilter: `ID = '${recordID.replace(/'/g, "''")}'`,
+                ResultType: 'simple',
+                Fields: ['ID', spec.Field],
+            });
+            const row = r?.Success ? (r.Results ?? [])[0] : undefined;
+            const value = row?.[spec.Field];
+            return typeof value === 'string' && value.length ? value : null;
+        } catch {
+            return null;
+        }
+    }
+
     public async LoadLookups(): Promise<DealWorkspaceLookups> {
         const rv = new RunView();
         const params: RunViewParams[] = [

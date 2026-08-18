@@ -56,12 +56,24 @@ export interface DealStatusLookup extends DealLookup {
     IsLost: boolean;
 }
 
+/**
+ * A loss reason plus the flag that decides whether notes are mandatory.
+ *
+ * `RequiresNotes` is read as a FLAG for the same reason every other behaviour here is: a deployment
+ * renames its reasons freely, and "Price" meaning "explain yourself" is a property of the row, not of
+ * the word. The close panel makes LossNotes required from this, and the server enforces the same rule.
+ */
+export interface LossReasonLookup extends DealLookup {
+    RequiresNotes: boolean;
+}
+
 /** Everything the surface needs to render its pickers. Loaded once per session. */
 export interface DealWorkspaceLookups {
     Pipelines: PipelineLookup[];
     Stages: StageLookup[];
     DealTypes: DealLookup[];
     DealStatusTypes: DealStatusLookup[];
+    LossReasons: LossReasonLookup[];
     ForecastCategoryTypes: DealLookup[];
     LineTypes: LineTypeLookup[];
     Accounts: DealLookup[];
@@ -75,6 +87,7 @@ export function EmptyLookups(): DealWorkspaceLookups {
         Stages: [],
         DealTypes: [],
         DealStatusTypes: [],
+        LossReasons: [],
         ForecastCategoryTypes: [],
         LineTypes: [],
         Accounts: [],

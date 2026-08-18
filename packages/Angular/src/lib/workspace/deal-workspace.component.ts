@@ -47,10 +47,20 @@ import { ChangeDetectionStrategy, ChangeDetectorRef, Component, inject, OnInit, 
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
+import { Metadata } from '@memberjunction/core';
 import type {
     DealEntity,
     mjBizAppsSalesDealLineEntity,
     mjBizAppsSalesDealPaymentScheduleEntity,
+    SalesCloseDealInput,
+    SalesCloseDealOutput,
+    SalesCloseRoutingResult,
+    SalesReopenDealOutput,
+} from '@mj-biz-apps/sales-entities';
+import {
+    IsDealFieldEditableWhileLocked,
+    ResolveDealLockState,
+    type DealLockState,
 } from '@mj-biz-apps/sales-entities';
 
 import { WorkspaceCardComponent } from '../vendored/workspace-tabs/workspace-card.component';
@@ -72,11 +82,27 @@ import {
     EmptyLookups,
     STANDARD_ANNUAL_INCREASE_PCT,
     STANDARD_CANCELLATION_NOTICE_DAYS,
+    type DealStatusLookup,
     type DealLookup,
     type DealWorkspaceLookups,
     type DealWorkspacePane,
     type StageLookup,
 } from './deal-workspace.types';
+
+/**
+ * The provider's remote-operation entry point, typed for the two calls this surface makes.
+ *
+ * `RouteOperation` lives on `ProviderBase` and is implemented by the GraphQL client provider, but it is
+ * not part of the `IMetadataProvider` interface `Metadata.Provider` is declared as — so it has to be
+ * narrowed here. Declared as a precise shape rather than reached for with a loose cast: the input and
+ * output types stay checked, which is the whole value of calling a typed operation.
+ */
+interface RemoteOperationRouter {
+    RouteOperation<TInput, TOutput>(
+        operationKey: string,
+        input: TInput,
+    ): Promise<{ Success: boolean; Output?: TOutput; ErrorMessage?: string }>;
+}
 
 /** What one open document in the outer strip carries. */
 interface OpenDeal {
@@ -214,6 +240,9 @@ export class DealWorkspaceComponent implements OnInit {
         });
         this.store.MarkClean(tabId);
         await this.RefreshProducts();
+        // The lock is resolved on OPEN, not on save: a deal that arrives already closed must render
+        // frozen from the first paint, rather than inviting an edit the server will refuse.
+        await this.RefreshLock();
         this.Revalidate();
         return true;
     }
@@ -468,6 +497,245 @@ export class DealWorkspaceComponent implements OnInit {
             return first ? `${first.Message}` : 'The deal is not ready to save.';
         }
         return null;
+    }
+
+    /* ── The close action (§7) ───────────────────────────────────────────────────────────────────
+     *
+     * WHY THIS EXISTS AT ALL. Until now the workspace could set `DealStatusTypeID` to a winning status
+     * and save — which wrote the status field and NOTHING else. No routing, no order, no stage event.
+     * A deal ended up Won with no provenance and no downstream record, and nothing said so. The close
+     * flow was fully built and tested at the operation level; it simply had no caller in the UI.
+     *
+     * So closing goes through `Sales.CloseDeal`, and the status dropdown no longer offers a closing
+     * status (see `SelectableStatuses`). One door, and it is the audited one.
+     */
+
+    /** True when the PERSISTED status locks the deal — resolved through the SHARED rule. */
+    public Lock: DealLockState = { IsLocked: false, StatusName: null, Notice: null };
+
+    public ClosePanelOpen = false;
+    /** `null` until the user picks; drives which fields the panel demands. */
+    public CloseOutcome: 'won' | 'lost' | null = null;
+    public CloseLossReasonID: string | null = null;
+    public CloseLossNotes = '';
+    public CloseNotes = '';
+    public readonly Closing = signal(false);
+    /** What the close actually did downstream, shown to the user rather than buried in a stage event. */
+    public CloseRouting: SalesCloseRoutingResult[] = [];
+    /** Order/contract numbers resolved for display, keyed by routing RecordID. */
+    public RoutedRecordNumbers: Record<string, string> = {};
+    public ReopenReason = '';
+    public ReopenPanelOpen = false;
+
+    /**
+     * The statuses a user may pick DIRECTLY.
+     *
+     * A closing status is excluded — by FLAG, never by name — because entering one is a transition with
+     * downstream consequences, and those only happen inside the operation. `On Hold` is neither won nor
+     * lost, so it survives: pausing a deal is not closing it.
+     */
+    public SelectableStatuses(): DealStatusLookup[] {
+        return this.Lookups.DealStatusTypes.filter((s) => !s.IsWon && !s.IsLost);
+    }
+
+    /** Whether a field may be edited right now. One rule, shared with the server and the record form. */
+    public IsFieldEditable(fieldName: string): boolean {
+        return !this.Lock.IsLocked || IsDealFieldEditableWhileLocked(fieldName);
+    }
+
+    /** The chosen loss reason demands notes — read off the row's FLAG. */
+    public LossReasonRequiresNotes(): boolean {
+        const chosen = this.Lookups.LossReasons.find((r) => r.ID === this.CloseLossReasonID);
+        return chosen?.RequiresNotes === true;
+    }
+
+    public OpenClosePanel(): void {
+        this.ClosePanelOpen = true;
+        this.CloseOutcome = null;
+        this.CloseLossReasonID = null;
+        this.CloseLossNotes = '';
+        this.CloseNotes = '';
+        this.CloseRouting = [];
+        this.Message = '';
+        this.cdr.detectChanges();
+    }
+
+    public CancelClose(): void {
+        this.ClosePanelOpen = false;
+        this.cdr.detectChanges();
+    }
+
+    /**
+     * Closes the deal through the operation.
+     *
+     * ── UNSAVED EDITS ARE SAVED FIRST, DELIBERATELY ─────────────────────────────────────────────
+     *
+     * A close routes the deal's LINES to an order. If the user has edited lines and not saved, there
+     * are three possible behaviours and only one is defensible:
+     *
+     *   · close the persisted state  -> the order is built from data the user is not looking at;
+     *   · discard the edits          -> silently drops work, the same class of bug as a false success;
+     *   · SAVE FIRST, then close     -> the order matches what is on screen.
+     *
+     * So this saves first. If the save is refused the close is NOT attempted, and the refusal shows in
+     * the normal issue list — the user sees why, with the deal intact and still open.
+     */
+    public async ConfirmClose(): Promise<void> {
+        const deal = this.Deal;
+        if (!deal || this.Closing() || !this.CloseOutcome) {
+            return;
+        }
+
+        const wantWon = this.CloseOutcome === 'won';
+        const status = this.Lookups.DealStatusTypes.find((s) => (wantWon ? s.IsWon : s.IsLost));
+        if (!status) {
+            this.Fail(
+                `No active status carries Is${wantWon ? 'Won' : 'Lost'}. Seed the deal status types first.`,
+            );
+            return;
+        }
+
+        this.Closing.set(true);
+        this.Message = '';
+        this.cdr.detectChanges();
+        try {
+            const tabId = this.store.ActiveId;
+            const dirty = this.store.Tabs.find((t) => t.Id === tabId)?.Dirty === true;
+            if (dirty) {
+                await this.Save();
+                if (this.MessageIsError) {
+                    return; // the save was refused; its reason is already on screen
+                }
+            }
+
+            const input: SalesCloseDealInput = {
+                DealID: deal.ID,
+                DealStatusTypeID: status.ID,
+                LossReasonID: wantWon ? null : this.CloseLossReasonID,
+                LossNotes: wantWon ? null : (this.CloseLossNotes.trim() || null),
+                Notes: this.CloseNotes.trim() || null,
+            };
+
+            /**
+             * TWO LAYERS OF SUCCESS, and checking only the outer one is a mistake this repo has already
+             * made once (KNOWN-ISSUES, the contracts seam): `RemoteOpResult.Success` means the operation
+             * RAN. Whether the deal actually closed is `Output.Success`.
+             */
+            const router = Metadata.Provider as unknown as RemoteOperationRouter;
+            const envelope = await router.RouteOperation<SalesCloseDealInput, SalesCloseDealOutput>(
+                'Sales.CloseDeal',
+                input,
+            );
+            if (!envelope.Success) {
+                this.Fail(envelope.ErrorMessage ?? 'Sales.CloseDeal could not be reached.');
+                return;
+            }
+            const out = envelope.Output;
+            if (!out?.Success) {
+                this.ApplyCloseIssues(out?.Issues ?? []);
+                this.Fail(out?.Issues?.[0]?.Message ?? 'The deal could not be closed.');
+                return;
+            }
+
+            this.CloseRouting = out.Routing ?? [];
+            await this.ResolveRoutedNumbers();
+            this.ClosePanelOpen = false;
+            this.MessageIsError = false;
+            this.Message = out.IsWon ? 'Deal closed as won.' : 'Deal closed as lost.';
+            await this.RefreshLock();
+        } finally {
+            this.Closing.set(false);
+            this.cdr.detectChanges();
+        }
+    }
+
+    /** Reopening — the one audited way back through the lock. The reason is required by the operation. */
+    public async ReopenDeal(): Promise<void> {
+        const deal = this.Deal;
+        if (!deal || this.Closing()) {
+            return;
+        }
+        if (!this.ReopenReason.trim()) {
+            this.Fail('A reason is required to reopen a deal — it is recorded on the stage event.');
+            return;
+        }
+
+        this.Closing.set(true);
+        try {
+            const router = Metadata.Provider as unknown as RemoteOperationRouter;
+            const envelope = await router.RouteOperation<
+                { DealID: string; Reason: string },
+                SalesReopenDealOutput
+            >('Sales.ReopenDeal', { DealID: deal.ID, Reason: this.ReopenReason.trim() });
+
+            if (!envelope.Success) {
+                this.Fail(envelope.ErrorMessage ?? 'Sales.ReopenDeal could not be reached.');
+                return;
+            }
+            const out = envelope.Output;
+            if (!out?.Success) {
+                this.ApplyCloseIssues(out?.Issues ?? []);
+                this.Fail(out?.Issues?.[0]?.Message ?? 'The deal could not be reopened.');
+                return;
+            }
+
+            this.ReopenPanelOpen = false;
+            this.ReopenReason = '';
+            this.CloseRouting = [];
+            this.MessageIsError = false;
+            this.Message = 'Deal reopened. The close event remains in its history.';
+            await this.RefreshLock();
+        } finally {
+            this.Closing.set(false);
+            this.cdr.detectChanges();
+        }
+    }
+
+    /**
+     * Turns the operation's issues into the SAME list the surface already uses for validation.
+     *
+     * A refusal naming `LossReasonID` therefore lands against the pane that owns it, with the field
+     * named, exactly like a validation failure — rather than in a second error channel the user has to
+     * learn separately.
+     */
+    private ApplyCloseIssues(issues: SalesCloseDealOutput['Issues']): void {
+        if (!issues?.length) {
+            return;
+        }
+        const mapped = issues.map<DealWorkspaceIssue>((i) => ({
+            Section: (i.Section ?? 'deal') as DealWorkspaceSection,
+            Field: i.Field ?? null,
+            Severity: i.Severity === 'warning' ? 'warning' : 'error',
+            Message: i.Message,
+            RowIndex: null,
+        }));
+        this.Validation = {
+            IsValid: !mapped.some((i) => i.Severity === 'error'),
+            Issues: mapped,
+        };
+    }
+
+    /** Reads the NUMBER for each executed route, so the result names a record a human can go and find. */
+    private async ResolveRoutedNumbers(): Promise<void> {
+        this.RoutedRecordNumbers = {};
+        for (const r of this.CloseRouting) {
+            if (!r.Executed || !r.RecordID) {
+                continue;
+            }
+            const number = await this.service.LookupRoutedRecordNumber(r.Target, r.RecordID);
+            if (number) {
+                this.RoutedRecordNumbers[r.RecordID] = number;
+            }
+        }
+    }
+
+    /** Re-resolves the lock after a close or reopen, so the surface reflects the new state immediately. */
+    private async RefreshLock(): Promise<void> {
+        const deal = this.Deal;
+        const persisted =
+            (deal?.GetFieldByName?.('DealStatusTypeID')?.OldValue as string | null | undefined)
+            ?? (deal?.DealStatusTypeID as string | null | undefined);
+        this.Lock = await ResolveDealLockState(persisted);
     }
 
     // ── Saving ─────────────────────────────────────────────────────────────────

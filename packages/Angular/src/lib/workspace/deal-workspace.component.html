@@ -90,20 +90,124 @@
         <p class="dw-msg" [class.dw-msg--error]="MessageIsError" role="status">{{ Message }}</p>
       }
 
+      <!-- ══════════════════════ THE CLOSE / REOPEN BAR ══════════════════════
+           Closing goes through Sales.CloseDeal, never through the status dropdown: the operation is
+           what routes to an order, stamps the stage event and applies the lock. -->
+      @if (!IsNew) {
+        <div class="dw-close-bar">
+          @if (Lock.IsLocked) {
+            <p class="dw-lock-notice" data-testid="lock-notice">
+              <i class="fa-solid fa-lock" aria-hidden="true"></i> {{ Lock.Notice }}
+            </p>
+            <button type="button" class="dw-btn" data-testid="reopen-open"
+                    (click)="ReopenPanelOpen = !ReopenPanelOpen">
+              <i class="fa-solid fa-lock-open" aria-hidden="true"></i> Reopen deal
+            </button>
+          } @else {
+            <button type="button" class="dw-btn dw-btn--primary" data-testid="close-open"
+                    [disabled]="Closing()" (click)="OpenClosePanel()">
+              <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i> Close deal
+            </button>
+          }
+        </div>
+
+        @if (ReopenPanelOpen && Lock.IsLocked) {
+          <section class="dw-close-panel" data-testid="reopen-panel">
+            <label class="dw-field dw-field--wide">
+              <span class="dw-field__label">Reason for reopening <em>*</em></span>
+              <!-- Required by the operation, and recorded on the stage event: undoing a close has to be
+                   explainable, because a contract or an order was derived from it. -->
+              <input type="text" data-testid="reopen-reason" [(ngModel)]="ReopenReason"
+                     placeholder="e.g. Customer asked to renegotiate the term" />
+            </label>
+            <div class="dw-close-panel__actions">
+              <button type="button" class="dw-btn dw-btn--primary" data-testid="reopen-confirm"
+                      [disabled]="Closing()" (click)="ReopenDeal()">Reopen</button>
+              <button type="button" class="dw-btn" (click)="ReopenPanelOpen = false">Cancel</button>
+            </div>
+          </section>
+        }
+
+        @if (ClosePanelOpen) {
+          <section class="dw-close-panel" data-testid="close-panel">
+            <div class="dw-close-panel__outcome">
+              <button type="button" class="dw-btn" data-testid="close-won"
+                      [class.dw-btn--primary]="CloseOutcome === 'won'"
+                      (click)="CloseOutcome = 'won'">Won</button>
+              <button type="button" class="dw-btn" data-testid="close-lost"
+                      [class.dw-btn--primary]="CloseOutcome === 'lost'"
+                      (click)="CloseOutcome = 'lost'">Lost</button>
+            </div>
+
+            @if (CloseOutcome === 'lost') {
+              <label class="dw-field">
+                <span class="dw-field__label">Loss reason <em>*</em></span>
+                <select data-testid="close-loss-reason" [(ngModel)]="CloseLossReasonID">
+                  <option [ngValue]="null">— choose —</option>
+                  @for (r of Lookups.LossReasons; track r.ID) {
+                    <option [ngValue]="r.ID">{{ r.Name }}</option>
+                  }
+                </select>
+              </label>
+              <!-- Shown only when the CHOSEN REASON's RequiresNotes flag is set — the flag, not the name. -->
+              @if (LossReasonRequiresNotes()) {
+                <label class="dw-field dw-field--wide">
+                  <span class="dw-field__label">Loss notes <em>*</em></span>
+                  <textarea rows="2" data-testid="close-loss-notes" [(ngModel)]="CloseLossNotes"
+                            placeholder="This reason requires an explanation."></textarea>
+                </label>
+              }
+            }
+
+            @if (CloseOutcome) {
+              <label class="dw-field dw-field--wide">
+                <span class="dw-field__label">Notes</span>
+                <textarea rows="2" data-testid="close-notes" [(ngModel)]="CloseNotes"></textarea>
+              </label>
+            }
+
+            <div class="dw-close-panel__actions">
+              <button type="button" class="dw-btn dw-btn--primary" data-testid="close-confirm"
+                      [disabled]="!CloseOutcome || Closing()" (click)="ConfirmClose()">
+                {{ Closing() ? 'Closing…' : 'Close deal' }}
+              </button>
+              <button type="button" class="dw-btn" (click)="CancelClose()">Cancel</button>
+            </div>
+          </section>
+        }
+
+        <!-- WHAT THE CLOSE ACTUALLY DID. Previously visible only in the stage event; a user who closes a
+             deal should be told whether an order exists and what it is called. -->
+        @if (CloseRouting.length) {
+          <section class="dw-routing" data-testid="close-routing">
+            @for (r of CloseRouting; track r.Target) {
+              <p class="dw-routing__row" [class.dw-routing__row--failed]="!r.Executed">
+                <strong>{{ r.Target }}</strong>
+                @if (r.Executed) {
+                  — created{{ r.RecordID && RoutedRecordNumbers[r.RecordID] ? ' · ' + RoutedRecordNumbers[r.RecordID] : '' }}
+                } @else {
+                  — not created: {{ r.Reason || 'no reason given' }}
+                }
+              </p>
+            }
+          </section>
+        }
+      }
+
       <!-- ══════════════════════════ PARTY INFO ══════════════════════════ -->
       @if (ActivePane === 'party') {
         <section class="dw-pane">
           <div class="dw-grid">
             <label class="dw-field dw-field--wide">
               <span class="dw-field__label">Deal name <em>*</em></span>
-              <input type="text" [(ngModel)]="deal.Name" (ngModelChange)="Touch()"
+              <input type="text" [(ngModel)]="deal.Name" [disabled]="!IsFieldEditable('Name')" (ngModelChange)="Touch()"
                      placeholder="e.g. Northwind Health — Platform Rollout" />
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Pipeline <em>*</em></span>
               <!-- Pipeline is not a plain binding: it decides the selling company AND the stage list. -->
-              <select [ngModel]="deal.PipelineID"
+              <select [ngModel]="deal.PipelineID" [disabled]="!IsFieldEditable('PipelineID')"
                       (ngModelChange)="SelectPipeline(deal, $event); Touch()">
                 <option [ngValue]="null">— choose —</option>
                 @for (p of Lookups.Pipelines; track p.ID) {
@@ -114,7 +218,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Stage</span>
-              <select [ngModel]="deal.PipelineStageID"
+              <select [ngModel]="deal.PipelineStageID" [disabled]="!IsFieldEditable('PipelineStageID')"
                       (ngModelChange)="OnStageChange(deal, $event)"
                       [disabled]="!deal.PipelineID">
                 <option [ngValue]="null">— choose —</option>
@@ -127,7 +231,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Deal type</span>
-              <select [(ngModel)]="deal.DealTypeID" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.DealTypeID" [disabled]="!IsFieldEditable('DealTypeID')" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— choose —</option>
                 @for (t of Lookups.DealTypes; track t.ID) {
                   <option [ngValue]="t.ID">{{ t.Name }}</option>
@@ -137,17 +241,27 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Status</span>
-              <select [(ngModel)]="deal.DealStatusTypeID" (ngModelChange)="Touch()">
+              <!-- CLOSING STATUSES ARE NOT OFFERED HERE. Picking one used to write the status field and
+                   nothing else — no routing, no order, no stage event — leaving a deal Won with no
+                   provenance. Closing is the close action; this dropdown is for the open lifecycle.
+                   Excluded by FLAG (IsWon/IsLost), so "On Hold" survives and a rename cannot break it. -->
+              <select data-testid="status-select" [(ngModel)]="deal.DealStatusTypeID"
+                      [disabled]="!IsFieldEditable('DealStatusTypeID')" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— choose —</option>
-                @for (s of Lookups.DealStatusTypes; track s.ID) {
+                @for (s of SelectableStatuses(); track s.ID) {
                   <option [ngValue]="s.ID">{{ s.Name }}</option>
+                }
+                <!-- The deal's OWN status when it is a closing one, so a closed deal still shows what it is
+                     rather than reading "— choose —". Never selectable: the list above excludes it. -->
+                @if (Lock.IsLocked && Lock.StatusName) {
+                  <option [ngValue]="deal.DealStatusTypeID">{{ Lock.StatusName }}</option>
                 }
               </select>
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Customer</span>
-              <select [(ngModel)]="deal.AccountID" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.AccountID" [disabled]="!IsFieldEditable('AccountID')" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— choose —</option>
                 @for (a of Lookups.Accounts; track a.ID) {
                   <option [ngValue]="a.ID">{{ a.Name }}</option>
@@ -157,7 +271,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Primary contact</span>
-              <select [(ngModel)]="deal.PrimaryContactID" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.PrimaryContactID" [disabled]="!IsFieldEditable('PrimaryContactID')" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— choose —</option>
                 @for (c of Lookups.Contacts; track c.ID) {
                   <option [ngValue]="c.ID">{{ c.Name }}</option>
@@ -167,7 +281,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Billing contact</span>
-              <select [(ngModel)]="deal.BillingContactID" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.BillingContactID" [disabled]="!IsFieldEditable('BillingContactID')" (ngModelChange)="Touch()">
                 <option [ngValue]="null">— same as primary —</option>
                 @for (c of Lookups.Contacts; track c.ID) {
                   <option [ngValue]="c.ID">{{ c.Name }}</option>
@@ -405,12 +519,12 @@
         <section class="dw-pane">
           <label class="dw-field dw-field--wide">
             <span class="dw-field__label">Contract variances</span>
-            <textarea rows="10" [(ngModel)]="deal.ContractVariances" (ngModelChange)="Touch()"
+            <textarea rows="10" [(ngModel)]="deal.ContractVariances" [disabled]="!IsFieldEditable('ContractVariances')" (ngModelChange)="Touch()"
                       placeholder="e.g. Annual increase capped at 3% for years 2–3. Termination for convenience with 60 days' notice."></textarea>
           </label>
           <label class="dw-field dw-field--wide">
             <span class="dw-field__label">Description / notes</span>
-            <textarea rows="5" [(ngModel)]="deal.Description" (ngModelChange)="Touch()"></textarea>
+            <textarea rows="5" [(ngModel)]="deal.Description" [disabled]="!IsFieldEditable('Description')" (ngModelChange)="Touch()"></textarea>
           </label>
           <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'variances' }"></ng-container>
         </section>
