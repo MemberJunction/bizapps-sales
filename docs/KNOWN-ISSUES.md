@@ -755,10 +755,14 @@ list in the warning is every sales and MJ-core entity and no common ones, which 
 **Expected, not a bug — do not file it.** `RequiresSubclass` is false on that base, so the fallback is
 legal and the record opens with its fields intact. Nothing is lost.
 
-Two reasons it is still worth recording. It is **console noise on a click a demo makes**, and the
-warning is long enough to bury a real error underneath it. And it means any Playwright spec that
-asserts a clean console on that click has to allowlist it — `expectOnlyKnownErrors` takes an `allowed`
-list for exactly this.
+It is still worth recording because it is **console noise on a click a demo makes**, and the warning is
+long enough to bury a real error underneath it.
+
+**It does NOT currently trip the Explorer harness, and that was measured rather than assumed.** It is
+logged at WARNING level, and `captureConsoleErrors` wires only `console.error` and `pageerror` — so the
+sink never sees it and the specs that click a customer pass with no allowlist. If that sink is ever
+widened to warnings, this becomes the first thing it catches, and `expectOnlyKnownErrors` takes an
+`allowed` list for exactly that case.
 
 The fix belongs upstream of sales: load bizapps-common's generated entity subclasses in the host's
 client bootstrap, the same way sales' are. Recorded here rather than worked around, because the
