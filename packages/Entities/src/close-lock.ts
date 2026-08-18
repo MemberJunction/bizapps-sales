@@ -26,6 +26,7 @@
  *
  * @module @mj-biz-apps/sales-entities
  */
+import { RunView, type UserInfo } from '@memberjunction/core';
 
 /**
  * The deal fields that stay editable while the deal is locked.
@@ -47,4 +48,68 @@ export const DEAL_FIELDS_EDITABLE_WHILE_LOCKED: ReadonlySet<string> = new Set<st
  */
 export function IsDealFieldEditableWhileLocked(fieldName: string): boolean {
     return DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has(fieldName);
+}
+
+/** Sales' deal-status type table. Named here so the lock lookup below has one spelling of it. */
+const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
+
+/** What a surface needs to know to render the lock: whether it is on, and what to say about it. */
+export interface DealLockState {
+    IsLocked: boolean;
+    /** The status' display name, for the notice. Null when not locked. */
+    StatusName: string | null;
+    /** A ready-to-render explanation, or null when the deal is open. */
+    Notice: string | null;
+}
+
+/**
+ * Resolves whether a PERSISTED status locks the deal.
+ *
+ * ── WHY THE LOOKUP IS SHARED, NOT JUST THE FIELD LIST ───────────────────────────────────────────
+ *
+ * Sharing `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` alone would still leave two copies of the more subtle
+ * half — *how you decide a deal is locked at all*: read `LocksDeal` off the status ROW, by FLAG, and
+ * off the **persisted** status rather than whatever the user just picked in a dropdown. Both of those
+ * are easy to get quietly wrong in a second implementation, and a surface that resolved the lock from
+ * the pending status would unlock a deal the moment someone changed the dropdown.
+ *
+ * So every surface calls this. The Explorer record form and the deal workspace now share one answer.
+ *
+ * Reads the FLAG, never a status name — a deployment may call its winning status "Signed" (§3).
+ *
+ * @param persistedStatusID - `DealStatusTypeID`'s **OldValue**, not its current value.
+ * @param contextUser - Server callers must pass one; the browser omits it.
+ */
+export async function ResolveDealLockState(
+    persistedStatusID: string | null | undefined,
+    contextUser?: UserInfo,
+): Promise<DealLockState> {
+    const open: DealLockState = { IsLocked: false, StatusName: null, Notice: null };
+    if (!persistedStatusID) {
+        return open;
+    }
+
+    const result = await new RunView().RunView<{ LocksDeal: boolean; Name: string }>(
+        {
+            EntityName: E_DEAL_STATUS_TYPE,
+            ExtraFilter: `ID = '${String(persistedStatusID).replace(/'/g, "''")}'`,
+            ResultType: 'simple',
+            Fields: ['LocksDeal', 'Name'],
+        },
+        contextUser,
+    );
+    const row = result?.Success ? (result.Results ?? [])[0] : undefined;
+    if (!row?.LocksDeal) {
+        return open;
+    }
+
+    const editable = [...DEAL_FIELDS_EDITABLE_WHILE_LOCKED].join(' and ');
+    return {
+        IsLocked: true,
+        StatusName: row.Name,
+        Notice:
+            `This deal is closed (${row.Name}) and locked. A contract or an order was derived from it, so ` +
+            `its terms are frozen — only ${editable} can still be changed. To change anything else, reopen ` +
+            'the deal, which records a reason.',
+    };
 }

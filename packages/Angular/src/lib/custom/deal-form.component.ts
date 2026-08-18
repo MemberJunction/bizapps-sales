@@ -34,12 +34,11 @@ import { Component } from '@angular/core';
 import { RunView } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
-import { DEAL_FIELDS_EDITABLE_WHILE_LOCKED } from '@mj-biz-apps/sales-entities';
+import { DEAL_FIELDS_EDITABLE_WHILE_LOCKED, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
 import type { ValidationResult } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
 
-const E_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 const E_DEAL_LINE = 'MJ_BizApps_Sales: Deal Lines';
 
 /** See `deal-line-form.component.ts` for why the priority is explicit rather than import-order. */
@@ -72,35 +71,16 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     }
 
     /**
-     * Reads `LocksDeal` off the persisted status ROW — never a status name.
+     * Resolves the lock through the SHARED rule in `sales-entities`.
      *
-     * The flag is the whole point of the type table: a deployment may call its winning status "Signed",
-     * and nothing here should care. The CI vocabulary grep enforces the same rule server-side.
+     * The lookup itself — read `LocksDeal` off the status row, by flag, off the PERSISTED status — lives
+     * in `ResolveDealLockState` so this form and the deal workspace cannot answer it differently.
      */
     private async resolveCloseLock(): Promise<void> {
         const persisted = this.record?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
-        if (!persisted) {
-            return;
-        }
-
-        const rv = new RunView();
-        const result = await rv.RunView<{ LocksDeal: boolean; Name: string }>({
-            EntityName: E_STATUS_TYPE,
-            ExtraFilter: `ID = '${String(persisted).replace(/'/g, "''")}'`,
-            ResultType: 'simple',
-            Fields: ['LocksDeal', 'Name'],
-        });
-        const row = result?.Success ? (result.Results ?? [])[0] : undefined;
-        if (!row?.LocksDeal) {
-            return;
-        }
-
-        this.IsLocked = true;
-        const editable = [...DEAL_FIELDS_EDITABLE_WHILE_LOCKED].join(' and ');
-        this.LockNotice =
-            `This deal is closed (${row.Name}) and locked. A contract or an order was derived from it, so ` +
-            `its terms are frozen — only ${editable} can still be changed. To change anything else, reopen ` +
-            'the deal, which records a reason.';
+        const lock = await ResolveDealLockState(persisted);
+        this.IsLocked = lock.IsLocked;
+        this.LockNotice = lock.Notice;
     }
 
     /**
