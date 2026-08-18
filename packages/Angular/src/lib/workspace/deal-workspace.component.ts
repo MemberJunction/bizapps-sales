@@ -642,6 +642,7 @@ export class DealWorkspaceComponent implements OnInit {
             this.ClosePanelOpen = false;
             this.MessageIsError = false;
             this.Message = out.IsWon ? 'Deal closed as won.' : 'Deal closed as lost.';
+            await this.ReloadActiveDeal();
             await this.RefreshLock();
         } finally {
             this.Closing.set(false);
@@ -684,6 +685,7 @@ export class DealWorkspaceComponent implements OnInit {
             this.CloseRouting = [];
             this.MessageIsError = false;
             this.Message = 'Deal reopened. The close event remains in its history.';
+            await this.ReloadActiveDeal();
             await this.RefreshLock();
         } finally {
             this.Closing.set(false);
@@ -736,6 +738,39 @@ export class DealWorkspaceComponent implements OnInit {
             (deal?.GetFieldByName?.('DealStatusTypeID')?.OldValue as string | null | undefined)
             ?? (deal?.DealStatusTypeID as string | null | undefined);
         this.Lock = await ResolveDealLockState(persisted);
+    }
+
+    /**
+     * Re-reads the deal after the operation changed it SERVER-SIDE.
+     *
+     * ── WHY THIS IS NOT OPTIONAL, AND WHAT IT COST TO LEARN ─────────────────────────────────────
+     *
+     * `Sales.CloseDeal` writes the status, the stage event and the downstream records itself. The
+     * `DealEntity` this surface is holding took no part in that, so after a close it still carries the
+     * OPEN status — and `RefreshLock` reads the PERSISTED status off that stale copy, concludes the deal
+     * is not locked, and leaves every field editable on a deal the server has already frozen.
+     *
+     * The screen therefore looked closed (message, routing result) while behaving open, and the lock
+     * appeared only after navigating away and back. `60-close-deal.spec.ts` caught exactly this; the
+     * browser walkthrough that preceded it did not, because it happened to re-open the deal from the
+     * roster before looking.
+     *
+     * So the record is re-read from the server, which is the only thing that can be right: the operation
+     * may have changed more than the status.
+     */
+    private async ReloadActiveDeal(): Promise<void> {
+        const tabId = this.store.ActiveId;
+        const current = this.Deal;
+        if (!tabId || !current?.ID) {
+            return;
+        }
+        const fresh = await this.service.LoadDeal(current.ID);
+        if (!fresh) {
+            return;
+        }
+        this.store.UpdateState(tabId, { Deal: fresh, ActivePane: this.ActivePane }, false);
+        this.store.MarkClean(tabId);
+        this.Revalidate();
     }
 
     // ── Saving ─────────────────────────────────────────────────────────────────

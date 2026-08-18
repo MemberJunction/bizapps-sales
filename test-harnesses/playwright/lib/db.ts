@@ -35,15 +35,39 @@ export async function Db(): Promise<sql.ConnectionPool> {
     const dotenv = await import('dotenv');
     dotenv.config({ path: `${REPO_ROOT}/.env` });
 
+    const database = process.env.DB_DATABASE ?? '';
+    /**
+     * ANNOUNCED, because getting this wrong is silent and expensive.
+     *
+     * These assertions only mean something if this is the SAME database the Explorer under test writes
+     * to. On a standalone stack sales' `.env` is that database; on an MJ HOST stack it is not — the host
+     * has its own, and the spec would then report a missing order that in fact exists, blaming the
+     * feature for a configuration mistake. `dotenv` does not overwrite an already-set variable, so
+     * `DB_DATABASE=... npx playwright test` wins; printing it makes the choice checkable in the log.
+     */
+    console.log(`  db: asserting against "${database}" (override with DB_DATABASE=...)`);
+
     pool = await new sql.ConnectionPool({
         server: process.env.DB_HOST ?? 'localhost',
         port: Number(process.env.DB_PORT ?? 1433),
-        database: process.env.DB_DATABASE ?? '',
+        database,
         user: process.env.DB_USERNAME,
         password: process.env.DB_PASSWORD,
         options: { trustServerCertificate: true, encrypt: true },
         requestTimeout: 30_000,
     }).connect();
+
+    // A database with no sales schema cannot be the right one; say so now rather than as a SQL error
+    // inside an assertion.
+    const r = await pool.request().query(
+        "SELECT COUNT(*) AS n FROM sys.schemas WHERE name = '__mj_BizAppsSales'",
+    );
+    if ((r.recordset[0]?.n ?? 0) === 0) {
+        throw new Error(
+            `"${database}" has no __mj_BizAppsSales schema, so it is not the database this Explorer is `
+            + 'writing to. Set DB_DATABASE to the host\'s database before running these specs.',
+        );
+    }
     return pool;
 }
 
@@ -70,11 +94,25 @@ export async function QueryAll<T extends Record<string, unknown>>(text: string):
 export async function DealByName(name: string): Promise<
     { ID: string; DealNumber: string; StatusName: string; IsWon: boolean; IsLost: boolean; LocksDeal: boolean } | undefined
 > {
+    /**
+     * LEFT JOIN, and the difference is not academic.
+     *
+     * `DealStatusTypeID` is nullable, and a deal saved without a status is perfectly legal. An INNER
+     * JOIN silently DROPS that row, so this returned `undefined` for a deal that plainly existed — and
+     * the spec then failed with "Cannot read properties of undefined", blaming the feature for a defect
+     * in its own query. A helper whose job is "does this row exist" must never be able to answer no
+     * because of a join.
+     *
+     * The flags are coalesced to false so callers can read them without null-checking: no status means
+     * not won, not lost, not locked, which is exactly right.
+     */
     return QueryOne(`
         SELECT CONVERT(varchar(36), d.ID) AS ID, d.DealNumber,
-               s.Name AS StatusName, s.IsWon, s.IsLost, s.LocksDeal
+               ISNULL(s.Name, '(none)') AS StatusName,
+               ISNULL(s.IsWon, 0) AS IsWon, ISNULL(s.IsLost, 0) AS IsLost,
+               ISNULL(s.LocksDeal, 0) AS LocksDeal
         FROM __mj_BizAppsSales.Deal d
-        JOIN __mj_BizAppsSales.DealStatusType s ON s.ID = d.DealStatusTypeID
+        LEFT JOIN __mj_BizAppsSales.DealStatusType s ON s.ID = d.DealStatusTypeID
         WHERE d.Name = '${name.replace(/'/g, "''")}'`);
 }
 

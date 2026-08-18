@@ -175,6 +175,9 @@ export class DealWorkspaceService {
             { EntityName: E_ACCOUNT, ExtraFilter: 'IsActive = 1', OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
             { EntityName: E_CONTACT, OrderBy: 'LastName ASC', ResultType: 'simple', Fields: ['ID', 'FirstName', 'LastName', 'Email'] },
             { EntityName: E_EMPLOYEE, ExtraFilter: 'Active = 1', OrderBy: 'LastName ASC', ResultType: 'simple', Fields: ['ID', 'FirstLast'] },
+            // Index 9 — loss reasons, for the close panel. `RequiresNotes` travels with them because the
+            // panel decides whether LossNotes is mandatory from the FLAG on the chosen row.
+            { EntityName: E_LOSS_REASON, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'RequiresNotes'] },
         ];
 
         const results = await rv.RunViews(params);
@@ -205,6 +208,12 @@ export class DealWorkspaceService {
             IsLost: r.IsLost === true,
         }));
         lookups.ForecastCategoryTypes = rows<NamedRow>(4).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        // Index 9 — the loss reasons queried above. The close panel cannot demand a reason it has no
+        // list to offer, and an empty dropdown fails as a TIMEOUT rather than as a missing list, which
+        // is a slow way to find out.
+        lookups.LossReasons = rows<LossReasonRow>(9).map<LossReasonLookup>((r) => ({
+            ID: r.ID, Name: r.Name, RequiresNotes: r.RequiresNotes === true,
+        }));
         lookups.LineTypes = rows<LineTypeRow>(5).map<LineTypeLookup>((r) => ({
             ID: r.ID, Name: r.Name, IsRecurring: r.IsRecurring === true,
         }));

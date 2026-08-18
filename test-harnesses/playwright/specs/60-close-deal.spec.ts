@@ -47,6 +47,16 @@ function railItem(page: Page, label: string) {
 const testId = (page: Page, id: string) => page.locator(`[data-testid="${id}"]`).locator('visible=true').first();
 
 /**
+ * A party-info `<select>` addressed by its LABEL.
+ *
+ * Positional selectors (`page.locator('select').nth(4)`) break the moment a field is added or reordered,
+ * and they break silently — the spec sets the wrong dropdown and fails somewhere unrelated. The label is
+ * the stable handle.
+ */
+const fieldSelect = (page: Page, label: string) =>
+    page.locator('label.dw-field', { hasText: new RegExp(`^\\s*${label}`) }).locator('select').first();
+
+/**
  * Builds a saved, line-carrying deal in the workspace and returns its name.
  *
  * A LINE IS NOT OPTIONAL here: one-time lines are what route to an order, so a header-only deal would
@@ -60,24 +70,42 @@ async function createDealWithLine(page: Page, suffix: string): Promise<string> {
     await railItem(page, 'Workspace').click();
     await expect(testId(page, 'status-select')).toBeVisible({ timeout: 30_000 });
 
-    await page.getByPlaceholder(/Northwind Health/i).first().fill(name);
+    await page.getByPlaceholder(/Northwind Health/i).locator('visible=true').first().fill(name);
 
     // Pipeline first: it decides the selling company, and the company decides the product catalogue.
-    const pipeline = page.locator('select').first();
-    await pipeline.selectOption({ label: 'B2B' });
+    await fieldSelect(page, 'Pipeline').selectOption({ label: 'B2B' });
+
+    /**
+     * A CUSTOMER IS REQUIRED TO CLOSE, and omitting it is how the first version of this spec failed.
+     *
+     * `Sales.CloseDeal` refuses a won deal with no account — "A won deal must be attached to a
+     * customer" — because an order needs a payer. The refusal is correct; the fixture was incomplete.
+     * Chosen by INDEX rather than by name so the spec does not depend on which accounts a host seeded.
+     */
+    await fieldSelect(page, 'Customer').selectOption({ index: 1 });
+
+    // An OPEN status, because a deal a rep is working is not statusless. The dropdown only offers
+    // non-closing statuses now, so index 1 is the first of those — closing is the close action's job.
+    await fieldSelect(page, 'Status').selectOption({ index: 1 });
 
     await page.locator('.dw-panes__tab', { hasText: 'Product lines' }).first().click();
     await page.getByRole('button', { name: /Add line/i }).first().click();
 
     // The picker: choose whatever the FIRST real product is rather than naming a SKU, so this spec
     // cannot rot when the catalogue changes.
-    const productSelect = page.locator('select').filter({ hasText: /not linked/i }).first();
+    const productSelect = page.locator('select').filter({ hasText: /not linked/i }).locator('visible=true').first();
     await productSelect.selectOption({ index: 1 });
-    const typeSelect = page.locator('select').filter({ hasText: /One-Time/i }).first();
+    const typeSelect = page.locator('select').filter({ hasText: /One-Time/i }).locator('visible=true').first();
     await typeSelect.selectOption({ label: 'One-Time' });
 
-    await page.getByRole('button', { name: /^Save deal/i }).first().click();
+    await page.getByRole('button', { name: /^Save deal/i }).locator('visible=true').first().click();
     await expect(page.locator('.dw-msg')).toContainText(/created|saved/i, { timeout: 30_000 });
+
+    // The screen said it saved; confirm the ROW exists before any test builds on it. A fixture that
+    // returns the name of a deal that was never persisted turns every later assertion into a mystery
+    // ("Cannot read properties of undefined"), which is exactly how this spec first failed.
+    const saved = await DealByName(name);
+    expect(saved, `fixture: "${name}" reported saved but no row exists`).toBeTruthy();
     return name;
 }
 
@@ -138,7 +166,7 @@ test.describe('closing a deal through the Explorer', () => {
         await expect(testId(page, 'lock-notice'), 'a locked deal must say so').toBeVisible();
 
         // The frozen fields must be DISABLED rather than merely refused later.
-        const nameInput = page.getByPlaceholder(/Northwind Health/i).first();
+        const nameInput = page.getByPlaceholder(/Northwind Health/i).locator('visible=true').first();
         await expect(nameInput, 'the deal name is frozen on a closed deal').toBeDisabled();
         await expect(testId(page, 'status-select'), 'status is frozen on a closed deal').toBeDisabled();
 
