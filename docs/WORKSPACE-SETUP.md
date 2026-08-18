@@ -80,6 +80,22 @@ pnpm exec turbo run build --filter "@memberjunction/cli..." --continue
 > own `turbo.json`, which uses `globalDependencies` — a key turbo 2.10.x rejects outright
 > (`Found an unknown key`). Every build in this guide is filtered for that reason.
 
+> ### ⚠️ A `--filter` build can report clean while the full build FAILS. Verify with `pnpm run build`.
+>
+> This has bitten more than once, in both directions, and it is worth the paragraph.
+>
+> `pnpm --filter <pkg> run build` consults turbo's cache. A package whose inputs turbo considers
+> unchanged is reported as a cache hit and its compiler never runs — so a file you just edited can be
+> declared clean by a build that did not look at it. The failure then surfaces later, from an unrelated
+> command, pointing at the wrong cause.
+>
+> Measured instances in this repo: a filtered `sales-ng` build passed while four TypeScript errors sat
+> in `deal-workspace.component.ts`; and a filtered build passed on a rebase whose merge resolution had
+> broken a doc comment into eight syntax errors, which only `pnpm run build` surfaced.
+>
+> **The rule: use `--filter` to iterate, and `pnpm run build` (all 6 tasks) before you trust a result,
+> commit, or report a package as green.** Filtered builds are for speed, not for evidence.
+
 `--continue` is required, not defensive: **MJ `next` does not currently build clean.** Four packages fail
 (see §7). The CLI's own output is still emitted and runs fine.
 

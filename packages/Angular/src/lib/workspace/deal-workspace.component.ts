@@ -108,6 +108,8 @@ interface RemoteOperationRouter {
         input: TInput,
     ): Promise<{ Success: boolean; Output?: TOutput; ErrorMessage?: string }>;
 }
+
+/**
  * The related entities this surface can open.
  *
  * `Sales Accounts` / `Sales Contacts` rather than common's `Organizations` / `People`: the deal's FKs
