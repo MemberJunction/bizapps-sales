@@ -350,3 +350,54 @@ Investigating the port established that the two `DealStageEvent` append sites in
 
 **Not done here.** Nothing on this lineage stamps an ordinary transition yet, so there is no double-write
 to fix today; `Sales.CloseDeal` remains the single writer. KI-9 stands, with this refinement.
+
+---
+
+## Explorer UX rework (#89) — Phase 1
+
+---
+
+### D-UX1 — The vendored `workspace-tabs` copy is retired, and its "byte-identical" claim was false
+
+**Decision:** delete `packages/Angular/src/lib/vendored/workspace-tabs/` (7 files, 473 TS lines + 2 CSS)
+and import the components from **`@memberjunction/ng-ui-components`**, which now ships them.
+
+**Why it was vendored at all**, from the deleted `VENDORED.md`: `mj-workspace-card` is the frame every
+workspace screen in this family shares; it lived in bizapps-accounting's Angular package, which sales does
+not depend on and must not depend on; and its upstream home was always MJ core — accounting's own source
+directory was called `transfer-pending` for exactly that reason. Copying was the smaller wrong answer, on
+record rather than by accident. **That intent is now redeemed.**
+
+**Three things had to be checked first, and two of them contradicted the rework plan.**
+
+1. **Is it in the PUBLISHED package, or only in the linked local MJ?** This matters and is easy to get
+   wrong: `mj dev workspace` resolves `@memberjunction/ng-ui-components` through a **symlink into the
+   local MJ checkout**, while CI installs from the registry with `--frozen-lockfile`. Anything present
+   only in local source would build here and break in CI. **Verified by downloading the actual
+   `6.1.0-edge.2` tarball** — all five files ship in `dist/lib/workspace-tabs/` and are exported from
+   `dist/public-api.d.ts`.
+
+2. **`VENDORED.md` claimed the files were byte-identical to upstream, "load-bearing" so the swap would be
+   a deletion plus an import change. THEY ARE NOT.** Measured drift against MJ core:
+   `workspace-tab-strip.component.css` 200 changed lines · `workspace-tab-strip.component.ts` 157 ·
+   `workspace-card.component.ts` 55 · `workspace-tab-store.ts` 22 · `workspace-tabs.types.ts` 20 ·
+   `workspace-tip.directive.ts` 9. Only `workspace-card.component.css` is unchanged.
+
+   **The swap still holds, for a better reason than byte-identity: the BINDING SURFACE is a superset.**
+   MJ core's card exposes all 23 `@Input`/`@Output` members the template binds, plus one new optional
+   input (`AllowReorder`), and the store has all ten members the component calls. The drift is internal
+   implementation and styling — which is the part worth inheriting.
+
+3. **The symbols were RENAMED**, so this was not the pure path swap the plan predicted:
+   `WorkspaceCardComponent` → `MJWorkspaceCardComponent`, and likewise `MJWorkspaceTabStore`,
+   `MJWorkspaceTab`, `MJTabReorder`, `MJWorkspaceTabState`, `MJWorkspaceTabStripComponent`,
+   `MJWorkspaceTipDirective`. **The selector is unchanged** (`mj-workspace-card`), so the template needed
+   no edits at all.
+
+**`VENDORED.md` also cited "a decision (D8)" that was never recorded in this repository** — the decision
+list here runs D1–D7, D-6 and D-RRC1–6. The citation appears to have been carried over from the source
+repo's numbering. This entry is the decision that should have existed.
+
+**Why the correction is recorded rather than simply deleted with the file:** the claim was load-bearing
+for planning. It is what made Phase 1 look like a five-minute change, and anyone re-reading an old copy of
+`VENDORED.md` or the first draft of the rework plan would believe it again.

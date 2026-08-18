@@ -80,7 +80,18 @@
                         <tr (click)="OpenDeal(d)" [title]="'Open ' + d.Name + ' in the workspace'"
                             [class.slipped]="IsSlipped(d)">
                           <td class="where">{{ d.Name }}</td>
-                          <td class="muted">{{ d.CustomerName }}</td>
+                          <td class="muted">
+                              <!-- The account opens as its OWN Explorer tab, not in the workspace. Only
+                                   offered when the deal actually has one — AccountID is nullable by
+                                   design. stopPropagation lives in OpenCustomer: this sits inside a row
+                                   that opens the deal. -->
+                              @if (d.AccountID) {
+                                <button type="button" class="linklike" (click)="OpenCustomer(d, $event)"
+                                        [title]="'Open ' + d.CustomerName + ' as a record'">{{ d.CustomerName }}</button>
+                              } @else {
+                                {{ d.CustomerName }}
+                              }
+                            </td>
                           <td class="muted">{{ d.PipelineStage || '—' }}</td>
                           <td class="num">{{ Money(d.Amount) }}</td>
                           <td class="muted">
@@ -145,7 +156,18 @@
                             {{ d.Name }}
                             @if (d.DealNumber) { <span class="num-chip">{{ d.DealNumber }}</span> }
                           </td>
-                          <td class="muted">{{ d.CustomerName }}</td>
+                          <td class="muted">
+                              <!-- The account opens as its OWN Explorer tab, not in the workspace. Only
+                                   offered when the deal actually has one — AccountID is nullable by
+                                   design. stopPropagation lives in OpenCustomer: this sits inside a row
+                                   that opens the deal. -->
+                              @if (d.AccountID) {
+                                <button type="button" class="linklike" (click)="OpenCustomer(d, $event)"
+                                        [title]="'Open ' + d.CustomerName + ' as a record'">{{ d.CustomerName }}</button>
+                              } @else {
+                                {{ d.CustomerName }}
+                              }
+                            </td>
                           <td class="muted">{{ d.Pipeline || '—' }}</td>
                           <td class="muted">{{ d.PipelineStage || '—' }}</td>
                           <td><span class="pill" [class]="StatusTone(d)">{{ d.DealStatusType || '—' }}</span></td>

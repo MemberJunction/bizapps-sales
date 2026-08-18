@@ -695,3 +695,76 @@ safe is not a fix for this; it only removes the shape from *our* fixtures.
 
 **Whatever the fix, the deal must not end up Won when no order was created.** That half is independent of
 how `ProductID` is resolved, and it is the part that corrupts data rather than merely failing.
+
+---
+
+## 🟢 KI-15 — The deal number is not surfaced in the workspace after a save
+
+**Found while dry-running the demo script.** Saving a deal reports `Deal created.` and clears the
+`Unsaved` chip, and that is all. `DealNumber` is minted by the server and is genuinely on the record —
+but the workspace template never renders it. It appears only in the roster
+(`sales-section.component.html`, the `num-chip` beside the deal name), so the only way to see the
+number of a deal you just created is to leave the workspace and open **All deals**.
+
+**Expected, not a bug — do not file it.** Nothing is lost and nothing is wrong; the number simply has
+no home on that surface yet. It matters because it reads as a failure: a demo or a tester waits for a
+number to appear, and waits.
+
+The fix is a one-line addition to the customer-context band, where the pipeline and deal-type chips
+already live. Left alone here because that band is chrome the UX rework owns, and a number added to it
+should be designed with the rest of the chips rather than wedged in.
+
+---
+
+## 🟢 KI-16 — The dashboard does not re-query when you navigate back to it
+
+Its tiles and its "Closing soonest" card are loaded once and cached. Close a deal in the workspace,
+click **Dashboard**, and the tiles still show the pre-close numbers — an open deal that is now won, a
+pipeline total that no longer includes it. Nothing indicates the figures are stale.
+
+**Press the refresh button (top right) and it corrects instantly.** That is the whole workaround, and
+it is why the button exists.
+
+**Expected, not a bug — do not file it.** The dashboard is a snapshot, not a live view, and the numbers
+are right for the moment they were read. But a tester who closes a deal and checks the dashboard will
+reasonably conclude the close did not count, which is the same false-negative shape as the close gap
+itself (the close DID happen; only the reading is old).
+
+Two ways it could be fixed and they are not equivalent: re-query on navigation (simple, and costs a
+round trip every time the section is entered), or invalidate the cached figures when a close or save
+succeeds (precise, and needs the dashboard to learn about events it currently does not observe). The
+second is the better shape and the reason this is recorded rather than patched.
+
+---
+
+## 🟢 KI-17 — Opening a Sales Account logs a ClassFactory fallback for common's Organizations
+
+Clicking a customer name opens the account as its own Explorer record tab, and it renders correctly.
+It also writes a warning to the browser console:
+
+```
+ClassFactory: no registration found for base class '_BaseEntity' with key
+'MJ_BizApps_Common: Organizations'. … Falling back to an instance of '_BaseEntity' itself.
+```
+
+**Why.** `SalesAccount` is an IsA child of common's `Organization`, so loading one asks the ClassFactory
+for the PARENT entity class. Sales' own subclasses are registered in the Explorer; **bizapps-common's are
+not** — nothing loads them client-side — so the parent resolves to bare `_BaseEntity`. The registered-key
+list in the warning is every sales and MJ-core entity and no common ones, which is the tell.
+
+**Expected, not a bug — do not file it.** `RequiresSubclass` is false on that base, so the fallback is
+legal and the record opens with its fields intact. Nothing is lost.
+
+It is still worth recording because it is **console noise on a click a demo makes**, and the warning is
+long enough to bury a real error underneath it.
+
+**It does NOT currently trip the Explorer harness, and that was measured rather than assumed.** It is
+logged at WARNING level, and `captureConsoleErrors` wires only `console.error` and `pageerror` — so the
+sink never sees it and the specs that click a customer pass with no allowlist. If that sink is ever
+widened to warnings, this becomes the first thing it catches, and `expectOnlyKnownErrors` takes an
+`allowed` list for exactly that case.
+
+The fix belongs upstream of sales: load bizapps-common's generated entity subclasses in the host's
+client bootstrap, the same way sales' are. Recorded here rather than worked around, because the
+workaround (registering common's classes from sales) would be sales reaching into another app's
+responsibility.

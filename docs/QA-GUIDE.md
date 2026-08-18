@@ -105,7 +105,7 @@ they take table locks and will deadlock, which presents as a hang rather than an
 
 ```bash
 scripts/seed-dev-data.sh      # companies, employees, users
-scripts/seed-demo-data.sh     # pipelines, stages, vocabulary, accounts, contacts, 6 demo deals
+scripts/seed-demo-data.sh     # pipelines, stages, vocabulary, accounts, contacts, 7 demo deals
 ```
 
 `scripts/seed-demo-data.sh --remove` tears the demo set back down, children first.
@@ -116,12 +116,12 @@ creating one, and the UI is unexercisable without deals. What you get:
 - **2 pipelines** — B2B (deals carry product lines) and D2C (`RequiresDealLines = 0`; header-only deals
   whose amount is typed directly)
 - **9 pipeline stages**, 3 sales accounts, 4 sales contacts
-- **6 deals** — one won, one lost with a loss reason, four open — across both pipelines and two selling
+- **7 deals** — one won, one lost with a loss reason, five open — across both pipelines and two selling
   companies, with product lines, a payment schedule, deal team members, a buying committee, stage
   history and a forecast snapshot
 
-Only some deals carry product lines (both Northwind deals). Line-dependent surfaces correctly show
-nothing for the others.
+Only some deals carry product lines — both Northwind deals on B2B, and `DEAL-9007` on the order-only
+pipeline. Line-dependent surfaces correctly show nothing for the others.
 
 ---
 
@@ -278,12 +278,18 @@ Which downstream a won deal produces is driven by the **pipeline's policy**, nev
    the lines is not a bug** — `Deal.Amount` is a cached answer with provenance (`AmountIsComputed`,
    `AmountComputedAt`, `AmountSourceHash`) and may legitimately be stale.
 8. **No quota/attainment, no territory routing.** Deferred by decision (`docs/DECISIONS.md` D2, D3).
-9. **The encryption-key warning at startup** is expected (§2).
-10. **`ForecastSnapshot` columns are `*Amount`-suffixed** (`CommitAmount`, not `Commit`) — `COMMIT` is
+9. **The deal number is not shown in the workspace after a save.** It exists and is on the record; it is
+   rendered only in the **All deals** roster. Do not wait for it to appear on the deal you just saved
+   (`docs/KNOWN-ISSUES.md` KI-15).
+10. **The dashboard does not re-query when you navigate back to it.** Close a deal, return to Dashboard,
+    and the tiles still show the pre-close numbers. **Press refresh (top right)** and they correct
+    instantly — the close did happen, only the reading is old (KI-16).
+11. **The encryption-key warning at startup** is expected (§2).
+12. **`ForecastSnapshot` columns are `*Amount`-suffixed** (`CommitAmount`, not `Commit`) — `COMMIT` is
     reserved in T-SQL and Postgres (D6).
-11. **The Playwright demo-tour specs run slowly** against a development-mode Explorer build
+13. **The Playwright demo-tour specs run slowly** against a development-mode Explorer build
     (`docs/KNOWN-ISSUES.md` KI-12). Behaviour is correct; the budgets assume a production build.
-12. **An upstream risk, not a sales bug:** `AllowMultipleSubtypes` is `false` on common's `Person` and
+14. **An upstream risk, not a sales bug:** `AllowMultipleSubtypes` is `false` on common's `Person` and
     `Organization`. Sales is currently the only app extending them, so it works today; a second app
     doing so would mis-chain. The fix belongs in bizapps-common (`docs/KNOWN-ISSUES.md` KI-1).
 

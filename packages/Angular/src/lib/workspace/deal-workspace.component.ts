@@ -46,6 +46,9 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, inject, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { CompositeKey } from '@memberjunction/core';
+import { MJFormPresenterService } from '@memberjunction/ng-base-forms';
+import { NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 import { Metadata } from '@memberjunction/core';
 import type {
@@ -63,10 +66,12 @@ import {
     type DealLockState,
 } from '@mj-biz-apps/sales-entities';
 
-import { WorkspaceCardComponent } from '../vendored/workspace-tabs/workspace-card.component';
-import { WorkspaceTabStore } from '../vendored/workspace-tabs/workspace-tab-store';
-import type { WorkspaceTab } from '../vendored/workspace-tabs/workspace-tabs.types';
-import type { TabReorder } from '../vendored/workspace-tabs/workspace-tab-strip.component';
+import {
+    MJWorkspaceCardComponent,
+    MJWorkspaceTabStore,
+    type MJTabReorder,
+    type MJWorkspaceTab,
+} from '@memberjunction/ng-ui-components';
 import { DealWorkspaceService } from './deal-workspace.service';
 import { FromDateInput, ToDateInput } from './deal-workspace.dates';
 import type { ProductLookup } from '@mj-biz-apps/sales-entities';
@@ -104,6 +109,16 @@ interface RemoteOperationRouter {
     ): Promise<{ Success: boolean; Output?: TOutput; ErrorMessage?: string }>;
 }
 
+/**
+ * The related entities this surface can open.
+ *
+ * `Sales Accounts` / `Sales Contacts` rather than common's `Organizations` / `People`: the deal's FKs
+ * point at the IsA CHILDREN, and those are the records a rep expects to land on.
+ */
+export const E_SALES_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
+export const E_SALES_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
+const E_DEAL_LINE = 'MJ_BizApps_Sales: Deal Lines';
+
 /** What one open document in the outer strip carries. */
 interface OpenDeal {
     Deal: DealEntity;
@@ -122,7 +137,7 @@ type DealDateField = 'ExecutionDate' | 'StartDate' | 'ExpectedCloseDate' | 'Next
 @Component({
     standalone: true,
     selector: 'mjs-deal-workspace',
-    imports: [CommonModule, FormsModule, SharedGenericModule, WorkspaceCardComponent],
+    imports: [CommonModule, FormsModule, SharedGenericModule, MJWorkspaceCardComponent],
     changeDetection: ChangeDetectionStrategy.OnPush,
     templateUrl: './deal-workspace.component.html',
     styleUrls: ['./deal-workspace.component.css'],
@@ -131,8 +146,36 @@ export class DealWorkspaceComponent implements OnInit {
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
 
+    /**
+     * Opens a related record as its own Explorer tab — the account or a contact behind this deal.
+     *
+     * SECONDARY SURFACE ONLY. The deal itself never goes through here: a deal belongs in this workspace,
+     * with its lines and terms, which is the entire reason the workspace exists.
+     */
+    private readonly nav = inject(NavigationService);
+
+    /**
+     * Opens a CHILD record in a slide-in, over the workspace rather than instead of it.
+     *
+     * A deal line has more fields than the grid can show — the service period, the term, the product
+     * reference, the description. Sending the rep to a separate Explorer tab to set them would mean
+     * leaving the deal they are composing; a slide-in keeps the deal on screen underneath, which is the
+     * distinction between a related record and a child record.
+     */
+    private readonly forms = inject(MJFormPresenterService);
+
     /** The outer strip's state: which deals are open, and which is in front. */
-    private readonly store = new WorkspaceTabStore<OpenDeal>();
+    private readonly store = new MJWorkspaceTabStore<OpenDeal>();
+
+    /**
+     * Entity names the template passes to {@link OpenRelated} / {@link CreateRelated}.
+     *
+     * Exposed as members because a template cannot reach a module-level `const`, and inlining the strings
+     * into the markup would put an entity name in two places — the thing that silently rots when one of
+     * them is renamed.
+     */
+    public readonly AccountEntity = E_SALES_ACCOUNT;
+    public readonly ContactEntity = E_SALES_CONTACT;
 
     public readonly Panes: readonly DealWorkspacePane[] = DEAL_WORKSPACE_PANES;
     public readonly StandardAnnualIncreasePct = STANDARD_ANNUAL_INCREASE_PCT;
@@ -168,7 +211,7 @@ export class DealWorkspaceComponent implements OnInit {
 
     // ── The outer strip: open deals ─────────────────────────────────────────────
 
-    public get Tabs(): WorkspaceTab<OpenDeal>[] {
+    public get Tabs(): MJWorkspaceTab<OpenDeal>[] {
         return this.store.Tabs;
     }
 
@@ -260,7 +303,7 @@ export class DealWorkspaceComponent implements OnInit {
         this.Revalidate();
     }
 
-    public ReorderTabs(move: TabReorder): void {
+    public ReorderTabs(move: MJTabReorder): void {
         this.store.Reorder(move.previousIndex, move.currentIndex);
         this.cdr.detectChanges();
     }
@@ -392,6 +435,37 @@ export class DealWorkspaceComponent implements OnInit {
         this.Touch();
     }
 
+    // ── Related records: the account and the contacts ──────────────────────────
+
+    /**
+     * Opens the chosen account or contact as its own Explorer tab.
+     *
+     * These are RELATED records, not children: an account outlives the deal and is edited on its own
+     * terms, so it gets a tab rather than a slide-in. Nothing is offered when the picker is empty — an
+     * "open" control that opens nothing is worse than no control.
+     */
+    public OpenRelated(entityName: string, id: string | null): void {
+        if (!id) {
+            return;
+        }
+        this.nav.OpenEntityRecord(entityName, CompositeKey.FromID(id));
+    }
+
+    /**
+     * Creates a new account or contact without leaving the deal being composed.
+     *
+     * THE CASE THIS EXISTS FOR: a rep is entering a deal for a customer that is not in the system yet.
+     * Before this, the only route was to abandon the draft, go and create the account, and start again.
+     *
+     * It deliberately does NOT try to select the new record back into the picker afterwards. The record
+     * opens in its own tab, so there is no reliable moment to come back at, and a picker that silently
+     * changed while the rep was elsewhere is worse than one they set themselves. Reopening the picker
+     * after creating shows the new row, because the lookups reload with the surface.
+     */
+    public CreateRelated(entityName: string): void {
+        this.nav.OpenNewEntityRecord(entityName);
+    }
+
     // ── The child collections ──────────────────────────────────────────────────
 
     public get Lines(): readonly mjBizAppsSalesDealLineEntity[] {
@@ -428,6 +502,46 @@ export class DealWorkspaceComponent implements OnInit {
     /** See {@link RemoveLine} — the same explicit-removal contract applies. */
     public RemoveScheduleRow(row: mjBizAppsSalesDealPaymentScheduleEntity): void {
         this.Deal?.PaymentSchedule.Remove(row);
+        this.Touch();
+    }
+
+    /**
+     * Opens one line's full form in a slide-in, over the deal rather than instead of it.
+     *
+     * WHY THIS IS NEEDED: the grid shows seven of the line's fields because seven is what fits. The
+     * service period, the term, the product reference and the description have had no surface at all —
+     * they were reachable only through the generated entity browser, which means leaving the deal.
+     *
+     * ONLY OFFERED FOR A SAVED LINE, and the guard is not cosmetic. A line created in this session has a
+     * primary key — `NewRecord()` generates one — but no row behind it, so the form would try to load a
+     * record that does not exist and fail in a way that looks like data loss. Save the deal first; the
+     * template hides the control until then.
+     *
+     * On close the collection is re-read, because the slide-in wrote to the same row this grid is bound
+     * to and the in-memory copy would otherwise be stale.
+     */
+    public async OpenLineDetail(line: mjBizAppsSalesDealLineEntity): Promise<void> {
+        const deal = this.Deal;
+        if (!deal || !line.IsSaved) {
+            return;
+        }
+
+        const ref = this.forms.Open({
+            EntityName: E_DEAL_LINE,
+            RecordId: line.ID,
+            Presentation: 'slide-in',
+            EditMode: true,
+            Title: line.ProductName?.trim() || 'Deal line',
+        });
+
+        const saved = await ref.AfterSaved();
+        if (!saved) {
+            return; // cancelled — re-reading would make a cancel look like it did something
+        }
+
+        // `force` is required and safe HERE specifically: the slide-in has already committed, so there is
+        // no unsaved work in the collection to discard — which is the only thing the guard protects.
+        await deal.Lines.Load(true);
         this.Touch();
     }
 
