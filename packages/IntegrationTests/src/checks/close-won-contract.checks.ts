@@ -1,5 +1,5 @@
 /**
- * @fileoverview `close-won-contract` — CT1–CT4. The seam where a won deal becomes a real agreement.
+ * @fileoverview `close-won-contract` — CT1–CT6. The seam where a won deal becomes a real agreement.
  *
  * The contract sibling of `close-won-handoff`. Same discipline: every assertion reads what CONTRACTS
  * wrote, through contracts' own entities, rather than trusting what Sales sent.
@@ -19,7 +19,7 @@
  * ── AND IT REFUSES TO RUN WITHOUT IT, LOUDLY ────────────────────────────────────────────────────
  *
  * An earlier version began each check with `if (!ContractsIsInstalled()) return;`. On a host without
- * contracts the bundle then reported **"4 passed"** having tested nothing — a vacuous pass, which is the
+ * contracts the bundle then reported **"all passed"** having tested nothing — a vacuous pass, which is the
  * exact failure mode `assert-check-count.mjs` exists to catch, and which a tester would reasonably read
  * as "the contract path works here".
  *
@@ -33,9 +33,16 @@
 import { RunView } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import { ContractsIsInstalled, LiveContractsSeam } from '@mj-biz-apps/sales-core-entities-server';
-import { E_ORDERS_PRODUCT, ProductFilterFor } from '@mj-biz-apps/sales-entities';
+import {
+    E_ORDERS_PRODUCT,
+    ProductFilterFor,
+    SalesCloseDealOperation,
+    type SalesCloseDealInput,
+    type SalesCloseDealOutput,
+} from '@mj-biz-apps/sales-entities';
 
 import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture } from '../fixture.js';
+import { SeedDealOnPipeline } from './close-won-handoff.fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -90,6 +97,22 @@ async function rows(ctx: Ctx, entity: string, filter: string): Promise<Record<st
     const r = await new RunView().RunView({ EntityName: entity, ExtraFilter: filter, ResultType: 'simple' }, ctx.User);
     Assert(r.Success, `reading ${entity} failed — ${r.ErrorMessage}`);
     return (r.Results ?? []) as Record<string, unknown>[];
+}
+
+/** Runs `Sales.CloseDeal` in-process and unwraps its payload — the envelope is not the answer. */
+async function close(ctx: Ctx, input: SalesCloseDealInput): Promise<SalesCloseDealOutput> {
+    const op = new SalesCloseDealOperation();
+    const result = await op.Execute(input, { provider: ctx.Provider, user: ctx.User });
+    const output = (result as { Output?: SalesCloseDealOutput })?.Output;
+    Assert(!!output, `Sales.CloseDeal returned no Output envelope: ${JSON.stringify(result).slice(0, 300)}`);
+    return output as SalesCloseDealOutput;
+}
+
+/** The PERSISTED deal row, read through the provider — not the in-memory entity the op held. */
+async function dealRow(ctx: Ctx, dealID: string): Promise<Record<string, unknown>> {
+    const [row] = await rows(ctx, 'MJ_BizApps_Sales: Deals', `ID = '${dealID}'`);
+    Assert(!!row, 'the deal was not readable back');
+    return row;
 }
 
 /** Runs the seam exactly as `CloseDealOperation` does, with a deal-shaped payload. */
@@ -235,6 +258,90 @@ export const CloseWonContractChecks: NamedCheck[] = [
                     typeof result.Message === 'string' && result.Message.length > 0,
                     'a refusal must say why — a silent false is indistinguishable from a bug',
                 );
+            }),
+    },
+    {
+        Id: 'close-won-contract.CT5',
+        Name: 'CT5: a name-only RECURRING line refuses the close up front, and the deal stays open',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * KI-14 DOWN THE CONTRACT ROUTE — the half CW5 cannot reach.
+                 *
+                 * `LiveContractsSeam` coerces with the same `String(l.ProductID ?? '')` that
+                 * `buildOrderInput` does, so a RECURRING line with a name and no `ProductID` fails
+                 * identically: an empty string against contracts' `uniqueidentifier`, inside
+                 * contracts' save, AFTER the close has written Won. Deal won, no contract.
+                 *
+                 * CW5 could not catch it. It seeds ONE-TIME lines on the order-only pipeline, so the
+                 * contract route is never planned there — the guard has to inspect each planned
+                 * route's own lines, and this is the check that proves it does.
+                 *
+                 * The pipeline is resolved by its POLICY (`SubscriptionLinesTo: 'Contract'`) and the
+                 * line type by its `IsRecurring` FLAG, never by either one's name.
+                 */
+                requireContracts();
+                const f = await ResolveSalesFixture(ctx);
+                const seeded = await SeedDealOnPipeline(ctx, f, {
+                    PipelineID: f.ContractPolicyPipelineID,
+                    StageID: f.ContractPolicyStageID,
+                    CompanyID: f.ContractPolicyCompanyID,
+                    LineCount: 1,
+                    LineTypeID: f.RecurringLineTypeID,
+                    NameOnly: true,
+                });
+
+                const out = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+                Assert(out.Success === false, 'a deal with an unroutable recurring line must NOT close');
+
+                const named = out.Issues.filter((i) => i.Section === 'lines' && i.Field === 'ProductID');
+                AssertEqual(named.length, 1, 'exactly one line should have been reported');
+                Assert(
+                    named[0].Message.includes('has no catalogue product selected'),
+                    `the refusal must explain itself — got \"${named[0].Message}\"`,
+                );
+
+                const row = await dealRow(ctx, seeded.DealID);
+                AssertEqual(
+                    String(row['DealStatusTypeID']).toLowerCase(),
+                    String(f.OpenStatusID).toLowerCase(),
+                    'a refused close must leave the deal OPEN — never Won with no contract',
+                );
+
+                const contract = out.Routing.find((r) => r.Target === 'Contract');
+                Assert(contract?.Executed !== true, 'nothing may have been written down a refused route');
+            }),
+    },
+    {
+        Id: 'close-won-contract.CT6',
+        Name: 'CT6: a properly-picked recurring line is NOT caught by that refusal, and still closes',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE CONTROL FOR CT5, and the reason CT5 means anything: a guard that refused every
+                 * contract-routed deal would make CT5 pass while breaking the close outright.
+                 */
+                requireContracts();
+                const f = await ResolveSalesFixture(ctx);
+                const seeded = await SeedDealOnPipeline(ctx, f, {
+                    PipelineID: f.ContractPolicyPipelineID,
+                    StageID: f.ContractPolicyStageID,
+                    CompanyID: f.ContractPolicyCompanyID,
+                    LineCount: 1,
+                    LineTypeID: f.RecurringLineTypeID,
+                });
+
+                const out = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+                AssertEqual(
+                    out.Issues.filter((i) => i.Section === 'lines' && i.Field === 'ProductID').length,
+                    0,
+                    'a picked product must never trip the unroutable-line refusal',
+                );
+                Assert(out.Success, `the close should have succeeded — ${JSON.stringify(out.Issues).slice(0, 300)}`);
+                const contract = out.Routing.find((r) => r.Target === 'Contract');
+                Assert(contract?.Executed === true, `and the contract should exist — ${contract?.Reason ?? 'no route'}`);
             }),
     },
 ];

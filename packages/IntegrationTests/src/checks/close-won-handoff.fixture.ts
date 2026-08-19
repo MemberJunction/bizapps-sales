@@ -94,6 +94,13 @@ export interface SeedTarget {
      * prove the close refuses it up front rather than failing inside orders.
      */
     NameOnly?: boolean;
+    /**
+     * The line type to seed. Defaults to ONE-TIME, which is what the order checks want.
+     *
+     * The contract checks need RECURRING, because that is the type `buildContractInput` sends and
+     * therefore the one that can be unroutable down the contract route.
+     */
+    LineTypeID?: string;
 }
 
 /**
@@ -119,7 +126,7 @@ export async function SeedDealOnPipeline(ctx: Ctx, f: SalesFixture, target: Seed
 
     for (let i = 0; i < products.length; i++) {
         const line: mjBizAppsSalesDealLineEntity = await deal.Lines.Create();
-        line.DealLineTypeID = f.OneTimeLineTypeID;
+        line.DealLineTypeID = target.LineTypeID ?? f.OneTimeLineTypeID;
         if (target.NameOnly !== true) {
             line.ProductID = products[i].ID;
         }

@@ -83,6 +83,8 @@ export interface SalesFixture {
     /** The pipeline whose `CloseWonPolicy` says `CreateContract: true`. B2B, as seeded. */
     ContractPolicyPipelineID: string;
     ContractPolicyStageID: string;
+    /** The contract pipeline's OWN company — products are per-company, as above. */
+    ContractPolicyCompanyID: string;
     /** The pipeline whose policy does NOT create a contract. D2C, as seeded. */
     OrderOnlyPolicyPipelineID: string;
     OrderOnlyPolicyStageID: string;
@@ -190,6 +192,7 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
 
         ContractPolicyPipelineID: withContract.ID,
         ContractPolicyStageID: withContract.StageID,
+        ContractPolicyCompanyID: withContract.CompanyID,
         OrderOnlyPolicyPipelineID: withoutContract.ID,
         OrderOnlyPolicyStageID: withoutContract.StageID,
         OrderOnlyPolicyCompanyID: withoutContract.CompanyID,
