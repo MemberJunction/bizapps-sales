@@ -1532,6 +1532,186 @@ export interface RecordProcessRunNowOutput {
     errorMessage?: string;
 }
 
+/**
+ * ============================================================================
+ * WHY THE SHARED CLOSE SHAPES LIVE IN THIS FILE
+ * ============================================================================
+ * CodeGen emits each operation's `InputTypeDefinition` / `OutputTypeDefinition`
+ * **verbatim** into one `remote_operations.ts`, de-duplicating by exact text and
+ * resolving NO imports. A definition file cannot `import` a sibling — every name
+ * it uses must be declared in some definition that also gets emitted.
+ *
+ * `CloseDeal` carries the policy and routing shapes, so they are declared once
+ * here. `ReopenDeal` references them freely: TypeScript hoists interfaces, so
+ * emission order does not matter.
+ *
+ * NO `import` statements in this file. Ever.
+ * ============================================================================
+ */
+
+/**
+ * `Pipeline.CloseWonPolicy`, parsed — master plan §7.1.
+ *
+ * THE POLICY IS THE ONLY THING THAT DECIDES ROUTING. Nothing in the close flow
+ * may branch on a pipeline's name, a status's name, or the words "B2B"/"D2C":
+ * a deployment renames those freely, and a rename must not change what happens
+ * when a deal is won. Behaviour comes from this JSON plus the `DealStatusType`
+ * flags, and from nowhere else.
+ *
+ * Every field is optional because a pipeline may declare a partial policy; the
+ * resolver supplies defaults and the effective policy is what gets recorded.
+ */
+export interface SalesCloseWonPolicy {
+    /** Create an agreement for this deal. Routes to Contracts.CreateFromDeal (or RenewTerm). */
+    CreateContract?: boolean;
+    /** Which contract type the agreement takes. A CODE, resolved by contracts, not by sales. */
+    ContractTypeCode?: string | null;
+    /** Default term for the created agreement. */
+    TermMonths?: number | null;
+    /** Where recurring lines go. `Contract` | `Subscription` | `None`. */
+    SubscriptionLinesTo?: string | null;
+    /** Where one-time lines go. `Order` | `Contract` | `None`. */
+    OneTimeLinesTo?: string | null;
+    /** The state a created order lands in. `Draft` | `Confirmed`. */
+    OrderState?: string | null;
+    /** When set, the close raises an approval task of this type rather than completing. */
+    RequireApprovalTaskTypeCode?: string | null;
+}
+
+/**
+ * What the caller asks for.
+ *
+ * NAMED FOR THE OUTCOME TYPE, NOT FOR "WON". The operation resolves everything from the target
+ * status's flags (`IsWon` / `IsLost` / `LocksDeal`), so a deployment that calls its winning status
+ * "Signed" needs no code change — master plan §7.2.
+ */
+export interface SalesCloseDealInput {
+    DealID: string;
+    /** The status to close INTO. Its flags decide the whole path. */
+    DealStatusTypeID: string;
+
+    /**
+     * Required when the target status has `IsLost`. Loss reason is this app's only mandatory field,
+     * and the friction is deliberate: it is the highest-value, most consistently-skipped data in any
+     * CRM (§7.2).
+     */
+    LossReasonID?: string | null;
+    /** Required when the chosen loss reason has `RequiresNotes`. */
+    LossNotes?: string | null;
+
+    /**
+     * Per-deal overrides merged OVER the pipeline's policy. This is how §7.1's "a deal may override
+     * it" is expressed without a per-deal policy column — see CLOSE-FLOW-DECISIONS.md D-CF6.
+     */
+    PolicyOverrides?: SalesCloseWonPolicy;
+
+    /** The stage to land in. Optional: when omitted the operation keeps the deal's current stage. */
+    ClosingStageID?: string | null;
+
+    /** Recorded on the DealStageEvent. Free text, for the human record. */
+    Notes?: string | null;
+
+    /**
+     * Validate and report what WOULD happen without writing anything. Nothing is committed, no lock
+     * is applied, and the routing plan comes back in the output — so a UI can show the consequences
+     * of a close before asking for confirmation.
+     */
+    PreviewOnly?: boolean;
+}
+
+/** What the caller asks for when undoing a close — §7.3. */
+export interface SalesReopenDealInput {
+    DealID: string;
+    /**
+     * REQUIRED. §7.3 makes reopening reason-gated on purpose: a lock exists because the deal is the
+     * provenance of a contract and an order, so undoing it is an event that has to be explainable.
+     */
+    Reason: string;
+    /** The status to reopen INTO. Must be a status whose `LocksDeal` is not set. */
+    DealStatusTypeID?: string | null;
+    /** The stage to return to. Defaults to the deal's current stage. */
+    StageID?: string | null;
+}
+
+/**
+ * Output shapes for the close family. Declared here rather than repeated per operation — see the
+ * header of `sales-close-deal.input.ts` for why definition files may not import one another.
+ */
+
+/** Which pane of the deal workspace an issue belongs to. Matches the workspace's tab keys exactly. */
+export type SalesCloseSection = 'deal' | 'party' | 'lines' | 'schedule' | 'terms' | 'variances';
+
+export type SalesCloseSeverity = 'error' | 'warning';
+
+/**
+ * ONE ISSUE, STRUCTURED — never a joined string. `Section` is what lets a tab badge itself, `Field`
+ * what lets a field mark itself. The same shape `Sales.SaveDeal` already returns, so a UI handles
+ * both operations' refusals with one code path.
+ */
+export interface SalesCloseIssue {
+    Section: SalesCloseSection;
+    Field?: string | null;
+    Severity: SalesCloseSeverity;
+    Message: string;
+}
+
+/**
+ * What the policy decided, per downstream target.
+ *
+ * RETURNED EVEN WHEN THE CALL WAS STUBBED, and `Executed` is what says which. Today both downstreams
+ * are stubs (CLOSE-FLOW-DECISIONS.md D-CF3/D-CF4), so a close reports `Planned: true,
+ * Executed: false` with a reason — the intent is auditable now and the flag flips to true when the
+ * seam lands, with no shape change.
+ */
+export interface SalesCloseRoutingResult {
+    /** `Contract` | `Order` | `Subscription`. */
+    Target: string;
+    /** The policy said this should happen. */
+    Planned: boolean;
+    /** It actually happened. False while the downstream is stubbed. */
+    Executed: boolean;
+    /** How many deal lines were routed here. */
+    LineCount: number;
+    /** The created record, when one was created. */
+    RecordID?: string | null;
+    /** Why it did not execute, when it did not. Shown verbatim. */
+    Reason?: string | null;
+}
+
+export interface SalesCloseDealOutput {
+    Success: boolean;
+    /** Empty on a clean close. Warnings may be present even when Success is true. */
+    Issues: SalesCloseIssue[];
+
+    /** True when the target status carried `IsWon` — resolved from the FLAG, never a name. */
+    IsWon: boolean;
+    /** True when the target status carried `IsLost`. */
+    IsLost: boolean;
+    /** True when the deal is now immutable, i.e. the target status had `LocksDeal`. */
+    Locked: boolean;
+
+    /** The policy actually applied: pipeline default with the caller's overrides merged over it. */
+    EffectivePolicy?: SalesCloseWonPolicy;
+    /** One entry per downstream the policy named. */
+    Routing: SalesCloseRoutingResult[];
+
+    /** The append-only provenance row this close wrote. Absent on a preview. */
+    DealStageEventID?: string | null;
+    ClosedAt?: string | null;
+
+    /** True when nothing was written because the caller asked for a preview. */
+    WasPreview: boolean;
+}
+
+export interface SalesReopenDealOutput {
+    Success: boolean;
+    Issues: SalesCloseIssue[];
+    /** The deal is editable again. */
+    Unlocked: boolean;
+    /** The append-only row recording the reopen and its reason. */
+    DealStageEventID?: string | null;
+}
+
 /** Input for the task-graph control operations. */
 export interface TaskGraphControlInput {
     /** Parent task ID identifying the graph. */
@@ -2160,6 +2340,38 @@ export class RecordProcessRunNowOperation extends BaseRemotableOperation<RecordP
     public readonly OperationKey = "RecordProcess.RunNow";
     public readonly ExecutionMode = 'LongRunning' as const;
     public readonly RequiredScope = "recordprocess:execute";
+    public readonly RequiresSystemUser = false;
+}
+
+// ============================================================
+// Sales.CloseDeal — Close Deal
+// ============================================================
+/**
+ * Close Deal
+ * Close a deal into a target status, in ONE transaction: validate it is closeable, resolve the effective CloseWonPolicy (pipeline default + caller overrides), route lines to a contract and/or an order per that policy, append the DealStageEvent, stamp ActualCloseDate/ClosedAt/ClosedByUserID, and apply the close lock when the status carries LocksDeal. Routing is decided by the policy and by DealStatusType FLAGS — never by a pipeline or status NAME. Sales passes intent only; every figure is computed downstream by orders.
+ * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
+ * under 'Sales.CloseDeal'. This generated base provides the typed contract only (client-safe).
+ */
+export class SalesCloseDealOperation extends BaseRemotableOperation<SalesCloseDealInput, SalesCloseDealOutput> {
+    public readonly OperationKey = "Sales.CloseDeal";
+    public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "sales:write";
+    public readonly RequiresSystemUser = false;
+}
+
+// ============================================================
+// Sales.ReopenDeal — Reopen Deal
+// ============================================================
+/**
+ * Reopen Deal
+ * Reopen a locked deal into a non-locking status, recording a mandatory reason. Appends a DealStageEvent, clears the close stamps, and releases the immutability enforced by DealEntityServer.Save(). The only sanctioned exit from the close lock (§7.3).
+ * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
+ * under 'Sales.ReopenDeal'. This generated base provides the typed contract only (client-safe).
+ */
+export class SalesReopenDealOperation extends BaseRemotableOperation<SalesReopenDealInput, SalesReopenDealOutput> {
+    public readonly OperationKey = "Sales.ReopenDeal";
+    public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "sales:write";
     public readonly RequiresSystemUser = false;
 }
 

@@ -14,6 +14,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=PrimaryContactID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:00.851Z",
+      "checksum": "e13af82690f82075adb6d88de03954da08ab15721f3849e0a361b603a4851433"
     }
   },
   {
@@ -32,6 +36,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=BillingContactID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.005Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -47,6 +55,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Deal Contact Roles&RelatedEntityJoinField=SalesContactID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:00.932Z",
+      "checksum": "ffcadf6a38dea7ba00c49040ba5c94475c9266e21b9bc382278ef1da715e8086"
     }
   },
   {
@@ -63,6 +75,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipelines&RelatedEntity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntityJoinField=PipelineID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:00.764Z",
+      "checksum": "e13af82690f82075adb6d88de03954da08ab15721f3849e0a361b603a4851433"
     }
   },
   {
@@ -79,6 +95,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipelines&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=PipelineID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.077Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -95,6 +115,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipelines&RelatedEntity=MJ_BizApps_Sales: Forecast Snapshots&RelatedEntityJoinField=PipelineID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.225Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -111,6 +135,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipelines&RelatedEntity=MJ_BizApps_Sales: Deal Types&RelatedEntityJoinField=DefaultPipelineID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.152Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -127,6 +155,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Accounts&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=AccountID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.302Z",
+      "checksum": "e13af82690f82075adb6d88de03954da08ab15721f3849e0a361b603a4851433"
     }
   },
   {
@@ -143,6 +175,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=PipelineStageID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.379Z",
+      "checksum": "e13af82690f82075adb6d88de03954da08ab15721f3849e0a361b603a4851433"
     }
   },
   {
@@ -160,6 +196,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntity=MJ_BizApps_Sales: Deal Stage Events&RelatedEntityJoinField=ToStageID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.451Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -177,6 +217,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntity=MJ_BizApps_Sales: Deal Stage Events&RelatedEntityJoinField=FromStageID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.649Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -194,6 +238,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Account Types&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=AccountTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.571Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -211,6 +259,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Buying Role Types&RelatedEntity=MJ_BizApps_Sales: Deal Contact Roles&RelatedEntityJoinField=BuyingRoleTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.722Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -228,23 +280,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Buying Role Types&RelatedEntity=MJ_BizApps_Sales: Sales Contacts&RelatedEntityJoinField=BuyingRoleTypeID"
-    }
-  },
-  {
-    "_comments": [
-      "Usage back-reference: which Deal Lines reference this Deal Line Type.",
-      "A config record should not be dominated by a grid of everything pointing at it."
-    ],
-    "fields": {
-      "Configuration": {
-        "UI": {
-          "inclusion": "More",
-          "FormRole": "Detail"
-        }
-      }
     },
-    "primaryKey": {
-      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Line Types&RelatedEntity=MJ_BizApps_Sales: Deal Lines&RelatedEntityJoinField=DealLineTypeID"
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.795Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -262,6 +301,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Roles&RelatedEntity=MJ_BizApps_Sales: Deal Team Members&RelatedEntityJoinField=DealRoleID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.011Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -279,6 +322,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Status Types&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=DealStatusTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.870Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -296,6 +343,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Status Types&RelatedEntity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntityJoinField=DealStatusTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:01.939Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -313,6 +364,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Status Types&RelatedEntity=MJ_BizApps_Sales: Deal Stage Events&RelatedEntityJoinField=ToDealStatusTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.224Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -330,6 +385,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Status Types&RelatedEntity=MJ_BizApps_Sales: Deal Stage Events&RelatedEntityJoinField=FromDealStatusTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.082Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -347,6 +406,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Types&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=DealTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.155Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -364,6 +427,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deal Types&RelatedEntity=MJ_BizApps_Sales: Pipelines&RelatedEntityJoinField=DealTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.332Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -381,6 +448,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Forecast Category Types&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=ForecastCategoryTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.406Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -398,6 +469,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Forecast Category Types&RelatedEntity=MJ_BizApps_Sales: Pipeline Stages&RelatedEntityJoinField=ForecastCategoryTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.486Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -415,6 +490,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Forecast Category Types&RelatedEntity=MJ_BizApps_Sales: Pipelines&RelatedEntityJoinField=DefaultForecastCategoryTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.565Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -432,6 +511,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Lead Source Types&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=LeadSourceTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.640Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -449,6 +532,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Lead Source Types&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=LeadSourceTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.718Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -466,6 +553,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Lead Source Types&RelatedEntity=MJ_BizApps_Sales: Sales Contacts&RelatedEntityJoinField=LeadSourceTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.794Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -483,6 +574,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Lifecycle Stage Types&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=LifecycleStageTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.873Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -500,6 +595,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Lifecycle Stage Types&RelatedEntity=MJ_BizApps_Sales: Sales Contacts&RelatedEntityJoinField=LifecycleStageTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:02.949Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   },
   {
@@ -517,6 +616,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Loss Reasons&RelatedEntity=MJ_BizApps_Sales: Deals&RelatedEntityJoinField=LossReasonID"
+    },
+    "sync": {
+      "lastModified": "2026-08-19T23:55:03.021Z",
+      "checksum": "e2a9dbc3a46928a093a19b31418e860cb6740abd46dccdbd3f7a41ac73f0d4b5"
     }
   }
 ]

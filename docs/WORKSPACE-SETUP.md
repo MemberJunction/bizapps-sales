@@ -70,6 +70,36 @@ console.log('connected to', process.env.DB_DATABASE);   // cheap, and it ends th
 
 ---
 
+## After removing a generated symbol, rebuild before you trust an error count
+
+**Especially a count of zero.** This has now misreported the state of this repo three times, each time
+in the reassuring direction, and each time the number looked like evidence.
+
+| Occasion | What the build said | What was true |
+|---|---|---|
+| `ng-ui-components` after the 324-commit MJ pull | `MJCard*` "has no exported member" | the source had them; the `dist` was pre-pull |
+| `base-forms` / `NewRecordValues` arity | four repos failing on a 2-arg call | MJ's source took 2 args; four repos read a stale `dist` |
+| Retiring `DealLine` | **0 errors across all six packages** | the generated class still existed, and consumers read `sales-entities`' old `.d.ts` |
+
+The third is the dangerous one. Deleting `DealLine` reported **zero** errors; regenerating raised it to
+**3**; rebuilding `sales-entities`' `dist` raised it to **67**. Had the first number been believed, the
+demolition would have looked nearly free and the real work would have surfaced somewhere much worse.
+
+So after removing or renaming anything a consumer imports:
+
+```bash
+# 1. regenerate, so the symbol actually leaves the source
+npm run mj:codegen:files
+# 2. rebuild the PRODUCING package, so its .d.ts stops advertising the old shape
+(cd packages/Entities && npx tsc -p tsconfig.json && npx tsc-alias -f)
+# 3. only now is a per-package count meaningful
+for d in packages/*/; do (cd "$d" && npx tsc -p tsconfig.json --noEmit); done
+```
+
+A per-package `--noEmit` sweep beats `turbo build`, which stops at the first failing package and so
+reports the first problem rather than all of them.
+
+---
 ## 0. What you need first
 
 - SQL Server reachable, and credentials that can `CREATE DATABASE`

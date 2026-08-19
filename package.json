@@ -24,10 +24,11 @@
     "test:integration": "node test-harnesses/integration.mjs",
     "test:coverage-gate": "node scripts/assert-check-count.mjs",
     "test:vocabulary-gate": "node scripts/assert-no-vocabulary-comparisons.mjs",
-    "verify": "npm run test:vocabulary-gate && npm run build",
+    "verify": "npm run test:vocabulary-gate && npm run test:discount-gate && npm run build",
     "test:explorer:auth": "playwright test --config test-harnesses/playwright/playwright.config.ts --project auth-setup",
     "test:explorer": "playwright test --config test-harnesses/playwright/playwright.config.ts --project crud",
-    "test:explorer:report": "playwright show-report test-harnesses/playwright/playwright-report"
+    "test:explorer:report": "playwright show-report test-harnesses/playwright/playwright-report",
+    "test:discount-gate": "node scripts/assert-discount-conversion.mjs"
   },
   "repository": {
     "type": "git",

@@ -47,3 +47,4 @@ export * from './close-lock';
  */
 export function LoadGeneratedEntities(): void {
 }
+export * from './discount-conversion.js';
