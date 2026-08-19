@@ -37,8 +37,9 @@
  * ── STILL TO COME (deliberately not stubbed) ────────────────────────────────────────────────────
  *   - `DealStageEvent` append on ORDINARY stage transition, stamping `AmountAtTransition` and
  *     `ProbabilityAtTransition`. `Sales.CloseDeal` already stamps the CLOSE transition; consolidating
- *     the two into a single writer here is D-BD2, and it must land in the `IsGraphNodeSave` branch so
- *     the event is inside the graph's transaction — see the note on {@link DealEntityServer.Save}.
+ *     the two into a single writer here is D-BD2. It must be inside the graph's transaction, which
+ *     since MJ `47ff71d68b` means a scope opened around `super.Save()` rather than a graph-node
+ *     branch — see the note on {@link DealEntityServer.Save}.
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */
@@ -81,32 +82,46 @@ export class DealEntityServer extends DealEntity {
     /**
      * Prepares the deal, then hands the whole graph to the framework.
      *
-     * ── THIS METHOD IS CALLED TWICE PER COMPOSITE SAVE. Read this before adding anything to it. ──
+     * ── THIS METHOD RUNS EXACTLY ONCE PER SAVE, COMPOSITE OR NOT. ──
      *
-     * When a deal has children, `BaseEntity.Save()` routes to a save graph: it opens a transaction and
-     * then executes the ROOT node by calling this record's `Save()` again with `IsGraphNodeSave` set.
-     * So the sequence is:
+     * That is a guarantee of MJ's, not an accident of ours, and it is worth knowing why because it used
+     * to be false. When a deal has children, `BaseEntity.Save()` builds a save plan and routes to
+     * `saveGraph`, which opens the transaction and executes every node — **the root included** — through
+     * the private `BaseEntity.saveAsGraphNode`, which calls `_InnerSave` directly:
      *
-     *   1. `Save()`            — no flag. Preparation happens here.
-     *   2. `Save()` internally — routes to the graph, which opens the transaction.
-     *   3. `Save({IsGraphNodeSave})` — re-enters HERE, and must do nothing but write its own row.
+     *     SaveSelfOnly: (entity, opts) => entity.saveAsGraphNode(opts)
      *
-     * Anything unguarded would therefore run twice. The early return on `IsGraphNodeSave` is what
-     * makes this method idempotent, and it is the reason a childless deal (which never takes the graph
-     * path, so step 3 never happens) still gets its number: preparation lives on the outer call, which
-     * always happens exactly once.
+     * `_InnerSave` is BELOW this override, so the graph never re-enters `Save()`. Preparation therefore
+     * happens once by construction, on the only call there is, and a childless deal (which never builds
+     * a plan at all) takes the same single path.
      *
-     * **The S4 stage-event append must go in the `IsGraphNodeSave` branch, not the outer one** — it
-     * needs to be inside the graph's transaction, so a rolled-back save cannot leave an event behind
-     * claiming a transition that did not happen.
+     * ── DO NOT RE-ADD A GRAPH-NODE GUARD ──
+     *
+     * Until MJ `47ff71d68b` the graph executed the root by calling this record's public `Save()` again
+     * with `EntitySaveOptions.IsGraphNodeSave` set, so this method DID run twice and needed an early
+     * return to stay idempotent. MJ deleted that flag deliberately — *"so application code cannot skip
+     * companions by passing a public flag"* — and made the node path private. There is no successor
+     * property and none is wanted: the re-entrancy the guard defended against no longer happens.
+     *
+     * `EntitySaveOptions.SkipRelatedCollections` is NOT that successor. It suppresses the caller's own
+     * collections on the way in (orders' `OrderEntityServer` uses it to hold its lines back until the
+     * header has a key); it says nothing about who is calling. Reaching for it here would skip the
+     * deal's lines and team entirely.
+     *
+     * ── WHERE THE S4 STAGE-EVENT APPEND HAS TO GO (this changed too) ──
+     *
+     * `DealStageEvent` is append-only provenance, so a rolled-back save must not leave an event behind
+     * claiming a transition that did not happen — the append has to be inside the same transaction as
+     * the write. The old answer was "put it in the `IsGraphNodeSave` branch", because that branch ran
+     * inside the graph's transaction. **That branch is gone, and code placed here now runs BEFORE the
+     * graph opens anything.**
+     *
+     * The mechanism that still works is the one `saveWithNewDealNumber` below already uses: open a scope
+     * with `BeginEntityTransaction()`, do the work, then call `super.Save(options)` inside it. The
+     * graph's own scope JOINS an ambient transaction rather than opening a second one, so the append and
+     * every row in the graph commit or roll back together.
      */
     public override async Save(options?: EntitySaveOptions): Promise<boolean> {
-        // The graph is executing our own row inside a transaction it already opened. Preparation ran
-        // on the outer call; doing it again here would double it.
-        if (options?.IsGraphNodeSave) {
-            return super.Save(options);
-        }
-
         /**
          * THE CLOSE LOCK (L-17, master plan §7.3) — enforced HERE and nowhere else.
          *
@@ -115,10 +130,9 @@ export class DealEntityServer extends DealEntity {
          * entity server rather than the UI is the whole point: an Action, an agent and a raw
          * `BaseEntity.Save()` all hit the same wall.
          *
-         * ON THE OUTER CALL ONLY, and that placement is load-bearing twice over. The graph-node branch
-         * above returns before reaching this, so the check runs once per save rather than twice — and a
-         * childless deal, which never takes the graph path at all, is still covered because the outer
-         * call always happens.
+         * IT RUNS ONCE PER SAVE, and that is now structural rather than something this code arranges:
+         * MJ executes graph nodes through a private path that never re-enters this override, so there is
+         * exactly one call to be on. A composite deal and a childless one take the same single path.
          *
          * Runs BEFORE any transaction opens: a refused save should cost nothing.
          */

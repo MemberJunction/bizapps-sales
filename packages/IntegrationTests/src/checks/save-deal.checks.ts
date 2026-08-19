@@ -674,6 +674,62 @@ export const SaveDealChecks: NamedCheck[] = [
                 AssertEqual(Number(after[0].DisplayOrder), 1, 'and the surviving row took position 1');
             }),
     },
+    {
+        Id: 'save-deal.SD17',
+        Name: 'SD17: a COMPOSITE save takes exactly ONE deal number — the graph does not re-enter Save()',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE GRAPH PATH, WHICH SD11 DOES NOT REACH.
+                 *
+                 * SD11 proves the counter for deals saved WITHOUT children, and those never build a save
+                 * plan at all. A deal WITH children does: `Save()` routes to the graph, and until MJ
+                 * `47ff71d68b` the graph executed the root by calling this record's public `Save()` a
+                 * second time. `DealEntityServer` carried an early return on `EntitySaveOptions
+                 * .IsGraphNodeSave` to stay idempotent through that; MJ then deleted the flag and made the
+                 * node path private, so the guard was removed.
+                 *
+                 * If that reading is ever wrong — or MJ reverts to re-entering the public method — the
+                 * preparation block runs twice and this deal consumes TWO numbers while keeping the second.
+                 * `DealNumber` appears in contracts, orders and people's email, and the counter is sold as
+                 * gap-free, so a silently skipped number is a defect somebody has to explain months later.
+                 *
+                 * Asserted on the COUNTER, not just the number: a double assignment would leave the deal
+                 * holding a plausible-looking number and the gap sitting invisibly in `DealSequence`.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const before = await TxOne<{ N: number }>(
+                    ctx, `SELECT NextSequenceNumber AS N FROM ${SALES_SCHEMA}.DealSequence WHERE ID = 1`,
+                );
+
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD17 composite'; });
+                await twoLines(deal, f);
+                await saveOk(deal, 'the composite save');
+
+                const after = await TxOne<{ N: number }>(
+                    ctx, `SELECT NextSequenceNumber AS N FROM ${SALES_SCHEMA}.DealSequence WHERE ID = 1`,
+                );
+
+                AssertEqual(
+                    Number(after.N) - Number(before.N),
+                    1,
+                    'a deal saved together with its lines must consume exactly ONE number — more than one ' +
+                        'means the preparation block ran again for the graph node',
+                );
+                AssertEqual(
+                    seqOf(deal.DealNumber as string),
+                    Number(before.N),
+                    'and it must KEEP the number the counter was showing, not a later one',
+                );
+
+                // The children really were written — otherwise this passes by not taking the graph path.
+                const lines = await TxOne<{ N: number }>(
+                    ctx, `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.DealLine WHERE DealID = '${deal.ID}'`,
+                );
+                AssertEqual(Number(lines.N), 2, 'both lines must have persisted, or this check proved nothing');
+            }),
+    },
 ];
 
 for (const check of SaveDealChecks) {

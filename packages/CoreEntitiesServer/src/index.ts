@@ -31,8 +31,8 @@
  *     its team become immutable, and reopening goes through `Sales.ReopenDeal` with a recorded reason.
  *     The schema is already shaped for it; the enforcement lands with S4.
  *   - `DealStageEvent` appends on stage transition, stamping `AmountAtTransition` and
- *     `ProbabilityAtTransition` — S4. Read the note on `DealEntityServer.Save()` first: it has to go in
- *     the `IsGraphNodeSave` branch, so it lands inside the graph's transaction.
+ *     `ProbabilityAtTransition` — S4. Read the note on `DealEntityServer.Save()` first: it has to land
+ *     inside the graph's transaction, and the mechanism for that changed in MJ `47ff71d68b`.
  *   - `DealLineEntityServer` — accepts the four `Resolved*` columns only from an `Orders.PreviewOrder`
  *     response (§6) — S2. Until it exists, nothing enforces that at the entity level.
  */
