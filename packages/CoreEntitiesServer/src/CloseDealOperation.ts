@@ -253,6 +253,55 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 ? await this.planRouting(deal, policy, provider, user)
                 : [];
 
+            /**
+             * ── THE UNROUTABLE-LINE REFUSAL (KI-14) ───────────────────────────────
+             *
+             * A line carrying a product NAME with a NULL `ProductID` cannot become an order line.
+             * `buildOrderInput` maps it to `ProductID: ''`, and an empty string against orders'
+             * `uniqueidentifier` column fails INSIDE orders' save — after this close has already written
+             * the status. The deal ended up **Won with no order and no provenance**, and the surfaced
+             * error was `No active transaction to commit`, which names nothing useful.
+             *
+             * So the close refuses HERE: before the transaction opens, before orders is touched, naming
+             * the line. A close that cannot complete must not begin.
+             *
+             * DELIBERATELY NARROW. This closes the TRIGGER only — a line sales can see is unroutable. It
+             * does not change what happens when an INSTALLED downstream errors for its own reasons; that
+             * interacts with routing and waits for the end-to-end design.
+             *
+             * ONLY WHEN ORDERS IS LIVE, and that condition is load-bearing rather than defensive.
+             * Without orders installed the Order route goes to the STUB, which refuses harmlessly
+             * and reports `Executed: false` with a reason — the graceful degradation a sales-only
+             * host depends on, and which CD7 pins. Refusing there would make a lined deal
+             * uncloseable on every standalone deployment: a worse bug than the one being fixed.
+             * Nothing can corrupt in that case — no empty GUID ever reaches a database.
+             *
+             * Checked only when an Order route was actually PLANNED, so a lineless close, a lost close,
+             * and a policy routing one-time lines nowhere are all unaffected — a NULL `ProductID` is
+             * perfectly legal on a deal nobody is closing to an order.
+             */
+            const unroutable = OrdersIsInstalled() && routing.some((r) => r.Target === 'Order' && r.Planned)
+                ? await this.unroutableOneTimeLines(deal.ID, provider, user)
+                : [];
+            if (unroutable.length) {
+                return {
+                    ...empty,
+                    IsWon: target.IsWon,
+                    IsLost: target.IsLost,
+                    EffectivePolicy: policy,
+                    Routing: routing,
+                    Issues: unroutable.map((name) =>
+                        issue(
+                            'lines',
+                            `"${name}" has no catalogue product selected, so it cannot become an order `
+                                + 'line. Pick a product for it, or change its type so it is not routed '
+                                + 'to an order.',
+                            'ProductID',
+                        ),
+                    ),
+                };
+            }
+            
             if (input.PreviewOnly) {
                 // Nothing written, nothing locked — the caller just wanted to see the consequences.
                 return {
@@ -602,6 +651,30 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
     }
 
     /** Split by the type's `IsRecurring` FLAG. A join, so one read rather than one per line. */
+    /**
+     * The ONE-TIME lines that cannot become order lines, by their display name (KI-14).
+     *
+     * Reuses the same split the routing uses, so this can only ever disagree with `buildOrderInput`
+     * if that mapping changes — there is no second notion of which lines go to an order.
+     *
+     * A line is unroutable when `ProductID` is null, undefined, or blank. The BLANK case matters as
+     * much as null: `buildOrderInput` coerces with `String(l.ProductID ?? '')`, so an empty-string
+     * column reaches orders looking exactly like the null case did, and fails identically.
+     *
+     * Named by `ProductName` because that is what the user typed and what they will recognise; the
+     * line ID would be correct and useless.
+     */
+    private async unroutableOneTimeLines(
+        dealID: string,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<string[]> {
+        const { oneTime } = await this.splitLinesByRecurrence(dealID, provider, user);
+        return oneTime
+            .filter((l) => !String(l.ProductID ?? '').trim())
+            .map((l) => String(l.ProductName ?? '').trim() || 'A line with no name');
+    }
+
     private async splitLinesByRecurrence(
         dealID: string,
         provider: IMetadataProvider,
