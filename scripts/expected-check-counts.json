@@ -20,10 +20,12 @@
     "product-picker": { "count": 4, "requires": "orders", "ids": "PP1-PP4" },
     "close-won-handoff": { "count": 6, "requires": "orders", "ids": "CW1-CW6" },
     "close-won-d2c": { "count": 4, "requires": "orders", "ids": "D1-D4" },
-    "close-won-contract": { "count": 6, "requires": "contracts", "ids": "CT1-CT6" }
+    "close-won-contract": { "count": 6, "requires": "contracts", "ids": "CT1-CT6" },
+    "close-won-tasks": { "count": 6, "requires": "tasks", "ids": "WT1-WT6" }
   },
   "probes": {
     "orders": "@mj-biz-apps/orders-entities",
-    "contracts": "@mj-biz-apps/contracts-entities"
+    "contracts": "@mj-biz-apps/contracts-entities",
+    "tasks": "@mj-biz-apps/tasks-entities"
   }
 }
