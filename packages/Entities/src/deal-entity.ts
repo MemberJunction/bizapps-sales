@@ -66,7 +66,6 @@ import { mjBizAppsOrdersOrderHeaderEntity } from '@mj-biz-apps/orders-entities';
 
 import {
     mjBizAppsSalesDealEntity,
-    mjBizAppsSalesDealLineEntity,
     mjBizAppsSalesDealPaymentScheduleEntity,
 } from './generated/entity_subclasses';
 
@@ -77,29 +76,6 @@ export const DEAL_DEFAULT_PAYMENT_METHOD = 'ACH';
 interface DealRoleIDRow {
     ID: string;
 }
-
-/**
- * The pricing-provenance block on `DealLine` — WRITE-ONLY from an `Orders.PreviewOrder` response.
- *
- * These four columns hold the answer the pricing engine gave, its explanation, and the moment it gave
- * it. Nothing in this app may compute them, and nothing outside the sanctioned pricing path may set
- * them: a hand-edited `ResolvedUnitPrice` is a number that looks authoritative and carries a provenance
- * stamp saying it came from the engine, when it did not. That is worse than an obviously wrong number,
- * because every downstream reader has been told it can trust this one.
- *
- * @see DealLineEntity.Validate — the guard, and why it lives there rather than in field permissions.
- */
-/**
- * Exported so the Explorer Deal Line form can refuse these edits BEFORE the round-trip, using the same
- * list the entity server refuses them with. Same reasoning as `close-lock.ts`: two copies would drift,
- * and the drift would only surface as a save the user did not expect to fail.
- */
-export const PRICING_PROVENANCE_FIELDS = [
-    'ResolvedUnitPrice',
-    'ResolvedExtendedAmount',
-    'PriceComponentsJSON',
-    'PricedAt',
-] as const;
 
 /**
  * Records a blocking problem. Separated from {@link warn} because only a failure clears
@@ -353,131 +329,14 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
 }
 
 /**
- * A deal line, with the rules a form can check.
+ * `DealLineEntity` was here. RETIRED with the table: the deal holds no line items, so there are no
+ * line rules for it to carry. Every invariant it enforced is accounted for in docs/DECISIONS.md
+ * D-DL1 — most relocated to orders' own CHECK constraints, two of them with changed semantics
+ * (negative quantities become legal; the discount is a FRACTION there, not a percentage).
  *
- * Reached through `Deal.Lines`, which builds its children with `GetEntityObject` — so this subclass is
- * resolved by the class factory and these rules apply to every line in the graph.
+ * The pricing-provenance guard went with it, and correctly: it existed because sales held columns
+ * carrying the engine's answer that sales was not allowed to author. It now holds none.
  */
-@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Lines')
-export class DealLineEntity extends mjBizAppsSalesDealLineEntity {
-    public override Validate(): ValidationResult {
-        const result = super.Validate();
-        const label = this.ProductName?.trim() || 'this line';
-
-        if (!this.ProductName || !this.ProductName.trim()) {
-            fail(result, 'ProductName', 'Every line needs a product or service name.', this.ProductName);
-        }
-        if (this.Quantity === null || this.Quantity === undefined || this.Quantity < 0) {
-            fail(result, 'Quantity', `Quantity on ${label} must be zero or more.`, this.Quantity);
-        }
-        if (outsideRange(this.RequestedDiscountPct, 0, 100)) {
-            fail(
-                result,
-                'RequestedDiscountPct',
-                `Requested discount on ${label} must be between 0 and 100%.`,
-                this.RequestedDiscountPct,
-            );
-        }
-        if (below(this.AnnualGrossFees, 0)) {
-            fail(result, 'AnnualGrossFees', `Annual gross fees on ${label} cannot be negative.`, this.AnnualGrossFees);
-        }
-        if (below(this.DiscountAmount, 0)) {
-            fail(
-                result,
-                'DiscountAmount',
-                `Discount on ${label} cannot be negative — a surcharge belongs on its own line.`,
-                this.DiscountAmount,
-            );
-        }
-        // Compared as DATES rather than as `yyyy-MM-dd` strings, which is what the retired draft did.
-        // The entity's own field type is what makes this correct for both a date-only and a full
-        // timestamp value, with no dependency on a normalizing boundary upstream.
-        if (this.ServicePeriodStart && this.ServicePeriodEnd && this.ServicePeriodEnd < this.ServicePeriodStart) {
-            fail(
-                result,
-                'ServicePeriodEnd',
-                `Service period on ${label} ends before it starts.`,
-                this.ServicePeriodEnd,
-            );
-        }
-
-        // DELIBERATELY NOT CHECKED: whether Total equals AnnualGrossFees - DiscountAmount. See the
-        // file header — all three are transcriptions, and asserting the relationship is computing money.
-
-        this.RefusePricingProvenanceEdits(result);
-
-        return result;
-    }
-
-    /**
-     * Refuses any caller-originated change to the four write-only pricing-provenance columns.
-     *
-     * ── WHY THIS EXISTS, AND WHY IT IS NEW ──────────────────────────────────────────────────────
-     *
-     * Until Related Record Collections landed, the only way a browser could write a deal line was the
-     * `Sales.SaveDeal` remote operation, which copied a LISTED set of fields — and the four below were
-     * deliberately absent from that list. Retiring the operation retired the list with it. Saving a line
-     * is now an ordinary entity save, and an ordinary entity save had nothing stopping it.
-     *
-     * THE HOLE WAS ALREADY WIDER THAN THAT, which is the part worth knowing: the generated Deal Lines
-     * form has always exposed these columns as editable inputs, so any Explorer user could type into
-     * them long before this change. Putting the rule on the ENTITY closes both doors at once, which
-     * neither a restored whitelist nor a UI change would do.
-     *
-     * ── WHY NOT FIELD PERMISSIONS ───────────────────────────────────────────────────────────────
-     *
-     * `AllowUpdateAPI = 0` looks like the obvious answer and is the wrong one: `EntityFieldInfo`
-     * excludes such fields from the `spCreate` / `spUpdate` parameter list entirely, so the S2 pricing
-     * bridge — the one caller that MUST write these — would be locked out too and would need raw SQL to
-     * do its job. Refusing at validation keeps the column writable by design and closed by rule.
-     *
-     * ── WHY THE TEST IS "NEW WITH A VALUE, **OR** DIRTY" ────────────────────────────────────────
-     *
-     * A dirty-check alone is NOT sufficient, and the reason is a genuine trap. `EntityField`'s setter
-     * treats the FIRST write to a never-set field as record setup and copies the incoming value into
-     * `_OldValue` as well as `_Value`:
-     *
-     *     if (this._NeverSet && (value !== null || this._OldValue !== null)) this._OldValue = value;
-     *
-     * So on a brand-new line, `line.ResolvedUnitPrice = 4200` leaves old and new equal and `Dirty`
-     * reports **false**. A guard built on `Dirty` alone would pass every forged value on a create — the
-     * exact case that matters most — while looking correct. This was caught by the check below failing,
-     * not by reading the code.
-     *
-     * The two conditions together are correct in all four quadrants:
-     *   · new + value set        → refused (the create case `Dirty` cannot see)
-     *   · new + untouched        → allowed (null, as it must be)
-     *   · loaded + changed       → refused (`Dirty` is reliable once a record has been loaded)
-     *   · loaded + unchanged     → allowed, so an already-priced line re-saves cleanly
-     *
-     * ── THE SEAM FOR S2 ─────────────────────────────────────────────────────────────────────────
-     *
-     * When the pricing bridge lands, `DealLineEntityServer` overrides this to permit the write when it
-     * originates from a verified `Orders.PreviewOrder` response — that server-only subclass is the
-     * sanctioned path, and it does not exist yet precisely because nothing may write these columns until
-     * it does. Until then the rule is absolute, which is the correct state rather than a gap.
-     */
-    protected RefusePricingProvenanceEdits(result: ValidationResult): void {
-        const isNew = !this.IsSaved;
-
-        for (const name of PRICING_PROVENANCE_FIELDS) {
-            const field = this.GetFieldByName(name);
-            if (!field) {
-                continue;
-            }
-            const hasValue = field.Value !== null && field.Value !== undefined;
-            if ((isNew && hasValue) || field.Dirty) {
-                fail(
-                    result,
-                    name,
-                    `${name} is written only from an Orders.PreviewOrder response — it cannot be set here. `
-                    + 'This app records what the pricing engine answered; it never computes or edits it.',
-                    field.Value,
-                );
-            }
-        }
-    }
-}
 
 /**
  * One negotiated instalment. No rows at all is the normal case — standard terms.
@@ -508,7 +367,7 @@ export class DealPaymentScheduleEntity extends mjBizAppsSalesDealPaymentSchedule
  * this file quietly stops applying. Touching the symbols is what keeps the import alive.
  */
 export function LoadSalesDealEntities(): void {
-    const anchors: unknown[] = [DealEntity, DealLineEntity, DealPaymentScheduleEntity];
+    const anchors: unknown[] = [DealEntity, DealPaymentScheduleEntity];
     if (anchors.length === 0) {
         throw new Error('LoadSalesDealEntities: registration anchors were tree-shaken away.');
     }

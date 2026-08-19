@@ -401,3 +401,36 @@ repo's numbering. This entry is the decision that should have existed.
 **Why the correction is recorded rather than simply deleted with the file:** the claim was load-bearing
 for planning. It is what made Phase 1 look like a five-minute change, and anyone re-reading an old copy of
 `VENDORED.md` or the first draft of the rework plan would believe it again.
+
+## D-DL1 — What happened to every invariant that lived on `DealLine`
+
+**Recorded because of PR #8.** When `DealDraft` was retired, six invariants lived only in the deleted
+code and one — the `DealLineTypeID` advisory — was genuinely lost until somebody went looking for it.
+`DealLine.Validate()` and its pricing-provenance guard are the same shape, so every rule is accounted
+for here before the table goes, not after.
+
+| Invariant on `DealLine` | Verdict | Where it lives now |
+|---|---|---|
+| `ProductName` required | **strengthened** | `OrderLine.ProductID` is `NOT NULL` with a real FK to the catalogue. A name was a transcription that could be anything; an ID cannot. |
+| `Quantity >= 0` | **relocated, WIDENED** | `CK_OrderLine_Quantity CHECK (Quantity <> 0)`. Orders forbids *zero* and **permits negative** — a return or credit line is negative. Sales forbade negatives. See the note below. |
+| `RequestedDiscountPct` within 0–100 | **relocated, UNIT CHANGED** | `CK_OrderLine_DiscountPct CHECK (DiscountPct >= 0 AND DiscountPct <= 1)`. Orders stores a **fraction**, sales stored a **percentage**. See the note below. |
+| `DiscountAmount >= 0` | **relocated, identical** | `CK_OrderLine_DiscountAmount CHECK (DiscountAmount >= 0)` |
+| `ServicePeriodEnd >= ServicePeriodStart` | **relocated, identical** | `CK_OrderLine_ServicePeriod`, same predicate, null-tolerant the same way |
+| `AnnualGrossFees >= 0` | **dropped, correctly** | A sales-side money column that only ever held a transcription. Money is wholly orders' concern now; there is no sales-side figure left to bound. |
+| `RefusePricingProvenanceEdits` — the four write-only `Resolved*` columns | **dropped, correctly** | The columns go with the table. The guard existed because sales held pricing provenance it was not allowed to author; it now holds none. `OrderLine.UnitPrice` is orders' to write and `CK_OrderLine_UnitPrice CHECK (UnitPrice >= 0)` bounds it there. |
+| "Total vs gross − discount is deliberately NOT checked" | **moot** | It was a note about not computing money on transcribed columns that no longer exist. The rule it protected is now structural: sales has no money columns on a line at all. |
+| The null-`ProductID` refusal (KI-14, PR #22) | **dropped, correctly** | Unreachable. `OrderLine.ProductID` is `NOT NULL`, so the name-only shape cannot be constructed. The HubSpot-import half of KI-14 becomes an import-time concern only. |
+
+### Two of those are behaviour changes, not relocations
+
+**Negative quantities become possible.** Sales refused them; orders allows them because a return line is
+a negative line. Nothing in the deal workspace should offer a negative quantity, so this is a UI
+constraint now rather than a data one — and the data layer will no longer catch it if the UI regresses.
+
+**Discount changes units: 0–100 becomes 0–1.** This is the one that would have become a silent
+hundred-fold bug. A rep entering "10" for ten percent must reach `OrderLine.DiscountPct` as `0.1`. The
+CHECK constraint catches anything above 1, so a raw percentage fails loudly rather than discounting to
+zero — but it fails at the database, naming a constraint, which is a poor error for a typo in a form.
+The workspace converts, and that conversion is the kind of thing worth a check of its own.
+
+---

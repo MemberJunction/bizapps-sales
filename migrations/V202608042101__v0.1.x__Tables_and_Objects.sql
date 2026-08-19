@@ -23,10 +23,10 @@
 -- THE TWO RULES THIS SCHEMA EXISTS TO MAKE STRUCTURAL (master plan §1)
 --
 -- 1. SALES NEVER COMPUTES MONEY. Every number comes back from `Orders.PreviewOrder`. That is why
---    DealLine carries `ResolvedUnitPrice` / `ResolvedExtendedAmount` / `PriceComponentsJSON` /
+--    The deal's EMBEDDED ORDER carries the priced figures on its OrderLine rows; the deal holds
 --    `PricedAt` as a WRITE-ONLY block populated from a PreviewOrder response, and why `Deal.Amount`
 --    is a CACHED answer carrying its own provenance (`AmountIsComputed`, `AmountComputedAt`,
---    `AmountSourceHash`). The hash fingerprints the DealLine set the amount was computed from, so
+--    `AmountSourceHash`). The hash fingerprints the order's line set the amount came from, so
 --    the UI can say "this figure is stale, reprice" instead of showing a number nobody can trace.
 --    Strip those three columns and `Amount` becomes a hand-edited field inside a month.
 --
@@ -37,7 +37,7 @@
 --
 --    CHECK constraints therefore survive in this file ONLY for structural invariants:
 --      * exactly-one-of foreign keys      (CK_DealTeamMember_EmployeeXorPerson)
---      * date ordering                    (CK_DealLine_ServicePeriodOrder, CK_ForecastSnapshot_PeriodOrder)
+--      * date ordering                    (CK_ForecastSnapshot_PeriodOrder)
 --      * non-negative / bounded numerics  (quantities, percentages, probabilities, scores)
 --    Every one of those stays true no matter what an organization calls its stages.
 --
@@ -55,7 +55,7 @@
 --
 -- SOFT (plain UNIQUEIDENTIFIER, no FK) — because the target app's migrations may not have run.
 -- This is DG-6, and it is the reason this baseline stands up with only bizapps-common present:
---   * DealLine.ProductID                → bizapps-orders catalog
+--   * Deal.OrderID                      → bizapps-orders OrderHeader (a REAL FK; see FK_Deal_OrderHeader)
 --   * Deal.ContractID / RenewsContractID → bizapps-contracts (§4.4, L-15 — the reference points
 --                                          DOWN the graph; there is deliberately no Contract.DealID,
 --                                          because it is ONE contract to MANY deals)
@@ -362,36 +362,6 @@ CREATE TABLE __mj_BizAppsSales.AccountType (
 GO
 
 ---------------------------------------------------------------------------
--- 3.10 DealLineType — whether a line is a ONE-TIME charge or a RECURRING one.
---
---      THIS WAS A STRING COLUMN AND IS NOW A TYPE TABLE, on purpose. `DealLine`
---      previously carried `LineType NVARCHAR(40)`, which was fine only while
---      nothing read it. It is about to be read: recurring lines are what produce
---      MRR/ARR and a renewal, one-time lines produce neither, and the moment any
---      code needs to tell them apart a string forces exactly the comparison Rule 2
---      exists to forbid — `line.LineType === 'Recurring'`.
---
---      `IsRecurring` is the flag the engine branches on, so a customer can call
---      the concept "Subscription" or "Implementation" and no code is aware of the
---      rename. Same shape as every other type table here: Code is the stable
---      identifier, Name is the label, the BIT is the behaviour.
----------------------------------------------------------------------------
-CREATE TABLE __mj_BizAppsSales.DealLineType (
-    ID UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID(),
-    Code NVARCHAR(40) NOT NULL,
-    Name NVARCHAR(200) NOT NULL,
-    Description NVARCHAR(MAX) NULL,
-
-    -- The behaviour flag. Recurring lines are the ones that carry into MRR/ARR and
-    -- become a renewable subscription; one-time lines are billed once and done.
-    IsRecurring BIT NOT NULL DEFAULT 0,
-
-    DisplayRank INT NOT NULL DEFAULT 0,
-    IsActive BIT NOT NULL DEFAULT 1,
-
-    CONSTRAINT PK_DealLineType PRIMARY KEY CLUSTERED (ID),
-    CONSTRAINT UQ_DealLineType_Code UNIQUE (Code)
-);
 GO
 
 
@@ -829,127 +799,6 @@ CREATE TABLE __mj_BizAppsSales.Deal (
 GO
 
 ---------------------------------------------------------------------------
--- 6.2 DealLine
---
---     THE SHAPE OF THIS TABLE IS THE PRICING RULE MADE STRUCTURAL. The first
---     block is INTENT — what the rep is asking for. The second block is the
---     RESOLVED ANSWER, and it is WRITE-ONLY from this app's perspective:
---     populated only from an Orders.PreviewOrder response, never computed
---     locally, never hand-edited.
---
---     What sales must never do, restated because this is the table where it
---     would happen: multiply quantity by price · apply a discount percentage ·
---     compute tax · prorate a partial period · sum lines into a header total ·
---     round anything.
---
---     PriceComponentsJSON stores the explanation trail orders returns, so a rep
---     can answer "why is it this price" without a support ticket.
----------------------------------------------------------------------------
-CREATE TABLE __mj_BizAppsSales.DealLine (
-    ID UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID(),
-    DealID UNIQUEIDENTIFIER NOT NULL,
-
-    -- ===== INTENT — what the rep is asking for =====
-    -- SOFT reference to the bizapps-orders catalog (DG-6): orders' migrations may
-    -- not have run, which is precisely what lets this baseline stand alone.
-    ProductID UNIQUEIDENTIFIER NULL,
-    -- The product/service name AS WRITTEN ON THE DOCUMENT, and not a denormalized
-    -- cache of ProductID's name (D5). Two independent reasons it has to exist:
-    --   1. ProductID points at the orders catalog, which is NOT INSTALLED here and
-    --      will not be for several phases. Without this column a line is a bare GUID
-    --      referencing a table that is absent, and the form has no product field that
-    --      resolves to anything a human can read.
-    --   2. Even once orders IS present, the line item on a signed Order Form is part
-    --      of the executed agreement. Renaming a catalog product must not retroactively
-    --      reword what a customer signed.
-    -- So this is transcription, not duplication, and it is never auto-synced from the
-    -- catalog. ProductID stays for when orders arrives and pricing needs a real key.
-    ProductName NVARCHAR(500) NULL,
-    Quantity DECIMAL(19, 4) NOT NULL DEFAULT 1,
-    RequestedDiscountPct DECIMAL(5, 2) NULL,
-    -- An INPUT to the pricing engine, never a replacement for it. A negotiated
-    -- price still goes through PreviewOrder.
-    OverrideUnitPrice DECIMAL(19, 4) NULL,
-    TermMonths INT NULL,
-    ServicePeriodStart DATE NULL,
-    ServicePeriodEnd DATE NULL,
-    -- Was `LineType NVARCHAR(40)`; now a type table (D7). See DealLineType §3.10 —
-    -- `IsRecurring` is the flag, so nothing ever compares this to the string
-    -- 'Recurring'.
-    DealLineTypeID UNIQUEIDENTIFIER NULL,
-    DisplayOrder INT NOT NULL DEFAULT 0,
-    Description NVARCHAR(MAX) NULL,
-
-    -- ===== THE SIGNED FIGURES — TRANSCRIBED, NEVER DERIVED (D2, D3) =====
-    --
-    -- READ THIS BEFORE ADDING ANY ARITHMETIC. These three columns come straight off
-    -- the 2026 Order Form / SOW line grid, and on that PDF `Total` visibly equals
-    -- AnnualGrossFees − DiscountAmount. THAT SUBTRACTION IS THE CUSTOMER'S AND THE
-    -- AD'S, NOT THIS APP'S. All three are INPUTS: the AD transcribes what the executed
-    -- document says, because the figure a customer signed is a fact about the agreement
-    -- and has to be recoverable from the deal record verbatim.
-    --
-    -- Rule 1 therefore still holds literally — no file in this repo multiplies,
-    -- discounts, sums or rounds to arrive at any of them. `Total` is not a computed
-    -- column, has no default, and is never back-filled from its siblings. When orders
-    -- is wired in, PreviewOrder's answer lands in the RESOLVED block below and becomes
-    -- the authority for what the deal is worth; these stay as the record of what was
-    -- signed, and a disagreement between the two blocks is a fact worth surfacing
-    -- rather than something to reconcile by overwriting.
-    --
-    -- DiscountAmount coexists with RequestedDiscountPct above, deliberately (D3): the
-    -- template expresses a discount as an AMOUNT, the pricing engine takes a PERCENT.
-    -- There is NO exactly-one-of CHECK between them — a deal can legitimately carry a
-    -- negotiated percentage as engine input AND a currency figure as written on the
-    -- signed page, and forcing a choice would lose one of them.
-    AnnualGrossFees DECIMAL(19, 4) NULL,
-    DiscountAmount DECIMAL(19, 4) NULL,
-    Total DECIMAL(19, 4) NULL,
-
-    -- ===== RESOLVED — write-only, from Orders.PreviewOrder =====
-    ResolvedUnitPrice DECIMAL(19, 4) NULL,
-    ResolvedExtendedAmount DECIMAL(19, 4) NULL,
-    PriceComponentsJSON NVARCHAR(MAX) NULL,
-    PricedAt DATETIMEOFFSET NULL,
-
-    -- Denormalized stamp of the PRODUCT's company at price time (§10), mirroring
-    -- OrderLine.CompanyID in orders. This is what lets a cross-company deal
-    -- materialize into orders with correct per-line company ownership, so each
-    -- line books its own single-company journal entry with no extra work here.
-    -- Server-maintained; never hand-set.
-    CompanyID UNIQUEIDENTIFIER NULL,
-
-    CONSTRAINT PK_DealLine PRIMARY KEY CLUSTERED (ID),
-    CONSTRAINT FK_DealLine_Deal FOREIGN KEY (DealID)
-        REFERENCES __mj_BizAppsSales.Deal (ID),
-    CONSTRAINT FK_DealLine_DealLineType FOREIGN KEY (DealLineTypeID)
-        REFERENCES __mj_BizAppsSales.DealLineType (ID),
-    CONSTRAINT FK_DealLine_Company FOREIGN KEY (CompanyID)
-        REFERENCES __mj.Company (ID),
-
-    -- STRUCTURAL invariants: non-negative quantity, bounded percentage, date ordering.
-    CONSTRAINT CK_DealLine_Quantity CHECK (Quantity >= 0),
-    CONSTRAINT CK_DealLine_RequestedDiscountPct
-        CHECK (RequestedDiscountPct IS NULL OR (RequestedDiscountPct >= 0 AND RequestedDiscountPct <= 100)),
-    CONSTRAINT CK_DealLine_TermMonths CHECK (TermMonths IS NULL OR TermMonths >= 0),
-    CONSTRAINT CK_DealLine_ServicePeriodOrder
-        CHECK (ServicePeriodStart IS NULL OR ServicePeriodEnd IS NULL OR ServicePeriodEnd >= ServicePeriodStart),
-
-    -- Gross fees and a discount are both quoted as positive magnitudes; a "negative
-    -- discount" is a surcharge and belongs on its own line rather than as a sign flip.
-    CONSTRAINT CK_DealLine_AnnualGrossFees
-        CHECK (AnnualGrossFees IS NULL OR AnnualGrossFees >= 0),
-    CONSTRAINT CK_DealLine_DiscountAmount
-        CHECK (DiscountAmount IS NULL OR DiscountAmount >= 0)
-    -- `Total` is DELIBERATELY UNCONSTRAINED. It is transcribed from the signed
-    -- document, so this app must not assert the arithmetic it would take to bound it,
-    -- and a credit or concession line is legitimately negative. Constraining it here
-    -- would be this repo quietly taking a position on how Total relates to the two
-    -- columns above — which is exactly what D2 decided it must not do.
-);
-GO
-
----------------------------------------------------------------------------
 -- 6.3 DealStageEvent — the immutable transition log
 --
 --     APPEND-ONLY, NEVER EDITED. This single table is where stage-conversion
@@ -1056,7 +905,7 @@ GO
 --     that reconciliation is wanted it belongs downstream, in contracts or
 --     orders, where the authoritative total actually lives.
 --
---     Amount is UNSIGNED-UNCONSTRAINED for the same reason DealLine.Total is: a
+--     Amount is UNSIGNED-UNCONSTRAINED for the same reason an order line's total is: a
 --     refund or credit instalment is legitimately negative, and this table records
 --     what was agreed rather than asserting a shape for it.
 ---------------------------------------------------------------------------
@@ -1436,9 +1285,9 @@ GO
 
 -- Deal
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'A deal (opportunity). Amount is a CACHED answer from Orders.PreviewOrder carrying its own provenance, never a locally computed total — this app performs no pricing arithmetic of any kind. Closing a deal is a transaction that CREATES a contract and/or orders, not a notification that someone should.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The deal value. A CACHED ANSWER returned by Orders.PreviewOrder for this deal''s line set — NOT computed here. For a simple (header-only) deal it is hand-entered and AmountIsComputed is 0. Never sum DealLine rows into this column; sales does no arithmetic.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'Amount';
+EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The deal value. A CACHED ANSWER returned by Orders.PreviewOrder for this deal''s line set — NOT computed here. For a simple (header-only) deal it is hand-entered and AmountIsComputed is 0. Never sum the order''s lines into this column; sales does no arithmetic.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'Amount';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'1 when Amount came from Orders.PreviewOrder; 0 when a human typed it (a simple, header-only deal). Distinguishes a traceable figure from a stated one.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'AmountIsComputed';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Fingerprint of the DealLine set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say "this figure is stale, reprice" instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'AmountSourceHash';
+EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Fingerprint of the embedded order''s line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say "this figure is stale, reprice" instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'AmountSourceHash';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'DENORMALIZED, SERVER-MAINTAINED. The Employee holding the role where DealRole.IsOwnerRole = 1, written by DealEntityServer.Save() whenever team membership changes. DealTeamMember is the source of truth; this exists so "my deals" and per-rep boards need no join. NEVER SET THIS DIRECTLY — it will diverge.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'OwnerEmployeeID';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The SELLING company. Must match Pipeline.CompanyID; enforced by the entity server, since a CHECK cannot reach across the FK to compare them. FK to __mj.Company.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'CompanyID';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'SOFT reference (no FK) to a bizapps-contracts Contract. The link points DOWN the dependency graph; there is deliberately no Contract.DealID, because it is ONE contract to MANY deals — the original sale, every renewal, every expansion.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'ContractID';
@@ -1454,25 +1303,8 @@ EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'PLACEHOLDER LABEL 
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Free-text summary of what this deal negotiated AWAY from standard terms — the red-line list, in the AD''s own words. The input to a human legal review; nothing should attempt to parse it.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'ContractVariances';
 GO
 
--- DealLine
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'A requested line on a deal. Stores INTENT (product, quantity, requested discount, override price, term); the Resolved* columns are WRITE-ONLY from an Orders.PreviewOrder response. Sales never multiplies quantity by price, applies a discount, computes tax, prorates a period, sums a total or rounds anything.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'SOFT reference (no FK) to a bizapps-orders Product. Soft because orders'' migrations may not have run — which is exactly what lets this app stand up independently.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'ProductID';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'A negotiated unit price. An INPUT to the pricing engine, never a replacement for it — the line still goes through Orders.PreviewOrder.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'OverrideUnitPrice';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'WRITE-ONLY from this app''s perspective: populated only from an Orders.PreviewOrder response, never computed locally, never hand-edited.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'ResolvedUnitPrice';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'WRITE-ONLY, from Orders.PreviewOrder. Never quantity x price computed here.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'ResolvedExtendedAmount';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The explanation trail Orders.PreviewOrder returns (base, rules, adjustments, charges, tax), so a rep can answer "why is it this price" without a support ticket.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'PriceComponentsJSON';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'DENORMALIZED stamp of the product''s owning company at price time, mirroring OrderLine.CompanyID. This is what lets a cross-company deal materialize into orders with correct per-line company ownership. Server-maintained; never hand-set.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'CompanyID';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The product/service name AS WRITTEN ON THE SIGNED DOCUMENT — transcription, not a denormalized cache of the catalog name, and never auto-synced from it. Needed twice over: ProductID points at the orders catalog, which is not installed yet, so without this a line is an unreadable GUID; and once orders IS present, renaming a catalog product must not retroactively reword what a customer signed.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'ProductName';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Whether this line is a one-time charge or a recurring one. A FK to DealLineType, replacing what was a free-text LineType column: recurring lines are what produce MRR/ARR and a renewal, and the moment code needs to tell them apart a string forces exactly the name comparison the vocabulary rule forbids. Branch on DealLineType.IsRecurring, never on the name.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'DealLineTypeID';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Annual gross fees for this line AS WRITTEN ON THE SIGNED DOCUMENT. An INPUT the AD transcribes, not a figure this app derives. Once orders is wired in, Orders.PreviewOrder''s answer lands in the Resolved* columns and becomes the authority on what the deal is worth; this remains the record of what was signed.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'AnnualGrossFees';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The discount as a CURRENCY AMOUNT, as the order form expresses it. Coexists with RequestedDiscountPct deliberately — the template speaks in amounts, the pricing engine takes a percent — and there is no exactly-one-of constraint, because a deal can legitimately carry a negotiated percentage as engine input AND the figure printed on the signed page.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'DiscountAmount';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'THE SIGNED FIGURE for this line, transcribed from the executed document. On the PDF it equals AnnualGrossFees minus DiscountAmount, but THAT SUBTRACTION IS THE CUSTOMER''S AND THE AD''S, NOT THIS APP''S: nothing here computes, defaults or back-fills it, which is how the no-arithmetic rule stays literally true. Deliberately unconstrained in sign — a credit or concession line is legitimately negative, and bounding it would mean asserting the arithmetic.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'Total';
-GO
-
--- DealLineType
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Whether a deal line is a ONE-TIME charge or a RECURRING one. A type table rather than a string column because recurring lines are what produce MRR/ARR and a renewal while one-time lines produce neither — so the distinction is behaviour, and behaviour belongs in a flag. IsRecurring is what the engine reads, which is what lets a customer call the concept Subscription or Implementation with no code aware of the rename.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLineType';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The behaviour flag. 1 for lines that carry into MRR/ARR and become a renewable subscription; 0 for lines billed once. Branch on this, never on Name or Code.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLineType', @level2type=N'COLUMN', @level2name=N'IsRecurring';
-GO
+-- DealLine / DealLineType — RETIRED. The deal holds no line items; its embedded order does, as
+-- OrderLine rows. See docs/DECISIONS.md D-DL1 for where every invariant went.
 
 -- DealPaymentSchedule
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The EXCEPTION payment schedule for a deal. THE ABSENCE OF ROWS IS THE COMMON CASE and that is the design: the standard term is 100% payable on execution, so a deal on standard terms carries no rows here and rows exist only where something else was negotiated. Storing the default on every deal would let a later change to "default" silently rewrite history, and would turn "did this deal negotiate payment terms?" into arithmetic instead of a row count. This app does NOT check that the schedule sums to the deal amount — that is computing money, and the authoritative total lives in orders.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealPaymentSchedule';
