@@ -640,61 +640,95 @@ bizapps remote operation must check **both**.
 
 ---
 
-## 🟠 KI-14 — A deal line with a free-text product fails close-won, and leaves the deal Won anyway
+## 🟢 KI-14 — A deal line with a free-text product used to fail close-won and leave the deal Won
 
-**Found while making the demo roster click-safe.** A `DealLine` that carries a `ProductName` string with
-**`ProductID` NULL** cannot be closed to an order. Worse than a refusal: the close reports failure but the
-deal is already marked **Won**, so the roster is left in a state no order backs.
+**TRIGGER CLOSED (PR #22).** A close-won that would send a line with no catalogue product now **refuses
+before it starts**, naming the line, and the deal stays **Open**. Kept here because the shape is
+legitimate, the HubSpot cutover produces it in volume, and the *broader* failure mode this exposed is
+still open — see the last section.
 
-### What happens
+### What used to happen
 
-`CloseDealOperation.buildOrderInput` maps each one-time line with
+A `DealLine` carrying a `ProductName` string with **`ProductID` NULL** could not be closed. Worse than a
+refusal: the close reported failure but the deal was **already marked Won**, so the roster was left in a
+state no order or contract backed.
+
+Both builders coerce the same way:
 
 ```ts
 ProductID: String(l.ProductID ?? ''),
 ```
 
-so a NULL becomes the **empty string**. Orders' `OrderLine` types `ProductID` as a `uniqueidentifier`, and
-`''` is not a null — it is a value that fails conversion. The failure happens *inside* orders' save, which
-rolls back its savepoint and returns false; the enclosing close transaction is already torn down by then.
-The observed symptom on a demo host was `No active transaction to commit`, which names nothing useful and
-reads like a transaction-management bug rather than a data problem. This is the same empty-GUID mechanism
-recorded in KI-11, reached by a different route.
+so a NULL became the **empty string**. Orders' `OrderLine` and contracts' `ContractLine` both type
+`ProductID` as a `uniqueidentifier`, and `''` is not a null — it is a value that fails conversion. The
+failure happened *inside* the sibling's save, which rolled back its savepoint and returned false; the
+enclosing close transaction was already torn down by then. The observed symptom on a demo host was
+`No active transaction to commit`, which names nothing useful and reads like a transaction-management bug
+rather than a data problem. Same empty-GUID mechanism as KI-11, reached by a different route.
 
-**Only ONE-TIME lines trigger it** — they are the ones routed to an order. A recurring line with a NULL
-`ProductID` routes to a contract and does not hit this path.
+**Both routes were affected**, which the first fix got wrong. An earlier note here claimed only one-time
+lines could trigger it because a recurring line "routes to a contract and does not hit this path" — that
+was false. `LiveContractsSeam` uses the identical coercion, so a recurring line with no product failed
+identically and left the deal **Won with no contract**. An audit caught it after the one-time half had
+already been fixed.
+
+### What the fix is
+
+`CloseDealOperation.unroutablePlannedLines` mirrors both builders rather than one:
+
+| Route | Lines inspected | Gate |
+|---|---|---|
+| Order | one-time | `Planned` && `OneTimeLinesTo === 'Order'` && `OrdersIsInstalled()` |
+| Contract | recurring | `Planned` && `SubscriptionLinesTo === 'Contract'` && `ContractsIsInstalled()` |
+
+It reuses the same recurrence split the routing uses, so there is no second notion of which lines go
+where. Blank counts as unroutable alongside null, because the coercion makes an empty-string column
+indistinguishable from a NULL by the time it reaches the sibling.
+
+Each route is gated on **its own** app being installed. A route whose downstream is absent still reaches
+its stub and refuses harmlessly — that is what keeps a lined deal closeable on a standalone host, and
+what CD7 pins. Refusing there instead would have broken every sales-only deployment.
+
+**PreviewOnly is affected on purpose.** The guard runs before the preview returns, so previewing a deal
+that cannot close reports the refusal rather than a clean routing plan. Nothing is written either way.
+
+Pinned by **CW5/CW6** (order route) and **CT5/CT6** (contract route) — a refusal check plus a control in
+each pair, since a guard that fired on every deal would make the refusal checks pass while breaking the
+close outright. They live in `close-won-handoff` and `close-won-contract` rather than the default gate,
+because each refusal only fires when its downstream is **live**.
 
 ### Where this shape comes from — and why it is not hypothetical
 
 Any line captured before the product picker existed. In this repo that was every seeded line, because
 `DealLine.ProductID` is a **soft reference** and `ProductName` is transcription: a deal is meant to remain
-readable on a host where orders was never installed. `scripts/seed-demo-data.sh` now resolves catalogue IDs
-by company so the seeded roster is safe, but the shape is legitimate and will recur.
+readable on a host where orders was never installed. `scripts/seed-demo-data.sh` resolves catalogue IDs by
+company so the seeded roster is safe, but the shape is legitimate and will recur.
 
 **The migration implication is the real one. Deals imported from HubSpot will have exactly this shape**
-(tracker **#60**) — a product *name* from HubSpot's line items and no MemberJunction catalogue ID. Closing
-an imported deal would therefore fail in precisely this way, on the records a cutover produces most of.
+(tracker **#60**) — a product *name* from HubSpot's line items and no MemberJunction catalogue ID. Those
+deals are now **refused legibly** instead of corrupting a close, which is the right failure but still a
+failure: the importer has to resolve what it can.
 
-Two ways out, and they are not equivalent:
+Two halves, and they are not equivalent:
 
 1. **The importer resolves products to catalogue IDs.** Correct where a confident match exists, but names
    are not unique and `SKU`'s unique index is filtered (`WHERE SKU IS NOT NULL`), so matching is a
    *suggestion a human confirms*, never an identity mechanism — see `product-filter.ts`. Some rows will
    have no match at all.
-2. **The close path handles a null `ProductID` rather than passing `''`.** Either omit the field so orders'
-   own validation refuses it by name, or refuse the close up front with a message naming the offending
-   line. Both beat an empty string reaching a `uniqueidentifier` column.
+2. **The close refuses the rest up front.** ✅ Done — this is PR #22.
 
-Most likely both: resolve what can be resolved, and refuse the rest legibly instead of corrupting a close.
+Half 1 is still owed, and belongs with the importer (S6).
 
-### Not fixed here, deliberately
+### Still open: the general case
 
-The fix belongs in the close-won routing path, which **Andrew's design updates may touch** — changing it now
-risks colliding with that work. Recorded rather than patched. The seed-data change that made the demo roster
-safe is not a fix for this; it only removes the shape from *our* fixtures.
+**The trigger is closed; the class is not.** This bug was one *reachable* way for a close to fail
+downstream after the status had been written. Any other error inside an installed sibling's save can still
+land the same way — deal Won, nothing downstream, and an error that names the transaction rather than the
+cause.
 
-**Whatever the fix, the deal must not end up Won when no order was created.** That half is independent of
-how `ProductID` is resolved, and it is the part that corrupts data rather than merely failing.
+Fixing that means changing what happens when an installed downstream errors, which interacts with routing
+and **waits for Andrew's end-to-end design doc**. Deliberately out of scope for PR #22, which closed the
+one trigger we could reach without touching those semantics.
 
 ---
 

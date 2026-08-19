@@ -14,6 +14,62 @@ Verified result: **38/38 integration checks and an 11/11 end-to-end smoke, on a 
 
 ---
 
+## Which database is which — read this before running an ad-hoc query
+
+There are four similarly-named databases on this machine and **two of them differ by a `_V6` suffix**.
+Nothing in a `sqlcmd` or `mssql` session tells you which one you reached, so a query that returns
+plausible-looking rows from the wrong database is the default failure, not an unlikely one.
+
+**It has already happened.** A roster check during demo prep read `MJ_BizAppsSales_V6` believing it was
+the demo host, found six deals where there should be seven and a NULL `ProductID` on every line, and
+concluded the demo data was broken. Nothing was broken — that database is *supposed* to look like that.
+The real host was fine. Cost: a wrong diagnosis and a needless re-seed.
+
+| Database | Tree that owns its `.env` | Serves | Contents |
+|---|---|---|---|
+| **`MJ_V6_Host`** | `/c/v6/MJ` | **API 4143**, Explorer **4341** | The **demo/recording** stack. Orders installed (~50 tables), contracts **absent**. Seven `DEAL-900x` deals, all lines carrying real catalogue `ProductID`s. |
+| **`MJ_V6_Repro`** | `/c/v6repro/*` (7 members) | nothing running by default | The **isolated schema/CodeGen** stack, and the **only** one with contracts (~10 tables) as well as orders. The only place the contract-gated bundles can prove anything. |
+| **`MJ_BizAppsSales_V6`** | `/c/v6/bizapps-sales` | API 4141 *(configured)* | **Sales-only** — no orders schema, no contracts. Which makes it the honest test of a standalone host: the default gate must be green here, and the downstream-gated bundles must refuse *loudly*. |
+| **`MJ_BizAppsSales`** | `/c/Dev/MJ/bizapps-sales` | API 4141 *(configured)* | The **original pre-workspace** dev database. Predates the product-picker work, so its demo lines carry names with no `ProductID`. Nothing current depends on it. |
+
+Also present and easy to mistake for the above: **`MJ_V6_QA`** (orders, no contracts), `MJ_E2E_Combined`,
+`MJ_Equiv_SS`, `mj_sqlserver_fresh`. None are part of this stack.
+
+### Two traps in that table
+
+**`GRAPHQL_PORT=4141` appears in two trees, against two different databases.** `/c/v6/bizapps-sales` and
+`/c/Dev/MJ/bizapps-sales` both claim it. Whichever starts first wins the port, so "the API on 4141" does
+not identify a database — and a stale process from the other tree answering on 4141 looks exactly like the
+one you meant to start. Resolve a listener to its tree before trusting it:
+
+```bash
+netstat -ano | grep LISTENING | grep ':4141'      # -> PID
+powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=<PID>').CommandLine"
+```
+
+**The demo API is on 4143, not 4141.** `/c/v6/MJ/.env` sets `GRAPHQL_PORT=4143`, and
+`MJExplorer/src/environments/environment.ts` points `GRAPHQL_URI` at `http://localhost:4143/`. A guide
+that says "MJAPI: 4141" is describing the *sales-standalone* convention, not this stack.
+
+### Announce the target
+
+`test-harnesses/playwright/lib/db.ts` prints the database it connected to, which is why the harness has
+never been the thing that got confused. Ad-hoc queries have no such habit — so give them one. Read the
+target from the `.env` of the tree you mean, rather than typing a name:
+
+```bash
+cd /c/v6/MJ && grep -E '^DB_DATABASE=' .env      # say out loud which tree you are in
+```
+
+and when connecting by hand, print it back before reading anything:
+
+```js
+require('dotenv').config();
+console.log('connected to', process.env.DB_DATABASE);   // cheap, and it ends the whole class of error
+```
+
+---
+
 ## 0. What you need first
 
 - SQL Server reachable, and credentials that can `CREATE DATABASE`
