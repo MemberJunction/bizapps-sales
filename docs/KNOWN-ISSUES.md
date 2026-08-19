@@ -389,6 +389,53 @@ Until step 3 exists, the doubling failure has no automated witness at all.
 >    `EventOrderLine` is an IsA child. Entity metadata is still written and post-CodeGen CRUD validation
 >    still passes. Judge it on the entity rows, not the exit code.
 
+## 🟠 KI-18 — CodeGen's remote-operation generation is not schema-scoped, so every app's file holds every app's operations
+
+**The sibling of KI-10, and the one `excludeSchemas` cannot fix.** KI-10's rule is that an app's CodeGen
+must exclude its siblings' schemas so it never emits their entities. That rule works, and sales' list is
+complete. It has no effect here, because **remote operations are not generated from schemas at all.**
+
+`runCodeGen.ts` selects them with an unfiltered view over the metadata table:
+
+```ts
+const remoteOpsResult = await new MJ.RunView().RunView<MJRemoteOperationEntity>(
+  { EntityName: 'MJ: Remote Operations', ResultType: 'entity_object' },
+  currentUser,
+);
+```
+
+and the generator then emits **every row whose `Status` is `Active`**. There is no schema filter, no
+exclusion hook and no config knob. So on a database hosting several Open Apps, each app's
+`remote_operations.ts` contains the union of all their operations.
+
+### What it actually costs
+
+**Churn and size, not correctness.** Sales' committed file already carries eight prefixes — `AISkill.`,
+`PredictiveStudio.`, `RecordComparison.`, `RecordProcess.`, `Sales.`, `TaskGraph.`, `Template.`,
+`Workflow.` — because MJ core's own operations were always in scope. Generating on the shared v6 host
+simply extends that to orders' (`OrdersPriceOrder`, `OrdersAdvanceOrderState`, …), about **+1,385 lines**.
+
+It does **not** shadow anyone's implementation, which was the first thing to check. The generated classes
+are **shells**: the file's own header says a hand-authored server subclass, registered via
+`@RegisterClass`, supplies the `InternalExecute` body. The generated shells carry no `@RegisterClass` of
+their own, so a sales-side copy of `Orders.PriceOrder` cannot win a ClassFactory key from orders' real
+implementation.
+
+### The ruling
+
+**The host is canonical.** Sales' generated code is produced against `MJ_V6_Host`, because that is the
+only database where the Deal → Order embed can resolve `RelatedEntityID` to a real `OrderHeader` entity.
+Accept the wider `remote_operations.ts` that follows; do not revert it after each run and do not chase a
+sales-only database to keep the file narrow — that would trade a correctness property for a cosmetic one.
+
+### What would fix it upstream
+
+A scope filter on that `RunView` — by operation-key prefix, by owning schema, or by the app manifest — so
+an app emits only the operations it owns. That is an MJ CodeGen change and belongs with the
+`entityPackageName` question in the same conversation, since both are about an app knowing which artifacts
+are its own.
+
+---
 ## 🟠 KI-10 (as originally recorded) — The shared v6 host cannot hold orders' schema, and app CodeGen must exclude Sales
 
 **Two separate hazards on `MJ_V6_Host`, both found the hard way and both cheap to avoid once known.**
