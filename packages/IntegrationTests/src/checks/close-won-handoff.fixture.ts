@@ -86,6 +86,21 @@ export interface SeedTarget {
     CompanyID: string;
     /** Zero is meaningful: a header-only deal, which is the whole point on a lineless motion. */
     LineCount: number;
+    /**
+     * Seed the lines with a product NAME and NO `ProductID` — the KI-14 shape.
+     *
+     * Everything else here picks a real catalogue product, because that is what the picker does.
+     * This builds the record a pre-picker deal or a HubSpot import produces instead, so a check can
+     * prove the close refuses it up front rather than failing inside orders.
+     */
+    NameOnly?: boolean;
+    /**
+     * The line type to seed. Defaults to ONE-TIME, which is what the order checks want.
+     *
+     * The contract checks need RECURRING, because that is the type `buildContractInput` sends and
+     * therefore the one that can be unroutable down the contract route.
+     */
+    LineTypeID?: string;
 }
 
 /**
@@ -111,8 +126,10 @@ export async function SeedDealOnPipeline(ctx: Ctx, f: SalesFixture, target: Seed
 
     for (let i = 0; i < products.length; i++) {
         const line: mjBizAppsSalesDealLineEntity = await deal.Lines.Create();
-        line.DealLineTypeID = f.OneTimeLineTypeID;
-        line.ProductID = products[i].ID;
+        line.DealLineTypeID = target.LineTypeID ?? f.OneTimeLineTypeID;
+        if (target.NameOnly !== true) {
+            line.ProductID = products[i].ID;
+        }
         // BOTH, because that is what the picker writes: the reference orders needs, and the name that
         // keeps the line readable if orders is ever uninstalled. `DealLine.Validate()` requires the name.
         line.ProductName = products[i].Name;

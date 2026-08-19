@@ -37,7 +37,7 @@ import { SalesCloseDealOperation, type SalesCloseDealInput, type SalesCloseDealO
 import { LiveOrdersSeam, OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
 
 import { InRolledBackTransaction, ResolveSalesFixture } from '../fixture.js';
-import { SeedDealWithLines } from './close-won-handoff.fixture.js';
+import { SeedDealOnPipeline, SeedDealWithLines } from './close-won-handoff.fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -104,6 +104,16 @@ async function orderHeader(ctx: Ctx, orderID: string): Promise<Record<string, un
 function bookedTotal(header: Record<string, unknown>): number | null {
     const v = header['TotalGross'];
     return typeof v === 'number' ? v : null;
+}
+
+/** The persisted deal row, so a check reads what the database holds rather than the entity in hand. */
+async function dealRow(ctx: Ctx, dealID: string): Promise<Record<string, unknown>> {
+    const r = await new RunView().RunView(
+        { EntityName: 'MJ_BizApps_Sales: Deals', ExtraFilter: `ID = '${dealID}'`, ResultType: 'simple' },
+        ctx.User,
+    );
+    Assert(r.Success && (r.Results ?? []).length === 1, `the deal was not readable — ${r.ErrorMessage}`);
+    return (r.Results ?? [])[0] as Record<string, unknown>;
 }
 
 export const CloseWonHandoffChecks: NamedCheck[] = [
@@ -264,6 +274,91 @@ export const CloseWonHandoffChecks: NamedCheck[] = [
                     Number(preview.Amount).toFixed(2),
                     'the booked order must equal the preview — the quote and the invoice are the same computation',
                 );
+            }),
+    },
+    {
+        Id: 'close-won-handoff.CW5',
+        Name: 'CW5: a name-only line REFUSES the close up front, and the deal stays open',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * KI-14, PINNED. A one-time line carrying a product NAME with no `ProductID` cannot
+                 * become an order line: `buildOrderInput` coerces it to `ProductID: ''`, and an empty
+                 * string against orders' `uniqueidentifier` fails INSIDE orders' save — after the close
+                 * has already written the status. The deal ended up WON WITH NO ORDER, and the error
+                 * surfaced as `No active transaction to commit`, which names nothing useful.
+                 *
+                 * IT LIVES HERE, NOT IN `close-deal`, because the refusal only fires when orders is
+                 * LIVE. Without orders the Order route goes to the stub, which refuses harmlessly —
+                 * and refusing the close there would make a lined deal uncloseable on every
+                 * standalone host. So this check's precondition is orders being installed, which is
+                 * exactly this bundle's precondition.
+                 *
+                 * The second assertion is the one that matters: the deal must still be OPEN. A close
+                 * that cannot finish must not have started.
+                 */
+                requireOrders();
+                const f = await ResolveSalesFixture(ctx);
+                const seeded = await SeedDealOnPipeline(ctx, f, {
+                    PipelineID: f.OrderOnlyPolicyPipelineID,
+                    StageID: f.OrderOnlyPolicyStageID,
+                    CompanyID: f.OrderOnlyPolicyCompanyID,
+                    LineCount: 1,
+                    NameOnly: true,
+                });
+
+                const out = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+                Assert(out.Success === false, 'a deal with an unroutable line must NOT close');
+
+                const named = out.Issues.filter((i) => i.Section === 'lines' && i.Field === 'ProductID');
+                AssertEqual(named.length, 1, 'exactly one line should have been reported');
+                Assert(
+                    named[0].Message.includes('has no catalogue product selected'),
+                    `the refusal must explain itself — got "${named[0].Message}"`,
+                );
+
+                /**
+                 * THE DEAL IS UNTOUCHED — the half that was corrupting data. Read back through the
+                 * provider so this is the persisted row, not the in-memory entity.
+                 */
+                const row = await dealRow(ctx, seeded.DealID);
+                AssertEqual(
+                    String(row['DealStatusTypeID']).toLowerCase(),
+                    String(f.OpenStatusID).toLowerCase(),
+                    'a refused close must leave the deal OPEN — never Won with no order',
+                );
+
+            }),
+    },
+    {
+        Id: 'close-won-handoff.CW6',
+        Name: 'CW6: a properly-picked line is NOT caught by that refusal, and still closes',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE CONTROL FOR CW5, and it is why CW5 means anything: a refusal that fired on every
+                 * deal would make CW5 pass too.
+                 */
+                requireOrders();
+                const f = await ResolveSalesFixture(ctx);
+                const seeded = await SeedDealOnPipeline(ctx, f, {
+                    PipelineID: f.OrderOnlyPolicyPipelineID,
+                    StageID: f.OrderOnlyPolicyStageID,
+                    CompanyID: f.OrderOnlyPolicyCompanyID,
+                    LineCount: 1,
+                });
+
+                const out = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+                AssertEqual(
+                    out.Issues.filter((i) => i.Section === 'lines' && i.Field === 'ProductID').length,
+                    0,
+                    'a picked product must never trip the unroutable-line refusal',
+                );
+                Assert(out.Success, `the close should have succeeded — ${JSON.stringify(out.Issues).slice(0, 300)}`);
+                const order = out.Routing.find((r) => r.Target === 'Order');
+                Assert(order?.Executed === true, `and the order should exist — ${order?.Reason ?? 'no route'}`);
             }),
     },
 ];

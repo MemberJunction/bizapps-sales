@@ -253,6 +253,60 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 ? await this.planRouting(deal, policy, provider, user)
                 : [];
 
+            /**
+             * ── THE UNROUTABLE-LINE REFUSAL (KI-14) ───────────────────────────────
+             *
+             * A line carrying a product NAME with no `ProductID` cannot become a downstream line. BOTH
+             * builders coerce it the same way — `buildOrderInput` and `buildContractInput` each write
+             * `ProductID: String(l.ProductID ?? '')` — and an empty string against a `uniqueidentifier`
+             * column fails INSIDE the sibling's save, after this close has already written the status. The
+             * deal ended up WON WITH NO DOWNSTREAM RECORD and no provenance, and the error surfaced as
+             * `No active transaction to commit`, which names nothing useful.
+             *
+             * So the close refuses HERE: before the transaction opens, before either sibling is touched,
+             * naming the lines. A close that cannot complete must not begin.
+             *
+             * EVERY PLANNED ROUTE IS CHECKED, not just the order one. The first version of this guard
+             * covered one-time -> Order only, and a recurring line with no product routed to a contract
+             * failed identically — same coercion, same corruption, one route over.
+             *
+             * EACH ROUTE IS GATED ON ITS OWN APP, and that is load-bearing rather than defensive. When a
+             * sibling is absent its route goes to the STUB, which refuses harmlessly and reports
+             * `Executed: false` with a reason — the graceful degradation CD7 pins and a standalone host
+             * depends on. Refusing there would make a lined deal uncloseable on every deployment that has
+             * not installed that sibling: a worse bug than the one being fixed. And nothing can corrupt in
+             * that case, because no empty GUID ever reaches a database.
+             *
+             * A lineless close, a lost close, and a policy that routes a line type nowhere are all
+             * unaffected — a NULL `ProductID` is perfectly legal on a deal nobody is closing downstream.
+             *
+             * NOTE THE PreviewOnly CHANGE. This runs BEFORE the preview returns, so a preview of a deal
+             * that cannot close now reports the refusal instead of a clean routing plan. That is the point:
+             * a preview whose whole job is "show me the consequences" must not answer with consequences
+             * that cannot happen. Nothing is written either way.
+             */
+            const unroutable = target.IsWon
+                ? await this.unroutablePlannedLines(deal.ID, routing, policy, provider, user)
+                : [];
+            if (unroutable.length) {
+                return {
+                    ...empty,
+                    IsWon: target.IsWon,
+                    IsLost: target.IsLost,
+                    EffectivePolicy: policy,
+                    Routing: routing,
+                    Issues: unroutable.map((name) =>
+                        issue(
+                            'lines',
+                            `"${name}" has no catalogue product selected, so it cannot become an order `
+                                + 'line. Pick a product for it, or change its type so it is not routed '
+                                + 'to an order.',
+                            'ProductID',
+                        ),
+                    ),
+                };
+            }
+
             if (input.PreviewOnly) {
                 // Nothing written, nothing locked — the caller just wanted to see the consequences.
                 return {
@@ -602,6 +656,48 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
     }
 
     /** Split by the type's `IsRecurring` FLAG. A join, so one read rather than one per line. */
+    /**
+     * The lines that cannot become downstream records, by their display name (KI-14).
+     *
+     * Mirrors the two builders exactly, which is the only way this can stay honest:
+     *
+     *   · `buildOrderInput`    sends ONE-TIME lines when `OneTimeLinesTo === 'Order'`
+     *   · `buildContractInput` sends RECURRING lines when `SubscriptionLinesTo === 'Contract'`
+     *
+     * It reuses the same recurrence split the routing uses, so there is no second notion of which
+     * lines go where. A route is only inspected when it was PLANNED and its app is INSTALLED —
+     * see the caller for why the install gate matters more than it looks.
+     *
+     * A line is unroutable when `ProductID` is null, undefined, or BLANK. The blank case matters as
+     * much as null: both builders coerce with `String(l.ProductID ?? '')`, so an empty-string column
+     * reaches the sibling looking exactly like the null case and fails identically.
+     *
+     * Named by `ProductName` because that is what the user typed and will recognise; the line ID
+     * would be correct and useless.
+     */
+    private async unroutablePlannedLines(
+        dealID: string,
+        routing: SalesCloseRoutingResult[],
+        policy: SalesCloseWonPolicy,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<string[]> {
+        const planned = (target: string): boolean => routing.some((r) => r.Target === target && r.Planned);
+        const ordersRoute = planned('Order') && policy.OneTimeLinesTo === 'Order' && OrdersIsInstalled();
+        const contractRoute =
+            planned('Contract') && policy.SubscriptionLinesTo === 'Contract' && ContractsIsInstalled();
+
+        if (!ordersRoute && !contractRoute) {
+            return [];
+        }
+
+        const { oneTime, recurring } = await this.splitLinesByRecurrence(dealID, provider, user);
+        const suspect = [...(ordersRoute ? oneTime : []), ...(contractRoute ? recurring : [])];
+        return suspect
+            .filter((l) => !String(l.ProductID ?? '').trim())
+            .map((l) => String(l.ProductName ?? '').trim() || 'A line with no name');
+    }
+
     private async splitLinesByRecurrence(
         dealID: string,
         provider: IMetadataProvider,
