@@ -136,9 +136,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Stage Events','FromDealStatusTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Stage Events')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Stage Events','FromDealStatusTypeID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealStageEventsFromDealStatusTypeID')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealStageEventsFromDealStatusTypeID', $event.totalRowCount)"
                 >
@@ -161,9 +161,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Stage Events','ToDealStatusTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Stage Events')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Stage Events','ToDealStatusTypeID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealStageEventsToDealStatusTypeID')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealStageEventsToDealStatusTypeID', $event.totalRowCount)"
                 >
@@ -186,9 +186,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','DealStatusTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals','DealStatusTypeID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDeals')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDeals', $event.totalRowCount)"
                 >
@@ -211,9 +211,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Pipeline Stages','DealStatusTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Pipeline Stages')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Pipeline Stages','DealStatusTypeID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesPipelineStages')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesPipelineStages', $event.totalRowCount)"
                 >

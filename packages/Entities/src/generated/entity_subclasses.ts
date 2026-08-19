@@ -1,4 +1,4 @@
-import { BaseEntity, EntitySaveOptions, EntityDeleteOptions, CompositeKey, ValidationResult, ValidationErrorInfo, ValidationErrorType, Metadata, ProviderType, DatabaseProviderBase } from "@memberjunction/core";
+import { BaseEntity, EntitySaveOptions, EntityDeleteOptions, CompositeKey, ValidationResult, ValidationErrorInfo, ValidationErrorType, Metadata, ProviderType, DatabaseProviderBase, RunView } from "@memberjunction/core";
 import { RegisterClass } from "@memberjunction/global";
 import { z } from "zod";
 
@@ -1046,6 +1046,11 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    OrderID: z.string().nullable().describe(`
+        * * Field Name: OrderID
+        * * Display Name: Order ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Orders: Order Headers (vwOrderHeaders.ID)`),
     Pipeline: z.string().describe(`
         * * Field Name: Pipeline
         * * Display Name: Pipeline
@@ -1062,6 +1067,10 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: DealStatusType
         * * Display Name: Deal Status Type
         * * SQL Data Type: nvarchar(200)`),
+    Account: z.string().nullable().describe(`
+        * * Field Name: Account
+        * * Display Name: Account
+        * * SQL Data Type: nvarchar(255)`),
     Company: z.string().describe(`
         * * Field Name: Company
         * * Display Name: Company
@@ -1086,6 +1095,10 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: ClosedByUser
         * * Display Name: Closed By User
         * * SQL Data Type: nvarchar(100)`),
+    Order: z.string().nullable().describe(`
+        * * Field Name: Order
+        * * Display Name: Order
+        * * SQL Data Type: nvarchar(40)`),
 });
 
 export type mjBizAppsSalesDealEntityType = z.infer<typeof mjBizAppsSalesDealSchema>;
@@ -4751,6 +4764,19 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
+    * * Field Name: OrderID
+    * * Display Name: Order ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Orders: Order Headers (vwOrderHeaders.ID)
+    */
+    get OrderID(): string | null {
+        return this.Get('OrderID');
+    }
+    set OrderID(value: string | null) {
+        this.Set('OrderID', value);
+    }
+
+    /**
     * * Field Name: Pipeline
     * * Display Name: Pipeline
     * * SQL Data Type: nvarchar(200)
@@ -4784,6 +4810,15 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     */
     get DealStatusType(): string | null {
         return this.Get('DealStatusType');
+    }
+
+    /**
+    * * Field Name: Account
+    * * Display Name: Account
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Account(): string | null {
+        return this.Get('Account');
     }
 
     /**
@@ -4838,6 +4873,15 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     */
     get ClosedByUser(): string | null {
         return this.Get('ClosedByUser');
+    }
+
+    /**
+    * * Field Name: Order
+    * * Display Name: Order
+    * * SQL Data Type: nvarchar(40)
+    */
+    get Order(): string | null {
+        return this.Get('Order');
     }
 }
 

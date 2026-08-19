@@ -54,6 +54,16 @@ import {
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 
+// THE PEER'S GENERATED CLASS, imported across the app boundary. This is the first hard import from
+// another BizApp in this repo, and it is deliberate: the standalone-Sales premise is retired (Amith —
+// sales has a hard dependency on orders), so the import-free seam no longer has to be preserved.
+// `mj-app.json` has always declared `mj-bizapps-orders`; this makes the code say so too.
+//
+// The TYPE is the generated class. The RUNTIME class is whatever `ClassFactory` resolves — the browser
+// gets orders' client subclass, the server gets `OrderEntityServer` — so the pricing and booking walk
+// still belong to orders. Sales never becomes the thing that computes money.
+import { mjBizAppsOrdersOrderHeaderEntity } from '@mj-biz-apps/orders-entities';
+
 import {
     mjBizAppsSalesDealEntity,
     mjBizAppsSalesDealLineEntity,
@@ -131,6 +141,68 @@ function below(value: number | null, min: number): boolean {
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deals')
 export class DealEntity extends mjBizAppsSalesDealEntity {
+    /**
+     * THE DEAL'S ORDER, as a 1:1 embedded peer joined by `OrderID`.
+     *
+     * One order per deal, created in Draft at deal creation, and from then on the only place line items
+     * live — the deal holds none (S-US4). Loading a deal loads its order; saving a deal saves the order
+     * and its lines in the same transaction, because an `EmbeddedRecord` is a save-graph participant.
+     *
+     * ── WHY THIS IS HAND-DECLARED AND NOT GENERATED ──
+     *
+     * CodeGen can emit this from an `EntityField.EmbeddedRecord` metadata row, and that is the normal
+     * route. It does not work here yet. CodeGen resolves the peer's import package through
+     * `entityPackageName`, which carries two incompatible meanings on one key: with a plain string every
+     * non-core schema resolves to THIS package, so orders' import comes out as `sales-entities`; with a
+     * schema map, `getExternalEntitySchemas()` returns the map's keys and CodeGen then excludes those
+     * schemas from every artifact it emits — so adding sales' own schema to get its own imports right
+     * makes sales stop generating its own entities entirely. Measured, both ways: the map-with-orders
+     * variant kept all 22 entity classes but emitted `from 'mj_generatedentities'`; the map-with-both
+     * variant emitted 0 classes, 0 GraphQL types, and deleted the generated Angular forms.
+     *
+     * So the declaration lives here instead. `DeclareEmbeddedRecord` is `protected` on `BaseEntity`
+     * precisely so a subclass can call it, which is the same mechanism the generated code uses — this is
+     * a different author, not a different pattern. If MJ separates those two meanings later, this moves
+     * to a metadata row and the accessors below are deleted; nothing else changes.
+     *
+     * ── OnClear: 'refuse' ──
+     *
+     * The three modes are `orphan` (default — null the FK, leave the row), `delete`, and `refuse`.
+     *
+     * `orphan` is wrong: the order holds every line item, so a detached order is the record of what was
+     * being sold with nothing pointing at it. `delete` is worse once the order matters — finance reviews
+     * and advances this order after Closed Won, and a Confirmed order has journal entries behind it.
+     * `refuse` says the link is not the kind of thing you unset: nothing in S-US4/S-US5 describes a deal
+     * legitimately shedding its order, and `FK_Deal_OrderHeader` carries no cascade in either direction
+     * for the same reason.
+     */
+    private readonly __embeddedOrder = this.DeclareEmbeddedRecord<mjBizAppsOrdersOrderHeaderEntity>({
+        ForeignKeyField: 'OrderID',
+        RelatedEntity: 'MJ_BizApps_Orders: Order Headers',
+        OnClear: 'refuse',
+    });
+
+    /**
+     * The embedded order, or null when this deal has none yet.
+     *
+     * Named to match what CodeGen would emit for `OrderID` (`{Field}_Object`), so a later move to the
+     * generated declaration is a deletion here rather than a rename at every call site.
+     */
+    public get OrderID_Object(): mjBizAppsOrdersOrderHeaderEntity | null {
+        return this.__embeddedOrder.Value;
+    }
+
+    /**
+     * The embedded order, creating it in memory if this deal has none. Idempotent.
+     *
+     * This is the hook deal creation uses to mint the Draft order: `Ensure()` provisions the peer, orders'
+     * own `NewRecord()` defaults `Status` to `'Draft'` and stamps `OrderDate`, and the row is written when
+     * the deal is saved. Sales sets no price and no status — it asks for an order to exist.
+     */
+    public OrderID_EnsureObject(): mjBizAppsOrdersOrderHeaderEntity {
+        return this.__embeddedOrder.Ensure();
+    }
+
     /**
      * @remarks
      * `super.Validate()` is what fans out to the child collections, so it must be called and its result

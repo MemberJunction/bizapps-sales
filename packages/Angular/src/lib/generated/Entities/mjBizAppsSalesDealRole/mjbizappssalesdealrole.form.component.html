@@ -128,9 +128,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Team Members','DealRoleID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Team Members')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Team Members','DealRoleID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealTeamMembers')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealTeamMembers', $event.totalRowCount)"
                 >

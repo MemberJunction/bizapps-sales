@@ -762,6 +762,20 @@ CREATE TABLE __mj_BizAppsSales.Deal (
     ClosedAt DATETIMEOFFSET NULL,
     ClosedByUserID UNIQUEIDENTIFIER NULL,
 
+    -- The deal's EMBEDDED ORDER (S-US4/S-US5). One order per deal, created in Draft at deal
+    -- creation, and from then on the only place line items live — the deal holds none.
+    --
+    -- NULLABLE, and that is required rather than lenient: a NOT NULL FK would demand an order
+    -- before a deal could be INSERTed, and the order is created through the deal. It is also what
+    -- lets a deal that predates the embed keep loading.
+    --
+    -- A REAL FK across the schema boundary. Sales' standalone premise is retired (Amith: sales has a
+    -- hard dependency on orders), `mj-app.json` already declares `mj-bizapps-orders`, and this table
+    -- already carries unconditional FKs into `__mj_BizAppsCommon` — so this follows the existing
+    -- shape rather than inventing one. A migration run against a database without orders' schema
+    -- fails here, loudly, which is the correct outcome for a dependency that is now hard.
+    OrderID UNIQUEIDENTIFIER NULL,
+
     CONSTRAINT PK_Deal PRIMARY KEY CLUSTERED (ID),
     -- NOTE: DealNumber's uniqueness is a FILTERED INDEX below, not a UNIQUE constraint here.
     -- See the "NULLABLE UNIQUENESS" block after this table for why that is not a style choice.
@@ -781,6 +795,12 @@ CREATE TABLE __mj_BizAppsSales.Deal (
         REFERENCES __mj_BizAppsSales.SalesContact (ID),
     CONSTRAINT FK_Deal_Company FOREIGN KEY (CompanyID)
         REFERENCES __mj.Company (ID),
+    -- Cross-schema, same database. NO cascade in either direction: the order is provenance once it
+    -- exists, so deleting a deal must not delete the order finance may be mid-review on, and
+    -- deleting the order out from under a live deal should be refused by the FK rather than silently
+    -- nulling the link. See DealEntity's embedded declaration, which sets OnClear: 'refuse' to match.
+    CONSTRAINT FK_Deal_OrderHeader FOREIGN KEY (OrderID)
+        REFERENCES __mj_BizAppsOrders.OrderHeader (ID),
     CONSTRAINT FK_Deal_OwnerEmployee FOREIGN KEY (OwnerEmployeeID)
         REFERENCES __mj.Employee (ID),
     CONSTRAINT FK_Deal_ForecastCategoryType FOREIGN KEY (ForecastCategoryTypeID)

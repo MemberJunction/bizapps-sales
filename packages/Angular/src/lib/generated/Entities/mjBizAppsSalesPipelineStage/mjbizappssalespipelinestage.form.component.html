@@ -163,9 +163,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Stage Events','ToStageID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Stage Events')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Stage Events','ToStageID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealStageEventsToStageID')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealStageEventsToStageID', $event.totalRowCount)"
                 >
@@ -188,9 +188,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Stage Events','FromStageID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Stage Events')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Stage Events','FromStageID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealStageEventsFromStageID')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealStageEventsFromStageID', $event.totalRowCount)"
                 >
@@ -213,9 +213,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','PipelineStageID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals','PipelineStageID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDeals')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDeals', $event.totalRowCount)"
                 >
