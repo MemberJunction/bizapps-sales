@@ -18,11 +18,11 @@
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
-import { RunView } from '@memberjunction/core';
+import { Metadata, RunView, type DatabaseProviderBase } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import { CloseWonTaskService, type CloseWonTaskInput } from '@mj-biz-apps/sales-core-entities-server';
 
-import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture } from '../fixture.js';
+import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture, TxOne } from '../fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -360,6 +360,73 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                     out.Issues.some((i) => i.includes('no order')),
                     `the refusal must explain itself — got ${JSON.stringify(out.Issues)}`,
                 );
+            }),
+    },
+    {
+        Id: 'close-won-tasks.WT9',
+        Name: 'WT9: task writes JOIN the transaction of the caller — a rolled-back scope leaves nothing behind',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE UNWRITTEN INVARIANT THIS FEATURE RESTS ON: one provider per process.
+                 *
+                 * The close writes its deal inside a transaction and then asks this service for tasks.
+                 * `TaskOrchestrationService` writes through the global `Metadata.Provider` and accepts no
+                 * injected provider — which sounds like it cannot join that transaction, and was briefly
+                 * believed to mean a rolled-back close would strand orphan tasks. It does not: in a server
+                 * process the global IS the provider the close opened its transaction on, so the writes
+                 * join it. Injection is not what decides membership; the connection is.
+                 *
+                 * That makes the guarantee depend on something nothing enforces. The day a second
+                 * `setupSQLServerClient` appears, or a background worker brings its own connection, task
+                 * writes land outside the caller's transaction and a rolled-back close silently leaves
+                 * work items pointing at a deal that was never closed. Nothing would fail — that is why
+                 * this check exists.
+                 *
+                 * Both halves are asserted: the IDENTITY (which is the invariant) and the BEHAVIOUR (which
+                 * is what the invariant buys). `BeginEntityTransaction` joins the ambient transaction as a
+                 * savepoint, so the inner rollback is observable from inside the harness's outer one.
+                 */
+                requireTasks(ctx);
+                const provider = ProviderOf(ctx);
+
+                Assert(
+                    Metadata.Provider === provider,
+                    'the global Metadata.Provider is NOT the provider holding this transaction — task '
+                        + 'writes would land outside the transaction of the caller and survive its rollback',
+                );
+
+                const db = provider as unknown as DatabaseProviderBase;
+                Assert(typeof db.BeginEntityTransaction === 'function', 'the provider cannot nest a scope');
+
+                const before = await TxOne<{ N: number }>(ctx, 'SELECT COUNT(*) AS N FROM __mj_BizAppsTasks.Task');
+
+                const input = await baseInput(ctx, false);
+                const scope = await db.BeginEntityTransaction();
+                const out = await service.CreateCloseWonTasks(input, provider, ctx.User);
+                Assert(out.Success, `the service reported failure — ${out.Issues.join(' | ')}`);
+                const taskID = out.Tasks[0].TaskID;
+
+                const during = await TxOne<{ N: number }>(
+                    ctx, `SELECT COUNT(*) AS N FROM __mj_BizAppsTasks.Task WHERE ID = '${taskID}'`,
+                );
+                AssertEqual(Number(during.N), 1, 'the task must be visible inside the scope that wrote it');
+
+                await scope.Rollback();
+
+                const survived = await TxOne<{ N: number }>(
+                    ctx, `SELECT COUNT(*) AS N FROM __mj_BizAppsTasks.Task WHERE ID = '${taskID}'`,
+                );
+                AssertEqual(
+                    Number(survived.N),
+                    0,
+                    'the task must NOT survive the rollback — an orphan task points finance at a deal that '
+                        + 'was never closed',
+                );
+
+                const after = await TxOne<{ N: number }>(ctx, 'SELECT COUNT(*) AS N FROM __mj_BizAppsTasks.Task');
+                AssertEqual(Number(after.N), Number(before.N), 'and the table must be back where it started');
             }),
     },
 ];
