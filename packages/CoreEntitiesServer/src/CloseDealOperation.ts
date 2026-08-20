@@ -679,21 +679,32 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             AutoRenew: deal.AutoRenew,
             AnnualIncreasePctOverride: deal.AnnualIncreasePctOverride,
             CancellationNoticeDaysOverride: deal.CancellationNoticeDaysOverride,
+            /**
+             * STATED, BUT NOT STAMPED ONTO THE CONTRACT — and the split is deliberate.
+             *
+             * These are facts about the DEAL, so this method reports them faithfully. What the seam
+             * does with them is the seam's business, and today it does nothing: v2 derives a
+             * contract's lifecycle from its dates, so an `EffectiveDate` on a contract nobody has
+             * approved yet would make it read as live and in force. `LiveContractsSeam` records the
+             * reasoning in full; the point here is that a reader of this method should not conclude
+             * these land on the agreement.
+             */
             ExecutionDate: deal.ExecutionDate ? String(deal.ExecutionDate) : null,
             StartDate: deal.StartDate ? String(deal.StartDate) : null,
             // The buying party, so contracts can stamp the customer without looking back at the deal.
             AccountID: deal.AccountID,
             PrimaryContactID: deal.PrimaryContactID,
-            // NOT SET. `CloseWonPolicy` carries no billing frequency, and it is generated code — so
-            // rather than invent one here, the seam applies its own default and contracts owns the
-            // vocabulary. Add it to the policy first if a deployment needs to vary it.
-            //
-            // NO LINES, and that is the design rather than a gap. S-US2's contract is a header:
-            // customer, selling company, primary contact, the type's stored defaults, the active
-            // template, a minted number, the typed linked pair, and TemplateModified. Line items were
-            // the redundancy this whole rework removes -- only OrderLine survives -- so contracts'
-            // own ContractTermLineItem retirement is the other half of it, on their side.
-            Lines: [],
+            /**
+             * NO `BillingFrequency`, NO `CommittedAmount`, NO `Lines` — all three now have nowhere to
+             * go rather than merely being unset.
+             *
+             * The 2026-08-18 contracts rebuild deleted `ContractTerm` and `ContractLine` outright: v2's
+             * contract IS the header. Billing frequency and the committed amount were TERM columns and
+             * line items were the redundancy the rework removed, so the earlier note here — that the
+             * seam would apply its own billing-frequency default and that contracts' line retirement
+             * was "the other half of it, on their side" — describes a schema that no longer exists.
+             * Their half landed; this is ours.
+             */
         };
     }
 }

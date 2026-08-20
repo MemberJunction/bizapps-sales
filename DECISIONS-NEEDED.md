@@ -250,6 +250,14 @@ contract is its own decision. Removing it is a five-minute change of exactly the
 **A deployment setting it is configuring nothing**, which is the argument for removing it rather than
 documenting it.
 
+**Three more joined it on 2026-08-20**, from the v6 contracts-seam merge:
+`ContractsCreateFromDealSeamInput` still declares `BillingFrequency`, `CommittedAmount` and `Lines`, and
+`buildContractInput()` no longer sends any of them. They were `ContractTerm` and `ContractLine` columns,
+and contracts deleted both tables — so unlike `OneTimeLinesTo` these have nowhere to go rather than
+merely being unread. Same decision, four fields now: narrow the seam shape in one pass, or leave it
+documented. Leaving it has a real cost — a reader of the interface reasonably concludes sales can send a
+committed amount, and it cannot.
+
 ---
 
 ## DN-12 — a board-drag warning has nowhere to go
