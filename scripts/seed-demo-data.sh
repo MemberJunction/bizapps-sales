@@ -24,10 +24,12 @@
 #   3. IDENTITY IS SHARED, NOT FORKED. Every SalesAccount IS an Organization and every SalesContact IS
 #      a Person, same UUID. Open an account and the name comes from the parent row.
 #
-#   4. SALES NEVER COMPUTES MONEY. The lined deal's DealLine rows carry INTENT (product, quantity,
-#      requested discount) with **ResolvedUnitPrice / ResolvedExtendedAmount / PricedAt left NULL** —
-#      because nothing has asked Orders.PreviewOrder yet. Deal.AmountIsComputed = 0 says the header
-#      figure is a human's estimate, not a traceable answer. That is the guarantee, visible as data.
+#   4. SALES NEVER COMPUTES MONEY, and the embedded order is where you can see it. A lined deal's
+#      intent — product and quantity — lives on ORDER lines now, not on the deal, because DealLine is
+#      retired. Deal.AmountIsComputed = 0 still says the header figure is a human's estimate rather
+#      than a traceable answer, and nothing in this app derives it. The prices on the seeded order
+#      lines are TRANSCRIBED from the catalogue by this script, which is a seeding convenience and not
+#      a pricing path: no code in sales multiplies, discounts, or totals anything.
 #
 #   5. THE DEAL TEAM, INCLUDING D-6. One deal carries an Employee owner AND a partner manager who is a
 #      common.Person with no Employee record — the exactly-one-of case that D-6 exists for.
@@ -61,17 +63,54 @@ SET NOCOUNT ON;
 -- Child-first, because the S1 foreign keys are real.
 DELETE FROM __mj_BizAppsSales.DealStageEvent  WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.DealTeamMember  WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
-DELETE FROM __mj_BizAppsSales.DealLine        WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
+-- THE EMBEDDED ORDER, and the order of these two statements is the whole trick.
+--
+-- `Deal.OrderID` is a real FK to orders' OrderHeader, so the order cannot be deleted while a deal
+-- still points at it, and the deal cannot be deleted while its own children exist. Null the link
+-- FIRST, delete the deals, then take the orders -- reversing any pair of these fails on a constraint
+-- that is doing exactly its job.
+--
+-- Only the orders THIS script created are removed, matched on the demo number prefix. An order that
+-- arrived any other way belongs to orders, not to us.
+UPDATE __mj_BizAppsSales.Deal SET OrderID = NULL WHERE DealNumber LIKE 'DEAL-9%';
 DELETE FROM __mj_BizAppsSales.DealPaymentSchedule WHERE DealID IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.DealContactRole WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.Deal            WHERE DealNumber LIKE 'DEAL-9%';
+IF OBJECT_ID('__mj_BizAppsOrders.OrderLine', 'U') IS NOT NULL
+BEGIN
+    DELETE FROM __mj_BizAppsOrders.OrderLine
+     WHERE OrderHeaderID IN (SELECT ID FROM __mj_BizAppsOrders.OrderHeader WHERE OrderNumber LIKE 'ORD-DEMO-9%');
+    DELETE FROM __mj_BizAppsOrders.OrderHeader WHERE OrderNumber LIKE 'ORD-DEMO-9%';
+END
 DELETE FROM __mj_BizAppsSales.ForecastSnapshot WHERE SnapshotJSON LIKE '%"demo":true%';
 DELETE FROM __mj_BizAppsSales.PipelineStage   WHERE PipelineID IN (SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE Code IN ('B2B','D2C','ENT-NEWBIZ','PARTNER-REF'));
 DELETE FROM __mj_BizAppsSales.Pipeline        WHERE Code IN ('B2B','D2C','ENT-NEWBIZ','PARTNER-REF');
+-- IDENTITY IS SHARED TOO, and for the same reason the selling company is.
+--
+-- These Persons and Organizations are sales' demo fiction, but once orders is installed they stop
+-- being only ours: an order bills TO a person (FK_OrderHeader_BillToPerson) and ships to an
+-- organization. Deleting the sales child then the common parent fails on those references -- and with
+-- sqlcmd's -b and the script's `set -e`, that aborted the ENTIRE teardown on the configuration
+-- docs/QA-GUIDE.md tells testers to run. It failed on FK_OrderHeader_BillToPerson in exactly that way.
+--
+-- Retaining is the RIGHT answer rather than merely the survivable one, and it is the same ruling this
+-- script already applies to the company below: a record another app still points at is not sales' to
+-- delete. The SalesAccount/SalesContact rows go either way, because those ARE sales' -- it is only the
+-- shared parent that is spared.
 DELETE FROM __mj_BizAppsSales.SalesContact    WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
-DELETE FROM __mj_BizAppsCommon.Person         WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
+BEGIN TRY
+    DELETE FROM __mj_BizAppsCommon.Person     WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
+END TRY
+BEGIN CATCH
+    PRINT 'Demo Person rows retained - another app still references them (expected when orders is installed and an order bills to one).';
+END CATCH
 DELETE FROM __mj_BizAppsSales.SalesAccount    WHERE ID IN ('A0111111-0000-4000-A000-000000000001','A0111111-0000-4000-A000-000000000002','A0111111-0000-4000-A000-000000000003');
-DELETE FROM __mj_BizAppsCommon.Organization   WHERE ID IN ('A0111111-0000-4000-A000-000000000001','A0111111-0000-4000-A000-000000000002','A0111111-0000-4000-A000-000000000003');
+BEGIN TRY
+    DELETE FROM __mj_BizAppsCommon.Organization WHERE ID IN ('A0111111-0000-4000-A000-000000000001','A0111111-0000-4000-A000-000000000002','A0111111-0000-4000-A000-000000000003');
+END TRY
+BEGIN CATCH
+    PRINT 'Demo Organization rows retained - another app still references them (expected when orders is installed).';
+END CATCH
 DELETE FROM __mj.Employee WHERE ID IN ('E0111111-0000-4000-A000-000000000002','E0111111-0000-4000-A000-000000000003');
 -- THE SELLING COMPANY IS SHARED, so removing sales' demo data must not assume it can take the
 -- company with it. Once orders is installed its catalogue hangs off this company
@@ -236,7 +275,7 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe2)
   INSERT INTO __mj_BizAppsSales.Pipeline (ID, CompanyID, Name, Code, Description, DealTypeID, DefaultForecastCategoryTypeID,
         RequiresDealLines, CloseWonPolicy, IsDefault, DisplayRank, IsActive)
     VALUES (@pipe2, @co2, N'D2C', N'D2C',
-      N'A different company, a different motion (master plan §4.2). RequiresDealLines = 0: these deals never carry catalog lines, so the amount is entered by hand and AmountIsComputed stays 0.',
+      N'A different company, a different motion (master plan §4.2). RequiresDealLines = 0: these deals never carry catalog lines — the flag survived the DealLine retirement and now means the deal''s EMBEDDED ORDER stays empty, so the amount is entered by hand and AmountIsComputed stays 0.',
       @dtNew, @fcPipe, 0, N'{"CreateContract":false,"OneTimeLinesTo":"Order","OrderState":"Draft"}', 1, 20, 1);
 
 DECLARE @t1 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000001';
@@ -281,109 +320,158 @@ INSERT INTO __mj_BizAppsSales.Deal (ID, DealNumber, Name, PipelineID, PipelineSt
   @acc3, @c3, @co1, @emp3, 15000.0000, 0, 12, '2026-07-15', 0, @fcClos, @lsPart,
   N'LOST on price. Loss reason is the app''s only mandatory field.', NULL, NULL);
 
-UPDATE __mj_BizAppsSales.Deal SET ActualCloseDate='2026-07-28', ClosedAt='2026-07-28T16:40:00Z' WHERE ID=@d5 AND ActualCloseDate IS NULL;
-UPDATE __mj_BizAppsSales.Deal SET ActualCloseDate='2026-07-14', ClosedAt='2026-07-14T11:05:00Z', LossReasonID=@lrPrice,
-       LossNotes=N'Incumbent discounted 30% at the last minute; we declined to match.' WHERE ID=@d6 AND LossReasonID IS NULL;
 
--- ============================ DEAL LINES — intent + the signed figures; Resolved* deliberately NULL ============================
---
--- LineType WAS a free-text column here, and the seed data made the case for changing it: these three
--- rows carried 'Subscription' and 'OneTime' — two different naming conventions in three rows, which is
--- what a string column always eventually holds. It is now a FK to DealLineType, and code branches on
--- that row's IsRecurring rather than on either spelling.
---
--- AnnualGrossFees / DiscountAmount / Total are the SIGNED FIGURES, transcribed. Nothing computes them,
--- and they deliberately do NOT tie to Deal.Amount: on these demo deals AmountIsComputed = 0, so the
--- header amount is a human's stated figure. Once Orders.PreviewOrder is wired in, the authoritative
--- number lands in the Resolved* columns and the two can be compared — which is the point of keeping
--- both rather than reconciling them by overwriting.
-DECLARE @ltRecur UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealLineType WHERE Code='RECURRING');
-DECLARE @ltOnce  UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsSales.DealLineType WHERE Code='ONETIME');
-
--- The B2B lines reference the catalog by ID, resolved the same company-scoped way DEAL-9007's is.
---
--- WHY THIS MATTERS AND IS NOT COSMETIC. A line carrying only a free-text ProductName leaves
--- ProductID NULL, and the close maps that to ProductID '' on the order line -- an empty string
--- against a uniqueidentifier, which fails INSIDE orders' save and takes the close transaction with
--- it, leaving the deal marked Won with no order (KNOWN-ISSUES KI-14). Seeded deals a demo or a
--- tester can click "close won" on must therefore reference real products.
---
--- Two DISTINCT products, so the order that results has two distinguishable lines. Ordered by Name
--- for determinism. With orders absent both stay NULL and the lines still seed -- ProductID is a
--- soft reference by design.
-DECLARE @b2bProd1 UNIQUEIDENTIFIER = NULL, @b2bProd2 UNIQUEIDENTIFIER = NULL;
-DECLARE @b2bName1 NVARCHAR(255) = N'Platform — Enterprise Seat';
-DECLARE @b2bName2 NVARCHAR(255) = N'Implementation & Data Migration';
-IF OBJECT_ID('__mj_BizAppsOrders.Product', 'U') IS NOT NULL
-BEGIN
-    DECLARE @findB2B NVARCHAR(MAX) = N'
-        SELECT @id1 = MAX(CASE WHEN rn = 1 THEN ID END), @nm1 = MAX(CASE WHEN rn = 1 THEN Name END),
-               @id2 = MAX(CASE WHEN rn = 2 THEN ID END), @nm2 = MAX(CASE WHEN rn = 2 THEN Name END)
-        FROM (SELECT ID, Name, ROW_NUMBER() OVER (ORDER BY Name) rn
-              FROM __mj_BizAppsOrders.Product
-              WHERE CompanyID = @c AND Status = ''Active''
-                AND (AvailableFrom IS NULL OR AvailableFrom <= CAST(SYSUTCDATETIME() AS date))
-                AND (AvailableTo   IS NULL OR AvailableTo   >= CAST(SYSUTCDATETIME() AS date))) q;';
-    EXEC sp_executesql @findB2B,
-         N'@id1 UNIQUEIDENTIFIER OUTPUT, @nm1 NVARCHAR(255) OUTPUT, @id2 UNIQUEIDENTIFIER OUTPUT, @nm2 NVARCHAR(255) OUTPUT, @c UNIQUEIDENTIFIER',
-         @id1 = @b2bProd1 OUTPUT, @nm1 = @b2bName1 OUTPUT, @id2 = @b2bProd2 OUTPUT, @nm2 = @b2bName2 OUTPUT, @c = @co1;
-    -- One sellable product is enough to stay coherent; fall back rather than leave a dangling name.
-    IF @b2bProd2 IS NULL BEGIN SET @b2bProd2 = @b2bProd1; SET @b2bName2 = @b2bName1; END
-END
-
-IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealLine WHERE DealID=@d1)
-INSERT INTO __mj_BizAppsSales.DealLine (DealID, ProductID, ProductName, Quantity, RequestedDiscountPct, TermMonths,
-       DealLineTypeID, AnnualGrossFees, DiscountAmount, Total, DisplayOrder, Description) VALUES
- (@d1, @b2bProd1, @b2bName1, 250, 12.00, 24,   @ltRecur, 200000.0000, 24000.0000, 176000.0000, 10, N'Platform seats — 250 @ 12% requested discount'),
- (@d1, @b2bProd2, @b2bName2,   1, NULL,  NULL, @ltOnce,   25000.0000,     0.0000,  25000.0000, 20, N'Implementation & data migration (SOW)'),
- (@d3, @b2bProd1, @b2bName1, 180,  5.00, 12,   @ltRecur, 101000.0000,  5050.0000,  95950.0000, 10, N'Renewal seats — 180 @ 5% requested discount');
-
--- ============================ THE D2C LINED DEAL (DEAL-9007) ============================
---
--- WHY THIS ONE EXISTS. Every other lined deal sits on the B2B pipeline, whose policy books a
--- CONFIRMED order. This one carries a line on the ORDER-ONLY pipeline, whose policy books a DRAFT.
--- Closing the two and getting different order states out of the SAME close action is the clearest
--- proof available that routing reads the pipeline's CloseWonPolicy rather than its name.
---
--- Its product must belong to the ORDER-ONLY pipeline's selling company (@co2), not @co1 --
--- products are per-company and the picker filters on exactly that, so a @co1 product here would be
--- unpickable in the UI and unroutable on close.
---
--- RESOLVED BY SKU, NOT HARDCODED, AND ONLY IF ORDERS IS INSTALLED. The reference is dynamic because
--- a static reference to __mj_BizAppsOrders.Product fails to COMPILE the whole batch on a
--- sales-only host. With orders absent the line still seeds, carrying its ProductName and a NULL
--- ProductID -- which is precisely how DealLine.ProductID is defined to behave as a soft reference.
-DECLARE @eduProdID UNIQUEIDENTIFIER = NULL;
-DECLARE @eduProdName NVARCHAR(255) = N'EDU Learner Seat';
-IF OBJECT_ID('__mj_BizAppsOrders.Product', 'U') IS NOT NULL
-BEGIN
-    DECLARE @findProd NVARCHAR(MAX) = N'
-        SELECT TOP 1 @id = ID, @nm = Name
-        FROM __mj_BizAppsOrders.Product
-        WHERE CompanyID = @c AND Status = ''Active''
-          AND (AvailableFrom IS NULL OR AvailableFrom <= CAST(SYSUTCDATETIME() AS date))
-          AND (AvailableTo   IS NULL OR AvailableTo   >= CAST(SYSUTCDATETIME() AS date))
-        ORDER BY Name;';
-    EXEC sp_executesql @findProd,
-         N'@id UNIQUEIDENTIFIER OUTPUT, @nm NVARCHAR(255) OUTPUT, @c UNIQUEIDENTIFIER',
-         @id = @eduProdID OUTPUT, @nm = @eduProdName OUTPUT, @c = @co2;
-END
-
+-- DEAL-9007 sits apart from the five above because it is the CONTRAST CASE, and it is easier to see
+-- when it is not buried in a six-row VALUES list. It is a lined deal on the ORDER-ONLY pipeline: the
+-- same close action that gives a B2B deal a contract gives this one none, because the policy differs
+-- and nothing in the code reads either pipeline's name. Its order is seeded further down with the
+-- other embedded orders.
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal WHERE ID=@d7)
 INSERT INTO __mj_BizAppsSales.Deal (ID, DealNumber, Name, PipelineID, PipelineStageID, DealTypeID, DealStatusTypeID,
    AccountID, PrimaryContactID, CompanyID, OwnerEmployeeID, Amount, AmountIsComputed, TermMonths,
    ExpectedCloseDate, Probability, ForecastCategoryTypeID, LeadSourceTypeID, Description, NextStep, NextStepDate) VALUES
  (@d7, N'DEAL-9007', N'Beacon Charter Schools — Campus Seats', @pipe2, @t2, @dtNew, @stOpen,
   @acc3, @c3, @co2, @emp2, 9500.0000, 0, 12, '2026-10-20', 60, @fcComm, @lsPart,
-  N'A LINED deal on the order-only pipeline. Closing it produces a DRAFT order -- numbered and priced by orders, deliberately not posted to the ledger -- where the same action on a B2B deal produces a CONFIRMED one. Same machinery, different policy.',
+  N'A LINED deal on the order-only pipeline. Its embedded order carries the seats; closing it creates no contract, where the same action on a B2B deal does. Same machinery, different policy.',
   N'Confirm campus count before quoting', '2026-08-25');
 
-IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealLine WHERE DealID=@d7)
-INSERT INTO __mj_BizAppsSales.DealLine (DealID, ProductID, ProductName, Quantity, RequestedDiscountPct, TermMonths,
-       DealLineTypeID, AnnualGrossFees, DiscountAmount, Total, DisplayOrder, Description) VALUES
- (@d7, @eduProdID, @eduProdName, 25, NULL, 12, @ltOnce, 9500.0000, 0.0000, 9500.0000, 10,
-  N'One-time seats. ONETIME so the close routes to an order rather than a contract.');
+UPDATE __mj_BizAppsSales.Deal SET ActualCloseDate='2026-07-28', ClosedAt='2026-07-28T16:40:00Z' WHERE ID=@d5 AND ActualCloseDate IS NULL;
+UPDATE __mj_BizAppsSales.Deal SET ActualCloseDate='2026-07-14', ClosedAt='2026-07-14T11:05:00Z', LossReasonID=@lrPrice,
+       LossNotes=N'Incumbent discounted 30% at the last minute; we declined to match.' WHERE ID=@d6 AND LossReasonID IS NULL;
 
+-- ============================ THE EMBEDDED ORDER — where lines live now ============================
+--
+-- THE DEAL HOLDS NO LINE ITEMS. It used to: `DealLine` carried product, quantity, the requested
+-- discount and a transcribed set of signed figures, and closing the deal copied them onto an order.
+-- That table is retired. The ORDER is now an embedded record on the deal -- `Deal.OrderID`, a real FK
+-- to orders' `OrderHeader` -- created with the deal, and adding a line to a deal writes an ORDER line.
+-- One place holds what is being sold, which is the point: two tables holding the same intent is how
+-- they end up disagreeing.
+--
+-- WHY THIS SCRIPT WRITES ORDERS IN RAW SQL. Everywhere else, an order is provisioned through the
+-- entity layer so orders' own server code mints the number, stamps the company and prices the lines.
+-- A seed script cannot reach that: it is `sqlcmd`, there is no provider, and the provisioning path is
+-- deliberately not duplicated here. So these rows are written directly and the figures are TRANSCRIBED
+-- FICTION, exactly as the old signed figures were -- a demo dataset, not a priced quote.
+--
+-- `UnitPrice` is drawn from the catalogue's own `ProductPrice.Amount` rather than invented, so the
+-- numbers on screen agree with what the pricing engine would resolve for the same product. Sales still
+-- computes nothing: this script transcribes a price it looked up, and no code path in the app does.
+--
+-- ONLY THE LINED DEALS GET AN ORDER. Under the real model every deal is created with one; here, three
+-- deals carry lines and the rest are header-only, which keeps the demo showing the contrast that
+-- matters (a priced motion beside a simple one) rather than seeding four empty orders to be uniform.
+--
+-- STATUS IS DRAFT. The model advances an order to Quoted when its deal reaches the agreement stage or
+-- higher, but nothing in the schema yet says WHICH stage that is -- see DECISIONS-NEEDED.md. Draft is
+-- the honest seed: it is what deal creation produces, and it is what an unadvanced order really is.
+
+IF OBJECT_ID('__mj_BizAppsOrders.OrderHeader', 'U') IS NOT NULL
+BEGIN
+    -- Fixed ids and demo-prefixed numbers, so this is idempotent and the teardown can find exactly
+    -- these rows. `OrderNumber` carries a UNIQUE index; the prefix keeps demo orders from ever
+    -- colliding with a number orders' own sequence mints.
+    DECLARE @o1 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000001';  -- DEAL-9001
+    DECLARE @o3 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000003';  -- DEAL-9003
+    DECLARE @o7 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000007';  -- DEAL-9007
+
+    /* ── the catalogue, resolved by SKU ──────────────────────────────────────────────────────────
+     *
+     * BY SKU, NOT BY NAME AND NOT BY HARDCODED ID. A product name is a label somebody will rewrite;
+     * an id differs per install. `SKU` is the catalogue's stable business key, and resolving through
+     * it means this script keeps working against a reseeded orders catalogue.
+     *
+     * Sellability is checked the same way the picker checks it -- Active, and inside its availability
+     * window -- so a seed can never hand the demo a product the UI would refuse to offer.
+     */
+    DECLARE @today date = CAST(SYSUTCDATETIME() AS date);
+
+    DECLARE @pStd UNIQUEIDENTIFIER, @pStdPrice DECIMAL(19,4), @pStdName NVARCHAR(255);
+    DECLARE @pPrm UNIQUEIDENTIFIER, @pPrmPrice DECIMAL(19,4), @pPrmName NVARCHAR(255);
+    DECLARE @pSeat UNIQUEIDENTIFIER, @pSeatPrice DECIMAL(19,4), @pSeatName NVARCHAR(255);
+
+    SELECT TOP 1 @pStd = p.ID, @pStdName = p.Name,
+           @pStdPrice = (SELECT TOP 1 pp.Amount FROM __mj_BizAppsOrders.ProductPrice pp
+                          WHERE pp.ProductID = p.ID AND pp.Status = 'Active' ORDER BY pp.Priority, pp.__mj_CreatedAt)
+      FROM __mj_BizAppsOrders.Product p
+     WHERE p.SKU = 'PLAT-STD' AND p.CompanyID = @co1 AND p.Status = 'Active'
+       AND (p.AvailableFrom IS NULL OR p.AvailableFrom <= @today)
+       AND (p.AvailableTo   IS NULL OR p.AvailableTo   >= @today);
+
+    SELECT TOP 1 @pPrm = p.ID, @pPrmName = p.Name,
+           @pPrmPrice = (SELECT TOP 1 pp.Amount FROM __mj_BizAppsOrders.ProductPrice pp
+                          WHERE pp.ProductID = p.ID AND pp.Status = 'Active' ORDER BY pp.Priority, pp.__mj_CreatedAt)
+      FROM __mj_BizAppsOrders.Product p
+     WHERE p.SKU = 'PLAT-PRM' AND p.CompanyID = @co1 AND p.Status = 'Active'
+       AND (p.AvailableFrom IS NULL OR p.AvailableFrom <= @today)
+       AND (p.AvailableTo   IS NULL OR p.AvailableTo   >= @today);
+
+    SELECT TOP 1 @pSeat = p.ID, @pSeatName = p.Name,
+           @pSeatPrice = (SELECT TOP 1 pp.Amount FROM __mj_BizAppsOrders.ProductPrice pp
+                           WHERE pp.ProductID = p.ID AND pp.Status = 'Active' ORDER BY pp.Priority, pp.__mj_CreatedAt)
+      FROM __mj_BizAppsOrders.Product p
+     WHERE p.SKU = 'EDU-SEAT' AND p.CompanyID = @co2 AND p.Status = 'Active'
+       AND (p.AvailableFrom IS NULL OR p.AvailableFrom <= @today)
+       AND (p.AvailableTo   IS NULL OR p.AvailableTo   >= @today);
+
+    -- One sellable product is enough to stay coherent. Falling back beats seeding a line with a NULL
+    -- ProductID -- which the schema now refuses outright, because OrderLine.ProductID is NOT NULL.
+    IF @pPrm IS NULL BEGIN SET @pPrm = @pStd; SET @pPrmName = @pStdName; SET @pPrmPrice = @pStdPrice; END
+
+    IF @pStd IS NULL OR @pSeat IS NULL
+        PRINT 'Catalogue not seeded for one or both selling companies - lined deals will be header-only. Run orders'' product seed first.';
+
+    /* ── DEAL-9001 — the priced B2B motion, two distinguishable lines ───────────────────────────── */
+    IF @pStd IS NOT NULL AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsOrders.OrderHeader WHERE ID=@o1)
+    BEGIN
+        INSERT INTO __mj_BizAppsOrders.OrderHeader (ID, OrderNumber, OrderDate, Status, CompanyID, Description)
+        VALUES (@o1, N'ORD-DEMO-9001', '2026-08-01', 'Draft', @co1,
+                N'The embedded order for DEAL-9001. Created with the deal, holds every line, and is what finance reviews and advances after Closed Won.');
+
+        INSERT INTO __mj_BizAppsOrders.OrderLine (OrderHeaderID, ProductID, CompanyID, LineNumber, Quantity, UnitPrice, Description) VALUES
+         (@o1, @pStd, @co1, 1, 250, @pStdPrice, N'Platform seats — the recurring core of the rollout'),
+         (@o1, @pPrm, @co1, 2,  20, @pPrmPrice, N'Premium seats for their clinical leads');
+
+        UPDATE __mj_BizAppsSales.Deal SET OrderID = @o1 WHERE ID = @d1;
+    END
+
+    /* ── DEAL-9003 — a RENEWAL, so the same shape carries a different meaning ───────────────────── */
+    IF @pStd IS NOT NULL AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsOrders.OrderHeader WHERE ID=@o3)
+    BEGIN
+        INSERT INTO __mj_BizAppsOrders.OrderHeader (ID, OrderNumber, OrderDate, Status, CompanyID, Description)
+        VALUES (@o3, N'ORD-DEMO-9003', '2026-08-05', 'Draft', @co1,
+                N'The embedded order for the Year 2 renewal. DealType.RequiresRenewalSource routes the CONTRACT differently; the order is the same shape either way.');
+
+        INSERT INTO __mj_BizAppsOrders.OrderLine (OrderHeaderID, ProductID, CompanyID, LineNumber, Quantity, UnitPrice, Description) VALUES
+         (@o3, @pStd, @co1, 1, 180, @pStdPrice, N'Renewal seats — fewer than year one, which is the story');
+
+        UPDATE __mj_BizAppsSales.Deal SET OrderID = @o3 WHERE ID = @d3;
+    END
+
+    /* ── DEAL-9007 — the SAME machinery on the other pipeline ───────────────────────────────────
+     *
+     * WHY THIS ONE EXISTS. Every other lined deal sits on the B2B pipeline, whose CloseWonPolicy
+     * creates a contract. This one carries lines on the order-only pipeline, whose policy does not.
+     * Closing the two and watching one produce a contract and the other not -- from the SAME close
+     * action -- is the clearest proof available that routing reads the policy rather than the name.
+     *
+     * Its product must belong to THAT pipeline's selling company. Products are per-company and the
+     * picker filters on exactly that, so a @co1 product here would be unpickable in the UI.
+     */
+    IF @pSeat IS NOT NULL AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsOrders.OrderHeader WHERE ID=@o7)
+    BEGIN
+        INSERT INTO __mj_BizAppsOrders.OrderHeader (ID, OrderNumber, OrderDate, Status, CompanyID, Description)
+        VALUES (@o7, N'ORD-DEMO-9007', '2026-08-10', 'Draft', @co2,
+                N'The embedded order for the D2C campus deal — same machinery, different pipeline policy.');
+
+        INSERT INTO __mj_BizAppsOrders.OrderLine (OrderHeaderID, ProductID, CompanyID, LineNumber, Quantity, UnitPrice, Description) VALUES
+         (@o7, @pSeat, @co2, 1, 25, @pSeatPrice, N'Campus seats — one line, deliberately: the contrast is the pipeline, not the size');
+
+        UPDATE __mj_BizAppsSales.Deal SET OrderID = @o7 WHERE ID = @d7;
+    END
+END
+ELSE
+    PRINT 'bizapps-orders is not installed - deals seeded header-only, with no embedded orders.';
 -- ============================ PAYMENT SCHEDULE — the EXCEPTION case, on one deal only ============================
 -- Five of the six demo deals carry NO rows here, and that is the design: no rows means standard terms
 -- (100% on execution). Only DEAL-9001 negotiated instalments, so only DEAL-9001 has a schedule. "Did
@@ -481,7 +569,9 @@ UNION ALL SELECT '  stages           ' + CAST(COUNT(*) AS varchar) FROM __mj_Biz
 UNION ALL SELECT '  accounts         ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.SalesAccount
 UNION ALL SELECT '  contacts         ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.SalesContact
 UNION ALL SELECT '  deals            ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal
-UNION ALL SELECT '  deal lines       ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealLine
+UNION ALL SELECT '  deals w/ order   ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE OrderID IS NOT NULL
+UNION ALL SELECT '  demo orders      ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsOrders.OrderHeader WHERE OrderNumber LIKE 'ORD-DEMO-9%'
+UNION ALL SELECT '  order lines      ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsOrders.OrderLine ol JOIN __mj_BizAppsOrders.OrderHeader oh ON oh.ID=ol.OrderHeaderID WHERE oh.OrderNumber LIKE 'ORD-DEMO-9%'
 UNION ALL SELECT '  payment sched.   ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealPaymentSchedule
 UNION ALL SELECT '  team members     ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealTeamMember
 UNION ALL SELECT '  buying committee ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealContactRole
