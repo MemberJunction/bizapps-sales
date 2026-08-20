@@ -113,10 +113,22 @@ and the same three console errors as the workspace, ending in
 same stage, same order status, same event count. The refusal is honest — nothing half-happened.
 
 **The isolating result matters more than the failure.** Dragging a deal with NO order works completely:
-`DEAL-9002` moved Qualification → Discovery, and the target stage's probability default was applied
-(25% → 10%). So the board is fine, the write path is fine, and the blocker is precisely and only the
+`DEAL-9002` moved Qualification → Discovery, the target stage's probability default was applied
+(25% → 10%), and **exactly one `DealStageEvent` was appended, stamped with `Probability = 25` and
+`Amount = 42000`** — the values the deal held on the way OUT, not the 10 it arrived at. That is `BD2`'s
+claim, verified through the UI rather than in process.
+
+So the board is fine, the write path is fine, and the blocker is precisely and only the
 **embedded-order LOAD**. Anything that must read a deal before writing it — workspace, board, importer —
 hits it; anything that only creates hits nothing.
+
+> **A false alarm worth recording, because it is the third time this trap has been sprung here.** The
+> first run of that drag appeared to move the deal and append NO event, which read as a defect in the
+> merged writer. It was a STALE API: MJAPI had been running since before the board branch was merged, so
+> the process was holding a `DealEntityServer` with no `appendStageEvent` in it. `ng serve` rebuilt the
+> browser bundle and made everything look current. CLAUDE.md says to restart both servers after a
+> rebuild; the reason it keeps saying so is that the symptom is a plausible-looking wrong answer rather
+> than an error.
 
 That narrows what a fix has to restore: one GraphQL read of `MJ_BizApps_Orders: Order Headers` whose
 selection set matches the host's entity metadata.
