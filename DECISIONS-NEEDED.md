@@ -316,3 +316,63 @@ Do not derive one from the other for symmetry.
 **What is needed:** finance to confirm the Contract Processing steps, and a ruling on whether sales
 seeding a second tasks child table (`TaskTypeStatus`, after `TaskType`) is the intended reading of
 Amith's "the metadata rows will be created by the sales open app", or one table further than he meant.
+
+---
+
+## D-14 · Sales and contracts disagree on the domain of the annual increase
+
+**Raised by:** review of the pass-through in `LiveContractsSeam.annualIncrease()`. The behaviour is
+correct; the reason recorded for it was not, and the real reason exposes a gap neither app owns.
+
+| | column | CHECK | type |
+|---|---|---|---|
+| sales | `Deal.AnnualIncreasePctOverride` | `>= 0 AND <= 100` | `DECIMAL(5,2)` |
+| contracts | `Contract.AnnualIncreasePercent` | `>= 0` — **no upper bound** | `DECIMAL(7,4)` |
+
+Both call it a percent, and `5` means five per cent on both sides today, so the handoff is right and
+nothing needs converting. But the wider column accepts values sales would have refused, and **neither
+side states the unit as a rule rather than as a habit**. A future writer — an importer, an integration,
+a second app — can put `0.05` in the contracts column meaning five per cent and no constraint will
+object.
+
+**This is the same shape as the discount-unit trap** already recorded in `docs/DECISIONS.md`, where
+0–100 became 0–1 across the sales→orders boundary: *"the one that would have become a silent
+hundred-fold bug"*. That one was caught because orders' CHECK rejects anything above 1, so a raw
+percentage fails loudly. Here there is no equivalent guard — contracts' bound is open at the top, so
+the same mistake lands silently and stays.
+
+**Interim choice:** pass through unconverted, and say so in the code. The pass-through is not justified
+by the domains matching — it is justified by the OVERRIDE semantics: sales' description says NULL means
+*"use the standard"*, whose default lives on contracts' `ContractType`, and that copying the default in
+at write time would freeze this year's terms into next year's renewals. A stated number travels; a null
+stays a null. Adding a conversion on suspicion would be precisely the computation this app must not
+perform, and would break the handoff that currently works.
+
+**What is needed, from Marcelo:** an upper bound on `CK_Contract_AnnualIncrease` matching sales' 0–100,
+or an explicit statement that contracts stores a fraction — in which case sales must convert and this
+becomes a real defect rather than a latent one. One line either way. Related to D-9: the same column is
+where the missing `ContractType` default would land.
+
+### Addendum to D-9 — the workspace constants become reads
+
+`packages/Angular/src/lib/workspace/deal-workspace.types.ts` carries two placeholders:
+
+```ts
+export const STANDARD_ANNUAL_INCREASE_PCT = 5;
+export const STANDARD_CANCELLATION_NOTICE_DAYS = 90;
+```
+
+They are shown as **placeholder text only** and never written into a draft, which is what makes the
+override/null distinction survive to the database — the file's own comment says so and it is correct.
+But they are hardcoded copies of values that are supposed to live on contracts' `ContractType`, and
+`ContractType` has no such columns (D-9). So today the deal workspace tells an AD what they are
+departing from using a number sales invented.
+
+**When Marcelo adds the renewal-default columns, both constants become reads** — the workspace resolves
+them from the contract type rather than declaring them — and `LiveContractsSeam.setNegotiatedTerms()`
+picks the defaults up on the same change. Until then a policy change in contracts would leave these two
+numbers stale, and nothing would notice: the form would display last year's standard while the database
+held this year's.
+
+Noted here rather than fixed because there is nothing to read from yet, and because a placeholder that
+is never persisted is a display bug at worst — the deal itself stays honest.
