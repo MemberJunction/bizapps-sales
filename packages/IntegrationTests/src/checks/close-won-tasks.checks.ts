@@ -20,9 +20,10 @@
  */
 import { Metadata, RunView, type DatabaseProviderBase } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
-import { CloseWonTaskService, type CloseWonTaskInput } from '@mj-biz-apps/sales-core-entities-server';
+import { CloseWonTaskService, CloseDealOperation, type CloseWonTaskInput } from '@mj-biz-apps/sales-core-entities-server';
+import type { SalesCloseDealOutput, mjBizAppsSalesPipelineEntity } from '@mj-biz-apps/sales-entities';
 
-import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture, TxOne } from '../fixture.js';
+import { InRolledBackTransaction, ProviderOf, TxOne } from '../fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -72,7 +73,10 @@ function entityID(ctx: Ctx, name: string): string {
 }
 
 /** A deal on a pipeline whose policy carries the given `CreateContract` flag — by FLAG, never by name. */
-async function dealOnPolicy(ctx: Ctx, createsContract: boolean): Promise<{ DealID: string; PipelineID: string }> {
+async function dealOnPolicy(
+    ctx: Ctx,
+    createsContract: boolean,
+): Promise<{ DealID: string; PipelineID: string; CompanyID: string }> {
     const pipelines = await rows(ctx, 'MJ_BizApps_Sales: Pipelines', 'IsActive = 1');
     const match = pipelines.find((p) => {
         const raw = p['CloseWonPolicy'];
@@ -88,14 +92,23 @@ async function dealOnPolicy(ctx: Ctx, createsContract: boolean): Promise<{ DealI
 
     const deals = await rows(ctx, E_DEAL, `PipelineID = '${pipelineID}'`);
     Assert(deals.length > 0, `setup: no deal on the pipeline with CreateContract = ${createsContract}`);
-    return { DealID: String(deals[0]['ID']), PipelineID: pipelineID };
+    return {
+        DealID: String(deals[0]['ID']),
+        PipelineID: pipelineID,
+        CompanyID: String(deals[0]['CompanyID']),
+    };
 }
 
 /** The service input every check starts from. Each one overrides only what it is testing. */
 async function baseInput(ctx: Ctx, createsContract: boolean): Promise<CloseWonTaskInput> {
-    const f = await ResolveSalesFixture(ctx);
-    const { DealID, PipelineID } = await dealOnPolicy(ctx, createsContract);
-    const orderID = await anyID(ctx, E_ORDER, `CompanyID = '${f.PipelineCompanyID}'`, 'order');
+    /**
+     * NO SHARED FIXTURE. `ResolveSalesFixture` still resolves `Deal Line Types`, which the embedded-order
+     * rework dropped, so it throws on any database that has caught up. This bundle only ever needed one
+     * field from it — the selling company — and the DEAL already carries that. Taking it from the deal is
+     * both less coupled and more correct: the order has to belong to the same company as the deal.
+     */
+    const { DealID, PipelineID, CompanyID } = await dealOnPolicy(ctx, createsContract);
+    const orderID = await anyID(ctx, E_ORDER, `CompanyID = '${CompanyID}'`, 'order');
     const typeID = await anyID(ctx, E_TASK_TYPE, 'IsActive = 1', 'active task type');
     const roleID = await anyID(ctx, E_TASK_ROLE, 'ID IS NOT NULL', 'task role');
     const personID = await anyID(ctx, E_PEOPLE, 'ID IS NOT NULL', 'person');
@@ -427,6 +440,114 @@ export const CloseWonTasksChecks: NamedCheck[] = [
 
                 const after = await TxOne<{ N: number }>(ctx, 'SELECT COUNT(*) AS N FROM __mj_BizAppsTasks.Task');
                 AssertEqual(Number(after.N), Number(before.N), 'and the table must be back where it started');
+            }),
+    },
+    {
+        Id: 'close-won-tasks.WT10',
+        Name: 'WT10: closing a deal as WON raises the tasks through Sales.CloseDeal, end to end',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE WIRING ITSELF, not the service in isolation. WT1-WT9 prove the service; this proves
+                 * that a real close reaches it, that the configuration route works end to end, and that
+                 * the tasks land inside the close transaction.
+                 *
+                 * Everything vocabulary-shaped is still resolved by FLAG or ID: the pipeline by its
+                 * CreateContract flag, the won status by IsWon, and the task types by taking two distinct
+                 * active rows. The check asserts the tasks carry the types CONFIGURED, never which types
+                 * they are -- the same discipline as WT1.
+                 */
+                requireTasks(ctx);
+
+                // A closeable deal: open, on a contract-creating pipeline, and carrying its order.
+                const pipelines = await rows(ctx, 'MJ_BizApps_Sales: Pipelines', 'IsActive = 1');
+                const contractPipe = pipelines.find((pl) => {
+                    const raw = pl['CloseWonPolicy'];
+                    if (typeof raw !== 'string' || !raw) return false;
+                    try { return (JSON.parse(raw) as { CreateContract?: boolean }).CreateContract === true; }
+                    catch { return false; }
+                });
+                Assert(!!contractPipe, 'setup: no active pipeline whose policy has CreateContract = true');
+                const pipelineID = String(contractPipe!['ID']);
+
+                const openStatuses = await rows(ctx, 'MJ_BizApps_Sales: Deal Status Types', 'IsOpen = 1 AND IsActive = 1');
+                Assert(openStatuses.length > 0, 'setup: no open deal status');
+                const openIDs = openStatuses.map((r) => String(r['ID']).toLowerCase());
+
+                const candidates = await rows(ctx, E_DEAL, `PipelineID = '${pipelineID}' AND OrderID IS NOT NULL`);
+                const deal = candidates.find((d) => openIDs.includes(String(d['DealStatusTypeID']).toLowerCase()));
+                Assert(
+                    !!deal,
+                    'setup: no OPEN deal on the contract pipeline that carries an order. The order is embedded '
+                        + 'at deal creation, so a host whose deals predate that has nothing to close here.',
+                );
+                const dealID = String(deal!['ID']);
+                const orderID = String(deal!['OrderID']);
+
+                const wonRows = await rows(ctx, 'MJ_BizApps_Sales: Deal Status Types', 'IsWon = 1 AND IsActive = 1');
+                Assert(wonRows.length > 0, 'setup: no WON status on this host');
+                const wonStatusID = String(wonRows[0]['ID']);
+
+                // Two DISTINCT active task types, by ID. Which ones they are is not the claim.
+                const types = await rows(ctx, E_TASK_TYPE, 'IsActive = 1');
+                Assert(types.length >= 2, 'setup: need at least two active task types');
+                const orderTypeID = String(types[0]['ID']);
+                const contractTypeID = String(types[1]['ID']);
+                const personID = await anyID(ctx, E_PEOPLE, 'ID IS NOT NULL', 'person');
+
+                // Configure the policy the way a deployment would. Rolled back with everything else.
+                const md = new Metadata();
+                const pipe = await md.GetEntityObject<mjBizAppsSalesPipelineEntity>('MJ_BizApps_Sales: Pipelines', ctx.User);
+                Assert(await pipe.Load(pipelineID), 'setup: the pipeline could not be loaded');
+                const basePolicy = JSON.parse(String(pipe.Get('CloseWonPolicy') ?? '{}')) as Record<string, unknown>;
+                basePolicy.CloseWonTasks = {
+                    OrderReviewTaskTypeID: orderTypeID,
+                    ContractTaskTypeID: contractTypeID,
+                    AssigneeEntityName: E_PEOPLE,
+                    AssigneeRecordID: personID,
+                };
+                pipe.Set('CloseWonPolicy', JSON.stringify(basePolicy));
+                Assert(await pipe.Save(), `setup: the policy could not be written — ${pipe.LatestResult?.CompleteMessage}`);
+
+                // THE CLOSE.
+                const op = new CloseDealOperation();
+                const raw = await op.Execute(
+                    { DealID: dealID, DealStatusTypeID: wonStatusID },
+                    { provider: ProviderOf(ctx), user: ctx.User },
+                );
+                const out = (raw as { Output?: SalesCloseDealOutput })?.Output;
+                Assert(!!out, `Sales.CloseDeal returned no Output envelope: ${JSON.stringify(raw).slice(0, 300)}`);
+                Assert(out!.Success, `the close failed — ${JSON.stringify(out!.Issues).slice(0, 400)}`);
+
+                // THE ORDER-REVIEW TASK, found by its LINK to the order rather than by name.
+                const orderEntityID = entityID(ctx, E_ORDER);
+                const links = await rows(
+                    ctx, E_TASK_LINK, `EntityID = '${orderEntityID}' AND RecordID = '${orderID}'`,
+                );
+                AssertEqual(links.length, 1, 'the close must leave exactly one task linked to the order');
+
+                const [task] = await rows(ctx, E_TASK, `ID = '${String(links[0]['TaskID'])}'`);
+                Assert(!!task, 'the link points at no task');
+                AssertEqual(
+                    String(task['TypeID']).toLowerCase(),
+                    orderTypeID.toLowerCase(),
+                    'and it must carry the type the POLICY configured',
+                );
+
+                const assigns = await rows(ctx, E_TASK_ASSIGNMENT, `TaskID = '${String(links[0]['TaskID'])}'`);
+                AssertEqual(assigns.length, 1, 'the task must be routed to the configured assignee');
+
+                // A contract-creating policy also owes the contract task.
+                const contractTasks = await rows(ctx, E_TASK, `TypeID = '${contractTypeID}'`);
+                Assert(contractTasks.length >= 1, 'a contract-creating policy must also raise the contract task');
+
+                // Fully configured means nothing to complain about.
+                AssertEqual(
+                    out!.Issues.length,
+                    0,
+                    `a fully configured close should report no issues — got ${JSON.stringify(out!.Issues)}`,
+                );
             }),
     },
 ];

@@ -21,7 +21,7 @@
     "close-won-handoff": { "count": 6, "requires": "orders", "ids": "CW1-CW6" },
     "close-won-d2c": { "count": 4, "requires": "orders", "ids": "D1-D4" },
     "close-won-contract": { "count": 6, "requires": "contracts", "ids": "CT1-CT6" },
-    "close-won-tasks": { "count": 9, "requires": "tasks", "ids": "WT1-WT9" }
+    "close-won-tasks": { "count": 10, "requires": "tasks", "ids": "WT1-WT10" }
   },
   "probes": {
     "orders": "@mj-biz-apps/orders-entities",
