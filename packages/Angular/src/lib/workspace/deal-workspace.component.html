@@ -379,12 +379,10 @@
                 <thead>
                   <tr>
                     <th scope="col">Product</th>
-                    <th scope="col">Product / service <em>*</em></th>
-                    <th scope="col">Type</th>
                     <th scope="col" class="dw-num">Qty</th>
-                    <th scope="col" class="dw-num">Annual gross fees</th>
+                    <th scope="col" class="dw-num">Unit price</th>
                     <th scope="col" class="dw-num">Discount</th>
-                    <th scope="col" class="dw-num">Total</th>
+                    <th scope="col" class="dw-num">Line total</th>
                     <th scope="col" class="dw-num">Disc %</th>
                     <th scope="col"><span class="dw-sr">Row actions</span></th>
                   </tr>
@@ -410,23 +408,21 @@
                           <small class="dw-field__hint">no longer offered</small>
                         }
                       </td>
-                      <td>
-                        <input type="text" [(ngModel)]="line.ProductName" (ngModelChange)="Touch()"
-                               placeholder="e.g. Platform — Enterprise Seat" />
-                      </td>
-                      <td>
-                        <select class="dw-cell-linetype" [(ngModel)]="line.DealLineTypeID" (ngModelChange)="Touch()">
-                          <option [ngValue]="null">—</option>
-                          @for (lt of Lookups.LineTypes; track lt.ID) {
-                            <option [ngValue]="lt.ID">{{ lt.Name }}</option>
-                          }
-                        </select>
-                      </td>
                       <td class="dw-num"><input type="number" min="0" step="1" [(ngModel)]="line.Quantity" (ngModelChange)="Touch()" /></td>
-                      <td class="dw-num"><input type="number" min="0" step="0.01" [(ngModel)]="line.AnnualGrossFees" (ngModelChange)="Touch()" /></td>
+                      <!-- Priced by orders, never entered here: sales states intent, orders states price. -->
+                      <td class="dw-num dw-readonly">{{ line.UnitPrice }}</td>
                       <td class="dw-num"><input type="number" min="0" step="0.01" [(ngModel)]="line.DiscountAmount" (ngModelChange)="Touch()" /></td>
-                      <td class="dw-num"><input type="number" step="0.01" [(ngModel)]="line.Total" (ngModelChange)="Touch()" /></td>
-                      <td class="dw-num"><input type="number" min="0" max="100" step="0.01" [(ngModel)]="line.RequestedDiscountPct" (ngModelChange)="Touch()" /></td>
+                      <td class="dw-num dw-readonly">{{ line.LineTotalNet ?? '—' }}</td>
+                      <td class="dw-num">
+                            <!-- Percent in, fraction stored. The conversion refuses an ambiguous 0-1
+                                 value rather than guessing -- see SetDiscountPercent. -->
+                            <input type="number" min="0" max="100" step="1"
+                                   [ngModel]="DiscountPercentFor(line)"
+                                   (ngModelChange)="SetDiscountPercent(line, $event)" />
+                            @if (DiscountRefusals.has(line)) {
+                              <span class="dw-field-error">{{ DiscountRefusals.get(line) }}</span>
+                            }
+                          </td>
                       <td>
                         <!-- The grid shows what fits; the slide-in shows the rest (service period, term,
                              product reference, description). Only for a SAVED line -- a line created in
@@ -588,3 +584,4 @@
     </ul>
   }
 </ng-template>
+

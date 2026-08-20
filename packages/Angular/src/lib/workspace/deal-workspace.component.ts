@@ -51,9 +51,12 @@ import { MJFormPresenterService } from '@memberjunction/ng-base-forms';
 import { NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 import { Metadata } from '@memberjunction/core';
+
+// The deal's lines are ORDER lines now (S-US4), so the row type comes from orders. A type-only
+// import: the runtime class is whatever ClassFactory resolves, which keeps pricing orders' business.
+import type { mjBizAppsOrdersOrderLineEntity as OrderLineEntity } from '@mj-biz-apps/orders-entities';
 import type {
     DealEntity,
-    mjBizAppsSalesDealLineEntity,
     mjBizAppsSalesDealPaymentScheduleEntity,
     SalesCloseDealInput,
     SalesCloseDealOutput,
@@ -72,6 +75,7 @@ import {
     type MJTabReorder,
     type MJWorkspaceTab,
 } from '@memberjunction/ng-ui-components';
+import { DiscountFractionToPercent, DiscountPercentToFraction } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from './deal-workspace.service';
 import { FromDateInput, ToDateInput } from './deal-workspace.dates';
 import type { ProductLookup } from '@mj-biz-apps/sales-entities';
@@ -468,8 +472,8 @@ export class DealWorkspaceComponent implements OnInit {
 
     // ── The child collections ──────────────────────────────────────────────────
 
-    public get Lines(): readonly mjBizAppsSalesDealLineEntity[] {
-        return this.Deal?.Lines.Items ?? [];
+    public get Lines(): readonly OrderLineEntity[] {
+        return this.Deal?.OrderID_Object?.Lines.Items ?? [];
     }
 
     public get Schedule(): readonly mjBizAppsSalesDealPaymentScheduleEntity[] {
@@ -477,7 +481,9 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     public async AddLine(): Promise<void> {
-        await this.Deal?.Lines.Create();
+        // Idempotent: the first line is what brings the Draft order into being.
+        const order = this.Deal?.OrderID_EnsureObject();
+        await order?.Lines.Create();
         this.Touch();
     }
 
@@ -489,8 +495,8 @@ export class DealWorkspaceComponent implements OnInit {
      * row that merely vanished from the array would survive in the database, and the screen would agree
      * with the user while the data did not.
      */
-    public RemoveLine(line: mjBizAppsSalesDealLineEntity): void {
-        this.Deal?.Lines.Remove(line);
+    public RemoveLine(line: OrderLineEntity): void {
+        this.Deal?.OrderID_Object?.Lines.Remove(line);
         this.Touch();
     }
 
@@ -520,7 +526,7 @@ export class DealWorkspaceComponent implements OnInit {
      * On close the collection is re-read, because the slide-in wrote to the same row this grid is bound
      * to and the in-memory copy would otherwise be stale.
      */
-    public async OpenLineDetail(line: mjBizAppsSalesDealLineEntity): Promise<void> {
+    public async OpenLineDetail(line: OrderLineEntity): Promise<void> {
         const deal = this.Deal;
         if (!deal || !line.IsSaved) {
             return;
@@ -531,7 +537,7 @@ export class DealWorkspaceComponent implements OnInit {
             RecordId: line.ID,
             Presentation: 'slide-in',
             EditMode: true,
-            Title: line.ProductName?.trim() || 'Deal line',
+            Title: line.Product?.trim() || line.Description?.trim() || 'Order line',
         });
 
         const saved = await ref.AfterSaved();
@@ -541,7 +547,7 @@ export class DealWorkspaceComponent implements OnInit {
 
         // `force` is required and safe HERE specifically: the slide-in has already committed, so there is
         // no unsaved work in the collection to discard — which is the only thing the guard protects.
-        await deal.Lines.Load(true);
+        await deal.OrderID_Object?.Lines.Load(true);
         this.Touch();
     }
 
@@ -997,7 +1003,7 @@ export class DealWorkspaceComponent implements OnInit {
      * since it was quoted — still shows its ID rather than silently reading as unset, because "this line
      * references something you can no longer sell" is a fact the rep needs.
      */
-    public ProductLabel(line: mjBizAppsSalesDealLineEntity): string {
+    public ProductLabel(line: OrderLineEntity): string {
         if (!line.ProductID) {
             return '';
         }
@@ -1006,18 +1012,62 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     /**
-     * Records the product a line references — the ID, never the name or SKU.
+     * Records the product a line references.
      *
-     * `ProductName` is kept in step as a TRANSCRIPTION for the quote, not as identity: it is what the
-     * line says it sells, and it must survive the product being renamed or withdrawn later. That is why
-     * both are written rather than deriving the name at read time.
+     * ── TWO THINGS CHANGED WHEN THE LINE BECAME AN ORDER LINE ──
+     *
+     * There is no `ProductName` to keep in step. `DealLine` carried one as a TRANSCRIPTION -- what the
+     * line says it sells, so a quote survived the catalogue product being renamed or withdrawn. An order
+     * line has `ProductID` and a `Product` lookup resolved at read time, so the transcription is gone and
+     * a rename now reaches old lines. That is orders' model to change, not sales' to work around; noted
+     * in docs/DECISIONS.md D-DL1.
+     *
+     * And the product CANNOT BE CLEARED. `OrderLine.ProductID` is `NOT NULL` with a real FK, where
+     * `DealLine.ProductID` was a nullable soft reference. A rep who picked the wrong product picks a
+     * different one; a line with no product is a line that should not exist, and the way to express that
+     * is `RemoveLine`. So a null selection is ignored rather than written -- refusing quietly here beats
+     * a database error naming a constraint.
      */
-    public OnProductChange(line: mjBizAppsSalesDealLineEntity, productID: string | null): void {
-        line.ProductID = productID;
-        const hit = productID ? this.Products.find((x) => x.ID === productID) : undefined;
-        if (hit) {
-            line.ProductName = hit.Name;
+    public OnProductChange(line: OrderLineEntity, productID: string | null): void {
+        if (!productID) {
+            return;
         }
+        line.ProductID = productID;
+        this.Touch();
+    }
+
+    /** Why a discount entry was refused, per line, so the row can say so beside the field. */
+    public readonly DiscountRefusals = new Map<OrderLineEntity, string>();
+
+    /**
+     * The discount for display, in the PERCENT a rep types.
+     *
+     * `OrderLine.DiscountPct` stores a FRACTION -- `CK_OrderLine_DiscountPct` bounds it 0..1 -- where the
+     * retired deal line stored a percentage bounded 0..100. Everything a rep sees and types stays in
+     * percent; the conversion happens at this single write path rather than in the template.
+     */
+    public DiscountPercentFor(line: OrderLineEntity): number {
+        return DiscountFractionToPercent(line.DiscountPct);
+    }
+
+    /**
+     * Writes a rep-entered percent onto the line as a fraction, or records why it was refused.
+     *
+     * THE REFUSAL MATTERS MORE THAN THE CONVERSION. A value between 0 and 1 is ambiguous: 0.5 as a
+     * percentage is half a percent, as a fraction it is fifty percent -- and the fraction reading
+     * satisfies the CHECK constraint perfectly, so nothing downstream would ever catch it. A hundred-fold
+     * discount error on a real quote is not a crash; it is a number nobody questions. So the rep is asked
+     * rather than guessed at. Pinned by scripts/assert-discount-conversion.mjs.
+     */
+    public SetDiscountPercent(line: OrderLineEntity, percent: number | null): void {
+        const converted = DiscountPercentToFraction(percent);
+        if (!converted.Ok) {
+            this.DiscountRefusals.set(line, converted.Reason);
+            this.Touch();
+            return;
+        }
+        this.DiscountRefusals.delete(line);
+        line.DiscountPct = converted.Fraction;
         this.Touch();
     }
 
@@ -1041,32 +1091,28 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     /**
-     * Per-line advisories, which have to live HERE rather than on the entity.
+     * Per-line advisories. Currently NONE, and the empty return is the record of why.
      *
-     * `RelatedRecordCollection.Validate()` pushes a child's errors only when the child's own result
-     * FAILED, so a warning on an otherwise-valid line is discarded before it ever reaches the parent's
-     * result. A `Warning` emitted from `DealLineEntity.Validate()` would therefore vanish silently —
-     * which is worse than not emitting it, because the rule would look present in the code and be absent
-     * on the screen.
+     * ── THE LINE-TYPE ADVISORY IS GONE, FOR THE SECOND TIME ──
      *
-     * This one is inherited from the retired `DealDraft`, and it is worth keeping: a line with no type is
-     * accepted by the database and by every rule in this app, but recurring and one-time lines diverge
-     * sharply downstream — one produces a renewal, the other does not. That is a nudge, not a blocker.
+     * It nudged a rep whose line had no `DealLineTypeID`, because a line with no type is accepted by the
+     * database and by every rule in this app, while recurring and one-time lines diverge sharply
+     * downstream -- one produces a renewal, the other does not. PR #8 lost this exact advisory once when
+     * `DealDraft` was retired, and it had to be gone looking for. So it is written down this time.
+     *
+     * It is unrecoverable rather than mislaid. `DealLineType` was the flag it read and the table is
+     * retired (docs/DECISIONS.md D-DL1); an order line carries no recurring/one-time distinction to
+     * nudge about. That decision now belongs to orders, made when the order is confirmed rather than
+     * chosen by a rep on a line. If the nudge is wanted back it is a NEW advisory against whatever
+     * orders exposes, not this one restored.
+     *
+     * The method stays rather than being deleted: advisories still have to live HERE rather than on the
+     * entity, because `RelatedRecordCollection.Validate()` discards a child's warnings unless the child's
+     * own result failed -- so a `Warning` from a line entity vanishes silently, which is worse than not
+     * emitting it. The next per-line nudge goes here for that reason, and this comment is why.
      */
-    private LineAdvisories(deal: DealEntity): DealWorkspaceIssue[] {
-        return deal.Lines.Items.flatMap((line, index) =>
-            line.DealLineTypeID
-                ? []
-                : [{
-                    Section: 'lines' as const,
-                    Field: 'DealLineTypeID',
-                    RowIndex: index,
-                    Severity: 'warning' as const,
-                    Message:
-                        `${line.ProductName?.trim() || 'This line'} has no type set — recurring and `
-                        + 'one-time lines behave differently downstream.',
-                }],
-        );
+    private LineAdvisories(_deal: DealEntity): DealWorkspaceIssue[] {
+        return [];
     }
 
     private Fail(message: string): void {

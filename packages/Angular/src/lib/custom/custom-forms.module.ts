@@ -21,12 +21,11 @@ import { EntityViewerModule } from '@memberjunction/ng-entity-viewer';
 import { LinkDirectivesModule } from '@memberjunction/ng-link-directives';
 
 import { DealFormComponentExtended } from './deal-form.component';
-import { DealLineFormComponentExtended } from './deal-line-form.component';
 import { DealStageEventFormComponentExtended } from './deal-stage-event-form.component';
 
 @NgModule({
-    declarations: [DealFormComponentExtended, DealLineFormComponentExtended, DealStageEventFormComponentExtended],
+    declarations: [DealFormComponentExtended, DealStageEventFormComponentExtended],
     imports: [CommonModule, FormsModule, BaseFormsModule, EntityViewerModule, LinkDirectivesModule],
-    exports: [DealFormComponentExtended, DealLineFormComponentExtended, DealStageEventFormComponentExtended],
+    exports: [DealFormComponentExtended, DealStageEventFormComponentExtended],
 })
 export class SalesCustomFormsModule {}

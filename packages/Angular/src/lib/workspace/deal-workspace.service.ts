@@ -113,7 +113,8 @@ interface EmployeeRow { ID: string; FirstLast: string | null }
  * "everything declared". A collection added to the entity later should not start being fetched by a
  * surface that does not render it.
  */
-const WORKSPACE_COLLECTIONS = ['Lines', 'PaymentSchedule', 'Team'] as const;
+// 'Lines' is NOT here: the deal holds none. Its order's lines arrive with the embedded order.
+const WORKSPACE_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
 
 @Injectable({ providedIn: 'root' })
 export class DealWorkspaceService {
@@ -349,7 +350,7 @@ export class DealWorkspaceService {
 
         // A collection only reports IsLoaded once its rows actually arrived, so this catches the silent
         // failure above. An empty deal and an unreadable one must never look the same.
-        if (!deal.Lines.IsLoaded || !deal.PaymentSchedule.IsLoaded || !deal.Team.IsLoaded) {
+        if (!deal.PaymentSchedule.IsLoaded || !deal.Team.IsLoaded) {
             return null;
         }
         return deal;

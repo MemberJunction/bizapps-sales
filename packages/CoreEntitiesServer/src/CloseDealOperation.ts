@@ -40,7 +40,6 @@ import {
     type ContractsSeamResult,
     type IDownstreamSeam,
     type OrdersOrderHandoffInput,
-    type OrdersOrderLineSeamInput,
     type SalesCloseDealInput,
     type SalesCloseDealOutput,
     type SalesCloseIssue,
@@ -48,7 +47,6 @@ import {
     type SalesCloseWonPolicy,
     type SalesReopenDealInput,
     type SalesReopenDealOutput,
-    type mjBizAppsSalesDealLineEntity,
     type mjBizAppsSalesDealStageEventEntity,
 } from '@mj-biz-apps/sales-entities';
 
@@ -57,7 +55,6 @@ import { LiveOrdersSeam, OrdersIsInstalled } from './LiveOrdersSeam.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
-const DEAL_LINE_ENTITY = 'MJ_BizApps_Sales: Deal Lines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const DEAL_TYPE_ENTITY = 'MJ_BizApps_Sales: Deal Types';
 const LINE_TYPE_ENTITY = 'MJ_BizApps_Sales: Deal Line Types';
@@ -78,6 +75,11 @@ interface StatusFlags {
 const POLICY_DEFAULTS: SalesCloseWonPolicy = {
     CreateContract: false,
     SubscriptionLinesTo: 'None',
+    // DEAD, both of them, and kept only so the shipped default still satisfies the generated input
+    // type. `OneTimeLinesTo` steered one-time lines to the Order route and `OrderState` set the status
+    // of the order that route created; close-won creates no order now, so nothing reads either. They
+    // stay in `sales-close-deal.input.ts` because that is a published remote-operation contract and
+    // narrowing it is its own decision -- but a deployment setting them is configuring nothing.
     OneTimeLinesTo: 'None',
     OrderState: 'Draft',
 };
@@ -254,58 +256,21 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 : [];
 
             /**
-             * ── THE UNROUTABLE-LINE REFUSAL (KI-14) ───────────────────────────────
+             * THE UNROUTABLE-LINE REFUSAL (KI-14) WAS HERE, and it is gone with the table it guarded.
              *
-             * A line carrying a product NAME with no `ProductID` cannot become a downstream line. BOTH
-             * builders coerce it the same way — `buildOrderInput` and `buildContractInput` each write
-             * `ProductID: String(l.ProductID ?? '')` — and an empty string against a `uniqueidentifier`
-             * column fails INSIDE the sibling's save, after this close has already written the status. The
-             * deal ended up WON WITH NO DOWNSTREAM RECORD and no provenance, and the error surfaced as
-             * `No active transaction to commit`, which names nothing useful.
+             * It refused a close when a line carried a product NAME with no `ProductID`, because both
+             * builders coerced that to `ProductID: ''` and an empty string against a `uniqueidentifier`
+             * failed inside the sibling's save — after the status had been written. Deal won, nothing
+             * downstream.
              *
-             * So the close refuses HERE: before the transaction opens, before either sibling is touched,
-             * naming the lines. A close that cannot complete must not begin.
+             * That shape cannot be constructed any more. `OrderLine.ProductID` is `NOT NULL` with a real
+             * FK to the catalogue, so a line without a product does not exist to be refused. Recorded as
+             * deliberate in docs/DECISIONS.md D-DL1 rather than left to be noticed missing.
              *
-             * EVERY PLANNED ROUTE IS CHECKED, not just the order one. The first version of this guard
-             * covered one-time -> Order only, and a recurring line with no product routed to a contract
-             * failed identically — same coercion, same corruption, one route over.
-             *
-             * EACH ROUTE IS GATED ON ITS OWN APP, and that is load-bearing rather than defensive. When a
-             * sibling is absent its route goes to the STUB, which refuses harmlessly and reports
-             * `Executed: false` with a reason — the graceful degradation CD7 pins and a standalone host
-             * depends on. Refusing there would make a lined deal uncloseable on every deployment that has
-             * not installed that sibling: a worse bug than the one being fixed. And nothing can corrupt in
-             * that case, because no empty GUID ever reaches a database.
-             *
-             * A lineless close, a lost close, and a policy that routes a line type nowhere are all
-             * unaffected — a NULL `ProductID` is perfectly legal on a deal nobody is closing downstream.
-             *
-             * NOTE THE PreviewOnly CHANGE. This runs BEFORE the preview returns, so a preview of a deal
-             * that cannot close now reports the refusal instead of a clean routing plan. That is the point:
-             * a preview whose whole job is "show me the consequences" must not answer with consequences
-             * that cannot happen. Nothing is written either way.
+             * The HubSpot half of KI-14 survives as an IMPORT concern: a deal imported with a product
+             * name and no catalogue ID now fails when the importer tries to write the order line, which
+             * is the right place for it to fail.
              */
-            const unroutable = target.IsWon
-                ? await this.unroutablePlannedLines(deal.ID, routing, policy, provider, user)
-                : [];
-            if (unroutable.length) {
-                return {
-                    ...empty,
-                    IsWon: target.IsWon,
-                    IsLost: target.IsLost,
-                    EffectivePolicy: policy,
-                    Routing: routing,
-                    Issues: unroutable.map((name) =>
-                        issue(
-                            'lines',
-                            `"${name}" has no catalogue product selected, so it cannot become an order `
-                                + 'line. Pick a product for it, or change its type so it is not routed '
-                                + 'to an order.',
-                            'ProductID',
-                        ),
-                    ),
-                };
-            }
 
             if (input.PreviewOnly) {
                 // Nothing written, nothing locked — the caller just wanted to see the consequences.
@@ -457,9 +422,15 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
     /**
      * What the policy says should happen, before anything is attempted.
      *
-     * Lines are split by their type's `IsRecurring` FLAG — recurring lines follow
-     * `SubscriptionLinesTo`, one-time lines follow `OneTimeLinesTo`. The split reads the flag off
-     * `DealLineType`, never the type's name.
+     * ── THERE IS NO LONGER AN ORDER ROUTE, AND THAT IS THE POINT ──
+     *
+     * Close-won used to create the order. It no longer does: the order is an EMBEDDED RECORD created
+     * with the deal and carrying its lines from the start (S-US4), so by the time a deal closes the
+     * order already exists. S-US5 is explicit that Closed Won leaves its status ALONE and editable, so
+     * finance can review and correct before the Confirm that locks it and triggers invoicing.
+     *
+     * So close-won no longer counts lines at all — there are none on the deal to count. What it plans
+     * is the CONTRACT (B2B only), and the still-unbuilt Subscription materialization.
      */
     private async planRouting(
         deal: DealEntityServer,
@@ -467,26 +438,20 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<SalesCloseRoutingResult[]> {
-        const { recurring, oneTime } = await this.splitLinesByRecurrence(deal.ID, provider, user);
         const plans: SalesCloseRoutingResult[] = [];
 
         if (policy.CreateContract === true) {
-            plans.push({
-                Target: 'Contract',
-                Planned: true,
-                Executed: false,
-                LineCount: policy.SubscriptionLinesTo === 'Contract' ? recurring.length : 0,
-            });
+            // LineCount 0, and not a placeholder: S-US2's contract is a header — customer, company,
+            // contact, type defaults, template, number, the linked pair and TemplateModified. It has no
+            // line items, which is the same consolidation that retired DealLine.
+            plans.push({ Target: 'Contract', Planned: true, Executed: false, LineCount: 0 });
         }
-        if (policy.OneTimeLinesTo === 'Order' && oneTime.length > 0) {
-            plans.push({ Target: 'Order', Planned: true, Executed: false, LineCount: oneTime.length });
-        }
-        if (policy.SubscriptionLinesTo === 'Subscription' && recurring.length > 0) {
+        if (policy.SubscriptionLinesTo === 'Subscription') {
             plans.push({
                 Target: 'Subscription',
                 Planned: true,
                 Executed: false,
-                LineCount: recurring.length,
+                LineCount: 0,
                 Reason:
                     'Subscription materialization needs orders\' Subscription.BillingMode (C0), which does ' +
                     'not exist yet.',
@@ -527,13 +492,6 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             return;
         }
 
-        if (plan.Target === 'Order') {
-            const result = await seam.CreateOrder(await this.buildOrderInput(deal, policy, provider, user));
-            plan.Executed = result.Success === true;
-            plan.RecordID = result.OrderID ?? null;
-            plan.Reason = result.Success ? null : result.Message ?? 'not executed';
-            return;
-        }
 
         // Subscription materialization has no seam at all yet; the plan already carries its reason.
         plan.Executed = false;
@@ -656,81 +614,6 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
     }
 
     /** Split by the type's `IsRecurring` FLAG. A join, so one read rather than one per line. */
-    /**
-     * The lines that cannot become downstream records, by their display name (KI-14).
-     *
-     * Mirrors the two builders exactly, which is the only way this can stay honest:
-     *
-     *   · `buildOrderInput`    sends ONE-TIME lines when `OneTimeLinesTo === 'Order'`
-     *   · `buildContractInput` sends RECURRING lines when `SubscriptionLinesTo === 'Contract'`
-     *
-     * It reuses the same recurrence split the routing uses, so there is no second notion of which
-     * lines go where. A route is only inspected when it was PLANNED and its app is INSTALLED —
-     * see the caller for why the install gate matters more than it looks.
-     *
-     * A line is unroutable when `ProductID` is null, undefined, or BLANK. The blank case matters as
-     * much as null: both builders coerce with `String(l.ProductID ?? '')`, so an empty-string column
-     * reaches the sibling looking exactly like the null case and fails identically.
-     *
-     * Named by `ProductName` because that is what the user typed and will recognise; the line ID
-     * would be correct and useless.
-     */
-    private async unroutablePlannedLines(
-        dealID: string,
-        routing: SalesCloseRoutingResult[],
-        policy: SalesCloseWonPolicy,
-        provider: IMetadataProvider,
-        user: UserInfo,
-    ): Promise<string[]> {
-        const planned = (target: string): boolean => routing.some((r) => r.Target === target && r.Planned);
-        const ordersRoute = planned('Order') && policy.OneTimeLinesTo === 'Order' && OrdersIsInstalled();
-        const contractRoute =
-            planned('Contract') && policy.SubscriptionLinesTo === 'Contract' && ContractsIsInstalled();
-
-        if (!ordersRoute && !contractRoute) {
-            return [];
-        }
-
-        const { oneTime, recurring } = await this.splitLinesByRecurrence(dealID, provider, user);
-        const suspect = [...(ordersRoute ? oneTime : []), ...(contractRoute ? recurring : [])];
-        return suspect
-            .filter((l) => !String(l.ProductID ?? '').trim())
-            .map((l) => String(l.ProductName ?? '').trim() || 'A line with no name');
-    }
-
-    private async splitLinesByRecurrence(
-        dealID: string,
-        provider: IMetadataProvider,
-        user: UserInfo,
-    ): Promise<{ recurring: Record<string, unknown>[]; oneTime: Record<string, unknown>[] }> {
-        const rv = new RunView();
-        const [lines, types] = await rv.RunViews(
-            [
-                {
-                    EntityName: DEAL_LINE_ENTITY,
-                    ExtraFilter: `DealID = '${dealID}'`,
-                    OrderBy: 'DisplayOrder ASC',
-                    ResultType: 'simple',
-                    Fields: ['ID', 'ProductID', 'ProductName', 'DealLineTypeID', 'Quantity', 'RequestedDiscountPct', 'ServicePeriodStart', 'ServicePeriodEnd', 'Description'],
-                },
-                { EntityName: LINE_TYPE_ENTITY, ResultType: 'simple', Fields: ['ID', 'IsRecurring'] },
-            ],
-            user,
-        );
-
-        const recurringIDs = new Set(
-            (types?.Success ? ((types.Results ?? []) as Array<{ ID: string; IsRecurring: boolean }>) : [])
-                .filter((t) => t.IsRecurring === true)
-                .map((t) => t.ID),
-        );
-
-        const all = (lines?.Success ? ((lines.Results ?? []) as Record<string, unknown>[]) : []);
-        return {
-            recurring: all.filter((l) => recurringIDs.has(String(l.DealLineTypeID))),
-            oneTime: all.filter((l) => !recurringIDs.has(String(l.DealLineTypeID))),
-        };
-    }
-
     private async dealTypeRequiresRenewalSource(
         dealTypeID: string | null,
         provider: IMetadataProvider,
@@ -753,55 +636,12 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         return r.Success && row?.RequiresRenewalSource === true;
     }
 
-    /**
-     * Map deal lines onto the order seam.
-     *
-     * NOTE what is absent: no price, no total, no tax. Sales states product, quantity, requested
-     * discount and service period; orders computes everything else. `UnitPrice` is only ever a
-     * negotiated OVERRIDE and is omitted entirely when unset — sending 0 would mean "free", which is a
-     * different statement from "you decide".
-     */
-    private async buildOrderInput(
-        deal: DealEntityServer,
-        policy: SalesCloseWonPolicy,
-        provider: IMetadataProvider,
-        user: UserInfo,
-    ): Promise<OrdersOrderHandoffInput> {
-        const { oneTime } = await this.splitLinesByRecurrence(deal.ID, provider, user);
-        return {
-            Header: {
-                CompanyID: deal.CompanyID,
-                OrganizationID: deal.AccountID,
-                PersonID: deal.PrimaryContactID,
-                CurrencyID: deal.CurrencyID,
-                Description: deal.Name,
-            },
-            Lines: oneTime.map<OrdersOrderLineSeamInput>((l) => ({
-                    ClientKey: String(l.ID),
-                    ProductID: String(l.ProductID ?? ''),
-                    Quantity: Number(l.Quantity ?? 1),
-                    ...(l.RequestedDiscountPct === null || l.RequestedDiscountPct === undefined
-                        ? {}
-                        : { DiscountPct: Number(l.RequestedDiscountPct) }),
-                ServicePeriodStart: (l.ServicePeriodStart as string) ?? null,
-                ServicePeriodEnd: (l.ServicePeriodEnd as string) ?? null,
-                Description: (l.Description as string) ?? (l.ProductName as string) ?? null,
-            })),
-            // The policy's OrderState is stated on the HEADER now — `TargetStatus` went away with
-            // `CreateOrderInState`, which orders' `next` does not ship. See downstream-seams.ts.
-            Status: policy.OrderState ?? 'Draft',
-            OrderType: 'Sale',
-            Reason: `Created by Sales.CloseDeal from deal ${deal.DealNumber ?? deal.ID}`,
-        };
-    }
-
     private async buildContractInput(
         deal: DealEntityServer,
         policy: SalesCloseWonPolicy,
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<ContractsCreateFromDealSeamInput> {
-        const { recurring } = await this.splitLinesByRecurrence(deal.ID, provider, user);
         return {
             DealID: deal.ID,
             CompanyID: deal.CompanyID,
@@ -821,15 +661,13 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             // NOT SET. `CloseWonPolicy` carries no billing frequency, and it is generated code — so
             // rather than invent one here, the seam applies its own default and contracts owns the
             // vocabulary. Add it to the policy first if a deployment needs to vary it.
-            Lines:
-                policy.SubscriptionLinesTo === 'Contract'
-                    ? recurring.map<OrdersOrderLineSeamInput>((l) => ({
-                          ClientKey: String(l.ID),
-                          ProductID: String(l.ProductID ?? ''),
-                          Quantity: Number(l.Quantity ?? 1),
-                          Description: (l.Description as string) ?? (l.ProductName as string) ?? null,
-                      }))
-                    : [],
+            //
+            // NO LINES, and that is the design rather than a gap. S-US2's contract is a header:
+            // customer, selling company, primary contact, the type's stored defaults, the active
+            // template, a minted number, the typed linked pair, and TemplateModified. Line items were
+            // the redundancy this whole rework removes -- only OrderLine survives -- so contracts'
+            // own ContractTermLineItem retirement is the other half of it, on their side.
+            Lines: [],
         };
     }
 }
