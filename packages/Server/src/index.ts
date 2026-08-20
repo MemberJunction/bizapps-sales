@@ -19,6 +19,7 @@ import '@mj-biz-apps/sales-core-entities-server';
 import { LoadSalesCoreEntitiesServer } from '@mj-biz-apps/sales-core-entities-server';
 /** Sales' first hand-written Action. Anchored below for the same reason the entities are. */
 import { LoadSyncActivitiesAction } from './custom/sync-activities.action.js';
+import { LoadCaptureForecastSnapshotAction } from './custom/forecast-snapshot.action.js';
 
 // Import generated GraphQL resolvers
 import './generated/generated.js';
@@ -67,9 +68,14 @@ export function LoadBizAppsSalesServer(): void {
      * `Sales.SyncActivities` present in metadata, scheduled, firing, and resolving to nothing.
      */
     LoadSyncActivitiesAction();
+    LoadCaptureForecastSnapshotAction();
 
     // Referenced so the manifest import is not elided; MJ reads it during registration.
     void CLASS_REGISTRATIONS;
 }
 
 export { SyncActivitiesAction, LoadSyncActivitiesAction } from './custom/sync-activities.action.js';
+export {
+    CaptureForecastSnapshotAction,
+    LoadCaptureForecastSnapshotAction,
+} from './custom/forecast-snapshot.action.js';
