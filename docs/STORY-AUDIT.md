@@ -33,7 +33,7 @@ The rule for this pass was *prove met criteria against the database, not the scr
 |---|---|
 | **#33** S-US1 Create a deal record | **partially met** — 3 of 5 criteria met, 2 partially (the missing "standard agreement modified" field, listed in the body, was built in this session) |
 | **#34** S-US2 Contract + tasks on Closed Won (B2B) | **partially met** — the contract is real; every task is absent |
-| **#35** S-US3 Order-review task on Closed Won | **not met** — its one deliverable does not exist |
+| **#35** S-US3 Order-review task on Closed Won | **WITHDRAWN** — audited against a branch that does not contain the work |
 | **#114** S-US4 Add and manage deal line items | **partially met** — add and edit work; removal is dropped upstream |
 | **#115** S-US5 Order status follows the deal | **partially met** — 4 of 5 rules met; the earlier verdict is refuted |
 | **#116** S-US6 Close a deal as Won | **partially met** — 3 of 4 criteria met; downstream is half-built |
@@ -167,14 +167,25 @@ contract half of S-US2 is live and proven; the *prompting* half — which is wha
 
 ---
 
-## #35 — S-US3: Order-review task on Closed Won → **not met**
+## #35 — S-US3: Order-review task on Closed Won → **VERDICT WITHDRAWN**
 
-Its single deliverable is a Task, and no task is created for either pipeline.
+**I audited a branch that does not contain the work.** `CloseWonTaskService` lives on
+`feature/closewon-tasks`, which had never been merged here — this branch carries
+`pipeline-board-rebased` and `contracts-seam-v6` and not that one. S-US3 is built, with ten checks green
+at `187c8a4`. My "no task creation exists anywhere in this repo" was a true statement about the wrong
+tree, which is exactly the error class that made the first audit's lifecycle verdict wrong.
 
-**But the issue's "Related order-status rules" table is now implemented**, which is exactly what the earlier
-audit got wrong by folding this row in with the rest. Those rules are #115's subject and are verdicted there —
-four of five met. The status behaviour S-US3 describes as *context* is real; the task it actually asks for is not.
+**Withdrawn rather than corrected**, because a verdict is a claim about a tree and I have not yet
+verified this one against an integrated tree. It is re-verified after the merges, in the section this
+one is replaced by.
 
+The same correction propagates to **#34**'s two task criteria and to **#116**'s "downstream creation
+fires per pipeline" — all three were reported unmet on the same missing-branch evidence. They are
+re-verified post-integration alongside this.
+
+**The lesson worth keeping:** an absence cannot be proven by a passing test, and it cannot be proven by
+a grep either — not without first establishing that the tree under the grep is the tree being reported
+on. Both audits got the built parts right and the absent parts wrong, for the same reason twice.
 ---
 
 ## #114 — S-US4: Add and manage deal line items → **partially met**

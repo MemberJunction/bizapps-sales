@@ -30,28 +30,108 @@
  *    the number that RAN and the number REGISTERED. That is strictly more information than orders' `(N
  *    checks)`, and it lets this gate catch the skip directly rather than inferring it from a total.
  *
- * Usage:  node scripts/assert-check-count.mjs [integration-log]
- *         (defaults to the log the runner writes: test-harnesses/.integration-log.txt)
+ * -- IT RUNS THE SUITE. IT USED TO READ A FILE, WHICH WAS THE BUG IT EXISTS TO CATCH ------------
+ *
+ * The gate read `test-harnesses/.integration-log.txt`, whatever had written it last. Two failure modes,
+ * and the quiet one is the dangerous one:
+ *
+ *   - A MUTATION RUN leaves a deliberately red log there, so the gate reports a failure that no longer
+ *     exists and no rebuild can clear. Noisy; cost an hour twice on 2026-08-20.
+ *   - A STALE GREEN LOG lets the gate PASS code it never saw. That is the vacuous pass -- a green tally
+ *     measuring nothing -- reproduced INSIDE the gate written to prevent it. Silent, and it would have
+ *     signed off any amount of untested work.
+ *
+ * So by default it executes the runner itself and judges that output, which cannot be stale. A log path
+ * may still be passed (CI reusing one run for several assertions), and then the log must be NEWER than
+ * every source file the checks are built from, or it is refused rather than trusted.
+ *
+ * Usage:  node scripts/assert-check-count.mjs            -- runs the suite (recommended)
+ *         node scripts/assert-check-count.mjs <log>      -- judges an existing log, if it is fresh
  */
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, extname } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_LOG = join(root, 'test-harnesses', '.integration-log.txt');
-const logPath = process.argv[2] ?? DEFAULT_LOG;
+const manifest = JSON.parse(readFileSync(join(root, 'scripts', 'expected-check-counts.json'), 'utf8'));
 
-if (!existsSync(logPath)) {
-    console.error(
-        `\n✖ no integration log at ${logPath}\n\n` +
-            '  The gate reads the log the runner writes. Produce one first:\n\n' +
-            '      RUN_MUTATION_TESTS=1 pnpm run test:integration\n',
-    );
-    process.exit(2);
+/** Newest mtime under a tree, ignoring build output, dependencies and dotfiles. */
+function newestMtime(dir, newest = 0) {
+    let out = newest;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) {
+            continue;
+        }
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+            out = newestMtime(full, out);
+        } else if (['.ts', '.mjs', '.js', '.json'].includes(extname(entry.name))) {
+            out = Math.max(out, statSync(full).mtimeMs);
+        }
+    }
+    return out;
 }
 
-const manifest = JSON.parse(readFileSync(join(root, 'scripts', 'expected-check-counts.json'), 'utf8'));
-const log = readFileSync(logPath, 'utf8');
+/**
+ * Everything a check's behaviour can come from: `packages` holds the checks AND the code under test,
+ * `test-harnesses` holds the runner, and the manifest is what the counts are judged against.
+ */
+function newestSourceMtime() {
+    return Math.max(
+        newestMtime(join(root, 'packages')),
+        newestMtime(join(root, 'test-harnesses')),
+        statSync(join(root, 'scripts', 'expected-check-counts.json')).mtimeMs,
+    );
+}
+
+function runSuite() {
+    console.log('running the integration suite (this gate no longer trusts a log off disk)...');
+    try {
+        return execFileSync('node', [join(root, 'test-harnesses', 'integration.mjs')], {
+            cwd: root,
+            encoding: 'utf8',
+            maxBuffer: 64 * 1024 * 1024,
+            // RUN_MUTATION_TESTS is mandatory: without it the runner skips every check and reports a
+            // green nothing. MJ_INTEGRATION_LOG is redirected so this run does not clobber the log a
+            // human may be reading -- the verdict comes from stdout, never from disk.
+            env: {
+                ...process.env,
+                RUN_MUTATION_TESTS: '1',
+                MJ_INTEGRATION_LOG: join(root, 'test-harnesses', '.integration-log.gate.txt'),
+            },
+        });
+    } catch (err) {
+        // A failing suite exits non-zero, and its output is exactly what this gate must report on.
+        return String(err.stdout ?? '') + String(err.stderr ?? '');
+    }
+}
+
+function readFreshLog(logPath) {
+    if (!existsSync(logPath)) {
+        console.error(
+            `\n✖ no integration log at ${logPath}\n\n` +
+                '  Pass a log the runner wrote, or pass nothing and let this gate run the suite.\n',
+        );
+        process.exit(2);
+    }
+    const logAge = statSync(logPath).mtimeMs;
+    const sourceAge = newestSourceMtime();
+    if (logAge < sourceAge) {
+        const seconds = Math.round((sourceAge - logAge) / 1000);
+        console.error(
+            `\n✖ REFUSED: the log at ${logPath} is OLDER than the source it would judge` +
+                ` (by ${seconds}s).\n\n` +
+                '  A stale log makes this gate pass code it never saw, which is the vacuous pass it\n' +
+                '  exists to catch. Re-run the suite, or invoke this gate with no argument so that it\n' +
+                '  runs the suite itself.\n',
+        );
+        process.exit(2);
+    }
+    return readFileSync(logPath, 'utf8');
+}
+
+const log = process.argv[2] ? readFreshLog(process.argv[2]) : runSuite();
 
 /**
  * Which sibling apps the RUN had available.

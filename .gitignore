@@ -37,4 +37,4 @@ test-harnesses/playwright/playwright-report/
 test-harnesses/playwright/test-results/
 
 # The coverage gate reads this; it is a run artefact, not source.
-test-harnesses/.integration-log.txt
+test-harnesses/.integration-log*.txt
