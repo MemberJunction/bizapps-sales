@@ -344,10 +344,12 @@ export class DealWorkspaceService {
     }
 
     /**
-     * Reads an existing deal and its children — header, lines, schedule and roster together.
+     * Reads an existing deal and everything the workspace shows — header, schedule, roster, and the
+     * lines, which belong to the deal's embedded order rather than to the deal.
      *
      * THIS IS THE ONLY PLACE THE COLLECTIONS ARE LOADED, and that is a data-loss guard rather than a
-     * tidiness preference. All three are declared `Load: 'explicit'`, so nothing populates them lazily;
+     * tidiness preference. Every one of them is declared `Load: 'explicit'`, so nothing populates them
+     * lazily;
      * a second load arriving mid-edit is what would replace the user's unsaved rows with whatever is in
      * the database. `LoadRelatedRecords` is itself guarded — it skips a collection that is already loaded
      * or holds staged work — and it batches all three into ONE `RunViews` rather than three round trips.
@@ -370,6 +372,53 @@ export class DealWorkspaceService {
         if (!deal.PaymentSchedule.IsLoaded || !deal.Team.IsLoaded) {
             return null;
         }
+
+        /**
+         * THE LINES LIVE ON THE ORDER, so they need a load of their own.
+         *
+         * `WORKSPACE_COLLECTIONS` covers the deal's OWN collections; the embedded order is a separate
+         * entity instance and its `Lines` is declared `Load: 'explicit'` just like the deal's are. Nothing
+         * populates it lazily, so without this a saved deal with lines opens showing NONE -- and reads as
+         * a deal nobody has quoted yet.
+         *
+         * ── THREE OUTCOMES, AND THEY MUST STAY DISTINGUISHABLE ──
+         *
+         * The whole point of the `IsLoaded` check above is that a failed read must not look like an empty
+         * one. That guarantee has to extend here, and there is a third case now:
+         *
+         *   1. no `OrderID` at all      -- legitimate. A deal saved before the embed landed, or one whose
+         *                                  order could not be provisioned. There are no lines to fail to
+         *                                  read, so this is NOT an error: the deal opens, empty.
+         *   2. `OrderID` set, order absent -- a FAILURE. The FK names a row and the peer did not arrive,
+         *                                  which means the read broke or the order was deleted out from
+         *                                  under the deal. Returning the deal here would show zero lines
+         *                                  for an order that has them.
+         *   3. order present, lines unread -- a FAILURE, for the same reason the collections above are
+         *                                  checked: `LoadRelatedRecords` logs and leaves the collection
+         *                                  empty rather than throwing.
+         *
+         * Only (1) returns a deal with no lines. (2) and (3) return null, which is what the caller already
+         * treats as "could not read this deal" rather than rendering it.
+         */
+        if (deal.OrderID) {
+            const order = deal.OrderID_Object;
+            if (!order) {
+                LogError(
+                    `DealWorkspaceService.LoadDeal: deal ${dealID} points at order ${deal.OrderID} but the ` +
+                    'embedded record did not resolve. Refusing to render it as a deal with no lines.',
+                );
+                return null;
+            }
+            await order.LoadRelatedRecords('Lines');
+            if (!order.Lines.IsLoaded) {
+                LogError(
+                    `DealWorkspaceService.LoadDeal: could not read the lines of order ${deal.OrderID} for ` +
+                    `deal ${dealID}. An unreadable line set must not present as an empty one.`,
+                );
+                return null;
+            }
+        }
+
         return deal;
     }
 
