@@ -159,6 +159,9 @@ const ORDERS_PACKAGES = [
     // unnoticed.
     ['@mj-biz-apps/contracts-entities', 'LoadGeneratedEntities'],
     ['@mj-biz-apps/contracts-core-entities-server', null],
+    // TASKS, for close-won-tasks. Its entities have to be REGISTERED, not merely migrated: the checks
+    // resolve Tasks/Task Links/Task Assignments by name and the service saves through them.
+    ['@mj-biz-apps/tasks-entities', 'LoadGeneratedEntities'],
 ];
 const optionalLoads = [];
 

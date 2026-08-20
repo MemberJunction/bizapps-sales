@@ -48,6 +48,14 @@ export * from './LiveOrdersSeam.js';
 /** The REAL contracts handoff — selected automatically when contracts' entities are registered. */
 export * from './LiveContractsSeam.js';
 
+/**
+ * The finance tasks a won deal raises (S-US2 #34, S-US3 #35).
+ *
+ * NOT called from the close yet, and that is deliberate -- see the note at the top of the file.
+ * Exported so the wiring, when it lands, is an import rather than a move.
+ */
+export * from './CloseWonTaskService.js';
+
 import { DealEntityServer } from './DealEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 

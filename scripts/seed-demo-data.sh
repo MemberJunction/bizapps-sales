@@ -68,16 +68,60 @@ SET NOCOUNT ON;
 -- Child-first, because the S1 foreign keys are real.
 DELETE FROM __mj_BizAppsSales.DealStageEvent  WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.DealTeamMember  WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
+-- THE EMBEDDED ORDER, and the order of these two statements is the whole trick.
+--
+-- `Deal.OrderID` is a real FK to orders' OrderHeader, so the order cannot be deleted while a deal
+-- still points at it, and the deal cannot be deleted while its own children exist. Null the link
+-- FIRST, delete the deals, then take the orders -- reversing any pair of these fails on a constraint
+-- that is doing exactly its job.
+--
+-- Only the orders THIS script created are removed, matched on the demo number prefix. An order that
+-- arrived any other way belongs to orders, not to us.
+UPDATE __mj_BizAppsSales.Deal SET OrderID = NULL WHERE DealNumber LIKE 'DEAL-9%';
+--
+-- ONE CORRECTION TO THE NOTE ABOVE. The `ORD-DEMO-9%` deletes below no longer match anything this
+-- script created: order numbers are minted by orders' own sequence now that the entity layer
+-- provisions them (DN-15), not written here with a demo prefix. They are kept because they still
+-- clean a host seeded by the older script, and because deleting an order this app did not create
+-- is not something to widen the WHERE clause for.
 DELETE FROM __mj_BizAppsSales.DealPaymentSchedule WHERE DealID IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.DealContactRole WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.Deal            WHERE DealNumber LIKE 'DEAL-9%';
+IF OBJECT_ID('__mj_BizAppsOrders.OrderLine', 'U') IS NOT NULL
+BEGIN
+    DELETE FROM __mj_BizAppsOrders.OrderLine
+     WHERE OrderHeaderID IN (SELECT ID FROM __mj_BizAppsOrders.OrderHeader WHERE OrderNumber LIKE 'ORD-DEMO-9%');
+    DELETE FROM __mj_BizAppsOrders.OrderHeader WHERE OrderNumber LIKE 'ORD-DEMO-9%';
+END
 DELETE FROM __mj_BizAppsSales.ForecastSnapshot WHERE SnapshotJSON LIKE '%"demo":true%';
 DELETE FROM __mj_BizAppsSales.PipelineStage   WHERE PipelineID IN (SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE Code IN ('B2B','D2C','ENT-NEWBIZ','PARTNER-REF'));
 DELETE FROM __mj_BizAppsSales.Pipeline        WHERE Code IN ('B2B','D2C','ENT-NEWBIZ','PARTNER-REF');
+-- IDENTITY IS SHARED TOO, and for the same reason the selling company is.
+--
+-- These Persons and Organizations are sales' demo fiction, but once orders is installed they stop
+-- being only ours: an order bills TO a person (FK_OrderHeader_BillToPerson) and ships to an
+-- organization. Deleting the sales child then the common parent fails on those references -- and with
+-- sqlcmd's -b and the script's `set -e`, that aborted the ENTIRE teardown on the configuration
+-- docs/QA-GUIDE.md tells testers to run. It failed on FK_OrderHeader_BillToPerson in exactly that way.
+--
+-- Retaining is the RIGHT answer rather than merely the survivable one, and it is the same ruling this
+-- script already applies to the company below: a record another app still points at is not sales' to
+-- delete. The SalesAccount/SalesContact rows go either way, because those ARE sales' -- it is only the
+-- shared parent that is spared.
 DELETE FROM __mj_BizAppsSales.SalesContact    WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
-DELETE FROM __mj_BizAppsCommon.Person         WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
+BEGIN TRY
+    DELETE FROM __mj_BizAppsCommon.Person     WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
+END TRY
+BEGIN CATCH
+    PRINT 'Demo Person rows retained - another app still references them (expected when orders is installed and an order bills to one).';
+END CATCH
 DELETE FROM __mj_BizAppsSales.SalesAccount    WHERE ID IN ('A0111111-0000-4000-A000-000000000001','A0111111-0000-4000-A000-000000000002','A0111111-0000-4000-A000-000000000003');
-DELETE FROM __mj_BizAppsCommon.Organization   WHERE ID IN ('A0111111-0000-4000-A000-000000000001','A0111111-0000-4000-A000-000000000002','A0111111-0000-4000-A000-000000000003');
+BEGIN TRY
+    DELETE FROM __mj_BizAppsCommon.Organization WHERE ID IN ('A0111111-0000-4000-A000-000000000001','A0111111-0000-4000-A000-000000000002','A0111111-0000-4000-A000-000000000003');
+END TRY
+BEGIN CATCH
+    PRINT 'Demo Organization rows retained - another app still references them (expected when orders is installed).';
+END CATCH
 DELETE FROM __mj.Employee WHERE ID IN ('E0111111-0000-4000-A000-000000000002','E0111111-0000-4000-A000-000000000003');
 -- THE SELLING COMPANY IS SHARED, so removing sales' demo data must not assume it can take the
 -- company with it. Once orders is installed its catalogue hangs off this company
@@ -265,7 +309,7 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe2)
   INSERT INTO __mj_BizAppsSales.Pipeline (ID, CompanyID, Name, Code, Description, DealTypeID, DefaultForecastCategoryTypeID,
         RequiresDealLines, CloseWonPolicy, IsDefault, DisplayRank, IsActive)
     VALUES (@pipe2, @co2, N'D2C', N'D2C',
-      N'A different company, a different motion (master plan §4.2). RequiresDealLines = 0: these deals never carry catalog lines, so the amount is entered by hand and AmountIsComputed stays 0.',
+      N'A different company, a different motion (master plan §4.2). RequiresDealLines = 0: these deals never carry catalog lines — the flag survived the DealLine retirement and now means the deal''s EMBEDDED ORDER stays empty, so the amount is entered by hand and AmountIsComputed stays 0.',
       @dtNew, @fcPipe, 0, N'{"CreateContract":false,"OneTimeLinesTo":"Order"}', 1, 20, 1);
 
 -- Repointed for the same reason as B2B — and this one carries the multi-company case (L-14 / §9.2),
@@ -322,7 +366,6 @@ UPDATE __mj_BizAppsSales.Deal SET ActualCloseDate='2026-07-28', ClosedAt='2026-0
 UPDATE __mj_BizAppsSales.Deal SET ActualCloseDate='2026-07-14', ClosedAt='2026-07-14T11:05:00Z', LossReasonID=@lrPrice,
        LossNotes=N'Incumbent discounted 30% at the last minute; we declined to match.' WHERE ID=@d6 AND LossReasonID IS NULL;
 
--- ============================ DEAL LINES — intent + the signed figures; Resolved* deliberately NULL ============================
 --
 -- ============================ WHY THERE ARE NO DEAL LINES ANY MORE ============================
 --
@@ -362,9 +405,25 @@ INSERT INTO __mj_BizAppsSales.Deal (ID, DealNumber, Name, PipelineID, PipelineSt
    ExpectedCloseDate, Probability, ForecastCategoryTypeID, LeadSourceTypeID, Description, NextStep, NextStepDate) VALUES
  (@d7, N'DEAL-9007', N'Beacon Charter Schools — Campus Seats', @pipe2, @t2, @dtNew, @stOpen,
   @acc3, @c3, @co2, @emp2, 9500.0000, 0, 12, '2026-10-20', 60, @fcComm, @lsPart,
-  N'A LINED deal on the order-only pipeline. Closing it produces a DRAFT order -- numbered and priced by orders, deliberately not posted to the ledger -- where the same action on a B2B deal produces a CONFIRMED one. Same machinery, different policy.',
+  N'A LINED deal on the order-only pipeline. Its embedded order carries the seats; closing it creates no contract, where the same action on a B2B deal does. Same machinery, different policy.',
   N'Confirm campus count before quoting', '2026-08-25');
 
+-- ============================ THE EMBEDDED ORDERS ARE NOT SEEDED HERE ============================
+--
+-- THIS BLOCK USED TO INSERT `OrderHeader` AND `OrderLine` ROWS, with UnitPrice transcribed from the
+-- catalogue. Both halves were wrong and the second is the one that matters:
+--
+--   * TRANSCRIBING A PRICE IS INVENTING MONEY. `OrderLine.UnitPrice` and `CompanyID` are stamped by
+--     `OrderLineEntityServer` from the product, and `LineTotalGross` comes from orders pricing
+--     engine. A SQL INSERT can only produce them by copying a number and asserting it, which is
+--     exactly what Rule 1 exists to prevent -- in the seed that is supposed to DEMONSTRATE Rule 1.
+--   * IT BYPASSED PROVISIONING. An order written here carries none of what `DealEntityServer` puts
+--     on one, and the deal amount cache never learns the order exists.
+--
+-- `scripts/seed-demo-lines.mjs` does it through the entity layer instead: lines by product and
+-- quantity only, priced by orders, with the amount cache following. It runs from the bottom of this
+-- script. The close stamps that used to sit in this block are already set further up -- keeping them
+-- here as well was how one of the three merged versions came to write them twice. DN-15.
 -- ============================ PAYMENT SCHEDULE — the EXCEPTION case, on one deal only ============================
 -- Five of the six demo deals carry NO rows here, and that is the design: no rows means standard terms
 -- (100% on execution). Only DEAL-9001 negotiated instalments, so only DEAL-9001 has a schedule. "Did
@@ -479,6 +538,7 @@ UNION ALL SELECT '  stages           ' + CAST(COUNT(*) AS varchar) FROM __mj_Biz
 UNION ALL SELECT '  accounts         ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.SalesAccount
 UNION ALL SELECT '  contacts         ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.SalesContact
 UNION ALL SELECT '  deals            ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal
+UNION ALL SELECT '  deals w/ order   ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE OrderID IS NOT NULL
 UNION ALL SELECT '  payment sched.   ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealPaymentSchedule
 UNION ALL SELECT '  team members     ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealTeamMember
 UNION ALL SELECT '  buying committee ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealContactRole

@@ -1,0 +1,73 @@
+[
+  {
+    "_comments": [
+      "SALES' TWO TASK TYPES, SEEDED FROM SALES INTO ANOTHER APP'S TABLE.",
+      "",
+      "This is the only directory here whose `entity` belongs to a different app, so it is worth saying",
+      "why rather than leaving a reader to assume it is a mistake. Amith's ruling, 2026-08-20: 'I will",
+      "create a more robust task type table in Tasks for you. But the metadata rows for these task types",
+      "will be created by the sales open app.' Tasks owns the SHAPE; the app that raises a kind of task",
+      "owns the ROW. bizapps-tasks seeds only the five generic types (General, Action Item, Follow-up,",
+      "Deliverable, Approval Request) and deliberately does not carry these two.",
+      "",
+      "That split is the right one. A task type nobody raises is dead vocabulary, and tasks has no way to",
+      "know that closing a won deal produces exactly these two pieces of work. It also means these rows",
+      "arrive and depart with the feature that needs them: uninstall sales and its task types go with it.",
+      "",
+      "WHY `Code` MATTERS HERE. bizapps-tasks PR #42 (merged 2026-08-20 14:01) added `TaskType.Code`,",
+      "NOT NULL and UNIQUE. Before it, the only stable handle on a type row was its UUID, so",
+      "`CloseWonTaskService` took the two IDs as deployment configuration on `Pipeline.CloseWonPolicy` --",
+      "every deployment restating a fact that is the same everywhere, and a fixed UUID travelling through",
+      "config to reach code that only ever wanted 'the order-review one'. `Code` retires that: the",
+      "service resolves ORDER_REVIEW and CONTRACT_PROCESSING itself, and the configuration keys go away.",
+      "",
+      "SCREAMING_SNAKE, matching the five tasks already seeds (GENERAL, ACTION_ITEM, FOLLOW_UP,",
+      "DELIVERABLE, APPROVAL_REQUEST). A code is an identifier, not a label -- renaming the display Name",
+      "must never change it, which is the whole reason for having both.",
+      "",
+      "FIXED UUIDs, carried over unchanged from when these rows lived in bizapps-tasks' own metadata, so",
+      "a database already holding them is UPDATED rather than given a second copy under a new ID.",
+      "",
+      "PUSH ORDER: nothing in sales references these, and they reference nothing in sales. They are last",
+      "in `directoryOrder` before `applications` only for tidiness.",
+      "",
+      "DEPENDENCY, AND IT IS REAL: pushing this directory requires bizapps-tasks to be installed in the",
+      "target database. `mj sync push` cannot create a row in a table that is not there, and the failure",
+      "is a plain 'entity not found' rather than anything that explains itself. Sales runs standalone by",
+      "design, so a deployment without tasks simply does not push this directory -- and",
+      "`CloseWonTaskService` already treats an unresolvable type as an Issue rather than a fault."
+    ],
+    "fields": {
+      "Name": "Order Review",
+      "Code": "ORDER_REVIEW",
+      "Description": "Review the order behind a won deal, correct it if needed, then advance it. Advancing is the confirm that locks the order, books the journal entries and triggers invoicing — so this task is the control on money leaving the building, not a reminder.",
+      "IconClass": "fa-solid fa-file-invoice-dollar",
+      "DefaultPriority": "High"
+    },
+    "primaryKey": {
+      "ID": "87ACA0BD-2FF6-493D-99B0-469D41825D1C"
+    }
+  },
+  {
+    "_comments": [
+      "Raised only when the pipeline's `CloseWonPolicy.CreateContract` flag is set -- B2B in the seeded",
+      "data, but read as a FLAG and never as a pipeline name.",
+      "",
+      "The description carries the steps as prose, which is a stopgap rather than a design. PR #42 also",
+      "added `TaskTypeStatus`, a per-type lifecycle with Sequence, IsDefault, IsTerminal and MacroStatus,",
+      "and that is a better home for them -- see D-13 in DECISIONS-NEEDED.md. Left as prose here because",
+      "seeding statuses commits sales to a workflow shape that finance has not confirmed, and a wrong",
+      "lifecycle is harder to walk back than a wrong paragraph."
+    ],
+    "fields": {
+      "Name": "Contract Processing",
+      "Code": "CONTRACT_PROCESSING",
+      "Description": "Process the contract a won deal created: attach the executed document, confirm the agreement version against what it cites, record the executed/effective/end dates, validate whether the template was modified, and move the contract to active.",
+      "IconClass": "fa-solid fa-file-signature",
+      "DefaultPriority": "High"
+    },
+    "primaryKey": {
+      "ID": "890C23F2-39D6-4075-8BA7-EC742A2D1CA8"
+    }
+  }
+]

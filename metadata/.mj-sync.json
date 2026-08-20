@@ -57,6 +57,7 @@
     "lifecycle-stage-types",
     "buying-role-types",
     "account-types",
+    "task-types",
     "remote-operation-categories",
     "remote-operations",
     "applications",
