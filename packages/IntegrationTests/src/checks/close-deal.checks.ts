@@ -296,6 +296,28 @@ export const CloseDealChecks: NamedCheck[] = [
                     ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD4 provenance',
                 );
 
+                /**
+                 * THE DEAL IS GIVEN REAL FIGURES FIRST, and that is the whole difference between this
+                 * check and the one it replaces.
+                 *
+                 * The previous version asserted `'AmountAtTransition' in last`. That is true of every row
+                 * `stageEvents()` returns, because the column is named in the RunView's `Fields` — so it
+                 * held whether the close stamped the value, stamped a null, or stamped nothing at all. A
+                 * mutation that replaced `event.AmountAtTransition = deal.Amount` with `= null` left the
+                 * whole suite green: measured, which is how this was found rather than reasoned about.
+                 *
+                 * A seeded deal carries no amount, so null-versus-null was indistinguishable. Setting the
+                 * figures here is what makes the comparison mean something.
+                 */
+                const priced = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await priced.Load(dealID), 'the open deal loads so it can be given figures');
+                priced.Amount = 123456.78;
+                priced.Probability = 42;
+                Assert(
+                    await priced.Save(),
+                    `an OPEN deal must accept an amount — ${priced.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
                 const before = (await stageEvents(ctx, dealID)).length;
                 const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
                 Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
@@ -309,10 +331,18 @@ export const CloseDealChecks: NamedCheck[] = [
                     f.WonStatusID.toLowerCase(),
                     'the event records the status it moved INTO',
                 );
-                // Without the stamps, "what did we think this was worth when we closed it" is
-                // unanswerable once amounts change. The columns must be PRESENT, not merely nullable.
-                Assert('AmountAtTransition' in last, 'the event stamps AmountAtTransition');
-                Assert('ProbabilityAtTransition' in last, 'the event stamps ProbabilityAtTransition');
+                // Without the stamps, "what did we think this was worth when we closed it" is unanswerable
+                // once amounts change. So the VALUES are compared, not the presence of the keys.
+                AssertEqual(
+                    Number(last.AmountAtTransition),
+                    123456.78,
+                    'the event stamps the amount the deal carried AT the transition',
+                );
+                AssertEqual(
+                    Number(last.ProbabilityAtTransition),
+                    42,
+                    'and the probability it carried at the transition',
+                );
                 Assert(
                     typeof last.Notes === 'string' && (last.Notes as string).length > 0,
                     'the routing outcome is recorded in Notes — that is what preserves the INTENT of a ' +

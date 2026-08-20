@@ -500,6 +500,12 @@ export class DealWorkspaceComponent implements OnInit {
      * collection tracks removals so it can DELETE the row inside the same transaction as the inserts. A
      * row that merely vanished from the array would survive in the database, and the screen would agree
      * with the user while the data did not.
+     *
+     * ⚠️ **THAT LAST SENTENCE IS CURRENTLY WHAT HAPPENS — see KI-20.** The call below is correct and the
+     * collection records the removal correctly; orders' `OrderEntityServer.Save()` then drops it, so the
+     * row survives and the line reappears on reload. Nothing here can fix it and nothing here should try:
+     * deleting orders' rows from this component would put a second app in charge of that. The fix belongs
+     * in orders, `save-deal.SD6` is the tripwire, and `DECISIONS-NEEDED.md` DN-6 is the open decision.
      */
     public RemoveLine(line: OrderLineEntity): void {
         this.Deal?.OrderID_Object?.Lines.Remove(line);
