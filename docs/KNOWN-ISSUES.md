@@ -100,10 +100,31 @@ That missing category is the first hard stop. Clearing it, letting the whole pus
 regenerating is the sequence with a chance of working — and it is `mj app install` for bizapps-orders in
 all but name.
 
+### The board cannot route around it either — measured 2026-08-20
+
+The hope was that the pipeline board would give a stage-change surface that never opens a deal, making
+the gap narrower than it looks. **It does not.** Dragging `DEAL-9001` — the one seeded deal that has an
+order — refused, with the board saying so plainly:
+
+> "Northwind Health — Platform Rollout" could not be read, so it was not moved.
+
+and the same three console errors as the workspace, ending in
+`DealWorkspaceService.LoadDeal: ... the embedded record did not resolve`. The database was unchanged:
+same stage, same order status, same event count. The refusal is honest — nothing half-happened.
+
+**The isolating result matters more than the failure.** Dragging a deal with NO order works completely:
+`DEAL-9002` moved Qualification → Discovery, and the target stage's probability default was applied
+(25% → 10%). So the board is fine, the write path is fine, and the blocker is precisely and only the
+**embedded-order LOAD**. Anything that must read a deal before writing it — workspace, board, importer —
+hits it; anything that only creates hits nothing.
+
+That narrows what a fix has to restore: one GraphQL read of `MJ_BizApps_Orders: Order Headers` whose
+selection set matches the host's entity metadata.
+
 ### Until then
 
-Reopening a deal that has an order does not work in the Explorer, so the reopen half of the Explorer
-pass stays unverified. Creating a deal, provisioning its order and writing order lines all work: those
+Reopening a deal that has an order does not work in the Explorer, and neither does moving one on the
+board, so the reopen half of the Explorer pass stays unverified. Creating a deal, provisioning its order and writing order lines all work: those
 go through **sales'** own resolver and never ask GraphQL for an Order Header. `DECISIONS-NEEDED.md` DN-8
 carries the decision.
 
