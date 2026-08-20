@@ -565,3 +565,123 @@ branches.
 
 **What is needed:** nothing yet — but if it appears in CI or on a clean install it is a version-skew
 symptom rather than a code fault, and this is where it was first seen.
+
+---
+---
+
+# UPDATES — what shipped since D-15…D-24 were written
+
+Three of the items above have moved. Recorded here rather than edited in place, so the reasoning that
+was current when a decision was taken stays readable next to what was done about it.
+
+---
+
+## D-16 — UPDATED: meetings are BUILT, on a recorded assumption
+
+Previously: "neither route taken, the interface is shaped so either fits."
+
+**Now built.** `MSGraphCalendarSource` calls Graph `/events` **directly**, outside MJ's Communication
+abstraction. This is **route 2, taken as a working assumption and not as a ruling** — the reason being
+that there is nothing to extend today: every abstract method on `BaseCommunicationProvider` is
+message-shaped, so route 1 would mean shipping no meetings at all while waiting on another repository.
+
+**It remains reversible for one file.** The calendar source sits behind `IActivitySource` exactly as the
+message source does; the relevance filter, the deal matcher, the writer, the dedupe, the watermark, the
+Action and the scheduled job neither know nor care which produced an item. If Amith rules that a calendar
+surface belongs in MJ core, `MSGraphCalendarSource` is replaced and nothing else moves.
+
+**One thing found while building it that argues FOR the direct call:** unlike `GetMessages`, `/events`
+accepts a date filter. So the calendar has none of D-17's fetch-and-discard overflow risk — it can ask
+for "events since the watermark" and get exactly that. A provider-base surface would have to expose the
+same, or meetings would regress to the mail behaviour.
+
+**Still needed:** the ruling. This is now a question of where the code lives, not whether meetings work.
+
+---
+
+## D-19 — RESOLVED, and the check had to be rebuilt to prove it
+
+The filter now folds case in the query: `LOWER(Value) IN (…)`. Correct on both engines.
+
+**Worth recording HOW this was nearly missed.** The first version of the check asserted the behaviour —
+a mixed-case address matching a lower-case stored value. It passed. Then the mutation pass reverted the
+fix, and **all seventeen checks stayed green**, because SQL Server's default collation is
+case-insensitive and does the work either way. The check was measuring the database, not the code.
+
+So the filter is built by an exported `BuildContactMethodFilter()` and AC12 asserts the SQL itself
+contains `LOWER(Value)`. White-box, deliberately: on this engine the SQL is the *only* observable
+difference, and a check that cannot fail until production is not a check. Re-ran the mutant afterwards
+and AC12 goes red.
+
+**Still recommended, and now only a performance matter rather than a correctness one:** a functional
+index on `LOWER(Value)` in bizapps-common. `LOWER()` is non-sargable, so any plain index on `Value` is
+now unusable for this read. That is somebody else's schema, and the read is per-participant-per-message,
+so it is worth doing before volume arrives.
+
+---
+
+## D-23 — SUPERSEDED: the job IS seeded, and Active
+
+Previously: "the callable half is complete; the row is deliberately not seeded, because an Active hourly
+job would write to `LastError` once an hour forever."
+
+**That objection was answered by changing the default source rather than by leaving the row out.** The
+factory's default is now two EMPTY fixtures — one per surface — so the hourly run does the whole
+pipeline and writes nothing. The job log reads as an hourly success that fetched zero items, and
+`LastError` stays clean. AC17 asserts exactly that, so replacing the default with anything that reads
+goes red rather than quietly writing fabricated activities into a real database every hour.
+
+**Shipped, in `metadata/`:**
+
+| Row | Value |
+|---|---|
+| Action Category | `Sales` — sales had none; MJ's ~50 seeded categories are its own connectors |
+| Action | `Sync Activities`, DriverClass `Sales.SyncActivities`, Type Custom, Active |
+| Action Param | `Limit`, Input, default 100 — see D-17 for why it is not just a performance dial |
+| ScheduledJob | Action type, `0 0 * * * *`, UTC, Active, ConcurrencyMode `Skip`, MissedRunPolicy `RunOnce`, MaxRuntimeMinutes 20 |
+
+Pushed to MJ_V6_Host and verified: four rows created, `Configuration.ActionID` resolves to the real
+Action, DriverClass matches the registered class. AC15 asserts that agreement, because the one silent
+failure mode here is a dangling `ActionID` — the job fires on time, resolves nothing, and reports no
+error.
+
+`NextRunAt` is null until the SchedulingEngine's first tick computes it; that is the engine's job, not a
+seed value, and an MJAPI restart populates it.
+
+**Still needed:** nothing to make the chain fire. Only a real source for it to read.
+
+---
+
+## D-25 · A cancelled meeting is captured, but its status is not modelled
+
+`MSGraphCalendarSource` reads `isCancelled` and carries it into `Activity.Details` as `Cancelled: true`,
+so the fact survives and a surface can badge it. But `Activity.Status` is hardcoded `'Completed'` by the
+ingest for every item, so a cancelled meeting is stored as completed.
+
+**Interim choice:** capture it and leave the status alone. Dropping cancelled meetings would be wrong —
+"they cancelled" is exactly the kind of thing a rep wants on a timeline — and `CK_Activity_Status` does
+allow `'Cancelled'`, so the value exists.
+
+**What is needed:** a ruling on whether a cancelled meeting should read as `Cancelled` (accurate about
+the meeting, but it then looks like a *task* that was cancelled in any generic activity view) or as
+`Completed` with a badge (accurate about the record, vaguer about the world). It is one line in the
+ingest either way, and it wants a product answer rather than a developer's guess.
+
+---
+
+## D-26 · The per-surface watermark uses `Settings`, which is a shared bag
+
+Messages advance `ActivitySyncConnection.LastSyncAt`; the calendar advances a `CalendarLastSyncAt` key
+inside `Settings`, an existing nullable JSON column.
+
+**Why it is split at all:** one watermark for both surfaces takes the max of the two, so a meeting older
+than the newest email is judged already-seen and **skipped forever** — the calendar source never even
+being asked for it. No error, and no row missing from anything anyone counts. AC14 is the regression
+test.
+
+**Why `Settings` rather than a column:** a column means a migration in bizapps-common for a field only
+this app reads. The write merges rather than replaces, so anything else keeping state there survives.
+
+**What is needed:** agreement that `Settings` is a legitimate place for a consumer's own state, or a
+second watermark column if bizapps-common would rather own it explicitly. The risk of the current shape
+is collision — two apps choosing the same key — and it is small but real.
