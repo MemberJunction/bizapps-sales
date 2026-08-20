@@ -273,14 +273,27 @@ export class LiveContractsSeam {
     /**
      * The negotiated year-over-year uplift, PASSED THROUGH UNCONVERTED.
      *
-     * Both sides call this a percent and both mean the same thing by it: sales bounds the column
-     * `>= 0 AND <= 100`, contracts calls it "the negotiated year-over-year uplift". So 5 means five
-     * per cent on both sides and this moves a number without touching it.
+     * -- WHY PASS-THROUGH IS RIGHT, WHICH IS NOT THE SAME AS THE TWO SIDES AGREEING --
      *
-     * The precision differs — `DECIMAL(5,2)` here, `DECIMAL(7,4)` there — and that direction is
-     * widening, so nothing is lost and nothing is rounded. Had the units differed, the right answer
-     * would have been to refuse rather than divide: scaling a rate is a computation, and sales does
-     * not compute money or the rates that move it.
+     * The reason is the OVERRIDE semantics, not a matching domain. Sales names this column
+     * `AnnualIncreasePctOverride` and its own description is explicit: NULL means use the standard,
+     * whose default lives on the contracts ContractType, and copying that default in at write time
+     * would freeze this year terms into next year renewals silently. So a stated number travels and a
+     * null stays a null. Nothing here converts, scales or substitutes, because each of those would be
+     * a computation and sales does not compute money or the rates that move it.
+     *
+     * -- AND THE TWO SCHEMAS DO NOT AGREE ON THE DOMAIN --
+     *
+     * Sales bounds this 0 to 100 (`CK_Deal_AnnualIncreasePctOverride`). Contracts bounds only `>= 0`
+     * (`CK_Contract_AnnualIncrease`) with no upper limit, at `DECIMAL(7,4)` against sales
+     * `DECIMAL(5,2)`. Both call it a percent and 5 means five per cent on both sides today, so the
+     * handoff is correct -- but the wider column will accept a value sales would have refused, and
+     * nothing on either side states the unit as a rule rather than as a habit.
+     *
+     * That is the same shape as the discount-unit trap recorded in `docs/DECISIONS.md`, where 0-100
+     * became 0-1 across a boundary and would have been a silent hundred-fold bug. It has not bitten
+     * here and it is not this file to settle: see D-14. Flagged rather than defended, because a
+     * conversion added on suspicion is exactly the computation this app must not perform.
      */
     private annualIncrease(pct: number | null | undefined): number | null {
         return pct == null ? null : pct;
