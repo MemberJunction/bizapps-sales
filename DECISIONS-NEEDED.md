@@ -131,3 +131,188 @@ correct on the host I verified against.
 
 **What is needed:** a decision on whether every bundle that saves a deal now implicitly requires orders.
 If so, `board-move` should be `requires: "orders"` — and so should `save-deal`.
+---
+
+## D-7 · The contracts seam has nowhere to run, on any database here
+
+**Raised by:** rewriting `LiveContractsSeam` onto the v6 entity path.
+
+Measured, not assumed. Both local databases:
+
+| | `__mj_BizAppsContracts` tables | `MJ_BizApps_Contracts%` entities |
+|---|---|---|
+| MJ_V6_Host | 0 | 0 |
+| MJ_V6_Tasks2 | 0 | 0 |
+
+So every call to `CreateContractFromDeal` returns *"bizapps-contracts is not installed in this
+deployment"* and stops at the guard. The rewrite is typechecked and vocabulary-clean, and **not one
+line of its body has ever executed.**
+
+This matters more than it sounds, because it is the second half of the same story: the seam's previous
+version dispatched `Contracts.SaveContract`, an operation deleted in the 2026-08-18 rebuild, and got
+back *"not registered in this process"* every time. Two different failures, one indistinguishable
+symptom — the contract route never runs — which is why it kept being read as a stack-configuration
+problem. The dispatch bug is now fixed. The *environment* half is not.
+
+**Interim choice:** the seam refuses honestly and the close records an unexecuted plan with a reason,
+which is the same shape every other unroutable target uses.
+
+**What is needed:** contracts installed in a database somebody can point a harness at. Until then the
+only assurance available is that the code matches the schema on `origin/next` (`d2f64e3`), which is
+what this rewrite is. Note the local contracts checkout sits on `local/pnpm-v6-conversion` and was
+deliberately not disturbed — installing it is a separate, deliberate act.
+
+---
+
+## D-8 · The task-type metadata cannot be pushed until tasks migrates
+
+**Raised by:** moving Order Review and Contract Processing into `metadata/task-types/`.
+
+The rows carry `Code`, which bizapps-tasks PR #42 added on 2026-08-20. Neither local database has that
+migration applied, and `mj sync push` refuses the whole directory:
+
+```
+1. Field "Code" does not exist on entity "MJ_BizApps_Tasks: Task Types"
+2. Field "Code" does not exist on entity "MJ_BizApps_Tasks: Task Types"
+✗ Validation failed with 2 error(s)
+```
+
+It fails at VALIDATION, before writing anything, so there is no partial state to clean up — the good
+outcome, and worth recording because it means the dependency is explicit rather than silent.
+
+**Interim choice:** ship the rows with `Code`. Writing them without it would produce metadata that
+pushes today and is wrong tomorrow, and `TaskType.Code` is NOT NULL, so a row seeded without one
+cannot exist on a migrated database anyway.
+
+**What is needed:** the PR #42 migration applied wherever these rows are wanted — which is an ordering
+constraint on deployment, not a code change. `CloseWonTaskService` already tolerates the older shape at
+runtime by matching on `Name`; it is only the PUSH that is blocked.
+
+---
+
+## D-9 · `ContractType` has no renewal-default columns, and nothing applies defaults
+
+Sales' own column descriptions say the standards live in contracts: *"the standard annual increase,
+whose default (5%) lives on the contracts ContractType"* and *"the standard cancellation-notice period
+(default 90 days, owned by the contracts ContractType)"*. As of `origin/next` @ `d2f64e3` they do not.
+`ContractType` carries Name, Description, RequiresExecutedDocument, ParentStatusRequirement and Status
+— nothing else — and `applyContractTypeDefaults()` went with the v1 rebuild.
+
+This is why sales' columns are named `…Override`: NULL means *"use the standard"*, which is a different
+fact from *"we negotiated a number that happens to equal today's standard"*. Only the NULL survives a
+later change to policy.
+
+**Interim choice:** the seam passes an override through when the deal states one and populates nothing
+when it does not. A null therefore reaches contracts as a null, which is the honest handoff — and it
+means the defaults, when they exist, land in one place rather than being pre-empted by a value sales
+invented.
+
+**What is needed:** the columns on `ContractType`, and something that applies them. Until then a
+contract auto-created at Closed Won has NULL renewal terms unless the deal negotiated them explicitly,
+and nothing anywhere fills that in.
+
+---
+
+## D-10 · `ContractTemplate` has no `Status`, so the current template cannot be chosen
+
+`ContractTemplate` carries Name, VersionLabel, `IntroducedDate`, SourceURL and Description. There is no
+way to ask which one is current.
+
+`IntroducedDate` is deliberately NOT used. Picking the newest by date is exactly the date-guessing the
+`Status` column Andrew asked for exists to eliminate, and it would silently attach next year's paper to
+this year's deal the day somebody loads a draft template.
+
+There is a stronger reason to leave this alone, and it is contracts' own: `ContractTemplateID` is
+*"nullable because a contract created automatically at Closed Won has none until finance reads the
+PDF"*. That describes this call site exactly. A template arrives when a human establishes which one was
+signed — which is, not coincidentally, one of the steps the Contract Processing task exists to carry.
+
+**Interim choice:** the seam honours a supplied `ContractTemplateID` and never selects one. Nothing in
+sales supplies one today.
+
+**What is needed:** `ContractTemplate.Status`, if template selection is ever supposed to be automatic.
+If it is not — and contracts' column note suggests it is not — then this is closed rather than pending,
+and the note should say so.
+
+---
+
+## D-11 · A renewal has no shape to take on the v2 schema
+
+`Contracts.RenewTerm` was deleted with `SaveContract`, and it did not simply move: `ContractTerm` was
+dropped as a table. "Add a term to an existing contract" no longer describes anything that exists, so
+`Deal.RenewsContractID` currently routes to a door with nothing behind it.
+
+Two shapes could express a renewal on the v2 header, and **they are not equivalent**:
+
+1. a NEW contract carrying `ParentContractID` — both agreements stay in the lineage;
+2. the existing contract stamped `SupersededByContractID` — one retires the other.
+
+Which is right decides what a renewal *is* in reporting, and it is contracts' modelling call, not
+sales'. Guessing would produce contract records that look correct and mean the wrong thing.
+
+**Interim choice:** `RenewContractTerm` returns an unexecuted plan naming both candidates, so a renewal
+close reports honestly instead of appearing to succeed.
+
+**What is needed:** a ruling from Marcelo or Andrew on which shape a renewal takes. One sentence
+unblocks the seam.
+
+---
+
+## D-12 · `ContractType` has no `Code`, so the type lookup matches on `Name`
+
+Sales' policy field is `CloseWonPolicy.ContractTypeCode`, and resolving a CODE is the right shape —
+sales does not know contracts' vocabulary and must not bake its UUIDs. But `ContractType` is identified
+only by `Name` (unique) and a fixed seeded UUID. **The previous seam filtered on `Code`, a column that
+does not exist**, so that lookup could only ever fail — one more reason this path never ran.
+
+Contracts' own seed comment is pointed about the underlying hazard: *"Neither is ever branched on by
+NAME — that was the defect this column replaced."* That is about branching on a name, which nothing
+here does; the string arrives from configuration, is looked up, and yields an ID. But it is the same
+instinct, and the same fix applies.
+
+**Interim choice:** the seam probes metadata for `Code`, uses it when present, matches on `Name`
+otherwise, and says in its returned message which it used — so the answer is never ambiguous.
+
+**What is needed:** `ContractType.Code`, exactly as bizapps-tasks just added to `TaskType` and for the
+same reason. It is a one-column migration on their side and deletes a branch on ours.
+
+---
+
+## D-13 · Should the review/correct/advance steps live in `TaskTypeStatus` rather than prose?
+
+**Raised by:** PR #42 adding `TaskTypeStatus` — a per-type lifecycle with `Code`, `Sequence`,
+`IsDefault`, `IsTerminal`, `MacroStatus` (Open/InProgress/Blocked/Completed/Cancelled),
+`OnEnterActionID`/`OnExitActionID` — plus `Task.TaskTypeStatusID`. This reopens a decision that was
+deliberately deferred when there was nowhere better to put the steps.
+
+**The case for moving them is strong, and it is this app's own thesis.** Steps written into a
+`Description` are domain knowledge trapped in text: nobody can filter on them, nothing can act on them,
+and they drift from what people actually do with no way to notice. That is precisely what the ten type
+tables exist to prevent. Statuses would make *"which order reviews are stuck being corrected"* a query
+instead of a conversation, and `OnEnterActionID` would let **advance** fire the order confirm as a hook
+rather than relying on somebody remembering that advancing is what books the journal entries.
+
+**But the two tasks are not the same shape, and that is the finding.**
+
+- **Contract Processing genuinely is a lifecycle.** Attach the executed document → confirm the
+  agreement version → record the dates → validate whether the template was modified → move the contract
+  to active. Five distinct states, strictly ordered, each observably done or not. `Sequence` and
+  `IsTerminal` fit it exactly.
+- **Order Review is not.** Review → correct → advance is one action with a loop in the middle, not
+  three states: a reviewer may correct nothing, or correct five times. Modelling a loop as a sequence
+  makes the data lie about how the work happens, and `MacroStatus` forces a second guess on top —
+  is "being corrected" `InProgress` or `Blocked`? `Blocked` implies waiting on someone else, which is
+  sometimes true and sometimes not.
+
+**Interim choice:** left as prose in both descriptions, and the metadata file says why. The asymmetry
+is the reason to wait rather than split the difference now: a wrong paragraph is edited, a wrong
+lifecycle is migrated, because live tasks will be carrying `TaskTypeStatusID` values by then.
+
+**Recommendation, if a decision is wanted:** seed statuses for **Contract Processing only**, once
+finance confirms those five steps are the real ones, and leave Order Review with a status set of its
+own shape — plausibly just `Reviewing` / `Advanced` with correction as an activity rather than a state.
+Do not derive one from the other for symmetry.
+
+**What is needed:** finance to confirm the Contract Processing steps, and a ruling on whether sales
+seeding a second tasks child table (`TaskTypeStatus`, after `TaskType`) is the intended reading of
+Amith's "the metadata rows will be created by the sales open app", or one table further than he meant.
