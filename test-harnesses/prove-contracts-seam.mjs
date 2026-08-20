@@ -64,13 +64,22 @@ if (!dealRow) {
     process.exit(2);
 }
 
-const tx = new sql.Transaction(pool);
-await tx.begin();
+/**
+ * THE TRANSACTION HAS TO BE THE PROVIDER'S OWN, and the first version of this file got that wrong.
+ *
+ * It opened a bare `mssql` transaction and assigned it to `provider.TransactionObject`, on the
+ * assumption that the provider would then enlist in it. It does not: the provider ran the save on its
+ * own connection, the rollback rolled back an empty transaction, and a REAL contract row survived in a
+ * shared database. The final assertion caught it -- which is the whole reason it asserts the rollback
+ * rather than trusting it -- but the row still had to be deleted by hand.
+ *
+ * `BeginTransaction()` on the provider is what the integration fixture uses, for exactly this reason.
+ */
 let contractID = null;
 let seamResult = null;
+const db = provider;
+await db.BeginTransaction();
 try {
-    // The provider must run inside THIS transaction, or the rollback below leaves a real row behind.
-    provider.TransactionObject = tx;
 
     const seam = new LiveContractsSeam(user, provider);
     seamResult = await seam.CreateContractFromDeal({
@@ -89,10 +98,9 @@ try {
     contractID = seamResult.ContractID;
 
     if (contractID) {
-        const r = new sql.Request(tx);
         const row = (
-            await r.query(`SELECT * FROM __mj_BizAppsContracts.Contract WHERE ID = '${contractID}'`)
-        ).recordset[0];
+            await db.ExecuteSQL(`SELECT * FROM __mj_BizAppsContracts.Contract WHERE ID = '${contractID}'`)
+        )?.[0];
 
         record(!!row, 'THE ROW EXISTS in __mj_BizAppsContracts.Contract', `ID ${contractID}`);
         if (row) {
@@ -102,8 +110,8 @@ try {
                 `= ${row.ContractNumber}`,
             );
             const dealEntityID = (
-                await r.query(`SELECT ID FROM __mj.Entity WHERE Name = 'MJ_BizApps_Sales: Deals'`)
-            ).recordset[0]?.ID;
+                await db.ExecuteSQL(`SELECT ID FROM __mj.Entity WHERE Name = 'MJ_BizApps_Sales: Deals'`)
+            )?.[0]?.ID;
             record(
                 String(row.CreatingEntityID).toLowerCase() === String(dealEntityID).toLowerCase(),
                 'CreatingEntityID points at the Deals entity',
@@ -150,8 +158,12 @@ try {
 } catch (err) {
     record(false, 'the seam threw', String(err));
 } finally {
-    await tx.rollback();
-    provider.TransactionObject = null;
+    try {
+        await db.RollbackTransaction();
+    } catch {
+        // Nothing to roll back if the body already failed out of one; swallowing keeps the real
+        // failure visible rather than replacing it with a cleanup error.
+    }
 }
 
 // The rollback must have taken the contract AND its sequence number with it.
