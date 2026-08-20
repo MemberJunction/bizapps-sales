@@ -146,6 +146,12 @@ const ORDERS_PACKAGES = [
     // Without it every booking fails with `No GL account is linked for role 'Accounts Receivable'`
     // even when the links are sitting in the table — the resolver is reading an empty cache, not an
     // empty database, and the message cannot tell you which.
+    // COMMON FIRST OF ALL, because the `activities` bundle writes through common's generated entity
+    // subclasses. Without them `GetEntityObject` resolves a bare `BaseEntity`, which has no `Title` or
+    // `ActivityTypeID` setter -- so every assignment silently becomes an own property, the save writes a
+    // row of defaults, and the checks fail on an assertion about a field they appeared to set. That
+    // failure names the field, not the missing import, which is why it is worth the comment.
+    ['@mj-biz-apps/common-entities', 'LoadGeneratedEntities'],
     ['@mj-biz-apps/accounting-entities', 'LoadGeneratedEntities'],
     ['@mj-biz-apps/accounting-engine-base', null],
     ['@mj-biz-apps/accounting-core-entities-server', null],

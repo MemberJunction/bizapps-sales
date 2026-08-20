@@ -48,6 +48,24 @@ export * from './LiveOrdersSeam.js';
 /** The REAL contracts handoff — selected automatically when contracts' entities are registered. */
 export * from './LiveContractsSeam.js';
 
+/**
+ * ACTIVITIES AND THE OUTLOOK INGEST (S-US9 #119, S-US10 #120).
+ *
+ * Exported as a block because they are one feature: the writer is what the workspace pane and the
+ * ingest both call, and `IActivitySource` is the seam that makes the ingest testable without a mailbox.
+ * The Graph source is exported too, deliberately -- it is complete, and hiding it would make it look
+ * unwritten rather than ungated.
+ */
+export * from './activities/activity-vocabulary.js';
+export * from './activities/ActivityWriterService.js';
+export * from './activities/ActivityReader.js';
+export * from './activities/ActivitySource.js';
+export * from './activities/FixtureActivitySource.js';
+export * from './activities/MSGraphActivitySource.js';
+export * from './activities/RelevanceFilter.js';
+export * from './activities/DealMatcher.js';
+export * from './activities/ActivityIngestService.js';
+
 import { DealEntityServer } from './DealEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 
