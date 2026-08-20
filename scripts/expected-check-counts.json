@@ -15,11 +15,36 @@
     "both, because the interesting failure is a bundle that registers 4 and runs 0."
   ],
   "bundles": {
-    "save-deal": { "count": 17, "requires": null, "ids": "SD1-SD17" },
-    "close-deal": { "count": 14, "requires": null, "ids": "CD1-CD14" },
-    "product-picker": { "count": 4, "requires": "orders", "ids": "PP1-PP4" },
-    "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
-    "close-won-contract": { "count": 4, "requires": "contracts", "ids": "CT1-CT4" }
+    "save-deal": {
+      "count": 17,
+      "requires": null,
+      "ids": "SD1-SD17"
+    },
+    "close-deal": {
+      "count": 14,
+      "requires": null,
+      "ids": "CD1-CD14"
+    },
+    "product-picker": {
+      "count": 4,
+      "requires": "orders",
+      "ids": "PP1-PP4"
+    },
+    "close-won-order": {
+      "count": 5,
+      "requires": "orders",
+      "ids": "CO1-CO5"
+    },
+    "close-won-contract": {
+      "count": 4,
+      "requires": "contracts",
+      "ids": "CT1-CT4"
+    },
+    "board-move": {
+      "count": 4,
+      "requires": null,
+      "ids": "BD1-BD4"
+    }
   },
   "probes": {
     "orders": "@mj-biz-apps/orders-entities",

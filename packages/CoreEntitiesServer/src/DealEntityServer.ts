@@ -52,7 +52,11 @@ import {
     LogError,
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
-import { DEAL_FIELDS_EDITABLE_WHILE_LOCKED, DealEntity } from '@mj-biz-apps/sales-entities';
+import {
+    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
+    DealEntity,
+    type mjBizAppsSalesDealStageEventEntity,
+} from '@mj-biz-apps/sales-entities';
 
 import { getNextDealNumber } from './SequenceService.js';
 
@@ -160,13 +164,134 @@ export class DealEntityServer extends DealEntity {
         // assigned once — it appears in contracts, orders and people's email, so re-saving a deal must
         // never renumber it.
         const saved = this.IsSaved || this.DealNumber
-            ? await super.Save(options)
+            ? await this.saveWithStageEvent(options)
             : await this.saveWithNewDealNumber(options);
 
         if (!saved) {
             this.explainOrderProvisioningFailure();
         }
         return saved;
+    }
+
+    /* ── STAGE PROVENANCE ─────────────────────────────────────────────────────────────────────────
+     *
+     * Deliberately its own block, and deliberately not folded into `provisionEmbeddedOrder` or the
+     * numbering path. These are three unrelated jobs that happen to share a save, and keeping them
+     * separate is what makes the next merge here a merge rather than an archaeology exercise.
+     */
+
+    /**
+     * Saves, and appends a `DealStageEvent` when the deal moved stage — both or neither.
+     *
+     * ── WHY THIS LIVES HERE NOW ──
+     *
+     * It used to live in `Sales.SaveDeal`, which no longer exists. That is not just a relocation: an
+     * operation could only stamp moves that came through IT, so a stage change made by an Action, an
+     * agent, a fixture or a raw `BaseEntity.Save()` left no trace. On the entity server it is the one
+     * path every write takes — the same reasoning that puts the close lock here.
+     *
+     * ── BOTH OR NEITHER ──
+     *
+     * A moved deal with no event is a hole in an append-only log; an event for a move that failed is
+     * worse, because it is a claim about history that never happened. So the two share one scope.
+     * `BeginEntityTransaction` JOINS an ambient transaction rather than opening a second, so a caller
+     * already in one — `Sales.CloseDeal`, or an integration check — gets a savepoint and everything
+     * still settles together.
+     *
+     * A save that does NOT move the stage takes no transaction at all. The overwhelming majority of
+     * deal saves are edits to a field nobody is watching, and wrapping those in a scope would be a cost
+     * paid on every keystroke for a guarantee they do not need.
+     */
+    private async saveWithStageEvent(options?: EntitySaveOptions): Promise<boolean> {
+        /**
+         * THE PERSISTED VALUES, read before the save overwrites them.
+         *
+         * `OldValue` is what is on disk, which is the only thing that makes a transition detectable —
+         * and the same discipline the close lock uses when it asks whether the deal was ALREADY locked
+         * rather than whether it is about to be.
+         */
+        const priorStageID = (this.GetFieldByName('PipelineStageID')?.OldValue as string | null) ?? null;
+        const stageChanged = priorStageID !== null && priorStageID !== (this.PipelineStageID ?? null);
+
+        if (!stageChanged) {
+            return super.Save(options);
+        }
+
+        const prior = {
+            StageID: priorStageID,
+            StatusID: (this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null) ?? null,
+            /**
+             * THE STAMPS COME FROM THE PRIOR VALUES, NOT THE NEW ONES, and that is the whole point of
+             * the table. A board drag applies the target stage's probability default, so reading the
+             * current value here would record the number the deal acquired by ARRIVING rather than the
+             * one it held on the way out — and every velocity report built on it would be quietly wrong.
+             */
+            Amount: (this.GetFieldByName('Amount')?.OldValue as number | null) ?? null,
+            Probability: (this.GetFieldByName('Probability')?.OldValue as number | null) ?? null,
+        };
+
+        const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
+        if (!provider?.BeginEntityTransaction) {
+            throw new Error(
+                'DealEntityServer.Save: the provider cannot open a transaction, so a stage move cannot be ' +
+                'recorded atomically. This class is server-only — it must run against a database provider.',
+            );
+        }
+
+        const scope = await provider.BeginEntityTransaction();
+        try {
+            const saved = await super.Save(options);
+            if (!saved) {
+                await scope.Rollback();
+                return false;
+            }
+            await this.appendStageEvent(prior);
+            await scope.Commit();
+            return true;
+        } catch (err) {
+            LogError(`DealEntityServer.saveWithStageEvent failed for deal ${this.ID}: ${err}`);
+            try {
+                await scope.Rollback();
+            } catch (rollbackErr) {
+                LogError(`Failed to roll back after a failed stage-event append: ${rollbackErr}`);
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Writes the one `DealStageEvent` a move owes.
+     *
+     * APPEND-ONLY — never edited, never deleted. Note what is NOT here: no close, no routing, no
+     * downstream call. A stage change is a stage change; closing is `Sales.CloseDeal` and stays an
+     * explicit act, even when the stage a deal moves into is the one a pipeline calls Signed.
+     */
+    private async appendStageEvent(
+        prior: { StageID: string | null; StatusID: string | null; Amount: number | null; Probability: number | null },
+    ): Promise<void> {
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        const user = this.ContextCurrentUser;
+        const event = await provider.GetEntityObject<mjBizAppsSalesDealStageEventEntity>(
+            'MJ_BizApps_Sales: Deal Stage Events',
+            user,
+        );
+        event.NewRecord();
+        event.DealID = this.ID;
+        event.FromStageID = prior.StageID;
+        event.ToStageID = this.PipelineStageID;
+        event.FromDealStatusTypeID = prior.StatusID;
+        event.ToDealStatusTypeID = this.DealStatusTypeID;
+        event.ChangedByUserID = user?.ID ?? null;
+        event.ChangedAt = new Date();
+        event.AmountAtTransition = prior.Amount;
+        event.ProbabilityAtTransition = prior.Probability;
+
+        if (!(await event.Save())) {
+            // THROWN, not returned: the caller's scope must roll the deal move back with it.
+            throw new Error(
+                `the stage event could not be written: ${event.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+            );
+        }
     }
 
     /**

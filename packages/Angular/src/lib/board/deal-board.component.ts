@@ -192,19 +192,19 @@ export class DealBoardComponent {
         this.cdr.detectChanges();
 
         try {
-            const draft = await this.service.LoadDraft(deal.ID);
+            const draft = await this.service.LoadDeal(deal.ID);
             if (!draft) {
                 this.Message = `"${deal.Name}" could not be read, so it was not moved.`;
                 return;
             }
 
-            draft.Header.PipelineStageID = target.StageID;
-            this.ApplyStageDefaults(draft.Header, target.StageID);
+            draft.PipelineStageID = target.StageID;
+            this.ApplyStageDefaults(draft, target.StageID);
 
             const outcome = await this.service.Save(draft);
             if (!outcome.Success) {
                 this.Message =
-                    outcome.Issues[0]?.Message ??
+                    outcome.Validation?.Issues[0]?.Message ??
                     outcome.ErrorMessage ??
                     `"${deal.Name}" could not be moved.`;
                 return;

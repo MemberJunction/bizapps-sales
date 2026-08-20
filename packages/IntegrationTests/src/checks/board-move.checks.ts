@@ -22,14 +22,11 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
-import {
-    SalesSaveDealOperation,
-    type SalesSaveDealInput,
-    type SalesSaveDealOutput,
-} from '@mj-biz-apps/sales-entities';
+import { DealEntity } from '@mj-biz-apps/sales-entities';
 
 import {
     InRolledBackTransaction,
+    ProviderOf,
     ResolveSalesFixture,
     SALES_SCHEMA,
     TxOne,
@@ -41,15 +38,69 @@ type Ctx = Parameters<NamedCheck['Fn']>[0];
 const E_STAGE_EVENT = 'MJ_BizApps_Sales: Deal Stage Events';
 const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
 
-async function save(ctx: Ctx, input: SalesSaveDealInput): Promise<SalesSaveDealOutput> {
-    const op = new SalesSaveDealOperation();
-    const result = await op.Execute(input, { provider: ctx.Provider, user: ctx.User });
-    const output = (result as { Output?: SalesSaveDealOutput })?.Output;
-    Assert(!!output, `Sales.SaveDeal returned no Output envelope: ${JSON.stringify(result).slice(0, 300)}`);
-    return output as SalesSaveDealOutput;
+/**
+ * WHAT THESE CHECKS DRIVE, AND WHY IT CHANGED.
+ *
+ * They used to call `Sales.SaveDeal`, a remote operation that no longer exists. The stage-event append
+ * moved with it, onto `DealEntityServer.Save()` — and that relocation is the point rather than an
+ * inconvenience. An operation could only stamp moves that came through IT, so a stage change made by an
+ * Action, an agent, a fixture or a raw `BaseEntity.Save()` left no trace at all. On the entity server it
+ * is the one path every write takes.
+ *
+ * So these now drive the ENTITY, which means they exercise the same code path a board drag, the deal
+ * workspace and a script all share. Every assertion below is unchanged: exactly one event per move,
+ * stamped with the values the deal held on the way OUT.
+ */
+interface DealDraft {
+    ID?: string;
+    Name: string;
+    PipelineID: string;
+    PipelineStageID: string;
+    DealTypeID: string;
+    DealStatusTypeID: string;
+    AccountID: string;
+    TermMonths?: number;
+    Amount?: number;
+    Probability?: number;
 }
 
-function draft(f: SalesFixture, name: string, overrides: Partial<SalesSaveDealInput> = {}): SalesSaveDealInput {
+/** What the old operation's envelope carried, kept so the checks below read unchanged. */
+interface DealSaveResult {
+    Success: boolean;
+    DealID: string | null;
+    Issues: { Message: string }[];
+}
+
+async function save(ctx: Ctx, input: DealDraft): Promise<DealSaveResult> {
+    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>('MJ_BizApps_Sales: Deals', ctx.User);
+    if (input.ID) {
+        // A MOVE IS A LOAD THEN AN EDIT, which is what the board actually does. Constructing a fresh
+        // record with an ID would leave every OldValue null, and the append reads OldValue to decide
+        // whether the stage moved at all — so a shortcut here would quietly test nothing.
+        Assert(await deal.Load(input.ID), `the deal ${input.ID} could not be loaded`);
+    } else {
+        deal.NewRecord();
+    }
+
+    deal.Name = input.Name;
+    deal.PipelineID = input.PipelineID;
+    deal.PipelineStageID = input.PipelineStageID;
+    deal.DealTypeID = input.DealTypeID;
+    deal.DealStatusTypeID = input.DealStatusTypeID;
+    deal.AccountID = input.AccountID;
+    if (input.TermMonths != null) deal.TermMonths = input.TermMonths;
+    if (input.Amount != null) deal.Amount = input.Amount;
+    if (input.Probability != null) deal.Probability = input.Probability;
+
+    const ok = await deal.Save();
+    return {
+        Success: ok,
+        DealID: ok ? deal.ID : null,
+        Issues: ok ? [] : [{ Message: deal.LatestResult?.CompleteMessage ?? 'unknown error' }],
+    };
+}
+
+function draft(f: SalesFixture, name: string, overrides: Partial<DealDraft> = {}): DealDraft {
     return {
         Name: name,
         PipelineID: f.PipelineID,
@@ -58,12 +109,9 @@ function draft(f: SalesFixture, name: string, overrides: Partial<SalesSaveDealIn
         DealStatusTypeID: f.OpenStatusID,
         AccountID: f.AccountID,
         TermMonths: 12,
-        Lines: [],
-        PaymentSchedule: [],
         ...overrides,
     };
 }
-
 /** Two stages on the fixture's pipeline, in DisplayOrder — a move needs somewhere to go. */
 async function twoStages(ctx: Ctx, f: SalesFixture): Promise<{ from: string; to: string } | null> {
     const rv = new RunView();
