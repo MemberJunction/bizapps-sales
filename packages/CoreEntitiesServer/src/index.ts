@@ -65,6 +65,7 @@ export * from './activities/MSGraphActivitySource.js';
 export * from './activities/RelevanceFilter.js';
 export * from './activities/DealMatcher.js';
 export * from './activities/ActivityIngestService.js';
+export * from './activities/ActivitySyncJob.js';
 
 import { DealEntityServer } from './DealEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';

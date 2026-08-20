@@ -107,7 +107,16 @@ export class ActivityIngestService {
          * distinction between them is for a human — an operator paused it, a run failed, an admin turned
          * it off. Treating any of them as runnable would make pausing advisory.
          */
-        if (connection.Status !== 'Active') {
+        /*
+         * WHY THIS IS EXEMPT FROM THE VOCABULARY GATE, which correctly flagged it.
+         *
+         * `ActivitySyncConnection.Status` is a CHECK-constrained OPERATIONAL state in another app's
+         * schema, not domain vocabulary: there is no companion type table and no behaviour flag to read
+         * instead -- the column IS the state, and `recordFailure` below writes it. Renaming a value is a
+         * migration in bizapps-common, not somebody editing a lookup row, so the hazard the gate guards
+         * against -- a rename silently changing behaviour -- cannot arise here.
+         */
+        if (connection.Status !== 'Active') { // vocabulary-grep-allow: operational state, not vocabulary
             result.Issues.push(
                 `Connection '${connectionID}' is ${connection.Status}, not Active, so no sync was attempted.`,
             );

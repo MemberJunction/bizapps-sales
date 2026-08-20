@@ -78,6 +78,8 @@ import {
 import { DiscountFractionToPercent, DiscountPercentToFraction } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from './deal-workspace.service';
 import { FromDateInput, ToDateInput } from './deal-workspace.dates';
+/** S-US9's timeline — standalone, so importing it is the whole cost. */
+import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import type { ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
     EmptyValidation,
@@ -144,7 +146,14 @@ type DealDateField = 'ExecutionDate' | 'StartDate' | 'ExpectedCloseDate' | 'Next
 @Component({
     standalone: true,
     selector: 'mjs-deal-workspace',
-    imports: [CommonModule, FormsModule, SharedGenericModule, MJWorkspaceCardComponent],
+    imports: [
+        CommonModule,
+        FormsModule,
+        SharedGenericModule,
+        MJWorkspaceCardComponent,
+        // S-US9's timeline. Standalone, so this line is the whole cost of hosting it.
+        DealActivityTimelineComponent,
+    ],
     changeDetection: ChangeDetectionStrategy.OnPush,
     templateUrl: './deal-workspace.component.html',
     styleUrls: ['./deal-workspace.component.css'],
