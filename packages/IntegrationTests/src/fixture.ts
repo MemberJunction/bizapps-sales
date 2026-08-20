@@ -45,7 +45,6 @@ export const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 export const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
 export const E_DEAL_TYPE = 'MJ_BizApps_Sales: Deal Types';
 export const E_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
-export const E_LINE_TYPE = 'MJ_BizApps_Sales: Deal Line Types';
 export const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 export const E_EMPLOYEE = 'MJ: Employees';
 export const E_STAGE_EVENT = 'MJ_BizApps_Sales: Deal Stage Events';
@@ -58,10 +57,16 @@ export interface SalesFixture {
     StageID: string;
     DealTypeID: string;
     OpenStatusID: string;
-    /** The RECURRING line type, resolved by its `IsRecurring` FLAG — never by name. */
-    RecurringLineTypeID: string;
-    /** The ONE-TIME line type, resolved as the one whose `IsRecurring` is false. */
-    OneTimeLineTypeID: string;
+    /*
+     * RecurringLineTypeID / OneTimeLineTypeID WERE HERE, and their removal is the point rather than
+     * tidying. `DealLineType` is retired (docs/DECISIONS.md D-DL1), so `one()` could not find a row --
+     * and `one()` THROWS. Because every bundle resolves this ONE SHARED FIXTURE, two lookups nothing
+     * needed any more took the whole suite down: all 14 close-deal checks failed on a host where
+     * close-deal itself was perfectly fine.
+     *
+     * Worth remembering when adding a field here. A fixture that throws is not a failing check; it is
+     * every check failing for a reason none of them are about.
+     */
     AccountID: string;
     EmployeeID: string;
 
@@ -151,12 +156,6 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
     const openStatus = await one<{ ID: string }>(
         ctx, E_STATUS_TYPE, 'IsOpen = 1 AND IsActive = 1', ['ID'], 'OPEN deal status (by IsOpen flag)',
     );
-    const recurring = await one<{ ID: string }>(
-        ctx, E_LINE_TYPE, 'IsRecurring = 1 AND IsActive = 1', ['ID'], 'recurring line type (by IsRecurring flag)',
-    );
-    const oneTime = await one<{ ID: string }>(
-        ctx, E_LINE_TYPE, 'IsRecurring = 0 AND IsActive = 1', ['ID'], 'one-time line type (by IsRecurring flag)',
-    );
     const account = await one<{ ID: string }>(ctx, E_ACCOUNT, 'IsActive = 1', ['ID'], 'sales account');
     const employee = await one<{ ID: string }>(ctx, E_EMPLOYEE, 'Active = 1', ['ID'], 'active employee');
 
@@ -181,8 +180,6 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
         StageID: stage.ID,
         DealTypeID: dealType.ID,
         OpenStatusID: openStatus.ID,
-        RecurringLineTypeID: recurring.ID,
-        OneTimeLineTypeID: oneTime.ID,
         AccountID: account.ID,
         EmployeeID: employee.ID,
 

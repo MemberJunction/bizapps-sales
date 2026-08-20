@@ -59,7 +59,7 @@ import {
 
 import {
     E_DEAL,
-    E_DEAL_LINE,
+    E_SCHEDULE,
     E_STAGE_EVENT,
     InRolledBackTransaction,
     ProviderOf,
@@ -182,16 +182,16 @@ async function stageEvents(ctx: Ctx, dealID: string): Promise<Record<string, unk
     return (r.Results ?? []) as Record<string, unknown>[];
 }
 
-/** The deal's line rows, read through the provider so the check's open transaction is visible. */
-async function children(ctx: Ctx, dealID: string): Promise<Record<string, unknown>[]> {
+/** The deal's INSTALMENT rows, read through the provider so the check's open transaction is visible. */
+async function instalments(ctx: Ctx, dealID: string): Promise<Record<string, unknown>[]> {
     const rv = new RunView();
     const r = await rv.RunView(
         {
-            EntityName: E_DEAL_LINE,
+            EntityName: E_SCHEDULE,
             ExtraFilter: `DealID = '${dealID}'`,
             OrderBy: 'DisplayOrder ASC',
             ResultType: 'simple',
-            Fields: ['ID', 'ProductName', 'Quantity', 'DisplayOrder'],
+            Fields: ['ID', 'Amount', 'Description', 'DisplayOrder'],
         },
         ctx.User,
     );
@@ -652,17 +652,17 @@ export const CloseDealChecks: NamedCheck[] = [
                     `an OPEN deal must accept a collection edit — ${closing.LatestResult?.CompleteMessage ?? ''}`,
                 );
 
-                const afterEdit = await TxOne<{ Quantity: number }>(
+                const afterEdit = await TxOne<{ Amount: number }>(
                     ctx, `SELECT Amount FROM ${SALES_SCHEMA}.DealPaymentSchedule WHERE ID = '${lastEdit.ID}'`,
                 );
-                AssertEqual(Number(afterEdit.Quantity), 41, 'and the edit actually landed');
+                AssertEqual(Number(afterEdit.Amount), 41000, 'and the edit actually landed');
 
                 // ── now close it ──────────────────────────────────────────────────────────────────
                 const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
                 Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
                 Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
 
-                const before = await children(ctx, dealID);
+                const before = await instalments(ctx, dealID);
 
                 // ── HALF TWO: a REMOVAL on the closed deal is refused ──────────────────────────────
                 const locked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
@@ -679,9 +679,9 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
 
                 AssertEqual(
-                    (await children(ctx, dealID)).length,
+                    (await instalments(ctx, dealID)).length,
                     before.length,
-                    'and the refusal kept the line in the database',
+                    'and the refusal kept the instalment in the database',
                 );
 
                 // ── HALF TWO (b): an EDIT on the closed deal is refused too ────────────────────────
@@ -692,10 +692,10 @@ export const CloseDealChecks: NamedCheck[] = [
                 target.Amount = 99900;
                 AssertEqual(await edited.Save(), false, 'editing an instalment on a CLOSED deal must be refused');
 
-                const finalRow = await TxOne<{ Quantity: number }>(
+                const finalRow = await TxOne<{ Amount: number }>(
                     ctx, `SELECT Amount FROM ${SALES_SCHEMA}.DealPaymentSchedule WHERE ID = '${target.ID}'`,
                 );
-                AssertEqual(Number(finalRow.Quantity), 41, 'the stored quantity is still the pre-close value');
+                AssertEqual(Number(finalRow.Amount), 41000, 'the stored amount is still the pre-close value');
             }),
     },
 ];

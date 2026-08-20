@@ -7,13 +7,22 @@
  *
  *     testing: { checkModules: ['@mj-biz-apps/sales-integration-tests'] }
  *
- * BUNDLES
- *   save-deal   SD1–SD16   Saving a deal and its children: four tables in one transaction, numbering,
- *                          the explicit-removal semantics of the child collections, and the no-pricing
- *                          guarantee — against a live database with nothing mocked
- *   close-deal  CD1–CD13   Sales.CloseDeal / Sales.ReopenDeal / the close lock: routing follows the
- *                          POLICY rather than any name, and a closed deal refuses a raw save — including
- *                          one made only against its CHILD COLLECTIONS (CD13)
+ * BUNDLES. The authoritative count for each is `scripts/expected-check-counts.json`, which the coverage
+ * gate and the runner both read; the ranges here are a map, not a second source of truth.
+ *   save-deal            Saving a deal, its EMBEDDED ORDER, that order's lines and its own children:
+ *                        four tables across two schemas in one transaction, numbering, the
+ *                        explicit-removal semantics of the collections, and the no-pricing guarantee
+ *   close-deal           Sales.CloseDeal / Sales.ReopenDeal / the close lock: routing follows the POLICY
+ *                        rather than any name, and a closed deal refuses a raw save — including one made
+ *                        only against its CHILD COLLECTIONS (CD13)
+ *   product-picker       The rule deciding which of orders' products a line may reference
+ *   close-won-order      What a won close does NOT do to the order: no second order, no status change,
+ *                        still editable afterwards (S-US5/S-US6)
+ *   close-won-contract   The contract route, on the one stack that has contracts linked
+ *
+ * ⚠️ EVERY BUNDLE NOW REQUIRES bizapps-orders, including save-deal and close-deal. A deal cannot be
+ * saved without it: `DealEntityServer.Save()` provisions the deal's embedded order (S-US4). `mj-app.json`
+ * declares orders a hard dependency, so a host without it is misconfigured rather than minimal.
  *
  * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` — this suite exists to
  * write to the database. Without that variable the suite runs ZERO checks and PASSES, which is the
@@ -33,7 +42,9 @@
  * (§7.3, L-17). One remains, and it needs code that does not exist yet, so it is listed rather than
  * stubbed to keep the gap visible:
  *   1. `Deal.Amount` for a lined deal equals the `Orders.PreviewOrder` result for the same draft (§6).
- *      Needs the pricing bridge — S2, blocked on orders' C0 seam.
+ *      Needs the pricing bridge. The shape of that bridge changed with the rework — the lines now live on
+ *      an order orders already owns and prices, so `save-deal.SD19` covers the per-line half (sales sends
+ *      product and quantity; the price comes back). What is still unasserted is the HEADER roll-up.
  *
  * One check is also deliberately WEAKER than it will eventually be: `close-deal.CD7` asserts that a
  * stubbed downstream reports `Executed: false` with a reason and invents no ID. When orders links, CD7

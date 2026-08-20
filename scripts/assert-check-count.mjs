@@ -85,6 +85,34 @@ for (const [bundle, spec] of Object.entries(manifest.bundles)) {
 }
 
 const expectedTotal = [...expected.values()].reduce((a, b) => a + b.count, 0);
+
+/**
+ * AN EMPTY EXPECTATION IS A FAILURE, not a clean run.
+ *
+ * Every bundle in the manifest now names a sibling app it requires -- saving a deal provisions its
+ * embedded order, so even `save-deal` needs orders. That makes zero expected bundles reachable: on a
+ * host with nothing linked, `expected` is empty, `expectedTotal` is 0, and every comparison below
+ * passes while the suite has executed nothing. That is the vacuous pass this whole script exists to
+ * catch, arriving through the one door it did not have a check on.
+ */
+if (expected.size === 0) {
+    console.error(
+        '
+✖ Integration coverage assertion FAILED
+
+' +
+            `  · NO bundles were expected on this host. Every bundle in the manifest requires a sibling
+` +
+            `    app, and this run reported none linked (${[...linked].join(', ') || 'none'}). A run that
+` +
+            '    expects nothing passes while measuring nothing.
+
+' +
+            '  Link the sibling apps and re-run -- see docs/WORKSPACE-SETUP.md.
+',
+    );
+    process.exit(1);
+}
 /**
  * One line per check that RAN.
  *
