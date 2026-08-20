@@ -77,11 +77,26 @@ export interface CloseWonTaskInput {
      * than a task hanging off the wrong end of a relationship it can still be navigated from.
      */
     ContractID?: string;
-    /** `TaskType` IDs. Supplied, never looked up by name — see the note at the top of this file. */
-    OrderReviewTaskTypeID: string;
+    /**
+     * `TaskType` IDs. Supplied, never looked up by name — see the note at the top of this file.
+     *
+     * OPTIONAL because they come from configuration (`CloseWonPolicy.CloseWonTasks`) and a deployment
+     * may not have set them yet. Absent means the task is not created and an issue says so — inventing
+     * a type would put finance's work under a label nobody filters on.
+     */
+    OrderReviewTaskTypeID?: string;
     /** Required only when the policy raises a contract task. */
     ContractTaskTypeID?: string;
-    Assignee: CloseWonTaskAssignee;
+    /**
+     * Who the task is routed to. OPTIONAL, and its absence is the interesting case.
+     *
+     * Nothing in tasks or common models "finance" as a group, and `TaskAssignment` needs a CONCRETE
+     * record — pointing it at a role would never surface in anyone's task list, because nothing expands
+     * a role-typed assignee. So the assignee is deployment configuration, and when it is unset the task
+     * is still created and linked but left UNROUTED with an issue naming the missing key. A guessed
+     * person is worse than an unassigned task: it looks routed and nobody is actually looking at it.
+     */
+    Assignee?: CloseWonTaskAssignee;
     AssignedByPersonID?: string;
     DueAt?: Date;
 }
@@ -114,6 +129,35 @@ export interface CloseWonTaskResult {
  * The subset of `CloseWonPolicy` this service reads. Deliberately not the whole type — it needs one flag,
  * and importing the full policy would couple the tasks half to every routing decision the close makes.
  */
+/**
+ * The close-won task configuration a deployment sets on `Pipeline.CloseWonPolicy`.
+ *
+ * It lives on the POLICY rather than in code for the same reason the contract decision does: these are
+ * row IDs in somebody's table, they differ per deployment, and a pipeline is the thing that already
+ * carries per-motion behaviour. Nothing here is looked up by name.
+ */
+export interface CloseWonTasksPolicyConfig {
+    OrderReviewTaskTypeID?: string | null;
+    ContractTaskTypeID?: string | null;
+    /** The assignee's entity NAME — in practice `'MJ_BizApps_Common: People'`. */
+    AssigneeEntityName?: string | null;
+    /** The assignee record. NULL by default: an unconfigured deployment routes nothing. */
+    AssigneeRecordID?: string | null;
+    /** Which `TaskRole` the assignee holds. Optional — `TaskAssignment.RoleID` is nullable. */
+    AssigneeRoleID?: string | null;
+}
+
+/**
+ * Reads the task configuration out of a `CloseWonPolicy`, tolerating every absent shape.
+ *
+ * Exported so the close operation can map policy to service input in one line rather than reaching
+ * into the JSON itself — the shape belongs with the service that consumes it.
+ */
+export function ReadCloseWonTaskConfig(policy: unknown): CloseWonTasksPolicyConfig {
+    const holder = policy as { CloseWonTasks?: CloseWonTasksPolicyConfig } | null | undefined;
+    return holder?.CloseWonTasks ?? {};
+}
+
 interface PolicyCreateContract {
     CreateContract?: boolean;
 }
@@ -136,7 +180,26 @@ export class CloseWonTaskService {
     ): Promise<CloseWonTaskResult> {
         const result: CloseWonTaskResult = { Success: true, Tasks: [], Issues: [] };
 
-        const orderReview = await this.raise(
+        /**
+         * NO ORDER, NO ORDER-REVIEW TASK. The order is embedded on the deal from creation, so an empty
+         * OrderID means something upstream did not happen — and a task pointing at nothing is a work
+         * item finance opens to find an empty page. Report it and create nothing.
+         */
+        if (!input.OrderID) {
+            result.Issues.push(
+                'The deal has no order, so no order-review task was created. The order is created with the '
+                    + 'deal, so this means the deal predates that or its order was never written.',
+            );
+            result.Success = false;
+        }
+        if (input.OrderID && !input.OrderReviewTaskTypeID) {
+            result.Issues.push(
+                'No order-review task type is configured on the pipeline\'s CloseWonPolicy '
+                    + '(CloseWonTasks.OrderReviewTaskTypeID), so the order-review task was not created.',
+            );
+            result.Success = false;
+        }
+        const orderReview = (input.OrderID && input.OrderReviewTaskTypeID) ? await this.raise(
             'OrderReview',
             {
                 Name: `Review order for deal ${input.DealID}`,
@@ -150,7 +213,7 @@ export class CloseWonTaskService {
             provider,
             contextUser,
             result,
-        );
+        ) : null;
         if (orderReview) {
             result.Tasks.push(orderReview);
         }
@@ -313,12 +376,19 @@ export class CloseWonTaskService {
         result: CloseWonTaskResult,
         kind: CloseWonTaskKind,
     ): Promise<string | null> {
+        if (!input.Assignee?.RecordID || !input.Assignee?.EntityName) {
+            result.Issues.push(
+                `The ${kind} task was created but NOT routed: no finance assignee is configured on the `
+                    + 'pipeline\'s CloseWonPolicy (CloseWonTasks.AssigneeRecordID).',
+            );
+            return null;
+        }
         const md = new Metadata();
-        const assigneeEntity = md.Entities.find((e) => e.Name === input.Assignee.EntityName);
+        const assigneeEntity = md.Entities.find((e) => e.Name === input.Assignee!.EntityName);
         if (!assigneeEntity) {
             result.Issues.push(
                 `The ${kind} task was created but could not be routed: entity `
-                    + `'${input.Assignee.EntityName}' is not registered on this host.`,
+                    + `'${input.Assignee!.EntityName}' is not registered on this host.`,
             );
             return null;
         }
@@ -328,8 +398,8 @@ export class CloseWonTaskService {
                 {
                     taskID,
                     assigneeEntityID: assigneeEntity.ID,
-                    assigneeRecordID: input.Assignee.RecordID,
-                    roleID: input.Assignee.RoleID,
+                    assigneeRecordID: input.Assignee!.RecordID,
+                    roleID: input.Assignee!.RoleID,
                     assignedByPersonID: input.AssignedByPersonID,
                 },
                 contextUser,

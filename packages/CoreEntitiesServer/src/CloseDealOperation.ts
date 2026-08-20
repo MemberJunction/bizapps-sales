@@ -53,6 +53,7 @@ import {
 import { DealEntityServer } from './DealEntityServer.js';
 import { LiveOrdersSeam, OrdersIsInstalled } from './LiveOrdersSeam.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
+import { CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
@@ -294,6 +295,48 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 await this.execute(plan, deal, policy, provider, user);
             }
 
+            /**
+             * THE FINANCE TASKS A WON DEAL OWES (S-US2 #34, S-US3 #35).
+             *
+             * INSIDE the transaction, deliberately and on evidence. `TaskOrchestrationService` writes
+             * through the global `Metadata.Provider`, which in a server process is the SAME provider this
+             * operation opened its transaction on — so the writes join it and a rolled-back close takes
+             * the tasks with it. Measured rather than assumed: a probe that created a task inside an
+             * ambient transaction and rolled back found the row gone, and the integration suite has
+             * created hundreds of task rows inside rolled-back checks without leaving one behind.
+             *
+             * Its issues are folded in as WARNINGS, not errors. The deal really did close and its
+             * provenance is written; an unconfigured task type or a missing finance assignee is a
+             * deployment gap to surface, not a reason to refuse a close that has already succeeded.
+             * `Section: 'deal'` because the issue vocabulary has no tasks section — worth adding when
+             * the surface exists to badge it.
+             */
+            const taskIssues: SalesCloseIssue[] = [];
+            if (target.IsWon) {
+                const cfg = ReadCloseWonTaskConfig(policy);
+                const taskResult = await new CloseWonTaskService().CreateCloseWonTasks(
+                    {
+                        DealID: deal.ID,
+                        OrderID: String(deal.OrderID ?? ''),
+                        PipelineID: deal.PipelineID,
+                        OrderReviewTaskTypeID: cfg.OrderReviewTaskTypeID ?? undefined,
+                        ContractTaskTypeID: cfg.ContractTaskTypeID ?? undefined,
+                        Assignee: cfg.AssigneeRecordID
+                            ? {
+                                  EntityName: cfg.AssigneeEntityName ?? 'MJ_BizApps_Common: People',
+                                  RecordID: cfg.AssigneeRecordID,
+                                  RoleID: cfg.AssigneeRoleID ?? undefined,
+                              }
+                            : undefined,
+                    },
+                    provider,
+                    user,
+                );
+                for (const message of taskResult.Issues) {
+                    taskIssues.push({ Section: 'deal', Field: null, Severity: 'warning', Message: message });
+                }
+            }
+
             const stageEvent = await this.stampClose(deal, input, target, routing, provider, user);
 
             if (!(await deal.Save())) {
@@ -307,7 +350,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
 
             return {
                 Success: true,
-                Issues: [],
+                Issues: taskIssues,
                 IsWon: target.IsWon,
                 IsLost: target.IsLost,
                 Locked: target.LocksDeal,

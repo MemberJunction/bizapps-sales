@@ -309,6 +309,59 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-won-tasks.WT7',
+        Name: 'WT7: with no finance assignee configured, the task is created but UNROUTED and says so',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ITEM 4'S RULE, PINNED. Nothing models "finance" as a group and TaskAssignment needs a
+                 * concrete record, so the assignee is deployment configuration. When it is unset the
+                 * honest outcome is an unrouted task plus an issue naming the key — NOT a guessed person,
+                 * which would look routed while nobody was actually looking at it.
+                 */
+                requireTasks(ctx);
+                const input = await baseInput(ctx, false);
+                delete input.Assignee;
+
+                const out = await service.CreateCloseWonTasks(input, ProviderOf(ctx), ctx.User);
+                AssertEqual(out.Tasks.length, 1, 'the task must still be created');
+                const review = out.Tasks[0];
+                AssertEqual(review.AssignmentID, null, 'and reported as unrouted');
+
+                const assigns = await rows(ctx, E_TASK_ASSIGNMENT, `TaskID = '${review.TaskID}'`);
+                AssertEqual(assigns.length, 0, 'no assignment row may be invented');
+                Assert(
+                    out.Issues.some((i) => i.includes('AssigneeRecordID')),
+                    `the issue must name the missing config key — got ${JSON.stringify(out.Issues)}`,
+                );
+            }),
+    },
+    {
+        Id: 'close-won-tasks.WT8',
+        Name: 'WT8: a deal with no order raises NO order-review task, and says why',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The order is embedded on the deal from creation, so an empty OrderID means something
+                 * upstream did not happen. A task linked to nothing is a work item finance opens to find
+                 * an empty page — worse than no task, because it looks handled.
+                 */
+                requireTasks(ctx);
+                const input = await baseInput(ctx, false);
+                input.OrderID = '';
+
+                const out = await service.CreateCloseWonTasks(input, ProviderOf(ctx), ctx.User);
+                Assert(out.Success === false, 'a deal with no order must not report success');
+                AssertEqual(out.Tasks.length, 0, 'and must create no task at all');
+                Assert(
+                    out.Issues.some((i) => i.includes('no order')),
+                    `the refusal must explain itself — got ${JSON.stringify(out.Issues)}`,
+                );
+            }),
+    },
 ];
 
 for (const check of CloseWonTasksChecks) {
