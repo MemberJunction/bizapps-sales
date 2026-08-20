@@ -389,6 +389,65 @@ Until step 3 exists, the doubling failure has no automated witness at all.
 >    `EventOrderLine` is an IsA child. Entity metadata is still written and post-CodeGen CRUD validation
 >    still passes. Judge it on the entity rows, not the exit code.
 
+## 🟠 KI-19 — The contract seam cannot be proven at runtime on any stack we have
+
+**The fix is in; the proof is not.** `LiveContractsSeam` set both `CustomerOrganizationID` and
+`CustomerPersonID`, and `CK_Contract_CustomerXor` requires exactly one:
+
+```sql
+CONSTRAINT CK_Contract_CustomerXor CHECK (
+    (CASE WHEN CustomerOrganizationID IS NULL THEN 0 ELSE 1 END)
+  + (CASE WHEN CustomerPersonID       IS NULL THEN 0 ELSE 1 END) = 1
+)
+```
+
+`validate()` requires an `AccountID` on a won deal, so the organization side was always populated —
+meaning **every B2B won deal with a primary contact produced a contract the database refused.** Only a
+deal with no contact at all got through, which is exactly the shape the existing CT fixture used, which
+is why it was invisible. Fixed by sending the contact as `PrimaryContactPersonID` (a real column on
+`Contract`) and leaving `CustomerPersonID` null.
+
+### Why it is unproven, and it is not the database's fault
+
+Proving it needs contracts' `SaveContractOperation` to actually run — the seam dispatches
+`Contracts.SaveContract` rather than saving entities itself. That needs **both** MJ new enough to build
+this branch **and** the `bizapps-contracts` package loaded in-process. No stack has both:
+
+| Stack | MJ supports the embed | `bizapps-contracts` |
+|---|---|---|
+| `/c/v6` — where this branch builds | yes (`next`, `0f2055fa`) | **absent** — never added as a workspace member |
+| `/c/v6repro` — the only stack with contracts | **no** (`cbfc330c`, zero `DeclareEmbeddedRecord`) | present |
+
+`MJ_V6_Repro` the *database* is fine — 10 contract tables, `PrimaryContactPersonID` present,
+`CK_Contract_CustomerXor` present, and its core is now migrated current. Running the harness there gets
+as far as `ContractsIsInstalled() === true` and then fails with
+`Remote operation 'undefined' has no server implementation` — because the operation's server half lives
+in a package this workspace does not have.
+
+**Importing contracts across from `/c/v6repro` is not a shortcut**: it would resolve
+`@memberjunction/*` from repro's older MJ and put two copies of MJ core in one process, which is the
+single-copy rule in `docs/WORKSPACE-SETUP.md` and breaks `ClassFactory` and decorator identity.
+
+### What closing it costs
+
+Either **add `bizapps-contracts` to `/c/v6`** (clone, workspace member, install, build it against MJ
+`next` — unproven, it carried a local conversion patch — then migrate its schema into `MJ_V6_Host` and
+push its metadata), or **bring `/c/v6repro/MJ` up to `next`** (pull, install, full build including the
+`ai-cerebras` and `actions-bizapps-formbuilders` breakage that needs `--noCheck` emits, then rebuild all
+seven repro members). Both are substantial and both modify a shared stack.
+
+### What IS verified
+
+The constraint text and the target column were read from contracts' own migration, the fix compiles, and
+`test-harnesses/prove-contract-customer.mjs` is written and refuses to pass vacuously — it asserts the
+contracts schema, the constraint's existence and `ContractsIsInstalled()` before it tests anything, and
+exits non-zero if any is missing. It is ready to run the moment a stack can host it.
+
+**Do not mark the CT bundle green on a host without contracts.** A skipped bundle is visually identical
+to a passing one, and that shape has already burned this project four times.
+
+---
+
 ## 🟠 KI-18 — CodeGen's remote-operation generation is not schema-scoped, so every app's file holds every app's operations
 
 **The sibling of KI-10, and the one `excludeSchemas` cannot fix.** KI-10's rule is that an app's CodeGen
@@ -818,7 +877,7 @@ second is the better shape and the reason this is recorded rather than patched.
 
 ---
 
-## 🟢 KI-17 — Opening a Sales Account logs a ClassFactory fallback for common's Organizations
+## 🟢 KI-17 — ClassFactory falls back to `_BaseEntity` for ANY of bizapps-common's entities
 
 Clicking a customer name opens the account as its own Explorer record tab, and it renders correctly.
 It also writes a warning to the browser console:
@@ -827,6 +886,14 @@ It also writes a warning to the browser console:
 ClassFactory: no registration found for base class '_BaseEntity' with key
 'MJ_BizApps_Common: Organizations'. … Falling back to an instance of '_BaseEntity' itself.
 ```
+
+**IT IS THE WHOLE FAMILY, NOT ONE ENTITY.** Recorded first for `Organizations` because that is where it
+was noticed, and the title said so for a while — which was a trap: a later reader met the same warning
+naming `MJ_BizApps_Common: Addresses` (server-side, from a harness) and had to decide whether it was new.
+It is not. **Any** entity in `__mj_BizAppsCommon` hits this, because the cause is that none of common's
+subclasses are registered in the consuming process — not anything specific to one table. Observed so far
+for `Organizations` (Explorer, opening a Sales Account) and `Addresses` (node harness); expect it for
+`People`, `ContactMethods` and the rest on whatever surface reaches them first.
 
 **Why.** `SalesAccount` is an IsA child of common's `Organization`, so loading one asks the ClassFactory
 for the PARENT entity class. Sales' own subclasses are registered in the Explorer; **bizapps-common's are

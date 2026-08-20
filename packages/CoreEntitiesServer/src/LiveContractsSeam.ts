@@ -79,6 +79,7 @@ interface SaveContractPayload {
         CompanyID: string;
         CustomerOrganizationID?: string | null;
         CustomerPersonID?: string | null;
+        PrimaryContactPersonID?: string | null;
         OwnerUserID?: string | null;
         Status: string;
         Description?: string | null;
@@ -169,8 +170,27 @@ export class LiveContractsSeam {
             Contract: {
                 ContractTypeID: contractTypeID,
                 CompanyID: input.CompanyID,
+                /**
+                 * THE CUSTOMER IS THE ACCOUNT, AND ONLY THE ACCOUNT.
+                 *
+                 * `CK_Contract_CustomerXor` requires EXACTLY ONE of CustomerOrganizationID /
+                 * CustomerPersonID:
+                 *
+                 *     (CASE WHEN CustomerOrganizationID IS NULL THEN 0 ELSE 1 END)
+                 *   + (CASE WHEN CustomerPersonID       IS NULL THEN 0 ELSE 1 END) = 1
+                 *
+                 * This set BOTH whenever a deal had a primary contact, so the sum was 2 and the
+                 * database refused the insert. And `validate()` requires an AccountID on a won deal,
+                 * so CustomerOrganizationID was always populated -- meaning EVERY B2B won deal with a
+                 * primary contact failed to produce its contract. Only a deal with no contact at all
+                 * got through, which is why the existing CT fixture never saw it.
+                 *
+                 * The contact is not a second customer; it is the person to talk to about this one. It
+                 * belongs in `PrimaryContactPersonID`, which contracts has for exactly that.
+                 */
                 CustomerOrganizationID: input.AccountID ?? null,
-                CustomerPersonID: input.PrimaryContactID ?? null,
+                CustomerPersonID: null,
+                PrimaryContactPersonID: input.PrimaryContactID ?? null,
                 // No OwnerUserID: sales holds an EMPLOYEE (Deal.OwnerEmployeeID), and guessing a
                 // user from it would be a mapping sales cannot make correctly. Left for contracts.
                 OwnerUserID: null,
