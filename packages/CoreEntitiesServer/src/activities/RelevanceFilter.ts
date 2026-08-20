@@ -87,18 +87,26 @@ export class RelevanceFilter {
     /**
      * Every stored contact method among these addresses, keyed by lower-cased address.
      *
-     * ── WHY THE MATCH IS DONE IN MEMORY RATHER THAN BY `LOWER()` IN THE FILTER ──
+     * -- WHY THE FILTER LOWER-CASES THE COLUMN, DESPITE THE INDEX COST (D-19) --
      *
-     * `ContactMethod.Value` is stored as entered, so an address could be `Ada@Example.com`. A
-     * `Value IN (...)` comparison relies on the database collation being case-insensitive, which it is on
-     * SQL Server by default and is NOT on PostgreSQL — and production is Postgres. Wrapping the column in
-     * `LOWER()` would be portable but non-sargable, discarding any index on `Value`. So the filter stays
-     * an `IN` for the index, and the case-folding is redone here where it is certain. A row the database
-     * returns case-insensitively still matches; one it misses on Postgres would be a genuine miss, which
-     * is why `Value` should be normalized at write time — noted as D-19.
+     * `ContactMethod.Value` is stored as entered, so an address may be `Ada@Example.com`. An `IN` list
+     * relies on the DATABASE COLLATION being case-insensitive. SQL Server's default is; **PostgreSQL's
+     * is not**, and production is Postgres.
+     *
+     * The earlier version used a bare `IN` and re-folded case in memory, which is correct on SQL Server
+     * and silently wrong on Postgres: a differently-cased stored address simply would not come back, the
+     * message would be judged irrelevant, and it would never link. No error, no missing row anyone
+     * counts, no way to notice -- the worst failure shape available. So the comparison is made
+     * case-insensitive IN THE QUERY, where it holds on both engines.
+     *
+     * The cost is real and accepted: `LOWER(Value)` is non-sargable, so any plain index on `Value` stops
+     * being usable for this read. A functional index on `LOWER(Value)` in bizapps-common restores it and
+     * is the proper fix; that is somebody else's schema, so it stays a recommendation rather than
+     * something done from here. The in-memory fold is KEPT as well, because it is what makes the returned
+     * map's keys match what the caller looks up.
      */
     private async lookup(addresses: string[], contextUser: UserInfo): Promise<Map<string, KnownAddress>> {
-        const list = addresses.map((a) => `'${escapeSql(a)}'`).join(', ');
+        const list = addresses.map((a) => `'${escapeSql(a.trim().toLowerCase())}'`).join(', ');
         const r = await new RunView().RunView<{
             Value: string;
             PersonID: string | null;
@@ -106,13 +114,12 @@ export class RelevanceFilter {
         }>(
             {
                 EntityName: E_CONTACT_METHOD,
-                ExtraFilter: `Value IN (${list})`,
+                ExtraFilter: `LOWER(Value) IN (${list})`,
                 ResultType: 'simple',
                 Fields: ['Value', 'PersonID', 'OrganizationID'],
             },
             contextUser,
         );
-
         const known = new Map<string, KnownAddress>();
         if (!r.Success) {
             /**

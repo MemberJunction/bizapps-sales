@@ -21,6 +21,9 @@ import { RunView, type IMetadataProvider } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import {
     ActivityIngestService,
+    ActivitySyncJob,
+    CurrentActivitySourceFactory,
+    SetActivitySourceFactory,
     ActivityReader,
     ActivityWriterService,
     FixtureActivitySource,
@@ -49,6 +52,9 @@ const E_ORGANIZATION = 'MJ_BizApps_Common: Organizations';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 
 /** A fixed address, so a leaked row is traceable to this bundle rather than mistaken for real mail. */
+/** The seeded hourly job, from `metadata/scheduled-jobs/`. Fixed there, so it is fixed here. */
+const ID_SYNC_JOB = '5A1E5000-0000-4000-8000-000000000201';
+
 const FIXTURE_ADDRESS = 'ac-fixture-contact@example.invalid';
 const STRANGER_ADDRESS = 'ac-fixture-stranger@example.invalid';
 
@@ -119,7 +125,11 @@ async function openDeal(ctx: Ctx): Promise<DealFixture> {
  * and never reads the type. Picking "the Email one" by name would be a vocabulary comparison in service
  * of a value nothing reads.
  */
-async function giveContactAnAddress(ctx: Ctx, personID: string): Promise<void> {
+async function giveContactAnAddress(
+    ctx: Ctx,
+    personID: string,
+    address: string = FIXTURE_ADDRESS,
+): Promise<void> {
     const types = await rows(ctx, E_CONTACT_TYPE, 'ID IS NOT NULL');
     Assert(types.length > 0, 'setup: no ContactType rows on this host');
 
@@ -127,7 +137,7 @@ async function giveContactAnAddress(ctx: Ctx, personID: string): Promise<void> {
     row.NewRecord();
     row.PersonID = personID;
     row.ContactTypeID = String(types[0]['ID']);
-    row.Value = FIXTURE_ADDRESS;
+    row.Value = address;
     row.IsPrimary = false;
     Assert(await row.Save(), `setup: the fixture contact method would not save — ${row.LatestResult?.CompleteMessage}`);
 }
@@ -671,6 +681,356 @@ export const ActivitiesChecks: NamedCheck[] = [
             );
             Assert(source.IsLive, 'the Graph source still declares itself LIVE — the gate is not a fixture');
         },
+    },
+    {
+        Id: 'activities.AC12',
+        Name: 'AC12: a mixed-case address matches a lower-case stored ContactMethod (D-19)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+
+                /**
+                 * THE FAILURE THIS GUARDS HAS NO ERROR. Stored lower-case, arriving mixed-case: on SQL
+                 * Server the default collation hides the difference, on PostgreSQL it does not, and the
+                 * message is simply judged irrelevant and never links. So the check asserts the MATCH,
+                 * which is the only observable the bug would change.
+                 */
+                await giveContactAnAddress(ctx, deal.ContactID, FIXTURE_ADDRESS.toLowerCase());
+
+                // Widened to `string` deliberately: with both sides as literal types TS decides the
+                // inequality can never hold and refuses to compile the very assertion that proves the
+                // two spellings differ.
+                const mixedCase: string = 'AC-Fixture-Contact@Example.INVALID';
+                AssertEqual(
+                    mixedCase.toLowerCase(),
+                    FIXTURE_ADDRESS.toLowerCase(),
+                    'setup: the two spellings must be the same address, or this check proves nothing',
+                );
+                Assert(
+                    mixedCase !== FIXTURE_ADDRESS,
+                    'setup: and they must differ in case, or the comparison is trivially satisfied',
+                );
+
+                const verdicts = await new RelevanceFilter().Apply(
+                    [
+                        item({
+                            ExternalID: 'ac12-mixed',
+                            Participants: [{ Address: mixedCase, Name: null, Role: 'From' }],
+                        }),
+                    ],
+                    ctx.User,
+                );
+
+                Assert(
+                    verdicts[0].IsRelevant,
+                    'a mixed-case address MUST match a lower-case stored value. If this fails on Postgres '
+                        + 'and passes on SQL Server, the collation is doing the work and the query is not.',
+                );
+                AssertEqual(
+                    String(verdicts[0].Matches[0].PersonID).toLowerCase(),
+                    deal.ContactID.toLowerCase(),
+                    'and it resolves to the person behind it',
+                );
+            }),
+    },
+    {
+        Id: 'activities.AC13',
+        Name: 'AC13: a MEETING is ingested through the same pipeline — attendees, dedupe, Meeting by code',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+                await giveContactAnAddress(ctx, deal.ContactID);
+                const connectionID = await makeConnection(ctx, null);
+
+                const meeting = item({
+                    ExternalID: 'ac13-event-1',
+                    ExternalThreadID: 'ac13-series-1',
+                    TypeCode: 'Meeting',
+                    Subject: 'AC13 quarterly review',
+                    Direction: 'Internal',
+                    StartedAt: new Date('2026-08-19T14:00:00.000Z'),
+                    EndedAt: new Date('2026-08-19T15:00:00.000Z'),
+                    Location: 'Room 4 / Teams',
+                    Participants: [
+                        { Address: FIXTURE_ADDRESS, Name: 'Fixture Contact', Role: 'Organizer' },
+                        { Address: STRANGER_ADDRESS, Name: null, Role: 'Attendee' },
+                    ],
+                });
+
+                const source = new FixtureActivitySource([meeting], 'Calendar');
+                const run = await ingest.RunSync(connectionID, source, ProviderOf(ctx), ctx.User);
+                Assert(run.Success, `the calendar run failed — ${run.Issues.join(' | ')}`);
+                AssertEqual(run.Written, 1, 'the meeting was filed');
+
+                const links = await rows(
+                    ctx,
+                    E_ACTIVITY_LINK,
+                    `EntityID = '${entityID(ctx, E_DEAL)}' AND RecordID = '${deal.DealID}'`,
+                );
+                const activityID = String(links[0]['ActivityID']);
+                const [activity] = await rows(ctx, E_ACTIVITY, `ID = '${activityID}'`);
+                Assert(!!activity, 'the meeting activity does not resolve to a row');
+
+                // Meeting resolved BY CODE, same lookup email uses.
+                const [meetingType] = await rows(ctx, E_ACTIVITY_TYPE, "Code = 'Meeting'");
+                AssertEqual(
+                    String(activity['ActivityTypeID']).toLowerCase(),
+                    String(meetingType['ID']).toLowerCase(),
+                    'the type is the one whose CODE is Meeting',
+                );
+
+                // The two fields only a calendar item populates.
+                Assert(!!activity['EndedAt'], 'a meeting carries an end time — CK_Activity_EndedAt allows it');
+                AssertEqual(String(activity['Location']), 'Room 4 / Teams', 'and its location');
+                AssertEqual(String(activity['Direction']), 'Internal', 'a meeting was attended, not sent');
+                AssertEqual(String(activity['ExternalThreadID']), 'ac13-series-1', 'the series groups occurrences');
+
+                // The SAME relevance and no-match handling email gets.
+                const partyLinks = await rows(ctx, E_ACTIVITY_LINK, `ActivityID = '${activityID}'`);
+                Assert(
+                    partyLinks.some(
+                        (l) => String(l['EntityID']).toLowerCase() === entityID(ctx, E_PERSON).toLowerCase(),
+                    ),
+                    'the known attendee is linked as a Person under common',
+                );
+                const identity = partyLinks.find((l) => l['IdentityValue'] !== null);
+                Assert(!!identity, 'and the unknown attendee becomes an identity link');
+                AssertEqual(String(identity!['IdentityValue']), STRANGER_ADDRESS, 'carrying their address');
+                Assert(
+                    identity!['RecordID'] === null,
+                    'with no record — no Person was invented for an attendee we do not know',
+                );
+
+                /**
+                 * DEDUPE, WITH THE WATERMARK CLEARED FIRST — the same discipline AC8 uses, and the same
+                 * trap: leaving it in place makes the CALENDAR watermark do the deduping (the source
+                 * filters strictly-greater-than, so it re-delivers nothing), and the check would go green
+                 * having never exercised the unique index at all.
+                 */
+                const reset = await ProviderOf(ctx).GetEntityObject<mjBizAppsCommonActivitySyncConnectionEntity>(
+                    E_SYNC_CONNECTION,
+                    ctx.User,
+                );
+                Assert(await reset.Load(connectionID), 'setup: the connection would not reload');
+                reset.Settings = null;
+                Assert(await reset.Save(), 'setup: the calendar watermark would not clear');
+
+                const again = await ingest.RunSync(
+                    connectionID,
+                    new FixtureActivitySource([meeting], 'Calendar'),
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+                AssertEqual(again.Written, 0, 'the same event re-read writes nothing');
+                AssertEqual(again.Duplicates, 1, 'it is recognised by (SourceSystem, ExternalID)');
+            }),
+    },
+    {
+        Id: 'activities.AC14',
+        Name: 'AC14: mail and meetings keep SEPARATE watermarks, so neither hides the other',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+                await giveContactAnAddress(ctx, deal.ContactID);
+                const connectionID = await makeConnection(ctx, null);
+
+                /**
+                 * THE BUG THIS EXISTS FOR. A shared watermark takes the max of both surfaces, so a meeting
+                 * OLDER than the newest email is judged already-seen and skipped forever — without the
+                 * calendar source ever having been asked for it. Nothing errors and no count looks wrong.
+                 */
+                const newEmail = item({
+                    ExternalID: 'ac14-mail',
+                    StartedAt: new Date('2026-08-19T18:00:00.000Z'),
+                });
+                const olderMeeting = item({
+                    ExternalID: 'ac14-event',
+                    TypeCode: 'Meeting',
+                    Subject: 'AC14 older meeting',
+                    Direction: 'Internal',
+                    StartedAt: new Date('2026-08-19T09:00:00.000Z'),
+                });
+
+                const mail = await ingest.RunSync(
+                    connectionID,
+                    new FixtureActivitySource([newEmail], 'Message'),
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+                Assert(mail.Success, `the mail run failed — ${mail.Issues.join(' | ')}`);
+                AssertEqual(mail.Written, 1, 'the email was filed');
+
+                const calendarSource = new FixtureActivitySource([olderMeeting], 'Calendar');
+                const cal = await ingest.RunSync(connectionID, calendarSource, ProviderOf(ctx), ctx.User);
+                Assert(cal.Success, `the calendar run failed — ${cal.Issues.join(' | ')}`);
+                AssertEqual(
+                    calendarSource.Calls[0].Since,
+                    null,
+                    'the calendar was asked from ITS OWN watermark, which is unset — not from the mail one',
+                );
+                AssertEqual(cal.Written, 1, 'so the older meeting was still ingested');
+
+                const [connection] = await rows(ctx, E_SYNC_CONNECTION, `ID = '${connectionID}'`);
+                Assert(!!connection['LastSyncAt'], 'the MESSAGE watermark is on the column');
+                const settings = JSON.parse(String(connection['Settings'] ?? '{}')) as Record<string, unknown>;
+                AssertEqual(
+                    String(settings['CalendarLastSyncAt']),
+                    olderMeeting.StartedAt.toISOString(),
+                    'and the CALENDAR watermark is in Settings, at its own position',
+                );
+            }),
+    },
+    {
+        Id: 'activities.AC15',
+        Name: 'AC15: the seeded ScheduledJob points at the seeded Action, hourly, Skip/RunOnce',
+        RequiresMutation: false,
+        Fn: async (ctx) => {
+            /**
+             * METADATA INTEGRITY, not behaviour. The chain is Category -> Action -> Param -> ScheduledJob,
+             * and its one silent failure mode is a `Configuration.ActionID` that points at nothing: the job
+             * fires on time, resolves no action, and does nothing with no error. Reading it back is the only
+             * way to know the four rows agree.
+             */
+            const jobs = await rows(ctx, 'MJ: Scheduled Jobs', `ID = '${ID_SYNC_JOB}'`);
+            if (jobs.length === 0) {
+                Assert(
+                    false,
+                    'the activity-sync ScheduledJob is not in this database. Run `mj sync push --dir metadata`; '
+                        + 'the row is seeded from metadata/scheduled-jobs/.',
+                );
+                return;
+            }
+            const job = jobs[0];
+
+            AssertEqual(String(job['CronExpression']), '0 0 * * * *', 'hourly, six-field (seconds first)');
+            AssertEqual(String(job['Status']), 'Active', 'Active — it is meant to be firing');
+            AssertEqual(String(job['ConcurrencyMode']), 'Skip', 'overlapping runs would race the watermark');
+            AssertEqual(String(job['MissedRunPolicy']), 'RunOnce', 'catching up N hours would fetch the same window N times');
+
+            const config = JSON.parse(String(job['Configuration'] ?? '{}')) as { ActionID?: string };
+            Assert(!!config.ActionID, 'the job Configuration must name an ActionID');
+
+            const actions = await rows(ctx, 'MJ: Actions', `ID = '${config.ActionID}'`);
+            AssertEqual(
+                actions.length,
+                1,
+                'and that ActionID must resolve to a real Action — a dangling one fires and does nothing',
+            );
+            AssertEqual(String(actions[0]['DriverClass']), 'Sales.SyncActivities', 'to THIS action');
+            AssertEqual(String(actions[0]['Status']), 'Active', 'which must itself be Active');
+        },
+    },
+    {
+        Id: 'activities.AC16',
+        Name: 'AC16: the Action drives the whole chain — swapping the factory is the only change',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+                await giveContactAnAddress(ctx, deal.ContactID);
+                const connectionID = await makeConnection(ctx, null);
+
+                const actions = await rows(ctx, 'MJ: Actions', `DriverClass = 'Sales.SyncActivities'`);
+                Assert(
+                    actions.length === 1,
+                    'setup: the Sales.SyncActivities action row is missing — run `mj sync push --dir metadata`',
+                );
+
+                /**
+                 * THE CLAIM: everything downstream of the seam is already wired, and a real credential
+                 * changes ONE thing. So this substitutes a populated fixture through the same setter a
+                 * deployment would use for a Graph source, runs the Action, and asserts activities land.
+                 *
+                 * The default factory returns two EMPTY fixtures, which is why the seeded hourly job is safe
+                 * to ship Active — the run is real and writes nothing.
+                 */
+                const previous = SetActivitySourceFactory(() => [
+                    new FixtureActivitySource([item({ ExternalID: 'ac16-mail' })], 'Message'),
+                    new FixtureActivitySource(
+                        [item({ ExternalID: 'ac16-event', TypeCode: 'Meeting', Direction: 'Internal' })],
+                        'Calendar',
+                    ),
+                ]);
+                try {
+                    const job = new ActivitySyncJob();
+                    const result = await job.Run(
+                        CurrentActivitySourceFactory(),
+                        ProviderOf(ctx),
+                        ctx.User,
+                        50,
+                    );
+
+                    Assert(result.Success, `the job failed — ${result.Issues.join(' | ')}`);
+                    AssertEqual(result.ConnectionsAttempted, 1, 'one Active connection was read');
+                    AssertEqual(result.Runs.length, 2, 'and BOTH surfaces ran against it');
+                    Assert(
+                        result.Runs.some((r) => r.Surface === 'Message') &&
+                            result.Runs.some((r) => r.Surface === 'Calendar'),
+                        'one run per surface, each labelled',
+                    );
+
+                    const written = result.Runs.reduce((n, r) => n + r.Result.Written, 0);
+                    AssertEqual(written, 2, 'an email and a meeting were both filed');
+                    AssertEqual(
+                        await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx)),
+                        2,
+                        'and both are on the deal timeline',
+                    );
+                } finally {
+                    SetActivitySourceFactory(previous);
+                }
+            }),
+    },
+    {
+        Id: 'activities.AC17',
+        Name: 'AC17: the DEFAULT factory writes nothing — which is why the hourly job ships Active',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+                await giveContactAnAddress(ctx, deal.ContactID);
+                const connectionID = await makeConnection(ctx, null);
+                Assert(!!connectionID, 'setup: a connection is needed, so this is not passing by absence');
+
+                /**
+                 * The default is deliberately two EMPTY fixtures. If somebody replaces it with a populated
+                 * one — or with a Graph source — this check goes red, which is the point: the seeded hourly
+                 * job is only safe to ship Active because the default reads nothing.
+                 */
+                const before = (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length;
+                const result = await new ActivitySyncJob().Run(
+                    CurrentActivitySourceFactory(),
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+
+                Assert(result.Success, `the default run must succeed — ${result.Issues.join(' | ')}`);
+                AssertEqual(result.ConnectionsAttempted, 1, 'it did read the connection');
+                AssertEqual(result.Runs.length, 2, 'and ran both surfaces');
+                AssertEqual(
+                    result.Runs.reduce((n, r) => n + r.Result.Fetched, 0),
+                    0,
+                    'fetching nothing',
+                );
+                AssertEqual(
+                    (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length,
+                    before,
+                    'and writing nothing — an hourly run against this default cannot invent data',
+                );
+                AssertEqual(
+                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx)),
+                    0,
+                    'nor touch the deal',
+                );
+            }),
     },
 ];
 

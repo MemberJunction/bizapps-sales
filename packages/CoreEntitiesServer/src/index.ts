@@ -62,6 +62,7 @@ export * from './activities/ActivityReader.js';
 export * from './activities/ActivitySource.js';
 export * from './activities/FixtureActivitySource.js';
 export * from './activities/MSGraphActivitySource.js';
+export * from './activities/MSGraphCalendarSource.js';
 export * from './activities/RelevanceFilter.js';
 export * from './activities/DealMatcher.js';
 export * from './activities/ActivityIngestService.js';

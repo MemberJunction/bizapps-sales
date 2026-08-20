@@ -55,6 +55,8 @@ interface SyncRuleRow {
 
 interface ConnectionRow {
     ID: string;
+    /** JSON. Holds the CALENDAR watermark; see `watermarkFor`. */
+    Settings: string | null;
     Provider: string;
     Status: string;
     Mailbox: string | null;
@@ -135,7 +137,20 @@ export class ActivityIngestService {
         }
 
         try {
-            const since = connection.LastSyncAt ? new Date(connection.LastSyncAt) : null;
+            /**
+             * ONE WATERMARK PER SURFACE, and this is a correctness requirement rather than tidiness.
+             *
+             * A connection has two sources -- messages and calendar -- and they advance independently. A
+             * shared `LastSyncAt` would take the max of both, so a meeting older than the newest email
+             * would be considered already-seen and SKIPPED FOREVER: the watermark moved past it without
+             * the calendar source ever having been asked. Nothing would error and no row would be
+             * missing from anything anyone counts.
+             *
+             * `LastSyncAt` stays the MESSAGE watermark, so nothing about existing behaviour changes, and
+             * the calendar's lives in `Settings` -- an existing nullable JSON column on the connection.
+             * That avoids a migration in another app's schema for a field only this app reads.
+             */
+            const since = this.watermarkFor(connection, source.Kind);
             const batch = await source.Fetch({ Mailbox: connection.Mailbox, Since: since, Limit: limit });
             result.Fetched = batch.Items.length;
             result.Issues.push(...batch.Issues);
@@ -164,7 +179,14 @@ export class ActivityIngestService {
              * not advancing past it would re-read and re-discard it forever.
              */
             if (batch.HighWatermark) {
-                await this.advanceWatermark(connectionID, batch.HighWatermark, provider, contextUser, result);
+                await this.advanceWatermark(
+                    connectionID,
+                    batch.HighWatermark,
+                    source.Kind,
+                    provider,
+                    contextUser,
+                    result,
+                );
             }
 
             await this.clearFailure(connectionID, provider, contextUser);
@@ -317,7 +339,7 @@ export class ActivityIngestService {
                 EntityName: E_ACTIVITY_SYNC_CONNECTION,
                 ExtraFilter: `ID = '${escapeSql(id)}'`,
                 ResultType: 'simple',
-                Fields: ['ID', 'Provider', 'Status', 'Mailbox', 'LastSyncAt'],
+                Fields: ['ID', 'Provider', 'Status', 'Mailbox', 'LastSyncAt', 'Settings'],
             },
             contextUser,
         );
@@ -337,9 +359,31 @@ export class ActivityIngestService {
         return r.Success ? (r.Results ?? []) : [];
     }
 
+    /** The key in `Settings` holding the calendar watermark. */
+    private static readonly CALENDAR_WATERMARK = 'CalendarLastSyncAt';
+
+    /** The watermark for one surface. Messages use the column; the calendar uses `Settings`. */
+    private watermarkFor(connection: ConnectionRow, kind: 'Message' | 'Calendar'): Date | null {
+        if (kind === 'Message') {
+            return connection.LastSyncAt ? new Date(connection.LastSyncAt) : null;
+        }
+        const stored = readSettings(connection.Settings)[ActivityIngestService.CALENDAR_WATERMARK];
+        if (typeof stored !== 'string' || !stored) {
+            return null;
+        }
+        const parsed = new Date(stored);
+        /**
+         * AN UNPARSEABLE WATERMARK IS TREATED AS ABSENT, not as an error. Hand-edited JSON is the likely
+         * cause, and the recovery -- re-read the window and let dedupe absorb it -- costs one extra fetch.
+         * Failing the run instead would leave the calendar permanently stuck on a typo.
+         */
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
     private async advanceWatermark(
         connectionID: string,
         to: Date,
+        kind: 'Message' | 'Calendar',
         provider: IMetadataProvider,
         contextUser: UserInfo,
         result: IngestRunResult,
@@ -349,7 +393,20 @@ export class ActivityIngestService {
             result.Issues.push('The watermark could not be advanced — the connection row would not load.');
             return;
         }
-        row.LastSyncAt = to;
+
+        if (kind === 'Message') {
+            row.LastSyncAt = to;
+        } else {
+            /**
+             * MERGED, NOT OVERWRITTEN. `Settings` is a shared JSON bag on another app's row -- anything
+             * else keeping state there must survive this write, and replacing the object would delete it
+             * silently.
+             */
+            const settings = readSettings(row.Settings);
+            settings[ActivityIngestService.CALENDAR_WATERMARK] = to.toISOString();
+            row.Settings = JSON.stringify(settings);
+        }
+
         if (await row.Save()) {
             result.WatermarkAdvancedTo = to;
         } else {
@@ -359,7 +416,6 @@ export class ActivityIngestService {
             );
         }
     }
-
     private async recordFailure(
         connectionID: string,
         reason: string,
@@ -402,6 +458,26 @@ export class ActivityIngestService {
             contextUser,
         );
         return (await row.Load(id)) ? row : null;
+    }
+}
+
+/**
+ * `ActivitySyncConnection.Settings` parsed, or an empty bag.
+ *
+ * Never throws: the column is free-form JSON on a row this app does not own, so unparseable content is
+ * somebody else's problem to fix and not a reason to fail a sync.
+ */
+function readSettings(raw: string | null | undefined): Record<string, unknown> {
+    if (!raw) {
+        return {};
+    }
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : {};
+    } catch {
+        return {};
     }
 }
 

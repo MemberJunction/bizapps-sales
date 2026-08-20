@@ -1,21 +1,20 @@
 /**
  * @fileoverview The hourly entry point — what a `MJ: Scheduled Jobs` row invokes.
  *
- * ── WHY THIS IS A RUNNER AND NOT A SEEDED JOB ───────────────────────────────────────────────────
+ * ── THE WHOLE CHAIN IS WIRED AND FIRING ────────────────────────────────────────────────────────
  *
  * MJ's `SchedulingEngine` is the mechanism: a `ScheduledJob` row of type **Action**
- * (`ActionScheduledJobDriver`) on a six-field cron — `0 0 * * * *` for hourly. No external cron, and
+ * (`ActionScheduledJobDriver`) on a six-field cron -- `0 0 * * * *` for hourly. No external cron, and
  * nothing here schedules itself.
  *
- * What is deliberately NOT done is seeding that row. Every source available today either refuses (the
- * Graph source, until a tenant policy exists) or is a fixture (which has no business running in a
- * deployment). An `Active` hourly job would therefore write to `ActivitySyncConnection.LastError` once an
- * hour, forever, and the operator surface that exists to make a broken sync visible would be permanently
- * red for a sync that was never switched on. A row that cannot succeed is worse than no row.
+ * The job row IS seeded, `Active`, and it fires. What makes that safe rather than noisy is the default
+ * source: an EMPTY fixture. The run does the whole pipeline every hour and writes nothing, so the job
+ * log reads as an hourly success that fetched zero items -- which is the truthful description of a
+ * deployment with no mailbox yet. See `activitySourceFactory` below for why the two alternatives are
+ * both worse.
  *
- * So this is the callable half, complete and tested. Turning it on is: create the Action metadata, create
- * the `ScheduledJob` row pointing at it, and flip a connection to `Active`. Recorded as D-23 with the
- * exact field values.
+ * So a real credential changes exactly one thing: which source the factory returns. Nothing in this file,
+ * the ingest, the filter, the matcher or the writer moves.
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */
@@ -23,6 +22,7 @@ import { LogStatus, RunView, type IMetadataProvider, type UserInfo } from '@memb
 
 import { ActivityIngestService, type IngestRunResult } from './ActivityIngestService.js';
 import { E_ACTIVITY_SYNC_CONNECTION, SOURCE_SYSTEM_M365 } from './activity-vocabulary.js';
+import { FixtureActivitySource } from './FixtureActivitySource.js';
 import type { IActivitySource } from './ActivitySource.js';
 
 export interface SyncJobResult {
@@ -30,12 +30,22 @@ export interface SyncJobResult {
     Success: boolean;
     ConnectionsAttempted: number;
     /** Per-connection outcomes, so a job log says which mailbox did what. */
-    Runs: { ConnectionID: string; Mailbox: string | null; Result: IngestRunResult }[];
+    Runs: {
+        ConnectionID: string;
+        Mailbox: string | null;
+        /** Which surface this run read. One connection produces one entry per surface. */
+        Surface: 'Message' | 'Calendar';
+        Result: IngestRunResult;
+    }[];
     Issues: string[];
 }
 
 /**
  * Builds the source for one connection.
+ *
+ * RETURNS A LIST, because one mailbox has TWO surfaces — messages and calendar — and both are read on
+ * the same schedule against the same connection. Returning one source would have made meetings a
+ * second job with a second row and a second cron to keep in step.
  *
  * A FACTORY, not a source, because one job run may cover several mailboxes and each needs its own
  * credential. It is also the seam's outermost point: a deployment that has scoped its app registration
@@ -46,7 +56,46 @@ export type ActivitySourceFactory = (connection: {
     ID: string;
     Mailbox: string | null;
     CredentialsRef: string | null;
-}) => IActivitySource | null;
+}) => IActivitySource[];
+
+/**
+ * THE PROCESS-WIDE SOURCE FACTORY, and the single line a real credential changes.
+ *
+ * ── WHY THE DEFAULT IS AN EMPTY FIXTURE ──
+ *
+ * The scheduled job has to be real and Active for the chain to be proved firing, and an Active job
+ * needs a source that neither invents data nor fails. An empty fixture is exactly that: the run does the
+ * whole pipeline -- reads the connection, applies the rules, calls the filter, advances nothing -- and
+ * writes zero rows. The job log shows an hourly success with nothing fetched, which is the truthful
+ * description of a deployment that has not been given a mailbox yet.
+ *
+ * The alternatives are both worse. A populated fixture would write fabricated activities into a real
+ * database every hour. A Graph source would refuse every hour and paint
+ * `ActivitySyncConnection.LastError` red for a sync nobody switched on.
+ *
+ * ── AND WHY IT IS A MODULE-LEVEL SETTER ──
+ *
+ * Same shape as `SetDownstreamSeam` in the close flow: an MJ Action is constructed by the ClassFactory
+ * with no arguments, so there is nowhere to inject a factory. Replacing it is a deployment act -- a
+ * bootstrap that has confirmed the tenant policy calls this with a Graph-backed factory -- and a check
+ * calls it with a populated fixture. Nothing else in the chain knows the difference.
+ */
+let activitySourceFactory: ActivitySourceFactory = () => [
+    new FixtureActivitySource([], 'Message'),
+    new FixtureActivitySource([], 'Calendar'),
+];
+
+/** Replace the process-wide factory. Returns the previous one, so a check can restore it. */
+export function SetActivitySourceFactory(factory: ActivitySourceFactory): ActivitySourceFactory {
+    const previous = activitySourceFactory;
+    activitySourceFactory = factory;
+    return previous;
+}
+
+/** The factory in force. What the Action calls; never captured at import time. */
+export function CurrentActivitySourceFactory(): ActivitySourceFactory {
+    return activitySourceFactory;
+}
 
 export class ActivitySyncJob {
     private readonly ingest = new ActivityIngestService();
@@ -104,8 +153,8 @@ export class ActivitySyncJob {
         }
 
         for (const connection of rows) {
-            const source = factory(connection);
-            if (!source) {
+            const sources = factory(connection);
+            if (sources.length === 0) {
                 result.Issues.push(
                     `No source could be built for connection ${connection.ID} (${connection.Mailbox ?? 'no mailbox'}).`,
                 );
@@ -114,11 +163,25 @@ export class ActivitySyncJob {
             }
 
             result.ConnectionsAttempted++;
-            const run = await this.ingest.RunSync(connection.ID, source, provider, contextUser, limit);
-            result.Runs.push({ ConnectionID: connection.ID, Mailbox: connection.Mailbox, Result: run });
-            if (!run.Success) {
-                result.Success = false;
-                result.Issues.push(`Connection ${connection.ID} failed: ${run.Issues.join(' | ')}`);
+            /**
+             * EACH SURFACE IS ITS OWN RUN against its own watermark. Sequential rather than concurrent on
+             * purpose: both writes touch the same connection row to advance a watermark, and two
+             * concurrent saves would race, with the loser's advance silently lost.
+             */
+            for (const source of sources) {
+                const run = await this.ingest.RunSync(connection.ID, source, provider, contextUser, limit);
+                result.Runs.push({
+                    ConnectionID: connection.ID,
+                    Mailbox: connection.Mailbox,
+                    Surface: source.Kind,
+                    Result: run,
+                });
+                if (!run.Success) {
+                    result.Success = false;
+                    result.Issues.push(
+                        `Connection ${connection.ID} (${source.Kind}) failed: ${run.Issues.join(' | ')}`,
+                    );
+                }
             }
         }
 

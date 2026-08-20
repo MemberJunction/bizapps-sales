@@ -40,6 +40,9 @@
     "account-types",
     "remote-operation-categories",
     "remote-operations",
+    "action-categories",
+    "actions",
+    "scheduled-jobs",
     "applications",
     "entity-relationships"
   ],
