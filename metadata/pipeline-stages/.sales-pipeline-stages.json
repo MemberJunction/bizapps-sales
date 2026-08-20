@@ -1,0 +1,190 @@
+[
+  {
+    "_comments": [
+      "THE B2B STAGES. DisplayOrder is the board's left-to-right order; Probability is a DEFAULT copied",
+      "onto a deal on entry, not read through — so a deal keeps the number it was judged at when a stage",
+      "is later retuned.",
+      "",
+      "OrderStatusOnEntry is NULL on the first two. That is an answer, not an omission: Discovery and",
+      "Qualification say nothing about the order, and a stage that reset it to Draft on every backward",
+      "move would fight the rep."
+    ],
+    "fields": {
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=B2B",
+      "Name": "Discovery",
+      "Code": "DISC",
+      "DisplayOrder": 10,
+      "Probability": 10,
+      "ForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",
+      "DealStatusTypeID": "@lookup:MJ_BizApps_Sales: Deal Status Types.Code=OPEN",
+      "RottingDays": 14,
+      "GuidanceMarkdown": "**What good looks like:** the economic buyer is named and the current cost of doing nothing is quantified.",
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "91111111-0000-4000-A000-000000000001"
+    }
+  },
+  {
+    "fields": {
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=B2B",
+      "Name": "Qualification",
+      "Code": "QUAL",
+      "DisplayOrder": 20,
+      "Probability": 25,
+      "ForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",
+      "DealStatusTypeID": "@lookup:MJ_BizApps_Sales: Deal Status Types.Code=OPEN",
+      "RottingDays": 14,
+      "GuidanceMarkdown": "**What good looks like:** budget, authority and a compelling event are all confirmed in writing.",
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "91111111-0000-4000-A000-000000000002"
+    }
+  },
+  {
+    "_comments": [
+      "FROM HERE ON THE ORDER IS QUOTED. A proposal IS a quote, which is why this is the stage where the",
+      "answer changes — and why the same value carries through Negotiation and the win rather than",
+      "escalating. Escalating to Confirmed is finance's act, not a rep's drag (DN-10)."
+    ],
+    "fields": {
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=B2B",
+      "Name": "Proposal",
+      "Code": "PROP",
+      "DisplayOrder": 30,
+      "Probability": 50,
+      "ForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=BESTCASE",
+      "DealStatusTypeID": "@lookup:MJ_BizApps_Sales: Deal Status Types.Code=OPEN",
+      "OrderStatusOnEntry": "Quoted",
+      "RottingDays": 21,
+      "GuidanceMarkdown": "**What good looks like:** a priced proposal the champion has seen and can defend internally.",
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "91111111-0000-4000-A000-000000000003"
+    }
+  },
+  {
+    "fields": {
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=B2B",
+      "Name": "Negotiation",
+      "Code": "NEG",
+      "DisplayOrder": 40,
+      "Probability": 75,
+      "ForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=COMMIT",
+      "DealStatusTypeID": "@lookup:MJ_BizApps_Sales: Deal Status Types.Code=OPEN",
+      "OrderStatusOnEntry": "Quoted",
+      "RottingDays": 21,
+      "GuidanceMarkdown": "**What good looks like:** a mutual action plan with dates, and legal engaged.",
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "91111111-0000-4000-A000-000000000004"
+    }
+  },
+  {
+    "_comments": [
+      "THE WINNING STAGE, and it is called Signed. The status type it points at carries IsWon = 1, which",
+      "is the only thing any code reads. Entering it QUOTES the order rather than confirming it: finance",
+      "reviews and corrects before the Confirm that books the ledger (S-US5/S-US6)."
+    ],
+    "fields": {
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=B2B",
+      "Name": "Signed",
+      "Code": "SIGNED",
+      "DisplayOrder": 50,
+      "Probability": 100,
+      "ForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=CLOSED",
+      "DealStatusTypeID": "@lookup:MJ_BizApps_Sales: Deal Status Types.Code=WON",
+      "OrderStatusOnEntry": "Quoted",
+      "GuidanceMarkdown": "Agreement executed. Entering this stage quotes the order; finance confirms it, and the Confirm is what books the ledger.",
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "91111111-0000-4000-A000-000000000005"
+    },
+    "sync": {
+      "lastModified": "2026-08-20T20:32:57.241Z",
+      "checksum": "34714c282ec3f67ccd7f52dfa5b09a0813503ecbfd632df75737593dbae53253"
+    }
+  },
+  {
+    "_comments": [
+      "VOIDING THE ORDER IS THE POINT OF THIS ROW (S-US7). A lost deal's order has to stop being",
+      "something finance might act on, and Voided is terminal in orders — which is also what makes the",
+      "reopen case in S-US8 warn rather than silently half-succeed."
+    ],
+    "fields": {
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=B2B",
+      "Name": "Lost",
+      "Code": "LOST",
+      "DisplayOrder": 60,
+      "Probability": 0,
+      "ForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=CLOSED",
+      "DealStatusTypeID": "@lookup:MJ_BizApps_Sales: Deal Status Types.Code=LOST",
+      "OrderStatusOnEntry": "Voided",
+      "GuidanceMarkdown": "A loss reason is mandatory — it is the highest-value, most-skipped data in any CRM. Entering this stage VOIDS the order.",
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "91111111-0000-4000-A000-000000000006"
+    },
+    "sync": {
+      "lastModified": "2026-08-20T20:32:57.303Z",
+      "checksum": "5f6e284cdd504a318a3b3364c171a7c0c35fbe2ec88653082827ab69a0f4bbd2"
+    }
+  },
+  {
+    "_comments": [
+      "THE D2C STAGES. No proposal step, so only the winning stage speaks about the order — which is the",
+      "shape difference that makes shipping both pipelines worth it rather than one."
+    ],
+    "fields": {
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=D2C",
+      "Name": "Introduced",
+      "Code": "INTRO",
+      "DisplayOrder": 10,
+      "Probability": 20,
+      "ForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",
+      "DealStatusTypeID": "@lookup:MJ_BizApps_Sales: Deal Status Types.Code=OPEN",
+      "RottingDays": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "92111111-0000-4000-A000-000000000001"
+    }
+  },
+  {
+    "fields": {
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=D2C",
+      "Name": "Evaluating",
+      "Code": "EVAL",
+      "DisplayOrder": 20,
+      "Probability": 60,
+      "ForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=COMMIT",
+      "DealStatusTypeID": "@lookup:MJ_BizApps_Sales: Deal Status Types.Code=OPEN",
+      "RottingDays": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "92111111-0000-4000-A000-000000000002"
+    }
+  },
+  {
+    "fields": {
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=D2C",
+      "Name": "Booked",
+      "Code": "BOOKED",
+      "DisplayOrder": 30,
+      "Probability": 100,
+      "ForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=CLOSED",
+      "DealStatusTypeID": "@lookup:MJ_BizApps_Sales: Deal Status Types.Code=WON",
+      "OrderStatusOnEntry": "Quoted",
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "92111111-0000-4000-A000-000000000003"
+    }
+  }
+]

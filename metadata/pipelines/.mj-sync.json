@@ -1,0 +1,34 @@
+{
+  "entity": "MJ_BizApps_Sales: Pipelines",
+  "filePattern": "**/.*.json",
+  "_comment": [
+    "PIPELINES ARE SEEDED NOW, AND THEY DELIBERATELY WERE NOT BEFORE.",
+    "",
+    "The root .mj-sync.json used to say pipelines are per-deployment data rather than vocabulary, and",
+    "that was the right call while installing the app and configuring it were the same act. The dev->test",
+    "process changed the premise: 'install the app and test it' is now the workflow, and an app that",
+    "installs with no pipeline is an app where nobody can create a deal or render a board column. A",
+    "default nobody wants is cheaper to change than a blocker nobody expected.",
+    "",
+    "THE COMPANY IS THE AWKWARD PART, and the reason this was deferred. Pipeline.CompanyID is NOT NULL",
+    "and stays that way (docs/DECISIONS.md D5), so a seeded pipeline has to name a selling company --",
+    "and companies are MJ core data that belong to the deployment, not to this app. The lookup below",
+    "resolves 'Default Company' with ?create -- the explicit auto-create form, because the root config's",
+    "autoCreateMissingRecords does NOT cover a failed @lookup — measured: the push halts on it. It is",
+    "the only option that leaves the app usable on a bare install. A deployment with a real company",
+    "should repoint these two rows or rename that one; scripts/seed-demo-data.sh does exactly that for",
+    "local development, so a dev host ends up with these pipelines on the dev companies rather than a",
+    "second set of them.",
+    "",
+    "This is the ONLY place sales' metadata reaches into MJ core data. It is worth knowing that, which",
+    "is why it is written here rather than assumed."
+  ],
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".sales-pipelines.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true
+  }
+}

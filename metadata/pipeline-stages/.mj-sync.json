@@ -1,0 +1,26 @@
+{
+  "entity": "MJ_BizApps_Sales: Pipeline Stages",
+  "filePattern": "**/.*.json",
+  "_comment": [
+    "The stages for the two seeded pipelines. MUST be pushed after `pipelines` — every row here",
+    "resolves its PipelineID by Code, so the pipeline has to exist first. That ordering is declared in",
+    "the root .mj-sync.json and is load-bearing, not precautionary.",
+    "",
+    "OrderStatusOnEntry is populated here because a stage with no answer to 'what does entering you mean",
+    "for the order' is the thing D-OS1 exists to remove. The values are the ones Andrew ruled: Quoted",
+    "from Proposal onward INCLUDING the winning stage, Voided on the losing stage, and NULL on the early",
+    "stages, which is a real answer meaning 'this stage has no opinion'.",
+    "",
+    "CONFIRMED IS SEEDED NOWHERE, ON PURPOSE. Confirming an order books journal entries and freezes its",
+    "lines, so a stage carrying it means dragging a card posts to the ledger. Which stage earns that is",
+    "the one open question -- DECISIONS-NEEDED.md DN-10 -- and it is one field on one row when answered."
+  ],
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".sales-pipeline-stages.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true
+  }
+}
