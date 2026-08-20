@@ -39,7 +39,7 @@
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
     "close-won-contract": { "count": 1, "requires": null, "ids": "CT0 — a tripwire; CT1-CT4 retired 2026-08-20" },
     "board-move": { "count": 4, "requires": "orders", "ids": "BD1-BD4" },
-    "activities": { "count": 17, "requires": "common", "ids": "AC1-AC17" }
+    "activities": { "count": 18, "requires": "common", "ids": "AC1-AC18" }
   },
   "probes": {
     "orders": "@mj-biz-apps/orders-entities",

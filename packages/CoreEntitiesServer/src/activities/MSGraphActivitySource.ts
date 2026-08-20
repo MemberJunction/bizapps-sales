@@ -215,6 +215,8 @@ export class MSGraphActivitySource implements IActivitySource {
             /** Inferred, and imperfect — see D-18. */
             Direction: from && from === mailbox ? 'Outbound' : 'Inbound',
             Participants: participants,
+            /** A sent message cannot be un-sent. Only the calendar has a cancellation. */
+            Cancelled: false,
             Raw: { ...message },
         };
     }
