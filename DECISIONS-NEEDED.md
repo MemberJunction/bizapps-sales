@@ -155,3 +155,61 @@ attaching an existing order stays legitimate. Nine failing checks became zero.
 
 The reason it survived until now: in the UI a deal is always saved before a line is added, so the broken
 branch was unreachable from the only path anyone had exercised.
+
+---
+
+## DN-8 — OPEN: the deal workspace cannot reopen a deal, and the fix is in another repo
+
+**Explorer pass, 2026-08-20.** Creating a deal works; its order is provisioned; the numbers land in the
+database. **Reopening it does not** — and since every deal now has an order, that is every deal.
+
+Two causes, found in sequence, both outside this repo. Full detail in `docs/KNOWN-ISSUES.md`:
+
+* **KI-21 — orders was never installed as an Open App on this host.** Its schema was migrated and its
+  entities registered, but `mj.config.cjs` → `dynamicPackages.server[]` listed only sales, so orders'
+  resolvers never entered the GraphQL schema. **Fixed locally** by adding the entry by hand; the proper
+  fix is `mj app install` for bizapps-orders. This one matters for the AWS install: a dependency
+  declaration in `mj-app.json` does not make a host register that dependency's server package.
+* **KI-22 — orders' generated resolvers are behind the database.** `vwOrderHeaders` and `EntityField`
+  both carry `RootReversesOrderHeaderID` (MJ's recursive-hierarchy column for the self-referencing
+  `ReversesOrderHeaderID`); orders' committed generated code does not. The client builds its selection
+  set from metadata, so every Order Header read asks for a field the schema lacks. **NOT fixed.**
+
+**The decision:** re-running orders' CodeGen file pass and rebuilding it (`npm run mj:codegen:files &&
+npm run build` in bizapps-orders) is almost certainly all it takes. It was not run because it is another
+repo, on a database shared with a second working session, and CLAUDE.md records a measured case of a
+second CodeGen pass corrupting a database. That is a call for Josue, in the morning, with the stack quiet
+— not something to do unattended at 07:40.
+
+---
+
+## DN-9 — DECIDED: a product line needs a SAVED deal, and the button now says so
+
+**The workspace could not save a product line at all.** `CanSave` is gated on `deal.Validate()`, which
+fans out into the embedded order — and in the browser nothing has stamped the server-derived NOT NULL
+columns. A rep filled in every field they could see and the Save button stayed disabled reading
+"Company ID cannot be null", against a Party info tab where nothing was wrong.
+
+Three required columns, three different answers:
+
+| Column | Who supplies it | What was done |
+|---|---|---|
+| `OrderLine.CompanyID` | `OrderLineEntityServer`, from the product | **`AddLine()` now sets it** from the pipeline lookup — the same row the server reads |
+| `OrderHeader.CompanyID` / `OrderType` | `provisionEmbeddedOrder()` | **`AddLine()` now sets both** on an unsaved order |
+| `OrderHeader.OrderNumber` | `OrderEntityServer.assignOrderNumber()` — server only | **cannot be supplied**, and must not be invented |
+
+Because of the third, an order that exists only in memory can never validate. So **`Add line` is disabled
+until the deal is saved**, with the reason on screen: *"Save the deal first — its order is created on the
+first save, and a product line needs it."* That is also the sequence S-US4 describes, so it is not a
+workaround dressed as a feature.
+
+**What was rejected:** relaxing `CanSave` to skip companion validation. It would have unblocked both
+cases at the cost of the thing that gating buys — a rep learning about a refusal before they lose their
+work. Worth revisiting only if pre-save line entry turns out to matter.
+
+**Still unverified**, because DN-8 blocks it: that adding a line to an ALREADY-SAVED deal now works
+end-to-end through the UI. The blocker was identified from metadata (`CompanyID` was the only line-level
+refusal; `UnitPrice` initialises to 0 and does not trip validation), and `save-deal.SD19` covers the same
+write through the entity layer — but the UI path itself has not been seen green. **It is the first thing
+to re-check once KI-22 is fixed.**
+

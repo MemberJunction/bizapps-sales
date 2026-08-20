@@ -317,14 +317,67 @@ the smoke script resolve siblings by scanning neighbouring repos for a matching 
 new tooling, do the same, and **never swallow the failure** — a sibling that is present but fails to load
 must not read as "not installed".
 
+**A regenerated class manifest can want a package the host has not linked.** MJAPI's and MJExplorer's
+`prestart` run `mj codegen manifest`, which walks whatever is linked in the workspace *at that moment* and
+emits imports for it. Link a new app into `/c/v6` and the next `npm start` in MJ begins importing it — and
+if `MJ/packages/<app>/node_modules/@mj-biz-apps/<pkg>` is absent or half-populated, the API dies before it
+logs anything useful:
+
+```
+node:internal/modules/run_main:107
+[Object: null prototype] { Symbol(nodejs.util.inspect.custom): [Function ...] }
+```
+
+No message, no stack, nothing naming the cause. It is a **`TS2307` from ts-node** thrown as a non-Error, so
+`--trace-uncaught` adds nothing. To read it, import the entry point yourself and inspect what was thrown:
+
+```bash
+cd C:/v6/MJ/packages/MJAPI
+cat > probe.mjs <<'EOF'
+import util from 'node:util';
+try { await import('./src/index.ts'); }
+catch (e) { console.error(util.inspect(e, { depth: 3 })); }
+EOF
+node --experimental-specifier-resolution=node --import ./register.js -r dotenv/config ./probe.mjs
+```
+
+The manifest also **writes the missing dependency into MJ's `package.json`** and tells you to install at the
+repo root. On Windows, `ln -s` under Git Bash may COPY a directory instead of linking it, which produces a
+real directory with no `package.json` — resolvable-looking and unresolvable. Use a junction:
+
+```powershell
+New-Item -ItemType Junction -Path 'C:\v6\MJ\packages\MJAPI\node_modules\@mj-biz-apps\common-entities' `
+         -Target 'C:\v6\bizapps-common\packages\Entities'
+```
+
+Hit on 2026-08-20: `bizapps-common` appeared in the workspace, the manifest started importing
+`@mj-biz-apps/common-entities`, and both MJAPI and MJExplorer refused to start.
+
 **Do not call every exported `Load*`.** Orders exports `LoadPaymentProviderConfig`, which is a real
 configuration loader that throws when no provider is configured. It will take your run down before a single
 check executes. Call named anchors only.
 
-## 8. If you only need Sales
+## 8. Sales does NOT run standalone any more
 
-None of the above is required. Sales runs standalone against its own database — `DealLine.ProductID` is a
-soft reference with no foreign key into orders, the product picker hides itself when orders is absent, and
-the close-won handoff falls back to a stub that reports `Executed: false` with a reason rather than
-pretending. `save-deal` and `close-deal` (30 checks) pass on a Sales-only host; `product-picker` and
-`close-won-handoff` need orders and are held out of the default gate for exactly that reason.
+**This section used to say the opposite, and the change is deliberate.** It read: *"Sales runs standalone
+against its own database — `DealLine.ProductID` is a soft reference with no foreign key into orders …
+`save-deal` and `close-deal` (30 checks) pass on a Sales-only host."* All three claims are now false, and
+leaving them would send someone down a setup path that cannot work.
+
+`DealLine` is retired. A deal carries an **embedded `OrderHeader`**, provisioned inside
+`DealEntityServer.Save()` (S-US4), and the lines live on that order in orders' schema. So:
+
+* **A deal cannot be SAVED without bizapps-orders.** Not "features degrade" — the save reaches for
+  `MJ_BizApps_Orders: Order Headers` and there is nothing to resolve.
+* **`mj-app.json` declares `mj-bizapps-orders` a hard dependency**, so a host without it is misconfigured
+  rather than minimal.
+* **Every check bundle requires orders**, including `save-deal` and `close-deal`. See
+  `scripts/expected-check-counts.json`; `save-deal`'s `Setup` refuses such a host with an explanation rather
+  than letting sixteen checks fail one at a time. Because nothing is unconditional any more,
+  `assert-check-count.mjs` treats an EMPTY expectation as a failure — otherwise a host with nothing linked
+  would pass while running zero checks.
+
+What is still true: **no foreign key crosses the schema boundary for the PRODUCT reference** (D-SW3), and
+`Deal.OrderID` is a real FK to orders' `OrderHeader` — the one place sales does depend structurally.
+
+`close-won-contract` remains the only bundle needing bizapps-contracts.

@@ -5,6 +5,142 @@ future developer will otherwise rediscover the hard way.
 
 ---
 
+## 🔴 KI-22 — Orders' generated GraphQL resolvers are behind the database, so a deal still cannot be reopened
+
+**The second half of KI-21, and it is a DIFFERENT problem with the same symptom.** With orders'
+server package registered, the schema gained the type — and the load still failed:
+
+```
+Error: Cannot query field "RootReversesOrderHeaderID" on type "mjBizAppsOrdersOrderHeader_".
+        Did you mean "ReversesOrderHeaderID" or "ReversesOrderHeader"?
+Error in BaseEntity.Load(MJ_BizApps_Orders: Order Headers, Key: ID=8ADF440B-…)
+```
+
+### What is skewed against what
+
+| Where | `RootReversesOrderHeaderID` |
+|---|---|
+| `__mj_BizAppsOrders.vwOrderHeaders` (MJ_V6_Host) | **present** |
+| `__mj.EntityField` for *Order Headers* | **present**, `IsVirtual = 1` |
+| orders' `packages/Server/src/generated/generated.ts` | **absent** |
+| orders' `packages/Server/dist/…` | **absent** |
+
+The client builds its GraphQL selection set from **entity metadata**, so it asks for every registered
+field. The server's type comes from orders' **generated resolvers**. The database has the recursive
+hierarchy column MJ emits for a self-referencing FK (`ReversesOrderHeaderID` → `Root…`, `…Depth`,
+`…Path`, `…IsLeaf`, `…ChildCount`); orders' committed generated code predates it. So metadata promises a
+field the schema does not have, and every read of an Order Header fails.
+
+**It is not a stale `dist`.** Source and dist agree — both lack it. Rebuilding orders changes nothing;
+its CodeGen has to be re-run against this database.
+
+### Why sales feels it and orders does not
+
+Orders' own suite runs in process and never asks GraphQL for that field. Sales' deal workspace reads the
+embedded order **over GraphQL**, so it is the first consumer to notice. Nothing in sales can fix it.
+
+### What it blocks, precisely
+
+Reopening any deal that has an order — i.e. every deal created since the redesign.
+`DealWorkspaceService.LoadDeal` refuses rather than rendering a deal with no lines, which is the right
+behaviour and makes the failure visible instead of silent data loss:
+
+> deal … points at order … but the embedded record did not resolve. Refusing to render it as a deal
+> with no lines.
+
+Creating a deal, and creating its order, both still work: those go through **sales'** own resolver, and
+the order is written server-side inside `DealEntityServer.Save()`.
+
+### The fix, and why it was not done here
+
+Re-run orders' CodeGen file pass against this database and rebuild it:
+
+```bash
+cd bizapps-orders && npm run mj:codegen:files && npm run build
+```
+
+**Deliberately not run on 2026-08-20.** It is another repo, on a shared host, and CLAUDE.md records that
+a second full CodeGen pass has corrupted a database before. See `DECISIONS-NEEDED.md` DN-8.
+
+---
+
+## 🔴 KI-21 — A host running Sales must ALSO register orders' server package, or no deal with an order can be opened
+
+**Found in the Explorer pass on 2026-08-20, on MJ_V6_Host — a database where orders' schema, entities and
+server classes were all present and the integration suite was fully green.** Every deal that HAS an order
+failed to open in the workspace:
+
+```
+Error: Cannot query field "mjBizAppsOrdersOrderHeader" on type "Query".
+Error in BaseEntity.Load(MJ_BizApps_Orders: Order Headers, Key: ID=8ADF440B-…)
+DealWorkspaceService.LoadDeal: deal 7A3FB14D-… points at order 8ADF440B-… but the embedded record did
+not resolve. Refusing to render it as a deal with no lines.
+```
+
+Since `DealEntityServer` provisions an order for every deal at creation, that is **every new deal**. Only
+the older order-less seeded rows still opened, which is what made it look like a data problem.
+
+### Why a green suite could not see it
+
+The integration checks run **in process**: they resolve entities through the provider directly, so orders'
+entities are reachable and every line assertion passes. The workspace reaches the same rows **over
+GraphQL**, and a resolver enters the schema only if its file path is passed to `buildSchema`. From
+`packages/ServerBootstrap/src/index.ts`:
+
+> side-effect-importing a resolver class only registers type-graphql metadata, but `buildSchema` includes
+> a resolver ONLY if it is PASSED in
+
+So importing orders' packages — which the class manifest does — registers its entity CLASSES and none of
+its resolvers.
+
+### The mechanism, exactly
+
+`loadDynamicAppPackages()` reads **`mj.config.cjs` → `dynamicPackages.server[]`**, written by
+`mj app install`, and collects each listed package's exported `RESOLVER_PATHS`. On MJ_V6_Host that array
+held one entry:
+
+```
+Loading Open App server packages...
+  Loaded Open App server package: @mj-biz-apps/sales-server (ran LoadBizAppsSalesServer) (+2 resolver paths)
+```
+
+Sales only. Orders' schema was migrated and its entities registered, but `mj app install` had never been
+run for it, so nothing contributed its resolver paths.
+
+**Being in `package.json` is not enough, and neither is being in the class manifest.** Both were true here.
+
+### The fix
+
+Register orders as an installed Open App on the host — `mj app install` for bizapps-orders, or by hand in
+`mj.config.cjs`:
+
+```js
+dynamicPackages: {
+  server: [
+    { PackageName: '@mj-biz-apps/sales-server',  StartupExport: 'LoadBizAppsSalesServer',  AppName: 'mj-bizapps-sales',  Enabled: true },
+    { PackageName: '@mj-biz-apps/orders-server', StartupExport: 'LoadBizAppsOrdersServer', AppName: 'mj-bizapps-orders', Enabled: true },
+  ],
+}
+```
+
+The names come from orders' own `mj-app.json` (`packages.server[].startupExport`), not from guesswork.
+
+### Why this is a KNOWN ISSUE and not a setup step
+
+It is **both**, and the reason it is here is the AWS install. `mj-app.json` declares
+`mj-bizapps-orders` a dependency, but a dependency declaration does not make the host register the
+dependency's server package — and nothing in Sales can force it to. A host that migrates orders' schema
+and stops there gets an app whose deal workspace cannot open a single deal, with a GraphQL error naming a
+field rather than a missing install. Verify it before a deployment is called done:
+
+```bash
+grep -A3 'dynamicPackages' mj.config.cjs      # orders-server must be listed
+# or, in the API's startup log:
+#   Loaded Open App server package: @mj-biz-apps/orders-server (+N resolver paths)
+```
+
+---
+
 ## 🔴 KI-20 — Removing a line from an order is silently dropped, so the workspace's delete-line button does nothing
 
 **Measured on MJ_V6_Host, 2026-08-20, by `test-harnesses/prove-line-removal.mjs`.** The save reports

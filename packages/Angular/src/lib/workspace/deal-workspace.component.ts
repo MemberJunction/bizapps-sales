@@ -483,13 +483,77 @@ export class DealWorkspaceComponent implements OnInit {
         return this.Deal?.PaymentSchedule.Items ?? [];
     }
 
+    /**
+     * Lines can only be added to a SAVED deal, and this is not a UX preference.
+     *
+     * `CanSave` is gated on `deal.Validate()`, which fans out into the embedded order. On an unsaved
+     * deal that order exists only in memory, and `OrderHeader.OrderNumber` is NOT NULL with no default
+     * -- minted by `OrderEntityServer.assignOrderNumber()`, a SERVER class that does not exist in the
+     * browser. So a line added before the first save makes the deal permanently unsaveable: the rep
+     * fills in every field they can see and the Save button never enables.
+     *
+     * Blocking the button is the honest version of that. The deal saves in one click, provisions its
+     * order server-side, and the button then works -- which is also the sequence S-US4 describes.
+     *
+     * Found in the Explorer pass on 2026-08-20. The API-level checks could not see it: they add lines
+     * through `deal.OrderID_EnsureObject()` and save through the entity layer, where the server stamps
+     * everything before validation runs.
+     */
+    public get CanAddLine(): boolean {
+        return !!this.Deal?.IsSaved;
+    }
+
+    /** Why the button is disabled, in the words a rep needs. Null when it is enabled. */
+    public get AddLineBlockedReason(): string | null {
+        if (this.CanAddLine) {
+            return null;
+        }
+        return 'Save the deal first — its order is created on the first save, and a product line needs it.';
+    }
+
     public async AddLine(): Promise<void> {
         // NOT the provisioning mechanism any more -- DealEntityServer.provisionEmbeddedOrder() owns
         // that, so an agent or an importer gets an order too. This stays for the UNSAVED deal: a rep
         // can add lines before the first save, and there is no order yet to add them to. Idempotent,
         // so on a saved deal it simply returns the peer that already exists.
         const order = this.Deal?.OrderID_EnsureObject();
-        await order?.Lines.Create();
+
+        // The HEADER needs the same treatment as the line below, and for the same reason: an order that
+        // exists only in memory has had nothing stamped, `OrderHeader.CompanyID` is NOT NULL, and
+        // `deal.Validate()` fans out into it. These are the two values `provisionEmbeddedOrder()` sets
+        // that the browser can also know -- deliberately NOT Status (orders defaults it) and NOT
+        // OrderNumber (orders MINTS it; see the note above CanSave).
+        if (order && !order.IsSaved) {
+            order.Set('CompanyID', this.CompanyIDFromPipeline ?? this.Deal?.CompanyID ?? null);
+            order.Set('OrderType', 'Sale');
+        }
+
+        const line = await order?.Lines.Create();
+
+        /**
+         * `CompanyID` IS SET HERE, AND WITHOUT IT THE SAVE BUTTON NEVER ENABLES.
+         *
+         * `OrderLine.CompanyID` is NOT NULL with no default, and orders stamps it from the product in
+         * `OrderLineEntityServer` -- a SERVER class. `CanSave` is gated on `deal.Validate()`, which runs
+         * in the BROWSER, where that subclass does not exist and nothing has stamped anything. So a
+         * freshly added line is permanently invalid, `Validation.IsValid` stays false, and the rep sees a
+         * disabled Save reading "Company ID cannot be null" against a form where every field they can
+         * reach is filled. Found in the Explorer pass on 2026-08-20, on a deal that saved perfectly well
+         * through the entity layer -- which is exactly why an API-level check could not see it.
+         *
+         * Supplying the company is not this app duplicating a rule it does not own. The picker filters
+         * products by THIS company (`ProductFilterFor`), so a selectable product's company and the
+         * deal's are the same value by construction, and the server will stamp the same thing. If that
+         * ever stops being true, the picker is what broke.
+         *
+         * It comes from the PIPELINE LOOKUP, not from `Deal.CompanyID`. On an unsaved deal that field is
+         * still null -- the server derives it from the pipeline in `stampCompanyFromPipeline()` (D-4), so
+         * it does not exist until the first save, and a rep adding a line before saving would be right
+         * back at the disabled button. `Lookups.Pipelines` carries `CompanyID` for exactly this reason,
+         * and it is the same row the server reads.
+         */
+        line?.Set('CompanyID', this.CompanyIDFromPipeline ?? this.Deal?.CompanyID ?? null);
+
         this.Touch();
     }
 
@@ -606,6 +670,18 @@ export class DealWorkspaceComponent implements OnInit {
     public get CompanyName(): string | null {
         const id = this.Deal?.PipelineID;
         return this.Lookups.Pipelines.find((p) => p.ID === id)?.CompanyName ?? null;
+    }
+
+    /**
+     * The selling company, from the pipeline — available BEFORE the first save, unlike `Deal.CompanyID`.
+     *
+     * `stampCompanyFromPipeline()` derives the deal's company server-side (D-4), so the field is null on
+     * an unsaved deal. `AddLine()` needs the value then, because a new order line's `CompanyID` is NOT
+     * NULL. Same lookup row the server reads, so the two cannot disagree.
+     */
+    public get CompanyIDFromPipeline(): string | null {
+        const id = this.Deal?.PipelineID;
+        return this.Lookups.Pipelines.find((p) => p.ID === id)?.CompanyID ?? null;
     }
 
     public NameOf(list: DealLookup[], id: string | null): string {

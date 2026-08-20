@@ -442,9 +442,13 @@
             </div>
           }
 
-          <button type="button" class="dw-addbtn" (click)="AddLine()">
+          <button type="button" class="dw-addbtn" (click)="AddLine()"
+                  [disabled]="!CanAddLine" [title]="AddLineBlockedReason ?? 'Add a product line'">
             <i class="fa-solid fa-plus" aria-hidden="true"></i> Add line
           </button>
+          @if (AddLineBlockedReason) {
+            <p class="dw-field__hint">{{ AddLineBlockedReason }}</p>
+          }
           <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'lines' }"></ng-container>
         </section>
       }
