@@ -7,6 +7,7 @@
  *   1. Every deal carries an embedded order, with the status its stage declares (#33, #115, #121).
  *   2. No deal-level line-item table or entity exists anywhere (#33, #114).
  *   3. Whether `Deal.OwnerEmployeeID` REFUSES a direct edit, or merely gets overwritten (#33).
+ *   4. That the close-won task path has rows to resolve outside a rolled-back transaction (#34/#35).
  *      It refuses, as of 2026-08-20. It did NOT when this probe was written, and that is what the
  *      probe found — a header-only save kept a hand-set stamp silently. `save-deal.SD26` and mutant
  *      `M-OW1` hold the line now; this stays as the standing check that the two paths agree.
@@ -110,5 +111,29 @@ const restored = (await q(`SELECT OwnerEmployeeID FROM __mj_BizAppsSales.Deal WH
 line(restored.OwnerEmployeeID === target.OwnerEmployeeID
     ? '  restored.'
     : `  !! RESTORE FAILED — set ${target.DealNumber} OwnerEmployeeID back to ${target.OwnerEmployeeID} by hand.`);
+
+// -- 4. The task path's preconditions, post-integration --------------------------------------------
+line('\n=== E4  the close-won task path has somewhere to write (S-US2 / S-US3) ===');
+const taskTables = await q(`
+    SELECT TABLE_NAME t FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_SCHEMA = '__mj_BizAppsTasks' AND TABLE_NAME IN ('Task', 'TaskLink', 'TaskAssignment')`);
+const taskTypes = await q(`SELECT Name FROM __mj_BizAppsTasks.TaskType ORDER BY Name`);
+const wanted = ['Order Review', 'Contract Processing'];
+line(`  tables: ${taskTables.map((r) => r.t).sort().join(', ') || 'NONE'}`);
+line(`  task types: ${taskTypes.map((r) => r.Name).join(', ') || 'NONE'}`);
+for (const name of wanted) {
+    const found = taskTypes.some((r) => r.Name === name);
+    line(`  ${found ? 'ok     ' : 'MISSING'} the service resolves '${name}'`);
+}
+/**
+ * WHY THIS IS A PRECONDITION CHECK AND NOT A BEHAVIOUR ONE. What the close actually WRITES is proven by
+ * close-won-tasks WT1-WT10, which run against this same database and roll back. This asks the question
+ * those cannot: that the rows they resolve exist OUTSIDE a transaction that undoes itself, so a host is
+ * not one `mj sync push` away from every task silently failing to route.
+ *
+ * The type names are matched rather than codes because this host predates bizapps-tasks PR #42, which
+ * adds `TaskType.Code`. The service says so out loud and falls back to Name; when that migration lands
+ * this check should move to Code with it.
+ */
 
 await pool.close();

@@ -169,6 +169,14 @@ const MUTATIONS = [
       to: '        const ownerRefusal: string | null = null;   void this.ownerStampEditRefusal;',
       note: 'the owner stamp is writable again' },
 
+    // S-US7's negative, which had no check until the story audit went looking and no mutant until now.
+    // Ungating the task step makes a LOST deal raise an order-review task: finance works a review for a
+    // deal nobody won, finds nothing to review, and no error was ever raised.
+    { id: 'M-WT1', file: CDO, expect: ['WT11'],
+      from: 'const taskIssues: SalesCloseIssue[] = [];\n            if (target.IsWon) {',
+      to: 'const taskIssues: SalesCloseIssue[] = [];\n            if (true) {',
+      note: 'a lost close raises the won deal\'s tasks' },
+
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
     // the agreement went. This flips exactly that bit and nothing else.

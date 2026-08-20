@@ -608,6 +608,78 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-won-tasks.WT11',
+        Name: 'WT11: a LOST close raises NO tasks — the gate is the IsWon flag, not the word "closed"',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * S-US7's third criterion, which had no check until the story audit went looking.
+                 *
+                 * WT1-WT10 all prove what a WON close creates. Nothing proved what a LOST close does NOT
+                 * create, and "no tasks are created" was resting on reading `if (target.IsWon)` at
+                 * `CloseDealOperation.ts:338`. That line is correct — but an unasserted negative is
+                 * exactly the kind of thing a later refactor moves a brace through, and the failure is
+                 * silent: finance gets an order-review task for a deal that was lost, works it, and finds
+                 * nothing to review.
+                 *
+                 * THE GATE IS A FLAG, WHICH IS WHY THIS CHECK RESOLVES BY FLAG TOO. The status is found by
+                 * `IsLost = 1`, never by a name, so a deployment that calls its losing status "Walked
+                 * Away" is covered by the same assertion.
+                 */
+                requireTasks(ctx);
+
+                const openStatuses = await rows(ctx, 'MJ_BizApps_Sales: Deal Status Types', 'IsOpen = 1 AND IsActive = 1');
+                Assert(openStatuses.length > 0, 'setup: no open deal status');
+                const openIDs = openStatuses.map((r) => String(r['ID']).toLowerCase());
+
+                const candidates = await rows(ctx, E_DEAL, 'OrderID IS NOT NULL');
+                const deal = candidates.find((d) => openIDs.includes(String(d['DealStatusTypeID']).toLowerCase()));
+                Assert(!!deal, 'setup: no OPEN deal carrying an order to close');
+                const dealID = String(deal!['ID']);
+                const orderID = String(deal!['OrderID']);
+
+                const lostRows = await rows(ctx, 'MJ_BizApps_Sales: Deal Status Types', 'IsLost = 1 AND IsActive = 1');
+                Assert(lostRows.length > 0, 'setup: no LOST status on this host');
+                const lostStatusID = String(lostRows[0]['ID']);
+
+                // A loss reason is mandatory (close-deal.CD8), so this has to supply one or the close is
+                // refused for the wrong reason and the check passes while proving nothing.
+                const reasonID = await anyID(
+                    ctx, 'MJ_BizApps_Sales: Loss Reasons', 'IsActive = 1 AND RequiresNotes = 0', 'loss reason',
+                );
+
+                const before = (await rows(ctx, E_TASK, '1 = 1')).length;
+
+                const op = new CloseDealOperation();
+                const raw = await op.Execute(
+                    { DealID: dealID, DealStatusTypeID: lostStatusID, LossReasonID: reasonID },
+                    { provider: ProviderOf(ctx), user: ctx.User },
+                );
+                const out = (raw as { Output?: SalesCloseDealOutput })?.Output;
+                Assert(!!out, `Sales.CloseDeal returned no Output envelope: ${JSON.stringify(raw).slice(0, 300)}`);
+                Assert(out!.Success, `the lost close failed — ${JSON.stringify(out!.Issues).slice(0, 400)}`);
+                Assert(out!.IsLost, 'the target status carries IsLost, so the close must report it');
+
+                AssertEqual(
+                    (await rows(ctx, E_TASK, '1 = 1')).length,
+                    before,
+                    'a LOST close must create no tasks at all',
+                );
+
+                /**
+                 * AND NOTHING POINTS AT THE ORDER. The count above would miss a task created and linked
+                 * while another was deleted in the same close — unlikely, but the whole value of this
+                 * check is in the negative, and a negative asserted one way is worth less than two.
+                 */
+                const orderEntityID = entityID(ctx, E_ORDER);
+                const links = await rows(
+                    ctx, E_TASK_LINK, `EntityID = '${orderEntityID}' AND RecordID = '${orderID}'`,
+                );
+                AssertEqual(links.length, 0, 'and nothing is linked to the lost deal\'s order');
+            }),
+    },
 ];
 
 for (const check of CloseWonTasksChecks) {
