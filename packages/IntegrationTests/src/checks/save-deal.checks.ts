@@ -1094,6 +1094,78 @@ export const SaveDealChecks: NamedCheck[] = [
                 Assert(stored.AmountIsComputed === false, 'and it is not claimed as computed');
             }),
     },
+    {
+        Id: 'save-deal.SD24',
+        Name: 'SD24: an EXISTING deal with no order gets one on its next save',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE MIGRATION CASE, and it was broken until 2026-08-20.
+                 *
+                 * `provisionEmbeddedOrder()` returned early on `IsSaved`, so an order could only ever be
+                 * created on a deal's FIRST save. Any deal that already existed without one could never
+                 * acquire one — which is every SQL-seeded demo deal and every deal created before S-US4
+                 * landed. Worse than merely missing: reaching for `OrderID_EnsureObject()` on such a deal
+                 * built an UNSTAMPED order, and the save died inside orders on `CompanyID cannot be null`,
+                 * two apps away from the cause. `scripts/seed-demo-lines.mjs` failed on four of five deals
+                 * before this was fixed.
+                 *
+                 * The FK is cleared here rather than a deal being created without one, because
+                 * provisioning now happens on the first save and there is no other way to reach the state
+                 * a pre-redesign row is in.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD24 late provisioning'; });
+                await saveOk(created, 'create');
+                const firstOrder = created.OrderID;
+                Assert(!!firstOrder, 'the deal provisioned an order on creation');
+
+                // Now make it look like a deal from before the redesign: saved, and pointing at nothing.
+                // Cast for the same reason `TxOne` does: `ExecuteSQL` is on the DATABASE provider, not on
+                // the `IMetadataProvider` interface the context exposes.
+                const sqlProvider = ctx.Provider as unknown as {
+                    ExecuteSQL: (
+                        sql: string,
+                        params: Record<string, unknown>,
+                        options: { isMutation: boolean; description: string },
+                        user: unknown,
+                    ) => Promise<unknown>;
+                };
+                await sqlProvider.ExecuteSQL(
+                    `UPDATE ${SALES_SCHEMA}.Deal SET OrderID = NULL WHERE ID = '${created.ID}'`,
+                    {},
+                    { isMutation: true, description: 'SD24: simulate a pre-S-US4 deal' },
+                    ctx.User,
+                );
+                const stale = await TxOne<{ OrderID: string | null }>(
+                    ctx, `SELECT OrderID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                Assert(!stale.OrderID, 'the deal now has no order, like a row that predates provisioning');
+
+                const reopened = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await reopened.Load(created.ID), 'the order-less deal loads');
+                reopened.NextStep = 'anything, so there is something to save';
+                await saveOk(reopened, 'the save that should provision');
+
+                const after = await TxOne<{ OrderID: string | null }>(
+                    ctx, `SELECT OrderID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                Assert(!!after.OrderID, 'an order was provisioned on a deal that already existed');
+                Assert(
+                    String(after.OrderID).toLowerCase() !== String(firstOrder).toLowerCase(),
+                    'and it is a NEW order — the old one was orphaned by the UPDATE, not re-attached',
+                );
+
+                const row = await orderRow(ctx, after.OrderID as string, ['CompanyID', 'OrderType']);
+                AssertEqual(
+                    String(row.CompanyID).toLowerCase(),
+                    f.PipelineCompanyID.toLowerCase(),
+                    'STAMPED, which is the half that was failing: an unstamped order dies on CompanyID',
+                );
+                AssertEqual(String(row.OrderType), 'Sale', 'and carries the type sales states');
+            }),
+    },
 ];
 
 for (const check of SaveDealChecks) {

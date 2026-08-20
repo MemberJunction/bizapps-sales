@@ -24,10 +24,17 @@
 #   3. IDENTITY IS SHARED, NOT FORKED. Every SalesAccount IS an Organization and every SalesContact IS
 #      a Person, same UUID. Open an account and the name comes from the parent row.
 #
-#   4. SALES NEVER COMPUTES MONEY. Seeded deals carry a STATED amount and no order lines at all, and
-#      AmountIsComputed = 0 says exactly that: the figure is a human's, not a traceable answer. Lines
-#      live on the deal's ORDER now and only orders can price them, so a SQL seed cannot write one
-#      without inventing money. The guarantee is visible as data precisely because the seed declines.
+#   4. SALES NEVER COMPUTES MONEY -- AND BOTH HALVES OF THAT ARE ON SCREEN. Five of the seven deals
+#      carry order lines and come back ENGINE-PRICED: AmountIsComputed = 1, with a timestamp and a
+#      source hash. Two carry a STATED amount and no lines at all, AmountIsComputed = 0, saying the
+#      figure is a human's rather than a traceable answer. The distinction is the point, so the demo
+#      has to show both -- a screen where everything is stated proves nothing about the cache.
+#
+#      THE PRICED FIVE CANNOT COME FROM THIS SCRIPT. UnitPrice and CompanyID are stamped by orders
+#      from the product, and LineTotalGross comes from its pricing engine, so a SQL INSERT would have
+#      to invent the money it is meant to prove sales never invents. They are seeded by
+#      scripts/seed-demo-lines.mjs instead, which drives the entity layer and lets orders answer --
+#      run from the bottom of this script, and separately re-runnable. DN-15.
 #
 #   5. THE DEAL TEAM, INCLUDING D-6. One deal carries an Employee owner AND a partner manager who is a
 #      common.Person with no Employee record — the exactly-one-of case that D-6 exists for.
@@ -445,6 +452,23 @@ SQL
 
 $SQLCMD -d "${DB_DATABASE}" -h -1 -W -i "$(cygpath -w "$TMP" 2>/dev/null || echo "$TMP")"
 
+# ── THE PRICED HALF, THROUGH THE ENTITY LAYER ────────────────────────────────────────────────────
+#
+# After the SQL half has COMMITTED, deliberately. This step loads the provider and both server
+# packages, and it is the slow part of the seed; running it inside the transaction above would hold
+# table locks across a provider startup. It is also allowed to fail without failing the seed: the SQL
+# rows are already committed by here, so aborting would leave a half-seeded database, and a demo where
+# every deal is hand-typed is still a working demo -- just a less complete story.
+say "Pricing five deals through the entity layer"
+if node scripts/seed-demo-lines.mjs; then
+    :
+else
+    echo ""
+    echo "  !! Order lines were NOT seeded, so all seven deals stay hand-typed."
+    echo "     The demo works; the stated-vs-priced distinction just is not visible."
+    echo "     Re-run on its own once fixed:  node scripts/seed-demo-lines.mjs"
+fi
+
 say "What the demo now contains"
 $SQLCMD -d "${DB_DATABASE}" -h -1 -W -Q "
 SET NOCOUNT ON;
@@ -459,7 +483,9 @@ UNION ALL SELECT '  payment sched.   ' + CAST(COUNT(*) AS varchar) FROM __mj_Biz
 UNION ALL SELECT '  team members     ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealTeamMember
 UNION ALL SELECT '  buying committee ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealContactRole
 UNION ALL SELECT '  stage events     ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealStageEvent
-UNION ALL SELECT '  forecast snaps   ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.ForecastSnapshot;"
+UNION ALL SELECT '  forecast snaps   ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.ForecastSnapshot
+UNION ALL SELECT '  priced deals     ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE AmountIsComputed = 1
+UNION ALL SELECT '  stated deals     ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE AmountIsComputed = 0;"
 
 cat <<'NEXT'
 

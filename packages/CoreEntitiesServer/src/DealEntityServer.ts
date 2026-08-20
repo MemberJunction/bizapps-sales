@@ -478,7 +478,23 @@ export class DealEntityServer extends DealEntity {
      * organization key; `PrimaryContactID` is a `SalesContact`, an IsA child of `Person`.
      */
     private provisionEmbeddedOrder(): void {
-        if (this.IsSaved) {
+        /**
+         * ── THE TEST IS "HAS A REAL ORDER", NOT "IS A NEW DEAL" ──
+         *
+         * This used to return early on `IsSaved`, which meant provisioning could only ever happen on a
+         * deal's FIRST save. Every deal that already existed without an order was therefore unable to
+         * acquire one — for good: every SQL-seeded demo deal, and every deal created before S-US4
+         * landed. Reaching for `OrderID_EnsureObject()` on one of those built an UNSTAMPED order and the
+         * save died inside orders on `CompanyID cannot be null`, two apps away from the cause. Found by
+         * `scripts/seed-demo-lines.mjs` failing on four of five deals.
+         *
+         * Asking about the ORDER instead covers both: a deal with a persisted order is left alone (the
+         * S-US5 rule — finance may already have worked on it), and a deal without one gets one whenever
+         * it is next saved, however old it is. The check is on `IsSaved` OF THE ORDER and not on
+         * `this.OrderID`, because `Ensure()` assigns the new peer's key immediately — which is the DN-7
+         * trap, and testing the FK here would walk straight back into it.
+         */
+        if (this.OrderID_Object?.IsSaved) {
             return;
         }
         if (!this.CompanyID) {
@@ -489,12 +505,6 @@ export class DealEntityServer extends DealEntity {
         }
 
         const order = this.OrderID_EnsureObject();
-        if (order.IsSaved) {
-            // The caller attached an order that already exists. Restating company, type and bill-to on
-            // it would be this app editing a record finance may already have worked on, which is exactly
-            // what S-US5 says not to do. Leave it alone.
-            return;
-        }
         order.CompanyID = this.CompanyID;
         order.OrderType = 'Sale';
         order.BillToOrganizationID = this.AccountID ?? null;

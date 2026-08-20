@@ -351,30 +351,56 @@ small. What made it look deep was that each attempt fixed one symptom and expose
 
 ---
 
-## DN-15 — OPEN: seeded deals have amounts but no order lines, so the dashboard states rather than computes
+## DN-15 — RESOLVED 2026-08-20: the seeded demo now shows both a priced deal and a stated one
 
-`Deal.Amount` is now a cache of `OrderHeader.TotalGross` and the provenance rule holds: a hand-typed
-figure is never overwritten (SD22). Every seeded demo deal is hand-typed — `AmountIsComputed = 0` with a
-stated figure — so the writer correctly leaves all seven alone.
+**It was built, and the answer to "is it worth it" turned out to be yes for a reason that only showed up
+once it worked:** with every deal hand-typed, the amount cache was invisible, and so was the argument the
+app exists to make. Five of the seven seeded deals now carry order lines and come back engine-priced; two
+stay deliberately hand-typed. The distinction between *stated* and *priced* is now a thing you can point
+at on a screen rather than a paragraph in a README.
 
-**That means the dashboard still shows stated figures, not order totals, on seeded data.** It is not the
-overstatement it looks like: the numbers are true to what they claim to be. But it does mean the demo
-never exercises the cache, and the one deal that does have a line shows £687 of order against a stated
-figure two orders of magnitude larger.
+`scripts/seed-demo-lines.mjs` does it, driven from the bottom of `scripts/seed-demo-data.sh` and
+separately re-runnable. It drives the ENTITY layer — adds lines by product and quantity only, and lets
+orders answer — because a SQL seed would have to invent the money it is meant to prove sales never
+invents.
 
-Fixing it properly means the seed carrying order lines that add up to something worth showing — and a
-SQL seed cannot write an order line, because `UnitPrice` and `CompanyID` are stamped by orders from the
-product and `LineTotalGross` comes from its pricing engine. So it needs a seeder that drives the ENTITY
-layer, the way `close-won-order.fixture.ts` already does for checks: create the deal, add lines by
-product and quantity, let orders price them, and let the amount cache follow.
+**Three things it does that a reader would not guess, each for a stated reason:**
 
-**The decision is whether that is worth building now.** It is the difference between a demo that shows
-the pipeline figure and a demo that shows the mechanism producing it. Not large, but not free, and it
-belongs to whoever owns the demo rather than to this change.
+* **It clears `Amount` first.** The SQL seed types a figure onto every deal, and SD22 rightly forbids
+  overwriting a human's number with a computed one. So the seeder RETRACTS the stated figure before
+  asking — a declaration that this deal's number is now the engine's, not a workaround for the guard.
+* **It deletes four child tables before clearing order lines.** Orders records an
+  `OrderLinePriceComponent` per line, so a bare line delete hits `FK_OLPC_OrderLine`. Subscription,
+  entitlement and payment rows only arise from CONFIRMING an order, so if the seed ever fails on one of
+  those, it has started booking — which is a bug, not a seeding problem.
+* **It lifts the close lock in SQL for the two closed deals, then restores it.** Deliberately NOT via
+  `Sales.ReopenDeal`: a demo fixture inventing audit history is worse than none.
+
+**Verified against the database, not the screen** — five `AmountIsComputed = 1` with a timestamp and a
+hash, two untouched:
+
+```
+DEAL-9001  PRICED  amount=124400  lines=2  order=Draft   stampedAt=yes hash=yes
+DEAL-9002  PRICED  amount= 16240  lines=1  order=Draft   stampedAt=yes hash=yes
+DEAL-9003  PRICED  amount= 73080  lines=1  order=Draft   stampedAt=yes hash=yes
+DEAL-9004  stated  amount= 28000  lines=0  order=Draft   stampedAt=no  hash=no
+DEAL-9005  PRICED  amount= 27480  lines=1  order=Quoted  stampedAt=yes hash=yes
+DEAL-9006  PRICED  amount= 12180  lines=1  order=Voided  stampedAt=yes hash=yes
+DEAL-9007  stated  amount=  9500  lines=0  order=Draft   stampedAt=no  hash=no
+```
+
+Note DEAL-9005 sitting at `Quoted` and DEAL-9006 at `Voided`: those came from their stages'
+`OrderStatusOnEntry`, so the seed also demonstrates D-OS1 rather than just the amount cache.
+
+**And it found a real defect on the way**, which is the part worth keeping. Four of the five deals failed
+with `CompanyID cannot be null` from inside orders, because `provisionEmbeddedOrder()` returned early on
+`this.IsSaved` — provisioning could only ever happen on a deal's FIRST save, so every deal that already
+existed without an order was permanently unable to get one. Fixed to ask about the ORDER instead. Pinned
+by `save-deal.SD24` and its mutant `M-PV1`.
 
 ---
 
-## DN-16 — OPEN: contracts is installed on MJ_V6_Host but not usable
+## DN-16 — RESOLVED 2026-08-20: contracts became usable, and CT1/CT4 are written
 
 Found by CT0 firing. Contracts' seven v2 tables and seven entities are on this host as of 2026-08-20,
 and nothing can read them:
@@ -388,7 +414,22 @@ The fix is in contracts — regenerate its views against this database and push 
 worth doing deliberately rather than by another CLI's side effect, because a malformed view that nothing
 reads is invisible until something does.
 
-CT0 holds the obligation and reports which precondition is missing. **When contracts becomes readable and
-carries at least one type, CT0 goes red and CT1/CT4 get written** — their assertions are spelled out in
-its failure message, and they were written once already, so it is transcription.
+Both were fixed outside this repo the same day. `vwContracts` reads, four contract types are seeded, CT0
+went red on cue, and CT1/CT4 are written — transcription from CT0's own failure message, as intended.
+
+**Two surprises in the writing, both worth recording because each cost a run.**
+
+`ContractType` has no `IsActive` column; it has `Status`. Asking for the wrong one fails at the SQL layer
+and surfaces through `RunView` as a bare `Error executing SQL`, which names nothing.
+
+And **the seeded `CloseWonPolicy` named a contract type that has never existed on any host.** It said
+`"ContractTypeCode":"Standard"`; contracts ships 'Order Form', 'Statement of Work', 'Payment Link' and
+'Change Order'. Every close-won on the B2B pipeline would have planned a contract the seam could not
+create — a real defect in metadata this branch shipped, found only because CT1 forced a resolution
+against the live table. Now `Order Form`.
+
+CT1 resolves a STANDALONE type by reading `ParentStatusRequirement`, not by excluding the name
+'Change Order' — that type requires a `ParentContractID` and a close-won has no parent. Contracts put
+that column there for exactly this reason, and its own seed comment says its subclass used to compare the
+name and broke on a rename. Same discipline, another app's vocabulary.
 

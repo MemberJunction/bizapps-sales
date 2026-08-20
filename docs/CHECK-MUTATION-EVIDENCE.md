@@ -118,6 +118,8 @@ CO3 and CO5 were reframed onto the MECHANISM, so their old mutants no longer app
 | M-AM1 | `DealEntityServer` · the amount cache is never refreshed | SD21 | — |
 | M-AM2 | `DealEntityServer` · a hand-typed amount is overwritten | SD22 | — |
 | M-AM3 | `DealEntityServer` · "nothing priced" becomes "priced at nil" | SD23 | — |
+| M-PV1 | `DealEntityServer` · provisioning only ever on a deal's first save | SD24 | — |
+| M-CT1 | `LiveContractsSeam` · an unresolvable type reported as a success | CT4 | — |
 
 `M-AM2` is the one to keep pointed at: it deletes the guard that protects a human's figure, and only
 SD22 notices. A cache that quietly overwrites a negotiated number is found by the person whose number
@@ -128,17 +130,30 @@ naive reading of a nullable column, and CO3's second half exists solely to catch
 asserts the WARNING and not merely the absence of a change — without it, a version that silently did
 nothing would pass.
 
-Twenty-nine mutations across both tables; **eighteen** of them failed exactly one check.
+Thirty-one mutations across both tables; **twenty** of them failed exactly one check.
 
-## `close-won-contract.CT0` has no mutant, and cannot have one
+M-PV1 is the only mutant in either table that is a REAL DEFECT REPLAYED rather than an invented one:
+that was the shipped code until 2026-08-20, and it meant a deal that already existed without an order
+could never acquire one. It failed two apps away, inside orders, on `CompanyID cannot be null`. SD24
+asks the question from the sales side, where the cause actually is.
 
-CT0 asserts that bizapps-contracts is **absent** from the host's entity metadata. Its failure condition
-is an environment fact, not a code path, so there is nothing in the product to mutate — the check *is*
-the code. The mutation driver has no entry for it and should not.
+## `close-won-contract` — CT0 is gone, CT4 has a mutant, CT1 cannot have one
 
-Its failure path was demonstrated instead, on 2026-08-20: pointing its entity constant at
-`MJ_BizApps_Sales: Deals` — an entity that does exist — makes it fail with the full work-order message.
-That proves the assertion fires and the message renders, which is the whole of what CT0 does.
+CT0 was a tripwire asserting bizapps-contracts was not usable, and it had no mutant BY CONSTRUCTION: its
+failure condition was an environment fact rather than a code path, so there was nothing in the product to
+mutate — the check *was* the code. Its failure path was demonstrated by hand instead, on 2026-08-20, by
+pointing its entity constant at an entity that does exist. It then fired for real, twice, and is retired.
+
+**CT4 has M-CT1**, and it is the more valuable of the pair. Flipping one `false` to `true` makes the seam
+report a successful create for a contract type that does not resolve, and only CT4 notices. That is the
+worst of the three ways a downstream can fail — worse than throwing — because the close reports success,
+no contract exists, and nothing looks wrong until somebody asks where the agreement went.
+
+**CT1 has no mutant, for a different reason than CT0 did.** What it asserts is CONTRACTS' behaviour: that
+`ContractNumber` arrives minted by a sequence sales never touched. The code that could break it lives in
+another repo, and mutating it from here would edit a package this branch is not allowed to change. The
+honest position is that CT1 is a *contract test against a peer app*, and its guarantee is only as strong
+as that peer's own suite.
 
 ## Checks with no single-check mutation, and why
 

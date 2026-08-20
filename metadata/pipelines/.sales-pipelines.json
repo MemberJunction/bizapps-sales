@@ -16,7 +16,12 @@
       "CloseWonPolicy carries no OrderState key. It was retired (D-OS1) in favour of",
       "PipelineStage.OrderStatusOnEntry, which can speak on every stage change rather than only at the",
       "moment of a won close. OneTimeLinesTo is still here and is DEAD -- close-won creates no order",
-      "now, so nothing routes lines. See DECISIONS-NEEDED.md DN-11."
+      "now, so nothing routes lines. See DECISIONS-NEEDED.md DN-11.",
+      "",
+      "ContractTypeCode is 'Order Form', which is a type contracts actually ships. It said 'Standard'",
+      "first and nothing on any host is called that -- v2's ContractType carries no Code column, so the",
+      "seam resolves on NAME, and an unresolvable name means close-won plans a contract it can never",
+      "create. Found by close-won-contract.CT1 the moment contracts became readable."
     ],
     "fields": {
       "Name": "B2B",
@@ -26,7 +31,7 @@
       "DealTypeID": "@lookup:MJ_BizApps_Sales: Deal Types.Code=NEW",
       "DefaultForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",
       "RequiresDealLines": true,
-      "CloseWonPolicy": "{\"CreateContract\":true,\"ContractTypeCode\":\"Standard\",\"TermMonths\":12,\"SubscriptionLinesTo\":\"Contract\",\"OneTimeLinesTo\":\"Order\",\"RequireApprovalTaskTypeCode\":null}",
+      "CloseWonPolicy": "{\"CreateContract\":true,\"ContractTypeCode\":\"Order Form\",\"TermMonths\":12,\"SubscriptionLinesTo\":\"Contract\",\"OneTimeLinesTo\":\"Order\",\"RequireApprovalTaskTypeCode\":null}",
       "IsDefault": true,
       "DisplayRank": 10,
       "IsActive": true

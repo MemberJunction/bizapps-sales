@@ -43,6 +43,7 @@ const PF = 'packages/Entities/src/product-filter.ts';
 const DE = 'packages/Entities/src/deal-entity.ts';
 const SEQ = 'packages/CoreEntitiesServer/src/SequenceService.ts';
 const SEAM = 'packages/Entities/src/downstream-seams.ts';
+const LCS = 'packages/CoreEntitiesServer/src/LiveContractsSeam.ts';
 
 /**
  * id · file · the exact text to replace · its replacement · which checks SHOULD go red.
@@ -143,6 +144,23 @@ const MUTATIONS = [
       from: '        if (!verdict.Allowed) {\n            this._orderStatusWarnings.push(',
       to: '        if (!verdict.Allowed) {\n            const swallowed: string[] = [];\n            swallowed.push(',
       note: 'swallows the warning; `swallowed` is unused on purpose and tsc must still accept it' },
+
+    // THE ONE MUTANT THAT IS A REAL DEFECT REPLAYED, not an invented one. This WAS the code, and it
+    // meant an already-saved deal with no order could never acquire one -- every SQL-seeded deal and
+    // everything created before S-US4. It failed two apps away, on `CompanyID cannot be null` inside
+    // orders, which is why SD24 asks the question from the sales side, where the cause is.
+    { id: 'M-PV1', file: DES, expect: ['SD24'],
+      from: '        if (this.OrderID_Object?.IsSaved) {\n            return;',
+      to: '        if (this.IsSaved) {\n            return;',
+      note: 'provisioning reachable only on a first save — the original bug, verbatim' },
+
+    // CT4's mutant. A downstream that reports success without writing is the worst of the three
+    // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
+    // the agreement went. This flips exactly that bit and nothing else.
+    { id: 'M-CT1', file: LCS, expect: ['CT4'],
+      from: "        if (!resolved.ID) {\n            return {\n                Success: false,",
+      to: "        if (!resolved.ID) {\n            return {\n                Success: true,",
+      note: 'an unresolvable contract type is reported as a successful create' }
 ];
 
 const wanted = new Set(process.argv.slice(2).filter((a) => !a.startsWith('--')));
