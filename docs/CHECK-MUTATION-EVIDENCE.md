@@ -137,7 +137,23 @@ Twenty-nine mutations across both tables; **eighteen** of them failed exactly on
 
 ## Re-running it
 
-There is no committed driver. The table above is the artifact deliberately: a driver would be a fourth
-thing to keep in step with the checks, and each row is a one-line edit plus
-`RUN_MUTATION_TESTS=1 pnpm run test:integration`. If you automate it, restore the file from git rather
-than by re-editing — a mutation left behind is worse than one never applied.
+```bash
+node test-harnesses/mutate-checks.mjs            # every mutation, ~70s each
+node test-harnesses/mutate-checks.mjs M-OS1      # one
+node test-harnesses/mutate-checks.mjs --list     # the table, no runs
+```
+
+**The driver is committed now, and the reason it is worth committing is the reason it nearly was not.**
+This file used to say a driver would be "a fourth thing to keep in step with the checks" — true, but the
+alternative turned out to be worse: the throwaway version restored mutated files with
+`git checkout -- <path>`, which restores to **HEAD**, and it deleted an entire uncommitted feature
+(DN-13). A tool whose job is to break things on purpose must not be able to break the thing it is
+testing.
+
+It now copies each file aside before touching it, restores from that copy byte for byte, and VERIFIES
+the restore — exiting with the backup path if it ever fails. Which means it is safe against a dirty
+working tree, and that is exactly when you want it: the moment a check is written is the moment to ask
+whether it can fail.
+
+Proven, not assumed: appending a comment to `DealEntityServer.ts`, running `M-SD18`, and comparing the
+file's checksum before and after — identical, with the mutation applied and reverted in between.

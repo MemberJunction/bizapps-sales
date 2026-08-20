@@ -269,7 +269,7 @@ now and surface it only on the two operations. Not decided.
 
 ---
 
-## DN-13 — the mutation driver restores with `git checkout --`, which means HEAD
+## DN-13 — FIXED: the mutation driver restored with `git checkout --`, which means HEAD
 
 Recorded because it cost real work tonight. The driver applies a mutation, builds, runs the suite, then
 restores the file with `git checkout -- <path>`. That restores to **HEAD** — so running it over
@@ -278,8 +278,17 @@ UNCOMMITTED work silently deletes the work rather than the mutation.
 It ate `DealEntityServer.ts`'s entire stage-order writer once. Recovering was only cheap because the
 edit had been applied by a scripted patch that could simply be re-run.
 
-**Commit before mutating.** If the driver is ever made permanent, it should refuse to run against a
-dirty working tree.
+**Fixed the same day, and it did not need the rule.** The driver is now committed as
+`test-harnesses/mutate-checks.mjs`: it copies each file aside before touching it, restores from that
+copy byte for byte, and verifies the restore — printing the backup path and exiting 3 if that ever
+fails. So "commit before mutating" is no longer required; running against a dirty tree is safe, which
+is when the tool is most useful.
+
+Proven rather than asserted: a comment was appended to `DealEntityServer.ts`, `M-SD18` was run, and the
+file's checksum was identical before and after with the mutation applied and reverted in between.
+
+The earlier idea — refuse to run against a dirty tree — was rejected. It protects the work by denying
+the tool at exactly the moment a new check most needs proving.
 
 ---
 
