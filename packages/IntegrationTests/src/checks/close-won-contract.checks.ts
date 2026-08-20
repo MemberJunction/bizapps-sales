@@ -29,11 +29,17 @@
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
-import { Metadata, RunView } from '@memberjunction/core';
+import { CompositeKey, Metadata, RunView, type BaseEntity } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
-import { ContractsIsInstalled, LiveContractsSeam } from '@mj-biz-apps/sales-core-entities-server';
+import { ContractsIsInstalled, LiveContractsSeam, OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
+import {
+    SalesCloseDealOperation,
+    type SalesCloseDealInput,
+    type SalesCloseDealOutput,
+} from '@mj-biz-apps/sales-entities';
 
-import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture } from '../fixture.js';
+import { E_DEAL, InRolledBackTransaction, ProviderOf, ResolveSalesFixture, TxOne } from '../fixture.js';
+import { SeedDealOnPipeline } from './close-won-order.fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -96,7 +102,7 @@ async function anyContractTypeName(ctx: Ctx): Promise<string> {
  * payload and what contracts does with it. That a contract is PLANNED at all is `close-deal.CD1`'s job,
  * and a check going through the close would fail for either reason.
  */
-async function createContract(ctx: Ctx, typeName: string | null) {
+async function createContract(ctx: Ctx, typeName: string | null, modified?: boolean) {
     const f = await ResolveSalesFixture(ctx);
     const seam = new LiveContractsSeam(ctx.User, ProviderOf(ctx));
     return seam.CreateContractFromDeal({
@@ -106,7 +112,33 @@ async function createContract(ctx: Ctx, typeName: string | null) {
         TermMonths: 12,
         AccountID: f.AccountID,
         StartDate: '2026-09-01',
+        ...(modified === undefined ? {} : { StandardAgreementModified: modified }),
     });
+}
+
+/**
+ * CT6 saves a deal, and a deal cannot be saved at all without orders — `DealEntityServer` provisions the
+ * embedded order inside `Save()`. So this one check needs BOTH siblings, and says so rather than failing
+ * on a missing `OrderNumber` two apps away.
+ */
+/**
+ * `Execute` returns a `RemoteOpResult` ENVELOPE, and the operation's own output sits inside `.Output`.
+ * Reading the envelope as if it were the output compiles against nothing and reads as a failed close.
+ */
+async function closeDeal(ctx: Ctx, input: SalesCloseDealInput): Promise<SalesCloseDealOutput> {
+    const op = new SalesCloseDealOperation();
+    const result = await op.Execute(input, { provider: ProviderOf(ctx), user: ctx.User });
+    const output = (result as { Output?: SalesCloseDealOutput })?.Output;
+    Assert(!!output, `Sales.CloseDeal returned no Output envelope: ${JSON.stringify(result).slice(0, 300)}`);
+    return output as SalesCloseDealOutput;
+}
+
+function requireOrdersToo(): void {
+    Assert(
+        OrdersIsInstalled(),
+        'bizapps-orders is not installed, and a deal cannot be SAVED without it — the embedded order is ' +
+            'provisioned inside DealEntityServer.Save(). CT6 needs both siblings.',
+    );
 }
 
 export const CloseWonContractChecks: NamedCheck[] = [
@@ -178,6 +210,132 @@ export const CloseWonContractChecks: NamedCheck[] = [
                     (await rows(ctx, E_CONTRACT, '1 = 1')).length,
                     before,
                     'a refused create leaves no contract behind',
+                );
+            }),
+    },
+    {
+        Id: 'close-won-contract.CT5',
+        Name: 'CT5: the deal answers "standard agreement modified", and the CONTRACT carries the answer',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE ONE CRITERION THAT SPANS TWO STORIES. S-US1 asks the rep whether the deal moved
+                 * off the standard agreement; S-US2 copies that answer onto the contract as
+                 * `HasModifications`, and contracts' review task branches on it — a true flag means
+                 * capture each deviation, a false one means read the document anyway because the rep
+                 * may have forgotten to raise it.
+                 *
+                 * The seam hardcoded `false` until the deal had a column to copy from. BOTH VALUES ARE
+                 * ASSERTED, because a hardcoded `false` passes any check that only ever sends `true`
+                 * for the wrong reason — and a hardcoded `true` would be the same defect wearing the
+                 * opposite value. Two contracts from the same seam, differing only in the flag.
+                 *
+                 * Read back through the ENTITY LAYER rather than the screen: what matters is the column
+                 * contracts stored, not what sales believes it sent.
+                 */
+                requireContracts();
+                const typeName = await anyContractTypeName(ctx);
+
+                const modified = await createContract(ctx, typeName, true);
+                Assert(modified.Success, `the modified-agreement contract was not created — ${modified.Message}`);
+                const [withMods] = await rows(ctx, E_CONTRACT, `ID = '${modified.ContractID}'`);
+                AssertEqual(
+                    withMods?.HasModifications,
+                    true,
+                    'a deal flagged as modified must produce a contract flagged as modified',
+                );
+
+                const standard = await createContract(ctx, typeName, false);
+                Assert(standard.Success, `the standard-agreement contract was not created — ${standard.Message}`);
+                const [noMods] = await rows(ctx, E_CONTRACT, `ID = '${standard.ContractID}'`);
+                AssertEqual(
+                    noMods?.HasModifications,
+                    false,
+                    'an unmodified deal must NOT produce a contract claiming modifications',
+                );
+
+                /**
+                 * And an OLDER CALLER — one that never sends the field — still lands on false. The
+                 * column is NOT NULL in contracts and the deal's own flag defaults to no, so false is
+                 * the honest reading of silence rather than a shrug.
+                 */
+                const silent = await createContract(ctx, typeName);
+                Assert(silent.Success, `the field-less contract was not created — ${silent.Message}`);
+                const [fromSilence] = await rows(ctx, E_CONTRACT, `ID = '${silent.ContractID}'`);
+                AssertEqual(fromSilence?.HasModifications, false, 'an absent flag means false, never null');
+            }),
+    },
+    {
+        Id: 'close-won-contract.CT6',
+        Name: 'CT6: the flag survives the WHOLE close — deal to contract, not just the seam call',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * WHY THIS EXISTS SEPARATELY FROM CT5. The wiring has two hops — the close READS the
+                 * deal's flag into the seam payload, and the seam WRITES it onto the contract — and CT5
+                 * only covers the second. Mutating the first (`M-CT3`, `buildContractInput` reporting a
+                 * constant `false`) left the whole suite green: fifty checks and none of them noticed a
+                 * negotiated agreement arriving at finance marked as standard.
+                 *
+                 * So this drives `Sales.CloseDeal` end to end and reads the contract the close actually
+                 * created, found through the `Deal.ContractID` the close stamps. It is the criterion both
+                 * S-US1 and S-US2 state, asserted the way a user would experience it.
+                 */
+                requireContracts();
+                requireOrdersToo();
+                const f = await ResolveSalesFixture(ctx);
+
+                const seeded = await SeedDealOnPipeline(ctx, f, {
+                    PipelineID: f.ContractPolicyPipelineID,
+                    StageID: f.ContractPolicyStageID,
+                    CompanyID: f.PipelineCompanyID,
+                    LineCount: 1,
+                });
+
+                // The rep's answer, set the way the workspace sets it: on the deal, before the close.
+                const deal = await ProviderOf(ctx).GetEntityObject<BaseEntity>(E_DEAL, ctx.User);
+                const key = new CompositeKey();
+                key.KeyValuePairs.push({ FieldName: 'ID', Value: seeded.DealID });
+                Assert(await deal.InnerLoad(key), 'the seeded deal reloads');
+                deal.Set('StandardAgreementModified', true);
+                Assert(await deal.Save(), `the flag could not be set — ${deal.LatestResult?.CompleteMessage}`);
+
+                const out = await closeDeal(ctx, {
+                    DealID: seeded.DealID,
+                    DealStatusTypeID: seeded.WonStatusID,
+                });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+
+                /**
+                 * THE ROUTE'S OWN VERDICT FIRST, and its reason in the message. When this check first
+                 * ran the contract was simply absent, and "no ContractID" says nothing about why —
+                 * a policy that routed nothing, a seam that refused, and a renewal taking the other
+                 * door all look identical from the deal's column.
+                 */
+                const route = out.Routing?.find((r) => r.Target === 'Contract');
+                Assert(!!route, `the close planned no Contract route: ${JSON.stringify(out.Routing)}`);
+                Assert(
+                    route?.Executed === true,
+                    `the Contract route did not execute — reason: ${route?.Reason ?? '(none given)'}`,
+                );
+
+                const stamped = await TxOne<{ ContractID: string | null }>(
+                    ctx, `SELECT ContractID FROM __mj_BizAppsSales.Deal WHERE ID = '${seeded.DealID}'`,
+                );
+                Assert(
+                    !!stamped.ContractID,
+                    'the close stamped the agreement onto the deal — without that there is nothing to ' +
+                        'read the flag off, and this check would pass vacuously',
+                );
+
+                const [contract] = await rows(ctx, E_CONTRACT, `ID = '${stamped.ContractID}'`);
+                AssertEqual(
+                    contract?.HasModifications,
+                    true,
+                    'the deal said the standard agreement was modified, so the contract must too — a ' +
+                        'false here means finance is told to expect standard paper for a negotiated deal',
                 );
             }),
     },

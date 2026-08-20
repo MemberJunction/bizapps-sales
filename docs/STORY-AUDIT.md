@@ -18,7 +18,7 @@ are met, **#120** is strictly broader than #38/#39 combined.
 
 The rule for this pass was *prove met criteria against the database, not the screen*. Three sources:
 
-1. **The 49 integration checks** (`RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs`). Every one hits a
+1. **The 51 integration checks** (`RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs`). Every one hits a
    live database with nothing mocked and rolls back. Where a criterion maps to a check, the check id **is** the
    evidence, and `docs/CHECK-MUTATION-EVIDENCE.md` records which mutant proves that check can fail.
 2. **`scripts/audit-story-evidence.mjs`** — written for this audit, for the three questions no check answers.
@@ -31,7 +31,7 @@ The rule for this pass was *prove met criteria against the database, not the scr
 
 | Issue | Verdict |
 |---|---|
-| **#33** S-US1 Create a deal record | **partially met** — 3 of 5 criteria met, 2 partially |
+| **#33** S-US1 Create a deal record | **partially met** — 3 of 5 criteria met, 2 partially (the missing "standard agreement modified" field, listed in the body, was built in this session) |
 | **#34** S-US2 Contract + tasks on Closed Won (B2B) | **partially met** — the contract is real; every task is absent |
 | **#35** S-US3 Order-review task on Closed Won | **not met** — its one deliverable does not exist |
 | **#114** S-US4 Add and manage deal line items | **partially met** — add and edit work; removal is dropped upstream |
@@ -55,8 +55,9 @@ The rule for this pass was *prove met criteria against the database, not the scr
 
 **Three more items from the story body, not in its checklist:**
 
-* **"Standard agreement modified" flag — not met.** No such column on `Deal`. It is also what #34's
-  `HasModifications` is supposed to copy from. Addressed in the same session as this audit.
+* **"Standard agreement modified" flag — MET, in this session.** `Deal.StandardAgreementModified`, NOT
+  NULL defaulting to 0, on the variances pane of the workspace. It is also what #34's `HasModifications`
+  copies from. `close-won-contract.CT5` (the seam writes it) and `CT6` (the whole close carries it).
 * **Stage drives probability and forecast category — partially met.** Done in the workspace at
   `deal-workspace.component.ts:417-418`. There is no server-side derivation, so a deal created by an Action, an
   agent or a script gets whatever probability the caller supplied. The vocabulary rule is respected either way
@@ -146,7 +147,7 @@ check and a mutant of its own, and it is outside the three items this session ca
 | `ContractNumber` — next from the sequence | **met** | **`close-won-contract.CT1`** asserts contracts minted it and sales sent none. Two apps generating into one sequence is how a duplicate contract number reaches a customer. |
 | `ContractTypeID` defaults to Order Form | **met, and it was broken** | The seeded `CloseWonPolicy` named `"Standard"` — a contract type that exists on **no** host (contracts ships Order Form, Statement of Work, Payment Link, Change Order). Every B2B close-won would have planned a contract the seam could not create. Now `Order Form`. Found only because CT1 forced a resolution against the live table. |
 | `CreatingEntityID` / `CreatingRecordID` typed pair | **met** | `setProvenance()`; CT1 asserts both-or-neither, which is also contracts' own CHECK constraint. |
-| `HasModifications` copied from the deal's flag | **not met** | `LiveContractsSeam.ts:175` hardcodes `false`. It has no source to copy from — see #33. Addressed this session. |
+| `HasModifications` copied from the deal's flag | **met, in this session** | Was hardcoded `false` because the deal had no column to copy from. Now `input.StandardAgreementModified === true`, reported by `buildContractInput`. **`CT5`** proves the seam writes both values and treats absence as false; **`CT6`** drives the whole close and reads the contract the close created. Mutants `M-CT2` and `M-CT3` cover the two hops separately — and M-CT3 is why CT6 exists: mutating the close alone left all fifty other checks green. |
 | `AutoRenew`, `RenewalNoticeDays`, `CancellationWindowDays`, `AnnualIncreasePercent` defaulted **from the Contract Type record** | **not met, and not buildable from here** | Contracts' `ContractType` has no such columns. Its full shape is `ID, Name, Description, RequiresExecutedDocument, Status, ParentStatusRequirement` — there are no per-type stored defaults to read. Sales sets three of the four only when the deal carries an explicit override (`setNegotiatedTerms`), and deliberately declines `RenewalNoticeDays` because contracts warns those two fields are not interchangeable. **This criterion is an upstream ask on contracts.** |
 | `ContractTemplateID` — the `ContractTemplate` where `Status = Active` | **not met** | `LiveContractsSeam.ts:319` `templateID()` returns `input.ContractTemplateID ?? null`. Nothing resolves the active template. |
 | A finance contract-processing **Task** | **not met** | No task creation exists anywhere in this repo. |

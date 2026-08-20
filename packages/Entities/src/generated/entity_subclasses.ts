@@ -869,6 +869,12 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Order ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Orders: Order Headers (vwOrderHeaders.ID)`),
+    StandardAgreementModified: z.boolean().describe(`
+        * * Field Name: StandardAgreementModified
+        * * Display Name: Standard Agreement Modified
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance's review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.`),
     Pipeline: z.string().describe(`
         * * Field Name: Pipeline
         * * Display Name: Pipeline
@@ -4093,6 +4099,20 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
     set OrderID(value: string | null) {
         this.Set('OrderID', value);
+    }
+
+    /**
+    * * Field Name: StandardAgreementModified
+    * * Display Name: Standard Agreement Modified
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance's review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.
+    */
+    get StandardAgreementModified(): boolean {
+        return this.Get('StandardAgreementModified');
+    }
+    set StandardAgreementModified(value: boolean) {
+        this.Set('StandardAgreementModified', value);
     }
 
     /**

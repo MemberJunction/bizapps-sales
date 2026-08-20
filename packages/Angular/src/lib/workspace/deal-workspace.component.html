@@ -549,6 +549,18 @@
       <!-- ══════════════════════════ VARIANCES ══════════════════════════ -->
       @if (ActivePane === 'variances') {
         <section class="dw-pane">
+          <!-- THE FLAG SITS ABOVE THE PROSE, and it is not a summary of it. Finance's review branches
+               on the flag: true means capture each deviation against the template, false means read the
+               document anyway to confirm nothing was negotiated. An empty variances box means nobody
+               wrote anything down, which is a different claim from nothing having happened — so the rep
+               is asked, rather than the answer being inferred from whether they typed a paragraph. -->
+          <label class="dw-field dw-field--check">
+            <input type="checkbox" [(ngModel)]="deal.StandardAgreementModified"
+                   [disabled]="!IsFieldEditable('StandardAgreementModified')" (ngModelChange)="Touch()" />
+            <span class="dw-field__label">Standard agreement modified</span>
+          </label>
+          <small class="dw-field__hint">Copied onto the contract at Closed Won — it is what sends finance to the paper.</small>
+
           <label class="dw-field dw-field--wide">
             <span class="dw-field__label">Contract variances</span>
             <textarea rows="10" [(ngModel)]="deal.ContractVariances" [disabled]="!IsFieldEditable('ContractVariances')" (ngModelChange)="Touch()"

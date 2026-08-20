@@ -400,6 +400,32 @@ by `save-deal.SD24` and its mutant `M-PV1`.
 
 ---
 
+## DN-17 — NOT A DECISION, A TRAP: `mj sync push` resets the seeded pipelines to Default Company
+
+Recorded because it cost a confusing suite run and will do so again. `metadata/pipelines/` seeds the
+B2B and D2C pipelines against `Default Company` — the only company a bare install is guaranteed to
+have — and `scripts/seed-demo-data.sh` repoints them at the two dev companies afterwards.
+
+**A metadata push undoes the repoint.** Both are correct: the push restores what metadata declares,
+and metadata cannot declare a company that only exists on this machine. The symptom is not a
+pipeline problem, though — it is **18 integration checks failing on `the host needs at least 1
+sellable product(s) for company C0DEFA17-...`**, because the fixture resolves its pipelines by
+policy and then looks for products belonging to whatever company they now name.
+
+After any `mj sync push --dir metadata`, re-point them:
+
+```sql
+UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = 'C0A5E100-0001-4A01-9E11-5B7C3D2F8A01'
+ WHERE ID = '90111111-0000-4000-A000-000000000001';   -- B2B  -> Blue Cypress (Local Dev)
+UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = 'B0111111-0000-4000-A000-000000000002'
+ WHERE ID = '90111111-0000-4000-A000-000000000002';   -- D2C  -> BC Education Group (Local Dev)
+```
+
+Or re-run `scripts/seed-demo-data.sh`, which does the same two updates. No decision needed; this is a
+note for whoever meets the 18 failures next.
+
+---
+
 ## DN-16 — RESOLVED 2026-08-20: contracts became usable, and CT1/CT4 are written
 
 Found by CT0 firing. Contracts' seven v2 tables and seven entities are on this host as of 2026-08-20,

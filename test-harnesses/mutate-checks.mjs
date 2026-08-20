@@ -160,7 +160,22 @@ const MUTATIONS = [
     { id: 'M-CT1', file: LCS, expect: ['CT4'],
       from: "        if (!resolved.ID) {\n            return {\n                Success: false,",
       to: "        if (!resolved.ID) {\n            return {\n                Success: true,",
-      note: 'an unresolvable contract type is reported as a successful create' }
+      note: 'an unresolvable contract type is reported as a successful create' },
+
+    // CT5's mutant: back to the hardcoded false the deal had no column to replace. Every contract then
+    // claims the standard agreement was untouched, including the negotiated ones.
+    { id: 'M-CT2', file: LCS, expect: ['CT5'],
+      from: "contract.Set('HasModifications', input.StandardAgreementModified === true);",
+      to: "contract.Set('HasModifications', false);",
+      note: 'the rep answered and the contract ignores it' },
+
+    // THE SECOND HOP of the same wiring, and a different question: does anything notice if the close
+    // stops REPORTING the flag? First time it was asked, NOTHING DID -- fifty checks green while a
+    // negotiated agreement reached finance marked standard. CT6 was written for this mutant.
+    { id: 'M-CT3', file: CDO, expect: ['CT6'],
+      from: 'StandardAgreementModified: deal.StandardAgreementModified,',
+      to: 'StandardAgreementModified: false,',
+      note: 'the close reports the flag as false regardless of what the deal says' }
 ];
 
 const wanted = new Set(process.argv.slice(2).filter((a) => !a.startsWith('--')));

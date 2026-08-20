@@ -2244,6 +2244,9 @@ export class mjBizAppsSalesDeal_ {
     @MaxLength(36)
     OrderID?: string;
         
+    @Field(() => Boolean, {description: `Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance's review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.`}) 
+    StandardAgreementModified: boolean;
+        
     @Field() 
     @MaxLength(200)
     Pipeline: string;
@@ -2431,6 +2434,9 @@ export class CreatemjBizAppsSalesDealInput {
     @Field({ nullable: true })
     OrderID: string | null;
 
+    @Field(() => Boolean, { nullable: true })
+    StandardAgreementModified?: boolean;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -2572,6 +2578,9 @@ export class UpdatemjBizAppsSalesDealInput {
 
     @Field({ nullable: true })
     OrderID?: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    StandardAgreementModified?: boolean;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

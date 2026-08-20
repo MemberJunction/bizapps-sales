@@ -676,6 +676,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             // The AD's red-lines travel with the agreement — a contract that silently dropped them
             // would send a human reviewer in blind.
             ContractVariances: deal.ContractVariances,
+            // And the flag that says whether there ARE any, which is the thing finance's review keys
+            // on. Reported even when the variances field is blank: the two answer different questions.
+            StandardAgreementModified: deal.StandardAgreementModified,
             AutoRenew: deal.AutoRenew,
             AnnualIncreasePctOverride: deal.AnnualIncreasePctOverride,
             CancellationNoticeDaysOverride: deal.CancellationNoticeDaysOverride,

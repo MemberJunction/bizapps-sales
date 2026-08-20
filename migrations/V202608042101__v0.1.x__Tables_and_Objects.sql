@@ -751,6 +751,25 @@ CREATE TABLE __mj_BizAppsSales.Deal (
     -- on it, which is what keeps it inside Rule 2 rather than in violation of it.
     PaymentMethod NVARCHAR(50) NULL DEFAULT 'ACH',
 
+    -- DID THIS DEAL MOVE OFF THE STANDARD AGREEMENT — yes or no, as a fact the REP
+    -- asserts. S-US1 asks for it on the creation form; S-US2 copies it onto the
+    -- contract as HasModifications, which is what routes finance's review.
+    --
+    -- IT IS NOT DERIVABLE FROM ContractVariances BELOW, and that is the reason both
+    -- exist. The variances field is prose for a human reviewer; emptiness there means
+    -- "nothing written down", which is not the same claim as "nothing negotiated" — a
+    -- rep in a hurry leaves it blank either way. Contracts' own task list makes the
+    -- distinction load-bearing: a FALSE flag still gets the document read, precisely
+    -- because the rep may have forgotten it, and a TRUE one gets each deviation
+    -- captured as a ContractTemplateModification row. Inferring the flag from whether
+    -- someone typed a paragraph would turn a stated fact into a guess, and finance
+    -- would be reviewing the guess.
+    --
+    -- NOT NULL DEFAULT 0: S-US1 says it defaults to no. An unanswered three-state
+    -- would leak into contracts as a null HasModifications, where the column is
+    -- NOT NULL — so the honest default belongs here, at the point the rep is asked.
+    StandardAgreementModified BIT NOT NULL DEFAULT 0,
+
     -- The red-line summary: what this deal negotiated AWAY from standard terms, in the
     -- AD's own words. Free text on purpose — the input to a human legal review, not
     -- something any code should try to parse.
@@ -1331,6 +1350,7 @@ EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Whether the result
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'An OVERRIDE, and NULL is meaningful: it means "use the standard annual increase", whose default (5%) lives on the contracts ContractType, not here. That is a different fact from "we negotiated a number that happens to equal today''s standard", and only the NULL survives a later change to policy. Copying the default in at write time would freeze this year''s terms into next year''s renewals silently.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'AnnualIncreasePctOverride';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'An OVERRIDE of the standard cancellation-notice period (default 90 days, owned by the contracts ContractType). NULL means "use the standard" — see AnnualIncreasePctOverride for why that distinction is load-bearing.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'CancellationNoticeDaysOverride';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'PLACEHOLDER LABEL (default ACH), and a string only for as long as nothing branches on it. Payment method becomes vocabulary the moment code cares — ACH and card differ in settlement timing and fees — but ORDERS owns that concept and will expose PaymentType. Pointing at orders'' vocabulary later beats standing up a competing copy here and reconciling two. No code may branch on this value.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'PaymentMethod';
+EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance''s review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'StandardAgreementModified';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Free-text summary of what this deal negotiated AWAY from standard terms — the red-line list, in the AD''s own words. The input to a human legal review; nothing should attempt to parse it.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'ContractVariances';
 GO
 

@@ -120,6 +120,8 @@ CO3 and CO5 were reframed onto the MECHANISM, so their old mutants no longer app
 | M-AM3 | `DealEntityServer` · "nothing priced" becomes "priced at nil" | SD23 | — |
 | M-PV1 | `DealEntityServer` · provisioning only ever on a deal's first save | SD24 | — |
 | M-CT1 | `LiveContractsSeam` · an unresolvable type reported as a success | CT4 | — |
+| M-CT2 | `LiveContractsSeam` · `HasModifications` hardcoded `false` again | CT5 | — |
+| M-CT3 | `CloseDealOperation` · the close reports the flag as a constant | CT6 | — |
 
 `M-AM2` is the one to keep pointed at: it deletes the guard that protects a human's figure, and only
 SD22 notices. A cache that quietly overwrites a negotiated number is found by the person whose number
@@ -130,7 +132,7 @@ naive reading of a nullable column, and CO3's second half exists solely to catch
 asserts the WARNING and not merely the absence of a change — without it, a version that silently did
 nothing would pass.
 
-Thirty-one mutations across both tables; **twenty** of them failed exactly one check.
+Thirty-three mutations across both tables; **twenty-two** of them failed exactly one check.
 
 M-PV1 is the only mutant in either table that is a REAL DEFECT REPLAYED rather than an invented one:
 that was the shipped code until 2026-08-20, and it meant a deal that already existed without an order
@@ -148,6 +150,12 @@ pointing its entity constant at an entity that does exist. It then fired for rea
 report a successful create for a contract type that does not resolve, and only CT4 notices. That is the
 worst of the three ways a downstream can fail — worse than throwing — because the close reports success,
 no contract exists, and nothing looks wrong until somebody asks where the agreement went.
+
+**M-CT3 is the reason CT6 exists, and it is worth reading as a method.** Mutating the close so it
+reported `StandardAgreementModified` as a constant `false` left the ENTIRE SUITE GREEN — fifty checks,
+and not one noticed a negotiated agreement arriving at finance marked as standard. CT5 covered the
+seam writing the flag; nothing covered the close reading it. The mutant found the hole in the coverage
+rather than a hole in the product, which is the case for running mutants on code that already passes.
 
 **CT1 has no mutant, for a different reason than CT0 did.** What it asserts is CONTRACTS' behaviour: that
 `ContractNumber` arrives minted by a sequence sales never touched. The code that could break it lives in

@@ -142,6 +142,16 @@ export interface ContractsCreateFromDealSeamInput {
     TermMonths?: number | null;
     /** The AD's red-line summary, verbatim. Input to a human review; nothing parses it. */
     ContractVariances?: string | null;
+    /**
+     * Did this deal move off the standard agreement? Becomes the contract's `HasModifications`.
+     *
+     * A SEPARATE FACT FROM `ContractVariances`, not a summary of it. The variances field being empty
+     * means nothing was written down, which is not the same claim as nothing having been negotiated —
+     * and contracts' review task branches on the difference: a true flag means capture each deviation
+     * as a `ContractTemplateModification`, a false one still means read the document, because the rep
+     * may have forgotten to raise it. Deriving one from the other would hand finance a guess.
+     */
+    StandardAgreementModified?: boolean;
     AutoRenew?: boolean;
     AnnualIncreasePctOverride?: number | null;
     CancellationNoticeDaysOverride?: number | null;

@@ -37,7 +37,7 @@
     "close-deal": { "count": 14, "requires": "orders", "ids": "CD1-CD14" },
     "product-picker": { "count": 4, "requires": "orders", "ids": "PP1-PP4" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
-    "close-won-contract": { "count": 2, "requires": "contracts", "ids": "CT1, CT4 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild" },
+    "close-won-contract": { "count": 4, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild" },
     "board-move": { "count": 4, "requires": "orders", "ids": "BD1-BD4" }
   },
   "probes": {

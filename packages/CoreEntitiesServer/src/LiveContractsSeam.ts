@@ -166,13 +166,24 @@ export class LiveContractsSeam {
             contract.Set('Description', input.ContractVariances ?? null);
 
             /**
-             * Sales creates no `ContractTemplateModification` rows: it has no template, so it has
-             * nothing to record a modification AGAINST. False is therefore the honest value rather
-             * than a default — and `ContractEntityServer.ValidateAsync()` only refuses a false flag
-             * when modification rows actually exist, which for a contract created this second they
-             * cannot.
+             * THE REP'S ANSWER, carried through — S-US1 asks the question, S-US2 copies it here.
+             *
+             * It used to be hardcoded `false`, and the reasoning was sound as far as it went: sales
+             * creates no `ContractTemplateModification` rows, because it has no template to record a
+             * modification against, and `ContractEntityServer.ValidateAsync()` only refuses a false
+             * flag when such rows exist — which for a contract created this second they cannot.
+             *
+             * What that argument missed is that the flag is not a count of rows. It is the INSTRUCTION
+             * to go and create them: a true flag sends finance to the paper to capture each deviation,
+             * a false one sends them to confirm nothing was negotiated. Hardcoding false made every
+             * contract claim the standard agreement was untouched, including the negotiated ones, so
+             * the only signal distinguishing them was lost at the boundary.
+             *
+             * Absent (an older caller, or the stub) still means false — the column is NOT NULL in
+             * contracts and S-US1 defaults the deal's flag to no, so false is the honest default at
+             * both ends rather than a shrug.
              */
-            contract.Set('HasModifications', false);
+            contract.Set('HasModifications', input.StandardAgreementModified === true);
 
             this.setProvenance(contract, input.DealID);
             this.setNegotiatedTerms(contract, input);
