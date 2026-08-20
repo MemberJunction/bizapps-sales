@@ -16,8 +16,10 @@
  *                        rather than any name, and a closed deal refuses a raw save — including one made
  *                        only against its CHILD COLLECTIONS (CD13)
  *   product-picker       The rule deciding which of orders' products a line may reference
- *   close-won-order      What a won close does NOT do to the order: no second order, no status change,
- *                        still editable afterwards (S-US5/S-US6)
+ *   close-won-order      The order beside a close: no second order (CO4), and — since D-OS1 — the STAGE
+ *                        is what names the order's status, so CO3 proves the order follows a stage that
+ *                        names one and ignores a stage that does not, and CO5 proves a REFUSED status
+ *                        never blocks the stage change (S-US5/S-US7/S-US8)
  *   close-won-contract   The contract route, on the one stack that has contracts linked
  *
  * ⚠️ EVERY BUNDLE NOW REQUIRES bizapps-orders, including save-deal and close-deal. A deal cannot be
