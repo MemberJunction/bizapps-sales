@@ -292,7 +292,7 @@ the tool at exactly the moment a new check most needs proving.
 
 ---
 
-## DN-14 — SUPERSEDES DN-8: KI-22 is an INSTALL problem, not a CodeGen one
+## DN-14 — ROOT CAUSE FOUND (2026-08-20). Was: KI-22 is an INSTALL problem, not a CodeGen one
 
 DN-8 said orders' CodeGen files pass was "almost certainly all it takes". **It was tried, twice, and it
 is not.** Full detail in `docs/KNOWN-ISSUES.md` KI-22; the short version:
@@ -312,9 +312,32 @@ whatever drives `entityPackageName`. No regeneration against this host can repro
 code, because the host was never given orders' metadata. `mj sync push --dir metadata` in bizapps-orders
 gets 14 of 23 directories in and stops on a missing `MJ: Query Categories` row named `Orders`.
 
-**The decision:** clear that blocker, complete orders' metadata push, and only then regenerate — which is
-`mj app install` for bizapps-orders in all but name, and the same root cause as KI-21. It is a change to
-a shared host and another team's repo, so it wants Josue's hand on it rather than mine. Until then
-reopening a deal with an order does not work in the Explorer, and the reopen half of the Explorer pass
-stays unverified.
+**That was the right shape and the wrong depth. The blocker turned out to be one line of JSON.**
+
+Andrew's hypothesis, measured: orders' `metadata/.mj-sync.json` listed 7 of 23 directories in
+`directoryOrder`, and `query-categories` was not one of them — so it fell to alphabetical ordering, where
+`queries` sorts first ('i' < 'y' at index 4) and every query was pushed ahead of the category it
+references. `sync push` halted there, and the NINE directories after it never ran, including
+`entity-fields` and `entity-relationships`. Adding `query-categories` before `queries` takes the push
+from 14 of 23 to **23 of 23, 0 errors**, and restores every piece of metadata KI-22 was about.
+
+**Regenerating then works too, except for one line:** CodeGen emits
+`import { mjBizAppsCommonAddressEntity } from '@mj-biz-apps/orders-entities'` — a self-import, which is
+the `entityPackageName` limitation `packages/Entities/src/deal-entity.ts` documents at length. Corrected
+by hand as a diagnostic, all four orders packages build, `DEAL-9001` opens in the workspace, and its
+order lines render with orders' prices (Qty 3 × 229 = 687), matching the database exactly, with zero
+console errors.
+
+**What is left to decide, and it is now small and specific:**
+
+1. **Land the `.mj-sync.json` fix in orders.** One line; it is in the orders working tree, uncommitted.
+   This is the whole install fix and it is not controversial.
+2. **The `entityPackageName` self-import is an MJ CodeGen bug** and needs fixing there. Do NOT reach for
+   the schema-map variant — measured both ways, it makes CodeGen exclude those schemas from generation
+   entirely (`deal-entity.ts`). Until it is fixed, orders cannot be regenerated cleanly on any host
+   carrying common's schema, and the hand-correction on this host is a diagnostic that the next CodeGen
+   run will wipe.
+
+DN-8's premise — "almost certainly all it takes" — was wrong about the mechanism and right that it was
+small. What made it look deep was that each attempt fixed one symptom and exposed the next.
 

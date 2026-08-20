@@ -5,7 +5,110 @@ future developer will otherwise rediscover the hard way.
 
 ---
 
-## 🔴 KI-22 — Orders' generated GraphQL resolvers are behind the database, so a deal still cannot be reopened
+## 🛑 KI-22 — BLOCKING THE FOUNDATION: no deal that has an order can be READ, and every new deal has one
+
+**Severity raised 2026-08-20 (Andrew).** This was filed as a known issue and it is not one. Every deal
+created since `DealEntityServer` began provisioning an embedded order (S-US4) has an order, so
+"anything that must read a deal before writing it" now means **every deal**. It looks narrow only
+because six of the seven story deals predate provisioning. Nothing in the deal workspace or on the
+pipeline board can open, move or edit a deal created from now on.
+
+### ROOT CAUSE FOUND — and it is one line of JSON in orders
+
+`bizapps-orders/metadata/.mj-sync.json` listed **7 of its 23** metadata directories in `directoryOrder`.
+Everything unlisted falls to default alphabetical ordering — which is harmless until an alphabetical
+neighbour is also a dependency:
+
+```
+"queries"          →  q u e r i e s
+"query-categories" →  q u e r y - c a t e g o r i e s
+                              ↑ 'i' < 'y', so queries sorts FIRST
+```
+
+So every query was pushed ahead of the category it references, and `mj sync push --dir metadata` halted:
+
+```
+✖ Push failed  Failed to process field 'CategoryID' in MJ: Queries:
+  Lookup failed: No record found in 'MJ: Query Categories' where Name='Orders'
+```
+
+**The halt is the bug, not the queries.** `sync push` stops there, so the NINE directories after it never
+ran — including `entity-fields` (16 of 23) and `entity-relationships` (17 of 23), which carry exactly the
+metadata KI-22 was about. The earlier observation that a push reported `entity-fields — 5 updated` while
+the values stayed NULL was the whole push being rolled back.
+
+Hypothesis credited to Andrew; measured here.
+
+### The fix, and what it unblocked
+
+Adding `query-categories` before `queries` to `directoryOrder`:
+
+| | before | after |
+|---|---|---|
+| directories processed | 14 of 23, then halt | **23 of 23, exit 0, 0 errors** |
+| `MJ: Query Categories` named `Orders` | 0 | 1 |
+| `EntityField.EmbeddedRecord` rows | **0** | **5** — the exact five orders ships |
+| `EntityRelationship.RelatedRecordCollection` rows | 18 | **23**, including `OrderHeader → OrderLines` with its full `Lines` declaration |
+
+`62 created, 98 updated, 0 errors.` This is the same class of problem as KI-21: orders' schema was
+migrated to this host and its metadata never was — because it *could* not be.
+
+### One line still stands between that and a working reopen
+
+With the metadata complete, orders' CodeGen file pass now produces code that keeps everything my earlier
+attempt broke — `InitialPaymentDetailID_Object` survives, `OrderHeader.Lines` survives — **and** gains
+the missing `RootReversesOrderHeaderID`. It fails to compile on exactly one line:
+
+```ts
+// packages/Entities/src/generated/entity_subclasses.ts:10
+import { mjBizAppsCommonAddressEntity } from '@mj-biz-apps/orders-entities';   // ← itself
+//                                            should be '@mj-biz-apps/common-entities'
+```
+
+That is the **`entityPackageName`** limitation this repo already documents at length in
+`packages/Entities/src/deal-entity.ts`: with a plain string, every non-core schema resolves to the
+generating package, so common's `Address` comes out as orders' own. It appeared only now because the
+completed push added the `BillToAddressID` / `ShipToAddressID` embeds that make CodeGen emit the import
+at all. **Do not "fix" it with a schema map** — that variant makes CodeGen exclude those schemas from
+generation entirely, measured both ways and recorded in `deal-entity.ts`.
+
+Corrected by hand as a DIAGNOSTIC (then reverted — generated code is not the place for it), all four
+orders packages build.
+
+### AND WITH THAT ONE LINE CORRECTED, EVERYTHING WORKS — verified end to end
+
+The whole chain, on `MJ_V6_Host`, with the API restarted:
+
+* **`DEAL-9001` opens in the deal workspace.** The deal that could not be read at all — name, pipeline,
+  stage, customer, primary contact, term all present.
+* **Its order lines render, priced by orders:** `Platform — Premium Seat (PLAT-PRM)`, Qty 3, Unit price
+  229, Line total 687, Discount % 0.
+* **The screen matches the database exactly** — `LineNumber 1, Quantity 3, UnitPrice 229,
+  LineTotalNet 687, DiscountPct 0, SKU PLAT-PRM`. Sales set the product and the quantity; every figure
+  came back from orders.
+* **Zero console errors.**
+
+That closes the half of the Explorer pass that has been blocked since the redesign: create → provision →
+add a line was already proven; reopen → resolve the embedded order → render its priced lines is now
+proven too.
+
+### The state this host is in right now, so nobody is surprised
+
+| Change | Where | Status |
+|---|---|---|
+| `query-categories` before `queries` in `directoryOrder` | `bizapps-orders/metadata/.mj-sync.json` | **the real fix.** Uncommitted in the orders working tree, ready to land — Josue has push access |
+| orders' metadata, fully pushed | `MJ_V6_Host` | 62 created, 98 updated, 0 errors |
+| orders' regenerated `src/generated` | orders working tree | uncommitted; correct except the one import |
+| that one import, hand-corrected | `packages/Entities/src/generated/entity_subclasses.ts:10` | **a DIAGNOSTIC, not a fix.** Generated code — the next CodeGen run wipes it |
+
+The hand-correction is deliberately left in place so the working environment can demonstrate the fix,
+and is called out here because it is exactly the kind of edit that must not be mistaken for generated
+output. **The durable fix is in MJ's CodeGen `entityPackageName` resolution**, and until it lands orders
+cannot be regenerated cleanly on any host that carries common's schema. `DECISIONS-NEEDED.md` DN-14.
+
+---
+
+## 🔴 KI-22 (as originally recorded) — Orders' generated GraphQL resolvers are behind the database
 
 **The second half of KI-21, and it is a DIFFERENT problem with the same symptom.** With orders'
 server package registered, the schema gained the type — and the load still failed:
