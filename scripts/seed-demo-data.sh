@@ -261,7 +261,13 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe1)
     VALUES (@pipe1, @co1, N'B2B', N'B2B',
       N'The main motion, per master plan §4.2. NOTE the winning stage is called "Signed", not "Closed Won" — the app still knows it is a win because the stage points at a DealStatusType with IsWon=1.',
       @dtNew, @fcPipe, 1,
-      N'{"CreateContract":true,"ContractTypeCode":"Standard","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","RequireApprovalTaskTypeCode":null}',
+      -- 'Order Form', not 'Standard'. THE THIRD PLACE THIS DEFECT LIVED: contracts ships Order Form,
+      -- Statement of Work, Payment Link and Change Order, and nothing on any host is called Standard,
+      -- so a close-won down this pipeline planned a contract the seam could not create. The metadata
+      -- copy was found by close-won-contract.CT1 and the seeded DB row by CT6; this INSERT is guarded
+      -- by IF NOT EXISTS, so it only fires on a host that has no pipelines yet -- which is exactly the
+      -- host nobody would think to check.
+      N'{"CreateContract":true,"ContractTypeCode":"Order Form","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","RequireApprovalTaskTypeCode":null}',
       1, 10, 1);
 
 -- REPOINTED, NOT RE-INSERTED, and this is the seam between two seeding mechanisms.
