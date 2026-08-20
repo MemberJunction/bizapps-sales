@@ -204,6 +204,21 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.SalesContact WHERE ID=@c4)
     VALUES (@c4, @lcOpp, @lsPart, N'Partner Principal', 0);
 
 -- ============================ PIPELINE 1 — and the point about labels ============================
+--
+-- CloseWonPolicy.ContractTypeCode IS 'Order Form', AND THE VALUE IS LOAD-BEARING.
+--
+-- It said 'Standard' until 2026-08-20, which was v1 contracts vocabulary. The 2026-08-18 contracts
+-- rebuild replaced MSA / Standard / Membership / Evergreen / Pilot -- names describing a commercial
+-- SHAPE -- with names describing what the DOCUMENT is: Order Form, Statement of Work, Payment Link,
+-- Change Order. Nothing matched 'Standard' any more, so every B2B close-won created no contract and
+-- reported 'No contract type matches Standard'. The close still SUCCEEDED and recorded the reason,
+-- which is exactly why it went unnoticed -- an honest report of a failure still reads as a pass to
+-- anyone watching the return value.
+--
+-- 'Order Form' is what S-US2 names as the default, and it is also the only safe class of answer: it
+-- has ParentStatusRequirement = NULL, so it STANDS ALONE. A type requiring a parent -- Change Order --
+-- is refused by ContractEntityServer.ValidateAsync(), because a change order that amends nothing has
+-- no lineage. Any future value here must satisfy that too.
 DECLARE @pipe1 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000001';
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe1)
   INSERT INTO __mj_BizAppsSales.Pipeline (ID, CompanyID, Name, Code, Description, DealTypeID, DefaultForecastCategoryTypeID,
@@ -211,7 +226,7 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe1)
     VALUES (@pipe1, @co1, N'B2B', N'B2B',
       N'The main motion, per master plan §4.2. NOTE the winning stage is called "Signed", not "Closed Won" — the app still knows it is a win because the stage points at a DealStatusType with IsWon=1.',
       @dtNew, @fcPipe, 1,
-      N'{"CreateContract":true,"ContractTypeCode":"Standard","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","OrderState":"Confirmed","RequireApprovalTaskTypeCode":null}',
+      N'{"CreateContract":true,"ContractTypeCode":"Order Form","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","OrderState":"Confirmed","RequireApprovalTaskTypeCode":null}',
       1, 10, 1);
 
 DECLARE @s1 UNIQUEIDENTIFIER='91111111-0000-4000-A000-000000000001';

@@ -129,7 +129,30 @@ export interface OrdersPreviewResult {
 export interface ContractsCreateFromDealSeamInput {
     DealID: string;
     CompanyID: string;
-    /** A CODE, resolved by contracts. Sales does not know contract types. */
+    /**
+     * Which contract type to create, resolved by contracts. Sales does not know contract types and
+     * must not bake their UUIDs, which is why this is a string and not an ID.
+     *
+     * -- THE NAME SAYS `Code`, AND TODAY IT IS MATCHED ON `Name`. READ THIS BEFORE RENAMING IT. --
+     *
+     * `ContractType` has no `Code` column as of contracts `origin/next` @ d2f64e3; it is identified by
+     * `Name` (unique) plus a fixed seeded UUID. So `LiveContractsSeam` probes the metadata and matches
+     * on whichever identifier contracts actually offers, and says which one it used in the message it
+     * returns -- the answer is never ambiguous at the call site.
+     *
+     * The name is therefore aspirational rather than wrong: a `Code` is what this SHOULD carry, it is
+     * what the seam already prefers the moment the column appears, and asking for that column is an
+     * open request to contracts (D-12) for exactly the reason bizapps-tasks added `TaskType.Code` --
+     * a display name that can be renamed is not an identifier.
+     *
+     * Renaming this key is a bigger change than it looks: it is part of the published
+     * `Sales.CloseDeal` remote-operation contract and appears in generated code. Not worth doing to
+     * describe a state that is meant to be temporary.
+     *
+     * WHATEVER VALUE GOES HERE MUST NAME A TYPE THAT STANDS ALONE. A type whose
+     * `ParentStatusRequirement` is `'Required'` -- Change Order -- is refused by contracts' own
+     * validation when nothing names its parent, and a close-won has no parent contract to give it.
+     */
     ContractTypeCode?: string | null;
     TermMonths?: number | null;
     /** The AD's red-line summary, verbatim. Input to a human review; nothing parses it. */
