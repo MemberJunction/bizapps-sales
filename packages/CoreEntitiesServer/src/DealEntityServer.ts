@@ -152,14 +152,21 @@ export class DealEntityServer extends DealEntity {
             return false;
         }
 
+        // AFTER the company stamp, deliberately. See the method for why it cannot be earlier and why
+        // it does not belong in the workspace.
+        this.provisionEmbeddedOrder();
+
         // Nothing to number: an existing deal, or one that already has a number. A number is only ever
         // assigned once — it appears in contracts, orders and people's email, so re-saving a deal must
         // never renumber it.
-        if (this.IsSaved || this.DealNumber) {
-            return super.Save(options);
-        }
+        const saved = this.IsSaved || this.DealNumber
+            ? await super.Save(options)
+            : await this.saveWithNewDealNumber(options);
 
-        return this.saveWithNewDealNumber(options);
+        if (!saved) {
+            this.explainOrderProvisioningFailure();
+        }
+        return saved;
     }
 
     /**
@@ -206,6 +213,90 @@ export class DealEntityServer extends DealEntity {
             }
             return false;
         }
+    }
+
+    /**
+     * Gives a brand-new deal its embedded order, in Draft, on the deal's FIRST save.
+     *
+     * ── WHY THE ENTITY SERVER AND NOT THE WORKSPACE ──
+     *
+     * The workspace called `OrderID_EnsureObject()` from `AddLine()`, so a deal only got an order when
+     * somebody added a line THROUGH THE UI. An agent, an importer, a remote operation or a plain
+     * `BaseEntity.Save()` each produced a deal with no order at all -- and S-US4 puts the order at
+     * creation, not at first line. Same reasoning as the close lock below: a rule the UI enforces holds
+     * only until something that is not the UI writes.
+     *
+     * ── WHY FIRST SAVE AND NOT NewRecord() ──
+     *
+     * `OrderHeader.CompanyID` is NOT NULL, and a deal does not know its company until
+     * `stampCompanyFromPipeline()` has run: the caller supplies a PipelineID and the selling company is
+     * derived from it (D-4). Provisioning in `NewRecord()` would mean inventing a company or building an
+     * order that cannot be inserted. So it happens here, after the stamps, on the one call where
+     * `IsSaved` is still false.
+     *
+     * Idempotent twice over: `Ensure()` returns any existing peer, and the guard below means a re-save
+     * never re-provisions and a deal that already carries an `OrderID` is left alone.
+     *
+     * ── WHAT SALES STATES, AND WHAT IT DOES NOT ──
+     *
+     * Company, type, and who to bill. NOT a status: orders' own `NewRecord()` defaults it to Draft, and
+     * restating that here would be sales asserting an order lifecycle it does not own. NOT an
+     * `OrderNumber`: the server subclass in orders mints it, which is what the diagnostic below is about.
+     *
+     * `BillToOrganizationID` and `BillToPersonID` are BOTH set, and unlike the contract case that is
+     * legal -- `OrderHeader` has no XOR across them, checked against `sys.check_constraints`. Do not
+     * carry the contract's exactly-one rule across by analogy; it is that table's rule, not a house style.
+     * `Deal.AccountID` is a `SalesAccount`, an IsA child of common's `Organization`, so its key IS an
+     * organization key; `PrimaryContactID` is a `SalesContact`, an IsA child of `Person`.
+     */
+    private provisionEmbeddedOrder(): void {
+        if (this.IsSaved || this.OrderID) {
+            return;
+        }
+        if (!this.CompanyID) {
+            // The pipeline stamp resolved no company, so an order cannot be inserted. Say nothing and
+            // let the deal's own validation report the missing pipeline -- failing later inside orders
+            // would name a column instead of the actual mistake.
+            return;
+        }
+
+        const order = this.OrderID_EnsureObject();
+        order.CompanyID = this.CompanyID;
+        order.OrderType = 'Sale';
+        order.BillToOrganizationID = this.AccountID ?? null;
+        order.BillToPersonID = this.PrimaryContactID ?? null;
+    }
+
+    /**
+     * Turns the one failure this provisioning can cause into a message that names its cause.
+     *
+     * `OrderNumber` is NOT NULL and is minted by the SERVER subclass in orders. If that class is not
+     * registered in the process, `ClassFactory` resolves the generated `OrderHeader` instead, nothing
+     * mints a number, and the insert dies on a NOT NULL violation raised inside the save graph. What
+     * reaches the caller is `Save failed for OrderID_Object (MJ_BizApps_Orders: Order Headers): Error
+     * executing SQL` -- which names the entity, not the reason, and reads like a database fault rather
+     * than a missing import.
+     *
+     * SALES MUST NOT FIX THAT BY DEPENDING ON ORDERS' SERVER PACKAGE. Neither `sales-server` nor
+     * `sales-core-entities-server` does, and neither should start: loading another app's server classes
+     * from inside this one is how two registrations for one key end up decided by import order. MJAPI
+     * owns that -- MJ declares orders' server packages itself, which is why the running app works. A
+     * bare node harness has to call `LoadBizAppsOrdersServer()` on its own.
+     *
+     * So this cannot repair anything. It exists to stop the next person debugging the wrong layer.
+     */
+    private explainOrderProvisioningFailure(): void {
+        const order = this.OrderID_Object;
+        if (!order || order.IsSaved || order.OrderNumber) {
+            return;   // whatever failed, it was not this
+        }
+        LogError(
+            'DealEntityServer.Save: the embedded order was not written and has no OrderNumber. That ' +
+            'column is NOT NULL and is minted by the server subclass in orders, so this is what it looks ' +
+            'like when OrderEntityServer is not registered in this process and ClassFactory fell back to ' +
+            'the generated OrderHeader. In MJAPI it arrives through the dependencies MJ declares; in a ' +
+            'script, call LoadBizAppsOrdersServer() before saving. Not a database or constraint problem.',
+        );
     }
 
     /* ── The close lock (L-17, master plan §7.3) ────────────────────────────── */

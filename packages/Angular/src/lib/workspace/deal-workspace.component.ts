@@ -484,7 +484,10 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     public async AddLine(): Promise<void> {
-        // Idempotent: the first line is what brings the Draft order into being.
+        // NOT the provisioning mechanism any more -- DealEntityServer.provisionEmbeddedOrder() owns
+        // that, so an agent or an importer gets an order too. This stays for the UNSAVED deal: a rep
+        // can add lines before the first save, and there is no order yet to add them to. Idempotent,
+        // so on a saved deal it simply returns the peer that already exists.
         const order = this.Deal?.OrderID_EnsureObject();
         await order?.Lines.Create();
         this.Touch();
