@@ -38,7 +38,6 @@ import { Assert, type IntegrationCheckContext } from '@memberjunction/testing-in
 export const SALES_SCHEMA = '__mj_BizAppsSales';
 
 export const E_DEAL = 'MJ_BizApps_Sales: Deals';
-export const E_DEAL_LINE = 'MJ_BizApps_Sales: Deal Lines';
 export const E_SCHEDULE = 'MJ_BizApps_Sales: Deal Payment Schedules';
 export const E_TEAM = 'MJ_BizApps_Sales: Deal Team Members';
 export const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';

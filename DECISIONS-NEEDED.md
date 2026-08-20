@@ -850,3 +850,341 @@ held this year's.
 
 Noted here rather than fixed because there is nothing to read from yet, and because a placeholder that
 is never persisted is a display bug at worst — the deal itself stays honest.
+
+---
+
+# ACTIVITIES AND THE OUTLOOK INGEST — D-15 … D-24
+
+Raised while building S-US9 (#119) and the ingest behind S-US10 (#120), on
+`feature/activities-and-ingest`, pinned to `ba07f7e`.
+
+> **Two numbering series live in this file, deliberately.** The `DN-n` items are the embedded-order
+> rework's; the `D-n` items are one continuous series begun on `feature/closewon-tasks`. As of the
+> three-way integration **all of D-1…D-24 are here**, so the caveat this note used to carry — that
+> only D-9…D-12 had merged — is spent. Renumbering either series would break cross-references already
+> written into code comments on three branches and reachable by no rename, so the prefixes stay.
+>
+> The overlaps are worth knowing rather than deduplicating: `DN-11`/`D-1` both ask which stage means
+> "agreement or higher" and reached the same answer from opposite ends, and `D-9`/`D-10` are the
+> contracts-side gaps this branch's audit re-derived independently from the schema.
+
+Each item below has a defensible interim choice already in the code. None blocks the work.
+
+---
+
+## D-15 · The dedupe key is Graph's message id, not the RFC-822 `Message-ID`
+
+`UQ_Activity_External` is unique on `(SourceSystem, ExternalID)`, and the ingest keys on
+`('Microsoft365', <graph message id>)` — as briefed, and the right key for one mailbox.
+
+**What it bounds:** a Graph message id is per-mailbox. The RFC-822 `Message-ID` header is the same string
+for every recipient of the same message. So **the same email ingested from two mailboxes produces two
+Activity rows**, and dedupe cannot see they are one message. Today one mailbox is in scope, so nothing is
+wrong; the day a second is added, every internal thread involving two colleagues doubles.
+
+**Interim choice:** the Graph id, with `IncludeHeaders: true` on the fetch so the RFC header reaches
+`Activity.Details` and a later migration could promote it.
+
+**What is needed:** a ruling on whether multi-mailbox ingestion is in scope. If it is, the key becomes the
+RFC `Message-ID` where present — which means a column, because `Details` is not indexable, plus a decision
+about rows already keyed the other way.
+
+---
+
+## D-16 · Meetings need either an MJ provider extension or a direct Graph call
+
+**Verified, not assumed.** `BaseCommunicationProvider`'s abstract surface is `SendSingleMessage`,
+`GetMessages`, `ForwardMessage`, `ReplyToMessage`, `CreateDraft`. There is **no event or calendar method
+of any kind**, so meetings cannot be fetched through the Communication abstraction as it stands.
+
+Two routes, not equivalent:
+
+1. **Extend MJ's provider base** with a calendar surface. Right in the long run, benefits every app, and
+   is a change to MJ core this repository cannot make alone.
+2. **Call Graph `/events` directly from sales**, outside the abstraction. Available immediately, and
+   permanently a second way of doing the same thing — the duplication `BaseCommunicationProvider` exists
+   to prevent.
+
+**Interim choice:** neither, and the interface is shaped so either fits. `NormalizedItem` already carries
+`TypeCode`, `EndedAt` and `Location`, and `IActivitySource.Kind` is `'Message' | 'Calendar'`, so a calendar
+source satisfies the same interface and slots in beside the message source with no redesign. Nothing about
+meetings is half-built.
+
+**What is needed:** a ruling on route 1 vs route 2. S-US10 asks for meetings explicitly — "Meetings
+involving a deal's contacts appear on the deal" — so this is an acceptance criterion, not a nicety.
+
+---
+
+## D-17 · `GetMessages` has no date filter, so incremental sync is fetch-and-discard
+
+`GetMessagesParams` is `{ Identifier, NumMessages, UnreadOnly, IncludeHeaders, ContextData }`. There is no
+"since". A Graph-backed source cannot ask for "messages after the watermark" — it fetches the most recent
+`NumMessages` and the caller discards what it has already seen.
+
+**What it bounds:** if more messages arrive between two runs than the limit, the oldest are **missed and
+never retried**, because the watermark advances past them. The window is `limit` messages per run per
+mailbox against an hourly schedule.
+
+**Interim choice:** the caller-side discard, plus an explicit issue when every fetched message was newer
+than the watermark AND the batch was full — the one observable signature of that overflow. The fixture
+source applies the watermark properly, so it is deliberately the stricter of the two.
+
+**What is needed:** either a date-filtered fetch on MJ's provider (`GetMessagesParams.Since`), or an
+agreed limit and cadence with the overflow signal wired to something that notices. A busy shared mailbox
+on an hourly run at limit 100 is the case to size against.
+
+---
+
+## D-18 · Direction is inferred, and there is no Bcc
+
+`GetMessageMessage` carries `From`, `To`, `ToRecipients`, `CCRecipients`, `ReplyTo` — nothing stating
+inbound versus outbound, and no Bcc field at all.
+
+**Interim choice:** `Direction` is inferred by comparing the sender to the mailbox being read. Correct for
+ordinary mail. **Wrong for a message sent by a delegate** on somebody else's behalf, which lands as
+Inbound to the delegate's mailbox. Bcc recipients are not dropped so much as never delivered by the
+contract.
+
+**What is needed:** confirmation that delegate-sent mail is out of scope, or a direction signal on MJ's
+message type. The Bcc gap is probably acceptable — a Bcc is deliberately invisible to recipients — but it
+should be an accepted absence rather than an unnoticed one.
+
+---
+
+## D-19 · `ContactMethod.Value` is not normalized at write time
+
+The relevance filter matches an address against `ContactMethod.Value` with an `IN` list, then re-folds case
+in memory. The `IN` keeps whatever index exists on `Value`; the in-memory fold is what makes the match
+certain.
+
+**Why it matters:** SQL Server's default collation is case-insensitive, so `Ada@Example.com` matches today.
+**PostgreSQL's is not**, and production is Postgres. Wrapping the column in `LOWER()` would be portable but
+non-sargable, discarding the index on the one query that runs against every participant of every message.
+
+**Interim choice:** `IN` plus the in-memory fold. Correct on SQL Server; on Postgres a differently-cased
+stored address is a genuine miss — a relevant message quietly treated as irrelevant, which is the failure
+direction that produces no error at all.
+
+**What is needed:** `ContactMethod.Value` normalized (lower-cased) at write time in bizapps-common, or a
+functional index on `LOWER(Value)`. **This is the one item here that becomes a real defect at the Postgres
+conversion** rather than at some later feature.
+
+---
+
+## D-20 · One message that belongs to two deals is filed against only the first
+
+`DealMatcher` deliberately returns EVERY open deal a participant points at, because a customer with two
+live pursuits emails about both and picking one would hide the message from the other.
+
+But the writer keys on `(SourceSystem, ExternalID)`, which is unique — so the second deal hits the
+idempotency short-circuit and is counted as a duplicate rather than gaining its own `Regarding` link. The
+loop breaks after the first deal, which is at least honest about what happened.
+
+**Interim choice:** file against the first match. The only alternative available today would be to
+fabricate a distinct `ExternalID` per deal, which defeats dedupe entirely — the same message would
+re-import on every run once its deal set changed.
+
+**What is needed:** a writer that APPENDS a link to an existing activity when the external key already
+exists, rather than short-circuiting. Small change to `ActivityWriterService`, plus a decision about
+whether one activity linked to two deals is the intended model — it is the shape `ActivityLink` supports,
+but nothing has said it is wanted.
+
+---
+
+## D-21 · The sync-rule precedence is a convention, not a stated one
+
+`ActivitySyncRule` has `Sequence`, `Action` (Include/Exclude), `Direction`, `DateFrom`/`DateTo` and a
+free-text `Filter`. Nothing in the schema or its descriptions says how the rules combine.
+
+**Interim choice:** `Sequence` order, **last match wins, default include** — the ordinary firewall
+convention and what a reader of those two columns would expect. `Filter` is **not evaluated at all**: it is
+free text with no stated grammar, and inventing one here would oblige every future consumer to match an
+undocumented dialect.
+
+**What is needed:** the precedence written down wherever `ActivitySyncRule` is documented, and either a
+grammar for `Filter` or an agreement that it is operator notes rather than a predicate.
+
+---
+
+## D-22 · The workspace writes activities directly rather than through the writer service
+
+`ActivityWriterService` is the canonical composition — one `Activity`, N `ActivityLink` rows, one
+transaction, dedupe, party resolution. It is server-side, and an Angular component must not import a server
+package.
+
+So the timeline component writes the same two records by hand: an `Activity` and its `Regarding` link, and
+**nothing else** — no party links, no external key, no dedupe. Those are exactly the parts that need the
+deal's account and contact resolved, and exactly the parts the ingest depends on being right.
+
+**Interim choice:** the manual path's minimum. A hand-logged activity is reachable from its deal and
+correctly typed; it just does not carry the account and contact as participants, which the service would
+have added.
+
+**What is needed:** a thin remote operation — `Sales.LogActivity` — wrapping the writer, so the browser
+uses the real composition instead of a reduced copy. That is the pattern the close flow already uses, and
+it would delete the duplication rather than manage it.
+
+---
+
+## D-23 · The scheduled job is written but not seeded
+
+MJ's `SchedulingEngine` is the mechanism, as briefed — no external cron. `ActivitySyncJob.Run()` is the
+callable half and is complete: it enumerates Active Microsoft365 connections and runs each independently,
+so one failing mailbox cannot stop the others.
+
+**What is deliberately not done is seeding the `ScheduledJob` row.** Every source available today either
+refuses (the Graph source, until the tenant policy exists) or is a fixture, which has no business running
+in a deployment. An `Active` hourly job would write to `ActivitySyncConnection.LastError` once an hour
+forever, and the operator surface that exists to make a broken sync visible would be permanently red for a
+sync nobody switched on.
+
+**What turning it on takes**, for whoever does it:
+
+| Field | Value |
+|---|---|
+| `JobTypeID` | `3B94DD43-E961-4D85-B7F4-B6783D748766` — the seeded **Action** type (`ActionScheduledJobDriver`) |
+| `CronExpression` | `0 0 * * * *` — hourly. Six fields; seconds come first in this dialect |
+| `Status` | `Active` (`CK_ScheduledJob_Status`: Pending/Active/Paused/Disabled/Expired) |
+| `ConcurrencyMode` | `Skip` — a run overlapping the previous one would double-fetch the same window |
+| `MissedRunPolicy` | `RunOnce`, not `RunAll` — catching up ten missed hours would fetch the same recent messages ten times |
+| `Configuration` | JSON naming the per-run limit; must satisfy `CK_ScheduledJob_Configuration_IsJson` |
+
+**What is needed first:** an MJ Action wrapping `ActivitySyncJob.Run()`. Sales' `Actions` package is
+currently empty — this would be its first — so there is no local precedent for the metadata shape, which is
+why it is a decision rather than a guess. And it is downstream of the tenant policy in any case: until that
+exists there is nothing for an hourly job to read.
+
+---
+
+## D-24 · `provider.QuoteSchemaAndView is not a function` on harness startup
+
+Not a decision so much as an observation that should not get lost. Running the integration harness from
+this worktree logs `TypeError: provider.QuoteSchemaAndView is not a function` during
+`setupSQLServerClient`, then continues; all 11 checks run and pass.
+
+Almost certainly local: this worktree's `Entities`/`Server` dists were compiled here against the store's
+`@memberjunction/core`, while the shared tree's were built earlier. It did not appear on the sibling
+branches.
+
+**What is needed:** nothing yet — but if it appears in CI or on a clean install it is a version-skew
+symptom rather than a code fault, and this is where it was first seen.
+
+---
+---
+
+# UPDATES — what shipped since D-15…D-24 were written
+
+Three of the items above have moved. Recorded here rather than edited in place, so the reasoning that
+was current when a decision was taken stays readable next to what was done about it.
+
+---
+
+## D-16 — UPDATED: meetings are BUILT, on a recorded assumption
+
+Previously: "neither route taken, the interface is shaped so either fits."
+
+**Now built.** `MSGraphCalendarSource` calls Graph `/events` **directly**, outside MJ's Communication
+abstraction. This is **route 2, taken as a working assumption and not as a ruling** — the reason being
+that there is nothing to extend today: every abstract method on `BaseCommunicationProvider` is
+message-shaped, so route 1 would mean shipping no meetings at all while waiting on another repository.
+
+**It remains reversible for one file.** The calendar source sits behind `IActivitySource` exactly as the
+message source does; the relevance filter, the deal matcher, the writer, the dedupe, the watermark, the
+Action and the scheduled job neither know nor care which produced an item. If Amith rules that a calendar
+surface belongs in MJ core, `MSGraphCalendarSource` is replaced and nothing else moves.
+
+**One thing found while building it that argues FOR the direct call:** unlike `GetMessages`, `/events`
+accepts a date filter. So the calendar has none of D-17's fetch-and-discard overflow risk — it can ask
+for "events since the watermark" and get exactly that. A provider-base surface would have to expose the
+same, or meetings would regress to the mail behaviour.
+
+**Still needed:** the ruling. This is now a question of where the code lives, not whether meetings work.
+
+---
+
+## D-19 — RESOLVED, and the check had to be rebuilt to prove it
+
+The filter now folds case in the query: `LOWER(Value) IN (…)`. Correct on both engines.
+
+**Worth recording HOW this was nearly missed.** The first version of the check asserted the behaviour —
+a mixed-case address matching a lower-case stored value. It passed. Then the mutation pass reverted the
+fix, and **all seventeen checks stayed green**, because SQL Server's default collation is
+case-insensitive and does the work either way. The check was measuring the database, not the code.
+
+So the filter is built by an exported `BuildContactMethodFilter()` and AC12 asserts the SQL itself
+contains `LOWER(Value)`. White-box, deliberately: on this engine the SQL is the *only* observable
+difference, and a check that cannot fail until production is not a check. Re-ran the mutant afterwards
+and AC12 goes red.
+
+**Still recommended, and now only a performance matter rather than a correctness one:** a functional
+index on `LOWER(Value)` in bizapps-common. `LOWER()` is non-sargable, so any plain index on `Value` is
+now unusable for this read. That is somebody else's schema, and the read is per-participant-per-message,
+so it is worth doing before volume arrives.
+
+---
+
+## D-23 — SUPERSEDED: the job IS seeded, and Active
+
+Previously: "the callable half is complete; the row is deliberately not seeded, because an Active hourly
+job would write to `LastError` once an hour forever."
+
+**That objection was answered by changing the default source rather than by leaving the row out.** The
+factory's default is now two EMPTY fixtures — one per surface — so the hourly run does the whole
+pipeline and writes nothing. The job log reads as an hourly success that fetched zero items, and
+`LastError` stays clean. AC17 asserts exactly that, so replacing the default with anything that reads
+goes red rather than quietly writing fabricated activities into a real database every hour.
+
+**Shipped, in `metadata/`:**
+
+| Row | Value |
+|---|---|
+| Action Category | `Sales` — sales had none; MJ's ~50 seeded categories are its own connectors |
+| Action | `Sync Activities`, DriverClass `Sales.SyncActivities`, Type Custom, Active |
+| Action Param | `Limit`, Input, default 100 — see D-17 for why it is not just a performance dial |
+| ScheduledJob | Action type, `0 0 * * * *`, UTC, Active, ConcurrencyMode `Skip`, MissedRunPolicy `RunOnce`, MaxRuntimeMinutes 20 |
+
+Pushed to MJ_V6_Host and verified: four rows created, `Configuration.ActionID` resolves to the real
+Action, DriverClass matches the registered class. AC15 asserts that agreement, because the one silent
+failure mode here is a dangling `ActionID` — the job fires on time, resolves nothing, and reports no
+error.
+
+`NextRunAt` is null until the SchedulingEngine's first tick computes it; that is the engine's job, not a
+seed value, and an MJAPI restart populates it.
+
+**Still needed:** nothing to make the chain fire. Only a real source for it to read.
+
+---
+
+## D-25 · A cancelled meeting is captured, but its status is not modelled
+
+`MSGraphCalendarSource` reads `isCancelled` and carries it into `Activity.Details` as `Cancelled: true`,
+so the fact survives and a surface can badge it. But `Activity.Status` is hardcoded `'Completed'` by the
+ingest for every item, so a cancelled meeting is stored as completed.
+
+**Interim choice:** capture it and leave the status alone. Dropping cancelled meetings would be wrong —
+"they cancelled" is exactly the kind of thing a rep wants on a timeline — and `CK_Activity_Status` does
+allow `'Cancelled'`, so the value exists.
+
+**What is needed:** a ruling on whether a cancelled meeting should read as `Cancelled` (accurate about
+the meeting, but it then looks like a *task* that was cancelled in any generic activity view) or as
+`Completed` with a badge (accurate about the record, vaguer about the world). It is one line in the
+ingest either way, and it wants a product answer rather than a developer's guess.
+
+---
+
+## D-26 · The per-surface watermark uses `Settings`, which is a shared bag
+
+Messages advance `ActivitySyncConnection.LastSyncAt`; the calendar advances a `CalendarLastSyncAt` key
+inside `Settings`, an existing nullable JSON column.
+
+**Why it is split at all:** one watermark for both surfaces takes the max of the two, so a meeting older
+than the newest email is judged already-seen and **skipped forever** — the calendar source never even
+being asked for it. No error, and no row missing from anything anyone counts. AC14 is the regression
+test.
+
+**Why `Settings` rather than a column:** a column means a migration in bizapps-common for a field only
+this app reads. The write merges rather than replaces, so anything else keeping state there survives.
+
+**What is needed:** agreement that `Settings` is a legitimate place for a consumer's own state, or a
+second watermark column if bizapps-common would rather own it explicitly. The risk of the current shape
+is collision — two apps choosing the same key — and it is small but real.

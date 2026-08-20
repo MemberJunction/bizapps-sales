@@ -1,0 +1,26 @@
+[
+  {
+    "_comments": [
+      "SALES' ACTION CATEGORY. One row, and it exists so `MJ: Actions` rows can resolve a parent by",
+      "@lookup on Name rather than baking a UUID into every action.",
+      "",
+      "There was no Sales category before this. Orders has one (`Orders`), accounting reaches for the",
+      "shared `Accounting` one, and the ~50 seeded categories are MJ's own connectors and utilities --",
+      "none of them is where a sales action belongs. Reusing `CRM` was the alternative and was rejected:",
+      "it is one of MJ's own connector categories, and a sales action appearing under it would read as",
+      "part of an integration rather than part of this app.",
+      "",
+      "Fixed UUID so a re-push against a rebuilt database UPDATES this row rather than creating a second",
+      "`Sales` category, which would then have actions split across two identically-named parents -- a",
+      "state nothing would flag and every action list would show twice."
+    ],
+    "fields": {
+      "Name": "Sales",
+      "Description": "Actions belonging to the BizApps Sales app: deal lifecycle, forecasting and the activity ingest.",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0000-4000-8000-000000000001"
+    }
+  }
+]

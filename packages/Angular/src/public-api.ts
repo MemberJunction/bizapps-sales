@@ -106,3 +106,6 @@ export function LoadBizAppsSalesClient(): void {
     void MJSSalesSectionComponent;
     void SalesDealsSectionResource;
 }
+
+/** S-US9 — the deal activity timeline. Standalone, so a host can drop it anywhere. */
+export * from './lib/activities/deal-activity-timeline.component';

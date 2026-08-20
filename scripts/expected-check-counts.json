@@ -39,11 +39,13 @@
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
     "close-won-contract": { "count": 4, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild" },
     "board-move": { "count": 4, "requires": "orders", "ids": "BD1-BD4" },
-    "close-won-tasks": { "count": 10, "requires": "tasks", "ids": "WT1-WT10" }
+    "close-won-tasks": { "count": 10, "requires": "tasks", "ids": "WT1-WT10" },
+    "activities": { "count": 17, "requires": "common", "ids": "AC1-AC17" }
   },
   "probes": {
     "orders": "@mj-biz-apps/orders-entities",
     "contracts": "@mj-biz-apps/contracts-entities",
-    "tasks": "@mj-biz-apps/tasks-entities"
+    "tasks": "@mj-biz-apps/tasks-entities",
+    "common": "@mj-biz-apps/common-entities"
   }
 }

@@ -575,6 +575,16 @@
       }
     }
 
+    <!--
+      THE ACTIVITY TIMELINE (S-US9 #119). Deliberately OUTSIDE the pane switch above: it is a record of
+      what happened rather than a part of the draft, so it carries no validation state and belongs to no
+      DealWorkspaceSection. Shown only for a SAVED deal — an unsaved draft has no ID to link an activity
+      to, and offering the button would produce a save that cannot land.
+    -->
+    @if (Deal?.ID) {
+      <mjs-deal-activity-timeline [DealID]="Deal!.ID"></mjs-deal-activity-timeline>
+    }
+
     <span workspaceFooterNote>
       @if (SaveBlockedReason) {
         <span class="dw-blocked">{{ SaveBlockedReason }}</span>

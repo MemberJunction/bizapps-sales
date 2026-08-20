@@ -51,10 +51,32 @@ export * from './LiveContractsSeam.js';
 /**
  * The finance tasks a won deal raises (S-US2 #34, S-US3 #35).
  *
- * NOT called from the close yet, and that is deliberate -- see the note at the top of the file.
- * Exported so the wiring, when it lands, is an import rather than a move.
+ * WIRED INTO THE CLOSE as of the closewon-tasks merge -- the comment here said "not called from the
+ * close yet, exported so the wiring, when it lands, is an import rather than a move". It landed.
+ * `CloseDealOperation` calls this, and its non-fatal warnings share the close's `Issues` array with the
+ * order-status writer, tasks first (see the ordering note there).
  */
 export * from './CloseWonTaskService.js';
+
+/**
+ * ACTIVITIES AND THE OUTLOOK INGEST (S-US9 #119, S-US10 #120).
+ *
+ * Exported as a block because they are one feature: the writer is what the workspace pane and the
+ * ingest both call, and `IActivitySource` is the seam that makes the ingest testable without a mailbox.
+ * The Graph source is exported too, deliberately -- it is complete, and hiding it would make it look
+ * unwritten rather than ungated.
+ */
+export * from './activities/activity-vocabulary.js';
+export * from './activities/ActivityWriterService.js';
+export * from './activities/ActivityReader.js';
+export * from './activities/ActivitySource.js';
+export * from './activities/FixtureActivitySource.js';
+export * from './activities/MSGraphActivitySource.js';
+export * from './activities/MSGraphCalendarSource.js';
+export * from './activities/RelevanceFilter.js';
+export * from './activities/DealMatcher.js';
+export * from './activities/ActivityIngestService.js';
+export * from './activities/ActivitySyncJob.js';
 
 import { DealEntityServer } from './DealEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
