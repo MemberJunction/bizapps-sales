@@ -291,6 +291,20 @@ async function orderLines(
     return (r.Results ?? []) as Record<string, unknown>[];
 }
 
+/**
+ * The order's TOTAL, read from ORDERS rather than computed here.
+ *
+ * `TotalGross` is maintained by orders' own rollup trigger, so this is the one number the amount cache
+ * is allowed to be compared against. A check that multiplied quantity by price to decide what to expect
+ * would be breaking Rule 1 to test Rule 1, and would agree with an implementation that made the same
+ * mistake.
+ */
+async function orderTotal(ctx: Parameters<NamedCheck['Fn']>[0], orderID: string): Promise<number | null> {
+    const row = await orderRow(ctx, orderID, ['TotalGross']);
+    const total = row.TotalGross;
+    return total === null || total === undefined ? null : Number(total);
+}
+
 /** The embedded order's row, read back through the entity layer. */
 async function orderRow(
     ctx: Parameters<NamedCheck['Fn']>[0],
@@ -957,6 +971,127 @@ export const SaveDealChecks: NamedCheck[] = [
                     idsOf(stored),
                     'the SAME rows, not merely the same number of them',
                 );
+            }),
+    },
+
+    {
+        Id: 'save-deal.SD21',
+        Name: 'SD21: Deal.Amount is CACHED from the order total, with provenance stamped',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE DEFECT THIS CHECK EXISTS FOR WAS VISIBLE ON A DASHBOARD FOR DAYS.
+                 *
+                 * `Amount` cached an `Orders.PreviewOrder` answer and `AmountSourceHash` fingerprinted the
+                 * `DealLine` set. `DealLine` is retired, so nothing repopulated it — and it did not go
+                 * blank, it kept its last value. A pipeline figure with no relationship to the order
+                 * underneath it, reported by the dashboard and the board as fact.
+                 *
+                 * The number is asserted against `OrderHeader.TotalGross` rather than against a figure
+                 * this check computes. That is the whole point: if this check multiplied quantity by price
+                 * to know what to expect, it would be doing the thing Rule 1 forbids and would agree with
+                 * a wrong implementation that made the same mistake.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD21 amount cache'; });
+                await twoLines(ctx, deal);
+                await saveOk(deal, 'the composed save');
+
+                const [order] = await orderLines(ctx, deal.OrderID as string, ['ID']);
+                Assert(!!order, 'the order has lines to total');
+
+                const stored = await TxOne<{ Amount: number; AmountIsComputed: boolean; AmountSourceHash: string }>(
+                    ctx,
+                    `SELECT Amount, AmountIsComputed, AmountSourceHash FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
+                );
+                const total = await orderTotal(ctx, deal.OrderID as string);
+
+                Assert(total !== null, 'the order carries a TotalGross for the amount to come from');
+                AssertEqual(
+                    Number(stored.Amount),
+                    Number(total),
+                    'Deal.Amount equals the order total ORDERS computed — sales added nothing up',
+                );
+                Assert(stored.AmountIsComputed === true, 'and it is marked COMPUTED, so a surface knows it is a cache');
+                Assert(
+                    !!stored.AmountSourceHash && stored.AmountSourceHash.length === 64,
+                    `the source fingerprint is stamped, got '${stored.AmountSourceHash}'`,
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD22',
+        Name: 'SD22: a HAND-TYPED amount is never overwritten by a computed one',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * L-2's SIMPLE DEAL, and the rule that keeps the provenance columns honest.
+                 *
+                 * `AmountIsComputed = 0` means a human typed the figure and is owed no explanation — the
+                 * D2C motion works exactly this way, `RequiresDealLines = 0` and the amount entered by
+                 * hand. A cache refresh that overwrote it would silently replace somebody's negotiated
+                 * number with an order total, and they would find out from a report.
+                 *
+                 * The trap: the column DEFAULTS to 0, so "0" alone cannot mean hand-typed. What
+                 * distinguishes them is whether an amount is actually there. SD21 covers the NULL case
+                 * (filled, and marked computed); this covers the typed one.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const deal = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD22 hand-typed';
+                    d.Amount = 250000;
+                    d.AmountIsComputed = false;
+                });
+                await twoLines(ctx, deal);
+                await saveOk(deal, 'the save');
+
+                const total = await orderTotal(ctx, deal.OrderID as string);
+                Assert(total !== null && Number(total) !== 250000, `the order total must DIFFER from the typed figure, got ${total}`);
+
+                const stored = await TxOne<{ Amount: number; AmountIsComputed: boolean; AmountSourceHash: string | null }>(
+                    ctx,
+                    `SELECT Amount, AmountIsComputed, AmountSourceHash FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
+                );
+                AssertEqual(Number(stored.Amount), 250000, 'the typed figure survived a save that had every reason to overwrite it');
+                Assert(stored.AmountIsComputed === false, 'and it is still marked hand-typed');
+                Assert(
+                    stored.AmountSourceHash === null || stored.AmountSourceHash === undefined,
+                    'with no source fingerprint, because it came from a person and not a computation',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD23',
+        Name: 'SD23: an order with no priced lines leaves the amount ALONE, rather than writing zero',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * "NOBODY HAS SAID YET" AND "PRICED AT NIL" ARE DIFFERENT ANSWERS, and a header-only deal
+                 * is the first one. Writing 0 with `AmountIsComputed = 1` would state the second, and
+                 * would also lock the deal out of ever being hand-typed — because a computed amount is a
+                 * cache, and the cache is refreshed.
+                 *
+                 * This is the lineless motion S-US4 explicitly supports, so it is not an edge case: it is
+                 * how every D2C deal starts.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD23 no lines'; });
+                await saveOk(deal, 'the save');
+
+                Assert(!!deal.OrderID, 'the deal still provisioned an order');
+                AssertEqual(await orderTotal(ctx, deal.OrderID as string), null, 'whose total is NULL — nothing priced');
+
+                const stored = await TxOne<{ Amount: number | null; AmountIsComputed: boolean }>(
+                    ctx, `SELECT Amount, AmountIsComputed FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
+                );
+                Assert(
+                    stored.Amount === null || stored.Amount === undefined,
+                    `the amount stays unset, not zero — got ${String(stored.Amount)}`,
+                );
+                Assert(stored.AmountIsComputed === false, 'and it is not claimed as computed');
             }),
     },
 ];

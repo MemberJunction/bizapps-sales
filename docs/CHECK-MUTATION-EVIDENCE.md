@@ -115,6 +115,13 @@ CO3 and CO5 were reframed onto the MECHANISM, so their old mutants no longer app
 | M-OS1 | `DealEntityServer` · the writer never plans anything | CO3, CO5 | — |
 | M-OS2 | `DealEntityServer` · a NULL `OrderStatusOnEntry` treated as `'Draft'` | CO3 | — |
 | M-OS3 | `DealEntityServer` · the refusal happens but the warning is swallowed | CO5 | — |
+| M-AM1 | `DealEntityServer` · the amount cache is never refreshed | SD21 | — |
+| M-AM2 | `DealEntityServer` · a hand-typed amount is overwritten | SD22 | — |
+| M-AM3 | `DealEntityServer` · "nothing priced" becomes "priced at nil" | SD23 | — |
+
+`M-AM2` is the one to keep pointed at: it deletes the guard that protects a human's figure, and only
+SD22 notices. A cache that quietly overwrites a negotiated number is found by the person whose number
+changed, from a report, days later.
 
 M-OS2 is the one worth keeping: treating "this stage has no opinion" as "set it back to Draft" is the
 naive reading of a nullable column, and CO3's second half exists solely to catch it. M-OS3 proves CO5

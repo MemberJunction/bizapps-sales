@@ -18,7 +18,14 @@
 import { IMetadataProvider, UserInfo } from '@memberjunction/core';
 import { SQLServerDataProvider } from '@memberjunction/sqlserver-dataprovider';
 
-const SALES_SCHEMA = '__mj_BizAppsSales';
+/**
+ * This app's schema, in ONE place in this package.
+ *
+ * Exported because `DealEntityServer` needs it too, for the targeted `UPDATE` that maintains the
+ * `Deal.Amount` cache. A second copy of the literal is a second thing to change when the schema is
+ * renamed for the PostgreSQL conversion, and the one that gets missed is the one nobody tested.
+ */
+export const SALES_SCHEMA = '__mj_BizAppsSales';
 
 /**
  * Atomically increments the singleton deal counter and returns the formatted `DEAL-{seq:000000}`.

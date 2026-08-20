@@ -51,6 +51,8 @@ import {
     IRunViewProvider,
     LogError,
 } from '@memberjunction/core';
+import { createHash } from 'node:crypto';
+
 import { RegisterClass } from '@memberjunction/global';
 // ORDERS' OWN RULE, imported rather than restated. `CanTransition` is the same function
 // `OrderEntityServer.passesStatusTransition()` consults, so a refusal here and a refusal there cannot
@@ -62,7 +64,7 @@ import {
     type mjBizAppsSalesDealStageEventEntity,
 } from '@mj-biz-apps/sales-entities';
 
-import { getNextDealNumber } from './SequenceService.js';
+import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
@@ -77,6 +79,12 @@ interface PipelineCompanyRow {
 }
 
 const STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
+const ORDER_HEADER_ENTITY = 'MJ_BizApps_Orders: Order Headers';
+
+/** The one column the order lookup selects for the amount cache. */
+interface OrderTotalRow {
+    TotalGross: number | null;
+}
 
 /** The one column the stage lookup selects for the order rule. */
 interface StageOrderStatusRow {
@@ -230,12 +238,27 @@ export class DealEntityServer extends DealEntity {
          */
         const stageMove = this.planStageEvent();
 
+        /**
+         * AND WHETHER THE AMOUNT CACHE COULD HAVE MOVED — a DIFFERENT trigger from the other three.
+         *
+         * The other three key on the stage changing. `Deal.Amount` keys on the ORDER changing, because
+         * that is what it caches: a rep adding a line does not touch the stage, and an amount that only
+         * refreshed on stage moves would be stale for exactly the action that changes it most.
+         *
+         * Drift caused by someone else — finance editing the order directly, which S-US5 explicitly
+         * allows — is deliberately NOT chased here. That is what `AmountSourceHash` is for: a surface
+         * holding the order can recompute the fingerprint and say "stale, reprice". Polling the order on
+         * every unrelated deal save would be a read per keystroke for a guarantee the hash already gives.
+         */
+        const order = this.OrderID_Object;
+        const amountMayHaveMoved = !!order && (order.Dirty || order.Lines.Dirty);
+
         // Nothing to number: an existing deal, or one that already has a number. A number is only ever
         // assigned once — it appears in contracts, orders and people's email, so re-saving a deal must
         // never renumber it.
         const saved = this.IsSaved || this.DealNumber
-            ? await this.saveWithinScope(options, { stageOrder, stageMove, assignNumber: false })
-            : await this.saveWithinScope(options, { stageOrder, stageMove, assignNumber: true });
+            ? await this.saveWithinScope(options, { stageOrder, stageMove, amountMayHaveMoved, assignNumber: false })
+            : await this.saveWithinScope(options, { stageOrder, stageMove, amountMayHaveMoved, assignNumber: true });
 
         if (!saved) {
             this.explainOrderProvisioningFailure();
@@ -285,7 +308,7 @@ export class DealEntityServer extends DealEntity {
     /**
      * The ONE place a save opens a transaction, and the one place the ordering is decided.
      *
-     * Three jobs share this scope, and each has a reason to be where it is:
+     * Four jobs share this scope, and each has a reason to be where it is:
      *
      * 1. **The deal number**, BEFORE the header is written — `DealNumber` carries a filtered UNIQUE
      *    index, and assigning it afterwards would mean a second write to a row already visible. The
@@ -296,6 +319,9 @@ export class DealEntityServer extends DealEntity {
      *    it was never really in.
      * 3. **The stage event**, AFTER, because it is provenance for a move that has actually happened.
      *    An event for a save that then failed is worse than no event: it is a claim about history.
+     * 4. **The `Deal.Amount` cache**, LAST, because `OrderHeader.TotalGross` is trigger-maintained and
+     *    only reflects this save's lines once they are written. Its trigger is the ORDER changing rather
+     *    than the stage, which is why the caller decides separately whether it runs.
      *
      * **BOTH-OR-NEITHER, ACROSS ALL THREE.** A moved deal with no event is a hole in an append-only
      * log. A numbered deal that does not exist consumes a number nobody can account for. And a stage
@@ -311,9 +337,14 @@ export class DealEntityServer extends DealEntity {
      */
     private async saveWithinScope(
         options: EntitySaveOptions | undefined,
-        work: { stageOrder: StageOrderPlan | null; stageMove: StageMoveSnapshot | null; assignNumber: boolean },
+        work: {
+            stageOrder: StageOrderPlan | null;
+            stageMove: StageMoveSnapshot | null;
+            amountMayHaveMoved: boolean;
+            assignNumber: boolean;
+        },
     ): Promise<boolean> {
-        if (!work.assignNumber && !work.stageOrder && !work.stageMove) {
+        if (!work.assignNumber && !work.stageOrder && !work.stageMove && !work.amountMayHaveMoved) {
             return super.Save(options);
         }
 
@@ -346,6 +377,11 @@ export class DealEntityServer extends DealEntity {
 
             if (work.stageMove) {
                 await this.appendStageEvent(work.stageMove);
+            }
+
+            // LAST, because it reads a total the trigger only produced a moment ago. See the method.
+            if (work.amountMayHaveMoved || work.assignNumber) {
+                await this.refreshAmountFromOrder();
             }
 
             await scope.Commit();
@@ -655,6 +691,139 @@ export class DealEntityServer extends DealEntity {
         }
     }
 
+
+    /**
+     * Re-establishes `Deal.Amount` from the order, as a CACHE with honest provenance.
+     *
+     * ── WHAT BROKE, AND WHY IT WAS INVISIBLE ──
+     *
+     * `Amount` was a cached `Orders.PreviewOrder` answer and `AmountSourceHash` fingerprinted the
+     * `DealLine` set it came from. `DealLine` is retired, so the fingerprint describes a table that does
+     * not exist and NOTHING repopulated the number. It did not go blank — it kept whatever it last held,
+     * which is the failure mode that survives review: a dashboard and a board reporting a pipeline
+     * figure with no relationship to the order underneath it.
+     *
+     * ── WHY `OrderHeader.TotalGross` AND NOT A SUM HERE ──
+     *
+     * Rule 1. Orders maintains `TotalGross` with its own rollup trigger (their D41 —
+     * trigger-maintained, deliberately not a computed column), so this reads ONE number that orders
+     * already stands behind. There is no multiplication, no addition and no rounding in this method, and
+     * there must never be: the moment sales sums `LineTotalGross` itself, the quote and the invoice can
+     * disagree.
+     *
+     * ── WHY IT IS CACHED ONTO THE DEAL ──
+     *
+     * The roster and the board read `Deal.Amount` as a column. Reading through the embedded order per
+     * row would turn one roster query into one-plus-N, on the hottest read in the app. Same argument as
+     * `OwnerEmployeeID`: a denormalised stamp exists so a list does not need a join.
+     *
+     * ── WHY IT RUNS LAST, INSIDE THE SCOPE ──
+     *
+     * `TotalGross` is trigger-maintained, so the value only reflects this save's lines AFTER
+     * `super.Save()` has written them. Reading earlier caches the PREVIOUS line set — the exact staleness
+     * this method exists to end. It writes with a targeted `UPDATE` rather than a second `Save()`: the
+     * row is already written in this transaction, and re-entering `Save()` would re-run the close lock,
+     * the stamps and the stage-event planner for a three-column cache refresh.
+     *
+     * ── THE PROVENANCE RULE, WHICH IS THE PART TO GET RIGHT ──
+     *
+     * `AmountIsComputed = 0` means a human typed this figure and is owed no explanation (L-2, the SIMPLE
+     * deal). Such an amount is NEVER overwritten. But the column defaults to 0, so "0" alone cannot mean
+     * hand-typed — a brand-new deal has never been touched by anyone. The distinction is whether an
+     * amount is actually THERE:
+     *
+     *   | `AmountIsComputed` | `Amount` | what it means | what happens |
+     *   |---|---|---|---|
+     *   | 1 | anything | a cache | refreshed |
+     *   | 0 | NULL | nobody has said | filled, and marked computed |
+     *   | 0 | a number | **a human typed it** | **left alone, always** |
+     *
+     * And a `TotalGross` of NULL means the order has no priced lines, so there is no answer to cache —
+     * that leaves the amount alone too, rather than writing a zero that would read as "priced at nil".
+     */
+    private async refreshAmountFromOrder(): Promise<void> {
+        if (!this.OrderID) {
+            return;
+        }
+        // A hand-typed figure. Not ours, ever.
+        if (this.AmountIsComputed === false && this.Amount !== null && this.Amount !== undefined) {
+            return;
+        }
+
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await view.RunView<OrderTotalRow>(
+            {
+                EntityName: ORDER_HEADER_ENTITY,
+                ExtraFilter: `ID = '${this.OrderID}'`,
+                ResultType: 'simple',
+                Fields: ['TotalGross'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            // Not fatal: a stale amount is worse than a missing refresh, but neither is worth failing a
+            // save the rep asked for. Recorded where the order warnings go, because that is what it is.
+            this._orderStatusWarnings.push(
+                `The deal saved, but its amount could not be refreshed from the order ` +
+                `(${result.ErrorMessage ?? 'unknown error'}), so it may be stale.`,
+            );
+            return;
+        }
+
+        /**
+         * A FINITE NUMBER OR NOTHING — and the `Number.isFinite` is not defensive padding.
+         *
+         * `RunView` returns a clean `null` for a NULL decimal when the row is already committed, so a
+         * `=== null` test looks sufficient. It is not: reading a row this transaction has only just
+         * INSERTED went through a different path and produced a value that was neither `null` nor
+         * `undefined` and that `mssql` then bound as NULL — so the cache wrote `Amount = NULL` while
+         * stamping `AmountIsComputed = 1` and a source hash. A deal claiming a computed amount of
+         * nothing, which is worse than either honest answer. SD23 is the check that found it.
+         *
+         * So the rule is the one a money cache should have had from the start: cache a finite number, or
+         * do not touch the columns.
+         */
+        const raw = (result.Results ?? [])[0]?.TotalGross;
+        const total = raw === null || raw === undefined ? null : Number(raw);
+        if (total === null || !Number.isFinite(total)) {
+            return;   // no priced lines, or no usable answer — either way, nothing to cache
+        }
+
+        /**
+         * The fingerprint, so a surface can say "stale, reprice" instead of showing an untraceable
+         * number. It covers the ORDER and the TOTAL, which is exactly what the cache was derived from —
+         * a reader holding the order can recompute this and compare without a second table.
+         */
+        const hash = createHash('sha256').update(`${this.OrderID}|${total}`).digest('hex');
+        if (Number(this.Amount) === Number(total) && this.AmountSourceHash === hash && this.AmountIsComputed) {
+            return;   // already current; a no-op write would only churn the row
+        }
+
+        const now = new Date();
+        const sql = this.ProviderToUse as unknown as {
+            ExecuteSQL: (
+                sql: string,
+                params: Record<string, unknown>,
+                options: { isMutation: boolean; description: string },
+                user: unknown,
+            ) => Promise<unknown>;
+        };
+        await sql.ExecuteSQL(
+            `UPDATE ${SALES_SCHEMA}.Deal
+                SET Amount = @amount, AmountIsComputed = 1, AmountComputedAt = @at, AmountSourceHash = @hash
+              WHERE ID = @id`,
+            { amount: total, at: now, hash, id: this.ID },
+            { isMutation: true, description: 'DealEntityServer: refresh Deal.Amount from OrderHeader.TotalGross' },
+            this.ContextCurrentUser,
+        );
+
+        // The in-memory record follows, so a caller reading the entity back after `Save()` sees the
+        // cache it just wrote rather than the value it came in with.
+        this.Amount = total;
+        this.AmountIsComputed = true;
+        this.AmountComputedAt = now;
+        this.AmountSourceHash = hash;
+    }
 
     /* ── The close lock (L-17, master plan §7.3) ────────────────────────────── */
 
