@@ -23,6 +23,12 @@
     "failure. Otherwise a run on a host with nothing linked would pass while executing zero checks --",
     "the exact vacuous pass this file exists to prevent.",
     "",
+    "close-won-contract went from 4 to 1 on 2026-08-20 and back to `requires: null`. CT1-CT4 named",
+    "ContractTerm and ContractLine, which contracts deleted in its 2026-08-18 rebuild, and asserted a",
+    "Contract.Status column that no longer exists -- while being SKIPPED on every host, because contracts",
+    "is installed on none of them. Four claimed, zero delivered. CT0 replaces them: it asserts contracts",
+    "is ABSENT, so it runs everywhere and goes red the day that stops being true, naming what to write.",
+    "",
     "`count` is the number of checks REGISTERED in the bundle, not the number that ran. The gate compares",
     "both, because the interesting failure is a bundle that registers 4 and runs 0."
   ],
@@ -31,7 +37,7 @@
     "close-deal": { "count": 14, "requires": "orders", "ids": "CD1-CD14" },
     "product-picker": { "count": 4, "requires": "orders", "ids": "PP1-PP4" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
-    "close-won-contract": { "count": 4, "requires": "contracts", "ids": "CT1-CT4" }
+    "close-won-contract": { "count": 1, "requires": null, "ids": "CT0 — a tripwire; CT1-CT4 retired 2026-08-20" }
   },
   "probes": {
     "orders": "@mj-biz-apps/orders-entities",

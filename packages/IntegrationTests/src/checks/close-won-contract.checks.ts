@@ -1,292 +1,104 @@
 /**
- * @fileoverview `close-won-contract` — CT1–CT6. The seam where a won deal becomes a real agreement.
+ * @fileoverview `close-won-contract` — CT0, a TRIPWIRE where four real checks used to be.
  *
- * The contract sibling of `close-won-order`. Same discipline: every assertion reads what CONTRACTS
- * wrote, through contracts' own entities, rather than trusting what Sales sent.
+ * ── WHY CT1–CT4 ARE GONE ────────────────────────────────────────────────────────────────────────
  *
- * ── ONE HONEST DIFFERENCE FROM THE ORDER CHECKS ─────────────────────────────────────────────────
+ * They were wrong AND skipped, which is the worst combination available: wrong, so they could not be
+ * trusted; skipped, so nothing said they were wrong. From every angle — the manifest, the runner's
+ * output, the coverage gate — the bundle read as four checks' worth of coverage. The real number was
+ * zero, and had been since contracts' clean-sheet rebuild on 2026-08-18.
  *
- * CW3 asserts that ORDERS priced the lines, because orders has a pricing engine and Sales sends no
- * price. Contracts does not work that way: `ContractLine.ContractedUnitPrice` is a NEGOTIATED price —
- * an input a human sets during redlining — and it is nullable. So there is no "contracts priced it"
- * claim to make, and CT3 does not invent one. What it asserts instead is the thing that actually
- * matters at this boundary: Sales set no price at all, and the term's committed amount is the stated
- * intent (zero) rather than a number Sales derived.
+ * Measured against `origin/next` at `d2f64e3`, the commit contracts' seam rewrite was verified against:
  *
- * ⚠️ **REQUIRES bizapps-contracts.** Held out of the default gate for the same reason `product-picker`
- * and `close-won-order` are.
+ * | Check | What it asserted | State |
+ * |---|---|---|
+ * | CT1 | a won deal creates a contract; the NUMBER is minted by contracts | still true |
+ * | CT2 | the TERM carries the deal's dates, the LINE carries its product | **unwritable** — `ContractTerm` and `ContractLine` are deleted |
+ * | CT3 | the contract lands in a status that fires nothing; sales priced none of it | **half unwritable** — `Contract` has no `Status` column, and there is no line to check a price on |
+ * | CT4 | the seam refuses honestly — a bad type code fails LOUDLY | still true |
  *
- * ── AND IT REFUSES TO RUN WITHOUT IT, LOUDLY ────────────────────────────────────────────────────
+ * v2's contract is a HEADER. The seven tables are `ContractTemplateType`, `ContractTemplate`,
+ * `ContractTemplateProvision`, `ContractType`, `ContractSequence`, `Contract` and
+ * `ContractTemplateModification`. The lifecycle that `Status` used to name is DERIVED.
  *
- * An earlier version began each check with `if (!ContractsIsInstalled()) return;`. On a host without
- * contracts the bundle then reported **"all passed"** having tested nothing — a vacuous pass, which is the
- * exact failure mode `assert-check-count.mjs` exists to catch, and which a tester would reasonably read
- * as "the contract path works here".
+ * ── WHY THE SURVIVORS WERE NOT SIMPLY REWRITTEN HERE ────────────────────────────────────────────
  *
- * There is no per-check skip in this harness — `skipped` is driven solely by `RequiresMutation`
- * filtering. So the honest behaviour for a bundle that is ONLY ever run deliberately is to fail with a
- * message naming the precondition. Silence that looks like success is worse than a red line that
- * explains itself.
+ * Because they could not be RUN. Contracts is installed in neither database this app is developed
+ * against — not `MJ_V6_Host`, not `MJ_BizAppsSales_V6` — so a rewrite would be four more checks that
+ * nobody can execute, written against a payload shape that is itself being rewritten on
+ * `feature/contracts-seam-v6`. That is how this bundle got into its previous state. Writing
+ * unverifiable checks to replace unverifiable checks is not progress; it is the same mistake with a
+ * fresher date on it.
+ *
+ * ── WHAT REPLACES THEM, AND WHEN ────────────────────────────────────────────────────────────────
+ *
+ * CT0 asserts the PREMISE — that contracts is absent — so the day it stops being true this check goes
+ * red and names what has to be written. It is the `close-deal.CD7` pattern: a check whose failure is a
+ * work order rather than a defect. Until then it runs everywhere, in the default gate, and the manifest
+ * says 1 because 1 is the number of things being checked.
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
-import { RunView } from '@memberjunction/core';
-import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
-import { ContractsIsInstalled, LiveContractsSeam } from '@mj-biz-apps/sales-core-entities-server';
-import {
-    E_ORDERS_PRODUCT,
-    ProductFilterFor,
-    SalesCloseDealOperation,
-    type SalesCloseDealInput,
-    type SalesCloseDealOutput,
-} from '@mj-biz-apps/sales-entities';
-
-import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture } from '../fixture.js';
-import { SeedDealOnPipeline } from './close-won-order.fixture.js';
-
-type Ctx = Parameters<NamedCheck['Fn']>[0];
+import { Metadata } from '@memberjunction/core';
+import { Assert, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
-const E_TERM = 'MJ_BizApps_Contracts: Contract Terms';
-const E_LINE = 'MJ_BizApps_Contracts: Contract Lines';
 
 /**
- * Refuses the run when contracts is absent, instead of quietly passing.
+ * The four requirements CT1–CT4 covered, kept as prose because prose is what survives a schema change.
  *
- * This bundle is never in the default gate, so reaching it at all means someone asked for it — and the
- * only useful answer on a host without contracts is to say so.
+ * Written into the failure message rather than a comment on purpose: whoever sees this check go red is
+ * the person who needs the list, and they should not have to find this file to read it.
  */
-function requireContracts(): void {
-    Assert(
-        ContractsIsInstalled(),
-        'bizapps-contracts is NOT installed on this host, so these checks cannot prove anything. ' +
-            'Run this bundle only against a stack that includes contracts — see docs/WORKSPACE-SETUP.md. ' +
-            '(Reporting a pass here would be a vacuous one.)',
-    );
-}
-
-/** A sellable product, chosen by the PICKER's own filter so the fixture cannot drift from it. */
-async function sellableProduct(ctx: Ctx, companyID: string): Promise<{ ID: string; Name: string }> {
-    const r = await new RunView().RunView<{ ID: string; Name: string }>(
-        {
-            EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(companyID, new Date()),
-            OrderBy: 'Name ASC',
-            ResultType: 'simple',
-            Fields: ['ID', 'Name'],
-        },
-        ctx.User,
-    );
-    Assert(r.Success && (r.Results ?? []).length > 0, `setup: no sellable product for company ${companyID}`);
-    return (r.Results ?? [])[0];
-}
-
-/**
- * A date column as a UTC `YYYY-MM-DD`, whatever shape it arrives in.
- *
- * MJ v6 returns real `Date` objects where v5 returned ISO strings, so `String(value).slice(0, 10)`
- * yields "Mon Aug 31" — and worse, LOCAL-time formatting shifts a UTC 2026-09-01 back a day. This repo
- * has been caught by the v6 shape change once already (7e55bae) and by local-time getters before that;
- * everything stored is UTC and must be compared as UTC.
- */
-function isoDate(value: unknown): string {
-    return new Date(value as string | Date).toISOString().slice(0, 10);
-}
-
-async function rows(ctx: Ctx, entity: string, filter: string): Promise<Record<string, unknown>[]> {
-    const r = await new RunView().RunView({ EntityName: entity, ExtraFilter: filter, ResultType: 'simple' }, ctx.User);
-    Assert(r.Success, `reading ${entity} failed — ${r.ErrorMessage}`);
-    return (r.Results ?? []) as Record<string, unknown>[];
-}
-
-/** Runs `Sales.CloseDeal` in-process and unwraps its payload — the envelope is not the answer. */
-async function close(ctx: Ctx, input: SalesCloseDealInput): Promise<SalesCloseDealOutput> {
-    const op = new SalesCloseDealOperation();
-    const result = await op.Execute(input, { provider: ctx.Provider, user: ctx.User });
-    const output = (result as { Output?: SalesCloseDealOutput })?.Output;
-    Assert(!!output, `Sales.CloseDeal returned no Output envelope: ${JSON.stringify(result).slice(0, 300)}`);
-    return output as SalesCloseDealOutput;
-}
-
-/** The PERSISTED deal row, read through the provider — not the in-memory entity the op held. */
-async function dealRow(ctx: Ctx, dealID: string): Promise<Record<string, unknown>> {
-    const [row] = await rows(ctx, 'MJ_BizApps_Sales: Deals', `ID = '${dealID}'`);
-    Assert(!!row, 'the deal was not readable back');
-    return row;
-}
-
-/** Runs the seam exactly as `CloseDealOperation` does, with a deal-shaped payload. */
-async function createContract(ctx: Ctx) {
-    const f = await ResolveSalesFixture(ctx);
-    const product = await sellableProduct(ctx, f.PipelineCompanyID);
-    const seam = new LiveContractsSeam(ctx.User, ProviderOf(ctx));
-    const result = await seam.CreateContractFromDeal({
-        DealID: '00000000-0000-0000-0000-000000000000',
-        CompanyID: f.PipelineCompanyID,
-        ContractTypeCode: 'Standard',
-        TermMonths: 12,
-        AccountID: f.AccountID,
-        StartDate: '2026-09-01',
-        Lines: [{ ProductID: product.ID, Quantity: 2, Description: product.Name }],
-    });
-    return { result, product };
-}
+const WHAT_TO_WRITE = [
+    'CT1 (still valid): a won deal on a contract-creating policy produces a Contract, and ContractNumber ' +
+        'is minted by contracts under its own lock — sales must never supply one.',
+    'CT4 (still valid): the seam refuses LOUDLY on a bad ContractTypeCode — Success:false with a reason, ' +
+        'and no contract row left behind.',
+    'CT2 is unwritable as it stood: ContractTerm and ContractLine no longer exist. The surviving question ' +
+        'is whether the HEADER carries the dates and negotiated terms the deal actually agreed.',
+    'CT3 is half unwritable: Contract has no Status column, so "lands in a status that fires nothing" has ' +
+        'no subject. The money half stands and is the more important one — sales sends product, quantity ' +
+        'and term structure and sets NO price. Assert it on whatever the v6 seam sends.',
+].join('\n      · ');
 
 export const CloseWonContractChecks: NamedCheck[] = [
     {
-        Id: 'close-won-contract.CT1',
-        Name: 'CT1: a won deal CREATES a contract, and its number is minted by contracts',
-        RequiresMutation: true,
-        Fn: async (ctx) =>
-            InRolledBackTransaction(ctx, async () => {
-                requireContracts();
-                const { result } = await createContract(ctx);
-                Assert(result.Success, `the contract was not created — ${result.Message}`);
-                Assert(!!result.ContractID, 'the seam reported success without a contract ID');
-
-                const [contract] = await rows(ctx, E_CONTRACT, `ID = '${result.ContractID}'`);
-                Assert(!!contract, 'the contract ID does not resolve to a row');
-                // The NUMBER is contracts' to mint. Sales supplying one would be sales owning
-                // contracts' sequence — the same ownership creep CW1 guards against for orders.
-                Assert(
-                    !!contract['ContractNumber'],
-                    'the contract exists but has no ContractNumber — contracts\' server code did not run',
-                );
-            }),
+        Id: 'close-won-contract.CT0',
+        Name: 'CT0: TRIPWIRE — contracts is not installed, so the contract checks cannot exist yet',
+        // Not a mutation: it reads metadata and writes nothing. That is deliberate — it must run on a
+        // bare host, and `RequiresMutation` would have it skipped exactly where it is most needed.
+        RequiresMutation: false,
+        Fn: async () => {
+            const installed = new Metadata().Entities.some((e) => e.Name === E_CONTRACT);
+            Assert(
+                !installed,
+                'CONTRACTS IS NOW INSTALLED, and this check has done its job by failing.\n\n' +
+                    '    CT1–CT4 were retired on 2026-08-20: two of the four had become unwritable against ' +
+                    "contracts' clean-sheet rebuild, and all four were being SKIPPED because contracts was " +
+                    'installed nowhere — so the bundle reported four checks of coverage and delivered none.\n\n' +
+                    '    Now that it is here, write these and delete this check:\n\n' +
+                    `      · ${WHAT_TO_WRITE}\n\n` +
+                    "    The reference for the payload is `LiveContractsSeam` on the v6 entity path — it drives " +
+                    'GetEntityObject -> set -> Save() rather than a remote operation, because contracts ships ' +
+                    'none. Move the count in `scripts/expected-check-counts.json` in the SAME commit.',
+            );
+        },
     },
-    {
-        Id: 'close-won-contract.CT2',
-        Name: 'CT2: the term carries the deal\'s dates and the line carries its product',
-        RequiresMutation: true,
-        Fn: async (ctx) =>
-            InRolledBackTransaction(ctx, async () => {
-                requireContracts();
-                const { result, product } = await createContract(ctx);
-                Assert(result.Success, `the contract was not created — ${result.Message}`);
-
-                const terms = await rows(ctx, E_TERM, `ContractID = '${result.ContractID}'`);
-                AssertEqual(terms.length, 1, 'one term should have been created for the deal');
-                const term = terms[0];
-                AssertEqual(
-                    isoDate(term['StartDate']),
-                    '2026-09-01',
-                    'the term must start on the date the deal stated',
-                );
-                AssertEqual(
-                    isoDate(term['EndDate']),
-                    '2027-09-01',
-                    'the term must end TermMonths after it starts — 12 months, computed from the deal',
-                );
-
-                const lines = await rows(ctx, E_LINE, `ContractTermID = '${String(term['ID'])}'`);
-                AssertEqual(lines.length, 1, 'one contract line per recurring deal line');
-                AssertEqual(
-                    String(lines[0]['ProductID']).toLowerCase(),
-                    product.ID.toLowerCase(),
-                    'the contract line must reference the SAME product the picker set on the deal line',
-                );
-                AssertEqual(Number(lines[0]['Quantity']), 2, 'the line must carry the deal line\'s quantity');
-            }),
-    },
-    {
-        Id: 'close-won-contract.CT3',
-        Name: 'CT3: the contract lands in a status that fires nothing, and Sales priced none of it',
-        RequiresMutation: true,
-        Fn: async (ctx) =>
-            InRolledBackTransaction(ctx, async () => {
-                requireContracts();
-                const { result } = await createContract(ctx);
-                Assert(result.Success, `the contract was not created — ${result.Message}`);
-
-                const [contract] = await rows(ctx, E_CONTRACT, `ID = '${result.ContractID}'`);
-                /**
-                 * §7.2: a close must never start billing by itself. `Draft` is the status that fires
-                 * nothing — `Pending` is a TERM status and violates `CK_Contract_Status` on the contract.
-                 */
-                AssertEqual(String(contract['Status']), 'Draft', 'a close must not produce a live agreement');
-
-                const terms = await rows(ctx, E_TERM, `ContractID = '${result.ContractID}'`);
-                AssertEqual(
-                    Number(terms[0]['CommittedAmount']),
-                    0,
-                    'the committed amount must be the STATED intent (zero = nothing committed), not a derived total',
-                );
-
-                /**
-                 * THE MONEY BOUNDARY, asserted rather than described. Sales sends product, quantity and
-                 * term structure and sets no price. `ContractedUnitPrice` is a NEGOTIATED figure a human
-                 * fills in during redlining, so it must be empty on a contract Sales just created — if it
-                 * ever arrives populated, something upstream started computing money.
-                 */
-                const lines = await rows(ctx, E_LINE, `ContractTermID = '${String(terms[0]['ID'])}'`);
-                for (const l of lines) {
-                    Assert(
-                        l['ContractedUnitPrice'] === null || l['ContractedUnitPrice'] === undefined,
-                        `Sales must set no contracted price; found ${String(l['ContractedUnitPrice'])}`,
-                    );
-                }
-            }),
-    },
-    {
-        Id: 'close-won-contract.CT4',
-        Name: 'CT4: the seam refuses honestly — a bad type code fails LOUDLY, never silently',
-        RequiresMutation: true,
-        Fn: async (ctx) =>
-            InRolledBackTransaction(ctx, async () => {
-                requireContracts();
-                const f = await ResolveSalesFixture(ctx);
-                const seam = new LiveContractsSeam(ctx.User, ProviderOf(ctx));
-
-                /**
-                 * THE FAILURE THIS PINS ACTUALLY HAPPENED. `RemoteOpResult.Success` means the operation
-                 * RAN; contracts carries its own Success/Message in the payload. A first version of this
-                 * seam checked only the envelope and returned `Success: true` with a null ContractID for
-                 * a contract that was never written — a routing result claiming Executed for nothing.
-                 */
-                const result = await seam.CreateContractFromDeal({
-                    DealID: '00000000-0000-0000-0000-000000000000',
-                    CompanyID: f.PipelineCompanyID,
-                    ContractTypeCode: 'NoSuchTypeCode',
-                    TermMonths: 12,
-                    AccountID: f.AccountID,
-                    StartDate: '2026-09-01',
-                    Lines: [],
-                });
-                Assert(result.Success === false, 'an unresolvable contract type must NOT report success');
-                Assert(!result.ContractID, 'a failed create must not fabricate a contract ID');
-                Assert(
-                    typeof result.Message === 'string' && result.Message.length > 0,
-                    'a refusal must say why — a silent false is indistinguishable from a bug',
-                );
-            }),
-    },
-    /**
-     * CT5 AND CT6 WERE HERE, and they are retired rather than repaired.
-     *
-     * They pinned KI-14 down the contract route: a RECURRING line carrying a product name with a null
-     * ProductID had to make the close refuse, because LiveContractsSeam coerced it to ProductID: '' and
-     * an empty string against a uniqueidentifier failed inside contracts' own save -- after the status
-     * had been written. CT6 was its control.
-     *
-     * Both subjects are gone. The recurring/one-time distinction went with DealLineType, and the
-     * name-only shape cannot be constructed at all now that OrderLine.ProductID is NOT NULL -- so the
-     * guard they pinned was removed as unreachable (docs/DECISIONS.md D-DL1). A check whose failure mode
-     * cannot occur is worse than no check: it passes forever and reads like coverage.
-     *
-     * The contract no longer carries lines at all (S-US2), so there is no contract-side line assertion
-     * to replace them with. The order-side equivalent lives in close-won-order.
-     */
 ];
 
 for (const check of CloseWonContractChecks) {
     IntegrationCheckRegistry.Instance.Register(check);
 }
 
-IntegrationCheckRegistry.Instance.RegisterLifecycle('close-won-contract', {
-    Setup: async () => {
-        /* every check creates and rolls back its own contract */
-    },
-    Teardown: async () => {
-        /* nothing survives the rollback */
-    },
-});
+/**
+ * No lifecycle hooks, and no `requireContracts()` guard any more.
+ *
+ * The old bundle refused to run without contracts, which was the right call for checks that needed it
+ * and is the wrong call for a check whose entire subject is that it is missing.
+ */
+
+/** Referenced by index.ts so the registration side effect cannot be tree-shaken away. */
+export function LoadCloseWonContractChecks(): void {
+    void Metadata;
+}

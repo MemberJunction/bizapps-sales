@@ -20,9 +20,14 @@
  *                        is what names the order's status, so CO3 proves the order follows a stage that
  *                        names one and ignores a stage that does not, and CO5 proves a REFUSED status
  *                        never blocks the stage change (S-US5/S-US7/S-US8)
- *   close-won-contract   The contract route, on the one stack that has contracts linked
+ *   close-won-contract   ONE tripwire (CT0), not a route. CT1-CT4 were retired on 2026-08-20: they named
+ *                        ContractTerm and ContractLine, deleted in contracts' clean-sheet rebuild, and a
+ *                        Contract.Status column that no longer exists -- while being SKIPPED on every
+ *                        host, so four claimed and zero delivered. CT0 asserts contracts is ABSENT and
+ *                        goes red the day that changes, naming what has to be written
  *
- * ⚠️ EVERY BUNDLE NOW REQUIRES bizapps-orders, including save-deal and close-deal. A deal cannot be
+ * ⚠️ EVERY BUNDLE REQUIRES bizapps-orders EXCEPT `close-won-contract`, whose single check needs nothing
+ * at all — it is asserting an absence. save-deal and close-deal require it too. A deal cannot be
  * saved without it: `DealEntityServer.Save()` provisions the deal's embedded order (S-US4). `mj-app.json`
  * declares orders a hard dependency, so a host without it is misconfigured rather than minimal.
  *

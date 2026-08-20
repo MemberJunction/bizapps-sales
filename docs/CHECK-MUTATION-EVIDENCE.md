@@ -123,6 +123,16 @@ nothing would pass.
 
 Twenty-nine mutations across both tables; **eighteen** of them failed exactly one check.
 
+## `close-won-contract.CT0` has no mutant, and cannot have one
+
+CT0 asserts that bizapps-contracts is **absent** from the host's entity metadata. Its failure condition
+is an environment fact, not a code path, so there is nothing in the product to mutate — the check *is*
+the code. The mutation driver has no entry for it and should not.
+
+Its failure path was demonstrated instead, on 2026-08-20: pointing its entity constant at
+`MJ_BizApps_Sales: Deals` — an entity that does exist — makes it fail with the full work-order message.
+That proves the assertion fires and the message renders, which is the whole of what CT0 does.
+
 ## Checks with no single-check mutation, and why
 
 * **SD1, SD6, SD7, SD13, SD14, SD17, SD19, SD20** — the order-line checks. They failed under the
