@@ -351,9 +351,24 @@ export class MJSSalesSectionComponent implements OnInit {
         return { Slipped: this.SlippedDeals.length };
     }
 
-    /** The handful of deals worth showing on a dashboard — soonest expected close first. */
+    /**
+     * The handful of deals worth showing on a dashboard — soonest expected close first.
+     *
+     * IT SORTS, rather than trusting the roster query's `ORDER BY` to still be
+     * `ExpectedCloseDate ASC` when someone changes it for a different reason. Correct output either way
+     * today; the difference is that the comment above is now enforced by the code beneath it instead of
+     * by a clause two files away. `slice()` first, so the copy is small and `sort()` never mutates the
+     * shared `Deals` array — an in-place sort here would silently reorder the board.
+     *
+     * The dates are DATE strings in UTC (`YYYY-MM-DD`), so lexical comparison IS chronological. No
+     * `new Date()` involved, which is what keeps this free of the local-midnight drift `SlippedDeals`
+     * has to work around.
+     */
     public get ClosingSoon(): DealRosterRow[] {
-        return this.Deals.filter((d) => this.hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate).slice(0, 8);
+        return this.Deals.filter((d) => this.hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate)
+            .slice()
+            .sort((a, b) => UtcDatePart(a.ExpectedCloseDate!).localeCompare(UtcDatePart(b.ExpectedCloseDate!)))
+            .slice(0, 8);
     }
 
     // ── Display helpers ────────────────────────────────────────────────────────

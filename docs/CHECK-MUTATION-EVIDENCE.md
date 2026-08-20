@@ -119,6 +119,7 @@ CO3 and CO5 were reframed onto the MECHANISM, so their old mutants no longer app
 | M-AM2 | `DealEntityServer` · a hand-typed amount is overwritten | SD22 | — |
 | M-AM3 | `DealEntityServer` · "nothing priced" becomes "priced at nil" | SD23 | — |
 | M-PV1 | `DealEntityServer` · provisioning only ever on a deal's first save | SD24 | — |
+| M-PV2 | `DealEntityServer` · a provisioned order never asks its stage | SD25 | — |
 | M-CT1 | `LiveContractsSeam` · an unresolvable type reported as a success | CT4 | — |
 | M-CT2 | `LiveContractsSeam` · `HasModifications` hardcoded `false` again | CT5 | — |
 | M-CT3 | `CloseDealOperation` · the close reports the flag as a constant | CT6 | — |
@@ -132,7 +133,7 @@ naive reading of a nullable column, and CO3's second half exists solely to catch
 asserts the WARNING and not merely the absence of a change — without it, a version that silently did
 nothing would pass.
 
-Thirty-three mutations across both tables; **twenty-two** of them failed exactly one check.
+Thirty-four mutations across both tables; **twenty-three** of them failed exactly one check.
 
 M-PV1 is the only mutant in either table that is a REAL DEFECT REPLAYED rather than an invented one:
 that was the shipped code until 2026-08-20, and it meant a deal that already existed without an order

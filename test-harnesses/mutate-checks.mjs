@@ -154,6 +154,13 @@ const MUTATIONS = [
       to: '        if (this.IsSaved) {\n            return;',
       note: 'provisioning reachable only on a first save — the original bug, verbatim' },
 
+    // The other half of the same question. M-PV1 asks whether an existing deal can GET an order; this
+    // asks whether the order it gets is in the right state. Reverting the gate is the DEAL-9003 defect.
+    { id: 'M-PV2', file: DES, expect: ['SD25'],
+      from: 'if (this.IsSaved && !this._orderJustProvisioned) {',
+      to: 'if (this.IsSaved) {',
+      note: 'a provisioned order never asks the stage, so it stays Draft' },
+
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
     // the agreement went. This flips exactly that bit and nothing else.

@@ -175,6 +175,7 @@ export class DealEntityServer extends DealEntity {
         // Per-save, so a caller reading them after `Save()` sees this save's warnings and not the last
         // one's. Cleared before the close lock can return early — an abandoned save has no warnings.
         this._orderStatusWarnings.length = 0;
+        this._orderJustProvisioned = false;
 
         /**
          * THE CLOSE LOCK (L-17, master plan §7.3) — enforced HERE and nowhere else.
@@ -505,6 +506,7 @@ export class DealEntityServer extends DealEntity {
         }
 
         const order = this.OrderID_EnsureObject();
+        this._orderJustProvisioned = true;
         order.CompanyID = this.CompanyID;
         order.OrderType = 'Sale';
         order.BillToOrganizationID = this.AccountID ?? null;
@@ -585,12 +587,24 @@ export class DealEntityServer extends DealEntity {
         if (!stageID) {
             return null;
         }
-        if (this.IsSaved) {
+        if (this.IsSaved && !this._orderJustProvisioned) {
             const previous = this.GetFieldByName('PipelineStageID')?.OldValue as string | null | undefined;
             if (previous && String(previous).toLowerCase() === String(stageID).toLowerCase()) {
                 return null;   // the stage did not move; the order is not this save's business
             }
         }
+
+        /**
+         * `_orderJustProvisioned` is what lets a BIRTH ask the question a MOVE asks.
+         *
+         * An order that has just been created has never been told anything about the deal's stage, so
+         * the stage gets to speak once — even though nothing moved. Without this, an existing deal
+         * sitting at a stage that declares `Quoted` acquired an order in `Draft` and stayed there until
+         * somebody happened to drag the card, which is a state the board displays without complaint.
+         *
+         * It cannot loop: the flag is set only by `OrderID_EnsureObject()` inside
+         * `provisionEmbeddedOrder()`, and cleared at the top of every `Save()`.
+         */
 
         const view = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await view.RunView<StageOrderStatusRow>(
@@ -844,6 +858,18 @@ export class DealEntityServer extends DealEntity {
      * lock advisory. `Sales.ReopenDeal` records a reason; nothing else may get through.
      */
     private _reopenInProgress = false;
+
+    /**
+     * True when THIS save built the deal's order, rather than finding one already there.
+     *
+     * It exists so the stage's `OrderStatusOnEntry` can be applied to an order that has just come into
+     * existence. The status writer otherwise keys on `PipelineStageID` CHANGING, which is right for a
+     * move and wrong for a birth: a deal that is already at Proposal when its order is provisioned
+     * never moved, so nothing asked the stage what the order should be, and the order stayed Draft
+     * while its stage plainly declared Quoted. Found by the story audit against seeded data
+     * (`DEAL-9003`), and it would have hit every deal the HubSpot import lands past Proposal.
+     */
+    private _orderJustProvisioned = false;
 
     /**
      * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.

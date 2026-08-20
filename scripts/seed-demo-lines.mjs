@@ -200,7 +200,13 @@ for (const plan of PLAN) {
 console.log('');
 // The alias is `ordStatus` rather than `current` because CURRENT is reserved in T-SQL — the first
 // version of this query failed with `Incorrect syntax near the keyword 'current'`.
-for (const dealNumber of ['DEAL-9005', 'DEAL-9006']) {
+//
+// EVERY DEAL, NOT JUST THE TWO CLOSED ONES. It was the closed pair for a while, and the story audit
+// caught what that missed: DEAL-9003 sits at Proposal, a stage declaring `Quoted`, with its order in
+// Draft. The product defect behind it is fixed (provisioning now asks the stage — save-deal.SD25), but
+// these seven deals were provisioned before that landed, so the seed has to bring them into line.
+// Deals whose stage says nothing are skipped by the `!row.target` guard below.
+for (const dealNumber of PLAN.map((x) => x.Deal).concat(['DEAL-9004', 'DEAL-9007'])) {
     const row = (await q(`
         SELECT d.OrderID, s.OrderStatusOnEntry target, o.Status AS ordStatus
           FROM __mj_BizAppsSales.Deal d

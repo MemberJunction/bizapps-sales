@@ -306,6 +306,24 @@ async function orderTotal(ctx: Parameters<NamedCheck['Fn']>[0], orderID: string)
 }
 
 /** The embedded order's row, read back through the entity layer. */
+/**
+ * Raw SQL inside the check's transaction, for the two setups that cannot be expressed as entity saves.
+ *
+ * The cast is the same one `TxOne` uses and for the same reason: `ExecuteSQL` lives on the DATABASE
+ * provider, not on the `IMetadataProvider` interface the check context exposes.
+ */
+async function execSql(ctx: Parameters<NamedCheck['Fn']>[0], sql: string, why: string): Promise<void> {
+    const sqlProvider = ctx.Provider as unknown as {
+        ExecuteSQL: (
+            sql: string,
+            params: Record<string, unknown>,
+            options: { isMutation: boolean; description: string },
+            user: unknown,
+        ) => Promise<unknown>;
+    };
+    await sqlProvider.ExecuteSQL(sql, {}, { isMutation: true, description: why }, ctx.User);
+}
+
 async function orderRow(
     ctx: Parameters<NamedCheck['Fn']>[0],
     orderID: string,
@@ -1122,21 +1140,10 @@ export const SaveDealChecks: NamedCheck[] = [
                 Assert(!!firstOrder, 'the deal provisioned an order on creation');
 
                 // Now make it look like a deal from before the redesign: saved, and pointing at nothing.
-                // Cast for the same reason `TxOne` does: `ExecuteSQL` is on the DATABASE provider, not on
-                // the `IMetadataProvider` interface the context exposes.
-                const sqlProvider = ctx.Provider as unknown as {
-                    ExecuteSQL: (
-                        sql: string,
-                        params: Record<string, unknown>,
-                        options: { isMutation: boolean; description: string },
-                        user: unknown,
-                    ) => Promise<unknown>;
-                };
-                await sqlProvider.ExecuteSQL(
+                await execSql(
+                    ctx,
                     `UPDATE ${SALES_SCHEMA}.Deal SET OrderID = NULL WHERE ID = '${created.ID}'`,
-                    {},
-                    { isMutation: true, description: 'SD24: simulate a pre-S-US4 deal' },
-                    ctx.User,
+                    'SD24: simulate a pre-S-US4 deal',
                 );
                 const stale = await TxOne<{ OrderID: string | null }>(
                     ctx, `SELECT OrderID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
@@ -1164,6 +1171,70 @@ export const SaveDealChecks: NamedCheck[] = [
                     'STAMPED, which is the half that was failing: an unstamped order dies on CompanyID',
                 );
                 AssertEqual(String(row.OrderType), 'Sale', 'and carries the type sales states');
+            }),
+    },
+    {
+        Id: 'save-deal.SD25',
+        Name: 'SD25: a provisioned order takes the status its STAGE declares, not Draft',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE HALF SD24 DOES NOT COVER, found by the story audit against seeded data rather than
+                 * by reading: `DEAL-9003` sat at Proposal — a stage declaring `Quoted` — with its order
+                 * in `Draft`.
+                 *
+                 * The status writer keys on `PipelineStageID` CHANGING, which is right for a move and
+                 * wrong for a birth. A deal already at or above the agreement threshold when its order
+                 * is provisioned never moved, so nothing ever asked the stage what the order should be,
+                 * and the board displayed the mismatch without complaint. It would have hit every deal
+                 * the HubSpot import lands past Proposal (S6).
+                 *
+                 * The stage is given an opinion HERE rather than relying on a seeded one, so the check
+                 * does not depend on which pipelines a host happens to carry. The transaction rolls
+                 * back, so the stage keeps whatever it had.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                await execSql(
+                    ctx,
+                    `UPDATE ${SALES_SCHEMA}.PipelineStage SET OrderStatusOnEntry = 'Quoted' WHERE ID = '${f.StageID}'`,
+                    'SD25: give the stage an opinion about the order',
+                );
+
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD25 provisioned at a declaring stage'; });
+                await saveOk(created, 'create');
+
+                // Back to the pre-S-US4 state: saved, at this stage, pointing at no order.
+                await execSql(
+                    ctx,
+                    `UPDATE ${SALES_SCHEMA}.Deal SET OrderID = NULL WHERE ID = '${created.ID}'`,
+                    'SD25: simulate a deal that predates provisioning',
+                );
+
+                const reopened = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await reopened.Load(created.ID), 'the order-less deal loads');
+                // Deliberately NOT a stage change: the whole point is that nothing moved.
+                reopened.NextStep = 'a header edit, so the stage stays exactly where it is';
+                await saveOk(reopened, 'the save that provisions');
+
+                const after = await TxOne<{ OrderID: string | null; PipelineStageID: string }>(
+                    ctx,
+                    `SELECT OrderID, PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                Assert(!!after.OrderID, 'an order was provisioned');
+                AssertEqual(
+                    String(after.PipelineStageID).toLowerCase(),
+                    f.StageID.toLowerCase(),
+                    'and the stage did not move — otherwise this would be testing a move, not a birth',
+                );
+
+                const row = await orderRow(ctx, after.OrderID as string, ['Status']);
+                AssertEqual(
+                    String(row.Status),
+                    'Quoted',
+                    'the new order took the status the stage declares. Draft here means provisioning ' +
+                        'never asked the stage, which is the DEAL-9003 defect',
+                );
             }),
     },
 ];

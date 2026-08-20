@@ -18,7 +18,7 @@ are met, **#120** is strictly broader than #38/#39 combined.
 
 The rule for this pass was *prove met criteria against the database, not the screen*. Three sources:
 
-1. **The 51 integration checks** (`RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs`). Every one hits a
+1. **The 52 integration checks** (`RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs`). Every one hits a
    live database with nothing mocked and rolls back. Where a criterion maps to a check, the check id **is** the
    evidence, and `docs/CHECK-MUTATION-EVIDENCE.md` records which mutant proves that check can fail.
 2. **`scripts/audit-story-evidence.mjs`** — written for this audit, for the three questions no check answers.
@@ -195,22 +195,26 @@ the reopen, and a pipeline can put the threshold wherever its own motion actuall
 | Reopened → Quoted or Draft per stage | **not met, blocked upstream** | `Voided` is terminal in orders' `CanTransition`, so a reopened lost deal's order stays voided. The reopen **succeeds and warns** rather than half-failing — `CloseDealOperation.ts:813-816`, `CO5`. That is the designed outcome, not a tolerated one, but the criterion as written is not met. |
 | No manual path for the rep | **met** | No UI control writes order status; `custom/server-owned-fields.ts` keeps it off the generated form. |
 
-### A gap E1 found that no check covers
+### A gap E1 found that no check covered — now fixed
 
-**`DEAL-9003` sits at stage `Proposal`, which declares `Quoted`, with its order at `Draft`.**
+**`DEAL-9003` sat at stage `Proposal`, which declares `Quoted`, with its order at `Draft`.**
 
 ```
 DEAL-9003  order=yes  status=Draft  stage=Proposal  declares=Quoted  DIVERGES
 ```
 
-The writer reacts to `PipelineStageID` **changing**. A deal already at or above the threshold when its order is
-provisioned never triggers it, so it keeps `Draft`. This is the same class of defect as the provisioning guard
-fixed earlier today (`SD24` / `M-PV1`): correct on the transition, wrong on the state. It bites any deal
-imported at a late stage, and it will bite the HubSpot import in S6 for every open deal past Proposal.
+The writer reacted to `PipelineStageID` **changing**, which is right for a move and wrong for a birth. A
+deal already at or above the threshold when its order was provisioned never triggered it, so it kept
+`Draft` until somebody happened to drag the card — a state the board displays without complaint. Same
+class as the provisioning guard fixed earlier the same day (`SD24` / `M-PV1`): correct on the transition,
+wrong on the state. It would have hit every open deal the HubSpot import lands past Proposal in S6.
 
-Smallest honest fix: when provisioning an order for a deal whose stage already declares a status, apply that
-declaration once. It needs a check of its own — the guard has to fire on provisioning and stay quiet on every
-ordinary later save, which is exactly the shape that produced the last two bugs in this area.
+**Fixed in this session.** `_orderJustProvisioned` lets a birth ask the question a move asks
+(`DealEntityServer.ts:583`). Pinned by **`save-deal.SD25`**, which gives a stage an opinion, strands a
+saved deal without an order, and saves it WITHOUT moving the stage — so a pass cannot come from a move —
+and by mutant **`M-PV2`**, which reverts the gate and fails SD25 alone. E1 now reports no divergence on
+any of the seven deals, and `seed-demo-lines.mjs` levels every deal with its stage rather than only the
+two closed ones.
 
 ---
 
@@ -268,11 +272,11 @@ silently wrong the moment that query's ordering changes, and the comment would s
 
 ## What this audit adds to the backlog, smallest first
 
-1. **`ClosingSoon` should sort what it claims to sort.** One line. Removes a comment that lies on a future edit.
-2. **Rename `Pipeline.RequiresDealLines`** → `RequiresOrderLines`. Cosmetic, but it is the last place the retired
+1. ~~**`ClosingSoon` should sort what it claims to sort.**~~ **DONE** — it sorts on `ExpectedCloseDate` over a
+   copy, so the comment is enforced by the code beneath it rather than by an `ORDER BY` two files away.
+2. ~~**Apply a stage's declared order status when the order is provisioned**~~ **DONE** — `SD25` and `M-PV2`.
+3. **Rename `Pipeline.RequiresDealLines`** → `RequiresOrderLines`. Cosmetic, but it is the last place the retired
    table's name survives, and a reader will misread a policy flag as a pointer to a table.
-3. **Apply a stage's declared order status when the order is provisioned**, not only when the stage changes
-   (#115's gap; `DEAL-9003`). Needs its own check and mutant.
 4. **Refuse a direct `OwnerEmployeeID` edit on a header-only save** (finding (b)). Needs its own check and mutant.
 5. **Resolve the active `ContractTemplate`** in the seam (#34).
 6. **BizApps Tasks integration** — the whole of #35, and half of #34 and #116. The largest item here by a wide
