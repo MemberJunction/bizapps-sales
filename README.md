@@ -361,11 +361,16 @@ operation executes it.**
   "ContractTypeCode": "Standard",
   "TermMonths": 12,
   "SubscriptionLinesTo": "Contract",   // Contract | Subscription | None
-  "OneTimeLinesTo": "Order",           // Order | Contract | None
-  "OrderState": "Confirmed",           // Draft | Confirmed
+  "OneTimeLinesTo": "Order",           // Order | Contract | None — DEAD, see below
   "RequireApprovalTaskTypeCode": null
 }
 ```
+
+**`OrderState` used to be a key here and is gone (D-OS1).** What status the deal's order takes is a
+property of the STAGE now — `PipelineStage.OrderStatusOnEntry`, nullable, one of
+`Draft | Quoted | Confirmed | Voided` — so it can speak on every stage change rather than only at the
+moment of a won close. `OneTimeLinesTo` is dead for a different reason: close-won creates no order, so
+there is nothing to route.
 
 A deal can legitimately need **both** a contract (subscription products) *and* a standalone order (a
 services SOW billed once). The policy expresses that rather than forcing a choice. And a deal type

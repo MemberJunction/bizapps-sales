@@ -23,6 +23,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@mj-biz-apps/orders-entities": "5.0.0",
     "@mj-biz-apps/sales-entities": "5.0.0"
   },
   "peerDependencies": {

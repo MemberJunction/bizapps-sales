@@ -211,7 +211,7 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe1)
     VALUES (@pipe1, @co1, N'B2B', N'B2B',
       N'The main motion, per master plan §4.2. NOTE the winning stage is called "Signed", not "Closed Won" — the app still knows it is a win because the stage points at a DealStatusType with IsWon=1.',
       @dtNew, @fcPipe, 1,
-      N'{"CreateContract":true,"ContractTypeCode":"Standard","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","OrderState":"Confirmed","RequireApprovalTaskTypeCode":null}',
+      N'{"CreateContract":true,"ContractTypeCode":"Standard","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","RequireApprovalTaskTypeCode":null}',
       1, 10, 1);
 
 DECLARE @s1 UNIQUEIDENTIFIER='91111111-0000-4000-A000-000000000001';
@@ -221,14 +221,27 @@ DECLARE @s4 UNIQUEIDENTIFIER='91111111-0000-4000-A000-000000000004';
 DECLARE @s5 UNIQUEIDENTIFIER='91111111-0000-4000-A000-000000000005';
 DECLARE @s6 UNIQUEIDENTIFIER='91111111-0000-4000-A000-000000000006';
 
+-- OrderStatusOnEntry — what entering each stage means for the deal's ORDER (S-US5, D-OS1).
+--
+-- NULL on the first two on purpose: Discovery and Qualification say NOTHING about the order, which is
+-- the default and the common case. The order stays in whatever state it is in.
+--
+-- Quoted from Proposal onward, INCLUDING the winning stage. Andrew's rule is "Proposal or higher is
+-- Quoted", and a quote is exactly what a proposal is. Confirmed is deliberately NOT seeded anywhere:
+-- confirming books journal entries, and which stage earns that is the one open question here — see
+-- DECISIONS-NEEDED.md DN-10. Changing it is one field on one row.
+--
+-- Voided on Lost (S-US7). It is also what makes the reopen case in S-US8 behave: the order is Voided,
+-- Voided is TERMINAL in orders, and a reopen into Proposal therefore asks for a move orders refuses.
+-- The deal reopens anyway with a warning, which is the intended outcome and not a bug to route around.
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineStage WHERE ID=@s1)
-  INSERT INTO __mj_BizAppsSales.PipelineStage (ID, PipelineID, Name, Code, DisplayOrder, Probability, ForecastCategoryTypeID, DealStatusTypeID, RottingDays, GuidanceMarkdown, IsActive) VALUES
-   (@s1, @pipe1, N'Discovery',    N'DISC',  10, 10,  @fcPipe, @stOpen, 14, N'**What good looks like:** the economic buyer is named and the current cost of doing nothing is quantified.', 1),
-   (@s2, @pipe1, N'Qualification',N'QUAL',  20, 25,  @fcPipe, @stOpen, 14, N'**What good looks like:** budget, authority and a compelling event are all confirmed in writing.', 1),
-   (@s3, @pipe1, N'Proposal',     N'PROP',  30, 50,  @fcBest, @stOpen, 21, N'**What good looks like:** a priced proposal the champion has seen and can defend internally.', 1),
-   (@s4, @pipe1, N'Negotiation',  N'NEG',   40, 75,  @fcComm, @stOpen, 21, N'**What good looks like:** a mutual action plan with dates, and legal engaged.', 1),
-   (@s5, @pipe1, N'Signed',       N'SIGNED',50, 100, @fcClos, @stWon,  NULL, N'Contract executed. This stage is where Sales.CloseDeal will create the contract and orders.', 1),
-   (@s6, @pipe1, N'Lost',         N'LOST',  60, 0,   @fcClos, @stLost, NULL, N'A loss reason is mandatory — it is the highest-value, most-skipped data in any CRM.', 1);
+  INSERT INTO __mj_BizAppsSales.PipelineStage (ID, PipelineID, Name, Code, DisplayOrder, Probability, ForecastCategoryTypeID, DealStatusTypeID, OrderStatusOnEntry, RottingDays, GuidanceMarkdown, IsActive) VALUES
+   (@s1, @pipe1, N'Discovery',    N'DISC',  10, 10,  @fcPipe, @stOpen, NULL,        14, N'**What good looks like:** the economic buyer is named and the current cost of doing nothing is quantified.', 1),
+   (@s2, @pipe1, N'Qualification',N'QUAL',  20, 25,  @fcPipe, @stOpen, NULL,        14, N'**What good looks like:** budget, authority and a compelling event are all confirmed in writing.', 1),
+   (@s3, @pipe1, N'Proposal',     N'PROP',  30, 50,  @fcBest, @stOpen, N'Quoted',   21, N'**What good looks like:** a priced proposal the champion has seen and can defend internally.', 1),
+   (@s4, @pipe1, N'Negotiation',  N'NEG',   40, 75,  @fcComm, @stOpen, N'Quoted',   21, N'**What good looks like:** a mutual action plan with dates, and legal engaged.', 1),
+   (@s5, @pipe1, N'Signed',       N'SIGNED',50, 100, @fcClos, @stWon,  N'Quoted',   NULL, N'Contract executed. Entering it quotes the order; finance confirms it, which is what books the ledger.', 1),
+   (@s6, @pipe1, N'Lost',         N'LOST',  60, 0,   @fcClos, @stLost, N'Voided',   NULL, N'A loss reason is mandatory — it is the highest-value, most-skipped data in any CRM. Entering it VOIDS the order.', 1);
 
 -- ============================ PIPELINE 2 — a SIMPLE (header-only) motion ============================
 DECLARE @pipe2 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000002';
@@ -237,16 +250,18 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe2)
         RequiresDealLines, CloseWonPolicy, IsDefault, DisplayRank, IsActive)
     VALUES (@pipe2, @co2, N'D2C', N'D2C',
       N'A different company, a different motion (master plan §4.2). RequiresDealLines = 0: these deals never carry catalog lines, so the amount is entered by hand and AmountIsComputed stays 0.',
-      @dtNew, @fcPipe, 0, N'{"CreateContract":false,"OneTimeLinesTo":"Order","OrderState":"Draft"}', 1, 20, 1);
+      @dtNew, @fcPipe, 0, N'{"CreateContract":false,"OneTimeLinesTo":"Order"}', 1, 20, 1);
 
 DECLARE @t1 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000001';
 DECLARE @t2 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000002';
 DECLARE @t3 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000003';
+-- The D2C motion has no proposal step, so only the winning stage speaks about the order. Introduced
+-- and Evaluating leave it alone.
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineStage WHERE ID=@t1)
-  INSERT INTO __mj_BizAppsSales.PipelineStage (ID, PipelineID, Name, Code, DisplayOrder, Probability, ForecastCategoryTypeID, DealStatusTypeID, RottingDays, IsActive) VALUES
-   (@t1, @pipe2, N'Introduced', N'INTRO',  10, 20, @fcPipe, @stOpen, 30, 1),
-   (@t2, @pipe2, N'Evaluating', N'EVAL',   20, 60, @fcComm, @stOpen, 30, 1),
-   (@t3, @pipe2, N'Booked',     N'BOOKED', 30, 100,@fcClos, @stWon,  NULL, 1);
+  INSERT INTO __mj_BizAppsSales.PipelineStage (ID, PipelineID, Name, Code, DisplayOrder, Probability, ForecastCategoryTypeID, DealStatusTypeID, OrderStatusOnEntry, RottingDays, IsActive) VALUES
+   (@t1, @pipe2, N'Introduced', N'INTRO',  10, 20, @fcPipe, @stOpen, NULL,      30, 1),
+   (@t2, @pipe2, N'Evaluating', N'EVAL',   20, 60, @fcComm, @stOpen, NULL,      30, 1),
+   (@t3, @pipe2, N'Booked',     N'BOOKED', 30, 100,@fcClos, @stWon,  N'Quoted', NULL, 1);
 
 -- ============================ DEALS ============================
 DECLARE @d1 UNIQUEIDENTIFIER='93111111-0000-4000-A000-000000000001';

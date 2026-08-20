@@ -23,7 +23,7 @@
  */
 import { CompositeKey, RunView, type BaseEntity } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
-import { OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
+import { OrdersIsInstalled, type DealEntityServer } from '@mj-biz-apps/sales-core-entities-server';
 import { SalesCloseDealOperation, type SalesCloseDealInput, type SalesCloseDealOutput } from '@mj-biz-apps/sales-entities';
 
 import { InRolledBackTransaction, ResolveSalesFixture, type SalesFixture } from '../fixture.js';
@@ -66,6 +66,68 @@ async function seedOrderOnly(ctx: Ctx, f: SalesFixture, lineCount: number): Prom
         CompanyID: f.OrderOnlyPolicyCompanyID,
         LineCount: lineCount,
     });
+}
+
+const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
+const E_DEAL = 'MJ_BizApps_Sales: Deals';
+
+/**
+ * Sets a stage's `OrderStatusOnEntry` for the duration of THIS CHECK ONLY.
+ *
+ * Written through the entity layer inside the check's open transaction, so it rolls back with
+ * everything else and the seeded pipelines are never permanently altered. That is what lets these
+ * checks assert the MECHANISM rather than the seed: whatever Andrew finally decides Closed Won should
+ * carry, the mechanism is the same and these still pass.
+ */
+async function setStageOrderStatus(ctx: Ctx, stageID: string, status: string | null): Promise<void> {
+    const stage = (await ctx.Provider.GetEntityObject(E_STAGE, ctx.User)) as BaseEntity;
+    const key = new CompositeKey();
+    key.KeyValuePairs.push({ FieldName: 'ID', Value: stageID });
+    Assert(await stage.InnerLoad(key), `stage ${stageID} could not be loaded`);
+    stage.Set('OrderStatusOnEntry', status);
+    Assert(await stage.Save(), `the stage could not be updated: ${stage.LatestResult?.CompleteMessage ?? ''}`);
+}
+
+/** Another active stage on the same pipeline — the one the deal will MOVE to. */
+async function otherStageOn(ctx: Ctx, pipelineID: string, notThis: string): Promise<string> {
+    const r = await new RunView().RunView<{ ID: string }>(
+        {
+            EntityName: E_STAGE,
+            ExtraFilter: `PipelineID = '${pipelineID}' AND IsActive = 1 AND ID <> '${notThis}'`,
+            OrderBy: 'DisplayOrder ASC',
+            ResultType: 'simple',
+            Fields: ['ID'],
+        },
+        ctx.User,
+    );
+    Assert(r.Success, `reading the pipeline's stages failed — ${r.ErrorMessage}`);
+    const id = (r.Results ?? [])[0]?.ID;
+    Assert(!!id, `the pipeline needs a second active stage to move to; only ${notThis} exists`);
+    return id as string;
+}
+
+/** Moves a deal to a stage through the WRITE PATH — the same call the board's drag makes. */
+async function moveToStage(ctx: Ctx, dealID: string, stageID: string): Promise<DealEntityServer> {
+    const deal = (await ctx.Provider.GetEntityObject(E_DEAL, ctx.User)) as unknown as DealEntityServer;
+    const key = new CompositeKey();
+    key.KeyValuePairs.push({ FieldName: 'ID', Value: dealID });
+    Assert(await deal.InnerLoad(key), `deal ${dealID} could not be loaded`);
+    deal.PipelineStageID = stageID;
+    Assert(
+        await deal.Save(),
+        `the stage change must succeed: ${deal.LatestResult?.CompleteMessage ?? 'refused with no message'}`,
+    );
+    return deal;
+}
+
+/** Puts an order into a given status directly, so a check can set up a refusal. */
+async function forceOrderStatus(ctx: Ctx, orderID: string, status: string): Promise<void> {
+    const order = (await ctx.Provider.GetEntityObject(E_ORDER_HEADER, ctx.User)) as BaseEntity;
+    const key = new CompositeKey();
+    key.KeyValuePairs.push({ FieldName: 'ID', Value: orderID });
+    Assert(await order.InnerLoad(key), `order ${orderID} could not be loaded`);
+    order.Set('Status', status);
+    Assert(await order.Save(), `the order could not be moved to ${status}: ${order.LatestResult?.CompleteMessage ?? ''}`);
 }
 
 /** One order header, read back through the entity layer. */
@@ -131,39 +193,61 @@ export const CloseWonOrderChecks: NamedCheck[] = [
     },
     {
         Id: 'close-won-order.CO3',
-        Name: 'CO3: a won close leaves the order STATUS untouched',
+        Name: 'CO3: the order follows the STAGE — OrderStatusOnEntry is what moves it',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 /**
-                 * NEW, AND THE INVERSE OF WHAT CW1–CW3 USED TO PIN.
+                 * REFRAMED ONTO THE MECHANISM, and the reason matters more than the rewrite.
                  *
-                 * Those asserted that closing a deal Won produced a BOOKED order and posted it to the
-                 * ledger. S-US5 and S-US6 now say the opposite: Closed Won does not touch the order's
-                 * status. It stays as it was — Draft, or Quoted if the deal reached Agreement — so finance
-                 * can review and correct before the Confirm that locks it, books the journal entries and
-                 * triggers invoicing.
+                 * This check used to assert "a won close leaves the order STATUS untouched" — read the
+                 * status before, read it after, demand they match. That was true of the code, and it was
+                 * true of only ONE reading of what S-US5 asks for. The moment a stage says what the order
+                 * should become (D-OS1), "untouched" stops being the requirement and starts being an
+                 * accident of which stage the fixture happened to seed.
                  *
-                 * Read BEFORE and AFTER and compare, rather than asserting a literal 'Draft': the status a
-                 * deal arrives with depends on the stage it reached, and hardcoding one would make this
-                 * check pass for the wrong reason on a pipeline that quotes. What matters is that the close
-                 * changed NOTHING.
+                 * So it asserts the mechanism instead: a stage names a status, a deal enters that stage
+                 * through the WRITE PATH, and the order arrives at that status. The stage's value is set
+                 * inside this check's own transaction, so the answer does not depend on the seed — and
+                 * whichever status Andrew finally puts on Closed Won (DECISIONS-NEEDED DN-10), this check
+                 * keeps measuring the thing that has to work.
+                 *
+                 * `moveToStage` is a plain `deal.Save()`, deliberately: the writer lives on the write path
+                 * precisely because a stage change arrives from the board's drag, an importer or an agent,
+                 * and never only from the close operation.
                  */
                 requireOrders();
                 const f = await ResolveSalesFixture(ctx);
                 const seeded = await seedOrderOnly(ctx, f, 2);
 
-                const statusBefore = String((await orderRow(ctx, seeded.OrderID)).Status ?? '');
-                Assert(statusBefore.length > 0, 'the seeded order has no status to compare against');
+                const before = String((await orderRow(ctx, seeded.OrderID)).Status ?? '');
+                Assert(before.length > 0, 'the seeded order has no status to move from');
+                Assert(before !== 'Quoted', `this check needs to MOVE the status; it is already ${before}`);
 
-                const out = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
-                Assert(out.Success, `the close should have succeeded — ${JSON.stringify(out.Issues).slice(0, 300)}`);
+                const target = await otherStageOn(ctx, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID);
+                await setStageOrderStatus(ctx, target, 'Quoted');
 
-                const statusAfter = String((await orderRow(ctx, seeded.OrderID)).Status ?? '');
+                const deal = await moveToStage(ctx, seeded.DealID, target);
+                AssertEqual(deal.OrderStatusWarnings.length, 0, `a legal move must warn about nothing: ${deal.OrderStatusWarnings.join(' | ')}`);
+
                 AssertEqual(
-                    statusAfter,
-                    statusBefore,
-                    'a won close must leave the order status exactly as it was — finance advances it, not sales',
+                    String((await orderRow(ctx, seeded.OrderID)).Status ?? ''),
+                    'Quoted',
+                    'the order took the status the stage named — asserted from the DATABASE, not from the entity',
+                );
+
+                /**
+                 * AND A STAGE THAT SAYS NOTHING CHANGES NOTHING. This is the other half of the rule and
+                 * the one a naive implementation gets wrong: NULL must mean "this stage has no opinion",
+                 * not "set it back to Draft".
+                 */
+                const quiet = await otherStageOn(ctx, f.OrderOnlyPolicyPipelineID, target);
+                await setStageOrderStatus(ctx, quiet, null);
+                await moveToStage(ctx, seeded.DealID, quiet);
+                AssertEqual(
+                    String((await orderRow(ctx, seeded.OrderID)).Status ?? ''),
+                    'Quoted',
+                    'a stage with no OrderStatusOnEntry leaves the order exactly where it was',
                 );
             }),
     },
@@ -210,38 +294,79 @@ export const CloseWonOrderChecks: NamedCheck[] = [
     },
     {
         Id: 'close-won-order.CO5',
-        Name: 'CO5: the order stays EDITABLE after the deal is locked',
+        Name: 'CO5: a REFUSED order status never blocks the stage change — and the order stays editable',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 /**
-                 * NEW, and the one most likely to break by accident.
+                 * D-OS1's THIRD RULE, which is the one with teeth: *"The Deal stage is the salesperson's
+                 * record of the sales process; it should never be held hostage by order-side rules."*
                  *
-                 * A won close LOCKS the deal — that is L-17, enforced in `DealEntityServer.Save()`, and
-                 * CD5/CD13 pin it including its child collections. S-US3 requires the opposite of the
-                 * order: finance reviews and CORRECTS it after the close, then advances it. So the lock
-                 * must stop at the deal.
+                 * The refusal is not hypothetical and not an edge case — S-US8 GUARANTEES it. A lost deal
+                 * voids its order, `Voided` is terminal in orders, and reopening moves the deal into a
+                 * stage asking for `Quoted`. Orders says no. The deal must reopen anyway.
                  *
-                 * The risk is real rather than theoretical. The order is now reachable THROUGH the locked
-                 * deal as an embedded peer, so any future widening of the lock to "the deal and everything
-                 * it owns" would silently make finance's job impossible — and it would look like a
-                 * correctness improvement while doing it.
+                 * Set up here with the same shape and without needing the loss path: put the order at
+                 * `Voided`, point the target stage at `Quoted`, and move. Three things must all hold —
+                 * the stage change LANDED, the order did NOT move, and something SAID SO. A version
+                 * missing the third would pass while the rep silently lost half of what they asked for.
                  *
-                 * Edits the order DIRECTLY, not through the deal, because that is what finance does.
+                 * This check also carries what it used to assert on its own — that the deal's close lock
+                 * stops at the deal — because the order is edited directly at the end, after the deal has
+                 * been locked by a won close.
                  */
                 requireOrders();
                 const f = await ResolveSalesFixture(ctx);
                 const seeded = await seedOrderOnly(ctx, f, 1);
 
+                await forceOrderStatus(ctx, seeded.OrderID, 'Voided');
+                const target = await otherStageOn(ctx, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID);
+                await setStageOrderStatus(ctx, target, 'Quoted');
+
+                // The stage change itself must SUCCEED. `moveToStage` asserts that.
+                const deal = await moveToStage(ctx, seeded.DealID, target);
+
+                const [row] = await rows(ctx, E_DEAL, `ID = '${seeded.DealID}'`);
+                AssertEqual(
+                    String(row.PipelineStageID).toLowerCase(),
+                    target.toLowerCase(),
+                    'the stage change reached the DATABASE — an in-memory-only move would be the worst outcome',
+                );
+                AssertEqual(
+                    String((await orderRow(ctx, seeded.OrderID)).Status ?? ''),
+                    'Voided',
+                    'and the order was left exactly as it was, not half-moved',
+                );
+
+                const warnings = deal.OrderStatusWarnings;
+                AssertEqual(warnings.length, 1, `exactly one warning was expected, got ${JSON.stringify(warnings)}`);
+                Assert(
+                    warnings[0].includes('Voided'),
+                    `the warning must name the status the order stayed in: '${warnings[0]}'`,
+                );
+                // NOT a search for the word "terminal". The first version of this looked for it and
+                // failed: orders says "Voided is final", which is the same fact in different words. A
+                // check that guesses another app's phrasing measures the phrasing. So it asserts the
+                // SHAPE a useful warning must have — both statuses named, and the outcome stated —
+                // which stays true however orders words the reason.
+                Assert(
+                    warnings[0].includes('Quoted'),
+                    `the warning must name the status that was ASKED for: '${warnings[0]}'`,
+                );
+                Assert(
+                    warnings[0].includes('The stage change was kept'),
+                    `and must say the stage change survived, or a rep reads it as a failure: '${warnings[0]}'`,
+                );
+                Assert(
+                    warnings[0].length > 'The deal moved stage, but its order stayed Voided: '.length + 20,
+                    `and must carry orders' REASON, not just the fact: '${warnings[0]}'`,
+                );
+
+                // ── the close lock stops at the DEAL ──────────────────────────────────────────
                 const out = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
                 Assert(out.Success, `the close should have succeeded — ${JSON.stringify(out.Issues).slice(0, 300)}`);
 
-                // Typed as the base: sales must not import orders' entity classes into a check, and everything
-                // asserted here is generic entity behaviour -- load, set, save.
                 const order = (await ctx.Provider.GetEntityObject(E_ORDER_HEADER, ctx.User)) as BaseEntity;
-                // `InnerLoad` with a CompositeKey, not `Load(id)`: the typed `Load` overload lives on the
-                // GENERATED subclass, and sales must not import orders' entity classes into a check. This is
-                // exactly what that generated overload does internally.
                 const key = new CompositeKey();
                 key.KeyValuePairs.push({ FieldName: 'ID', Value: seeded.OrderID });
                 Assert(await order.InnerLoad(key), 'the order must still be loadable after the close');
@@ -251,12 +376,10 @@ export const CloseWonOrderChecks: NamedCheck[] = [
                     'the order must remain editable after a won close — finance corrects it before ' +
                         `advancing it: ${order.LatestResult?.CompleteMessage ?? 'refused with no message'}`,
                 );
-
-                const after = await orderRow(ctx, seeded.OrderID);
                 AssertEqual(
-                    String(after.Notes ?? ''),
+                    String((await orderRow(ctx, seeded.OrderID)).Notes ?? ''),
                     'finance reviewed this after the close',
-                    'and the edit must have persisted',
+                    'and the edit actually landed',
                 );
             }),
     },

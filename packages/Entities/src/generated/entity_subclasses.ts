@@ -1325,6 +1325,16 @@ export const mjBizAppsSalesPipelineStageSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    OrderStatusOnEntry: z.union([z.literal('Confirmed'), z.literal('Draft'), z.literal('Quoted'), z.literal('Voided')]).nullable().describe(`
+        * * Field Name: OrderStatusOnEntry
+        * * Display Name: Order Status On Entry
+        * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Confirmed
+    *   * Draft
+    *   * Quoted
+    *   * Voided`),
     Pipeline: z.string().describe(`
         * * Field Name: Pipeline
         * * Display Name: Pipeline
@@ -5313,6 +5323,24 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
     */
     get __mj_UpdatedAt(): Date {
         return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: OrderStatusOnEntry
+    * * Display Name: Order Status On Entry
+    * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Confirmed
+    *   * Draft
+    *   * Quoted
+    *   * Voided
+    */
+    get OrderStatusOnEntry(): 'Confirmed' | 'Draft' | 'Quoted' | 'Voided' | null {
+        return this.Get('OrderStatusOnEntry');
+    }
+    set OrderStatusOnEntry(value: 'Confirmed' | 'Draft' | 'Quoted' | 'Voided' | null) {
+        this.Set('OrderStatusOnEntry', value);
     }
 
     /**

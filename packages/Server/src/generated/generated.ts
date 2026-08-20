@@ -3791,6 +3791,10 @@ export class mjBizAppsSalesPipelineStage_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field({nullable: true}) 
+    @MaxLength(20)
+    OrderStatusOnEntry?: string;
+        
     @Field() 
     @MaxLength(200)
     Pipeline: string;
@@ -3852,6 +3856,9 @@ export class CreatemjBizAppsSalesPipelineStageInput {
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
 
+    @Field({ nullable: true })
+    OrderStatusOnEntry: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -3903,6 +3910,9 @@ export class UpdatemjBizAppsSalesPipelineStageInput {
 
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
+
+    @Field({ nullable: true })
+    OrderStatusOnEntry?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

@@ -568,6 +568,18 @@ CREATE TABLE __mj_BizAppsSales.PipelineStage (
     -- The status a deal takes on when it enters this stage. See the note above.
     DealStatusTypeID UNIQUEIDENTIFIER NULL,
 
+    -- The status the deal's EMBEDDED ORDER takes on when a deal enters this stage. NULL means this
+    -- stage says nothing about the order, which is the default and the common case.
+    --
+    -- It deliberately mirrors DealStatusTypeID directly above: a stage already declares what entering
+    -- it means for the deal's own status, and S-US5 asks the same question of the order. Ruled by
+    -- Andrew (docs/DECISIONS.md D-OS1); it replaces CloseWonPolicy.OrderState, which could only speak
+    -- at the moment of close and only about a won one.
+    --
+    -- A STRING RATHER THAN AN FK, because the vocabulary belongs to ORDERS. There is no sales type
+    -- table to point at, and inventing one would put this app in charge of another app's lifecycle.
+    OrderStatusOnEntry NVARCHAR(20) NULL,
+
     -- Days without activity before the board flags the deal as rotting.
     RottingDays INT NULL,
 
@@ -589,7 +601,26 @@ CREATE TABLE __mj_BizAppsSales.PipelineStage (
     CONSTRAINT CK_PipelineStage_Probability
         CHECK (Probability IS NULL OR (Probability >= 0 AND Probability <= 100)),
     CONSTRAINT CK_PipelineStage_RottingDays
-        CHECK (RottingDays IS NULL OR RottingDays >= 0)
+        CHECK (RottingDays IS NULL OR RottingDays >= 0),
+
+    -- ── THE FOUR STATUSES A SALES STAGE MAY ASK FOR, AND WHY A CHECK IS RIGHT HERE ──
+    --
+    -- Rule 2 says CHECK constraints are for structural invariants and NEVER for domain vocabulary.
+    -- This is not this app's vocabulary: `OrderHeader.Status` is orders' own CHECK-constrained column,
+    -- and the same reasoning already governs `ProductFilterFor`'s `Status = 'Active'` literal. What
+    -- the constraint enforces is a STRUCTURAL restriction on that foreign set — the subset a SALES
+    -- stage is allowed to name.
+    --
+    -- Posted and Fulfilled are absent on purpose (Andrew, D-OS1): they are finance and fulfilment
+    -- OUTCOMES, reached by orders' own advance, not something a salesperson moving a card decides. A
+    -- stage that could name them would let the board post to the ledger.
+    --
+    -- Orders' full set is Draft | Quoted | Confirmed | Posted | Fulfilled | Voided. If orders adds a
+    -- status, this constraint does not change automatically, and it should not: whether a sales stage
+    -- may ask for it is a new decision.
+    CONSTRAINT CK_PipelineStage_OrderStatusOnEntry
+        CHECK (OrderStatusOnEntry IS NULL
+               OR OrderStatusOnEntry IN ('Draft', 'Quoted', 'Confirmed', 'Voided'))
 );
 GO
 

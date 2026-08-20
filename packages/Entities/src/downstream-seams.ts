@@ -88,7 +88,15 @@ export interface OrdersOrderHeaderSeamInput {
 export interface OrdersOrderHandoffInput {
     Header: OrdersOrderHeaderSeamInput;
     Lines: OrdersOrderLineSeamInput[];
-    /** `Draft` | `Confirmed` — supplied by `CloseWonPolicy.OrderState`. Set on the header. */
+    /**
+     * The status the order is created in. Set on the header, because that is where the entity graph
+     * takes it.
+     *
+     * It used to come from `CloseWonPolicy.OrderState`. That key is retired (D-OS1): a stage now says
+     * what entering it means for the order, via `PipelineStage.OrderStatusOnEntry`. Nothing in sales
+     * fills this field today — close-won creates no order — so it survives as part of the seam's
+     * shape for a caller that creates one directly.
+     */
     Status: string;
     /** Orders' own vocabulary for what kind of order this is. Sales always books a `Sale`. */
     OrderType: string;

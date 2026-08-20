@@ -38,8 +38,6 @@ export interface SalesCloseWonPolicy {
     SubscriptionLinesTo?: string | null;
     /** Where one-time lines go. `Order` | `Contract` | `None`. */
     OneTimeLinesTo?: string | null;
-    /** The state a created order lands in. `Draft` | `Confirmed`. */
-    OrderState?: string | null;
     /** When set, the close raises an approval task of this type rather than completing. */
     RequireApprovalTaskTypeCode?: string | null;
 }

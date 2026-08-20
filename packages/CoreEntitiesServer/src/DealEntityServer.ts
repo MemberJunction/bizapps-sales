@@ -52,6 +52,10 @@ import {
     LogError,
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
+// ORDERS' OWN RULE, imported rather than restated. `CanTransition` is the same function
+// `OrderEntityServer.passesStatusTransition()` consults, so a refusal here and a refusal there cannot
+// disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
+import { CanTransition, type OrderStatus } from '@mj-biz-apps/orders-entities';
 import { DEAL_FIELDS_EDITABLE_WHILE_LOCKED, DealEntity } from '@mj-biz-apps/sales-entities';
 
 import { getNextDealNumber } from './SequenceService.js';
@@ -66,6 +70,24 @@ const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
  */
 interface PipelineCompanyRow {
     CompanyID: string;
+}
+
+const STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
+
+/** The one column the stage lookup selects for the order rule. */
+interface StageOrderStatusRow {
+    OrderStatusOnEntry: string | null;
+}
+
+/**
+ * What entering a stage asks of the deal's order — resolved before the transaction, applied inside it.
+ *
+ * A plan exists ONLY when there is something to do: the stage actually changed, and the new stage names
+ * a status. Everything else is `null`, so the ordinary save path is untouched by this feature.
+ */
+interface StageOrderPlan {
+    StageID: string;
+    Target: OrderStatus;
 }
 
 @RegisterClass(BaseEntity, DEAL_ENTITY)
@@ -122,6 +144,10 @@ export class DealEntityServer extends DealEntity {
      * every row in the graph commit or roll back together.
      */
     public override async Save(options?: EntitySaveOptions): Promise<boolean> {
+        // Per-save, so a caller reading them after `Save()` sees this save's warnings and not the last
+        // one's. Cleared before the close lock can return early — an abandoned save has no warnings.
+        this._orderStatusWarnings.length = 0;
+
         /**
          * THE CLOSE LOCK (L-17, master plan §7.3) — enforced HERE and nowhere else.
          *
@@ -156,12 +182,25 @@ export class DealEntityServer extends DealEntity {
         // it does not belong in the workspace.
         this.provisionEmbeddedOrder();
 
+        /**
+         * WHAT THIS STAGE CHANGE ASKS OF THE ORDER (S-US5) — resolved here, applied inside the
+         * transaction.
+         *
+         * BESIDE `provisionEmbeddedOrder()`, not inside it. Provisioning happens once, on creation;
+         * this happens on every stage change for the rest of the deal's life. Folding them together
+         * would tie a rule about movement to a rule about birth.
+         *
+         * The READ happens before any transaction opens, for the same reason the close lock does: it is
+         * one lookup, and work that might not be needed should not lengthen a critical section.
+         */
+        const stageOrder = await this.planStageOrderStatus();
+
         // Nothing to number: an existing deal, or one that already has a number. A number is only ever
         // assigned once — it appears in contracts, orders and people's email, so re-saving a deal must
         // never renumber it.
         const saved = this.IsSaved || this.DealNumber
-            ? await super.Save(options)
-            : await this.saveWithNewDealNumber(options);
+            ? await this.saveApplyingStageOrderStatus(options, stageOrder)
+            : await this.saveWithNewDealNumber(options, stageOrder);
 
         if (!saved) {
             this.explainOrderProvisioningFailure();
@@ -182,7 +221,10 @@ export class DealEntityServer extends DealEntity {
      * UNIQUE index and assigning it afterwards would mean a second write to a row that is already
      * visible.
      */
-    private async saveWithNewDealNumber(options?: EntitySaveOptions): Promise<boolean> {
+    private async saveWithNewDealNumber(
+        options?: EntitySaveOptions,
+        stageOrder?: StageOrderPlan | null,
+    ): Promise<boolean> {
         const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
         if (!provider?.BeginEntityTransaction) {
             throw new Error(
@@ -197,6 +239,9 @@ export class DealEntityServer extends DealEntity {
                 this.ContextCurrentUser,
                 this.ProviderToUse as unknown as IMetadataProvider,
             );
+            if (stageOrder) {
+                await this.applyStageOrderStatus(stageOrder);
+            }
             const saved = await super.Save(options);
             if (!saved) {
                 await scope.Rollback();
@@ -313,6 +358,202 @@ export class DealEntityServer extends DealEntity {
             'the generated OrderHeader. In MJAPI it arrives through the dependencies MJ declares; in a ' +
             'script, call LoadBizAppsOrdersServer() before saving. Not a database or constraint problem.',
         );
+    }
+
+    /* ── The stage → order status writer (S-US5 / S-US7 / S-US8, D-OS1) ─────── */
+
+    /**
+     * Warnings from the last `Save()` about what did NOT happen to the order, and why.
+     *
+     * A channel rather than a thrown error, because that is the whole ruling: *"The Deal stage is the
+     * salesperson's record of the sales process; it should never be held hostage by order-side rules"*
+     * (Andrew, D-OS1). So a refused order update is not a failure of the save — it is a fact about the
+     * save, and something has to be able to say it out loud.
+     *
+     * `Sales.ReopenDeal` and `Sales.CloseDeal` copy these into their `Issues` with
+     * `Severity: 'warning'`, which is how a caller sees them. A plain `deal.Save()` from the board's
+     * drag leaves them here and in the server log; see `DECISIONS-NEEDED.md` DN-12, because a warning
+     * only a server log carries is one a rep never reads.
+     */
+    private readonly _orderStatusWarnings: string[] = [];
+
+    public get OrderStatusWarnings(): readonly string[] {
+        return this._orderStatusWarnings;
+    }
+
+    /**
+     * Resolves what this save's stage change asks of the order. Reads only; opens nothing.
+     *
+     * ── WHAT COUNTS AS "CHANGING STAGE" ──
+     *
+     * `OldValue` versus the current value, the same mechanism {@link checkCloseLock} keys on. A save
+     * that does not touch `PipelineStageID` plans nothing, so an ordinary edit — a rename, a nudge to
+     * `NextStep` — never reaches the order. That matters more than it looks: an order that got
+     * re-Quoted on every save of its deal would be a write amplification nobody asked for, and on a
+     * Confirmed order it would be a refusal warning on every single save.
+     *
+     * A BRAND-NEW deal also counts as entering its first stage. `CanTransition` treats a null `from` as
+     * "may be created in any legal state", so a new deal on a stage naming `Quoted` gets an order
+     * created Quoted rather than created Draft and then moved — one row, one state, no history of a
+     * status it was never really in.
+     */
+    private async planStageOrderStatus(): Promise<StageOrderPlan | null> {
+        const stageID = this.PipelineStageID;
+        if (!stageID) {
+            return null;
+        }
+        if (this.IsSaved) {
+            const previous = this.GetFieldByName('PipelineStageID')?.OldValue as string | null | undefined;
+            if (previous && String(previous).toLowerCase() === String(stageID).toLowerCase()) {
+                return null;   // the stage did not move; the order is not this save's business
+            }
+        }
+
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await view.RunView<StageOrderStatusRow>(
+            {
+                EntityName: STAGE_ENTITY,
+                ExtraFilter: `ID = '${stageID}'`,
+                ResultType: 'simple',
+                Fields: ['OrderStatusOnEntry'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            // Not fatal, and deliberately so: a stage lookup that fails must not stop a rep moving a
+            // card. It is recorded as a warning like any other thing that did not happen.
+            this._orderStatusWarnings.push(
+                `The order was not updated: the stage's OrderStatusOnEntry could not be read ` +
+                `(${result.ErrorMessage ?? 'unknown error'}).`,
+            );
+            return null;
+        }
+
+        const target = (result.Results ?? [])[0]?.OrderStatusOnEntry;
+        if (!target) {
+            return null;   // this stage says nothing about the order. The common case.
+        }
+        return { StageID: stageID, Target: target as OrderStatus };
+    }
+
+    /**
+     * Applies the plan to the deal's order, and NEVER lets a refusal reach the caller as a failure.
+     *
+     * ── WHY THE TRANSITION IS CHECKED BEFORE IT IS ATTEMPTED ──
+     *
+     * `CanTransition` is orders' own table of legal moves. Asking it first means the ordinary refusal —
+     * `Voided → Quoted` on a reopened lost deal, which S-US8 says WILL happen — costs no write and
+     * produces orders' own explanation. Attempting the save and reading the failure would also work,
+     * but it would leave the in-memory order holding a status the database refused, and that object is
+     * a participant in this deal's save graph.
+     *
+     * ── WHY THE SAVE STILL RUNS IN ITS OWN SCOPE ──
+     *
+     * A legal transition can still fail for reasons this app does not model — confirming books journal
+     * entries and needs a payer. `BeginEntityTransaction` joins the ambient transaction as a savepoint,
+     * so rolling this one back undoes the order write and leaves the deal's own transaction intact.
+     * Without that, one order-side failure would take the stage change down with it, which is exactly
+     * what D-OS1 forbids.
+     *
+     * ── THE UNSAVED ORDER ──
+     *
+     * A new deal's order has not been written yet, so there is nothing to transition and nothing to
+     * roll back: setting `Status` means it is INSERTED in that state by the graph a moment later.
+     */
+    private async applyStageOrderStatus(plan: StageOrderPlan): Promise<void> {
+        const order = this.OrderID_Object;
+        if (!order) {
+            // No order to update. Not a refusal and not worth a warning: a deal without one predates
+            // the embedded order, and provisioning is what fixes that, not this.
+            return;
+        }
+
+        if (!order.IsSaved) {
+            order.Status = plan.Target;
+            return;
+        }
+
+        const from = order.Status;
+        if (from === plan.Target) {
+            return;   // already there; a no-op write would only dirty the row
+        }
+
+        const verdict = CanTransition(from, plan.Target);
+        if (!verdict.Allowed) {
+            this._orderStatusWarnings.push(
+                `The deal moved stage, but its order stayed ${from}: ${verdict.Reason ?? 'orders refused the move.'} ` +
+                `The stage change was kept — a sales stage is not held hostage by an order-side rule.`,
+            );
+            LogError(
+                `DealEntityServer: stage ${plan.StageID} asked for order status '${plan.Target}' on order ` +
+                `${order.ID} (currently '${from}') and orders refused it: ${verdict.Reason ?? 'no reason given'}. ` +
+                'The deal\'s stage change proceeds (D-OS1).',
+            );
+            return;
+        }
+
+        const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
+        const scope = await provider.BeginEntityTransaction();
+        try {
+            order.Status = plan.Target;
+            if (await order.Save()) {
+                await scope.Commit();
+                return;
+            }
+            throw new Error(order.LatestResult?.CompleteMessage ?? 'the order save was refused with no message');
+        } catch (err) {
+            try {
+                await scope.Rollback();
+            } catch (rollbackErr) {
+                LogError(`DealEntityServer: rolling back the order status update failed: ${rollbackErr}`);
+            }
+            // Put the in-memory value back, or the deal's save graph will try to write the status the
+            // database has just refused and take the whole save down with it.
+            order.Status = from;
+            this._orderStatusWarnings.push(
+                `The deal moved stage, but its order stayed ${from}: the move to ${plan.Target} was legal ` +
+                `but did not complete (${err instanceof Error ? err.message : String(err)}). The stage change was kept.`,
+            );
+            LogError(`DealEntityServer: the order status update to '${plan.Target}' failed: ${err}`);
+        }
+    }
+
+    /**
+     * The ordinary save path, plus the stage's order update when there is one — both in one transaction.
+     *
+     * When there is no plan this is `super.Save()` and nothing more, so a deal that is not moving stage
+     * pays nothing for this feature. When there is, the scope is what makes the order status and the
+     * deal's own row commit together: a stage change that is visible while the order it moved is not
+     * would be a worse outcome than either alone.
+     */
+    private async saveApplyingStageOrderStatus(
+        options?: EntitySaveOptions,
+        stageOrder?: StageOrderPlan | null,
+    ): Promise<boolean> {
+        if (!stageOrder) {
+            return super.Save(options);
+        }
+
+        const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
+        const scope = await provider.BeginEntityTransaction();
+        try {
+            await this.applyStageOrderStatus(stageOrder);
+            const saved = await super.Save(options);
+            if (!saved) {
+                await scope.Rollback();
+                return false;
+            }
+            await scope.Commit();
+            return true;
+        } catch (err) {
+            LogError(`DealEntityServer.saveApplyingStageOrderStatus: ${err}`);
+            try {
+                await scope.Rollback();
+            } catch (rollbackErr) {
+                LogError(`DealEntityServer: rollback after a failed stage-order save: ${rollbackErr}`);
+            }
+            return false;
+        }
     }
 
     /* ── The close lock (L-17, master plan §7.3) ────────────────────────────── */

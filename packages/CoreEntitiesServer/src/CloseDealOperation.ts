@@ -74,17 +74,41 @@ interface StatusFlags {
 const POLICY_DEFAULTS: SalesCloseWonPolicy = {
     CreateContract: false,
     SubscriptionLinesTo: 'None',
-    // DEAD, both of them, and kept only so the shipped default still satisfies the generated input
-    // type. `OneTimeLinesTo` steered one-time lines to the Order route and `OrderState` set the status
-    // of the order that route created; close-won creates no order now, so nothing reads either. They
-    // stay in `sales-close-deal.input.ts` because that is a published remote-operation contract and
-    // narrowing it is its own decision -- but a deployment setting them is configuring nothing.
+    // `OrderState` IS GONE FROM THE POLICY ENTIRELY, and not because it was merely unread.
+    //
+    // A close-time key could only ever speak at one moment, and only about a won close. The stage is
+    // where the answer belongs: `PipelineStage.OrderStatusOnEntry` says what entering ANY stage means
+    // for the order -- won, lost, or halfway -- and it is one source of truth rather than a policy key
+    // that agreed with the stage table by luck. Ruled by Andrew, `docs/DECISIONS.md` D-OS1. Removed
+    // from the published input contract in the same commit, because two spellings of the same idea is
+    // the problem being solved.
+    //
+    // `OneTimeLinesTo` is still DEAD but still here: it steered one-time lines to the Order route,
+    // which no longer exists. Narrowing the published contract is its own decision and Andrew has not
+    // made it -- see `DECISIONS-NEEDED.md` DN-11. A deployment setting it is configuring nothing.
     OneTimeLinesTo: 'None',
-    OrderState: 'Draft',
 };
 
 function issue(Section: SalesCloseIssue['Section'], Message: string, Field: string | null = null): SalesCloseIssue {
     return { Section, Field, Severity: 'error', Message };
+}
+
+/**
+ * The deal's order-status warnings, as Issues — the channel D-OS1's rule 3 needs.
+ *
+ * A stage change that asks the order for a status orders refuses must not fail the operation, so the
+ * refusal cannot be an error. It also must not be silent, or the one case S-US8 GUARANTEES will happen —
+ * a reopened lost deal whose order is Voided — reads as a clean reopen that quietly did half the job.
+ *
+ * `Severity: 'warning'` is already in the published union, so this needs no contract change.
+ */
+function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
+    return deal.OrderStatusWarnings.map((Message) => ({
+        Section: 'deal' as const,
+        Field: 'PipelineStageID',
+        Severity: 'warning' as const,
+        Message,
+    }));
 }
 
 /**
@@ -306,7 +330,10 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
 
             return {
                 Success: true,
-                Issues: [],
+                // A close can move the deal into its CLOSING stage, and that stage may name an order
+                // status — `Voided` on a lost stage (S-US7). If orders refuses, the close still stands
+                // and the refusal rides out here as a warning.
+                Issues: orderStatusIssues(deal),
                 IsWon: target.IsWon,
                 IsLost: target.IsLost,
                 Locked: target.LocksDeal,
@@ -772,7 +799,16 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             await db.CommitTransaction();
             transactionOpen = false;
 
-            return { Success: true, Issues: [], Unlocked: true, DealStageEventID: event.ID };
+            // The reopen SUCCEEDED even when the order refused to come back with it. That is the
+            // designed outcome, not a tolerated one: S-US8's reopen enters a stage asking for `Quoted`
+            // while the order sits at `Voided`, which orders treats as terminal. The deal reopens and
+            // says what did not happen.
+            return {
+                Success: true,
+                Issues: orderStatusIssues(deal),
+                Unlocked: true,
+                DealStageEventID: event.ID,
+            };
         } catch (err) {
             if (transactionOpen) {
                 try {
