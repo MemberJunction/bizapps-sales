@@ -121,7 +121,10 @@ interface RemoteOperationRouter {
  */
 export const E_SALES_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 export const E_SALES_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
-const E_DEAL_LINE = 'MJ_BizApps_Sales: Deal Lines';
+// The slide-in opens a line's detail -- service period, term, description -- and those rows are ORDER
+// lines now (S-US4). Retargeted rather than deleted: the detail a rep needs still exists, on the order
+// line, and the generated Order Lines form is what shows it.
+const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
 
 /** What one open document in the outer strip carries. */
 interface OpenDeal {
@@ -533,7 +536,7 @@ export class DealWorkspaceComponent implements OnInit {
         }
 
         const ref = this.forms.Open({
-            EntityName: E_DEAL_LINE,
+            EntityName: E_ORDER_LINE,
             RecordId: line.ID,
             Presentation: 'slide-in',
             EditMode: true,

@@ -16,7 +16,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { Injectable } from '@angular/core';
-import { EntitySaveOptions, Metadata, RunView, RunViewParams } from '@memberjunction/core';
+import { EntitySaveOptions, LogError, Metadata, RunView, RunViewParams } from '@memberjunction/core';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 
 import {
@@ -25,7 +25,6 @@ import {
     type DealStatusLookup,
     type LossReasonLookup,
     type DealWorkspaceLookups,
-    type LineTypeLookup,
     type PipelineLookup,
     type StageLookup,
 } from './deal-workspace.types';
@@ -41,7 +40,6 @@ const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
 const E_DEAL_TYPE = 'MJ_BizApps_Sales: Deal Types';
 const E_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 const E_FORECAST_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
-const E_LINE_TYPE = 'MJ_BizApps_Sales: Deal Line Types';
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 const E_EMPLOYEE = 'MJ: Employees';
@@ -101,7 +99,6 @@ export interface DealSaveOutcome {
 interface PipelineRow { ID: string; Name: string; CompanyID: string; Company: string | null }
 interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null }
 interface NamedRow { ID: string; Name: string }
-interface LineTypeRow extends NamedRow { IsRecurring: boolean }
 interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean }
 interface LossReasonRow extends NamedRow { RequiresNotes: boolean }
 interface ContactRow { ID: string; FirstName: string | null; LastName: string | null; Email: string | null }
@@ -168,7 +165,6 @@ export class DealWorkspaceService {
             // the vocabulary gate forbids, and it also breaks the moment somebody renames "Won".
             { EntityName: E_STATUS_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsOpen', 'IsClosed', 'IsWon', 'IsLost'] },
             { EntityName: E_FORECAST_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
-            { EntityName: E_LINE_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsRecurring'] },
             // KI-8: a Deal row cannot resolve its own account or contact name, because both FKs point at
             // IsA CHILDREN whose Name lives on the parent and CodeGen generates no lookup join through
             // that edge. So they are loaded here and resolved client-side. This is the reason the
@@ -182,6 +178,30 @@ export class DealWorkspaceService {
         ];
 
         const results = await rv.RunViews(params);
+
+        /**
+         * `RunViews` answers POSITIONALLY, and hand-typed indexes drift the moment a query is added or
+         * removed. This file has already been bitten by it: a picker that read as EMPTY because every
+         * index after an insertion point was off by one -- which looks like "no rows", not like a bug.
+         * Deleting the Deal Line Types query above would have shifted four more.
+         *
+         * So the order is declared ONCE and every reader asks by NAME. Adding a query means adding its
+         * name here beside the param; nothing else moves.
+         */
+        const ORDER = [
+            'Pipelines', 'Stages', 'DealTypes', 'DealStatusTypes', 'ForecastCategoryTypes',
+            'Accounts', 'Contacts', 'Employees', 'LossReasons',
+        ] as const;
+        const at = (key: (typeof ORDER)[number]): number => ORDER.indexOf(key);
+        if (results && results.length !== ORDER.length) {
+            // Each block below already degrades on its own, so this is not fatal -- but a mismatch means
+            // ORDER and `params` have drifted apart, and every picker past the drift is reading the
+            // wrong query. Say so rather than let it be discovered as an empty dropdown.
+            LogError(
+                `DealWorkspaceService.LoadLookups: ${results.length} result(s) for ${ORDER.length} ` +
+                'named lookups -- ORDER and the params array have drifted.',
+            );
+        }
         const lookups = EmptyLookups();
 
         // RunViews does not throw; an unsuccessful view yields an empty list rather than an exception,
@@ -192,15 +212,15 @@ export class DealWorkspaceService {
             return r?.Success ? ((r.Results ?? []) as T[]) : [];
         };
 
-        lookups.Pipelines = rows<PipelineRow>(0).map<PipelineLookup>((p) => ({
+        lookups.Pipelines = rows<PipelineRow>(at('Pipelines')).map<PipelineLookup>((p) => ({
             ID: p.ID, Name: p.Name, CompanyID: p.CompanyID, CompanyName: p.Company ?? null,
         }));
-        lookups.Stages = rows<StageRow>(1).map<StageLookup>((s) => ({
+        lookups.Stages = rows<StageRow>(at('Stages')).map<StageLookup>((s) => ({
             ID: s.ID, Name: s.Name, PipelineID: s.PipelineID, DisplayOrder: s.DisplayOrder,
             Probability: s.Probability, ForecastCategoryTypeID: s.ForecastCategoryTypeID,
         }));
-        lookups.DealTypes = rows<NamedRow>(2).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
-        lookups.DealStatusTypes = rows<StatusRow>(3).map<DealStatusLookup>((r) => ({
+        lookups.DealTypes = rows<NamedRow>(at('DealTypes')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        lookups.DealStatusTypes = rows<StatusRow>(at('DealStatusTypes')).map<DealStatusLookup>((r) => ({
             ID: r.ID,
             Name: r.Name,
             IsOpen: r.IsOpen === true,
@@ -208,22 +228,19 @@ export class DealWorkspaceService {
             IsWon: r.IsWon === true,
             IsLost: r.IsLost === true,
         }));
-        lookups.ForecastCategoryTypes = rows<NamedRow>(4).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        lookups.ForecastCategoryTypes = rows<NamedRow>(at('ForecastCategoryTypes')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
         // Index 9 — the loss reasons queried above. The close panel cannot demand a reason it has no
         // list to offer, and an empty dropdown fails as a TIMEOUT rather than as a missing list, which
         // is a slow way to find out.
-        lookups.LossReasons = rows<LossReasonRow>(9).map<LossReasonLookup>((r) => ({
+        lookups.LossReasons = rows<LossReasonRow>(at('LossReasons')).map<LossReasonLookup>((r) => ({
             ID: r.ID, Name: r.Name, RequiresNotes: r.RequiresNotes === true,
         }));
-        lookups.LineTypes = rows<LineTypeRow>(5).map<LineTypeLookup>((r) => ({
-            ID: r.ID, Name: r.Name, IsRecurring: r.IsRecurring === true,
-        }));
-        lookups.Accounts = rows<NamedRow>(6).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
-        lookups.Contacts = rows<ContactRow>(7).map<DealLookup>((c) => ({
+        lookups.Accounts = rows<NamedRow>(at('Accounts')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        lookups.Contacts = rows<ContactRow>(at('Contacts')).map<DealLookup>((c) => ({
             ID: c.ID,
             Name: [c.FirstName, c.LastName].filter(Boolean).join(' ').trim() || c.Email || '(unnamed contact)',
         }));
-        lookups.Employees = rows<EmployeeRow>(8).map<DealLookup>((e) => ({
+        lookups.Employees = rows<EmployeeRow>(at('Employees')).map<DealLookup>((e) => ({
             ID: e.ID, Name: e.FirstLast ?? '(unnamed employee)',
         }));
 

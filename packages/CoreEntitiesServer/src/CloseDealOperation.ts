@@ -57,7 +57,6 @@ import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js'
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const DEAL_TYPE_ENTITY = 'MJ_BizApps_Sales: Deal Types';
-const LINE_TYPE_ENTITY = 'MJ_BizApps_Sales: Deal Line Types';
 const LOSS_REASON_ENTITY = 'MJ_BizApps_Sales: Loss Reasons';
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const STAGE_EVENT_ENTITY = 'MJ_BizApps_Sales: Deal Stage Events';

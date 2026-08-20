@@ -18,7 +18,13 @@ import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 
 import { mjBizAppsSalesDealStageEventFormComponent } from '../generated/Entities/mjBizAppsSalesDealStageEvent/mjbizappssalesdealstageevent.form.component';
 
-/** See `deal-line-form.component.ts` for why the priority is explicit rather than import-order. */
+/**
+ * The registration priority is EXPLICIT rather than left to import order.
+ *
+ * `@RegisterClass` resolves last-registration-wins, so two subclasses for one entity would be decided by
+ * whichever module the bundler happened to import second -- stable in dev and not necessarily in a
+ * different build. Stating the priority makes the winner a decision instead of an accident.
+ */
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Sales: Deal Stage Events', 2)
 @Component({
     standalone: false,

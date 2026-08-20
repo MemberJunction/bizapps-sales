@@ -36,10 +36,6 @@ export interface StageLookup extends DealLookup {
     ForecastCategoryTypeID: string | null;
 }
 
-/** A line type plus the one flag anything downstream actually branches on. */
-export interface LineTypeLookup extends DealLookup {
-    IsRecurring: boolean;
-}
 
 /**
  * A deal status plus its BEHAVIOUR FLAGS.
@@ -75,7 +71,6 @@ export interface DealWorkspaceLookups {
     DealStatusTypes: DealStatusLookup[];
     LossReasons: LossReasonLookup[];
     ForecastCategoryTypes: DealLookup[];
-    LineTypes: LineTypeLookup[];
     Accounts: DealLookup[];
     Contacts: DealLookup[];
     Employees: DealLookup[];
@@ -89,7 +84,6 @@ export function EmptyLookups(): DealWorkspaceLookups {
         DealStatusTypes: [],
         LossReasons: [],
         ForecastCategoryTypes: [],
-        LineTypes: [],
         Accounts: [],
         Contacts: [],
         Employees: [],
