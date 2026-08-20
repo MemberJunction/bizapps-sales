@@ -1,0 +1,78 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Slipped Deals",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "Which deals had their expected close date moved, by how much, and are they still open?",
+      "Description": "Deals whose expected close date moved (master plan §9.3 measure 8). Deals pulled FORWARD are kept rather than filtered out, because a report that only ever shows bad news is one people learn to discount.",
+      "SQL": "@file:SQL/slippage.sql",
+      "TechnicalDescription": "Grain: Deal, sourced from __mj.RecordChange. Neither Deal nor DealStageEvent holds the previous ExpectedCloseDate, so the history comes from MJ's own audit trail: Entity.TrackRecordChanges is 1 on Deals and ChangesJSON carries {\"Field\":{\"field\",\"oldValue\",\"newValue\"}} per changed column, read with JSON_VALUE. This means slippage needs no new column and no new stamp. It does depend on RecordChange rows surviving — a retention policy on that table would silently shorten this report's history rather than break it. Date dimension: RecordChange.ChangedAt (when the slip was recorded). NetDaysSlipped compares earliest-from to latest-to, so a deal moved twice the same way is not counted twice.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 4,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {
+      "MJ: Query Parameters": [
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "CompanyID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
+            "SampleValue": "C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PipelineID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "One pipeline. Omit for all pipelines.",
+            "SampleValue": "90111111-0000-4000-A000-000000000001",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodStart",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive start of the window. Omit for no lower bound.",
+            "SampleValue": "2026-01-01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodEnd",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive end of the window. Omit for no upper bound.",
+            "SampleValue": "2026-12-31",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "OpenOnly",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "Pass \"true\" to show only deals that are still open.",
+            "SampleValue": "true",
+            "DetectionMethod": "Manual"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-000000000007"
+    }
+  }
+]

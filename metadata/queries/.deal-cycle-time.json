@@ -1,0 +1,67 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Deal Cycle Time",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "How long do deals take to close, and does that differ for wins and losses?",
+      "Description": "Average and median days to close (master plan §9.3 measure 6), reported separately for wins and losses because they measure different things — time-to-win is a sales-cycle measure, time-to-lose is a qualification measure, and a team that loses fast is healthier than one that loses slowly.",
+      "SQL": "@file:SQL/deal-cycle-time.sql",
+      "TechnicalDescription": "Grain: Deal. Window on ActualCloseDate; duration measured from the EARLIEST evidence the deal existed — its creation stamp or its first DealStageEvent, whichever is earlier. That is not the obvious column and the reason matters: __mj_CreatedAt is when the ROW was written, so imported history (whose ChangedAt values are preserved) would otherwise produce negative cycle times. Measured on demo data: both closed deals close in July against an 18 Aug creation stamp. Median via PERCENTILE_CONT, because one enterprise deal moves a mean far more than a median at these deal counts.",
+      "Status": "Approved",
+      "QualityRank": 7,
+      "ExecutionCostRank": 3,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {
+      "MJ: Query Parameters": [
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "CompanyID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
+            "SampleValue": "C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PipelineID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "One pipeline. Omit for all pipelines.",
+            "SampleValue": "90111111-0000-4000-A000-000000000001",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodStart",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive start of the window. Omit for no lower bound.",
+            "SampleValue": "2026-01-01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodEnd",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive end of the window. Omit for no upper bound.",
+            "SampleValue": "2026-12-31",
+            "DetectionMethod": "Manual"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-000000000005"
+    }
+  }
+]

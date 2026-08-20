@@ -1,0 +1,89 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Deal Roster",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "Which deals are these — one row each, with names, amounts and provenance?",
+      "Description": "One row per deal, dimensioned, as a grid source and a drill-through target for every aggregate here. Exists because the first thing anyone does with a number they distrust is ask which deals are in it, and without a roster sharing the same filters that question gets answered by ad-hoc SQL — which is how a report and its drill-through quietly stop agreeing. Names throughout, per S-US11, with IDs alongside for navigation.",
+      "SQL": "@file:SQL/deal-roster.sql",
+      "TechnicalDescription": "Grain: Deal. Returns the IsOpen / IsWon / IsLost / IsClosed flags on every row so a consumer can branch on behaviour rather than on the status name it was given for display — the vocabulary rule reaching one layer past the query. Carries AmountIsComputed so a grid can mark a stated figure instead of presenting it as settled. IsPastExpectedClose is computed against SYSUTCDATETIME because everything stored is UTC. Filtered on expected close for open deals and actual close for closed, so one period filter behaves across a mixed set.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {
+      "MJ: Query Parameters": [
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "CompanyID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
+            "SampleValue": "C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PipelineID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "One pipeline. Omit for all pipelines.",
+            "SampleValue": "90111111-0000-4000-A000-000000000001",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodStart",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive start of the window. Omit for no lower bound.",
+            "SampleValue": "2026-01-01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodEnd",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive end of the window. Omit for no upper bound.",
+            "SampleValue": "2026-12-31",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "OwnerEmployeeID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "One owner. Reads the denormalised Deal.OwnerEmployeeID because this is a display filter, not an attribution measure — see \"Sales: Bookings by Owner\" for the reconciling version.",
+            "SampleValue": "",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "OpenOnly",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "Pass \"true\" for open deals only.",
+            "SampleValue": "true",
+            "DetectionMethod": "Manual"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-00000000000D"
+    }
+  }
+]
