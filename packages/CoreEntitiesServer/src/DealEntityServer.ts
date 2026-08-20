@@ -199,6 +199,19 @@ export class DealEntityServer extends DealEntity {
             }
         }
 
+        /**
+         * THE OWNER STAMP IS NOT A FIELD ANYONE MAY SET (S-US1: "cannot be edited directly").
+         *
+         * Refused here, beside the close lock, and for the same reason it is: the UI already hides the
+         * field, and a rule that only the UI enforces is not a rule. Runs before the stamps below so a
+         * refused save costs nothing.
+         */
+        const ownerRefusal = this.ownerStampEditRefusal();
+        if (ownerRefusal) {
+            LogError(`DealEntityServer.Save refused: ${ownerRefusal}`);
+            return false;
+        }
+
         try {
             await this.stampCompanyFromPipeline();
             await this.stampOwnerFromTeam();
@@ -1038,6 +1051,48 @@ export class DealEntityServer extends DealEntity {
      * Both conditions are needed because `Add()` and `Create()` do not mark a collection loaded: a new
      * deal whose roster was composed in the browser arrives with `IsLoaded === false` and `Count > 0`.
      */
+    /**
+     * Why a direct write to `OwnerEmployeeID` is refused, or null when this save is not doing that.
+     *
+     * ── THE HOLE THIS CLOSES, AND WHY IT WAS NOT OBVIOUS ────────────────────────────────────────
+     *
+     * {@link stampOwnerFromTeam} is guarded on the roster having participated in the save, and that
+     * guard is correct — without it, an ordinary header edit would derive "no owner" from an unloaded
+     * collection and CLEAR the stamp. But its consequence was two paths and a refusal on neither: a
+     * save carrying the roster silently DISCARDED a hand-set stamp, and a header-only save silently
+     * KEPT one. The second is the damaging half. It left the app able to hold a deal whose owner column
+     * and owner-role team row name different people, reached by a plain `BaseEntity.Save()` with no
+     * error and no warning — and the stamp exists precisely so per-rep rollups need no join, so a
+     * rollup could disagree with the roster it was meant to shortcut. Proven against the database by
+     * `scripts/audit-story-evidence.mjs` (E3) before this existed.
+     *
+     * ── WHY REFUSE RATHER THAN QUIETLY RE-DERIVE ────────────────────────────────────────────────
+     *
+     * Because the caller believed they were setting the owner. Correcting them in silence produces the
+     * same wrong outcome as before — the owner is not who they said — with no way to notice. The
+     * message names {@link DealEntity.SetOwner}, which is the operation they actually wanted.
+     *
+     * ── WHY `SetOwner` IS NOT CAUGHT BY THIS ────────────────────────────────────────────────────
+     *
+     * It calls `Team.Load()` first, so `IsLoaded` is true by the time it assigns the stamp: the roster
+     * IS part of that save, and the server re-derives the same value from it a moment later. The two
+     * conditions mirror `stampOwnerFromTeam`'s guard exactly, which is what keeps them from disagreeing.
+     */
+    private ownerStampEditRefusal(): string | null {
+        if (this.Team.IsLoaded || this.Team.Count > 0) {
+            return null;   // the roster is part of this save; the stamp is derived from it below
+        }
+        if (!this.GetFieldByName('OwnerEmployeeID')?.Dirty) {
+            return null;   // nobody touched it. The common case.
+        }
+        return (
+            'Deal.OwnerEmployeeID is a server-maintained stamp derived from the DealTeamMember holding ' +
+            'the owner role, and cannot be set directly — a save that changed it without the roster ' +
+            'would leave the column and the team disagreeing about who owns the deal. Use ' +
+            'DealEntity.SetOwner(employeeID), which edits the roster and lets the stamp follow.'
+        );
+    }
+
     private async stampOwnerFromTeam(): Promise<void> {
         if (!this.Team.IsLoaded && this.Team.Count === 0) {
             return; // the roster is not part of this save; leave the stamp alone

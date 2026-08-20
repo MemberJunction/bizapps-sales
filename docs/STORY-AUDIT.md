@@ -18,7 +18,7 @@ are met, **#120** is strictly broader than #38/#39 combined.
 
 The rule for this pass was *prove met criteria against the database, not the screen*. Three sources:
 
-1. **The 52 integration checks** (`RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs`). Every one hits a
+1. **The 53 integration checks** (`RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs`). Every one hits a
    live database with nothing mocked and rolls back. Where a criterion maps to a check, the check id **is** the
    evidence, and `docs/CHECK-MUTATION-EVIDENCE.md` records which mutant proves that check can fail.
 2. **`scripts/audit-story-evidence.mjs`** — written for this audit, for the three questions no check answers.
@@ -51,7 +51,7 @@ The rule for this pass was *prove met criteria against the database, not the scr
 | Adding a line creates an order line; removing removes it | **partially met** | Add and edit: `save-deal.SD1`, `SD14` (two levels down, one save). **Removal is silently dropped** — `save-deal.SD6` is a tripwire pinned to the current wrong behaviour, cause diagnosed in orders' `savePendingLines`, `docs/KNOWN-ISSUES.md` KI-20. |
 | No deal-level line-item records exist anywhere | **met** | **E2: no table matches `%DealLine%`, no entity matches `Deal Line`.** The only surviving occurrence of the name is `Pipeline.RequiresDealLines`, a policy flag choosing priced vs header-only mode — not a record. |
 | The rep can create the account or contact inline without leaving the deal workspace | **partially met** | `deal-workspace.component.ts:473` `CreateRelated()` calls `nav.OpenNewEntityRecord()`. **The rep does leave** — it is a new Explorer tab — and the new record is not returned to the picker. See finding (a). |
-| The owner column matches the Owner-role team member **and cannot be edited directly** | **partially met** | Matches: `DealEntityServer.ts:1021` `stampOwnerFromTeam()`, `save-deal.SD3`. **Cannot be edited directly: NOT met.** See finding (b). |
+| The owner column matches the Owner-role team member **and cannot be edited directly** | **met, after a fix in this session** | Matches: `DealEntityServer.ts:1021` `stampOwnerFromTeam()`, `save-deal.SD3`. **Cannot be edited directly: was NOT met, now is** — `ownerStampEditRefusal()`, `SD26`, `M-OW1`. See finding (b). |
 
 **Three more items from the story body, not in its checklist:**
 
@@ -131,10 +131,19 @@ rollups need no join — which means a rollup can now disagree with the roster i
 `custom/server-owned-fields.ts` keeps the field off the Explorer form, so the UI is clean; the criterion says
 *cannot be edited directly*, and the server is where that has to hold — the same argument the close lock won.
 
-**The fix is small and belongs in `Save()`:** if `OwnerEmployeeID` is dirty and the roster did not participate,
-refuse it with a message naming `SetOwner`. Refusing beats silently re-deriving: quietly correcting a caller who
-believed they were setting the owner is how the close lock would have gone wrong. Not done here — it needs a
-check and a mutant of its own, and it is outside the three items this session carried.
+**FIXED, later in the same session.** `ownerStampEditRefusal()` (`DealEntityServer.ts`) refuses the save when
+`OwnerEmployeeID` is dirty and the roster did not participate, with a message naming `SetOwner` — the operation
+the caller actually wanted. Refusing beats silently re-deriving: quietly correcting a caller who believed they
+were setting the owner produces the same wrong outcome with nothing to notice.
+
+`SetOwner()` is untouched by it, and not by coincidence — it calls `Team.Load()` before assigning the stamp, so
+the roster IS part of that save and the server re-derives the same value from it. The guard's two conditions
+mirror `stampOwnerFromTeam`'s exactly, which is what keeps them from disagreeing.
+
+**`save-deal.SD26`** asserts the refusal, that a refused save writes nothing, AND that the refusal is narrow —
+the same header-only shape with an ordinary field must still save, or a guard that refused every header edit
+would pass the first two assertions and break the app. Mutant **`M-OW1`** removes the guard and fails SD26
+alone. Re-running the probe now reports `save returned false` with the stamp still matching the team row.
 
 ---
 
@@ -277,7 +286,7 @@ silently wrong the moment that query's ordering changes, and the comment would s
 2. ~~**Apply a stage's declared order status when the order is provisioned**~~ **DONE** — `SD25` and `M-PV2`.
 3. **Rename `Pipeline.RequiresDealLines`** → `RequiresOrderLines`. Cosmetic, but it is the last place the retired
    table's name survives, and a reader will misread a policy flag as a pointer to a table.
-4. **Refuse a direct `OwnerEmployeeID` edit on a header-only save** (finding (b)). Needs its own check and mutant.
+4. ~~**Refuse a direct `OwnerEmployeeID` edit on a header-only save**~~ **DONE** — `SD26` and `M-OW1`.
 5. **Resolve the active `ContractTemplate`** in the seam (#34).
 6. **BizApps Tasks integration** — the whole of #35, and half of #34 and #116. The largest item here by a wide
    margin, and the one a finance user would notice first.

@@ -65,6 +65,7 @@ import {
 
 import {
     E_DEAL,
+    E_EMPLOYEE,
     E_SCHEDULE,
     E_TEAM,
     InRolledBackTransaction,
@@ -1235,6 +1236,76 @@ export const SaveDealChecks: NamedCheck[] = [
                     'the new order took the status the stage declares. Draft here means provisioning ' +
                         'never asked the stage, which is the DEAL-9003 defect',
                 );
+            }),
+    },
+    {
+        Id: 'save-deal.SD26',
+        Name: 'SD26: a hand-set OwnerEmployeeID is REFUSED, not silently overwritten',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * S-US1 says the owner column "cannot be edited directly", and until this check existed
+                 * it could — on the quieter of two paths, which is why nothing caught it.
+                 *
+                 * `stampOwnerFromTeam()` only re-derives the stamp when the ROSTER took part in the
+                 * save, and that guard is right: without it an ordinary header edit would read an
+                 * unloaded collection as "no owner" and clear the stamp. But it meant a header-only save
+                 * carrying a hand-set stamp KEPT it, with no error — leaving the owner column and the
+                 * owner-role team row naming different people. The stamp exists so per-rep rollups need
+                 * no join, so a rollup could then disagree with the roster it was meant to shortcut.
+                 * Proven against the database by `scripts/audit-story-evidence.mjs` (E3).
+                 *
+                 * ASSERTED AS A REFUSAL, NOT A CORRECTION. A save that quietly fixed the value would
+                 * produce the same surprise — the owner is not who the caller said — with nothing to
+                 * notice. `SD3` covers the legitimate path, `SetOwner()`, which is untouched by this:
+                 * it loads the roster first, so the roster IS part of that save.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD26 owner stamp is not writable'; });
+                await saveOk(created, 'create');
+
+                const before = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+
+                const other = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: E_EMPLOYEE,
+                        ExtraFilter: `Active = 1 AND ID <> '${f.EmployeeID}'`,
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                    },
+                    ctx.User,
+                );
+                Assert(other.Success, `reading employees failed — ${other.ErrorMessage}`);
+                const otherID = (other.Results ?? [])[0]?.ID;
+                Assert(!!otherID, 'the host needs a second active employee for this check to mean anything');
+
+                // A HEADER-ONLY save: the roster is deliberately never loaded or touched.
+                const edited = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await edited.Load(created.ID), 'the deal reloads');
+                edited.OwnerEmployeeID = otherID;
+                AssertEqual(await edited.Save(), false, 'setting the stamp directly must be REFUSED');
+
+                const after = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                AssertEqual(
+                    String(after.OwnerEmployeeID ?? '').toLowerCase(),
+                    String(before.OwnerEmployeeID ?? '').toLowerCase(),
+                    'and the stored stamp is exactly what it was — a refused save writes nothing',
+                );
+
+                /**
+                 * AND THE REFUSAL IS NARROW. The same deal, the same header-only shape, a field that IS
+                 * the caller's to set — this must still save. A guard that refused every header edit
+                 * would pass the assertion above and break the app.
+                 */
+                const ordinary = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await ordinary.Load(created.ID), 'the deal reloads again');
+                ordinary.NextStep = 'an ordinary header edit, which must still be allowed';
+                await saveOk(ordinary, 'a header-only save that touches nothing server-owned');
             }),
     },
 ];

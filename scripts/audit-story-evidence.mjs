@@ -7,6 +7,9 @@
  *   1. Every deal carries an embedded order, with the status its stage declares (#33, #115, #121).
  *   2. No deal-level line-item table or entity exists anywhere (#33, #114).
  *   3. Whether `Deal.OwnerEmployeeID` REFUSES a direct edit, or merely gets overwritten (#33).
+ *      It refuses, as of 2026-08-20. It did NOT when this probe was written, and that is what the
+ *      probe found — a header-only save kept a hand-set stamp silently. `save-deal.SD26` and mutant
+ *      `M-OW1` hold the line now; this stays as the standing check that the two paths agree.
  *
  * (3) is the only mutation. It writes one column on one open deal through the entity layer, reads it
  * back, and restores the original in SQL — verified by re-reading. It is deliberately not wrapped in a
@@ -96,8 +99,10 @@ line(`  save returned ${saved}; error: ${deal.LatestResult?.Message ?? '(none)'}
 line(`  stamp in the database now: ${after.OwnerEmployeeID}`);
 line(`  owner-role team member:    ${teamOwner?.EmployeeID ?? '(none)'}`);
 line(after.OwnerEmployeeID === other.ID
-    ? '  -> PERSISTED. The direct edit was NOT refused, and the stamp now disagrees with the team row.'
-    : '  -> the direct edit did not survive the save.');
+    ? '  -> PERSISTED. The direct edit was NOT refused, and the stamp now disagrees with the team row. ' +
+      'This is the finding-(b) defect; it should be impossible since SD26.'
+    : '  -> REFUSED, and the stamp still matches the owner-role team row. Correct: S-US1 says the owner ' +
+      'column cannot be edited directly, and the server is where that has to hold.');
 
 await pool.request().query(
     `UPDATE __mj_BizAppsSales.Deal SET OwnerEmployeeID = '${target.OwnerEmployeeID}' WHERE ID = '${target.ID}'`);

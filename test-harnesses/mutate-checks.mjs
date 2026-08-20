@@ -161,6 +161,14 @@ const MUTATIONS = [
       to: 'if (this.IsSaved) {',
       note: 'a provisioned order never asks the stage, so it stays Draft' },
 
+    // FINDING (b) FROM THE STORY AUDIT, replayed. Removing the guard restores the state the audit proved
+    // against the database: a header-only save keeps a hand-set stamp, so the owner column and the
+    // owner-role team row name different people, with no error anywhere.
+    { id: 'M-OW1', file: DES, expect: ['SD26'],
+      from: '        const ownerRefusal = this.ownerStampEditRefusal();',
+      to: '        const ownerRefusal: string | null = null;   void this.ownerStampEditRefusal;',
+      note: 'the owner stamp is writable again' },
+
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
     // the agreement went. This flips exactly that bit and nothing else.

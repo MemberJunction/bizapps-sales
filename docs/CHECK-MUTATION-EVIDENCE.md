@@ -120,6 +120,7 @@ CO3 and CO5 were reframed onto the MECHANISM, so their old mutants no longer app
 | M-AM3 | `DealEntityServer` · "nothing priced" becomes "priced at nil" | SD23 | — |
 | M-PV1 | `DealEntityServer` · provisioning only ever on a deal's first save | SD24 | — |
 | M-PV2 | `DealEntityServer` · a provisioned order never asks its stage | SD25 | — |
+| M-OW1 | `DealEntityServer` · the owner stamp is writable again | SD26 | — |
 | M-CT1 | `LiveContractsSeam` · an unresolvable type reported as a success | CT4 | — |
 | M-CT2 | `LiveContractsSeam` · `HasModifications` hardcoded `false` again | CT5 | — |
 | M-CT3 | `CloseDealOperation` · the close reports the flag as a constant | CT6 | — |
@@ -133,7 +134,7 @@ naive reading of a nullable column, and CO3's second half exists solely to catch
 asserts the WARNING and not merely the absence of a change — without it, a version that silently did
 nothing would pass.
 
-Thirty-four mutations across both tables; **twenty-three** of them failed exactly one check.
+Thirty-five mutations across both tables; **twenty-four** of them failed exactly one check.
 
 M-PV1 is the only mutant in either table that is a REAL DEFECT REPLAYED rather than an invented one:
 that was the shipped code until 2026-08-20, and it meant a deal that already existed without an order
@@ -175,6 +176,20 @@ as that peer's own suite.
   matters when the pipeline default disagrees with it.
 * **CD12** — failed under `M-CD1`, because a preview reports the plan; a plan that changes changes the
   preview.
+
+## After a mutation run, re-feed the coverage gate
+
+`scripts/assert-check-count.mjs` does not run the suite — it READS `test-harnesses/.integration-log.txt`,
+whatever wrote it last. A mutation run leaves a deliberately red log there, so the gate reports a failure
+that is a week old by the time somebody reads it, and rebuilding does not clear it. The log is the input,
+not a by-product.
+
+```bash
+RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs | tee test-harnesses/.integration-log.txt
+node scripts/assert-check-count.mjs
+```
+
+Cost half an hour of chasing a phantom failing check on 2026-08-20, twice, and the fix is one `tee`.
 
 ## Re-running it
 
