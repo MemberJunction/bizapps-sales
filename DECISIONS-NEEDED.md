@@ -40,6 +40,19 @@ say something else entirely, and no code notices.
 The pipeline board sums `Deal.Amount` for its column totals, so it will show figures that are
 unpriced, stale, or both — silently.
 
+**Now measured, on the reseeded demo data.** The board sums `Deal.Amount`; the embedded order lines say
+something else entirely:
+
+| Deal | `Deal.Amount` (what the board shows) | Order lines (what is being sold) |
+|---|---|---|
+| DEAL-9001 | 185,000 | 106,080 |
+| DEAL-9003 | 96,000 | 73,080 |
+| DEAL-9007 | 9,500 | 4,775 |
+
+That is a 43–50% divergence on every lined deal, and nothing anywhere reconciles it. The board's column
+totals are therefore confidently wrong rather than obviously missing, which is the worse failure — a
+blank total invites a question, a precise one does not.
+
 **Interim choice:** seeded amounts left as-is and deliberately NOT reconciled to the order lines. The
 figures differ, visibly, which is more useful than quietly making them agree in seed data and
 discovering the gap in production.
@@ -79,3 +92,42 @@ exactly its own rows, and can never collide with a sequence-minted number.
 **What is needed:** confirmation that a visibly-fake order number is acceptable in the demo. If it is
 not, the alternative is provisioning through the entity layer, which means the seed stops being a SQL
 script — a much larger change.
+
+---
+
+## D-5 · The stage-event append is now on every write path, including ones that never had it
+
+**Raised by:** moving the board's append out of the deleted `SaveDealOperation` and into
+`DealEntityServer.Save()`.
+
+This is a genuine behaviour change and worth being explicit about rather than discovering. Previously
+only a stage move made through `Sales.SaveDeal` produced a `DealStageEvent`. Now every stage move does —
+an Action, an agent, a fixture, a raw `BaseEntity.Save()`, a data fix run from a script.
+
+That is almost certainly what was always wanted: an append-only provenance log with a hole in it for
+whichever callers bypassed one operation is not really a log. But it means **any bulk or migration
+script that moves deals between stages will now generate one event per deal**, and a HubSpot import that
+replays historical stage history will write events as a side effect of loading.
+
+**Interim choice:** the append fires on every path, because a partial log is worse than a noisy one.
+
+**What is needed:** confirmation, plus a decision on whether an importer needs a documented way to
+suppress it — the same shape as the close-lock bypass the importer already needs (CLAUDE.md rule 3
+gives it 'an explicit, audited path'), rather than a general-purpose off switch.
+
+---
+
+## D-6 · `board-move` is registered as an unconditional bundle
+
+I added `board-move` to `scripts/expected-check-counts.json` with `requires: null`, so the coverage gate
+expects it on every host. BD1–BD4 drive a deal through the entity and read `DealStageEvent`; they touch
+no sibling app directly.
+
+**But saving a deal now provisions its embedded order**, which does need orders. On a host without
+orders the save may refuse and all four would fail for a reason none of them are about.
+
+**Interim choice:** `requires: null`, because it is true of what the checks themselves read, and it was
+correct on the host I verified against.
+
+**What is needed:** a decision on whether every bundle that saves a deal now implicitly requires orders.
+If so, `board-move` should be `requires: "orders"` — and so should `save-deal`.
