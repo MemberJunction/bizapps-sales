@@ -22,6 +22,7 @@ import { Metadata, RunView, type DatabaseProviderBase } from '@memberjunction/co
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import { CloseWonTaskService, CloseDealOperation, type CloseWonTaskInput } from '@mj-biz-apps/sales-core-entities-server';
 import type { SalesCloseDealOutput, mjBizAppsSalesPipelineEntity } from '@mj-biz-apps/sales-entities';
+import type { mjBizAppsTasksTaskTypeEntity } from '@mj-biz-apps/tasks-entities';
 
 import { InRolledBackTransaction, ProviderOf, TxOne } from '../fixture.js';
 
@@ -36,6 +37,19 @@ const E_PEOPLE = 'MJ_BizApps_Common: People';
 const E_ORDER = 'MJ_BizApps_Orders: Order Headers';
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
+
+/**
+ * THE SEEDED TASK-TYPE ROWS, BY ID — deliberately a DIFFERENT route than the service takes.
+ *
+ * The service resolves these by `Code` (falling back to `Name` on a host that predates bizapps-tasks
+ * PR #42). If these checks resolved them the same way they would only prove the lookup agrees with
+ * itself. Naming the primary keys makes this an independent oracle: `metadata/task-types/` fixes
+ * these UUIDs, so a check can assert the service found THE row sales seeds rather than merely a row.
+ *
+ * This is the one place a fixed UUID is the right answer rather than the thing being retired.
+ */
+const ID_ORDER_REVIEW = '87ACA0BD-2FF6-493D-99B0-469D41825D1C';
+const ID_CONTRACT_PROCESSING = '890C23F2-39D6-4075-8BA7-EC742A2D1CA8';
 
 /**
  * Refuses the run when tasks is absent, instead of quietly passing.
@@ -109,7 +123,7 @@ async function baseInput(ctx: Ctx, createsContract: boolean): Promise<CloseWonTa
      */
     const { DealID, PipelineID, CompanyID } = await dealOnPolicy(ctx, createsContract);
     const orderID = await anyID(ctx, E_ORDER, `CompanyID = '${CompanyID}'`, 'order');
-    const typeID = await anyID(ctx, E_TASK_TYPE, 'IsActive = 1', 'active task type');
+
     const roleID = await anyID(ctx, E_TASK_ROLE, 'ID IS NOT NULL', 'task role');
     const personID = await anyID(ctx, E_PEOPLE, 'ID IS NOT NULL', 'person');
 
@@ -117,10 +131,26 @@ async function baseInput(ctx: Ctx, createsContract: boolean): Promise<CloseWonTa
         DealID,
         OrderID: orderID,
         PipelineID,
-        OrderReviewTaskTypeID: typeID,
-        ContractTaskTypeID: typeID,
         Assignee: { EntityName: E_PEOPLE, RecordID: personID, RoleID: roleID },
     };
+}
+
+/**
+ * Rename a seeded task type so neither the `Code` nor the `Name` lookup can find it.
+ *
+ * Both are changed because the service prefers `Code` where the column exists and falls back to `Name`
+ * where it does not; touching only one would leave this check passing on one host shape and silently
+ * doing nothing on the other.
+ */
+async function hideTaskType(ctx: Ctx, id: string): Promise<void> {
+    const md = new Metadata();
+    const row = await md.GetEntityObject<mjBizAppsTasksTaskTypeEntity>(E_TASK_TYPE, ctx.User);
+    Assert(await row.Load(id), `setup: the seeded task type ${id} is not in this database`);
+    row.Set('Name', `hidden-by-WT6-${id}`);
+    if (row.Fields.some((f) => f.Name === 'Code')) {
+        row.Set('Code', `HIDDEN_BY_WT6`);
+    }
+    Assert(await row.Save(), `setup: could not rename the task type — ${row.LatestResult?.CompleteMessage}`);
 }
 
 const service = new CloseWonTaskService();
@@ -143,10 +173,16 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                 // Read the ROW, not the result object: a service can report an ID it never wrote.
                 const [task] = await rows(ctx, E_TASK, `ID = '${review!.TaskID}'`);
                 Assert(!!task, 'the reported task ID does not resolve to a row');
+                /**
+                 * A STRONGER CLAIM THAN THE ONE THIS USED TO MAKE. It asserted the task carried the type
+                 * it was HANDED, which proved only that the service did not tamper with an argument. The
+                 * service now CHOOSES, so the check has to prove it chose correctly — and it does that
+                 * against the seeded primary key, which the service never sees.
+                 */
                 AssertEqual(
                     String(task['TypeID']).toLowerCase(),
-                    input.OrderReviewTaskTypeID.toLowerCase(),
-                    'the task must carry the type it was HANDED — the service must not choose one',
+                    ID_ORDER_REVIEW.toLowerCase(),
+                    'the task must carry the ORDER_REVIEW type this repo seeds — resolved by code, not configured',
                 );
 
                 const links = await rows(ctx, E_TASK_LINK, `TaskID = '${review!.TaskID}'`);
@@ -310,15 +346,28 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                  */
                 requireTasks(ctx);
                 const input = await baseInput(ctx, true);
-                delete input.ContractTaskTypeID;
+                /**
+                 * MAKE THE SEED UNRESOLVABLE, which is what this failure now IS.
+                 *
+                 * Deleting a configuration key no longer expresses anything: the type is not configured,
+                 * it is seeded. The equivalent real-world break is a database the metadata was never
+                 * pushed to — so the row is renamed out from under the lookup, inside the transaction,
+                 * and rolled back with everything else. Renamed rather than deleted because a TaskType
+                 * with tasks against it cannot be deleted, and that is not the failure being modelled.
+                 */
+                await hideTaskType(ctx, ID_CONTRACT_PROCESSING);
 
                 const out = await service.CreateCloseWonTasks(input, ProviderOf(ctx), ctx.User);
                 Assert(out.Success === false, 'a policy that owes a contract task must not report success without one');
                 AssertEqual(out.Tasks.length, 1, 'the order-review task must still have been created');
                 AssertEqual(out.Tasks[0].Kind, 'OrderReview', 'and it is the order review');
                 Assert(
-                    out.Issues.some((i) => i.includes('ContractTaskTypeID')),
-                    `the refusal must name what was missing — got ${JSON.stringify(out.Issues)}`,
+                    out.Issues.some((i) => i.includes('CONTRACT_PROCESSING') || i.includes('Contract Processing')),
+                    `the refusal must name the type it could not find — got ${JSON.stringify(out.Issues)}`,
+                );
+                Assert(
+                    out.Issues.some((i) => i.includes('mj sync push')),
+                    'and it must say where the row comes from, which a missing-configuration message could not',
                 );
             }),
     },
@@ -489,11 +538,21 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                 Assert(wonRows.length > 0, 'setup: no WON status on this host');
                 const wonStatusID = String(wonRows[0]['ID']);
 
-                // Two DISTINCT active task types, by ID. Which ones they are is not the claim.
-                const types = await rows(ctx, E_TASK_TYPE, 'IsActive = 1');
-                Assert(types.length >= 2, 'setup: need at least two active task types');
-                const orderTypeID = String(types[0]['ID']);
-                const contractTypeID = String(types[1]['ID']);
+                /**
+                 * NOTHING TO CHOOSE ANY MORE. This used to grab two arbitrary active types and hand their
+                 * IDs to the policy, because any two distinct types proved the plumbing carried what it
+                 * was given. The types are now sales-owned rows resolved by code, so the claim is
+                 * sharper: the close must land the two rows THIS REPO SEEDS, and the check knows which
+                 * those are without asking the service.
+                 */
+                const seeded = await rows(
+                    ctx, E_TASK_TYPE, `ID IN ('${ID_ORDER_REVIEW}', '${ID_CONTRACT_PROCESSING}')`,
+                );
+                AssertEqual(
+                    seeded.length,
+                    2,
+                    'setup: this database is missing the seeded task types — run `mj sync push --dir metadata`',
+                );
                 const personID = await anyID(ctx, E_PEOPLE, 'ID IS NOT NULL', 'person');
 
                 // Configure the policy the way a deployment would. Rolled back with everything else.
@@ -501,9 +560,8 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                 const pipe = await md.GetEntityObject<mjBizAppsSalesPipelineEntity>('MJ_BizApps_Sales: Pipelines', ctx.User);
                 Assert(await pipe.Load(pipelineID), 'setup: the pipeline could not be loaded');
                 const basePolicy = JSON.parse(String(pipe.Get('CloseWonPolicy') ?? '{}')) as Record<string, unknown>;
+                // Only the assignee remains configurable; the type keys are gone from the policy.
                 basePolicy.CloseWonTasks = {
-                    OrderReviewTaskTypeID: orderTypeID,
-                    ContractTaskTypeID: contractTypeID,
                     AssigneeEntityName: E_PEOPLE,
                     AssigneeRecordID: personID,
                 };
@@ -531,15 +589,15 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                 Assert(!!task, 'the link points at no task');
                 AssertEqual(
                     String(task['TypeID']).toLowerCase(),
-                    orderTypeID.toLowerCase(),
-                    'and it must carry the type the POLICY configured',
+                    ID_ORDER_REVIEW.toLowerCase(),
+                    'and it must carry the seeded ORDER_REVIEW type, resolved by the close with no policy help',
                 );
 
                 const assigns = await rows(ctx, E_TASK_ASSIGNMENT, `TaskID = '${String(links[0]['TaskID'])}'`);
                 AssertEqual(assigns.length, 1, 'the task must be routed to the configured assignee');
 
                 // A contract-creating policy also owes the contract task.
-                const contractTasks = await rows(ctx, E_TASK, `TypeID = '${contractTypeID}'`);
+                const contractTasks = await rows(ctx, E_TASK, `TypeID = '${ID_CONTRACT_PROCESSING}'`);
                 Assert(contractTasks.length >= 1, 'a contract-creating policy must also raise the contract task');
 
                 // Fully configured means nothing to complain about.

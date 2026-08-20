@@ -30,6 +30,7 @@
 import {
     LogError,
     Metadata,
+    LogStatus,
     RunView,
     type IMetadataProvider,
     type UserInfo,
@@ -41,6 +42,42 @@ const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_TASK_LINK = 'MJ_BizApps_Tasks: Task Links';
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
+const E_TASK_TYPE = 'MJ_BizApps_Tasks: Task Types';
+
+/**
+ * The two task types sales owns, addressed by CODE.
+ *
+ * These are not configuration and no deployment varies them. The rows live in this repo, under
+ * `metadata/task-types/`, on Amith's ruling that tasks owns the SHAPE while the app that raises a
+ * kind of work owns the ROW -- so a code is simply this service naming its own vocabulary.
+ *
+ * -- WHY A CODE AND NOT AN ID --
+ *
+ * These used to arrive as UUIDs on `Pipeline.CloseWonPolicy`, which was the best available handle
+ * before bizapps-tasks PR #42 added `TaskType.Code` (NOT NULL, UNIQUE) on 2026-08-20. It made every
+ * deployment restate a fact identical everywhere, and routed a fixed UUID through configuration to
+ * reach code that only ever wanted the order-review one. Worse, a database missing the seed and a
+ * policy missing the key were indistinguishable at this end.
+ *
+ * -- AND WHY THIS IS NOT A VOCABULARY COMPARISON --
+ *
+ * Nothing branches on these. They are looked up, they yield an ID, and no behaviour anywhere asks
+ * which type a task has -- the contract task is still decided by `CloseWonPolicy.CreateContract`, a
+ * flag. A code is a stable identifier that survives renaming the display Name, which is the property
+ * a NAME comparison lacks and the whole reason the column exists.
+ */
+const CODE_ORDER_REVIEW = 'ORDER_REVIEW';
+const CODE_CONTRACT_PROCESSING = 'CONTRACT_PROCESSING';
+
+/**
+ * The display Names paired with those codes, used ONLY by the pre-PR-#42 fallback in
+ * `resolveTaskType`. Deliberately a lookup beside the codes rather than a string inline at the call
+ * site: when the fallback is deleted, this goes with it and nothing is left holding a name.
+ */
+const TASK_TYPE_NAMES: Record<string, string> = {
+    [CODE_ORDER_REVIEW]: 'Order Review',
+    [CODE_CONTRACT_PROCESSING]: 'Contract Processing',
+};
 
 /** The record a task hangs off. Polymorphic, because `TaskLink` is. */
 export interface CloseWonTaskTarget {
@@ -78,15 +115,12 @@ export interface CloseWonTaskInput {
      */
     ContractID?: string;
     /**
-     * `TaskType` IDs. Supplied, never looked up by name — see the note at the top of this file.
+     * NO TASK-TYPE IDs. They were here, and their removal is the point rather than a simplification.
      *
-     * OPTIONAL because they come from configuration (`CloseWonPolicy.CloseWonTasks`) and a deployment
-     * may not have set them yet. Absent means the task is not created and an issue says so — inventing
-     * a type would put finance's work under a label nobody filters on.
+     * The service resolves both types itself, by `Code`, from rows this repo seeds. A caller cannot
+     * substitute a different type, which is correct: which type is the order-review task has exactly
+     * one answer and it is not a per-deal decision. See `CODE_ORDER_REVIEW` above.
      */
-    OrderReviewTaskTypeID?: string;
-    /** Required only when the policy raises a contract task. */
-    ContractTaskTypeID?: string;
     /**
      * Who the task is routed to. OPTIONAL, and its absence is the interesting case.
      *
@@ -137,8 +171,12 @@ export interface CloseWonTaskResult {
  * carries per-motion behaviour. Nothing here is looked up by name.
  */
 export interface CloseWonTasksPolicyConfig {
-    OrderReviewTaskTypeID?: string | null;
-    ContractTaskTypeID?: string | null;
+    /**
+     * The two task-type keys that used to live here are GONE, and a deployment still carrying them is
+     * harmless: this reads only what it names, so a stale `OrderReviewTaskTypeID` in somebody policy
+     * JSON is ignored rather than mis-honoured. What remains is the part that genuinely differs per
+     * deployment -- WHO the work is routed to.
+     */
     /** The assignee's entity NAME — in practice `'MJ_BizApps_Common: People'`. */
     AssigneeEntityName?: string | null;
     /** The assignee record. NULL by default: an unconfigured deployment routes nothing. */
@@ -192,18 +230,14 @@ export class CloseWonTaskService {
             );
             result.Success = false;
         }
-        if (input.OrderID && !input.OrderReviewTaskTypeID) {
-            result.Issues.push(
-                'No order-review task type is configured on the pipeline\'s CloseWonPolicy '
-                    + '(CloseWonTasks.OrderReviewTaskTypeID), so the order-review task was not created.',
-            );
-            result.Success = false;
-        }
-        const orderReview = (input.OrderID && input.OrderReviewTaskTypeID) ? await this.raise(
+        const orderReviewTypeID = input.OrderID
+            ? await this.resolveTaskType(CODE_ORDER_REVIEW, provider, contextUser, result)
+            : null;
+        const orderReview = (input.OrderID && orderReviewTypeID) ? await this.raise(
             'OrderReview',
             {
                 Name: `Review order for deal ${input.DealID}`,
-                TypeID: input.OrderReviewTaskTypeID,
+                TypeID: orderReviewTypeID,
                 Description:
                     'Review the order for accuracy, correct it if needed, then advance it. Advancing is '
                     + 'the confirm that locks the order, books the journal entries and triggers invoicing.',
@@ -219,13 +253,13 @@ export class CloseWonTaskService {
         }
 
         if (await this.policyRaisesContractTask(input.PipelineID, contextUser, result)) {
-            if (!input.ContractTaskTypeID) {
-                result.Issues.push(
-                    'The pipeline policy raises a contract-processing task, but no ContractTaskTypeID was '
-                        + 'supplied, so it was not created.',
-                );
-                result.Success = false;
-            } else {
+            const contractTypeID = await this.resolveTaskType(
+                CODE_CONTRACT_PROCESSING,
+                provider,
+                contextUser,
+                result,
+            );
+            if (contractTypeID) {
                 /**
                  * THE FALLBACK IS DELIBERATE, not defensive padding, and it has TWO triggers.
                  *
@@ -255,7 +289,7 @@ export class CloseWonTaskService {
                     'ContractProcessing',
                     {
                         Name: `Process contract for deal ${input.DealID}`,
-                        TypeID: input.ContractTaskTypeID,
+                        TypeID: contractTypeID,
                         Description:
                             'Attach the executed PDF, confirm the agreement version against the signed '
                             + 'document, record the executed/effective/end dates, validate whether the '
@@ -280,6 +314,89 @@ export class CloseWonTaskService {
     /* ── internals ───────────────────────────────────────────────────────────── */
 
     /** Creates one task, links it and routes it. Returns null when the task itself could not be created. */
+    /**
+     * The `TaskType` row for a code, or null with an issue explaining why not.
+     *
+     * -- THE PROBE, AND WHY IT IS NOT PADDING --
+     *
+     * `TaskType.Code` arrived in bizapps-tasks PR #42, merged 2026-08-20. A database migrated before
+     * that does not have the column, and a filter naming a column that does not exist does not return
+     * nothing -- it fails the whole query. Verified: neither local host has the migration applied.
+     *
+     * So this asks the metadata which identifier tasks actually offers. With `Code` present it matches
+     * on `Code`, which is the point of the exercise. Without it, it matches on `Name` -- safe here in a
+     * way it would not be in general, because these two rows are seeded by THIS repo under fixed UUIDs,
+     * so their names are ours and change only when we change them.
+     *
+     * When every host has the column the `else` goes, and nothing else in this file moves.
+     */
+    private async resolveTaskType(
+        code: string,
+        provider: IMetadataProvider,
+        contextUser: UserInfo,
+        result: CloseWonTaskResult,
+    ): Promise<string | null> {
+        const info = provider.Entities.find((e) => e.Name === E_TASK_TYPE);
+        if (!info) {
+            result.Issues.push(
+                `bizapps-tasks is not installed on this host, so the ${code} task could not be created.`,
+            );
+            result.Success = false;
+            return null;
+        }
+
+        const hasCode = info.Fields?.some((f) => f.Name === 'Code') === true;
+        const column = hasCode ? 'Code' : 'Name';
+        const value = hasCode ? code : TASK_TYPE_NAMES[code];
+        if (!hasCode) {
+            /**
+             * LOGGED, NOT RAISED AS AN ISSUE -- and the distinction matters more than it looks.
+             *
+             * This was an Issue first, and WT10 caught what that actually meant: every close on an
+             * unmigrated host reports two warnings about a pending migration to the person closing a
+             * deal, who can do nothing about it. An issue list that is never empty is an issue list
+             * nobody reads, and the close would have been training people to ignore it.
+             *
+             * It is a property of the HOST, not of this deal, so it goes where host facts go. The
+             * fallback stays observable where it should be: WT1 and WT6 run against a database with no
+             * Code column and assert the right type is still found.
+             */
+            LogStatus(
+                `CloseWonTaskService: this host predates bizapps-tasks PR #42, so TaskType has no Code `
+                    + `column and ${code} was matched on its Name. Apply the tasks migration.`,
+            );
+        }
+
+        const r = await new RunView().RunView<{ ID: string }>(
+            {
+                EntityName: E_TASK_TYPE,
+                ExtraFilter: `${column} = '${String(value).replace(/'/g, "''")}'`,
+                ResultType: 'simple',
+                Fields: ['ID'],
+            },
+            contextUser,
+        );
+        if (!r?.Success) {
+            result.Issues.push(`Could not read task types: ${r?.ErrorMessage ?? 'unknown error'}.`);
+            result.Success = false;
+            return null;
+        }
+
+        const id = (r.Results ?? [])[0]?.ID ?? null;
+        if (!id) {
+            /**
+             * A MISSING SEED, NAMED AS SUCH. The old code could only say the configuration key was
+             * unset, which was the same message whether a deployment had forgotten a policy field or
+             * had never pushed the metadata at all. This says which, and where the row comes from.
+             */
+            result.Issues.push(
+                `No task type with ${column} '${value}' exists, so that task was not created. The row is `
+                    + `seeded from this repo: run \`mj sync push --dir metadata\` against this database.`,
+            );
+            result.Success = false;
+        }
+        return id;
+    }
     private async raise(
         kind: CloseWonTaskKind,
         task: { Name: string; TypeID: string; Description: string },

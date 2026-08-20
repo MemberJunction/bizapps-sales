@@ -319,8 +319,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                         DealID: deal.ID,
                         OrderID: String(deal.OrderID ?? ''),
                         PipelineID: deal.PipelineID,
-                        OrderReviewTaskTypeID: cfg.OrderReviewTaskTypeID ?? undefined,
-                        ContractTaskTypeID: cfg.ContractTaskTypeID ?? undefined,
+                        // No task-type IDs: the service resolves both by Code from rows this repo
+                        // seeds. What the policy still carries is the part that varies — the assignee.
                         Assignee: cfg.AssigneeRecordID
                             ? {
                                   EntityName: cfg.AssigneeEntityName ?? 'MJ_BizApps_Common: People',
