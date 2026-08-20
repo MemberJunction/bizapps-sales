@@ -25,15 +25,20 @@
  *                        Contract.Status column that no longer exists -- while being SKIPPED on every
  *                        host, so four claimed and zero delivered. CT0 asserts contracts is ABSENT and
  *                        goes red the day that changes, naming what has to be written
+ *   board-move           A stage move appends EXACTLY ONE DealStageEvent, stamped with the values the
+ *                        deal held on the way OUT — the provenance a board drag owes (D-BD2). Its writer
+ *                        shares one transaction with the stage-order writer and the deal counter; see
+ *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters
  *
  * ⚠️ EVERY BUNDLE REQUIRES bizapps-orders EXCEPT `close-won-contract`, whose single check needs nothing
  * at all — it is asserting an absence. save-deal and close-deal require it too. A deal cannot be
  * saved without it: `DealEntityServer.Save()` provisions the deal's embedded order (S-US4). `mj-app.json`
  * declares orders a hard dependency, so a host without it is misconfigured rather than minimal.
  *
- * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` — this suite exists to
- * write to the database. Without that variable the suite runs ZERO checks and PASSES, which is the
- * vacuous pass this repo's definition of done calls out. Treat "0 checks" as a failure wearing a pass.
+ * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` except
+ * `close-won-contract.CT0`, which reads metadata and writes nothing — so without that variable the
+ * suite runs ONE check out of forty-four and reports success. That is the vacuous pass this repo's
+ * definition of done calls out, and `assert-check-count.mjs` is what turns it into a failure.
  *
  * They are safe to run repeatedly because each one rolls its transaction back; see `fixture.ts`.
  *
@@ -76,10 +81,12 @@ import './checks/close-deal.checks.js';
 import './checks/product-picker.checks.js';
 import './checks/close-won-order.checks.js';
 import './checks/close-won-contract.checks.js';
+import './checks/board-move.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
 export { ProductPickerChecks } from './checks/product-picker.checks.js';
 export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
 export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
+export { BoardMoveChecks } from './checks/board-move.checks.js';
 export * from './fixture.js';

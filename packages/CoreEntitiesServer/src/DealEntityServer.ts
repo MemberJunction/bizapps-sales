@@ -56,7 +56,11 @@ import { RegisterClass } from '@memberjunction/global';
 // `OrderEntityServer.passesStatusTransition()` consults, so a refusal here and a refusal there cannot
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
 import { CanTransition, type OrderStatus } from '@mj-biz-apps/orders-entities';
-import { DEAL_FIELDS_EDITABLE_WHILE_LOCKED, DealEntity } from '@mj-biz-apps/sales-entities';
+import {
+    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
+    DealEntity,
+    type mjBizAppsSalesDealStageEventEntity,
+} from '@mj-biz-apps/sales-entities';
 
 import { getNextDealNumber } from './SequenceService.js';
 
@@ -88,6 +92,19 @@ interface StageOrderStatusRow {
 interface StageOrderPlan {
     StageID: string;
     Target: OrderStatus;
+}
+
+/**
+ * The persisted state a deal held on the way OUT of a stage — what `DealStageEvent` records.
+ *
+ * A snapshot rather than a read at write time, because by then `super.Save()` has overwritten the
+ * values. See {@link DealEntityServer.planStageEvent}.
+ */
+interface StageMoveSnapshot {
+    StageID: string | null;
+    StatusID: string | null;
+    Amount: number | null;
+    Probability: number | null;
 }
 
 @RegisterClass(BaseEntity, DEAL_ENTITY)
@@ -138,10 +155,13 @@ export class DealEntityServer extends DealEntity {
      * inside the graph's transaction. **That branch is gone, and code placed here now runs BEFORE the
      * graph opens anything.**
      *
-     * The mechanism that still works is the one `saveWithNewDealNumber` below already uses: open a scope
-     * with `BeginEntityTransaction()`, do the work, then call `super.Save(options)` inside it. The
+     * The mechanism that still works is the one {@link DealEntityServer.saveWithinScope} uses: open a
+     * scope with `BeginEntityTransaction()`, do the work, then call `super.Save(options)` inside it. The
      * graph's own scope JOINS an ambient transaction rather than opening a second one, so the append and
      * every row in the graph commit or roll back together.
+     *
+     * **That append now exists** (D-BD2) and shares its scope with two other jobs. `saveWithinScope` is
+     * where the ordering between them is decided and is the only place this class opens a transaction.
      */
     public override async Save(options?: EntitySaveOptions): Promise<boolean> {
         // Per-save, so a caller reading them after `Save()` sees this save's warnings and not the last
@@ -195,12 +215,27 @@ export class DealEntityServer extends DealEntity {
          */
         const stageOrder = await this.planStageOrderStatus();
 
+        /**
+         * AND WHAT IT OWES THE APPEND-ONLY LOG — snapshotted here, for the same reason.
+         *
+         * Two features arrived at this hook within a day of each other: the stage-order writer (D-OS1)
+         * and `DealStageEvent` provenance on an ordinary move (D-BD2). They key on the SAME trigger,
+         * `PipelineStageID` changing, and each opened its own `BeginEntityTransaction`. Merging them as
+         * two sibling scope-openers would have produced a save that took whichever branch was written
+         * last and silently skipped the other — the routing line was the merge conflict, and resolving
+         * it textually would have shipped exactly that bug.
+         *
+         * So there is one scope now, and {@link saveWithinScope} owns the ORDERING, which is the part
+         * that actually matters and the part neither branch could state alone.
+         */
+        const stageMove = this.planStageEvent();
+
         // Nothing to number: an existing deal, or one that already has a number. A number is only ever
         // assigned once — it appears in contracts, orders and people's email, so re-saving a deal must
         // never renumber it.
         const saved = this.IsSaved || this.DealNumber
-            ? await this.saveApplyingStageOrderStatus(options, stageOrder)
-            : await this.saveWithNewDealNumber(options, stageOrder);
+            ? await this.saveWithinScope(options, { stageOrder, stageMove, assignNumber: false })
+            : await this.saveWithinScope(options, { stageOrder, stageMove, assignNumber: true });
 
         if (!saved) {
             this.explainOrderProvisioningFailure();
@@ -208,57 +243,159 @@ export class DealEntityServer extends DealEntity {
         return saved;
     }
 
-    /**
-     * Takes the next deal number and saves, with both inside ONE transaction.
+    /* ── STAGE PROVENANCE ─────────────────────────────────────────────────────────────────────────
      *
-     * The transaction is what makes the counter gap-free: `spAssignNextDealNumber` increments a locked
-     * row, so a save that then fails must roll the increment back or the number is consumed by a deal
-     * that does not exist. `BeginEntityTransaction` JOINS an ambient transaction rather than opening a
-     * second one, so the graph's own scope nests inside this as a savepoint and the whole thing settles
-     * together.
-     *
-     * The number is assigned BEFORE the header is written, because `DealNumber` carries a filtered
-     * UNIQUE index and assigning it afterwards would mean a second write to a row that is already
-     * visible.
+     * Deliberately its own block, and deliberately not folded into `provisionEmbeddedOrder` or the
+     * numbering path. These are three unrelated jobs that happen to share a save, and keeping them
+     * separate is what makes the next merge here a merge rather than an archaeology exercise.
      */
-    private async saveWithNewDealNumber(
-        options?: EntitySaveOptions,
-        stageOrder?: StageOrderPlan | null,
+
+    /**
+     * The snapshot an ordinary stage move owes the append-only log, or null when the deal did not move.
+     *
+     * ── THE PERSISTED VALUES, read before the save overwrites them ──
+     *
+     * `OldValue` is what is on disk, which is the only thing that makes a transition detectable — the
+     * same discipline the close lock uses when it asks whether the deal was ALREADY locked rather than
+     * whether it is about to be.
+     *
+     * ── THE STAMPS COME FROM THE PRIOR VALUES, NOT THE NEW ONES ──
+     *
+     * That is the whole point of the table. A board drag applies the target stage's probability default,
+     * so reading the current value here would record the number the deal acquired by ARRIVING rather
+     * than the one it held on the way out — and every velocity report built on it would be quietly
+     * wrong.
+     *
+     * A brand-new deal has no prior stage and owes no event: `priorStageID` is null, so it is not a
+     * MOVE. It is a birth, and `DealStageEvent` is a log of movement.
+     */
+    private planStageEvent(): StageMoveSnapshot | null {
+        const priorStageID = (this.GetFieldByName('PipelineStageID')?.OldValue as string | null) ?? null;
+        if (priorStageID === null || priorStageID === (this.PipelineStageID ?? null)) {
+            return null;
+        }
+        return {
+            StageID: priorStageID,
+            StatusID: (this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null) ?? null,
+            Amount: (this.GetFieldByName('Amount')?.OldValue as number | null) ?? null,
+            Probability: (this.GetFieldByName('Probability')?.OldValue as number | null) ?? null,
+        };
+    }
+
+    /**
+     * The ONE place a save opens a transaction, and the one place the ordering is decided.
+     *
+     * Three jobs share this scope, and each has a reason to be where it is:
+     *
+     * 1. **The deal number**, BEFORE the header is written — `DealNumber` carries a filtered UNIQUE
+     *    index, and assigning it afterwards would mean a second write to a row already visible. The
+     *    transaction is what keeps the counter gap-free: `spAssignNextDealNumber` increments a locked
+     *    row, so a save that then fails must roll the increment back.
+     * 2. **The order status**, BEFORE the header is written, because an unsaved order is INSERTED in the
+     *    target status rather than created and then moved — one row, one state, no history of a status
+     *    it was never really in.
+     * 3. **The stage event**, AFTER, because it is provenance for a move that has actually happened.
+     *    An event for a save that then failed is worse than no event: it is a claim about history.
+     *
+     * **BOTH-OR-NEITHER, ACROSS ALL THREE.** A moved deal with no event is a hole in an append-only
+     * log. A numbered deal that does not exist consumes a number nobody can account for. And a stage
+     * change visible while the order it moved is not would be a worse outcome than either alone.
+     *
+     * `BeginEntityTransaction` JOINS an ambient transaction rather than opening a second, so a caller
+     * already in one — `Sales.CloseDeal`, or an integration check — gets a savepoint and everything
+     * still settles together.
+     *
+     * **A save with nothing to do here takes no transaction at all** (see the caller). The overwhelming
+     * majority of deal saves are edits to a field nobody is watching, and wrapping those in a scope
+     * would be a cost paid on every keystroke for a guarantee they do not need.
+     */
+    private async saveWithinScope(
+        options: EntitySaveOptions | undefined,
+        work: { stageOrder: StageOrderPlan | null; stageMove: StageMoveSnapshot | null; assignNumber: boolean },
     ): Promise<boolean> {
+        if (!work.assignNumber && !work.stageOrder && !work.stageMove) {
+            return super.Save(options);
+        }
+
         const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
         if (!provider?.BeginEntityTransaction) {
             throw new Error(
-                'DealEntityServer.Save: the provider cannot open a transaction, so a deal number cannot be ' +
-                'assigned safely. This class is server-only — it must run against a database provider.',
+                'DealEntityServer.Save: the provider cannot open a transaction, so a deal number, an order ' +
+                'status and a stage event cannot be written atomically. This class is server-only — it must ' +
+                'run against a database provider.',
             );
         }
 
         const scope = await provider.BeginEntityTransaction();
         try {
-            this.DealNumber = await getNextDealNumber(
-                this.ContextCurrentUser,
-                this.ProviderToUse as unknown as IMetadataProvider,
-            );
-            if (stageOrder) {
-                await this.applyStageOrderStatus(stageOrder);
+            if (work.assignNumber) {
+                this.DealNumber = await getNextDealNumber(
+                    this.ContextCurrentUser,
+                    this.ProviderToUse as unknown as IMetadataProvider,
+                );
             }
+            if (work.stageOrder) {
+                await this.applyStageOrderStatus(work.stageOrder);
+            }
+
             const saved = await super.Save(options);
             if (!saved) {
                 await scope.Rollback();
                 return false;
             }
+
+            if (work.stageMove) {
+                await this.appendStageEvent(work.stageMove);
+            }
+
             await scope.Commit();
             return true;
         } catch (err) {
-            LogError(`Exception during DealEntityServer.Save(): ${err}`);
+            LogError(`DealEntityServer.saveWithinScope failed for deal ${this.ID}: ${err}`);
             try {
                 await scope.Rollback();
             } catch (rollbackErr) {
-                LogError(`Failed to roll back after a failed DealEntityServer.Save(): ${rollbackErr}`);
+                LogError(`Failed to roll back after a failed deal save: ${rollbackErr}`);
             }
             return false;
         }
     }
+
+    /**
+     * Writes the one `DealStageEvent` a move owes.
+     *
+     * APPEND-ONLY — never edited, never deleted. Note what is NOT here: no close, no routing, no
+     * downstream call. A stage change is a stage change; closing is `Sales.CloseDeal` and stays an
+     * explicit act, even when the stage a deal moves into is the one a pipeline calls Signed.
+     */
+    private async appendStageEvent(
+        prior: { StageID: string | null; StatusID: string | null; Amount: number | null; Probability: number | null },
+    ): Promise<void> {
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        const user = this.ContextCurrentUser;
+        const event = await provider.GetEntityObject<mjBizAppsSalesDealStageEventEntity>(
+            'MJ_BizApps_Sales: Deal Stage Events',
+            user,
+        );
+        event.NewRecord();
+        event.DealID = this.ID;
+        event.FromStageID = prior.StageID;
+        event.ToStageID = this.PipelineStageID;
+        event.FromDealStatusTypeID = prior.StatusID;
+        event.ToDealStatusTypeID = this.DealStatusTypeID;
+        event.ChangedByUserID = user?.ID ?? null;
+        event.ChangedAt = new Date();
+        event.AmountAtTransition = prior.Amount;
+        event.ProbabilityAtTransition = prior.Probability;
+
+        if (!(await event.Save())) {
+            // THROWN, not returned: the caller's scope must roll the deal move back with it.
+            throw new Error(
+                `the stage event could not be written: ${event.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+            );
+        }
+    }
+
 
     /**
      * Gives a brand-new deal its embedded order, in Draft, on the deal's FIRST save.
@@ -518,43 +655,6 @@ export class DealEntityServer extends DealEntity {
         }
     }
 
-    /**
-     * The ordinary save path, plus the stage's order update when there is one — both in one transaction.
-     *
-     * When there is no plan this is `super.Save()` and nothing more, so a deal that is not moving stage
-     * pays nothing for this feature. When there is, the scope is what makes the order status and the
-     * deal's own row commit together: a stage change that is visible while the order it moved is not
-     * would be a worse outcome than either alone.
-     */
-    private async saveApplyingStageOrderStatus(
-        options?: EntitySaveOptions,
-        stageOrder?: StageOrderPlan | null,
-    ): Promise<boolean> {
-        if (!stageOrder) {
-            return super.Save(options);
-        }
-
-        const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
-        const scope = await provider.BeginEntityTransaction();
-        try {
-            await this.applyStageOrderStatus(stageOrder);
-            const saved = await super.Save(options);
-            if (!saved) {
-                await scope.Rollback();
-                return false;
-            }
-            await scope.Commit();
-            return true;
-        } catch (err) {
-            LogError(`DealEntityServer.saveApplyingStageOrderStatus: ${err}`);
-            try {
-                await scope.Rollback();
-            } catch (rollbackErr) {
-                LogError(`DealEntityServer: rollback after a failed stage-order save: ${rollbackErr}`);
-            }
-            return false;
-        }
-    }
 
     /* ── The close lock (L-17, master plan §7.3) ────────────────────────────── */
 

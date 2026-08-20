@@ -42,6 +42,7 @@ const ck = (ok, label, detail) => {
 const q = async (text) => (await pool.request().query(text)).recordset;
 const orderStatus = async (id) => (await q(`SELECT Status FROM __mj_BizAppsOrders.OrderHeader WHERE ID='${id}'`))[0]?.Status;
 const dealStage = async (id) => (await q(`SELECT PipelineStageID FROM __mj_BizAppsSales.Deal WHERE ID='${id}'`))[0]?.PipelineStageID;
+const eventCount = async (id) => (await q(`SELECT COUNT(*) n FROM __mj_BizAppsSales.DealStageEvent WHERE DealID='${id}'`))[0].n;
 
 // ── the seeded B2B pipeline, read rather than assumed ──────────────────────
 const stages = await q(`
@@ -88,10 +89,21 @@ async function move(toCode) {
 
 // ── S-US5: PROP names Quoted, and the order follows ───────────────────────
 {
+    const eventsBefore = await eventCount(deal.ID);
     const { ok, warnings } = await move('PROP');
     ck(ok, 'the deal moves to PROP');
     ck(warnings.length === 0, 'with no warnings', warnings.join(' | '));
     ck(await orderStatus(orderID) === 'Quoted', 'and the order is now Quoted (S-US5)', await orderStatus(orderID));
+
+    /**
+     * BOTH WRITERS, ONE SAVE — the claim the merge of the board branch created and that neither side's
+     * checks assert together. The stage-order writer (D-OS1) runs before `super.Save()`, the stage-event
+     * append (D-BD2) after, and `saveWithinScope` owns the ordering. If the merge had been resolved
+     * textually, one of them would silently not have run.
+     */
+    ck(await eventCount(deal.ID) === eventsBefore + 1,
+       'and EXACTLY ONE DealStageEvent was appended by the same save (D-BD2 + D-OS1 in one scope)',
+       `${eventsBefore} -> ${await eventCount(deal.ID)}`);
 }
 
 // ── a stage with no opinion leaves it alone ───────────────────────────────

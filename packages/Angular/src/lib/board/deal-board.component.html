@@ -1,0 +1,152 @@
+<!--
+  The pipeline board. Columns are stages in DisplayOrder; cards are deals.
+
+  A closing column renders disabled with a hint rather than being hidden: hiding it would make the board
+  lie about the pipeline's shape, and a rep looking for "where do won deals go" needs to see that the
+  answer is "not by dragging".
+-->
+<div class="db">
+
+  <!-- Pipeline switcher. A pipeline defines the stages, so this is the board's one real control. -->
+  <div class="db-bar">
+    <span class="db-bar__label">Pipeline</span>
+    <div class="db-bar__pipes" role="tablist" aria-label="Pipeline">
+      @for (pipeline of Pipelines; track pipeline.ID) {
+        <button
+          type="button"
+          role="tab"
+          class="db-pipe"
+          [class.db-pipe--on]="pipeline.ID === ActivePipelineID"
+          [attr.aria-selected]="pipeline.ID === ActivePipelineID"
+          (click)="SelectPipeline(pipeline.ID)">
+          {{ pipeline.Name }}
+        </button>
+      }
+    </div>
+    @if (Moving) {
+      <span class="db-bar__busy"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Moving…</span>
+    }
+  </div>
+
+  @if (Message) {
+    <p class="db-msg" role="status">
+      <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ Message }}
+    </p>
+  }
+
+  @if (Columns.length === 0) {
+    <p class="db-empty">This pipeline has no stages yet.</p>
+  } @else {
+    <div class="db-cols">
+      @for (column of Columns; track TrackColumn($index, column)) {
+        <section
+          class="db-col"
+          [class.db-col--closing]="column.IsClosing"
+          [attr.aria-label]="column.Label">
+
+          <header class="db-col__head">
+            <span class="db-col__name">
+              {{ column.Label }}
+              @if (column.IsClosing) {
+                <i class="fa-solid fa-lock db-col__lock"
+                   aria-hidden="true"
+                   title="Arriving here closes and locks the deal — close it from the workspace."></i>
+              }
+            </span>
+            <span class="db-col__meta">
+              <span class="db-col__count">{{ column.Cards.length }}</span>
+              <!-- A SUM of stored Deal.Amount values. Nothing here is priced. -->
+              <span class="db-col__total">{{ column.Total | currency:'USD':'symbol':'1.0-0' }}</span>
+            </span>
+            @if (column.Unpriced > 0) {
+              <span class="db-col__partial"
+                    [title]="column.Unpriced + ' deal(s) in this stage have no amount yet, so the total is partial.'">
+                +{{ column.Unpriced }} unpriced
+              </span>
+            }
+          </header>
+
+          <div
+            class="db-col__drop"
+            cdkDropList
+            [id]="'col-' + column.StageID"
+            [cdkDropListData]="column"
+            [cdkDropListConnectedTo]="ColumnIDs"
+            [cdkDropListEnterPredicate]="CanDropInto(column)"
+            (cdkDropListDropped)="OnDrop($event, column)">
+
+            @for (deal of column.Cards; track TrackCard($index, deal)) {
+              <article
+                class="db-card"
+                cdkDrag
+                [cdkDragData]="deal"
+                [cdkDragDisabled]="Moving"
+                (click)="OpenCard(deal)"
+                (keydown.enter)="OpenCard(deal)"
+                tabindex="0"
+                role="button"
+                [attr.aria-label]="'Open ' + deal.Name">
+
+                <div class="db-card__name">{{ deal.Name }}</div>
+                <div class="db-card__customer">
+                  <i class="fa-solid fa-building" aria-hidden="true"></i> {{ deal.CustomerName }}
+                </div>
+
+                <div class="db-card__figures">
+                  <span class="db-card__amount">
+                    @if (deal.Amount === null) {
+                      <span class="db-card__noamount" title="No amount recorded yet">—</span>
+                    } @else {
+                      {{ deal.Amount | currency:'USD':'symbol':'1.0-0' }}
+                    }
+                    @if (deal.AmountIsComputed) {
+                      <!-- Deal.Amount is a cached answer from orders; the marker says so rather than
+                           implying this app derived it. -->
+                      <i class="fa-solid fa-calculator db-card__computed"
+                         aria-hidden="true"
+                         title="Priced by orders, not typed in"></i>
+                    }
+                  </span>
+                  @if (deal.Probability !== null) {
+                    <span class="db-card__prob">{{ deal.Probability }}%</span>
+                  }
+                </div>
+
+                <div class="db-card__foot">
+                  <span class="db-card__owner">{{ deal.OwnerEmployee ?? 'Unassigned' }}</span>
+                  <span class="db-card__close">{{ deal.ExpectedCloseDate ? (deal.ExpectedCloseDate | date:'MMM d, y') : 'No date' }}</span>
+                </div>
+
+                <div class="db-card__ghost" *cdkDragPreview>{{ deal.Name }}</div>
+              </article>
+            }
+
+            @if (column.Cards.length === 0) {
+              <p class="db-col__empty">
+                @if (column.IsClosing) { Close deals from the workspace. } @else { Nothing here. }
+              </p>
+            }
+          </div>
+        </section>
+      }
+    </div>
+
+    @if (Unstaged.length > 0) {
+      <!-- Deals with no stage would otherwise be invisible on a board built from stage columns, and
+           "missing from the board" is indistinguishable from "does not exist". -->
+      <section class="db-unstaged">
+        <h4 class="db-unstaged__head">
+          <i class="fa-solid fa-circle-question" aria-hidden="true"></i>
+          No stage set ({{ Unstaged.length }})
+        </h4>
+        <div class="db-unstaged__list">
+          @for (deal of Unstaged; track TrackCard($index, deal)) {
+            <button type="button" class="db-chip" (click)="OpenCard(deal)">
+              {{ deal.Name }}
+            </button>
+          }
+        </div>
+      </section>
+    }
+  }
+</div>
