@@ -389,9 +389,12 @@ Until step 3 exists, the doubling failure has no automated witness at all.
 >    `EventOrderLine` is an IsA child. Entity metadata is still written and post-CodeGen CRUD validation
 >    still passes. Judge it on the entity rows, not the exit code.
 
-## 🟠 KI-19 — The contract seam cannot be proven at runtime on any stack we have
+## 🟠 KI-19 — The contract seam's END-TO-END path is unproven; the constraint it turns on is not
 
-**The fix is in; the proof is not.** `LiveContractsSeam` set both `CustomerOrganizationID` and
+**The fix is in and its premise is PROVEN; only the seam round trip is not.** Read the scope note at
+the bottom before treating this as an open correctness risk -- it is narrower than it first read.
+
+**The bug.** `LiveContractsSeam` set both `CustomerOrganizationID` and
 `CustomerPersonID`, and `CK_Contract_CustomerXor` requires exactly one:
 
 ```sql
@@ -428,7 +431,7 @@ in a package this workspace does not have.
 `@memberjunction/*` from repro's older MJ and put two copies of MJ core in one process, which is the
 single-copy rule in `docs/WORKSPACE-SETUP.md` and breaks `ClassFactory` and decorator identity.
 
-### What closing it costs
+### What closing the REMAINING gap costs (not blocking; the premise is proven)
 
 Either **add `bizapps-contracts` to `/c/v6`** (clone, workspace member, install, build it against MJ
 `next` — unproven, it carried a local conversion patch — then migrate its schema into `MJ_V6_Host` and
@@ -436,7 +439,25 @@ push its metadata), or **bring `/c/v6repro/MJ` up to `next`** (pull, install, fu
 `ai-cerebras` and `actions-bizapps-formbuilders` breakage that needs `--noCheck` emits, then rebuild all
 seven repro members). Both are substantial and both modify a shared stack.
 
-### What IS verified
+### What IS verified — including the claim the fix turns on
+
+**`CK_Contract_CustomerXor` was observed rejecting the old shape.** A CHECK constraint needs no MJ, no
+contracts server half and no `Contracts.SaveContract` — so the missing stack does not stand in the way of
+proving the premise. `test-harnesses/prove-customer-xor.mjs` inserts a minimal `Contract` row four ways
+inside one transaction and rolls back, against real FK targets so a failure can only be the XOR:
+
+| Row | Result |
+|---|---|
+| both columns set — **what the seam used to send** | **rejected**, by `CK_Contract_CustomerXor` by name |
+| organization only — **what the fix now sends** | accepted |
+| person only | accepted |
+| neither | rejected — it is *exactly*-one, not at-most-one |
+
+So the fix's correctness no longer rests on reading the constraint text. What remains unproven is only
+the **round trip through the seam** — that `CreateContractFromDeal` composes a payload
+`Contracts.SaveContract` accepts and that the contact lands in `PrimaryContactPersonID`.
+
+### Also verified
 
 The constraint text and the target column were read from contracts' own migration, the fix compiles, and
 `test-harnesses/prove-contract-customer.mjs` is written and refuses to pass vacuously — it asserts the
