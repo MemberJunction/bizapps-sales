@@ -434,3 +434,48 @@ zero — but it fails at the database, naming a constraint, which is a poor erro
 The workspace converts, and that conversion is the kind of thing worth a check of its own.
 
 ---
+
+## D-DL2 — The rep states a discount as a PERCENT only, and never as an amount
+
+**S-US4 is explicit that no price field is enterable by the rep.** The deal-workspace line grid had an
+editable `DiscountAmount` currency input beside the percent one — inherited from `DealLine`, where the two
+coexisted deliberately: the order form template speaks in amounts, the pricing engine takes a percent, and
+`DealLine` transcribed both. That reasoning died with the table. The amount input is removed; the percent
+path and its conversion guard (D-DL1) are untouched.
+
+### Why it was removed rather than made read-only
+
+Read-only was the obvious move — `UnitPrice` and `LineTotalNet` became read-only displays for exactly this
+reason — and it would have been **wrong**, actively so. Orders documents why, in
+`InvoiceBehavior.ts`:
+
+> `OrderLine.DiscountAmount` **IS NOT THE DISCOUNT**. A discount can be recorded as an amount or as a
+> percentage, and when it is a percentage the amount column stays zero: in the review seed, 15 orders
+> carry a discount and 16 lines have a `LineTotalNet` below list with `DiscountAmount = 0`. Trusting the
+> column prints "Subtotal 600.00 / Total 540.00" with no discount row between them — a bill that is off
+> by sixty dollars and looks completely ordinary.
+
+So `DiscountAmount` is an **input channel**, not a computed figure. Since the workspace now sends a
+percent, that column stays `0` on every line it writes — and a read-only cell showing `0` next to a real
+10% discount is the same lie orders' invoice code exists to avoid, moved upstream into the rep's own
+screen.
+
+**The discount is derived, not stored:** `list − net`, whichever way it was entered. That is
+`LineDiscountOf()` in orders, and it carries the correct sign on a return line without a special case.
+
+### What this costs, stated plainly
+
+**A rep can no longer express a discount as a currency amount** — only as a percent. If a signed order
+form says "less $500", somebody converts it. That is a real narrowing of what the screen can capture, and
+it is accepted rather than overlooked: sales stating an amount would be sales stating money, and the
+alternative (keeping the input) puts a price field back in the rep's hands, which the story forbids.
+
+If an amount-entered discount is genuinely needed, it belongs in orders — the column is theirs, the
+pricing walk is theirs, and the derivation already handles both channels.
+
+### For anyone adding a discount display later
+
+Do **not** bind `DiscountAmount` and call it the discount. Derive it (`list − net`) or ask orders for the
+figure. The column is not the number you want, and it will be zero exactly when a discount exists.
+
+---
