@@ -170,7 +170,7 @@ Two causes, found in sequence, both outside this repo. Full detail in `docs/KNOW
   resolvers never entered the GraphQL schema. **Fixed locally** by adding the entry by hand; the proper
   fix is `mj app install` for bizapps-orders. This one matters for the AWS install: a dependency
   declaration in `mj-app.json` does not make a host register that dependency's server package.
-* **KI-22 — orders' generated resolvers are behind the database.** `vwOrderHeaders` and `EntityField`
+* **KI-22 — orders' generated resolvers are behind the database.** ⚠️ **UPDATED 2026-08-20 — see DN-14; the fix below was tried and does not work.** `vwOrderHeaders` and `EntityField`
   both carry `RootReversesOrderHeaderID` (MJ's recursive-hierarchy column for the self-referencing
   `ReversesOrderHeaderID`); orders' committed generated code does not. The client builds its selection
   set from metadata, so every Order Header read asks for a field the schema lacks. **NOT fixed.**
@@ -212,4 +212,100 @@ end-to-end through the UI. The blocker was identified from metadata (`CompanyID`
 refusal; `UnitPrice` initialises to 0 and does not trip validation), and `save-deal.SD19` covers the same
 write through the entity layer — but the UI path itself has not been seen green. **It is the first thing
 to re-check once KI-22 is fixed.**
+
+---
+
+## DN-10 — OPEN, and it is one field: which stage carries `Confirmed`?
+
+Andrew's normative sentence says Proposal or higher **"including Closed Won"** is `Quoted`. A later
+example in the same message says Closed Won → `Confirmed`. We asked which he intends and proceeded with
+**`Quoted` on the winning stage**, per the instruction to assume and note.
+
+**Why it is not a coin toss.** `Confirmed` is the irreversible step in orders: it books journal entries
+(their D8), freezes every line with trigger 51003, and is reachable only forward or to `Voided`
+afterwards. Seeding it on the winning stage means **a rep dragging a card to Closed Won posts to the
+ledger**. That may be exactly what Andrew wants — back-office entry does confirm directly — but it is a
+different sentence from "a quote becomes a signed quote", and the two readings are one seeded field
+apart.
+
+`Confirmed` is therefore seeded **nowhere** today. To change it:
+
+```sql
+UPDATE __mj_BizAppsSales.PipelineStage SET OrderStatusOnEntry = N'Confirmed' WHERE Code = 'SIGNED';
+```
+
+plus the matching literal in `scripts/seed-demo-data.sh`. The code needs no change — that is the point of
+D-OS1. CO3 and CO5 assert the MECHANISM and stay green either way, which is why they were reframed.
+
+---
+
+## DN-11 — `OneTimeLinesTo` is the last dead key in `CloseWonPolicy`
+
+`OrderState` is gone from the published input contract. `OneTimeLinesTo` is equally dead — it steered
+one-time lines to the Order route, and close-won creates no order — but it is still declared, still
+defaulted to `'None'`, and still in both seeded policy JSONs.
+
+It was left because Andrew's ruling named `OrderState` and narrowing a published remote-operation
+contract is its own decision. Removing it is a five-minute change of exactly the shape just completed.
+**A deployment setting it is configuring nothing**, which is the argument for removing it rather than
+documenting it.
+
+---
+
+## DN-12 — a board-drag warning has nowhere to go
+
+`Sales.CloseDeal` and `Sales.ReopenDeal` return the order-status warnings as `Issues` with
+`Severity: 'warning'`, so a caller of either sees them. A plain `deal.Save()` — which is what the
+pipeline board's drag does, and the path D-OS3 insists the writer live on — leaves them on
+`DealEntityServer.OrderStatusWarnings` and in the server log.
+
+**A warning only a server log carries is one a rep never reads.** And the S-US8 case guarantees a real
+one: reopen a lost deal and the order stays voided, silently, from the board.
+
+Options, cheapest first: have the board read the property back off the saved entity (it is a server
+class, so this needs a channel through GraphQL that does not exist yet); return warnings on a
+`Sales.MoveDealStage` operation the board would call instead of saving directly; or accept the log for
+now and surface it only on the two operations. Not decided.
+
+---
+
+## DN-13 — the mutation driver restores with `git checkout --`, which means HEAD
+
+Recorded because it cost real work tonight. The driver applies a mutation, builds, runs the suite, then
+restores the file with `git checkout -- <path>`. That restores to **HEAD** — so running it over
+UNCOMMITTED work silently deletes the work rather than the mutation.
+
+It ate `DealEntityServer.ts`'s entire stage-order writer once. Recovering was only cheap because the
+edit had been applied by a scripted patch that could simply be re-run.
+
+**Commit before mutating.** If the driver is ever made permanent, it should refuse to run against a
+dirty working tree.
+
+---
+
+## DN-14 — SUPERSEDES DN-8: KI-22 is an INSTALL problem, not a CodeGen one
+
+DN-8 said orders' CodeGen files pass was "almost certainly all it takes". **It was tried, twice, and it
+is not.** Full detail in `docs/KNOWN-ISSUES.md` KI-22; the short version:
+
+* Round 1 (files only) restored `RootReversesOrderHeaderID` and **removed**
+  `OrderHeaderEntity.InitialPaymentDetailID_Object`. `orders-entities` stopped compiling.
+* Round 2 (after setting the missing `EntityField.EmbeddedRecord` rows by hand) restored the embeds and
+  produced a **self-import** in `entity_subclasses.ts` plus the loss of `OrderHeader.Lines`.
+
+Everything was restored — orders' generated files to HEAD, the seven metadata rows to NULL — and orders
+builds again with its `dist` matching its committed source. A full database backup was taken first and
+still exists: `/var/opt/mssql/data/MJ_V6_Host_pre_orderstatusonentry.bak`.
+
+**What this establishes:** MJ_V6_Host is missing at least three classes of orders' metadata —
+`EntityField.EmbeddedRecord` (zero rows host-wide), `RelatedRecordCollection` (`OrderHeader.Lines`), and
+whatever drives `entityPackageName`. No regeneration against this host can reproduce orders' committed
+code, because the host was never given orders' metadata. `mj sync push --dir metadata` in bizapps-orders
+gets 14 of 23 directories in and stops on a missing `MJ: Query Categories` row named `Orders`.
+
+**The decision:** clear that blocker, complete orders' metadata push, and only then regenerate — which is
+`mj app install` for bizapps-orders in all but name, and the same root cause as KI-21. It is a change to
+a shared host and another team's repo, so it wants Josue's hand on it rather than mine. Until then
+reopening a deal with an order does not work in the Explorer, and the reopen half of the Explorer pass
+stays unverified.
 

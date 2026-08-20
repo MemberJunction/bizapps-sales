@@ -8,8 +8,9 @@ from the outside. This file records the run that told them apart.
 record which check IDs failed, restore the file from git. The whole suite is run each time rather than one
 bundle, so a mutation that breaks something unintended shows up instead of hiding.
 
-**Run on 2026-08-20, against `MJ_V6_Host` with bizapps-orders and bizapps-accounting linked and
-bizapps-contracts absent.** 39 checks across 4 bundles: `save-deal` (16), `close-deal` (14),
+**First run 2026-08-20 with 26 mutations, extended the same day with `M-OS1`–`M-OS3` for the stage →
+order-status writer.** Against `MJ_V6_Host`, with bizapps-orders and bizapps-accounting linked and
+bizapps-contracts absent. 39 checks across 4 bundles: `save-deal` (16), `close-deal` (14),
 `product-picker` (4), `close-won-order` (5). `close-won-contract` needs contracts and was not expected on
 this host.
 
@@ -60,10 +61,14 @@ the deal is locked") are absence-assertions. Planning a phantom Order route was 
 correctly, because it counts orders rather than plans. Both needed a mutant that re-instates what S-US5
 removed: a close that CREATES a second order (CO2) or CONSUMES the deal's order (CO5). Both then failed.
 
-`CO5` carries a documented limit even so. Its real claim is that the deal's close lock stops at the deal,
-and the only mutant that could falsify THAT is a guard added in bizapps-orders. It is a regression
-tripwire for a widening of the lock, and the mutant above proves it executes and can fail — but the two
-are not the same thing, and the difference is worth stating.
+`CO5` carried a documented limit even so: its claim that the deal's close lock stops at the deal could
+only be falsified by a guard added in bizapps-orders.
+
+**Both were superseded the same day.** D-OS1 gave a stage the power to name an order status, which made
+"untouched" and "stays editable" accidents of the seed rather than requirements. CO3 and CO5 were
+reframed onto the mechanism, and `M-OS1`–`M-OS3` below are mutants that falsify them from INSIDE this
+repo — which is what the old pair could not manage. CO5 still also asserts the lock-stops-at-the-deal
+claim, and that half still has the limit described above.
 
 ---
 
@@ -101,7 +106,22 @@ records which other checks share the behaviour, which is information a per-check
 | M-CO3 | `CloseDealOperation` · the close voids the order | CO3 | — |
 | M-CO5 | `CloseDealOperation` · the close deletes the order | CO5 | CO1, CO2, CO3, CO4 |
 
-Twenty-six mutations; sixteen of them failed **exactly one** check.
+### Added 2026-08-20 with the stage → order-status writer (D-OS1)
+
+CO3 and CO5 were reframed onto the MECHANISM, so their old mutants no longer apply. These replace them.
+
+| # | File · change | Target | Also failed |
+|---|---|---|---|
+| M-OS1 | `DealEntityServer` · the writer never plans anything | CO3, CO5 | — |
+| M-OS2 | `DealEntityServer` · a NULL `OrderStatusOnEntry` treated as `'Draft'` | CO3 | — |
+| M-OS3 | `DealEntityServer` · the refusal happens but the warning is swallowed | CO5 | — |
+
+M-OS2 is the one worth keeping: treating "this stage has no opinion" as "set it back to Draft" is the
+naive reading of a nullable column, and CO3's second half exists solely to catch it. M-OS3 proves CO5
+asserts the WARNING and not merely the absence of a change — without it, a version that silently did
+nothing would pass.
+
+Twenty-nine mutations across both tables; **eighteen** of them failed exactly one check.
 
 ## Checks with no single-check mutation, and why
 

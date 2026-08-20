@@ -10,6 +10,62 @@ assumes it was an accident.
 
 ---
 
+## 2026-08-20 — the order's status is a property of the STAGE
+
+### D-OS1 — `PipelineStage.OrderStatusOnEntry`, replacing `CloseWonPolicy.OrderState`
+
+**Decided by Andrew**, choosing against the design this repo proposed. The proposal was a flag on the
+close policy; the ruling is a nullable column on `PipelineStage`. When a deal enters a stage carrying a
+value, the automation moves the deal's order to that status. Blank means the stage says nothing.
+
+**Why the stage and not the policy.** `PipelineStage.DealStatusTypeID` already answers exactly this
+question for the deal's OWN status, two lines above the new column in the same table. A close-time
+policy key could only ever speak at one moment, and only about a won close; a stage speaks on every
+transition — forward, backward, won, lost. And it is ONE source of truth: a policy key and a stage
+table can agree today and drift apart in a deployment nobody is watching.
+
+**Values are limited to `Draft | Quoted | Confirmed | Voided`,** enforced by
+`CK_PipelineStage_OrderStatusOnEntry`. `Posted` and `Fulfilled` are deliberately absent: they are
+finance and fulfilment OUTCOMES reached by orders' own advance, not something a salesperson moving a
+card decides. A stage that could name them would let the board post to the ledger.
+
+*On Rule 2:* a CHECK constraint on a vocabulary looks like the thing Rule 2 forbids, and is not. The
+vocabulary is ORDERS' — `OrderHeader.Status` is their CHECK-constrained column — and the same reasoning
+already governs `ProductFilterFor`'s `Status = 'Active'` literal. What this constraint enforces is a
+structural restriction on a foreign set: the subset a SALES stage may name.
+
+### D-OS2 — a refused order update must never block the stage change
+
+**Andrew, verbatim:** *"The Deal stage is the salesperson's record of the sales process; it should never
+be held hostage by order-side rules."*
+
+So the update runs through orders' own transition validation, the stage change succeeds regardless, the
+order's status is left exactly as it was, and a warning says what did not happen and why.
+
+**Mechanically:** `CanTransition` — imported from orders rather than restated, so a refusal here and a
+refusal in `OrderEntityServer.passesStatusTransition()` cannot disagree — is asked BEFORE anything is
+attempted. A legal-but-failing move (confirming books journal entries and needs a payer) runs in its own
+`BeginEntityTransaction` scope, which joins the ambient transaction as a savepoint, so rolling it back
+leaves the deal's own transaction intact.
+
+**This makes S-US8's reopen warn every time, and that is correct.** A lost deal voids its order,
+`Voided` is terminal in orders, and reopening asks for `Quoted`. The deal reopens; the order does not
+come back. **Do not special-case it and do not write an un-void workaround.** Amith is considering
+making `Voided` non-terminal for never-confirmed orders; if he allows it, the same code starts
+succeeding instead of warning, with no change here.
+
+### D-OS3 — the writer lives on the WRITE PATH
+
+In `DealEntityServer.Save()`, keyed on `PipelineStageID` changing, beside `provisionEmbeddedOrder()`
+rather than inside it — provisioning happens once at birth, this happens on every stage change for the
+rest of the deal's life.
+
+**Not in the UI**, because a stage change arrives from the board's drag, an importer, an agent or a raw
+`BaseEntity.Save()`. This is the same argument as the close lock, and the third time this repo has
+reached for it.
+
+---
+
 ## 2026-08-04 — the seven S1 open questions
 
 Ruled by **Josue** (repo owner, sales) at the close of the S0/S1 bootstrap. These resolve

@@ -51,16 +51,64 @@ behaviour and makes the failure visible instead of silent data loss:
 Creating a deal, and creating its order, both still work: those go through **sales'** own resolver, and
 the order is written server-side inside `DealEntityServer.Save()`.
 
-### The fix, and why it was not done here
+### THE FIX WAS ATTEMPTED ON 2026-08-20 AND IT DOES NOT WORK. Read this before trying it again.
 
-Re-run orders' CodeGen file pass against this database and rebuild it:
+The obvious move is to re-run orders' CodeGen file pass against this database and rebuild:
 
 ```bash
-cd bizapps-orders && npm run mj:codegen:files && npm run build
+cd bizapps-orders && node node_modules/@memberjunction/cli/bin/run.js codegen --skipdb && npm run build
 ```
 
-**Deliberately not run on 2026-08-20.** It is another repo, on a shared host, and CLAUDE.md records that
-a second full CodeGen pass has corrupted a database before. See `DECISIONS-NEEDED.md` DN-8.
+That was run, with a full database backup taken first and orders' `excludeSchemas` already guarding
+`__mj_BizAppsSales`. **It fixes the field and breaks two other things,** because the premise is wrong:
+this host's `__mj` metadata is not the metadata orders' committed code was generated against. Each
+regeneration trades one skew for another.
+
+| Round | What was regenerated | Outcome |
+|---|---|---|
+| 1 | files only | `RootReversesOrderHeaderID` **appears** ✅ · `OrderHeaderEntity.InitialPaymentDetailID_Object` **disappears** ❌ — `orders-entities` no longer compiles |
+| 2 | after setting the missing `EntityField.EmbeddedRecord` rows | the embeds come back ✅ · `entity_subclasses.ts` now **self-imports** `@mj-biz-apps/orders-entities` ❌ and `OrderHeader.Lines` **disappears** ❌ |
+
+Everything was restored: orders' generated files to `HEAD`, and the seven `EmbeddedRecord` rows back to
+`NULL`. Orders builds again and its `dist` matches its committed source.
+
+### What the two failed rounds actually establish
+
+**MJ_V6_Host is missing at least three CLASSES of orders' metadata**, not one field:
+
+* **`EntityField.EmbeddedRecord`** — **zero** rows on the whole host. Orders ships these in
+  `metadata/entity-fields/.embedded-payment-detail.json` and `.embedded-order-addresses.json`; that
+  file's own comment says they need MJ's v6.1+ column and a push. `mj sync push --dir metadata` reported
+  `entity-fields — 5 updated` and the values did **not** persist, so the push path for this column does
+  not work here either.
+* **`RelatedRecordCollection`** — `OrderHeader.Lines` vanished from the regenerated class, so this is
+  missing too. Which also means **KI-20's cause is not the only reason line removal misbehaves**: on
+  this host the collection is not even declared in metadata.
+* **whatever drives `entityPackageName`** — the self-import is the exact trap sales documents in
+  `packages/Entities/src/deal-entity.ts`, arriving from the other direction.
+
+**So this is not a CodeGen problem. It is an INSTALL problem** — the same family as KI-21. Orders'
+schema was migrated here and its metadata never was. `mj sync push --dir metadata` in bizapps-orders
+gets 14 directories in and then fails:
+
+```
+✖ Push failed  Failed to process field 'CategoryID' in MJ: Queries:
+  Lookup failed: No record found in 'MJ: Query Categories' where Name='Orders'
+```
+
+That missing category is the first hard stop. Clearing it, letting the whole push complete, and THEN
+regenerating is the sequence with a chance of working — and it is `mj app install` for bizapps-orders in
+all but name.
+
+### Until then
+
+Reopening a deal that has an order does not work in the Explorer, so the reopen half of the Explorer
+pass stays unverified. Creating a deal, provisioning its order and writing order lines all work: those
+go through **sales'** own resolver and never ask GraphQL for an Order Header. `DECISIONS-NEEDED.md` DN-8
+carries the decision.
+
+**Do not "just re-run CodeGen".** It has been tried twice, it is recorded here, and the second attempt
+left orders' tree broken until it was restored.
 
 ---
 
@@ -195,13 +243,53 @@ a removed line is simply not in the loop and nothing deletes it.
 * **`save-deal.SD14`** lost its repositioning half. A clean row whose `LineNumber` changes because a
   neighbour was removed cannot be demonstrated while removal does not happen.
 
-### The fix, and where it must happen
+### The fix, and where it must happen — written for whoever picks it up in orders
 
-In **bizapps-orders**, not here — `savePendingLines()` (or `persistPreparedLines()`) must process the
-collection's pending deletions before or after the insert/update loop. Sales could work around it by
-deleting the line row itself, and that is deliberately NOT done: it would put a second app in charge of
-deleting orders' rows, and orders freezes a booked line with trigger 51003 for reasons sales does not
-model. See `DECISIONS-NEEDED.md` DN-6 — this is a decision for Josue/Amith, not an inference from code.
+In **bizapps-orders**, not here. Sales could delete the line row itself and that is deliberately NOT
+done: it would put a second app in charge of deleting orders' rows, and orders freezes a booked line
+with trigger 51003 for reasons sales does not model. `DECISIONS-NEEDED.md` DN-6 is the decision.
+
+**The two lines responsible**, both in `packages/CoreEntitiesServer/src/OrderEntityServer.ts`:
+
+1. `super.Save({ ...options, SkipRelatedCollections: true })` — correct, and the comment above it
+   explains why: lines must not insert before they are expanded, priced, discounted, charged and taxed.
+   Keep it. It means MJ never processes the collection, so the hand-rolled replacement owns every verb.
+2. `savePendingLines()` — `for (const line of this.Lines.Items) { await line.Save(options); }`. Inserts
+   and updates, iterated off the SURVIVORS. Nothing asks the collection for its pending removals.
+
+**What a fix has to get right, and none of it is guesswork:**
+
+* **Scope the delete to states where it is legal.** Trigger 51003 freezes a line on a Confirmed order,
+  and because the CRUD procs run under INSERT-EXEC a trigger rollback raises *"Cannot use the ROLLBACK
+  statement within an INSERT-EXEC statement"* — an error naming neither the line nor the rule. The
+  existing comment in `prepareLines` says this in orders' own words. So: delete on `Draft`/`Quoted`,
+  refuse with a real message afterwards.
+* **Delete BEFORE the inserts and updates**, which is the ordering MJ's own plan uses and the reason
+  `Deal.PaymentSchedule` re-sequences correctly: `LineNumber` is a `Sequence` field, and removing row 2
+  of 3 has to renumber row 3 before or as part of the same write.
+* **Do it inside the existing transaction**, alongside `persistPreparedLines`, so a failed delete rolls
+  back with the header rather than leaving a half-emptied order.
+* **Check `Lines.Dirty` still covers a pure removal.** `OrderEntityServer.Save()`'s ordinary-path
+  shortcut is `if (!booking && !this.Lines.Dirty && this.IsSaved) return super.Save(options)`. Its
+  comment claims `Dirty` "is true when a line was added, edited or removed". If a removal-only change
+  leaves `Dirty` false, that shortcut swallows the delete a second time — and the fix passes its own
+  test while the UI stays broken. **Verify that claim before trusting it.**
+
+**The reproduction is already written and needs no orders-side setup:**
+
+```bash
+cd bizapps-sales && node test-harnesses/prove-line-removal.mjs
+```
+
+Six labelled cases, including the control that proves MJ's machinery works. `save-deal.SD6` is the
+tripwire in the suite: **when this is fixed, SD6 starts failing**, and the three assertions to restore
+are listed verbatim in its comment.
+
+**One caveat found later, on 2026-08-20:** KI-22's second regeneration round showed `OrderHeader.Lines`
+disappearing from the generated class, which means the `RelatedRecordCollection` metadata for it is
+**absent on MJ_V6_Host**. The `dist` orders ships still declares the collection, so the harness result
+above stands — but anyone reproducing this on a freshly-generated host should confirm the collection
+exists before concluding anything about `savePendingLines()`.
 
 ### How to reproduce in thirty seconds
 
