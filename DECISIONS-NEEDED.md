@@ -685,3 +685,128 @@ this app reads. The write merges rather than replaces, so anything else keeping 
 **What is needed:** agreement that `Settings` is a legitimate place for a consumer's own state, or a
 second watermark column if bizapps-common would rather own it explicitly. The risk of the current shape
 is collision — two apps choosing the same key — and it is small but real.
+
+---
+---
+
+# ROUND TWO — D-25 decided, D-27…D-30
+
+---
+
+## D-25 — DECIDED: a cancelled meeting is `Cancelled`
+
+**Ruling taken here, not deferred.** A meeting that did not happen is not a completed activity, and
+anyone reading a timeline would be misled by one that says it was.
+
+**And no vocabulary had to be invented,** which is the part worth recording: `CK_Activity_Status` already
+allows `'Cancelled'`. The value was there the whole time and the earlier version simply was not using it
+— it hardcoded `'Completed'` for every ingested item. So this is a bug fixed rather than a model
+extended.
+
+`NormalizedItem.Cancelled` is now a first-class field rather than a marker buried in `Raw`, because the
+ingest branches on it and a fact nothing can act on without knowing which provider shape to look inside
+is not really recorded. Messages always report false: a sent mail cannot be un-sent.
+
+**`Outcome` is deliberately left NULL.** The nearest seeded value is `NoShow`, and that is a *different
+fact*: a no-show is a meeting that went ahead and somebody failed to attend. Reusing it for a meeting
+called off in advance would put a false claim in a column reports read, which is worse than an empty one.
+Nothing in `CK_Activity_Outcome` means "did not occur", and inventing a value was explicitly off the
+table.
+
+AC18 asserts both directions and that neither gains an outcome. Cancelled meetings are still **filed** —
+"they cancelled" is a fact a rep wants on the timeline, not something to drop.
+
+---
+
+## D-27 · UPSTREAM (bizapps-common): a functional index on `LOWER(ContactMethod.Value)`
+
+**Not built here, by instruction — it is another repository's schema and we are not touching other
+repos.** Recorded with the reasoning so it can go upstream intact.
+
+**What changed and why the index is now needed.** The relevance filter matches a message participant's
+address against `ContactMethod.Value`. It used a bare `Value IN (…)`, which relies on the database
+collation being case-insensitive: true on SQL Server, **false on PostgreSQL**, and production is Postgres.
+On Postgres a differently-cased stored address simply would not come back, the message would be judged
+irrelevant, and it would never link — no error, no missing row anyone counts. So the filter now folds
+case explicitly: `LOWER(Value) IN (…)`.
+
+**The cost, stated plainly.** `LOWER(Value)` is non-sargable, so any plain index on `Value` is no longer
+usable for this read — and this is the read that runs for **every participant of every message on every
+sync run**, which is the highest-frequency query the ingest makes. It is correct now and it will not
+scale.
+
+**The fix, for whoever owns bizapps-common:**
+
+```sql
+CREATE INDEX IX_ContactMethod_ValueLower ON __mj_BizAppsCommon.ContactMethod (LOWER(Value));
+```
+
+SQL Server needs a computed column plus an index on it; Postgres supports the expression index directly.
+Either way it restores the index for this pattern without changing any consumer.
+
+**A second, better option worth putting to them:** normalize `Value` to lower case at write time in
+`ContactMethodEntityServer`. Then a plain index works, every consumer's comparison gets simpler, and the
+case question stops existing. It is a bigger change — existing rows need a backfill — and it is theirs to
+weigh.
+
+**Why this is not urgent yet:** no `ActivitySyncConnection` is Active anywhere, so the query runs only in
+checks. It becomes a real performance matter on the day a mailbox is connected, which is the same day the
+tenant policy lands.
+
+---
+
+## D-28 · The snapshot period is the calendar month, because nothing stores a fiscal one
+
+`CurrentMonthPeriod()` returns the current calendar month in UTC when no period is supplied.
+
+**This is a choice, not a derivation.** Sales has no fiscal calendar — no `FiscalPeriod` table, nothing on
+`Company` naming a year end, nothing anywhere that says when a quarter begins. So "the current period"
+has no stored answer, and the calendar month is the only window that needs no invented configuration.
+
+Monthly is very likely right; most forecasting is. But if Blue Cypress forecasts on a fiscal calendar
+offset from January, every snapshot is filed against the wrong window — and the rows would look
+perfectly reasonable, because a period is just two dates.
+
+**Interim choice:** calendar month, UTC, computed with `getUTC*` throughout. FS7 asserts the boundary with
+a fixed instant late on a month end (which is already the next month east of Greenwich) and both a leap
+and a common February.
+
+**What is needed:** confirmation that forecasting is monthly and calendar-aligned, or a fiscal calendar to
+read from. The Action already accepts an explicit `PeriodStart`/`PeriodEnd` pair, so a caller who knows
+better can override it today — both or neither, never one.
+
+---
+
+## D-29 · A snapshot is skipped once per day per grain, rather than versioned
+
+`ForecastSnapshot` has no unique index, correctly: the table is a series and `CapturedAt` distinguishes
+captures, so "what did we think on the 1st" stays answerable.
+
+But that means nothing stops a double-run adding two captures minutes apart, which is noise rather than
+history. So the writer skips a grain already captured **today** and counts it.
+
+**Skipped rather than updated**, because overwriting a capture edits provenance — the one thing rule 3
+forbids — and a second measurement of the same day is not more true than the first. FS3 asserts the
+original figure survives a second run carrying a different one.
+
+**What is needed:** confirmation that one capture per day per grain is the intended granularity. If
+somebody wants intra-day forecast movement the guard has to go, and then the daily cron and the guard are
+both wrong rather than just one of them.
+
+---
+
+## D-30 · Two forecast sources could disagree and nothing would notice
+
+`IForecastSource` returns rows for a period, and the writer stores them. Nothing validates that a
+company-wide row equals the sum of its per-pipeline rows, or that `CommitAmount <= BestCaseAmount`.
+
+**Deliberate.** Sales does not compute these, so it cannot check them without computing them — and a
+reconciliation here would be a second implementation of the measures, which is exactly what routing them
+through a query was meant to avoid. If the query says commit exceeds best case, that is the query's answer
+and this app is not the place to argue.
+
+**But it means a wrong query produces confident-looking rows**, and the only signal is `SnapshotJSON`
+naming the source. Worth knowing before somebody reads a forecast series as verified.
+
+**What is needed:** a decision on whether the measures get their own sanity assertions somewhere — most
+naturally as checks against the queries themselves, on the session that owns them, rather than here.
