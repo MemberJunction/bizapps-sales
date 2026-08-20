@@ -140,6 +140,11 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* A total that nobody priced still reads as a figure -- this keeps it from reading as a FINAL one. */
+.db-col__total--stated {
+    font-style: italic;
+}
+
 .db-col__partial {
     font-size: 0.6875rem;
     color: var(--mj-status-warning);
@@ -214,6 +219,14 @@
     gap: 0.3rem;
 }
 
+/*
+ * The two provenance markers are deliberately the SAME weight as each other.
+ *
+ * Making the stated one louder would read as an error, which it is not -- a stated amount is a
+ * legitimate answer, just a different kind of fact from a priced one. Making it quieter would put us
+ * back where we started, with the reader learning nothing unless they notice an absence.
+ */
+.db-card__stated,
 .db-card__noamount,
 .db-card__computed {
     color: var(--mj-text-muted);

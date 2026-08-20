@@ -307,11 +307,27 @@ export class MJSSalesSectionComponent implements OnInit {
         // A rollup of figures that are already answers — NOT pricing arithmetic. See the file header.
         const openValue = open.reduce((sum, d) => sum + (d.Amount ?? 0), 0);
 
+        /**
+         * HOW MUCH OF THAT TOTAL NOBODY PRICED.
+         *
+         * The tile is the most-read number on the page and it was the least qualified: a sum of stored
+         * `Deal.Amount` values presented as one authoritative figure, with the provenance flag sitting
+         * unread on every row that fed it. On the data in the host database every deal carries
+         * `AmountIsComputed = 0`, so the tile was reporting entirely hand-typed money as pipeline value.
+         * The footnote now says so.
+         */
+        const statedOpen = open.filter((d) => d.Amount !== null && !d.AmountIsComputed).length;
+        const statedNote = statedOpen === 0
+            ? ''
+            : statedOpen === open.length
+                ? ' · all stated, none priced'
+                : ` · ${statedOpen} stated`;
+
         return [
             {
                 Label: 'Open pipeline',
                 Value: this.money(openValue),
-                Footnote: `across ${open.length} open ${open.length === 1 ? 'deal' : 'deals'}`,
+                Footnote: `across ${open.length} open ${open.length === 1 ? 'deal' : 'deals'}${statedNote}`,
             },
             {
                 Label: 'Open deals',
