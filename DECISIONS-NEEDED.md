@@ -349,3 +349,46 @@ console errors.
 DN-8's premise — "almost certainly all it takes" — was wrong about the mechanism and right that it was
 small. What made it look deep was that each attempt fixed one symptom and exposed the next.
 
+---
+
+## DN-15 — OPEN: seeded deals have amounts but no order lines, so the dashboard states rather than computes
+
+`Deal.Amount` is now a cache of `OrderHeader.TotalGross` and the provenance rule holds: a hand-typed
+figure is never overwritten (SD22). Every seeded demo deal is hand-typed — `AmountIsComputed = 0` with a
+stated figure — so the writer correctly leaves all seven alone.
+
+**That means the dashboard still shows stated figures, not order totals, on seeded data.** It is not the
+overstatement it looks like: the numbers are true to what they claim to be. But it does mean the demo
+never exercises the cache, and the one deal that does have a line shows £687 of order against a stated
+figure two orders of magnitude larger.
+
+Fixing it properly means the seed carrying order lines that add up to something worth showing — and a
+SQL seed cannot write an order line, because `UnitPrice` and `CompanyID` are stamped by orders from the
+product and `LineTotalGross` comes from its pricing engine. So it needs a seeder that drives the ENTITY
+layer, the way `close-won-order.fixture.ts` already does for checks: create the deal, add lines by
+product and quantity, let orders price them, and let the amount cache follow.
+
+**The decision is whether that is worth building now.** It is the difference between a demo that shows
+the pipeline figure and a demo that shows the mechanism producing it. Not large, but not free, and it
+belongs to whoever owns the demo rather than to this change.
+
+---
+
+## DN-16 — OPEN: contracts is installed on MJ_V6_Host but not usable
+
+Found by CT0 firing. Contracts' seven v2 tables and seven entities are on this host as of 2026-08-20,
+and nothing can read them:
+
+* `View or function '__mj_BizAppsContracts.vwContracts' has more column names specified than columns
+  defined` — the generated view is malformed, so every read of the entity fails at the SQL level.
+* `ContractType` is unseeded, so `LiveContractsSeam` has no type to resolve and refuses before it starts.
+
+Both are the KI-21/KI-22 shape once more: a schema migrated onto a host whose metadata never followed.
+The fix is in contracts — regenerate its views against this database and push its metadata — and it is
+worth doing deliberately rather than by another CLI's side effect, because a malformed view that nothing
+reads is invisible until something does.
+
+CT0 holds the obligation and reports which precondition is missing. **When contracts becomes readable and
+carries at least one type, CT0 goes red and CT1/CT4 get written** — their assertions are spelled out in
+its failure message, and they were written once already, so it is transcription.
+
