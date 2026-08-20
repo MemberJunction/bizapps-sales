@@ -50,7 +50,6 @@ import {
     type SalesReopenDealOutput,
     type DealEntity,
     type mjBizAppsSalesDealEntity,
-    type mjBizAppsSalesDealLineEntity,
 } from '@mj-biz-apps/sales-entities';
 import {
     OrdersIsInstalled,
@@ -72,11 +71,20 @@ import {
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
-/** A line as the fixture builder wants it, before it becomes a real child entity. */
-interface SeedLine {
-    DealLineTypeID: string;
-    ProductName: string;
-    Quantity: number;
+/**
+ * A CHILD ROW as the fixture builder wants it, before it becomes a real child entity.
+ *
+ * These are payment-schedule INSTALMENTS now, not lines. The deal holds no lines (S-US4), and the
+ * checks that need a deal WITH children need them for the close lock -- CD13 proves the lock reaches a
+ * child collection, and any of the deal's own collections demonstrates that equally well.
+ *
+ * Instalments are the better choice for a second reason: they need no catalogue. The old seed reached
+ * into orders for a real ProductID, which made a DEFAULT-GATE bundle depend on orders being installed.
+ * This bundle must stay green on a sales-only host, and now it can without a conditional.
+ */
+interface SeedInstalment {
+    Amount: number;
+    Description: string;
 }
 
 /**
@@ -87,8 +95,8 @@ interface SeedLine {
  * the server-maintained stamps, instead of a hand-assembled shape that happens to satisfy them.
  *
  * That path used to be `Sales.SaveDeal`. The operation was retired when `Deal` gained Related Record
- * Collections, so the same intent is now expressed directly on the entity graph — `deal.Lines.Create()`
- * and one `deal.Save()`, which is exactly what the workspace does.
+ * Collections, so the same intent is now expressed directly on the entity graph — one `deal.Save()`
+ * carrying whatever children the caller asked for, which is what the workspace does.
  */
 async function openDeal(
     ctx: Ctx,
@@ -96,7 +104,7 @@ async function openDeal(
     pipelineID: string,
     stageID: string,
     name: string,
-    lines: SeedLine[] = [],
+    instalments: SeedInstalment[] = [],
 ): Promise<string> {
     const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
     deal.NewRecord();
@@ -109,35 +117,11 @@ async function openDeal(
     deal.CompanyID = f.PipelineCompanyID;
     deal.TermMonths = 12;
 
-    /**
-     * A REAL ProductID when orders is installed, and only then.
-     *
-     * This bundle was written when `DealLine.ProductID` was null on every row and the close routed to a
-     * stub, so `ProductName` alone was enough. On a host where orders IS installed the handoff is live
-     * and the same seed produces a line orders cannot price.
-     *
-     * WHAT THAT LOOKED LIKE, because the visible error named the wrong thing entirely. The empty
-     * `ProductID` is an empty STRING rather than null, so it passes the not-null check and reaches the
-     * price lookup as `ID = ''` against a `uniqueidentifier` column — a SQL conversion error. Orders
-     * handles it correctly: it catches, rolls back its own savepoint, and returns false with the real
-     * message. The `FK_DealStageEvent_Deal` conflict that follows is the CALLER continuing to write
-     * after a save had already failed, not evidence of a broken transaction.
-     *
-     * So the fix is here, in the fixture, and not in orders: give the line a product that exists.
-     *
-     * Sales-only hosts are unaffected: no orders, no products, `ProductName` as before.
-     */
-    const productIDs = await sellableProductIDs(ctx, f.PipelineCompanyID, lines.length);
-    for (const [i, seed] of lines.entries()) {
-        const line: mjBizAppsSalesDealLineEntity = await deal.Lines.Create();
-        line.DealLineTypeID = seed.DealLineTypeID;
-        line.ProductName = seed.ProductName;
-        line.Quantity = seed.Quantity;
-        if (productIDs[i]) {
-            line.ProductID = productIDs[i];
-        }
+    for (const seed of instalments) {
+        const row = await deal.PaymentSchedule.Create();
+        row.Amount = seed.Amount;
+        row.Description = seed.Description;
     }
-
     Assert(
         await deal.Save(),
         `setup: the deal could not be saved — ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
@@ -145,41 +129,19 @@ async function openDeal(
     return deal.ID;
 }
 
-/**
- * Sellable products for this company, or an empty list when orders is not installed.
- *
- * Uses the PICKER'S OWN filter, so this fixture cannot drift from the rule the product picker applies.
- */
-async function sellableProductIDs(ctx: Ctx, companyID: string, count: number): Promise<string[]> {
-    if (!OrdersIsInstalled()) {
-        return [];
-    }
-    const rv = new RunView();
-    const r = await rv.RunView<{ ID: string }>(
-        {
-            EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(companyID, new Date()),
-            OrderBy: 'Name ASC',
-            ResultType: 'simple',
-            Fields: ['ID'],
-        },
-        ctx.User,
-    );
-    if (!r.Success) {
-        return [];
-    }
-    const ids = (r.Results ?? []).map((x) => x.ID);
-    // Repeat rather than run short: every line needs one, and which product is irrelevant here.
-    return Array.from({ length: count }, (_, i) => ids[i % Math.max(ids.length, 1)]).filter(Boolean);
-}
 
-/** One recurring line and one one-time line, so the policy has both kinds to route. */
-function bothLineKinds(f: SalesFixture): SeedLine[] {
-    // No DisplayOrder and no ClientKey: the collection sequences from array position, and identity is
-    // the entity's own primary key. Both were payload concerns of the retired operation.
+/**
+ * Two instalments, so a deal has a child collection for the lock to reach.
+ *
+ * It used to be one recurring and one one-time LINE, because the policy routed the two kinds
+ * differently. Nothing routes by line kind any more -- DealLineType is retired and close-won does not
+ * touch the order -- so what these checks actually need from children is simply that some exist.
+ */
+function twoInstalments(): SeedInstalment[] {
+    // No DisplayOrder: the collection sequences from array position.
     return [
-        { DealLineTypeID: f.RecurringLineTypeID, ProductName: 'Platform — Enterprise Seat', Quantity: 40 },
-        { DealLineTypeID: f.OneTimeLineTypeID, ProductName: 'Onboarding', Quantity: 1 },
+        { Amount: 40000, Description: 'On execution' },
+        { Amount: 20000, Description: 'On acceptance' },
     ];
 }
 
@@ -233,7 +195,7 @@ async function children(ctx: Ctx, dealID: string): Promise<Record<string, unknow
         },
         ctx.User,
     );
-    Assert(r.Success, `reading deal lines failed — ${r.ErrorMessage}`);
+    Assert(r.Success, `reading the deal's instalments failed — ${r.ErrorMessage}`);
     return (r.Results ?? []) as Record<string, unknown>[];
 }
 
@@ -247,7 +209,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 const f = await ResolveSalesFixture(ctx);
                 const dealID = await openDeal(
                     ctx, f, f.ContractPolicyPipelineID, f.ContractPolicyStageID, 'CD1 contract policy',
-                    bothLineKinds(f),
+                    twoInstalments(),
                 );
 
                 const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
@@ -269,7 +231,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 // pipeline it sits on — so any difference in routing is attributable to the policy alone.
                 const dealID = await openDeal(
                     ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD2 order-only policy',
-                    bothLineKinds(f),
+                    twoInstalments(),
                 );
 
                 const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
@@ -293,7 +255,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 const f = await ResolveSalesFixture(ctx);
                 const dealID = await openDeal(
                     ctx, f, f.ContractPolicyPipelineID, f.ContractPolicyStageID, 'CD3 override',
-                    bothLineKinds(f),
+                    twoInstalments(),
                 );
 
                 const out = await close(ctx, {
@@ -478,7 +440,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 const f = await ResolveSalesFixture(ctx);
                 const dealID = await openDeal(
                     ctx, f, f.ContractPolicyPipelineID, f.ContractPolicyStageID, 'CD7 stub honesty',
-                    bothLineKinds(f),
+                    twoInstalments(),
                 );
 
                 const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
@@ -622,7 +584,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 const f = await ResolveSalesFixture(ctx);
                 const dealID = await openDeal(
                     ctx, f, f.ContractPolicyPipelineID, f.ContractPolicyStageID, 'CD12 preview',
-                    bothLineKinds(f),
+                    twoInstalments(),
                 );
                 const before = (await stageEvents(ctx, dealID)).length;
 
@@ -673,7 +635,7 @@ export const CloseDealChecks: NamedCheck[] = [
                  */
                 const dealID = await openDeal(
                     ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD13 collection lock',
-                    bothLineKinds(f),
+                    twoInstalments(),
                 );
 
                 // ── HALF ONE: the CLOSING transition may carry final collection state ──────────────
@@ -682,16 +644,16 @@ export const CloseDealChecks: NamedCheck[] = [
                 // be unusable rather than merely strict.
                 const closing = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
                 Assert(await closing.Load(dealID), 'the open deal loads');
-                await closing.LoadRelatedRecords('Lines');
-                const lastEdit = closing.Lines.Items[0];
-                lastEdit.Quantity = 41;
+                await closing.LoadRelatedRecords('PaymentSchedule');
+                const lastEdit = closing.PaymentSchedule.Items[0];
+                lastEdit.Amount = 41000;
                 Assert(
                     await closing.Save(),
                     `an OPEN deal must accept a collection edit — ${closing.LatestResult?.CompleteMessage ?? ''}`,
                 );
 
                 const afterEdit = await TxOne<{ Quantity: number }>(
-                    ctx, `SELECT Quantity FROM ${SALES_SCHEMA}.DealLine WHERE ID = '${lastEdit.ID}'`,
+                    ctx, `SELECT Amount FROM ${SALES_SCHEMA}.DealPaymentSchedule WHERE ID = '${lastEdit.ID}'`,
                 );
                 AssertEqual(Number(afterEdit.Quantity), 41, 'and the edit actually landed');
 
@@ -705,14 +667,14 @@ export const CloseDealChecks: NamedCheck[] = [
                 // ── HALF TWO: a REMOVAL on the closed deal is refused ──────────────────────────────
                 const locked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
                 Assert(await locked.Load(dealID), 'the closed deal loads');
-                await locked.LoadRelatedRecords('Lines');
-                AssertEqual(locked.Lines.Count, 2, 'both lines came back');
+                await locked.LoadRelatedRecords('PaymentSchedule');
+                AssertEqual(locked.PaymentSchedule.Count, 2, 'both instalments came back');
 
-                locked.Lines.Remove(locked.Lines.Items[1]);
+                locked.PaymentSchedule.Remove(locked.PaymentSchedule.Items[1]);
                 AssertEqual(
                     await locked.Save(),
                     false,
-                    'removing a line from a CLOSED deal must be refused — the header is untouched, so only ' +
+                    'removing an instalment from a CLOSED deal must be refused — the header is untouched, so only ' +
                         'the collection check can catch this',
                 );
 
@@ -725,13 +687,13 @@ export const CloseDealChecks: NamedCheck[] = [
                 // ── HALF TWO (b): an EDIT on the closed deal is refused too ────────────────────────
                 const edited = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
                 Assert(await edited.Load(dealID), 'the closed deal loads again');
-                await edited.LoadRelatedRecords('Lines');
-                const target = edited.Lines.Items[0];
-                target.Quantity = 999;
-                AssertEqual(await edited.Save(), false, 'editing a line on a CLOSED deal must be refused');
+                await edited.LoadRelatedRecords('PaymentSchedule');
+                const target = edited.PaymentSchedule.Items[0];
+                target.Amount = 99900;
+                AssertEqual(await edited.Save(), false, 'editing an instalment on a CLOSED deal must be refused');
 
                 const finalRow = await TxOne<{ Quantity: number }>(
-                    ctx, `SELECT Quantity FROM ${SALES_SCHEMA}.DealLine WHERE ID = '${target.ID}'`,
+                    ctx, `SELECT Amount FROM ${SALES_SCHEMA}.DealPaymentSchedule WHERE ID = '${target.ID}'`,
                 );
                 AssertEqual(Number(finalRow.Quantity), 41, 'the stored quantity is still the pre-close value');
             }),
