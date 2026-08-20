@@ -22,6 +22,7 @@ import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '
 import {
     ActivityIngestService,
     ActivitySyncJob,
+    BuildContactMethodFilter,
     CurrentActivitySourceFactory,
     SetActivitySourceFactory,
     ActivityReader,
@@ -711,6 +712,25 @@ export const ActivitiesChecks: NamedCheck[] = [
                 Assert(
                     mixedCase !== FIXTURE_ADDRESS,
                     'setup: and they must differ in case, or the comparison is trivially satisfied',
+                );
+
+                /**
+                 * THE ASSERTION THAT CAN ACTUALLY FAIL ON THIS ENGINE.
+                 *
+                 * The behavioural check below passes on SQL Server whether or not the fix is present,
+                 * because the default collation is case-insensitive -- measured by reverting the fix and
+                 * finding all seventeen checks still green. So the SQL itself is asserted: the fold must
+                 * be in the QUERY, which is the only difference visible from here and the whole point of
+                 * D-19.
+                 */
+                const filter = BuildContactMethodFilter([mixedCase]);
+                Assert(
+                    filter.includes('LOWER(Value)'),
+                    `the filter must fold case in SQL, not rely on the collation — got ${filter}`,
+                );
+                Assert(
+                    filter.includes(FIXTURE_ADDRESS.toLowerCase()),
+                    'and the compared literal must be lower-cased too, or the fold only works one side',
                 );
 
                 const verdicts = await new RelevanceFilter().Apply(

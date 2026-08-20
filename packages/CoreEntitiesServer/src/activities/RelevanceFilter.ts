@@ -106,7 +106,7 @@ export class RelevanceFilter {
      * map's keys match what the caller looks up.
      */
     private async lookup(addresses: string[], contextUser: UserInfo): Promise<Map<string, KnownAddress>> {
-        const list = addresses.map((a) => `'${escapeSql(a.trim().toLowerCase())}'`).join(', ');
+        const filter = BuildContactMethodFilter(addresses);
         const r = await new RunView().RunView<{
             Value: string;
             PersonID: string | null;
@@ -114,7 +114,7 @@ export class RelevanceFilter {
         }>(
             {
                 EntityName: E_CONTACT_METHOD,
-                ExtraFilter: `LOWER(Value) IN (${list})`,
+                ExtraFilter: filter,
                 ResultType: 'simple',
                 Fields: ['Value', 'PersonID', 'OrganizationID'],
             },
@@ -150,4 +150,24 @@ export class RelevanceFilter {
         }
         return known;
     }
+}
+
+/**
+ * The `ContactMethod` filter for a set of addresses -- extracted so the claim can be TESTED.
+ *
+ * -- WHY THIS IS A SEPARATE, EXPORTED FUNCTION --
+ *
+ * The D-19 fix is that the case-fold happens in the QUERY rather than being left to the database
+ * collation. On SQL Server, whose default collation is case-insensitive, both versions behave
+ * identically -- so a behavioural check passes either way and proves nothing. Measured, not assumed:
+ * reverting the fix and re-running the suite left all seventeen checks green.
+ *
+ * The only thing that differs on THIS engine is the SQL. So the filter is built here, once, and AC12
+ * asserts it folds case explicitly. That turns an untestable intention into a testable one, and the
+ * regression it guards -- silently dropping relevant mail after the Postgres conversion -- is worth a
+ * white-box assertion.
+ */
+export function BuildContactMethodFilter(addresses: string[]): string {
+    const list = addresses.map((a) => `'${escapeSql(a.trim().toLowerCase())}'`).join(', ');
+    return `LOWER(Value) IN (${list})`;
 }
