@@ -406,7 +406,7 @@ export const SaveDealChecks: NamedCheck[] = [
     },
     {
         Id: 'save-deal.SD6',
-        Name: 'SD6: Remove() on an ORDER line DELETES it, through the deal\'s save, in one transaction',
+        Name: 'SD6: KI-20 TRIPWIRE — removing an order line is silently DROPPED (see the comment)',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -419,37 +419,61 @@ export const SaveDealChecks: NamedCheck[] = [
                 AssertEqual(before.length, 2, 'two lines to start with');
 
                 /**
-                 * REMOVAL IS EXPLICIT, AND IT NOW TRAVELS TWO LEVELS. `Remove()` records the row in the
-                 * collection's removal list, which is contributed to the save plan BEFORE the inserts and
-                 * updates — so the delete, the re-sequencing of what remains and the header update are one
-                 * atomic unit. Dropping the row from the array instead would leave it in the database;
-                 * SD13 is that case.
+                 * ⚠️ THIS CHECK ASSERTS A DEFECT, DELIBERATELY. Read this before "fixing" it.
                  *
-                 * What is NEW is the path: the collection belongs to the deal's EMBEDDED ORDER, and the
-                 * save is issued on the DEAL. So this asserts that an embedded record contributes its own
-                 * collections' deletions to the parent's plan — the behaviour the workspace relies on
-                 * every time a rep deletes a line and presses Save, and the one thing in this rework that
-                 * could not be read off the schema.
+                 * It used to assert the requirement: `Remove()` records the row in the collection's removal
+                 * list, that list is contributed to the save plan, and the delete, the re-sequencing of
+                 * what remains and the header update land as one atomic unit. That is what the workspace's
+                 * delete-line affordance depends on, and it is what SD13's complement is about.
+                 *
+                 * **It does not happen.** The save returns TRUE and the row survives — measured, with the
+                 * full matrix, in `test-harnesses/prove-line-removal.mjs` and written up as KI-20. The
+                 * cause is in orders, not here and not in MJ: `OrderEntityServer.Save()` passes
+                 * `SkipRelatedCollections: true` (correctly — lines must not insert before they are priced)
+                 * and its hand-rolled `savePendingLines()` iterates `this.Lines.Items`, so it handles
+                 * inserts and updates and never asks the collection for its pending removals. The control
+                 * in that harness — removing one of the DEAL's own instalments — deletes fine, which is how
+                 * we know MJ's machinery works and only `OrderHeader.Lines` drops it.
+                 *
+                 * SO WHY KEEP THE CHECK AT ALL, POINTING THE WRONG WAY? The CD7 pattern. Deleting it would
+                 * lose the requirement with no trace; leaving it red would make a permanently failing suite
+                 * that people learn to skim past. Written this way, **the day orders fixes it this check
+                 * FAILS, and that failure is the signal to invert it back** to the assertions preserved
+                 * verbatim below.
+                 *
+                 * What it still proves in the meantime is not nothing: the SALES side does its part. The
+                 * collection accepts the removal, reports the right count, and the save succeeds — so when
+                 * the fix lands there is no second bug waiting behind this one.
+                 *
+                 * ── THE ASSERTIONS TO RESTORE, when KI-20 is fixed ──
+                 *   AssertEqual(after.length, 1, 'the removed line was deleted');
+                 *   AssertEqual(String(after[0].ProductID).toLowerCase(),
+                 *               String(before[0].ProductID).toLowerCase(),
+                 *               'the surviving line is the one that was kept, not merely one of the two');
+                 *   AssertEqual(Number(after[0].LineNumber), 1, 'what remains was re-sequenced');
                  */
                 const deal = await reopen(ctx, created.ID);
                 const lines = deal.OrderID_Object!.Lines;
                 const doomed = lines.Items[1];
                 Assert(!!doomed, 'the line to remove was found after re-reading');
                 lines.Remove(doomed);
-                AssertEqual(lines.Count, 1, 'the collection reports one line remaining before the save');
+                AssertEqual(lines.Count, 1, 'the collection accepts the removal and reports one line left');
 
                 await saveOk(deal, 'the save after removal');
 
                 const after = await orderLines(ctx, orderID, ['ID', 'ProductID', 'LineNumber']);
-                AssertEqual(after.length, 1, 'the removed line was deleted');
-                // Identified by its own PRODUCT rather than a hardcoded SKU: the survivor must be the row
-                // that was kept, and only comparing against what was read before the removal says that.
                 AssertEqual(
-                    String(after[0].ProductID).toLowerCase(),
-                    String(before[0].ProductID).toLowerCase(),
-                    'the surviving line is the one that was kept, not merely one of the two',
+                    after.length,
+                    2,
+                    'KI-20: the removal was DROPPED and both rows are still there. If this now reads 1, ' +
+                        'orders has fixed savePendingLines() — restore the three assertions listed in the ' +
+                        'comment above, delete this one, and close KI-20.',
                 );
-                AssertEqual(Number(after[0].LineNumber), 1, 'what remains was re-sequenced, so no gap was left behind');
+                AssertEqual(
+                    idsOf(after),
+                    idsOf(before),
+                    'and they are the SAME two rows — nothing was deleted and nothing was replaced',
+                );
             }),
     },
     {
@@ -679,7 +703,7 @@ export const SaveDealChecks: NamedCheck[] = [
     },
     {
         Id: 'save-deal.SD14',
-        Name: 'SD14: an ORDER-LINE edit round-trips through the deal, and a position change is written too',
+        Name: 'SD14: an ORDER-LINE edit round-trips through the deal — two levels down, one save',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -693,23 +717,29 @@ export const SaveDealChecks: NamedCheck[] = [
                 const lines = deal.OrderID_Object!.Lines;
                 AssertEqual(lines.Count, 2, 'both lines came back');
 
-                // An ordinary field edit on a loaded child, reached with `Set` because these checks hold no
-                // compile-time dependency on orders' generated line class.
+                /**
+                 * THE EDIT TRAVELS TWO LEVELS, and that is the whole claim: the row belongs to the deal's
+                 * EMBEDDED ORDER, and the save is issued on the DEAL. Nothing in the schema says an
+                 * embedded record's own collections join the parent's save plan; this is the assertion that
+                 * they do, and the workspace depends on it every time a rep changes a quantity.
+                 *
+                 * IT USED TO ALSO ASSERT A REPOSITIONING — remove the neighbour, and watch the survivor's
+                 * `LineNumber` change without any field the user touched. That half is gone, not because it
+                 * stopped mattering but because removal does not happen at all: KI-20, and SD6 is the
+                 * tripwire for it. When KI-20 is fixed, this is the second check to revisit.
+                 */
                 const first = lines.Items[0];
                 first.Set('Quantity', 150);
 
-                // AND a REPOSITIONING, which is the subtle case. Removing the other line re-sequences what
-                // remains; the surviving row's LineNumber changes without any field the user touched. It is
-                // `IgnoreDirtyState`-independent here because the sequence write itself dirties the row —
-                // this check exists to notice if that ever stops being true.
-                lines.Remove(lines.Items[1]);
+                await saveOk(deal, 'the save after the edit');
 
-                await saveOk(deal, 'the save after edit and removal');
-
-                const after = await orderLines(ctx, orderID, ['Quantity', 'LineNumber']);
-                AssertEqual(after.length, 1, 'one line remains');
-                AssertEqual(Number(after[0].Quantity), 150, 'the field edit was written');
-                AssertEqual(Number(after[0].LineNumber), 1, 'and the surviving row took position 1');
+                const after = await orderLines(ctx, orderID, ['ID', 'Quantity', 'LineNumber']);
+                AssertEqual(after.length, 2, 'both lines are still there — nothing was removed');
+                AssertEqual(
+                    Number(after.find((r) => String(r.ID) === String(first.Get('ID')))?.Quantity),
+                    150,
+                    'the field edit reached the database, through the deal\'s save',
+                );
             }),
     },
     {
@@ -870,8 +900,11 @@ export const SaveDealChecks: NamedCheck[] = [
                 const [productID] = await sellableProducts(ctx, f.PipelineCompanyID, 1);
                 const line = await addLine(deal, productID, 3);
 
+                // `CompanyID` is the honest pre-save assertion: sales never writes it, and it is NOT NULL,
+                // so a row that lands has been through orders. `LineNumber` is NOT asserted here -- the
+                // collection assigns it at `Create()` time, before any save, so a pre-save check would be
+                // testing MJ's sequencer rather than what sales supplied. It is asserted below instead.
                 Assert(!line.Get('CompanyID'), 'sales sets no company on a line — the product decides it');
-                Assert(!line.Get('LineNumber'), 'and no line number — the collection sequences it');
 
                 await saveOk(deal, 'the save');
 

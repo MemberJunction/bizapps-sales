@@ -58,18 +58,29 @@ of SD15 (`PaymentMethod` defaults from metadata) is untouched.
 
 ---
 
-## DN-3 — SD6/SD13/SD14 now assert a two-level save graph
+## DN-3 — The two-level save graph: insert and edit work, REMOVE does not
 
-**Taken:** rewrote them against `deal.OrderID_Object.Lines` — the collection belongs to the deal's
-**embedded order**, while `Save()` is still issued on the **deal**.
+**Taken:** rewrote SD6, SD13 and SD14 against `deal.OrderID_Object.Lines` — the collection belongs to the
+deal's **embedded order**, while `Save()` is still issued on the **deal**. Then ran them, which is the
+part that mattered.
 
-**Why it matters:** this is the one claim in the rework that could not be read off the schema — that an
-embedded record contributes its own collections' inserts, edits, sequencing and **deletions** to the
-parent's save plan. `prove-line-roundtrip.mjs` established the INSERT half only. SD6 (removal) and SD14
-(edit + reposition) are the first assertions of the other two, and the workspace depends on all three
-every time a rep edits a line and presses Save.
+**Result — and the first draft of this entry guessed it wrong, which is why the run happened:**
 
-**If any of them fails on a real run, it is a finding about MJ's save graph, not about these checks.**
+| Verb | Through `deal.Save()` | Check |
+|---|---|---|
+| INSERT | ✅ | SD1, SD19, SD20 |
+| EDIT | ✅ | SD14 |
+| **REMOVE** | ❌ **silently dropped, save returns true** | SD6, now a tripwire |
+
+So an embedded record DOES join the parent's save plan — for two verbs out of three. The third is
+**KI-20**, and it is not about embedding at all: the same removal fails through `order.Save()` too, while
+removing one of the deal's OWN instalments deletes fine. `test-harnesses/prove-line-removal.mjs` prints
+that whole matrix, including the control, and cleans up after itself.
+
+**Cause, located:** `OrderEntityServer.Save()` in bizapps-orders passes `SkipRelatedCollections: true`
+(correctly — lines must not insert before they are priced) and its hand-rolled `savePendingLines()`
+iterates `this.Lines.Items`. Inserts and updates, off the survivors. Nothing ever asks the collection for
+its pending removals.
 
 ---
 
@@ -99,3 +110,48 @@ removing it. The per-line half is covered by SD19. What nothing asserts is the d
 `Deal.Amount` still a cached PreviewOrder answer with provenance — or is it now simply a read-through of
 the order's total, making the three provenance columns dead weight? The answer decides whether that
 check gets written or those columns get dropped. Not something to infer from the code.
+
+---
+
+## DN-6 — OPEN, and the one worth waking up to: who fixes KI-20?
+
+**The user-visible consequence:** the deal workspace's delete-line affordance does not work. A rep removes
+a line, the row disappears from the grid, the save reports success — and the line is back on reload. This
+is in sales' own UI, on a surface that is part of the demo.
+
+Nothing was changed to work around it tonight. Three options, and the choice is not mine to make:
+
+**A. Fix it in bizapps-orders** — `savePendingLines()` (or `persistPreparedLines()`) processes the
+collection's pending deletions. Correct place, one app, one method, and it fixes every consumer rather
+than just sales. Needs care: it is the booking path, and trigger 51003 freezes a line on a Confirmed
+order, so the deletion has to be scoped to the states where it is legal. **My recommendation.**
+
+**B. Work around it in sales** — `DealWorkspaceService` deletes the removed line rows itself. Fast, and
+entirely inside this repo. Rejected as a default because it puts a second app in charge of deleting
+orders' rows and would silently duplicate whatever rule orders eventually writes. Also does nothing for
+any other caller.
+
+**C. Leave it** — SD6 stays a tripwire, the delete affordance stays broken, KI-20 stays open. Defensible
+only if line deletion is not in the near-term demo path.
+
+**Why this is not a judgement call I made unilaterally:** option A is a change in another repo, tonight's
+brief scopes me to this one, and my one previous rebuild of orders disrupted a second instance's checks.
+Option B is a change I could have made and deliberately did not, because it is the kind of workaround that
+is very hard to remove later.
+
+---
+
+## DN-7 — The provisioning guard was wrong, and every line check found it at once
+
+**Not a decision — a fix, recorded because the failure shape is worth recognising.**
+`DealEntityServer.provisionEmbeddedOrder()` guarded on `IsSaved || OrderID`. But `Ensure()` assigns the
+new peer's key to `OrderID` immediately, so any caller that reached the order BEFORE saving — an importer
+building a deal and its lines for one `Save()`, or nine of these checks — arrived with `OrderID` already
+populated. The guard returned early, the stamps never ran, and the save died inside orders on
+`CompanyID cannot be null`: a NOT NULL complaint about a column two apps away from the mistake.
+
+It is now `IsSaved` alone, plus a second guard that leaves an ALREADY-PERSISTED order untouched, so
+attaching an existing order stays legitimate. Nine failing checks became zero.
+
+The reason it survived until now: in the UI a deal is always saved before a line is added, so the broken
+branch was unreachable from the only path anyone had exercised.

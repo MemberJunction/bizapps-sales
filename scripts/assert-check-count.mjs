@@ -97,19 +97,11 @@ const expectedTotal = [...expected.values()].reduce((a, b) => a + b.count, 0);
  */
 if (expected.size === 0) {
     console.error(
-        '
-✖ Integration coverage assertion FAILED
-
-' +
-            `  · NO bundles were expected on this host. Every bundle in the manifest requires a sibling
-` +
-            `    app, and this run reported none linked (${[...linked].join(', ') || 'none'}). A run that
-` +
-            '    expects nothing passes while measuring nothing.
-
-' +
-            '  Link the sibling apps and re-run -- see docs/WORKSPACE-SETUP.md.
-',
+        `\n\u2716 Integration coverage assertion FAILED\n\n` +
+            `  \u00b7 NO bundles were expected on this host. Every bundle in the manifest requires a` +
+            ` sibling app, and this run reported none linked (${[...linked].join(", ") || "none"}).\n` +
+            `    A run that expects nothing passes while measuring nothing.\n\n` +
+            `  Link the sibling apps and re-run -- see docs/WORKSPACE-SETUP.md.\n`,
     );
     process.exit(1);
 }

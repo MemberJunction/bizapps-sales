@@ -5,6 +5,78 @@ future developer will otherwise rediscover the hard way.
 
 ---
 
+## 🔴 KI-20 — Removing a line from an order is silently dropped, so the workspace's delete-line button does nothing
+
+**Measured on MJ_V6_Host, 2026-08-20, by `test-harnesses/prove-line-removal.mjs`.** The save reports
+SUCCESS and the row stays. Nothing logs, nothing throws, and the collection in memory is correct — so the
+UI shows the line gone until the page is reloaded.
+
+### The matrix, which is what makes the cause unambiguous
+
+| Verb | Route | Result |
+|---|---|---|
+| INSERT a line | `deal.Save()` | ✅ written |
+| EDIT a line | `deal.Save()` | ✅ written |
+| **REMOVE a line** | `deal.Save()` | ❌ **row survives, save returns true** |
+| **REMOVE a line** | `order.Save()` — the collection's own owner | ❌ **row survives, save returns true** |
+| **REMOVE a line** | `Lines.Load()` then `order.Save()` — different loader | ❌ **row survives** |
+| REMOVE an instalment (`Deal.PaymentSchedule`) | `deal.Save()` | ✅ **deleted** |
+
+The last row is the control, and it is why this is not an MJ bug and not about embedded records. MJ's
+collection-removal machinery works; `Deal.PaymentSchedule` proves it on the same save, in the same
+process. Only `OrderHeader.Lines` drops the deletion, and it does so through every route.
+
+### The cause, in bizapps-orders
+
+`OrderEntityServer.Save()` deliberately takes the collection out of MJ's hands:
+
+```ts
+const savedHeader = await super.Save({ ...options, SkipRelatedCollections: true });
+...
+await this.persistPreparedLines(options, decisions);
+```
+
+`SkipRelatedCollections: true` is correct and well-reasoned — the comment above it explains that lines
+must not insert before they have been expanded, priced, discounted, charged and taxed. But it means MJ
+never processes the collection, so the hand-rolled replacement is now solely responsible for every verb.
+And `savePendingLines()` is:
+
+```ts
+for (const line of this.Lines.Items) {
+    const saved = await line.Save(options);
+```
+
+Inserts and updates, iterated off the SURVIVORS. It never asks the collection for its pending removals, so
+a removed line is simply not in the loop and nothing deletes it.
+
+### What this affects in sales, today
+
+* **`DealWorkspaceComponent.RemoveLine()`** — the delete affordance on a deal line. It calls
+  `Lines.Remove(line)` and then saves, which is the correct API. The line comes back on reload.
+* **`save-deal.SD6`** asserts the defect rather than the requirement, on the CD7 pattern: **when orders
+  fixes this, SD6 starts failing, and that failure is the signal to invert it back.** Read SD6's own
+  comment before "fixing" it.
+* **`save-deal.SD14`** lost its repositioning half. A clean row whose `LineNumber` changes because a
+  neighbour was removed cannot be demonstrated while removal does not happen.
+
+### The fix, and where it must happen
+
+In **bizapps-orders**, not here — `savePendingLines()` (or `persistPreparedLines()`) must process the
+collection's pending deletions before or after the insert/update loop. Sales could work around it by
+deleting the line row itself, and that is deliberately NOT done: it would put a second app in charge of
+deleting orders' rows, and orders freezes a booked line with trigger 51003 for reasons sales does not
+model. See `DECISIONS-NEEDED.md` DN-6 — this is a decision for Josue/Amith, not an inference from code.
+
+### How to reproduce in thirty seconds
+
+```bash
+node test-harnesses/prove-line-removal.mjs      # needs orders linked and MJ_V6_Host seeded
+```
+
+It prints the matrix above and cleans up after itself.
+
+---
+
 ## 🔴 KI-1 — `AllowMultipleSubtypes` is `false` on common's `Person` and `Organization`
 
 **This is fine today and becomes a silent data-corruption bug the moment a second app extends either

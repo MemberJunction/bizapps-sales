@@ -234,8 +234,18 @@ export class DealEntityServer extends DealEntity {
      * order that cannot be inserted. So it happens here, after the stamps, on the one call where
      * `IsSaved` is still false.
      *
-     * Idempotent twice over: `Ensure()` returns any existing peer, and the guard below means a re-save
-     * never re-provisions and a deal that already carries an `OrderID` is left alone.
+     * ── WHY THE GUARD IS `IsSaved`, AND NOT `IsSaved || OrderID` ──
+     *
+     * It was the second form, and that was a real bug rather than a stylistic choice. `Ensure()` assigns
+     * the new peer's key to `OrderID` immediately, so a caller that reached the order BEFORE saving --
+     * the workspace's `AddLine()`, an importer building a deal and its lines for one `Save()`, or any of
+     * the line checks in `save-deal` -- arrived here with `OrderID` already populated. The guard then
+     * returned early, the stamps below never ran, and the save died inside orders on
+     * `CompanyID cannot be null`: a NOT NULL complaint about a column two apps away from the mistake.
+     *
+     * Idempotent twice over all the same: `Ensure()` returns any existing peer, `IsSaved` means a re-save
+     * never re-provisions, and an order that is ALREADY PERSISTED is left untouched (below) so attaching
+     * an existing order stays a legitimate thing to do.
      *
      * ── WHAT SALES STATES, AND WHAT IT DOES NOT ──
      *
@@ -250,7 +260,7 @@ export class DealEntityServer extends DealEntity {
      * organization key; `PrimaryContactID` is a `SalesContact`, an IsA child of `Person`.
      */
     private provisionEmbeddedOrder(): void {
-        if (this.IsSaved || this.OrderID) {
+        if (this.IsSaved) {
             return;
         }
         if (!this.CompanyID) {
@@ -261,6 +271,12 @@ export class DealEntityServer extends DealEntity {
         }
 
         const order = this.OrderID_EnsureObject();
+        if (order.IsSaved) {
+            // The caller attached an order that already exists. Restating company, type and bill-to on
+            // it would be this app editing a record finance may already have worked on, which is exactly
+            // what S-US5 says not to do. Leave it alone.
+            return;
+        }
         order.CompanyID = this.CompanyID;
         order.OrderType = 'Sale';
         order.BillToOrganizationID = this.AccountID ?? null;

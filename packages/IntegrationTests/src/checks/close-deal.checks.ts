@@ -243,7 +243,23 @@ export const CloseDealChecks: NamedCheck[] = [
                     'a policy with CreateContract:false must NOT plan a Contract, even for a won deal — ' +
                         'if this fails, something is branching on the status or the pipeline name',
                 );
-                Assert(!!routeTo(out, 'Order'), 'this policy sends one-time lines to an Order');
+                /**
+                 * AND NO ORDER EITHER, which is the assertion that changed. This line used to read
+                 * `Assert(!!routeTo(out, 'Order'))` -- the policy's whole point was that it sent one-time
+                 * lines to a new Order instead of a contract. The Order route is GONE: the deal now carries
+                 * its order from creation (S-US4) and a won close leaves it alone (S-US5), so there is
+                 * nothing left for the close to create.
+                 *
+                 * Inverting it rather than deleting it keeps CD2 doing its real job. The check is about
+                 * POLICY deciding routing rather than the status -- CD1 and CD2 close the identical deal
+                 * shape to the identical won status and differ only in pipeline. What that comparison
+                 * proves now is that one plans a contract and the other plans NOTHING.
+                 */
+                Assert(
+                    !routeTo(out, 'Order'),
+                    'no Order is planned any more — the deal already has one. close-won-order.CO4 is the ' +
+                        'check that owns this behaviour; this asserts the policy path agrees with it.',
+                );
             }),
     },
     {
