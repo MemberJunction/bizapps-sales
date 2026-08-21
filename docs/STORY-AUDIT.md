@@ -22,12 +22,12 @@ than before them.
 
 ## THE ANSWER, IN ONE LINE
 
-**Four of the nine are met outright** — #35, #116, #117, #121. Of the five that are not, **the remaining
-gap is upstream in every case except one**, and that one is #33's.
+**Four of the nine are met outright** — #35, #116, #117, #121. Of the five that are not, **every remaining
+gap is now upstream** — nothing outstanding in this audit is ours.
 
 | Issue | Verdict | The remaining gap | Whose |
 |---|---|---|---|
-| **#33** S-US1 Create a deal | partially met | Line removal (below); and stage-driven probability/forecast is UI-deep only, so an Action, an agent or the S6 import gets whatever the caller supplied | **ours** + orders |
+| **#33** S-US1 Create a deal | partially met | Line removal only (KI-20). Stage-driven probability/forecast **was** the one gap that was ours; it is now on the write path — `BD5`, `BD6`, mutants `M-BD1`/`M-BD2`/`M-BD3` | orders |
 | **#34** S-US2 Contract + tasks | partially met | `ContractType` has no per-type renewal defaults; `ContractTemplate` has no `Status`, so the active template cannot be selected | contracts (D-9, D-10) |
 | **#35** S-US3 Order-review task | **met** | — | — |
 | **#114** S-US4 Deal line items | partially met | Removing an order line is silently dropped (KI-20) | orders |
@@ -37,9 +37,11 @@ gap is upstream in every case except one**, and that one is #33's.
 | **#118** S-US8 Reopen | partially met | The same terminal `Voided` | orders |
 | **#121** S-US11 Board + dashboard | **met** | — | — |
 
-**The only gap that is ours is server-side stage-driven probability and forecast category** (#33's body,
-`deal-workspace.component.ts`). Everything else outstanding is one of three upstream facts: orders drops a
-line removal, orders treats `Voided` as terminal, and contracts lacks two columns.
+**Nothing outstanding is ours any more.** Stage-driven probability and forecast category were the last of
+it, and they now run in `DealEntityServer.saveWithinScope` beside the order-status writer, the stage event
+and the amount cache — same trigger, same transaction, filling rather than overwriting. Everything still
+open is one of three upstream facts: orders drops a line removal, orders treats `Voided` as terminal, and
+contracts lacks two columns.
 
 **One verdict I nearly got wrong, and the check stopped me.** I drafted "#114 moves to met, KI-20 no longer
 reproduces" — then read `save-deal.SD6`, which asserts `after.length === 2`, i.e. that the removal IS
@@ -59,7 +61,7 @@ merges, of which **four were corrections for a head that had already moved**.
 `docs/INTEGRATION-LOG.md` records which commit each one consumed and the expected shape it was checked
 against — which is why the last four were diffs against a stated baseline rather than guesses.
 
-**Evidence base: 96 integration checks across 9 bundles**, 0 failed, 0 skipped, plus E1–E4 from
+**Evidence base: 98 integration checks across 9 bundles**, 0 failed, 0 skipped, plus E1–E4 from
 `scripts/audit-story-evidence.mjs` and `test-harnesses/compare-dashboard-measures.mjs` at 11 agree / 0
 differ.
 
@@ -72,7 +74,7 @@ on them would repeat the mistake this pass exists to correct.
 
 The rule for this pass was *prove met criteria against the database, not the screen*. Three sources:
 
-1. **The 93 integration checks** across 9 bundles (`node scripts/assert-check-count.mjs`, which now runs
+1. **The 98 integration checks** across 9 bundles (`node scripts/assert-check-count.mjs`, which now runs
    the suite itself rather than trusting a log off disk). Every check hits a live database with nothing
    mocked and rolls back. Where a criterion maps to a check, the check id **is** the evidence, and
    `docs/CHECK-MUTATION-EVIDENCE.md` records which mutant proves that check can fail.
