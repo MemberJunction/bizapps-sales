@@ -135,6 +135,9 @@ export const E_SALES_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
 
 /** What one open document in the outer strip carries. */
+/** One shared empty list, so a mismatched catalogue returns a STABLE identity. See `Products`. */
+const NO_PRODUCTS: readonly ProductLookup[] = Object.freeze([]) as readonly ProductLookup[];
+
 interface OpenDeal {
     Deal: DealEntity;
     ActivePane: DealWorkspaceSection;
@@ -251,7 +254,12 @@ export class DealWorkspaceComponent implements OnInit {
      * construction" -- is now true by construction rather than by coincidence of call order.
      */
     public get Products(): ProductLookup[] {
-        return this.Catalogue.CompanyID === this.ActiveCompanyID ? this.Catalogue.Items : [];
+        // NO_PRODUCTS rather than a fresh `[]`: this getter runs on every change-detection pass, and a
+        // new array identity each time would have the template's @for tear down and rebuild the picker
+        // continuously while the catalogue is mismatched.
+        return this.Catalogue.CompanyID === this.ActiveCompanyID
+            ? this.Catalogue.Items
+            : (NO_PRODUCTS as ProductLookup[]);
     }
 
     /**
