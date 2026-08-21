@@ -29,7 +29,6 @@
  */
 import {
     LogError,
-    Metadata,
     LogStatus,
     RunView,
     type IMetadataProvider,
@@ -432,7 +431,7 @@ export class CloseWonTaskService {
             result.Success = false;
         }
 
-        const assignmentID = await this.route(taskID, input, contextUser, result, kind);
+        const assignmentID = await this.route(taskID, input, provider, contextUser, result, kind);
         if (!assignmentID) {
             result.Success = false;
         }
@@ -470,8 +469,21 @@ export class CloseWonTaskService {
             return false;
         }
 
-        const md = new Metadata();
-        const link = await md.GetEntityObject<mjBizAppsTasksTaskLinkEntity>(E_TASK_LINK, contextUser);
+        /**
+         * THE INJECTED PROVIDER, NOT `new Metadata()` — and this was a real hole in the transaction
+         * proof, not a style point.
+         *
+         * `WT9` shows task writes joining the caller's transaction, and it holds only where
+         * `Metadata.Provider` IS the injected object. `fixture.ts` documents the counter-case: under
+         * `mj test` the CLI installs its own instrumented cache first, so the global and the injected
+         * provider are different objects. On such a host this insert landed on a different connection
+         * and SURVIVED the close's rollback — a TaskLink left pointing at a deal that was never closed,
+         * and WT9 would still have been green because it reads through the same global.
+         *
+         * `DealEntityServer` uses `this.ProviderToUse` throughout for exactly this reason; the pattern
+         * was already in the repo.
+         */
+        const link = await provider.GetEntityObject<mjBizAppsTasksTaskLinkEntity>(E_TASK_LINK, contextUser);
         link.NewRecord();
         link.TaskID = taskID;
         link.EntityID = entity.ID;
@@ -489,6 +501,7 @@ export class CloseWonTaskService {
     private async route(
         taskID: string,
         input: CloseWonTaskInput,
+        provider: IMetadataProvider,
         contextUser: UserInfo,
         result: CloseWonTaskResult,
         kind: CloseWonTaskKind,
@@ -500,8 +513,13 @@ export class CloseWonTaskService {
             );
             return null;
         }
-        const md = new Metadata();
-        const assigneeEntity = md.Entities.find((e) => e.Name === input.Assignee!.EntityName);
+        /**
+         * Also the injected provider. A read rather than a write, so the stakes are lower — but an
+         * instrumented cache can carry a different entity registry, and resolving an EntityID from one
+         * provider to write it through another is how an assignment ends up pointing at the wrong
+         * entity on the one host where it matters.
+         */
+        const assigneeEntity = provider.Entities.find((e) => e.Name === input.Assignee!.EntityName);
         if (!assigneeEntity) {
             result.Issues.push(
                 `The ${kind} task was created but could not be routed: entity `

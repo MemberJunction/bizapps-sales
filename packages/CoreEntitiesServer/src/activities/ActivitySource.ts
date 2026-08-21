@@ -104,6 +104,21 @@ export interface ActivitySourceQuery {
 export interface ActivitySourceBatch {
     Items: NormalizedItem[];
     /**
+     * WHAT THE WATERMARK MEANS, which differs by surface and is why this is the source's answer
+     * rather than the caller's arithmetic.
+     *
+     * A message source may return `max(StartedAt)`: a mail item's `StartedAt` is when it was sent, so
+     * it is always in the past and the newest one is a safe floor.
+     *
+     * A CALENDAR SOURCE MUST NOT. A meeting's `StartedAt` is when it BEGINS, which is routinely in the
+     * future — so `max(StartedAt)` over a batch containing a December meeting sets the watermark to
+     * December, and every meeting created afterwards for any earlier date is filtered out as
+     * already-seen. Permanently, and with no error: the calendar simply stops ingesting.
+     *
+     * So a calendar source reports its own INGEST time (or a provider `ModifiedAt` where one exists) —
+     * a value about when the source looked, not about when the event happens.
+     */
+    /**
      * The newest `StartedAt` in the batch, or null when it is empty.
      *
      * Advanced from the ITEMS rather than from the clock, deliberately. A wall-clock watermark skips

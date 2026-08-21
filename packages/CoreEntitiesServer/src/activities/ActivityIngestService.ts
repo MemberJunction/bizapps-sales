@@ -36,6 +36,15 @@ export interface IngestRunResult {
     Duplicates: number;
     /** Relevant, but matched no open deal. Filed against the parties only. */
     Unattributed: number;
+    /**
+     * Items this run FAILED on, as opposed to discarded.
+     *
+     * The distinction is the whole point and the code did not make it. A discarded item has been SEEN
+     * — the filter looked at it and said no — so the watermark may pass it. A FAILED item has not been
+     * seen to a conclusion, and because `GetMessages` has no date filter (D-17) anything the watermark
+     * passes can never be re-fetched. Advancing over a failure loses the item permanently.
+     */
+    Failed: number;
     WatermarkAdvancedTo: Date | null;
     Issues: string[];
 }
@@ -94,6 +103,7 @@ export class ActivityIngestService {
             Written: 0,
             Duplicates: 0,
             Unattributed: 0,
+            Failed: 0,
             WatermarkAdvancedTo: null,
             Issues: [],
         };
@@ -118,7 +128,21 @@ export class ActivityIngestService {
          * migration in bizapps-common, not somebody editing a lookup row, so the hazard the gate guards
          * against -- a rename silently changing behaviour -- cannot arise here.
          */
-        if (connection.Status !== 'Active') { // vocabulary-grep-allow: operational state, not vocabulary
+        /**
+         * `Error` IS RETRIED. `Paused` and `Disabled` are not.
+         *
+         * This gate used to refuse anything but `Active`, and `clearFailure` sat inside the try block
+         * the gate protected — so one Graph throttle latched the connection off permanently. Nothing
+         * would retry it, and the job then reported SUCCESS with NO_CONNECTIONS when the only mailbox
+         * had been disabled by a transient error. Recovering meant a manual UPDATE on another app's
+         * table.
+         *
+         * The distinction the gate was missing: `Paused` and `Disabled` are decisions a PERSON made and
+         * must be honoured, while `Error` is a record of the last run and says nothing about whether
+         * the next one will work. So `Error` retries, and a clean run clears it.
+         */
+        const runnable = connection.Status === 'Active' || connection.Status === 'Error'; // vocabulary-grep-allow: operational state, not vocabulary
+        if (!runnable) {
             result.Issues.push(
                 `Connection '${connectionID}' is ${connection.Status}, not Active, so no sync was attempted.`,
             );
@@ -164,10 +188,23 @@ export class ActivityIngestService {
             }
 
             // ── THE PRIVACY BOUNDARY. Nothing above this line has looked at content for meaning. ──
-            const verdicts = await this.filter.Apply(allowed, contextUser);
-            const relevant = verdicts.filter((v) => v.IsRelevant);
+            const filtered = await this.filter.Apply(allowed, contextUser);
+            if (filtered.LookupFailed) {
+                /**
+                 * A FAILED LOOKUP IS NOT AN IRRELEVANT BATCH. Counting these as failures is what holds
+                 * the watermark: without it a database blip discarded the whole batch as personal mail
+                 * and moved past it, and D-17 means it could never be re-fetched.
+                 */
+                result.Failed += allowed.length;
+                result.Issues.push(
+                    'The contact-method lookup failed, so nothing could be judged relevant. The watermark '
+                        + 'was held and these items will be re-read.',
+                );
+                return result;
+            }
+            const relevant = filtered.Verdicts.filter((v) => v.IsRelevant);
             result.Relevant = relevant.length;
-            result.Irrelevant = verdicts.length - relevant.length;
+            result.Irrelevant = filtered.Verdicts.length - relevant.length;
 
             for (const verdict of relevant) {
                 await this.fileItem(verdict, connection, source, provider, contextUser, result);
@@ -178,7 +215,20 @@ export class ActivityIngestService {
              * rather than the newest one written. An item the filter discarded has still been seen, and
              * not advancing past it would re-read and re-discard it forever.
              */
-            if (batch.HighWatermark) {
+            /**
+             * THE WATERMARK ONLY MOVES IF NOTHING FAILED.
+             *
+             * Two ways a failure used to slip past it. `fileItem` records a failed write as an Issue
+             * and continues, and `LogActivity` returns `Success: false` rather than throwing — so the
+             * loop completed and `result.Success` was set true regardless. And `RelevanceFilter.lookup`
+             * and `DealMatcher` both return empty on a READ failure, which made a transient database
+             * blip look exactly like a batch of irrelevant mail.
+             *
+             * Either way the watermark advanced over items that were never written, and D-17 means they
+             * can never be re-fetched. Holding the watermark costs one re-read on the next run, which
+             * dedupe absorbs; advancing over a failure costs the item.
+             */
+            if (batch.HighWatermark && result.Failed === 0) {
                 await this.advanceWatermark(
                     connectionID,
                     batch.HighWatermark,
@@ -189,8 +239,19 @@ export class ActivityIngestService {
                 );
             }
 
+            if (result.Failed > 0) {
+                result.Issues.push(
+                    `${result.Failed} item(s) failed rather than being discarded, so the watermark was `
+                        + 'held. They will be re-read next run and dedupe will absorb anything that did land.',
+                );
+            }
+
             await this.clearFailure(connectionID, provider, contextUser);
-            result.Success = true;
+            /**
+             * A run that failed on individual items is NOT a success. It used to report one, which is
+             * what let the connection look healthy while losing mail.
+             */
+            result.Success = result.Failed === 0;
             return result;
         } catch (err) {
             LogError(`ActivityIngestService.RunSync failed for connection ${connectionID}: ${err}`);
@@ -219,7 +280,20 @@ export class ActivityIngestService {
         result: IngestRunResult,
     ): Promise<void> {
         const item = verdict.Item;
-        const deals = await this.matcher.MatchOpenDeals(verdict.Matches, contextUser);
+        const matched = await this.matcher.MatchOpenDeals(verdict.Matches, contextUser);
+        if (matched.ReadFailed) {
+            /**
+             * The deal read failed, so this item has NOT been considered. Reporting it as unattributed
+             * would claim it was looked at and matched nothing.
+             */
+            result.Failed++;
+            result.Issues.push(
+                `"${truncate(item.Subject)}" could not be matched to a deal — the read failed, so it was `
+                    + 'neither filed nor discarded.',
+            );
+            return;
+        }
+        const deals = matched.Matches;
 
         if (deals.length === 0) {
             result.Unattributed++;
@@ -303,6 +377,11 @@ export class ActivityIngestService {
             } else if (written.Success) {
                 result.Written++;
             } else {
+                /**
+                 * COUNTED AS A FAILURE, not just reported. This is one of the two paths that used to
+                 * let the watermark advance over an item that was never written.
+                 */
+                result.Failed++;
                 result.Issues.push(`"${truncate(item.Subject)}" could not be filed: ${written.Issues.join(' | ')}`);
             }
 
@@ -453,7 +532,12 @@ export class ActivityIngestService {
         contextUser: UserInfo,
     ): Promise<void> {
         const row = await this.connectionEntity(connectionID, provider, contextUser);
-        if (!row || !row.LastError) {
+        /**
+         * Clears on either signal, not just `LastError`. A connection left `Error` with a null message —
+         * possible if a previous version failed before writing one — would otherwise stay `Error`
+         * forever even though every run since has succeeded.
+         */
+        if (!row || (!row.LastError && row.Status !== 'Error')) { // vocabulary-grep-allow: operational state, not vocabulary
             return;
         }
         row.LastError = null;

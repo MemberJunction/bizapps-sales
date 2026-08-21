@@ -183,6 +183,25 @@ function item(overrides: Partial<NormalizedItem> = {}): NormalizedItem {
     };
 }
 
+/**
+ * Renames an ActivityType so a code lookup cannot find it, forcing a WRITE failure without a mock.
+ *
+ * The same technique WT6 uses on task types. It produces the shape a transient database failure
+ * produces -- LogActivity returning Success: false -- which is precisely what the ingest used to record
+ * as an Issue while advancing the watermark anyway.
+ */
+async function hideActivityType(ctx: Ctx, code: string): Promise<void> {
+    const [row] = await rows(ctx, E_ACTIVITY_TYPE, `Code = '${code}'`);
+    Assert(!!row, `setup: no ActivityType with Code '${code}' on this host`);
+    const entity = await ProviderOf(ctx).GetEntityObject<mjBizAppsCommonActivityTypeEntity>(
+        E_ACTIVITY_TYPE,
+        ctx.User,
+    );
+    Assert(await entity.Load(String(row['ID'])), 'setup: the activity type would not load');
+    entity.Code = `HIDDEN_${code.toUpperCase()}`;
+    Assert(await entity.Save(), `setup: could not hide the type -- ${entity.LatestResult?.CompleteMessage}`);
+}
+
 const writer = new ActivityWriterService();
 const reader = new ActivityReader();
 const ingest = new ActivityIngestService();
@@ -436,7 +455,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                 const deal = await openDeal(ctx);
                 await giveContactAnAddress(ctx, deal.ContactID);
 
-                const verdicts = await new RelevanceFilter().Apply(
+                const filtered = await new RelevanceFilter().Apply(
                     [
                         item({ ExternalID: 'ac6-known' }),
                         item({
@@ -450,6 +469,8 @@ export const ActivitiesChecks: NamedCheck[] = [
                     ctx.User,
                 );
 
+                Assert(filtered.LookupFailed === false, 'the contact-method lookup itself must have worked');
+                const verdicts = filtered.Verdicts;
                 const known = verdicts.find((v) => v.Item.ExternalID === 'ac6-known');
                 const unknown = verdicts.find((v) => v.Item.ExternalID === 'ac6-unknown');
                 Assert(!!known?.IsRelevant, 'an item involving a stored contact method IS relevant');
@@ -734,7 +755,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                     'and the compared literal must be lower-cased too, or the fold only works one side',
                 );
 
-                const verdicts = await new RelevanceFilter().Apply(
+                const filtered = await new RelevanceFilter().Apply(
                     [
                         item({
                             ExternalID: 'ac12-mixed',
@@ -744,6 +765,8 @@ export const ActivitiesChecks: NamedCheck[] = [
                     ctx.User,
                 );
 
+                Assert(filtered.LookupFailed === false, 'the lookup must have run');
+                const verdicts = filtered.Verdicts;
                 Assert(
                     verdicts[0].IsRelevant,
                     'a mixed-case address MUST match a lower-case stored value. If this fails on Postgres '
@@ -900,10 +923,22 @@ export const ActivitiesChecks: NamedCheck[] = [
                 const [connection] = await rows(ctx, E_SYNC_CONNECTION, `ID = '${connectionID}'`);
                 Assert(!!connection['LastSyncAt'], 'the MESSAGE watermark is on the column');
                 const settings = JSON.parse(String(connection['Settings'] ?? '{}')) as Record<string, unknown>;
+                /**
+                 * THE CALENDAR WATERMARK IS INGEST TIME, NOT THE MEETING'S START.
+                 *
+                 * This assertion used to expect `olderMeeting.StartedAt` — it was written against the
+                 * defect and passed because `FixtureActivitySource` reproduced it. A fixture that
+                 * repeats a bug cannot detect it, which is how a broken calendar watermark survived
+                 * eighteen checks.
+                 */
                 AssertEqual(
                     String(settings['CalendarLastSyncAt']),
-                    olderMeeting.StartedAt.toISOString(),
-                    'and the CALENDAR watermark is in Settings, at its own position',
+                    calendarSource.fetchedAt.toISOString(),
+                    'the CALENDAR watermark is the ingest instant, in Settings, at its own position',
+                );
+                Assert(
+                    String(settings['CalendarLastSyncAt']) !== olderMeeting.StartedAt.toISOString(),
+                    'and explicitly NOT the meeting start — that is the defect this guards',
                 );
             }),
     },
@@ -1103,6 +1138,140 @@ export const ActivitiesChecks: NamedCheck[] = [
                     off['Outcome'] === null,
                     'Outcome stays NULL: the nearest seeded value is NoShow, which means a meeting went ahead '
                         + 'and somebody failed to attend — a different fact, and a false one here',
+                );
+            }),
+    },
+    {
+        Id: 'activities.AC19',
+        Name: 'AC19: a FUTURE meeting does not push the calendar watermark into the future',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+                await giveContactAnAddress(ctx, deal.ContactID);
+                const connectionID = await makeConnection(ctx, null);
+
+                /**
+                 * THE DEFECT THIS EXISTS FOR, stated as the failure it produced.
+                 *
+                 * A meeting's StartedAt is when it BEGINS, which is routinely in the future. Under
+                 * `max(StartedAt)` one sync seeing a December meeting set the watermark to December — and
+                 * every meeting created afterwards for any earlier date was then filtered out as
+                 * already-seen. Permanently, with no error: the calendar simply stopped ingesting and the
+                 * timeline stopped growing.
+                 *
+                 * The start date here is deliberately years out, so the assertion cannot pass by the run
+                 * happening to be close to it.
+                 */
+                const farFuture = new Date(Date.UTC(2031, 11, 1, 10, 0, 0));
+                const source = new FixtureActivitySource(
+                    [
+                        item({
+                            ExternalID: 'ac19-future-meeting',
+                            TypeCode: 'Meeting',
+                            Subject: 'AC19 planning session, years out',
+                            Direction: 'Internal',
+                            StartedAt: farFuture,
+                        }),
+                    ],
+                    'Calendar',
+                );
+
+                const run = await ingest.RunSync(connectionID, source, ProviderOf(ctx), ctx.User);
+                Assert(run.Success, `the run failed — ${run.Issues.join(' | ')}`);
+                AssertEqual(run.Written, 1, 'the future meeting is still ingested — it is a real event');
+
+                Assert(
+                    !!run.WatermarkAdvancedTo,
+                    'the watermark must still advance, or the calendar would re-read forever',
+                );
+                Assert(
+                    run.WatermarkAdvancedTo!.getTime() < farFuture.getTime(),
+                    `the watermark must NOT be pushed to the meeting start — got `
+                        + `${run.WatermarkAdvancedTo!.toISOString()} against an event at `
+                        + `${farFuture.toISOString()}. A future watermark discards every meeting created `
+                        + `afterwards for an earlier date, silently and permanently.`,
+                );
+                AssertEqual(
+                    run.WatermarkAdvancedTo!.toISOString(),
+                    source.fetchedAt.toISOString(),
+                    'it is the ingest instant — when the source LOOKED, not when the event happens',
+                );
+
+                /**
+                 * AND THE CONSEQUENCE, PROVED RATHER THAN ARGUED: a meeting for an earlier date, created
+                 * after that watermark, still comes through. Under the defect this second run saw nothing.
+                 */
+                const nextSource = new FixtureActivitySource(
+                    [
+                        item({
+                            ExternalID: 'ac19-earlier-meeting',
+                            TypeCode: 'Meeting',
+                            Subject: 'AC19 meeting next week',
+                            Direction: 'Internal',
+                            StartedAt: new Date(Date.UTC(2026, 8, 15, 9, 0, 0)),
+                        }),
+                    ],
+                    'Calendar',
+                );
+                nextSource.fetchedAt = new Date(source.fetchedAt.getTime() + 60_000);
+
+                const second = await ingest.RunSync(connectionID, nextSource, ProviderOf(ctx), ctx.User);
+                Assert(second.Success, `the second run failed — ${second.Issues.join(' | ')}`);
+                AssertEqual(
+                    second.Written,
+                    1,
+                    'a meeting for an EARLIER date, created after the watermark, must still be ingested',
+                );
+            }),
+    },
+    {
+        Id: 'activities.AC20',
+        Name: 'AC20: a failed write HOLDS the watermark — discarded and failed are different',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+                await giveContactAnAddress(ctx, deal.ContactID);
+                const connectionID = await makeConnection(ctx, null);
+
+                /**
+                 * FORCING A WRITE FAILURE WITHOUT A MOCK. The activity type is renamed out from under the
+                 * writer, so `LogActivity` cannot resolve `Email` by code and returns Success: false — the
+                 * same shape a transient database failure produces, and the shape the ingest used to
+                 * record as an Issue while advancing the watermark regardless.
+                 *
+                 * Because `GetMessages` has no date filter (D-17), anything the watermark passes can never
+                 * be re-fetched — so advancing over a failure loses the item for good. Holding it costs one
+                 * re-read, which dedupe absorbs.
+                 */
+                await hideActivityType(ctx, 'Email');
+
+                const source = new FixtureActivitySource([item({ ExternalID: 'ac20-will-fail' })]);
+                const run = await ingest.RunSync(connectionID, source, ProviderOf(ctx), ctx.User);
+
+                AssertEqual(run.Fetched, 1, 'the item was fetched');
+                AssertEqual(run.Relevant, 1, 'and judged relevant');
+                AssertEqual(run.Written, 0, 'but not written');
+                AssertEqual(run.Failed, 1, 'and counted as FAILED, not discarded');
+                Assert(
+                    run.Success === false,
+                    'a run that failed on an item is not a success — reporting one is what let the '
+                        + 'connection look healthy while losing mail',
+                );
+                AssertEqual(
+                    run.WatermarkAdvancedTo,
+                    null,
+                    'and the watermark was HELD — advancing past an unwritten item loses it permanently, '
+                        + 'because there is no date filter to fetch it again with',
+                );
+
+                const [connection] = await rows(ctx, E_SYNC_CONNECTION, `ID = '${connectionID}'`);
+                Assert(
+                    !connection['LastSyncAt'],
+                    'nothing was persisted to the watermark column either',
                 );
             }),
     },

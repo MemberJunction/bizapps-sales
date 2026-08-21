@@ -20,6 +20,18 @@ import { escapeSql } from './ActivityWriterService.js';
 import { E_DEAL, E_DEAL_STATUS_TYPE } from '@mj-biz-apps/sales-entities';
 import type { KnownAddress } from './RelevanceFilter.js';
 
+/**
+ * What `MatchOpenDeals` returns.
+ *
+ * `ReadFailed` for the same reason `RelevanceFilter` needs `LookupFailed`: no matches and a failed read
+ * produced the identical value, so a database blip was filed as "involves a known contact but matches
+ * no open deal" — an item reported as seen-and-unattributed when it had not been looked at.
+ */
+export interface DealMatchResult {
+    Matches: DealMatch[];
+    ReadFailed: boolean;
+}
+
 export interface DealMatch {
     DealID: string;
     /** Why this deal was chosen — carried so a surface can explain an attribution. */
@@ -55,11 +67,14 @@ export class DealMatcher {
      * that cannot happen. Mail about a closed deal that involves a known contact still lands: it becomes
      * a party-linked activity with no deal, which is the honest description of it.
      */
-    public async MatchOpenDeals(matches: KnownAddress[], contextUser: UserInfo): Promise<DealMatch[]> {
+    public async MatchOpenDeals(
+        matches: KnownAddress[],
+        contextUser: UserInfo,
+    ): Promise<DealMatchResult> {
         const personIDs = [...new Set(matches.map((m) => m.PersonID).filter((id): id is string => !!id))];
         const orgIDs = [...new Set(matches.map((m) => m.OrganizationID).filter((id): id is string => !!id))];
         if (personIDs.length === 0 && orgIDs.length === 0) {
-            return [];
+            return { Matches: [], ReadFailed: false };
         }
 
         const clauses: string[] = [];
@@ -88,9 +103,16 @@ export class DealMatcher {
             },
             contextUser,
         );
-        const openIDs = statuses.Success ? (statuses.Results ?? []).map((row) => row.ID) : [];
+        if (!statuses.Success) {
+            return { Matches: [], ReadFailed: true };
+        }
+        const openIDs = (statuses.Results ?? []).map((row) => row.ID);
         if (openIDs.length === 0) {
-            return [];
+            /**
+             * No OPEN status configured is a real answer, not a failure: nothing can match, and the
+             * item has genuinely been considered.
+             */
+            return { Matches: [], ReadFailed: false };
         }
         const openList = openIDs.map((id) => `'${escapeSql(id)}'`).join(', ');
 
@@ -104,7 +126,7 @@ export class DealMatcher {
             contextUser,
         );
         if (!r.Success) {
-            return [];
+            return { Matches: [], ReadFailed: true };
         }
         const personSet = new Set(personIDs.map((id) => id.toLowerCase()));
         const orgSet = new Set(orgIDs.map((id) => id.toLowerCase()));
@@ -125,6 +147,6 @@ export class DealMatcher {
                 found.push({ DealID: deal.ID, Basis: 'Account', PartyID: account });
             }
         }
-        return found;
+        return { Matches: found, ReadFailed: false };
     }
 }

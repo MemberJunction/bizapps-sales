@@ -122,6 +122,25 @@ export class ForecastSnapshotJob {
         result.Measured = batch.Rows.length;
         result.Issues.push(...batch.Issues);
 
+        /**
+         * A SOURCE THAT REPORTED A PROBLEM AND NO ROWS IS A FAILURE, not a quiet quarter.
+         *
+         * `Success = true` used to be set unconditionally at the end, which threw away the one
+         * distinction the seam exists to preserve. `QueryForecastSource` refuses by NAME when its query
+         * is missing — and that refusal became indistinguishable from a period with nothing in it, so
+         * renaming or deleting the query left the daily job green forever, reporting "measured 0, wrote
+         * 0". Exactly the silence the source was written to avoid, discarded one layer up.
+         *
+         * Zero rows and NO issues is still a success: that is a genuinely empty period.
+         */
+        if (batch.Rows.length === 0 && batch.Issues.length > 0) {
+            result.Issues.push(
+                'The source reported no rows AND raised issues, so this is a failed measurement rather '
+                    + 'than an empty period. Nothing was captured.',
+            );
+            return result;
+        }
+
         const existing = await this.capturedToday(period, contextUser);
         const capturedAt = new Date();
 
@@ -171,7 +190,12 @@ export class ForecastSnapshotJob {
             }
         }
 
-        result.Success = true;
+        /**
+         * A row that could not be saved fails the capture. Reporting success with a save error in
+         * `Issues` would leave a partial snapshot looking like a complete one, and a forecast series
+         * with a silently missing grain is worse than a visible gap.
+         */
+        result.Success = result.Issues.every((i) => !i.includes('could not be saved'));
         return result;
     }
 

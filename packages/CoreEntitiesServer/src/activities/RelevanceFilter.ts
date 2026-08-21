@@ -32,6 +32,21 @@ export interface KnownAddress {
     OrganizationID: string | null;
 }
 
+/**
+ * What `Apply` returns.
+ *
+ * `LookupFailed` exists because the alternative is indistinguishable from the ordinary case: a failed
+ * `ContactMethod` read returns no matches, every item then looks irrelevant, and the run reports a
+ * clean batch of personal mail. The filter is right to FAIL CLOSED — capturing nothing on a database
+ * blip is the safe direction — but the caller has to be able to tell that apart from a genuinely
+ * irrelevant batch, because one may advance the watermark and the other must not.
+ */
+export interface RelevanceResult {
+    Verdicts: RelevanceVerdict[];
+    /** True when the contact-method read itself failed. Nothing was matched, and nothing was seen. */
+    LookupFailed: boolean;
+}
+
 export interface RelevanceVerdict {
     Item: NormalizedItem;
     /** True when at least one participant matched a stored contact method. */
@@ -50,9 +65,9 @@ export class RelevanceFilter {
      * performance rule forbids — and at a mailbox's scale it is the difference between one round trip
      * and one per message.
      */
-    public async Apply(items: NormalizedItem[], contextUser: UserInfo): Promise<RelevanceVerdict[]> {
+    public async Apply(items: NormalizedItem[], contextUser: UserInfo): Promise<RelevanceResult> {
         if (items.length === 0) {
-            return [];
+            return { Verdicts: [], LookupFailed: false };
         }
 
         const addresses = [
@@ -61,12 +76,15 @@ export class RelevanceFilter {
             ),
         ];
         if (addresses.length === 0) {
-            return items.map((item) => ({ Item: item, IsRelevant: false, Matches: [], Unmatched: [] }));
+            return {
+                Verdicts: items.map((item) => ({ Item: item, IsRelevant: false, Matches: [], Unmatched: [] })),
+                LookupFailed: false,
+            };
         }
 
-        const known = await this.lookup(addresses, contextUser);
+        const { known, failed } = await this.lookup(addresses, contextUser);
 
-        return items.map((item) => {
+        const verdicts = items.map((item) => {
             const itemAddresses = [
                 ...new Set(item.Participants.map((p) => p.Address.trim().toLowerCase()).filter(Boolean)),
             ];
@@ -82,6 +100,7 @@ export class RelevanceFilter {
             }
             return { Item: item, IsRelevant: matches.length > 0, Matches: matches, Unmatched: unmatched };
         });
+        return { Verdicts: verdicts, LookupFailed: failed };
     }
 
     /**
@@ -105,7 +124,10 @@ export class RelevanceFilter {
      * something done from here. The in-memory fold is KEPT as well, because it is what makes the returned
      * map's keys match what the caller looks up.
      */
-    private async lookup(addresses: string[], contextUser: UserInfo): Promise<Map<string, KnownAddress>> {
+    private async lookup(
+        addresses: string[],
+        contextUser: UserInfo,
+    ): Promise<{ known: Map<string, KnownAddress>; failed: boolean }> {
         const filter = BuildContactMethodFilter(addresses);
         const r = await new RunView().RunView<{
             Value: string;
@@ -127,7 +149,11 @@ export class RelevanceFilter {
              * captured — the safe direction. Failing open would capture the entire mailbox on a transient
              * database error, which is the one outcome this filter exists to prevent.
              */
-            return known;
+            /**
+             * FAIL CLOSED, AND SAY SO. Returning the empty map alone made a transient read failure
+             * identical to a batch nobody knew — same verdicts, same counts, and the watermark moved.
+             */
+            return { known, failed: true };
         }
 
         for (const row of r.Results ?? []) {
@@ -148,7 +174,7 @@ export class RelevanceFilter {
                 OrganizationID: row.OrganizationID ?? null,
             });
         }
-        return known;
+        return { known, failed: false };
     }
 }
 

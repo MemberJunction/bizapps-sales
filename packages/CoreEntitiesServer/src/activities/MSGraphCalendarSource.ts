@@ -102,6 +102,12 @@ export class MSGraphCalendarSource implements IActivitySource {
             };
         }
 
+        /**
+         * Stamped before the request for the reason given at the return below: a value taken after the
+         * call would skip anything created while it was in flight.
+         */
+        const fetchedAt = new Date();
+
         try {
             /**
              * UNLIKE `GetMessages`, A DATE FILTER IS AVAILABLE HERE. Calling `/events` directly means the
@@ -132,11 +138,26 @@ export class MSGraphCalendarSource implements IActivitySource {
                 }
             }
 
+            /**
+             * THE WATERMARK IS INGEST TIME, NOT max(StartedAt) — and this is the one line where the
+             * calendar must not copy the message source.
+             *
+             * A meeting's `StartedAt` is when it BEGINS. One sync that sees a December meeting would
+             * set the watermark to December, and every meeting created afterwards for any earlier date
+             * would be discarded as already-seen. Forever, silently: no error, no issue, the calendar
+             * just stops ingesting and the timeline quietly stops growing.
+             *
+             * `fetchedAt` is stamped BEFORE the request, not after. Anything created while the request
+             * was in flight then has a `ModifiedAt`/creation time after the watermark and is picked up
+             * next run; stamping afterwards would skip exactly that window.
+             *
+             * The filter this pairs with is a MODIFICATION-time filter, not a start-time one — see the
+             * `Since` handling in the fetch above. A start-time filter would also mean a meeting moved
+             * into the past was never seen again.
+             */
             return {
                 Items: items,
-                HighWatermark: items.length
-                    ? new Date(Math.max(...items.map((i) => i.StartedAt.getTime())))
-                    : null,
+                HighWatermark: items.length ? fetchedAt : null,
                 Issues: issues,
             };
         } catch (err) {
