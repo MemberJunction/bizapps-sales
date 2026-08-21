@@ -72,9 +72,14 @@ const MUTATIONS = [
       to: '        if (false && (!this.Name || !this.Name.trim())) {' },
     { id: 'M-SD9', file: SEQ, expect: ['SD9'],
       from: '    return value;\n}', to: "    return value.replace('DEAL-', 'DEAL-0');\n}" },
+    // RETARGETED. This named `saveApplyingStageOrderStatus` and `saveWithNewDealNumber`, two methods that
+    // were merged into `saveWithinScope` rounds ago. The anchor therefore matched ZERO times, the driver
+    // reported a SKIP and exited 1 — so the one script whose job is to prove checks can fail was itself
+    // failing to run, quietly, on every invocation. Now aimed at the routing decision that survived.
     { id: 'M-SD10', file: DES, expect: ['SD10'],
-      from: '        const saved = this.IsSaved || this.DealNumber\n            ? await this.saveApplyingStageOrderStatus(options, stageOrder)\n            : await this.saveWithNewDealNumber(options, stageOrder);',
-      to: '        const saved = await this.saveWithNewDealNumber(options, stageOrder);' },
+      from: 'assignNumber: false,',
+      to: 'assignNumber: true,',
+      note: 'an existing deal is renumbered on every save, which is what SD10 forbids' },
     { id: 'M-SD11', file: SEQ, expect: ['SD11'],
       from: '    const rows = await sqlProvider.ExecuteSQL(',
       to: "    await sqlProvider.ExecuteSQL(sql, {}, { isMutation: true, description: 'MUTANT double-take' }, contextUser);\n    const rows = await sqlProvider.ExecuteSQL(" },
@@ -211,6 +216,75 @@ const MUTATIONS = [
       from: '        if (!probabilityIsTheirs) {',
       to: '        if (true) {',
       note: 'the stage default always overwrites a stated probability' },
+
+    // DEFECT 1, REPLAYED. Reading OrderID before the save is the state the code shipped in: provisioning
+    // moved into Save() and the task call stayed twenty lines above it. Every seeded, legacy and imported
+    // deal then closed with a warning saying it had no order, while the save created one.
+    { id: 'M-TK1', file: CDO, expect: ['WT13'],
+      from: "                        // Read AFTER the save: provisioning happens inside it. See the note above.\n                        OrderID: String(deal.OrderID ?? ''),",
+      to: "                        OrderID: String(''),",
+      note: 'the task service sees an empty OrderID. A PROXY, not an exact replay: the real defect only emptied it for deals that had no order YET, whereas this empties it always, which is why WT10 falls too. The driver takes one from/to pair, and moving a 30-line block is not expressible as one' },
+
+    // DEFECT 2, REPLAYED. Dropping ContractID from the input literal makes the service's contract branch
+    // unreachable again, so every contract-processing task links the deal.
+    { id: 'M-TK2', file: CDO, expect: ['WT14'],
+      from: '                        ContractID: deal.ContractID ?? undefined,',
+      to: '                        ContractID: undefined,',
+      note: 'the contract task links the deal, and the service cannot know otherwise' },
+
+    // DEFECT 5. Un-gate provisioning and a permitted edit to a frozen deal mints an order again.
+    { id: 'M-LK1', file: DES, expect: ['SD27'],
+      from: '        if (!this._lockedAtSave) {\n            this.provisionEmbeddedOrder();',
+      to: '        if (true) {\n            this.provisionEmbeddedOrder();',
+      note: 'a locked deal provisions an order from a description edit' },
+
+
+    // DEFECT 7. Leave the number in memory and the retry re-inserts a re-issued one.
+    { id: 'M-DN1', file: DES, expect: ['SD29'],
+      from: '                if (work.assignNumber) {\n                    this.DealNumber = null;',
+      to: '                if (false && work.assignNumber) {\n                    this.DealNumber = null;',
+      note: 'a rolled-back deal number survives, and the deal becomes unsaveable' },
+
+    // ── THE FOUR-WRITERS ROUND. One mechanism replaced four special cases, so these five prove the
+    // five distinct things it now decides. Every one of them was a live defect a week ago.
+
+    // TWO ROWS FOR ONE TRANSITION, which is what a close that moved the stage actually produced: the
+    // operation wrote its event and then moved the stage, so the save wrote a second. Reproduced by
+    // calling the single writer twice -- appendStageEvent builds a NEW entity per call, so this really
+    // does insert two rows. CD4 counts events on a close that does not move the stage; CD15 counts them
+    // on one that does, which is the case nothing covered while the defect was live.
+    { id: 'M-ST1', file: DES, expect: ['CD4', 'CD15', 'BD2'],
+      from: 'await this.appendStageEvent(work.stageMove);',
+      to: 'await this.appendStageEvent(work.stageMove); await this.appendStageEvent(work.stageMove);',
+      note: 'one transition, two append-only rows. BROAD BY NATURE: it doubles EVERY event, so seven count-based checks fall (BD1, BD2, BD4, CD4, CD11, CD15, CD16). The three named above are the ones that must, and CD15 is the one that could not before it existed' },
+
+    // THE CASE-SENSITIVE COMPARE. Three writers on one trigger and only this one used ===, so a caller
+    // that lowercased its ids was recorded as moving the deal to the stage it was already in.
+    { id: 'M-ST2', file: DES, expect: ['SD32'],
+      from: "priorStageID.toLowerCase() !== String(this.PipelineStageID ?? '').toLowerCase()",
+      to: "priorStageID !== String(this.PipelineStageID ?? '')",
+      note: 'a normalised id reads as a stage move, and a self-transition is logged' },
+
+    // THE DEFAULTS WRITER RUNNING ON A DECLARED TRANSITION. A reopen naming a stage had its probability
+    // re-derived from that stage, AFTER its own event had stamped the figure being left behind.
+    { id: 'M-ST3', file: DES, expect: ['CD16'],
+      from: 'this._lockedAtSave || this._declaredTransition ? null : await this.planStageDefaults()',
+      to: 'this._lockedAtSave ? null : await this.planStageDefaults()',
+      note: 'a reopen loses the probability a human set, and disagrees with its own provenance row' },
+
+    // THE CREATE GUARD ON THE STAGE LOG. A new deal whose stage is set twice -- what NewDeal() plus a
+    // rep's choice does -- looked like a MOVE, because the first assignment becomes the OldValue.
+    { id: 'M-ST4', file: DES, expect: ['SD30'],
+      from: 'if (!this.IsSaved) {\n            return null;\n        }\n\n        const priorStageID',
+      to: 'if (false) {\n            return null;\n        }\n\n        const priorStageID',
+      note: 'a deal being created logs a transition out of a stage it was never in' },
+
+    // THE SAME QUESTION ON THE OWNER STAMP. Dirty is the right question on an update and useless on a
+    // create, so an importer set the column directly and walked past the refusal SD26 pins.
+    { id: 'M-OW2', file: DES, expect: ['SD31'],
+      from: "if (!this.callerSuppliedValue('OwnerEmployeeID', this.OwnerEmployeeID)) {",
+      to: "if (!this.GetFieldByName('OwnerEmployeeID')?.Dirty) {",
+      note: 'a created deal keeps a hand-set owner column, disagreeing with its own roster' },
 
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where

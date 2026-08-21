@@ -33,8 +33,8 @@
     "both, because the interesting failure is a bundle that registers 4 and runs 0."
   ],
   "bundles": {
-    "save-deal": { "count": 22, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD26" },
-    "close-deal": { "count": 14, "requires": "orders", "ids": "CD1-CD14" },
+    "save-deal": { "count": 28, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD32" },
+    "close-deal": { "count": 16, "requires": "orders", "ids": "CD1-CD16" },
     "product-picker": { "count": 4, "requires": "orders", "ids": "PP1-PP4" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
     "close-won-contract": { "count": 4, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild" },
@@ -53,7 +53,7 @@
       "Kept as history rather than deleted, because the next person to face a two-branch count collision",
       "should be able to find the reasoning rather than re-derive it."
     ],
-    "close-won-tasks": { "count": 12, "requires": "tasks", "ids": "WT1-WT12" },
+    "close-won-tasks": { "count": 14, "requires": "tasks", "ids": "WT1-WT14" },
     "activities": { "count": 18, "requires": "common", "ids": "AC1-AC18" },
     "forecast": { "count": 13, "requires": null, "ids": "FS1-FS13" }
   },

@@ -107,13 +107,42 @@ const COLLECTION_SECTION: Readonly<Record<string, DealWorkspaceSection>> = {
     PaymentSchedule: 'schedule',
 };
 
-/** `Lines[3].ProductName` → collection, index, field. Null when the source is not a child error. */
+/**
+ * `Lines[3].ProductName` → collection, index, field. Null when the source is not a child error.
+ *
+ * ── THE PREFIX IS THE WHOLE FIX, AND EVERY LINE ERROR LANDED ON THE WRONG PANE WITHOUT IT ────────
+ *
+ * The pattern used to anchor the collection on `[A-Za-z]+`, which was right when a child error read
+ * `Lines[3].Quantity`. It does not any more: `EmbeddedRecord.prefixError` emits
+ *
+ *     OrderID_Object.Lines[3].Quantity
+ *
+ * and neither `_` nor `.` is in `[A-Za-z]`. So the match failed, the error fell through to
+ * `DEFAULT_SECTION` with a null row index, and the result was the worst combination available: Save
+ * disabled, the Lines badge reading 0, no row marked, and the message shown on **Party info** — a pane
+ * that has nothing to do with it. `COLLECTION_SECTION.Lines` became unreachable, which is the tell.
+ *
+ * ── WHY THE LAST SEGMENT RATHER THAN THE WHOLE PATH ─────────────────────────────────────────────
+ *
+ * The path names how the collection was REACHED; `COLLECTION_SECTION` is keyed by what the collection
+ * IS. `OrderID_Object.Lines` and a future `SomethingElse.Lines` are the same grid to a reader, so the
+ * last segment is the part that answers "which pane renders this". Taking the whole path would put the
+ * embed's field name in a lookup table that has no business knowing it.
+ *
+ * Both shapes are accepted deliberately: the un-prefixed form is what a direct child of the deal still
+ * produces, and a regex that only understood the new shape would move the bug rather than fix it.
+ */
 function parseChildSource(source: string): { Collection: string; Index: number; Field: string | null } | null {
-    const match = /^([A-Za-z]+)\[(\d+)\](?:\.(.+))?$/.exec(source);
+    const match = /^([A-Za-z0-9_.]+)\[(\d+)\](?:\.(.+))?$/.exec(source);
     if (!match) {
         return null;
     }
-    return { Collection: match[1], Index: Number(match[2]), Field: match[3] ?? null };
+    const path = match[1];
+    const collection = path.slice(path.lastIndexOf('.') + 1);
+    if (!collection) {
+        return null;
+    }
+    return { Collection: collection, Index: Number(match[2]), Field: match[3] ?? null };
 }
 
 /**
@@ -156,4 +185,56 @@ export function ProjectValidation(result: ValidationResult | null): DealWorkspac
     // disagree: a result carrying only warnings has Success true, and a caller that merged results would
     // otherwise have to keep a separate flag in step by hand.
     return { IsValid: !issues.some((i) => i.Severity === 'error'), Issues: issues };
+}
+
+
+/**
+ * A refused discount, as a BLOCKING issue on the row that carries it.
+ *
+ * ── WHY THIS IS NOT A WARNING ───────────────────────────────────────────────────────────────────
+ *
+ * `SetDiscountPercent` refuses an ambiguous figure — is `0.5` half a percent or fifty? — and leaves the
+ * entity holding its previous value. The refusal was recorded in a map the TEMPLATE read, and nothing
+ * else. `CanSave` never saw it.
+ *
+ * So the sequence a rep actually hit was: type `0.5`, see the refusal, and watch the input keep showing
+ * `0.5` while the entity still held `0.10`. Save stayed enabled. The quote went out at ten percent,
+ * with a screen that had said so nowhere. A hundred-fold discount error is not a crash; it is a number
+ * nobody questions.
+ *
+ * `LineAdvisories` deliberately produces warnings that never gate the save, and folding refusals in
+ * there would have kept the bug. These are errors, and `MergeValidation` is what makes them count.
+ */
+export function DiscountRefusalIssues(
+    refusals: readonly { RowIndex: number | null; Reason: string }[],
+): DealWorkspaceIssue[] {
+    return refusals.map((r) => ({
+        Section: 'lines' as DealWorkspaceSection,
+        Field: 'DiscountPct',
+        RowIndex: r.RowIndex,
+        Severity: 'error' as const,
+        Message: r.Reason,
+    }));
+}
+
+/**
+ * Combines the entity's own verdict with warnings and with issues that must BLOCK the save.
+ *
+ * The component used to assemble this inline as `IsValid: entity.IsValid`, with a comment explaining
+ * that advisories are warnings and therefore never change savability. True of advisories, and it is
+ * exactly the line a blocking issue has to get past — so the combination now lives here, where the
+ * three inputs are named and a gate can assert what happens to each.
+ *
+ * ORDER OF `Issues` IS NOT COSMETIC: blocking issues come before warnings, because `SaveBlockedReason`
+ * shows the FIRST error it finds and a rep reading a disabled Save wants the reason that disabled it.
+ */
+export function MergeValidation(
+    entity: DealWorkspaceValidation,
+    warnings: readonly DealWorkspaceIssue[],
+    blocking: readonly DealWorkspaceIssue[],
+): DealWorkspaceValidation {
+    return {
+        IsValid: entity.IsValid && blocking.length === 0,
+        Issues: [...entity.Issues, ...blocking, ...warnings],
+    };
 }

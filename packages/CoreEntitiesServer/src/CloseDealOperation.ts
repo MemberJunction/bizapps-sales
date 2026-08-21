@@ -47,7 +47,6 @@ import {
     type SalesCloseWonPolicy,
     type SalesReopenDealInput,
     type SalesReopenDealOutput,
-    type mjBizAppsSalesDealStageEventEntity,
 } from '@mj-biz-apps/sales-entities';
 
 import { DealEntityServer } from './DealEntityServer.js';
@@ -60,7 +59,8 @@ const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const DEAL_TYPE_ENTITY = 'MJ_BizApps_Sales: Deal Types';
 const LOSS_REASON_ENTITY = 'MJ_BizApps_Sales: Loss Reasons';
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
-const STAGE_EVENT_ENTITY = 'MJ_BizApps_Sales: Deal Stage Events';
+// No STAGE_EVENT_ENTITY here any more: this operation no longer writes to the stage log. It declares
+// the transition and DealEntityServer appends the one row it owes. See DeclareTransition.
 
 /** The behaviour flags a close reads off the target status. Never its name. */
 interface StatusFlags {
@@ -335,13 +335,60 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              * the surface exists to badge it.
              */
             const taskIssues: SalesCloseIssue[] = [];
+
+            this.stampClose(deal, input, target, routing, user);
+
+            if (!(await deal.Save())) {
+                throw new Error(
+                    `the deal could not be saved: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+                );
+            }
+
+            // The save appended the close's `DealStageEvent` — one row, whether or not the stage moved.
+            // Read AFTER it for the same reason `OrderID` is: the row does not exist until then.
+            const stageEvent = deal.LastStageEventID;
+
+            /**
+             * ── THE TASKS RUN **AFTER** THE SAVE, AND THAT IS THE FIX RATHER THAN A TIDY-UP ──────────
+             *
+             * This block used to sit twenty lines earlier, before `deal.Save()`, and it read
+             * `deal.OrderID`. That was correct until provisioning MOVED INTO `Save()` this round. After
+             * that move, closing any deal that did not already carry an order — every seeded, legacy and
+             * imported deal — read an EMPTY OrderID, so the service reported
+             *
+             *     "The deal has no order, so no order-review task was created…"
+             *
+             * as a warning on a SUCCESSFUL close, raised no order-review task, and then `Save()` created
+             * the order a moment later. Finance got nothing, and the warning stated the opposite of what
+             * had just happened. Two rules that were each right on their own, in the wrong order.
+             *
+             * Reading after the save is the smaller of the two available fixes: provisioning explicitly
+             * beforehand would put a second caller in the business of knowing when an order is due, which
+             * is exactly what moving it into `Save()` was for.
+             *
+             * STILL INSIDE THE TRANSACTION. `CommitTransaction` is below, so the tasks remain
+             * all-or-none with the close — `close-won-tasks.WT9` is the check that pins that.
+             *
+             * ── AND `ContractID` IS PASSED, WHICH IT NEVER WAS ──────────────────────────────────────
+             *
+             * `executeRoute` sets `deal.ContractID` in the routing loop that runs before this, so the
+             * value has been available all along and the input literal simply omitted it. The service's
+             * `if (input.ContractID)` branch was therefore UNREACHABLE from production, and its
+             * "contracts is not installed" fallback was dead code. Every contract-processing task linked
+             * the DEAL instead of the contract it exists to process, and nothing reported it, because the
+             * branch that would have reported it is the one that never ran.
+             */
             if (target.IsWon) {
                 const cfg = ReadCloseWonTaskConfig(policy);
                 const taskResult = await new CloseWonTaskService().CreateCloseWonTasks(
                     {
                         DealID: deal.ID,
+                        // Read AFTER the save: provisioning happens inside it. See the note above.
                         OrderID: String(deal.OrderID ?? ''),
                         PipelineID: deal.PipelineID,
+                        // Set by the routing loop above. Omitting it is what made the contract task link
+                        // the deal, and made the service's own fallback message unreachable.
+                        ContractID: deal.ContractID ?? undefined,
                         // No task-type IDs: the service resolves both by Code from rows this repo
                         // seeds. What the policy still carries is the part that varies — the assignee.
                         Assignee: cfg.AssigneeRecordID
@@ -358,14 +405,6 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 for (const message of taskResult.Issues) {
                     taskIssues.push({ Section: 'deal', Field: null, Severity: 'warning', Message: message });
                 }
-            }
-
-            const stageEvent = await this.stampClose(deal, input, target, routing, provider, user);
-
-            if (!(await deal.Save())) {
-                throw new Error(
-                    `the deal could not be saved: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
-                );
             }
 
             await db.CommitTransaction();
@@ -592,32 +631,30 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
      * §7 also calls for writing an `Activity` here. The Activity spine does not exist in common or MJ
      * core, so that step is skipped and recorded in CLOSE-FLOW-DECISIONS.md D-CF5 rather than faked.
      */
-    private async stampClose(
+    private stampClose(
         deal: DealEntityServer,
         input: SalesCloseDealInput,
         target: StatusFlags,
         routing: SalesCloseRoutingResult[],
-        provider: IMetadataProvider,
         user: UserInfo,
-    ): Promise<string> {
-        const event = await provider.GetEntityObject<mjBizAppsSalesDealStageEventEntity>(STAGE_EVENT_ENTITY, user);
-        event.NewRecord();
-        event.DealID = deal.ID;
-        event.FromStageID = deal.PipelineStageID;
-        event.ToStageID = input.ClosingStageID ?? deal.PipelineStageID;
-        event.FromDealStatusTypeID = deal.DealStatusTypeID;
-        event.ToDealStatusTypeID = target.ID;
-        event.ChangedByUserID = user.ID;
-        event.ChangedAt = new Date();
-        event.AmountAtTransition = deal.Amount;
-        event.ProbabilityAtTransition = deal.Probability;
-        event.Notes = this.routingNote(routing, input.Notes);
-
-        if (!(await event.Save())) {
-            throw new Error(
-                `the stage event could not be written: ${event.LatestResult?.CompleteMessage ?? 'unknown error'}`,
-            );
-        }
+    ): void {
+        /**
+         * ── DECLARED, NOT WRITTEN. THIS METHOD USED TO APPEND THE ROW ITSELF ────────────────────────
+         *
+         * It built a `DealStageEvent` here and then set `deal.PipelineStageID` below — so `Save()` saw a
+         * stage change and appended a SECOND row for the same close. Every close that passed a
+         * `ClosingStageID` doubled its own provenance, and `CD4` was blind to it because it never passes
+         * one.
+         *
+         * `DeclareTransition` hands the entity the one thing it could not derive — the routing note — and
+         * leaves the writing to the single writer, which also suppresses the stage defaults so a close's
+         * probability is not re-derived from the stage it lands in. The `From`/`To` stamps come out the
+         * same, because the entity reads them from `OldValue`, which is what this method read too.
+         *
+         * The event id is no longer available here: it exists only once the save has appended the row.
+         * The caller reads `deal.LastStageEventID` afterwards.
+         */
+        deal.DeclareTransition('Close', this.routingNote(routing, input.Notes));
 
         // Everything stored is UTC — getUTC*, never local-time getters, for anything persisted.
         const now = new Date();
@@ -638,8 +675,6 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         deal.ActualCloseDate = new Date(
             Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
         );
-
-        return event.ID;
     }
 
     /** A human-readable record of what the policy routed, and what actually happened. */
@@ -826,27 +861,19 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             await db.BeginTransaction();
             transactionOpen = true;
 
-            const event = await provider.GetEntityObject<mjBizAppsSalesDealStageEventEntity>(
-                STAGE_EVENT_ENTITY,
-                user,
-            );
-            event.NewRecord();
-            event.DealID = deal.ID;
-            event.FromStageID = deal.PipelineStageID;
-            event.ToStageID = input.StageID ?? deal.PipelineStageID;
-            event.FromDealStatusTypeID = deal.DealStatusTypeID;
-            event.ToDealStatusTypeID = target.ID;
-            event.ChangedByUserID = user.ID;
-            event.ChangedAt = new Date();
-            event.AmountAtTransition = deal.Amount;
-            event.ProbabilityAtTransition = deal.Probability;
-            event.Notes = `REOPENED: ${input.Reason.trim()}`;
-
-            if (!(await event.Save())) {
-                throw new Error(
-                    `the reopen event could not be written: ${event.LatestResult?.CompleteMessage ?? 'unknown error'}`,
-                );
-            }
+            /**
+             * ── SAME MECHANISM AS THE CLOSE, AND FOR A THIRD REASON BESIDES THE DUPLICATE ROW ────────
+             *
+             * This hand-wrote its event and then moved the stage, so a reopen that named a `StageID` got
+             * two rows exactly as the close did. It also invoked the stage-DEFAULTS writer without meaning
+             * to: the save re-derived `Probability` from the arriving stage, AFTER the event above had
+             * stamped the value being left behind. The reopen's own provenance row disagreed with the deal
+             * it described, and nothing was comparing the two.
+             *
+             * A declared transition answers both — one row, and the defaults writer stands down because
+             * the probability on a reopened deal is a human's judgement, not the pipeline's default.
+             */
+            deal.DeclareTransition('Reopen', `REOPENED: ${input.Reason.trim()}`);
 
             deal.DealStatusTypeID = target.ID;
             if (input.StageID) {
@@ -877,7 +904,8 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
                 Success: true,
                 Issues: orderStatusIssues(deal),
                 Unlocked: true,
-                DealStageEventID: event.ID,
+                // Appended by the save under the declaration above, so read from the deal afterwards.
+                DealStageEventID: deal.LastStageEventID,
             };
         } catch (err) {
             if (transactionOpen) {

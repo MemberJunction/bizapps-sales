@@ -199,7 +199,6 @@ export class DealBoardComponent {
             }
 
             draft.PipelineStageID = target.StageID;
-            this.ApplyStageDefaults(draft, target.StageID);
 
             const outcome = await this.service.Save(draft);
             if (!outcome.Success) {
@@ -224,24 +223,20 @@ export class DealBoardComponent {
     }
 
     /**
-     * A stage carries the probability and forecast category the pipeline designer chose for it, so moving
-     * inherits them rather than asking a rep to retype what the process already knows. Both stay editable
-     * in the workspace afterwards.
+     * ── THE BOARD DOES NOT WRITE STAGE DEFAULTS EITHER ──────────────────────────────────────────────
      *
-     * Deliberately the same rule as the workspace's own `ApplyStageDefaults` — a drag and a dropdown must
-     * not produce different deals.
+     * `ApplyStageDefaults` was here too, assigning `Probability` and `ForecastCategoryTypeID`
+     * unconditionally onto the dragged card's header — with a comment saying it was deliberately the same
+     * rule as the workspace's, so that "a drag and a dropdown must not produce different deals". The
+     * intent was right and the implementation destroyed a rep-typed probability, in both places, before
+     * the server could apply its fill-but-don't-overwrite rule.
+     *
+     * Both copies are gone. The server applies the stage's answer inside the save (same trigger, same
+     * transaction), and the board re-reads the row afterwards, so the card shows what was actually
+     * written rather than what the client guessed. A drag and a dropdown now produce the same deal
+     * because they go through the same single writer, which is a stronger guarantee than two clients
+     * agreeing with each other.
      */
-    private ApplyStageDefaults(
-        header: { Probability: number | null; ForecastCategoryTypeID: string | null },
-        stageID: string,
-    ): void {
-        const stage = this.Stages.find((s) => s.ID === stageID);
-        if (!stage) {
-            return;
-        }
-        header.Probability = stage.Probability;
-        header.ForecastCategoryTypeID = stage.ForecastCategoryTypeID;
-    }
 
     public NameOf(pipelineID: string | null): string {
         return this.Pipelines.find((p) => p.ID === pipelineID)?.Name ?? '—';

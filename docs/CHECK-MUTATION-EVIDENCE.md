@@ -1,4 +1,31 @@
-# Mutation evidence — every integration check has been proven able to FAIL
+# Mutation evidence — which integration checks have been proven able to FAIL, and which have not
+
+> **THE TITLE USED TO CLAIM ALL OF THEM, AND THAT WAS FALSE.** It read "every integration check has been
+> proven able to fail" while the mutants covered 44 of 103 checks. `docs/STORY-AUDIT.md` cites this file as
+> its evidence, so the overclaim propagated into a verdict document — which is the worst place for it.
+>
+> **51 of 108 checks are mutant-proven** (was 44 of 103 — the four-writers round added six checks and
+> proved seven, two of which had been green and unproven since S3). The gap is concentrated, not scattered:
+>
+> | Bundle | Checks | Mutants |
+> |---|---|---|
+> | `save-deal` | 28 | 19 |
+> | `close-deal` | 16 | 14 |
+> | `product-picker` | 4 | 4 |
+> | `close-won-order` | 5 | 3 |
+> | `close-won-contract` | 4 | 3 |
+> | `board-move` | 6 | 5 |
+> | `close-won-tasks` | 14 | 3 |
+> | **`activities`** | **18** | **0** |
+> | **`forecast`** | **13** | **0** |
+>
+> `activities` and `forecast` — 31 checks, still nearly a third of the suite — have NO mutant at all. Neither
+> bundle has ever been shown able to fail, so for those 31 the honest statement is that they pass, not that
+> they work. Both arrived by merge from sessions that did not use this driver, which is the mechanism
+> rather than an excuse.
+>
+> **What this file DOES establish** is that the 51 named below fail for the reason they claim to, each
+> against a specific one-line mutation. That is worth having and is not the same as coverage.
 
 A green suite is not evidence. A check can be green because the behaviour it names is correct, or because
 it is asserting something that is true no matter what the code does — and the two are indistinguishable
@@ -14,10 +41,43 @@ bizapps-contracts absent. 39 checks across 4 bundles: `save-deal` (16), `close-d
 `product-picker` (4), `close-won-order` (5). `close-won-contract` needs contracts and was not expected on
 this host.
 
-## Result: 39 of 39 checks were made to fail
+## Result: 51 checks were made to fail, of 108 in the suite
 
 Three rounds were needed, and the reason there were three is the point of the exercise — round 1's
 misses were findings, not retries.
+
+---
+
+## Round 4 (2026-08-21) — four writers on one trigger, and MJ's create semantics
+
+Five mutations, `M-ST1`–`M-ST4` and `M-OW2`, all against `DealEntityServer.ts`. Each one reverts one
+decision of the mechanism that replaced the four writers, and each was a live defect the day before.
+
+| Mutant | What it reverts | Checks it fells |
+|---|---|---|
+| `M-ST1` | one writer for the stage log — calls the appender twice | BD1, BD2, BD4, CD4, **CD11**, **CD15**, CD16 |
+| `M-ST2` | the case-insensitive stage compare | **SD32** |
+| `M-ST3` | a declared transition suppressing the stage defaults | **CD16** |
+| `M-ST4` | the create guard on the stage log | **SD30** |
+| `M-OW2` | `callerSuppliedValue` on the owner stamp, back to `Dirty` | **SD31** |
+
+Four of the five isolate exactly one check. `M-ST1` is broad by nature — doubling every event breaks
+every count-based assertion in the suite — and that breadth is itself the finding: **seven checks were
+counting events, and not one of them could see the duplicate row**, because the only input that makes a
+close move the stage (`ClosingStageID`) was never passed by any of them. `CD15` exists to pass it.
+
+**Two checks that had been green and unproven since S3 fell here:** `BD1` and `BD4`. Both count stage
+events, both were correct, and neither had ever been shown able to fail. `board-move` goes from 3 mutants
+to 5 as a side effect of a mutation aimed elsewhere — which is the argument for running the whole suite per
+mutation rather than the bundle under test.
+
+### What this round could NOT express as a mutation
+
+The original defect was **two writers** — the close operation hand-wrote a `DealStageEvent` and then moved
+the stage, so the save wrote a second. With one writer left, "two rows" cannot be reintroduced by a
+one-line edit; re-adding a writer is a thirty-line insertion. `M-ST1` reproduces the SYMPTOM faithfully
+(two rows for one transition, same `From`/`To`, inside the same transaction) by calling the single writer
+twice, and its note in the driver says so. It is a proxy, labelled as one, exactly like `M-TK1`.
 
 ---
 

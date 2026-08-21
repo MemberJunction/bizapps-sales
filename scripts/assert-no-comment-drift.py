@@ -7,10 +7,16 @@ check each one is actually in the SELECT list. A documented column that is not r
 report waiting to happen — a consumer writes against the description, gets undefined, and the fault
 looks like the data rather than the doc.
 """
-import io, json, os, re, glob
+import io, json, os, re, glob, sys
 
-SQLDIR = r'C:\v6\sales-dash\metadata\queries\SQL'
-JSONDIR = r'C:\v6\sales-dash\metadata\queries'
+# REPO-RELATIVE, not the worktree this was written in. It hardcoded a path into C:/v6/sales-dash, so on
+# this checkout it audited ANOTHER working copy's queries — 15 files that are not the ones being shipped
+# — and reported clean about them. A gate pointed at the wrong tree is worse than none, because its pass
+# is about something nobody asked.
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+SQLDIR = os.path.join(REPO, 'metadata', 'queries', 'SQL')
+JSONDIR = os.path.join(REPO, 'metadata', 'queries')
 
 def output_columns(sql_text):
     """The aliases the outermost SELECT actually produces."""
@@ -77,6 +83,14 @@ for f in sorted(glob.glob(os.path.join(SQLDIR, '*.sql'))):
                 continue
             findings.append((name, ident, 'metadata description names it; not in the SELECT list'))
 
+scanned = glob.glob(os.path.join(SQLDIR, '*.sql'))
+
+# AN EMPTY SCAN IS A FAILURE, not a clean run — the shape this script was already in when it pointed at
+# the wrong tree, and the shape it would take again the day the directory is renamed.
+if not scanned:
+    print('  no .sql files found under %s — this gate measured nothing' % SQLDIR)
+    sys.exit(2)
+
 if findings:
     print('  DRIFT FOUND:')
     seen = set()
@@ -88,4 +102,8 @@ if findings:
         print('    %-40s %-28s %s' % (f, ident, why))
 else:
     print('  no comment-versus-reality drift found')
-print('\n  %d file(s) scanned' % len(glob.glob(os.path.join(SQLDIR, '*.sql'))))
+print('\n  %d file(s) scanned' % len(scanned))
+
+# THE POINT OF A GATE. It always exited 0 — reporting drift and passing anyway — so it could not fail
+# and was therefore not a gate. It was also wired into nothing, which is why nobody noticed.
+sys.exit(1 if findings else 0)

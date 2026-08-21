@@ -83,6 +83,8 @@ import { DealActivityTimelineComponent } from '../activities/deal-activity-timel
 import type { ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
     EmptyValidation,
+    DiscountRefusalIssues,
+    MergeValidation,
     ProjectValidation,
     type DealWorkspaceIssue,
     type DealWorkspaceSection,
@@ -431,8 +433,9 @@ export class DealWorkspaceComponent implements OnInit {
         // A stage from the previous pipeline is meaningless now.
         const stages = this.StagesFor(pipelineID);
         if (!stages.some((s) => s.ID === deal.PipelineStageID)) {
+            // The stage moves because the pipeline did; its probability and forecast category are the
+            // server's to fill on save. See OnStageChange for why this no longer writes them.
             deal.PipelineStageID = stages[0]?.ID ?? null;
-            this.ApplyStageDefaults(deal, deal.PipelineStageID);
         }
 
         // The company just moved, so the catalogue has too. Not awaited: this runs from a template
@@ -448,22 +451,31 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     /**
-     * A stage carries the probability and forecast category the pipeline designer chose for it, so moving
-     * stages inherits them rather than asking the rep to retype what the process already knows. Both
-     * remain editable afterwards.
+     * ── THE STAGE'S DEFAULTS ARE THE SERVER'S TO APPLY, AND THIS NO LONGER WRITES THEM ──────────────
+     *
+     * `ApplyStageDefaults` used to live here and assign `Probability` and `ForecastCategoryTypeID`
+     * UNCONDITIONALLY. That destroyed a rep-typed value before the server ever saw it: type 85, move the
+     * stage, and 85 was gone — replaced by the arriving stage's number, in memory, before Save.
+     *
+     * The server's `applyStageDefaults` implements fill-but-don't-overwrite and its comment claimed "the
+     * UI copy and this one cannot fight, because the UI sets both fields so they arrive dirty and are
+     * respected". That was WRONG, and wrong in the direction that matters: arriving dirty is exactly what
+     * made the server respect a value the UI had already overwritten. `board-move.BD6` stayed green
+     * because it drives the entity layer directly and never goes near this method, so every real user got
+     * the opposite of what the check asserted.
+     *
+     * ── WHY DELETED RATHER THAN TAUGHT THE RULE ────────────────────────────────────────────────────
+     *
+     * The rule is "is this value the caller's, or mine to fill?" — and the UI cannot answer it. It cannot
+     * tell 75-because-the-rep-typed-it from 75-because-the-last-stage-set-it; only a save boundary can,
+     * which is what the server has and this does not. A heuristic here would be a second writer with a
+     * worse view of the same question, and two writers is how they came to disagree in the first place.
+     *
+     * So the deal keeps whatever the rep typed, the server fills what they left alone, and the reload
+     * after save shows the answer. One writer.
      */
-    public ApplyStageDefaults(deal: DealEntity, stageID: string | null): void {
-        const stage = this.Lookups.Stages.find((s) => s.ID === stageID);
-        if (!stage) {
-            return;
-        }
-        deal.Probability = stage.Probability;
-        deal.ForecastCategoryTypeID = stage.ForecastCategoryTypeID;
-    }
-
     public OnStageChange(deal: DealEntity, stageID: string | null): void {
         deal.PipelineStageID = stageID;
-        this.ApplyStageDefaults(deal, stageID);
         this.Touch();
     }
 
@@ -1389,12 +1401,26 @@ export class DealWorkspaceComponent implements OnInit {
 
         const entity = ProjectValidation(deal.Validate());
         const advisories = this.LineAdvisories(deal);
-        this.Validation = {
-            // Advisories are warnings, so they never change whether the deal can be saved. Recomputing
-            // rather than or-ing keeps that fact in one place.
-            IsValid: entity.IsValid,
-            Issues: [...entity.Issues, ...advisories],
-        };
+
+        /**
+         * A REFUSED DISCOUNT NOW BLOCKS THE SAVE, which it did not.
+         *
+         * `DiscountRefusals` was read by the template and by nothing else, so `CanSave` never saw it: a
+         * rep typed `0.5`, saw the refusal, and saved a line still holding the previous `0.10`. The
+         * screen had said so nowhere, and a hundred-fold discount error is a number nobody questions.
+         *
+         * Mapped through the LINE'S POSITION so the issue lands on the row that caused it — the grid
+         * iterates `Lines.Items`, so the index is what both sides already agree on. A refusal against a
+         * line that is no longer in the collection (removed after being refused) yields a null index and
+         * still blocks: losing the row marker is acceptable, letting the save through is not.
+         */
+        const lines = deal.OrderID_Object?.Lines.Items ?? [];
+        const refusals = [...this.DiscountRefusals.entries()].map(([line, Reason]) => {
+            const at = lines.indexOf(line);
+            return { RowIndex: at >= 0 ? at : null, Reason };
+        });
+
+        this.Validation = MergeValidation(entity, advisories, DiscountRefusalIssues(refusals));
         this.cdr.detectChanges();
     }
 
