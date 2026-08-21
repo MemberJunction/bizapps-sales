@@ -66,7 +66,19 @@ export * from './CloseWonTaskService.js';
  * The Graph source is exported too, deliberately -- it is complete, and hiding it would make it look
  * unwritten rather than ungated.
  */
-export * from './activities/activity-vocabulary.js';
+/**
+ * THE VOCABULARY MOVED TO `sales-entities`, and is re-exported here so no consumer changed.
+ *
+ * It had to move for the deal-activity pane to reach it: an Angular package must not import a SERVER
+ * package, and the pane needs the `ActivityTypeCode` values for its own type list. The module is pure
+ * union types and string constants -- no provider, no entity, nothing server-only -- so `Entities` is
+ * where it always belonged.
+ *
+ * Re-exported rather than repointed at every call site because `sales-core-entities-server` is the
+ * public surface the checks and the operations import from, and moving a file should not be a breaking
+ * change for them.
+ */
+export * from '@mj-biz-apps/sales-entities';
 export * from './activities/ActivityWriterService.js';
 export * from './activities/ActivityReader.js';
 export * from './activities/ActivitySource.js';

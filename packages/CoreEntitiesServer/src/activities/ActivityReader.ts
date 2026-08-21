@@ -28,7 +28,7 @@ import {
     type ActivityLinkRole,
     type ActivitySource,
     type ActivityStatus,
-} from './activity-vocabulary.js';
+} from '@mj-biz-apps/sales-entities';
 
 /** One party on an activity, resolved or not. */
 export interface TimelineParty {

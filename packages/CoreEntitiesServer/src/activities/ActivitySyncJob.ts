@@ -21,7 +21,7 @@
 import { LogStatus, RunView, type IMetadataProvider, type UserInfo } from '@memberjunction/core';
 
 import { ActivityIngestService, type IngestRunResult } from './ActivityIngestService.js';
-import { E_ACTIVITY_SYNC_CONNECTION, SOURCE_SYSTEM_M365 } from './activity-vocabulary.js';
+import { E_ACTIVITY_SYNC_CONNECTION, SOURCE_SYSTEM_M365 } from '@mj-biz-apps/sales-entities';
 import { FixtureActivitySource } from './FixtureActivitySource.js';
 import type { IActivitySource } from './ActivitySource.js';
 

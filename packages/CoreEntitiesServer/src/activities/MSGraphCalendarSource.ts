@@ -32,7 +32,7 @@
  */
 import { LogError } from '@memberjunction/core';
 
-import { SOURCE_SYSTEM_M365 } from './activity-vocabulary.js';
+import { SOURCE_SYSTEM_M365 } from '@mj-biz-apps/sales-entities';
 import type {
     ActivitySourceBatch,
     ActivitySourceQuery,

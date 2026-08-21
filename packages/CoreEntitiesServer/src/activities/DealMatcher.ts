@@ -17,7 +17,7 @@
 import { RunView, type UserInfo } from '@memberjunction/core';
 
 import { escapeSql } from './ActivityWriterService.js';
-import { E_DEAL, E_DEAL_STATUS_TYPE } from './activity-vocabulary.js';
+import { E_DEAL, E_DEAL_STATUS_TYPE } from '@mj-biz-apps/sales-entities';
 import type { KnownAddress } from './RelevanceFilter.js';
 
 export interface DealMatch {

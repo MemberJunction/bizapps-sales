@@ -22,7 +22,7 @@
 import { RunView, type UserInfo } from '@memberjunction/core';
 
 import { escapeSql } from './ActivityWriterService.js';
-import { E_CONTACT_METHOD } from './activity-vocabulary.js';
+import { E_CONTACT_METHOD } from '@mj-biz-apps/sales-entities';
 import type { NormalizedItem } from './ActivitySource.js';
 
 /** A contact method that matched — the person or organization behind an address. */

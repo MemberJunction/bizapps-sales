@@ -29,7 +29,7 @@
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */
-import type { ActivityDirection, ActivityTypeCode } from './activity-vocabulary.js';
+import type { ActivityDirection, ActivityTypeCode } from '@mj-biz-apps/sales-entities';
 
 /** One party on an item, as the SOURCE reports them — an address, not yet a person. */
 export interface ItemParticipant {

@@ -20,9 +20,9 @@ import type { mjBizAppsCommonActivitySyncConnectionEntity } from '@mj-biz-apps/c
 import { ActivityWriterService, escapeSql, type UnresolvedParty } from './ActivityWriterService.js';
 import { DealMatcher } from './DealMatcher.js';
 import { RelevanceFilter, type RelevanceVerdict } from './RelevanceFilter.js';
-import { E_ACTIVITY_SYNC_CONNECTION, E_ACTIVITY_SYNC_RULE } from './activity-vocabulary.js';
+import { E_ACTIVITY_SYNC_CONNECTION, E_ACTIVITY_SYNC_RULE } from '@mj-biz-apps/sales-entities';
 import type { IActivitySource, NormalizedItem } from './ActivitySource.js';
-import type { ActivityLinkRole } from './activity-vocabulary.js';
+import type { ActivityLinkRole } from '@mj-biz-apps/sales-entities';
 
 export interface IngestRunResult {
     Success: boolean;
