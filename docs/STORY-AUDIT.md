@@ -21,7 +21,15 @@ tree being searched is the tree being reported on. That is why this pass came af
 than before them.
 
 Integrated for this pass, in order: `feature/closewon-tasks` (187c8a4), `feature/contracts-seam-v6`
-(a41473f, re-merged for drift), `feature/activities-and-ingest` (1db90c9).
+(a41473f, then again at 01b4437), `feature/activities-and-ingest` (1db90c9, then again at 99be05b). Five
+merges, of which three were corrections for a head that had moved — `docs/INTEGRATION-LOG.md` records
+which commit each one consumed and the shape it was checked against.
+
+**The last two merges arrived after these verdicts were written**, and they do not change any of them:
+they carry #40's read model (13 MJ Queries) and the ForecastSnapshot job, which are not among the stories
+audited here. What they do change is the evidence base — 92 checks in 9 bundles rather than 81 in 8 — so
+every check id cited below still holds and there are now two bundles' worth of coverage nobody claimed
+credit for in this document. #40 is unaudited and deliberately unclaimed.
 
 Settled before this run and deliberately not re-examined: **#37/#38/#39** are superseded, **#93** and
 **#83** are met, **#120** is strictly broader than #38/#39 combined. S-US9 (#119) and the Outlook ingest
@@ -32,7 +40,7 @@ on them would repeat the mistake this pass exists to correct.
 
 The rule for this pass was *prove met criteria against the database, not the screen*. Three sources:
 
-1. **The 81 integration checks** across 8 bundles (`node scripts/assert-check-count.mjs`, which now runs
+1. **The 92 integration checks** across 9 bundles (`node scripts/assert-check-count.mjs`, which now runs
    the suite itself rather than trusting a log off disk). Every check hits a live database with nothing
    mocked and rolls back. Where a criterion maps to a check, the check id **is** the evidence, and
    `docs/CHECK-MUTATION-EVIDENCE.md` records which mutant proves that check can fail.
