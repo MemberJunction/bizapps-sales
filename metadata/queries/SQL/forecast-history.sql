@@ -10,8 +10,16 @@
 -- those leave the current row carrying what it used to say. A forecast review that asks "we called
 -- 4.2 million on the first — where did it go?" cannot be answered from live data at all.
 --
--- So the answer has to be captured, not derived. `scripts/capture-forecast-snapshot.sql` writes one
--- row per company × pipeline × owner × period, and a Scheduled Job runs it. This query reads them.
+-- So the answer has to be captured, not derived. The `Sales.CaptureForecastSnapshot` Action writes one
+-- row per company × pipeline × period, on a daily ScheduledJob. This query reads them.
+--
+-- ⚠ NO OWNER GRAIN YET, and this query is built expecting one -- both LAG windows below partition by
+-- OwnerEmployeeID and the Employee join projects OwnerName. The Action reads
+-- `Sales: Forecast by Category`, which groups by company and pipeline only, so every snapshot carries
+-- OwnerEmployeeID = NULL. That means "across all owners" and is correct for a rollup -- but it makes
+-- this query render THIN rather than broken: one partition, no owner names, and nothing anywhere
+-- saying the grain is absent rather than the data empty. The fix is a companion owner-grain query
+-- rather than reshaping Forecast by Category, which is published and has consumers outside this repo.
 --
 -- ══ THE COLUMN NAMES DIVERGE FROM THE MASTER PLAN, DELIBERATELY ════════════════════════════════
 --

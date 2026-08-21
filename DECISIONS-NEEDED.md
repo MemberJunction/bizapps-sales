@@ -1499,3 +1499,84 @@ capture failure.
 
 **What is needed:** nothing in code. It belongs in whatever documents the snapshot table, so the first
 person to see a zero `ClosedAmount` beside a large `PipelineAmount` does not treat it as a bug.
+
+---
+---
+
+# RULINGS — D-29, D-31 and D-32 settled
+
+Three items above moved from open to decided. Recorded here rather than edited in place, so the reasoning
+that was current when each was raised stays readable beside what was decided.
+
+---
+
+## D-29 — DECIDED: skip, not replace, on a same-day re-run
+
+`ForecastSnapshotJob` skips a grain already captured today. The first capture stands.
+
+**Their argument was better than mine and still did not choose.** `capture-forecast-snapshot.sql` argued
+that duplicate captures double every movement calculation in `forecast-history.sql`, whose `LAG` windows
+step by `CapturedAt`. That is true and concrete — and it does not discriminate, because **skip and replace
+both yield exactly one row per day.** Both avoid the doubling. The only difference is which reading
+survives when two runs of the same day disagree.
+
+**What chooses is what `CapturedAt` is for.** It answers *"what did we think on the 1st"*, and that only
+holds if the first capture survives. Replace lets a later run silently rewrite recorded history — and
+unlike a duplicate, which is visible as two rows anyone can see, an overwrite leaves nothing behind to
+notice. That is the failure you cannot detect afterwards, so it is the one to refuse.
+
+FS3 asserts it directly: a second capture carrying a different figure leaves the original standing.
+
+---
+
+## D-31 — DECIDED: one writer, and it is the Action
+
+`Sales.CaptureForecastSnapshot`, driven by the seeded `Sales — Forecast Snapshot (daily)` ScheduledJob, is
+the writer. `scripts/capture-forecast-snapshot.sql` is **demoted to an unseeded manual tool** and its
+header now says so at the very top, before a reader meets anything else.
+
+**Kept rather than deleted, for one reason:** it is the only working per-owner capture in the repo. The
+Action's source reads `Sales: Forecast by Category`, which cannot produce the owner grain (D-32), and when
+a companion query is written that script's `GROUP BY d.CompanyID, d.PipelineID, d.OwnerEmployeeID` is the
+reference for what it must project. Deleting it would throw away the specification along with the code.
+
+Three claims in its header were corrected because they were false or superseded:
+
+* *"An MJ Scheduled Job, nightly"* — **never true.** Nothing ever seeded one. A comment claiming a schedule
+  that does not exist is how somebody concludes snapshots are being captured when they are not.
+* *"deliberately a plain SQL script rather than an Action"* — the argument predates the Action existing, so
+  it is no longer the choice on offer.
+* Its replace-on-re-run behaviour is now marked as disagreeing with the Action, with the Action winning
+  and the reasoning from D-29 stated inline.
+
+**Nothing seeds it and nothing should.** Two writers for one table is worse than either of them, and these
+two disagree about same-day re-runs — so running both would make `ForecastSnapshot` mean different things
+on different days.
+
+---
+
+## D-32 — NAMED LIMITATION, deliberately not fixed: the snapshot has no owner grain
+
+**The gap.** `Sales: Forecast by Category` groups by `CompanyID, Company, PipelineID, Pipeline` and does not
+project `OwnerEmployeeID`. So every snapshot the Action writes carries `OwnerEmployeeID = null`, meaning
+"across all owners" — correct for a company-by-pipeline rollup, and asserted deliberately by FS11 rather
+than tolerated.
+
+**Why it matters.** `forecast-history.sql` partitions both of its `LAG` windows by `OwnerEmployeeID` and
+joins `__mj.Employee` to project `OwnerName`. The reporting layer expects the owner grain. Fed only
+null-owner rows it still runs — every row lands in one partition, `OwnerName` is always null — so it
+**shows materially less than it was written to show, without failing.** Nothing reports that the grain is
+missing rather than empty.
+
+**The fix, stated and not built: a COMPANION owner-grain query.** Not a change to the existing query's
+shape. `Sales: Forecast by Category` is published and `Approved`, and its consumers are outside this
+repository — nothing in this codebase calls it except the forecast checks, so the blast radius of altering
+its projection is not something that can be verified from here. Adding `Sales: Forecast by Category and
+Owner` beside it changes nothing for existing readers. Owned by whoever owns the queries.
+
+**What makes it cheap when it happens:** `FORECAST_QUERY_COLUMNS.OwnerEmployeeID` is already declared, and
+`readRow` reads every measure through a candidate-name list. The moment a query projects that column the
+mapping populates it — **no change in this repo at all.** The grain arrives; the code does not move.
+
+**And what to watch for meanwhile:** a forecast history view that looks thin rather than broken. That is
+the shape this limitation produces, and it is the reason it is written down instead of left to be noticed.

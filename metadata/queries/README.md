@@ -57,7 +57,7 @@ the grain, the dimension and the measures on them are unchanged, only the source
 - **Pipeline coverage vs. quota** (§9.3) needs a `Quota` table, deferred to v2 by `docs/DECISIONS.md`
   D-2. No query can be written for it.
 - **Point-in-time forecast** (§9.4) reads `ForecastSnapshot`, not `Deal`. The snapshot query is here;
-  what fills the table is `scripts/capture-forecast-snapshot.sql`, which a Scheduled Job runs. Live
+  what fills the table is the `Sales.CaptureForecastSnapshot` Action, on the seeded `Sales - Forecast Snapshot (daily)` ScheduledJob. (`scripts/capture-forecast-snapshot.sql` is a manual tool and is deliberately unseeded.) Live
   and point-in-time are different questions and stay different queries.
 
 ## Layout
