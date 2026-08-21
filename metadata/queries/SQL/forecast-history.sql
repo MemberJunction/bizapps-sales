@@ -19,7 +19,9 @@
 -- OwnerEmployeeID = NULL. That means "across all owners" and is correct for a rollup -- but it makes
 -- this query render THIN rather than broken: one partition, no owner names, and nothing anywhere
 -- saying the grain is absent rather than the data empty. The fix is a companion owner-grain query
--- rather than reshaping Forecast by Category, which is published and has consumers outside this repo.
+-- rather than reshaping Forecast by Category: it is published and Approved and has NO in-repo consumer,
+-- so who reads it -- Explorer, a metadata dashboard, a person -- cannot be enumerated from here, and
+-- neither can the blast radius of changing what it projects.
 --
 -- ══ THE COLUMN NAMES DIVERGE FROM THE MASTER PLAN, DELIBERATELY ════════════════════════════════
 --

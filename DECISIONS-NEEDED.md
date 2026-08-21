@@ -1569,9 +1569,20 @@ null-owner rows it still runs — every row lands in one partition, `OwnerName` 
 missing rather than empty.
 
 **The fix, stated and not built: a COMPANION owner-grain query.** Not a change to the existing query's
-shape. `Sales: Forecast by Category` is published and `Approved`, and its consumers are outside this
-repository — nothing in this codebase calls it except the forecast checks, so the blast radius of altering
-its projection is not something that can be verified from here. Adding `Sales: Forecast by Category and
+shape. `Sales: Forecast by Category` is published and `Approved`, and **it has no in-repo consumer** — so
+the blast radius of altering its projection cannot be established from here.
+
+That claim needs stating carefully, because an earlier draft supported it with "there is no `RunQuery` in
+the Angular package at all" — which was true only of this branch. `feature/dashboard-queries`, which lands
+after `a2abcfd`, adds two `RunQuery` call sites in `deal-workspace.service.ts`; with the one in
+`QueryForecastSource` that is three in the repository. A reader post-merge would have found them,
+concluded the note was wrong, and reasonably discounted the rest of this item along with it.
+
+The conclusion survives, and was re-checked against that branch rather than assumed: those two call sites
+name `Sales: Dashboard Summary` and `Sales: Deal Roster`, and **an exhaustive scan of every `.ts` file on
+`feature/dashboard-queries` finds none naming `Sales: Forecast by Category`.** Its readers are MJ
+Explorer, metadata-defined dashboards and people — none of which this repository can enumerate, which is
+exactly why a companion is safer than a reshape. Adding `Sales: Forecast by Category and
 Owner` beside it changes nothing for existing readers. Owned by whoever owns the queries.
 
 **What makes it cheap when it happens:** `FORECAST_QUERY_COLUMNS.OwnerEmployeeID` is already declared, and
