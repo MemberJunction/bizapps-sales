@@ -325,11 +325,43 @@ export class MJSSalesSectionComponent implements OnInit {
             ];
         }
 
+        /**
+         * HOW MUCH OF THAT TOTAL NOBODY PRICED.
+         *
+         * The tile is the most-read number on the page and it was the least qualified: a sum of stored
+         * `Deal.Amount` values presented as one authoritative figure, with the provenance flag sitting
+         * unread on every row that fed it. On the data in the host database every deal carries
+         * `AmountIsComputed = 0`, so the tile was reporting entirely hand-typed money as pipeline value.
+         * The footnote now says so.
+         */
+        /**
+         * ── EXPRESSED FROM THE SUMMARY, NOT FROM A LOCAL THAT NO LONGER EXISTS ──────────────────────
+         *
+         * The board branch computed this by filtering an `open` array and dividing by `open.length`.
+         * Neither survives the merge: the dashboard branch replaced that whole block with one summary
+         * QUERY, so `open` and `openValue` are gone and this code would not have compiled. Auto-merge
+         * kept the consumer and dropped the producer — the failure mode worth naming, because the file
+         * still looked plausible.
+         *
+         * It resolves better than it started. `DealDashboardSummary` already carries
+         * `OpenPricedAmount` / `OpenStatedAmount` / `OpenNoAmountCount`, computed in SQL over every open
+         * deal rather than over whatever the roster page happened to load — so the footnote is now exact
+         * where the hand-filtered version was limited to the rows on screen. It also reports MONEY rather
+         * than a deal count, which is the question a reader of a money tile is actually asking.
+         */
+        const statedNote = s.OpenStatedAmount === 0
+            ? ''
+            : s.OpenPricedAmount === 0
+                ? ' · all stated, none priced'
+                : ` · ${this.money(s.OpenStatedAmount)} stated`;
+
         return [
             {
                 Label: 'Open pipeline',
                 Value: this.money(s.OpenAmount),
-                Footnote: `across ${s.OpenCount} open ${s.OpenCount === 1 ? 'deal' : 'deals'}`,
+                // Dashboard's summary figures, with the board branch's provenance suffix. Both halves
+                // are kept: the currency-correct total, and the caveat about who produced it.
+                Footnote: `across ${s.OpenCount} open ${s.OpenCount === 1 ? 'deal' : 'deals'}${statedNote}`,
             },
             {
                 Label: 'Open deals',

@@ -102,8 +102,21 @@ export interface BoardColumn {
     Currency: string | null;
     /** True when the cards disagree about currency, so the template can say why the total is absent. */
     MixedCurrency: boolean;
-    /** Deals whose amount is null, so a footnote can say the total is partial rather than wrong. */
+    /**
+     * Cards in this column whose figure did NOT come from the orders engine.
+     *
+     * WIDENED, and the old definition was the more dangerous of the two. It counted only cards with a
+     * null amount, so a figure a human typed was counted as priced and folded into the total with no
+     * caveat at all -- and on the seeded data every deal carries `AmountIsComputed = 0`, which made this
+     * read `0 unpriced` on a board where nothing whatsoever was priced. A missing figure at least looks
+     * missing; a stated one looks authoritative, which is why it is the case that needed counting.
+     *
+     * A null amount is still counted -- it is certainly not priced -- so the footnote keeps one
+     * vocabulary rather than growing a second.
+     */
     Unpriced: number;
+    /** True when NOTHING in the column was priced, so the footnote can say so rather than count to N. */
+    NonePriced: boolean;
 }
 
 @Component({
@@ -194,7 +207,13 @@ export class DealBoardComponent {
                     Currency: SingleCurrencyOf(cards),
                     MixedCurrency: SingleCurrencyOf(cards) === null && cards.length > 0
                         && new Set(cards.map((d) => d.CurrencyID ?? '')).size > 1,
-                    Unpriced: cards.filter((d) => d.Amount === null || d.Amount === undefined).length,
+                    /**
+                     * `AmountIsComputed` is the provenance flag, and reading it is the whole point: a
+                     * null amount and a typed one are both un-priced, and the second is the one a reader
+                     * would otherwise trust. Never a comparison on any status or stage name.
+                     */
+                    Unpriced: cards.filter((d) => !d.AmountIsComputed).length,
+                    NonePriced: cards.length > 0 && cards.every((d) => !d.AmountIsComputed),
                 };
             });
     }
@@ -309,6 +328,19 @@ export class DealBoardComponent {
     public TrackCard = (_: number, deal: DealRosterRow): string => deal.ID;
     /** Exposed for the template's per-card fallback. See DEFAULT_DISPLAY_CURRENCY. */
     public readonly DefaultCurrency = DEFAULT_DISPLAY_CURRENCY;
+    /**
+     * What the stated-amount footnote says when a reader hovers it.
+     *
+     * In the component rather than the template because it is a sentence, and a sentence built out of
+     * a ternary inside a binding is unreadable in both places at once.
+     */
+    public PricingNote(column: BoardColumn): string {
+        return column.NonePriced
+            ? 'No deal in this stage has been priced by the orders engine. Every figure in this total '
+                + 'was typed by a person.'
+            : `${column.Unpriced} of ${column.Cards.length} deals in this stage were not priced by the `
+                + 'orders engine, so part of this total was typed by a person.';
+    }
 
     public TrackColumn = (_: number, column: BoardColumn): string => column.StageID;
 }

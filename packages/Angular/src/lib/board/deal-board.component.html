@@ -55,10 +55,16 @@
             </span>
             <span class="db-col__meta">
               <span class="db-col__count">{{ column.Cards.length }}</span>
-              <!-- A SUM of stored Deal.Amount values. Nothing here is priced. -->
               <!--
+                A SUM of stored Deal.Amount values. This app prices nothing; the marker says whether the
+                ORDERS engine did, and the currency question is separate from the provenance question.
+
                 NO TOTAL WHEN THE COLUMN MIXES CURRENCIES. Adding EUR to USD produces a number that is
                 wrong in a way nobody can see; an absent figure prompts a question instead.
+
+                UNIONED, and the board branch's half needed one correction to survive: it carried
+                `currency:'USD'`, which is the hardcoding the currency work removed. The `--stated` class
+                is its contribution and is kept; the literal is not.
               -->
               @if (column.MixedCurrency) {
                 <span class="db-col__total db-col__total--mixed"
@@ -66,13 +72,28 @@
                   mixed currencies
                 </span>
               } @else {
-                <span class="db-col__total">{{ column.Total | currency:column.Currency:'symbol':'1.0-0' }}</span>
+                <span class="db-col__total" [class.db-col__total--stated]="column.Unpriced > 0">
+                  <!-- `?? DefaultCurrency` because Currency is null in two different situations and only
+                       one of them is "mixed": an EMPTY column has no currency to disagree about, and its
+                       total is 0. The mixed case never reaches here — it is the @if above. -->
+                  {{ column.Total | currency:(column.Currency ?? DefaultCurrency):'symbol':'1.0-0' }}
+                </span>
               }
             </span>
             @if (column.Unpriced > 0) {
-              <span class="db-col__partial"
-                    [title]="column.Unpriced + ' deal(s) in this stage have no amount yet, so the total is partial.'">
-                +{{ column.Unpriced }} unpriced
+              <!--
+                SAYS WHICH OF THE TWO IT IS. A total nobody priced and a total that is only partly
+                priced are different claims, and collapsing them is how a stated figure passes for an
+                authoritative one. The wording lives in PricingNote() -- a template expression cannot
+                hold a sentence without becoming unreadable.
+              -->
+              <span class="db-col__partial" [title]="PricingNote(column)">
+                <i class="fa-solid fa-pen-nib" aria-hidden="true"></i>
+                @if (column.NonePriced) {
+                  stated, not priced
+                } @else {
+                  {{ column.Unpriced }} of {{ column.Cards.length }} stated
+                }
               </span>
             }
           </header>
@@ -110,12 +131,23 @@
                     } @else {
                       {{ deal.Amount | currency:(deal.CurrencyID ?? DefaultCurrency):'symbol':'1.0-0' }}
                     }
-                    @if (deal.AmountIsComputed) {
-                      <!-- Deal.Amount is a cached answer from orders; the marker says so rather than
-                           implying this app derived it. -->
-                      <i class="fa-solid fa-calculator db-card__computed"
-                         aria-hidden="true"
-                         title="Priced by orders, not typed in"></i>
+                    <!--
+                      BOTH CASES ARE MARKED, and marking only one was the defect. A calculator on the
+                      priced figure and nothing on the stated one means the reader has to notice an
+                      ABSENCE to learn anything -- and on data where nothing is priced, no card carries
+                      a marker at all, so the whole board reads as authoritative. A positive mark on
+                      each says which it is without anyone having to know the convention.
+                    -->
+                    @if (deal.Amount !== null) {
+                      @if (deal.AmountIsComputed) {
+                        <i class="fa-solid fa-calculator db-card__computed"
+                           aria-hidden="true"
+                           title="Priced by the orders engine"></i>
+                      } @else {
+                        <i class="fa-solid fa-pen-nib db-card__stated"
+                           aria-hidden="true"
+                           title="Stated by a person, not priced by the orders engine"></i>
+                      }
                     }
                   </span>
                   @if (deal.Probability !== null) {
