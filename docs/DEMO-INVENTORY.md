@@ -7,12 +7,21 @@ working against this host and write-heavy runs are what cause the contention.
 
 This is the inventory a demo script gets written from. It is not the script.
 
-> ### Read this first: the host is not recordable right now
+> ### Retracted: the port finding was a false alarm
 >
-> **`GRAPHQL_PORT=4141` and nothing is listening on 4141.** MJExplorer is up on 4341 and another API is
-> up on 4143. Until 4141 is serving — or the Explorer is deliberately pointed at 4143 — every query the
-> UI makes fails, so nothing in this document can be filmed. That is the first thing to fix and the
-> cheapest to miss, because the Explorer shell renders fine with a dead API behind it.
+> An earlier version of this document opened by claiming the host was unrecordable because
+> `GRAPHQL_PORT=4141` had nothing listening on it. **That was wrong, and it was ranked first, which
+> displaced the real risks.**
+>
+> `/c/v6/MJ/.env` sets `GRAPHQL_PORT=4143` and `MJExplorer/src/environments/environment.ts` points
+> `GRAPHQL_URI` at `http://localhost:4143/`. The 4143 listener is **the demo API**, working normally.
+> Sales' own `GRAPHQL_PORT=4141` is vestigial — sales no longer ships an API, so nothing reads it —
+> which `docs/QA-GUIDE.md:80` states in as many words, and `docs/WORKSPACE-SETUP.md:50` says *"The demo
+> API is on 4143, not 4141."*
+>
+> Kept rather than deleted, because the mistake is instructive: the value was read from the wrong
+> `.env`, one line above the sentence warning not to. **On this stack the host's config is
+> authoritative and sales' is not.** Nothing here was ever broken.
 
 ## Two corrections to the brief
 
@@ -38,14 +47,20 @@ contradict that on screen.
 | Deals | **7** (`DEAL-9001`–`DEAL-9007`) |
 | Order headers | **57** |
 | Order lines | **63** |
-| Stage events | **7** (baseline 5) |
+| Stage events | **6** (5 at 19:38 after the injected pair was removed; +1 from the close below) |
 | Deal team rows | **10** |
 | Pipelines / stages | 2 / 9 |
 | Products | 9 |
 | Forecast snapshots | **1** |
 | Activities / activity links | **0 / 0** |
-| Tasks / task links | **1 / 0** |
-| Contracts / contract types | **0 / 4** |
+| Tasks / task links | **3 / 2** (was 1 / 0 — the close raised two and linked both) |
+| Task assignments | **0** (see the close-won section: created, not routed) |
+| Contracts / contract types | **1 / 4** (was 0 / 4) |
+
+> Counts above are as of **2026-08-21 20:48**, after the close-won run described below. The 19:15
+> measurement that the rest of this document's *deal* figures come from read `stage_events` 7, `tasks` 1,
+> `task_links` 0 and `contracts` 0. Both readings are recorded rather than one overwritten, because the
+> difference is the evidence.
 
 Deal count agrees with the seed today. Orders do not: **50 of the 57 headers are orphans** — no deal
 points at them — carrying **57 orphan lines** between them. By status: 31 `Confirmed`, 11 `Draft`, 6
@@ -206,40 +221,127 @@ The five exclusions are deliberately one per reason — two status kinds beyond 
 has closed and one that has not opened — so the picker demo has a real story. Note both offered B2B
 products are typed `Add-On / Fee` in orders' catalogue, which reads oddly for a seat licence.
 
-## What a close-won actually produces, end to end
+## What a close-won actually produces, end to end — MEASURED
 
-**Nothing on this host has ever been closed through `Sales.CloseDeal`.** `DEAL-9005` was *seeded* Won, so
-it is not evidence of what the operation does. Measured state of the downstream:
+**Until 2026-08-21 20:48 nothing on this host had ever been closed through `Sales.CloseDeal`.**
+`DEAL-9005` was *seeded* Won, so it was never evidence of anything. The centrepiece was therefore
+unproven rather than merely unrehearsed, so it was run once, for real, on **`DEAL-9002`** — not
+`DEAL-9001`, which is the flagship and the only two-line deal in the set.
 
-- **Order: untouched in the sense that matters** — `ORD-000060` is `Quoted`, which is what the Signed
-  stage's `OrderStatusOnEntry` declares. Note it says **Quoted, not Confirmed**: a won deal showing a
-  *quoted* order is correct here and will be questioned on camera.
-- **Tasks: one on the entire host, and it is wrong in three ways.** Name
-  `Review order for deal 93111111-0000-4000-A000-000000000001` — a **raw GUID**, and that GUID is
-  `DEAL-9001`, which is *open*. Type resolves to the generic `ACTION_ITEM`. `DueAt` is **NULL**. Created
-  2026-08-20 23:25 by a test run, not by any close.
-- **Task links: zero.** So even that task is attached to nothing; the deal-to-task relationship is
-  unrepresented on this host.
-- **Contract: none.** 0 contracts against 4 contract types. B2B's `CloseWonPolicy` is
-  `{"CreateContract":true,"ContractTypeCode":"Order Form",...}` and `Order Form` **is** seeded, and
-  `__mj_BizAppsContracts.vwContracts` now reads cleanly (0 rows, no error) — so the refusal recorded in
-  KI-16/DN-16 is resolved and the path *should* work. It has simply never been exercised here. D2C's
-  policy is `CreateContract: false`, so a D2C close correctly produces none.
+Method, in order: a `PreviewOnly: true` run first (returned `Success`, no issues, and a routing plan;
+wrote nothing, confirmed by an unchanged before/after snapshot); then a **`COPY_ONLY` backup**
+(`MJ_V6_Host_precloseown_20260821.bak`, 69,820 pages — `COPY_ONLY` so a shared host's log chain and
+anybody else's differential base are untouched); then the committing run. Runner:
+`test-harnesses/run-close-won-once.mjs`.
 
-**So the brief's expected end state — order untouched, both tasks raised and linked, contract routed or
-refused with a stated reason — cannot be demonstrated from existing data.** It has to be produced live,
-and what a live close will produce is unverified.
+### What it produced
+
+| | Before | After |
+|---|---|---|
+| Deal | Qualification / Open | **Signed / Won**, `ClosedAt` 20:48:34, `ActualCloseDate` set, `ContractID` set |
+| Stage events | 5 | **6** |
+| Tasks | 1 | **3** |
+| Task links | 0 | **2** |
+| Task assignments | 0 | **0** |
+| Contracts | 0 | **1** |
+| Order status | Draft | **Quoted** |
+| Order lines / total | 1 / 16,240 | **1 / 16,240** |
+
+**The order was not re-priced.** `TotalGross` is unchanged at 16,240, the line count is unchanged, and the
+line's own `__mj_UpdatedAt` is still 2026-08-21 01:13:20 — the close never touched it. Only the *header*
+moved, because its `Status` went `Draft` → `Quoted`, which is the Signed stage's declared
+`OrderStatusOnEntry` rather than anything the close decided. So "order untouched" is true in the sense
+that matters — no re-pricing, no line changes — and false literally, which is the distinction to make on
+camera rather than in front of it.
+
+**Both tasks were raised, with real types and real due dates:**
+
+| Task | Type | Due | Linked to |
+|---|---|---|---|
+| `Review order for deal 93111111-…-000000000002` | `ORDER_REVIEW` / Order Review | 2026-08-26 | `MJ_BizApps_Orders: Order Headers` → **ORD-000058** |
+| `Process contract for deal 93111111-…-000000000002` | `CONTRACT_PROCESSING` / Contract Processing | 2026-08-26 | `MJ_BizApps_Contracts: Contracts` → **CTR-000009** |
+
+This **corrects two findings in the earlier version of this document.** The raw-GUID name, the generic
+`ACTION_ITEM` type and the `NULL DueAt` all belonged to the one *stale leftover* task from a test run —
+not to what the operation produces. Type resolution and the due-date arithmetic both work: five days out,
+by date offset, exactly as `CloseWonTaskDueAt` intends.
+
+**What is still wrong with them is the naming**, and it survives into real output: both names embed the
+deal's **UUID** rather than `DEAL-9002` or "Cascade Manufacturing — Pilot". A task list on screen reads as
+two rows of hex.
+
+**Neither task links to the DEAL.** One points at the order header, one at the contract. Nothing points at
+`MJ_BizApps_Sales: Deals`, so from a deal you cannot navigate to the tasks its close raised — only the
+other way round.
+
+**Both tasks were created but NOT ROUTED, and the operation says why.** `TaskAssignment` is still 0.
+`CloseWonTaskService.route()` refuses with *"The … task was created but NOT routed: no finance assignee is
+configured on the pipeline's CloseWonPolicy (CloseWonTasks.AssigneeRecordID)."* — and neither pipeline's
+`CloseWonPolicy` contains a `CloseWonTasks` block at all. This is a **seed gap, not a code defect**, and
+it is fixable by editing one JSON policy. It is also exactly the "refused with its stated reason" the
+brief asked for, arriving on the tasks rather than on the contract.
+
+**The contract was routed**, and it is a shell:
+
+```
+CTR-000009   type "Order Form"   customer Cascade Manufacturing
+CreatingEntity  MJ_BizApps_Sales: Deals      CreatingRecordID  = DEAL-9002
+EffectiveDate  NULL      EndDate  NULL      AnnualIncreasePercent  NULL
+AutoRenew  0             HasModifications  0  CancellationWindowDays  NULL
+```
+
+Right type, right customer, and provenance recorded on both sides (`Deal.ContractID` set,
+`Contract.CreatingEntityID/CreatingRecordID` pointing back). **And no commercial terms whatsoever** —
+despite B2B's policy stating `TermMonths: 12` and the deal itself carrying `TermMonths = 12`. The KI-16 /
+DN-16 refusal is resolved (`Order Form` is seeded, `vwContracts` reads cleanly), so the path works; what
+it produces is a stub that finance would have to complete by hand.
+
+`LineCount: 0` on the routing plan is **structural, not a failure**: contracts' v2 rebuild removed
+`ContractLine` entirely, so there is nowhere for `SubscriptionLinesTo: "Contract"` to put anything. The
+schema holds `Contract`, `ContractSequence`, `ContractTemplate`, `ContractTemplateProvision` (71 rows),
+`ContractTemplateType` and `ContractType` — and no line table.
+
+**The stage event is correct, including the stamp that is easy to get wrong:**
+
+```
+Qualification -> Signed    Open -> Won    Amount 16,240    Probability 25.00
+```
+
+`25.00` is the **departing** probability, from Qualification — not the 100 that Signed declares. That is
+the provenance rule working.
+
+### The cost of having run it
+
+`DEAL-9002` is now Won and **locked** (`DealStatusType.LocksDeal = 1`). Consequences for the demo set:
+
+- The board loses its only Qualification card; B2B Qualification becomes a fourth empty column.
+- `Sales: Dashboard Summary` moves to 4 open / 234,980 open, and **`PastExpectedCloseCount` drops from 1
+  to 0** — `DEAL-9002` was the only deal that tile counted.
+- `Win Rate` becomes 3 closed / 2 won / 1 lost.
+- The one legal drag on B2B is now Proposal ⇄ Negotiation only.
+
+Undo is surgical rather than a restore, because a full restore of this shared host would destroy two other
+sessions' work. The baseline to return to is **stage_events 5, tasks 1, task_links 0, contracts 0**, and
+every row the close wrote carries `__mj_CreatedAt` at 2026-08-21 20:48. The `COPY_ONLY` backup exists as a
+genuine last resort. **Whether to undo it is a decision, not a cleanup** — the same reasoning that stopped
+me deleting the injected stage events: `DealStageEvent` and the task/contract rows are append-only by
+design, and the host now holds the only working example of a close-won on this stack.
 
 ---
 
 # What would trip a recording
 
-Ranked by how likely a camera is to catch it.
+Ranked by how likely a camera is to catch it. Eleven, after the port claim was retracted — see the
+note at the top of this document for why a false alarm at position one was worse than no entry at all.
 
-### 1. The API is down — nothing can be recorded at all
-`GRAPHQL_PORT=4141`, nothing listening. Explorer up on 4341, a different API on 4143. Blocking.
+### 0. RESOLVED 2026-08-21 19:38 — `DEAL-9001`'s injected stage events are gone
 
-### 2. `DEAL-9001`'s timeline contains a 20-second round trip
+Re-measured after this document was first written: `stage_events` is back to **5**, the two note-less
+events are absent, and `DEAL-9001` reads Negotiation @ 75 again. Somebody acted on the finding at
+19:38. Kept in place, unrenumbered, because the hazard below is the reasoning that made it findable and
+the same injection will recur the next time a board spec runs against this host.
+
+### 1. `DEAL-9001`'s timeline contained a 20-second round trip
 The flagship deal's stage history reads:
 
 ```
@@ -258,25 +360,25 @@ today's date, after a clean three-month narrative. **This is the single most fil
 It needs the two events deleted before recording — which means deleting from an append-only table, so it
 is a deliberate, recorded act, not a tidy-up.
 
-### 3. The same deal's history and header disagree about money
+### 2. The same deal's history and header disagree about money
 The timeline says the deal reached **185,000** at Negotiation; the header says **124,400**. Legitimate —
 amounts move and the stamps freeze what was true — but on screen it invites "so which is it?". Same
 shape on the won deal: `DEAL-9005`'s close event stamps **64,000** while the deal reads **27,480**, and
 DN-21's attribution story quotes 27,480.
 
-### 4. The single forecast snapshot contradicts the live forecast by 60,600
+### 3. The single forecast snapshot contradicts the live forecast by 60,600
 `ForecastHistory` has one row: commit **185,000**, closed **64,000**, captured 2026-08-01. Live commit is
 **124,400** and closed-won is **27,480**. That is the snapshot doing its job, and it is indefensible on
 camera unless narrated as "this is what we believed on 1 August". With one data point there is also no
 trend to show.
 
-### 5. A rep cannot remove an order line
+### 4. A rep cannot remove an order line
 Confirmed: `UQ_OrderLine_OrderHeader_LineNumber` on `(OrderHeaderID, LineNumber)`, **unfiltered**. Per
 KI-20 the whole save is now refused on the unique-index violation rather than failing silently. Do not
 put line removal in the script. `DEAL-9001` is the only deal with two lines, i.e. the only place the
 gesture is even reachable.
 
-### 6. Three of seven deals have an owner but no team row
+### 5. Three of seven deals have an owner but no team row
 `DEAL-9002`, `DEAL-9003`, `DEAL-9007` carry `OwnerEmployeeID` with **zero** `DealTeamMember` rows. This
 puts two tiles into disagreement on the same screen: anything reading `Deal.OwnerEmployeeID` counts them
 (`Forecast by Owner` credits Priya Raman 73,080 of best case on `DEAL-9003`), while anything joining
@@ -284,32 +386,32 @@ puts two tiles into disagreement on the same screen: anything reading `Deal.Owne
 source of truth for membership *including the owner*. Opening the team pane on any of those three shows
 an owner in the header and an empty team.
 
-### 7. `DEAL-9004` has a team row pointing at nobody
+### 6. `DEAL-9004` has a team row pointing at nobody
 Role `Partner Manager`, `EmployeeID` **NULL**, `IsActive = 1`. The team pane will render a live row with
 no person in it.
 
-### 8. Tom Okafor's forecast row is all zeros
+### 7. Tom Okafor's forecast row is all zeros
 `Forecast by Owner` returns him with 0 commit, 0 best case, 0 pipeline, 0 closed won and 0 counts —
 because his only deal is lost. A named individual rendered as an empty row reads as either a bug or an
 unkind callout. Same person is the 0.000 win rate in `Bookings by Owner`, against a 1.000 for Local
 Developer: two reps, one at 100% and one at 0%, on one deal each.
 
-### 9. Nothing to show in three surfaces
+### 8. Nothing to show in three surfaces
 - **Activity timeline: 0 activities, 0 links.** S-US9's pane renders empty. Do not open it.
 - **Discount depth: every line is 0% discount.** The tile has no signal, and the only way to create one
   live runs into the sub-1% and step-constraint issues.
 - **Product mix has no D2C row**, because both D2C deals have zero lines.
 
-### 10. 50 orphan orders, and the order sequence has run past the demo
+### 9. 50 orphan orders, and the order sequence has run past the demo
 31 `Confirmed`, 11 `Draft`, 6 `Quoted`, 2 `Voided`, holding 57 lines. Invisible on the sales surfaces but
 visible the moment anything shows an order list or the next minted number — the live orders are
 `ORD-000057`–`ORD-000063` and the next will be `ORD-000065`.
 
-### 11. Both pipelines are flagged `IsDefault = 1`
+### 10. Both pipelines are flagged `IsDefault = 1`
 Two defaults means "the default pipeline" has no single answer, so which one a new deal opens on may
 differ between takes. This is the most likely cause of a *"it did something different last time"* moment.
 
-### 12. A won deal's order says `Quoted`
+### 11. A won deal's order says `Quoted`
 Correct by data — Signed declares `OrderStatusOnEntry = Quoted` — and it will be read as unfinished.
 Decide the narration before the camera is on rather than in front of it.
 
