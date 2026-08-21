@@ -35,28 +35,31 @@
  * ORDERS — the shape `LiveOrdersSeam` sends into orders' entity graph
  * ──────────────────────────────────────────────────────────────────────────── */
 
+/** The order header sales can state. Everything financial is absent by design. */
 /**
- * One line as ORDERS requires it.
+ * A line on an order handoff.
  *
- * ⚠️ `ProductID` IS REQUIRED BY ORDERS, and this is the single hardest blocker on the D2C path: sales'
- * `DealLine.ProductID` is a nullable soft reference to the orders catalog, and it is NULL in every row
- * we have — the workspace captures `ProductName` as transcription precisely because that catalog is
- * not installed. A deal therefore cannot currently produce a valid order line, and that is a DATA
- * problem (populate `DealLine.ProductID` from a real catalog), not a build problem.
+ * ── KEPT ONLY BECAUSE ITS CONTAINER IS ─────────────────────────────────────────────────────────
+ *
+ * Nothing constructs one of these any more. It survives because `OrdersOrderHandoffInput` still
+ * names it, and that type is imported by `CloseDealOperation.ts` — another session's file this turn.
+ * Both go together, in the same edit that removes that import.
+ *
+ * ⚠ `DiscountPct` HAS NO STATED UNITS, AND THAT WAS THE BUG. Orders stores a FRACTION (0.25 = a
+ * quarter off); the caller that used to build these sent a rep-entered PERCENTAGE (25). The two
+ * methods that carried it straight through to `OrderLine` — `LiveOrdersSeam.CreateOrder` and
+ * `PreviewOrderMoney` — are deleted, so nothing can reach the database with it any more. Anyone
+ * reviving this type must convert, the way `scripts/assert-discount-conversion.mjs` requires.
  */
 export interface OrdersOrderLineSeamInput {
-    ClientKey?: string;
     ProductID: string;
     Quantity: number;
-    /** An INPUT to the pricing engine, never a replacement for it. Omitted entirely when unset. */
-    UnitPrice?: number;
+    /** UNITS: a fraction, 0–1, per orders' CK_OrderLine_DiscountPct. Not a percentage. */
     DiscountPct?: number;
-    ServicePeriodStart?: string | null;
-    ServicePeriodEnd?: string | null;
+    UnitPrice?: number;
     Description?: string | null;
 }
 
-/** The order header sales can state. Everything financial is absent by design. */
 export interface OrdersOrderHeaderSeamInput {
     CompanyID: string;
     /** The buying organization — sales' `Deal.AccountID` is an IsA child of common's Organization. */
@@ -102,20 +105,6 @@ export interface OrdersOrderHandoffInput {
     OrderType: string;
     OrderDate?: string | null;
     Reason?: string | null;
-}
-
-/**
- * What the money preview returns.
- *
- * `Amount` is ORDERS' number, carried back verbatim. Sales stores it as a cached answer with
- * provenance and never derives anything from it — no rounding, no summing, no re-deriving a line from
- * a total. See the money-boundary rule in the file header.
- */
-export interface OrdersPreviewResult {
-    Success: boolean;
-    Amount?: number | null;
-    CurrencyID?: string | null;
-    Message?: string | null;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -194,8 +183,6 @@ export interface ContractsCreateFromDealSeamInput {
      * computes it; it is only ever passed through when a deal actually negotiated one.
      */
     CommittedAmount?: number | null;
-    /** Recurring lines, when the policy routes them to the contract. */
-    Lines?: OrdersOrderLineSeamInput[];
 }
 
 /** Renewal path: used INSTEAD of CreateFromDeal when `DealType.RequiresRenewalSource` is set (§7.2). */
@@ -235,11 +222,20 @@ export interface OrdersSeamResult {
  * implementation be registered later without the operation changing at all.
  */
 export interface IDownstreamSeam {
-    /** True when this implementation actually reaches the sibling app. */
-    readonly IsLive: boolean;
-    /** Prices a draft WITHOUT creating anything. The only place an order amount may come from. */
-    PreviewOrderMoney(input: OrdersOrderHandoffInput): Promise<OrdersPreviewResult>;
-    CreateOrder(input: OrdersOrderHandoffInput): Promise<OrdersSeamResult>;
+    /**
+     * THE ORDER METHODS ARE GONE. `PreviewOrderMoney` and `CreateOrder` described a route close-won no
+     * longer takes: the order is embedded on the deal from creation, so there is nothing to create and
+     * nothing to price at close. They were exported, typechecked and documented, and called by nobody.
+     *
+     * `readonly IsLive: boolean` went with them. Nothing read it. Note that `IActivitySource.IsLive`
+     * and `IForecastSource.IsLive` are DIFFERENT flags on different interfaces and are load-bearing —
+     * the ingest refuses to write `Source: 'Integration'` from a fixture source — so do not read this
+     * removal as a verdict on those.
+     *
+     * RENEWAL STAYS. `RenewContractTerm` currently reports an unexecuted plan, because the contracts
+     * rebuild removed `ContractTerm` and `Contracts.RenewTerm` with it. It is kept rather than pruned
+     * because a renewal User Story is coming and the route is the shape it will land in.
+     */
     CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult>;
     RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult>;
 }
@@ -253,30 +249,8 @@ export interface IDownstreamSeam {
  * UI can mistake a planned contract for a created one.
  */
 export class StubDownstreamSeam implements IDownstreamSeam {
-    public readonly IsLive = false;
-
     /** Everything the close flow tried to send, in call order — for the run report and for tests. */
     public readonly Attempts: Array<{ Target: string; Payload: unknown }> = [];
-
-    public async PreviewOrderMoney(input: OrdersOrderHandoffInput): Promise<OrdersPreviewResult> {
-        this.Attempts.push({ Target: 'OrderPreview', Payload: input });
-        return {
-            Success: false,
-            Message:
-                'Orders.PriceOrder is not reachable: bizapps-orders is not present in this deployment. ' +
-                'See CLOSE-FLOW-DECISIONS.md D-CF3.',
-        };
-    }
-
-    public async CreateOrder(input: OrdersOrderHandoffInput): Promise<OrdersSeamResult> {
-        this.Attempts.push({ Target: 'Order', Payload: input });
-        return {
-            Success: false,
-            Message:
-                'The order handoff is not wired: bizapps-orders is not present in this deployment, so ' +
-                'its Order Headers entity cannot be resolved. See CLOSE-FLOW-DECISIONS.md D-CF3.',
-        };
-    }
 
     public async CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {
         this.Attempts.push({ Target: 'Contract', Payload: input });
