@@ -114,6 +114,25 @@ below stops matching — it is the map, and it is cheaper than guessing.
 | `specs/40-deal-workspace.spec.ts` | Composes a deal across all five workspace panes and reads it back through a **different** surface. |
 | `specs/41-deal-roundtrip.spec.ts` | **The related-record-collection round trip** — save, RE-OPEN, and prove the lines, instalment, dates and owner all came back; then remove a line and prove the removal survives another re-open. |
 | `specs/50-sales-shell.spec.ts` | The Phase 2 section layout, the rail, and the roster opening the workspace. |
+| `specs/70-activity-timeline.spec.ts` | **NEVER RUN.** Logs an activity from the workspace and asserts the `Activity` row, its `LoggedByUserID`, and the deal/account/contact links the `Sales.LogActivity` Action attaches. Plus: a refused log leaves no unreachable activity. |
+| `specs/80-board-drag.spec.ts` | **NEVER RUN.** Drags a card between stages and asserts the stage change, exactly one append-only event stamped with the DEPARTING probability and amount, and the order following the new stage. Plus: a drop onto a closing column is refused with a hint. |
+
+### Two specs are written and have never been executed
+
+`70-activity-timeline` and `80-board-drag` cover the two newest surfaces in the tree, both of which had
+no spec at all. They were authored while Explorer and `MJ_V6_Host` were in use by another session, so
+**neither has run once** — not green, not red, not at all.
+
+That is recorded rather than hidden because an unrun spec and a passing spec look identical in a file
+listing, and the difference matters: **a spec that has never failed has never been shown to test
+anything.** Each file ends with a numbered list of mutations — the specific line to break and the
+assertion that must go red. The first thing the post-merge pass should do is work that list, THEN run
+them green. Doing it the other way round produces a green result with no evidence behind it, which is
+the state this harness exists to avoid.
+
+The precedent is in-repo: an integration check (`AC14`) spent a day asserting a defect, passing the
+whole time, because the fixture it drove reproduced the bug it was meant to catch. Only a mutation
+found it.
 
 ### Three traps these specs have already hit
 

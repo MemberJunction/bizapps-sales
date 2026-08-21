@@ -26,15 +26,24 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Metadata, RunView } from '@memberjunction/core';
+import { Metadata, RunView, type IMetadataProvider } from '@memberjunction/core';
+import { GraphQLActionClient, type GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
+/**
+ * The codes come from the SHARED package, not a list retyped here. That is why `activity-vocabulary`
+ * moved out of `sales-core-entities-server`: an Angular package must not import a server one, and a
+ * second copy of the four codes is exactly the drift this change removes.
+ */
+import type { ActivityTypeCode } from '@mj-biz-apps/sales-entities';
 /** For `<mj-loading>` — the house rule is that spinner and no other. */
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 
 /** Common's entity names. Strings, because sales must not import contracts' or common's classes here. */
 const E_ACTIVITY = 'MJ_BizApps_Common: Activities';
 const E_ACTIVITY_LINK = 'MJ_BizApps_Common: Activity Links';
-const E_ACTIVITY_TYPE = 'MJ_BizApps_Common: Activity Types';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
+
+/** The seeded Action this pane calls. Its display Name, which is what `Action.Name` holds. */
+const LOG_ACTIVITY_ACTION = 'Log Activity';
 
 /** What the timeline shows for one activity. */
 export interface DealActivityRow {
@@ -50,7 +59,7 @@ export interface DealActivityRow {
 }
 
 /** The four codes a person can log by hand. Meetings arrive from the calendar, not from this form. */
-const LOGGABLE_CODES = ['Call', 'Meeting', 'Note', 'Email'] as const;
+const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 'Email'];
 
 @Component({
     selector: 'mjs-deal-activity-timeline',
@@ -249,18 +258,31 @@ export class DealActivityTimelineComponent {
     }
 
     /**
-     * Writes one activity and its deal link.
+     * Logs the activity by calling `Sales.LogActivity`. This component composes NOTHING.
      *
-     * ── THE DUPLICATION HERE IS DELIBERATE AND BOUNDED ──
+     * ── WHAT THIS REPLACED, AND WHY IT WAS NOT A MISSING FIELD ──
      *
-     * `ActivityWriterService` is the canonical composition and it is server-side. A browser cannot call
-     * it, and an Angular package importing a server one would put server code in the bundle. So this
-     * writes the same two records the service writes — an `Activity` and its `Regarding` link — and
-     * NOTHING ELSE: no party links, no external key, no dedupe. Those are the parts that need the deal's
-     * account and contact resolved, and the parts the ingest depends on being exactly right.
+     * The previous version wrote the `Activity` and its `ActivityLink` here, by hand. It never set
+     * `LoggedByUserID`, which is NOT NULL with no default, so **every attempt to log an activity from
+     * this pane failed at the database** with a raw constraint error the rep could do nothing with. The
+     * feature had never worked.
      *
-     * The honest reading is that this is the manual path's minimum, and a remote operation wrapping the
-     * writer would let the browser use the real composition. Recorded as D-22 rather than half-built.
+     * Adding the field would have fixed the error and left the real defect: two independent saves, so a
+     * link failure committed an activity no surface could ever reach, and a second copy of a composition
+     * that `ActivityWriterService`'s own header had already predicted would drift. It drifted in exactly
+     * the way that header warned about.
+     *
+     * So the composition is gone from here. The service stamps the user, resolves the deal's account and
+     * primary contact as participants, and wraps the activity and every link in ONE transaction — which
+     * a browser cannot open at all, and which is the strongest reason this could never have been correct
+     * client-side.
+     *
+     * ── WHY AN ACTION CALL AND NOT A REMOTE OPERATION ──
+     *
+     * `GraphQLActionClient.RunAction` is the browser-reachable path, and the one MJ's own
+     * `interactive-form-apply.service.ts` uses. A remote operation would read better beside
+     * `Sales.CloseDeal`, but operation shells are CodeGen output and CodeGen is not run here to close a
+     * gap — see `docs/CODEGEN-PARTIAL-RUNS.md`.
      */
     public async Save(): Promise<void> {
         if (!this.dealID || !this.DraftTitle.trim()) {
@@ -271,47 +293,50 @@ export class DealActivityTimelineComponent {
         this.cdr.detectChanges();
 
         try {
-            const md = new Metadata();
-            const typeID = await this.resolveTypeCode(this.DraftTypeCode);
-            if (!typeID) {
-                this.Error = `No activity type with code '${this.DraftTypeCode}' exists in this deployment.`;
+            const provider = Metadata.Provider;
+            const client = this.actionClient(provider);
+            if (!client) {
+                this.Error = 'Logging an activity needs a GraphQL connection, which this session does not have.';
                 return;
             }
 
-            const activity = await md.GetEntityObject(E_ACTIVITY);
-            activity.NewRecord();
-            activity.Set('ActivityTypeID', typeID);
-            activity.Set('Title', this.DraftTitle.trim());
-            activity.Set('StartedAt', this.DraftWhen ? new Date(this.DraftWhen) : new Date());
-            activity.Set('Description', this.DraftNotes.trim() || null);
-            activity.Set('Direction', 'Internal');
-            activity.Set('Status', 'Logged');
-            activity.Set('Visibility', 'Internal');
-            activity.Set('Source', 'Manual');
-            if (!(await activity.Save())) {
-                this.Error = activity.LatestResult?.CompleteMessage ?? 'The activity could not be saved.';
+            const actionID = this.logActivityActionID(provider);
+            if (!actionID) {
+                this.Error =
+                    'The Log Activity action is not installed in this deployment. It is seeded from '
+                    + 'metadata/actions/; run `mj sync push --dir metadata`.';
                 return;
             }
 
-            const dealEntityID = md.Entities.find((e) => e.Name === E_DEAL)?.ID;
-            if (!dealEntityID) {
-                this.Error = 'The Deals entity is not registered, so the activity could not be linked.';
-                return;
-            }
-            const link = await md.GetEntityObject(E_ACTIVITY_LINK);
-            link.NewRecord();
-            link.Set('ActivityID', activity.Get('ID'));
-            link.Set('Role', 'Regarding');
-            link.Set('EntityID', dealEntityID);
-            link.Set('RecordID', this.dealID);
-            link.Set('Sequence', 1);
-            if (!(await link.Save())) {
-                this.Error = 'The activity was saved but could not be linked to the deal.';
+            const result = await client.RunAction(actionID, [
+                { Name: 'DealID', Value: this.dealID, Type: 'Input' },
+                { Name: 'TypeCode', Value: this.DraftTypeCode, Type: 'Input' },
+                { Name: 'Title', Value: this.DraftTitle.trim(), Type: 'Input' },
+                { Name: 'Notes', Value: this.DraftNotes.trim(), Type: 'Input' },
+                /**
+                 * SENT AS AN INSTANT, not as the `datetime-local` text. That input carries no zone, so
+                 * handing its string to the server would have it read in the server's zone — everything
+                 * stored here is UTC and the shift would be invisible.
+                 */
+                {
+                    Name: 'StartedAt',
+                    Value: (this.DraftWhen ? new Date(this.DraftWhen) : new Date()).toISOString(),
+                    Type: 'Input',
+                },
+            ]);
+
+            if (result?.Success !== true) {
+                /**
+                 * The action's own message is shown verbatim. It names the actual refusal — a bad type
+                 * code, an unreadable date, a missing deal — which is worth more to a rep than anything
+                 * this component could paraphrase.
+                 */
+                this.Error = actionMessage(result) ?? 'The activity could not be logged.';
                 return;
             }
 
             this.Adding = false;
-            this.Logged.emit(String(activity.Get('ID')));
+            this.Logged.emit(this.dealID);
             await this.Load();
         } catch (err) {
             this.Error = `The activity could not be logged: ${String(err)}`;
@@ -319,6 +344,27 @@ export class DealActivityTimelineComponent {
             this.Saving = false;
             this.cdr.detectChanges();
         }
+    }
+
+    /**
+     * The action client, or null when this provider cannot reach one.
+     *
+     * Duck-checked on `ExecuteGQL` rather than by `instanceof`: the provider is typed as
+     * `IMetadataProvider` and only the GraphQL one can run an action, so the test has to be about the
+     * capability rather than the class.
+     */
+    private actionClient(provider: IMetadataProvider): GraphQLActionClient | null {
+        const gql = provider as unknown as GraphQLDataProvider;
+        if (typeof (gql as { ExecuteGQL?: unknown })?.ExecuteGQL !== 'function') {
+            return null;
+        }
+        return new GraphQLActionClient(gql);
+    }
+
+    /** `RunAction` takes an ID, so the name is resolved from metadata the provider already holds. */
+    private logActivityActionID(provider: IMetadataProvider): string | null {
+        const actions = (provider as unknown as { Actions?: { ID: string; Name: string }[] }).Actions ?? [];
+        return actions.find((a) => a.Name === LOG_ACTIVITY_ACTION)?.ID ?? null;
     }
 
     /** Newest first, by when it HAPPENED rather than when it was filed. */
@@ -381,16 +427,6 @@ export class DealActivityTimelineComponent {
         }
     }
 
-    /** The type row for a code. By CODE, never by the display name — see the vocabulary rule. */
-    private async resolveTypeCode(code: string): Promise<string | null> {
-        const r = await new RunView().RunView<{ ID: string }>({
-            EntityName: E_ACTIVITY_TYPE,
-            ExtraFilter: `Code = '${escape(code)}'`,
-            ResultType: 'simple',
-            Fields: ['ID'],
-        });
-        return r.Success ? ((r.Results ?? [])[0]?.ID ?? null) : null;
-    }
 }
 
 function escape(value: string): string {
@@ -405,3 +441,16 @@ function localInputValue(when: Date): string {
         + `T${pad(when.getHours())}:${pad(when.getMinutes())}`
     );
 }
+
+/**
+ * The message off an action result, whatever shape it came back in.
+ *
+ * `ActionResult` does not expose `Message` or `ResultCode` at the top level — MJ's own caller reaches
+ * through `Result` for the code — so this reads defensively rather than asserting a shape that is not
+ * guaranteed. Returning null lets the caller supply its own fallback rather than showing "undefined".
+ */
+function actionMessage(result: unknown): string | null {
+    const r = result as { Message?: string; Result?: { Message?: string; ResultCode?: string } } | null;
+    return r?.Message ?? r?.Result?.Message ?? r?.Result?.ResultCode ?? null;
+}
+

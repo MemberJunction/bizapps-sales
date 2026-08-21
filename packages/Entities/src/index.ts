@@ -48,3 +48,6 @@ export * from './close-lock';
 export function LoadGeneratedEntities(): void {
 }
 export * from './discount-conversion.js';
+
+/** Activity vocabulary — shared, because the deal-activity pane needs the codes too. */
+export * from './activities/activity-vocabulary.js';

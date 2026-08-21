@@ -43,7 +43,7 @@ import {
     type ActivityStatus,
     type ActivityTypeCode,
     type ActivityVisibility,
-} from './activity-vocabulary.js';
+} from '@mj-biz-apps/sales-entities';
 
 /** A party we know the identity of — a common `Person` or `Organization`. See the convention note. */
 export interface ResolvedParty {

@@ -38,9 +38,20 @@ export class FixtureActivitySource implements IActivitySource {
         this.Kind = kind;
     }
 
+    /**
+     * The instant a CALENDAR fixture reports as its watermark. Injectable so a check can assert an
+     * exact value instead of racing the clock.
+     */
+    public fetchedAt: Date = new Date();
+
     public async Fetch(query: ActivitySourceQuery): Promise<ActivitySourceBatch> {
         this.Calls.push(query);
 
+        /**
+         * The watermark filter stays a `StartedAt` comparison here even for a calendar, because a
+         * fixture has no modification time to offer. That asymmetry is deliberate and stated: it keeps
+         * the fixture the STRICTER of the two, so nothing passes here that the live source would drop.
+         */
         const since = query.Since ? query.Since.getTime() : null;
         const eligible = this.items
             /**
@@ -53,11 +64,24 @@ export class FixtureActivitySource implements IActivitySource {
             .sort((a, b) => a.StartedAt.getTime() - b.StartedAt.getTime())
             .slice(0, Math.max(0, query.Limit));
 
+        /**
+         * THE FIXTURE MIRRORS EACH SURFACE'S REAL RULE, and getting this wrong is how the calendar
+         * watermark bug survived eighteen checks.
+         *
+         * The fixture used `max(StartedAt)` for both kinds, which is right for messages and is exactly
+         * the defect for a calendar — so any check written against it would have agreed with the broken
+         * source and passed. A fixture that repeats a bug cannot detect it.
+         *
+         * Messages: `max(StartedAt)`, always past. Calendar: ingest time, because a meeting starts in
+         * the future.
+         */
+        const watermark = this.Kind === 'Calendar'
+            ? this.fetchedAt
+            : new Date(Math.max(...eligible.map((i) => i.StartedAt.getTime())));
+
         return {
             Items: eligible,
-            HighWatermark: eligible.length
-                ? new Date(Math.max(...eligible.map((i) => i.StartedAt.getTime())))
-                : null,
+            HighWatermark: eligible.length ? watermark : null,
             Issues: [...this.issues],
         };
     }

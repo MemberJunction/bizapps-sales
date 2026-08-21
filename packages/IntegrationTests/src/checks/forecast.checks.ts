@@ -333,11 +333,35 @@ export const ForecastChecks: NamedCheck[] = [
              * the last day of a month in UTC, which is ALREADY the next month for anyone east of Greenwich —
              * the exact case a local-time getter gets wrong.
              */
-            const lateOnMonthEnd = new Date('2026-03-31T23:30:00.000Z');
-            const period = CurrentMonthPeriod(lateOnMonthEnd);
+            /**
+             * AN INSTANT WHERE LOCAL AND UTC DISAGREE ABOUT THE MONTH, which the previous one did not.
+             *
+             * FS7 used `2026-03-31T23:30Z`. On a host at UTC-4 that is still 31 March locally, so
+             * swapping `getUTCMonth()` for `getMonth()` changed nothing and the mutation survived — the
+             * check was asserting a boundary it could not actually test.
+             *
+             * Just after midnight UTC on the 1st is the case that separates them: UTC says April, every
+             * timezone behind Greenwich still says March. A run on a UTC host sees no difference either,
+             * which is why the second instant below covers the other direction.
+             */
+            const justAfterUtcMonthStart = new Date('2026-04-01T00:30:00.000Z');
+            const period = CurrentMonthPeriod(justAfterUtcMonthStart);
 
-            AssertEqual(period.PeriodStart.toISOString().slice(0, 10), '2026-03-01', 'first day of the month');
-            AssertEqual(period.PeriodEnd.toISOString().slice(0, 10), '2026-03-31', 'and the last');
+            AssertEqual(
+                period.PeriodStart.toISOString().slice(0, 10),
+                '2026-04-01',
+                'the period follows UTC, not the host zone — behind Greenwich this instant is still March',
+            );
+            AssertEqual(period.PeriodEnd.toISOString().slice(0, 10), '2026-04-30', 'and ends on the 30th');
+
+            /** The other direction, for a host AHEAD of Greenwich: late on the last day UTC. */
+            const lateOnMonthEnd = CurrentMonthPeriod(new Date('2026-03-31T23:30:00.000Z'));
+            AssertEqual(
+                lateOnMonthEnd.PeriodStart.toISOString().slice(0, 10),
+                '2026-03-01',
+                'and ahead of Greenwich this instant is already April, but the period is still March',
+            );
+            AssertEqual(lateOnMonthEnd.PeriodEnd.toISOString().slice(0, 10), '2026-03-31', 'ending the 31st');
 
             /** February in a leap year — the case a hand-written day count gets wrong. */
             const leap = CurrentMonthPeriod(new Date('2028-02-10T12:00:00.000Z'));
@@ -367,6 +391,18 @@ export const ForecastChecks: NamedCheck[] = [
 
                 const result = await job.Capture(TEST_PERIOD, source, ProviderOf(ctx), ctx.User);
 
+                /**
+                 * THE ASSERTION FS8 WAS MISSING, found by mutation: removing the zero-rows-with-issues
+                 * guard killed no check, because FS8 only ever checked that nothing was WRITTEN — which
+                 * is equally true of a quiet quarter. Success is the whole distinction the seam exists
+                 * to preserve, and nothing asserted it.
+                 */
+                Assert(
+                    result.Success === false,
+                    'a missing query is a FAILED measurement, not an empty period — reporting success '
+                        + 'here is what would leave the daily job green forever after somebody renamed '
+                        + 'the query',
+                );
                 AssertEqual(result.Measured, 0, 'nothing was measured');
                 AssertEqual(result.Written, 0, 'and nothing written — no row of nulls');
                 AssertEqual((await snapshotsFor(ctx)).length, before, 'the table did not move');
