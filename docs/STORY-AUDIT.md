@@ -136,6 +136,25 @@ Three details that are not incidental:
   looking at. The create button is also now hidden when that field is not editable, so a locked deal
   cannot create a record it would then fail to attach; it was previously offered unconditionally.
 
+**EXERCISED IN THE BROWSER, and one half could not be.** Verified by clicking, against the live Explorer:
+
+| Claim | Result |
+|---|---|
+| It opens a slide-in, not an Explorer tab | **verified** — panel over the workspace, browser tab count unchanged, workspace still visible beneath |
+| The title comes from the launching field | **verified** — "New customer" |
+| Save left, Cancel right (house convention) | **verified** |
+| The create button is gated on `IsFieldEditable` | **verified** — on the WON, locked `DEAL-9005` only `Open account`/`Open contact` render; on a new deal only `New account`/`New contact` |
+| The created record is selected back into the picker | **NOT OBSERVABLE ON THIS HOST** — see below |
+| The picker does not render blank after a successful create | **UNOBSERVED** — no successful create was possible |
+
+The create fails before my code runs: `spCreateOrganization` does not exist on `MJ_V6_Host`
+(`docs/KNOWN-ISSUES.md` KI-23). `SalesAccount` IS an Organization, so the save reaches for the parent and
+finds no insert procedure. **The picker correctly stayed unchanged**, because `CreateRelated` returns early
+when `AfterSaved()` yields nothing rather than inventing a selection — so what was observed is the
+failed-save path behaving right, not the success path. The blank-picker question the click-through was
+meant to settle is therefore still open, and I would rather say that than let a verified-looking table
+imply otherwise.
+
 ---
 
 ## Finding (b) — `OwnerEmployeeID`: **CONFIRMED, and the distinction matters**

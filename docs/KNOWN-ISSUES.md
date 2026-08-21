@@ -108,6 +108,65 @@ cannot be regenerated cleanly on any host that carries common's schema. `DECISIO
 
 ---
 
+## 🔴 KI-23 — `spCreateOrganization` and `spUpdateOrganization` do not exist on `MJ_V6_Host`, so no SalesAccount can be created or edited through the entity layer
+
+**Found by clicking, not by reading**, while verifying #33's inline create-and-return in the Explorer.
+Creating a customer from the deal workspace fails with:
+
+```
+Failed to save parent entity 'MJ_BizApps_Common: Organizations': Error executing SQL
+  Could not find stored procedure '__mj_BizAppsCommon.spCreateOrganization'.
+```
+
+**The IsA chain did its job.** `SalesAccount` IS an Organization (same UUID), so the save reached for the
+parent first — exactly as designed — and the parent's insert procedure is absent.
+
+### It is a PARTIAL CodeGen application, which is why nobody noticed
+
+`__mj_BizAppsCommon` holds 46 procedures and 18 views. What it has, and what it does not:
+
+| Entity | Create | Update | Delete |
+|---|---|---|---|
+| `Person` | ✅ | ✅ | ✅ |
+| `OrganizationType` | ✅ | ✅ | ✅ |
+| **`Organization`** | ❌ | ❌ | ✅ |
+
+An Organization can be **deleted** but not created or updated. One entity, two of three procedures, on a
+schema that is otherwise complete — so nothing looks broken until something tries to write one.
+
+### Why it stayed invisible
+
+* **The demo seed writes Organizations with raw SQL `INSERT`**, not through the entity layer, so seeding
+  succeeds and every screen that only READS accounts is fine. All 92→93 integration checks pass, because
+  none of them creates an account — they resolve the seeded ones.
+* **It was visible earlier and I mis-triaged it.** My own CodeGen run reported
+  `Error executing permissions file ... spCreateOrganization ... Cannot find the object` and the same for
+  `spUpdateOrganization`, and I recorded it as "cross-app permission noise" because it named another app's
+  objects. It was not noise; it was this. A permissions step failing because the OBJECT is missing is a
+  different fact from a permissions step failing.
+
+### What it blocks
+
+* **#33's inline create-and-return cannot be demonstrated**, though the code is correct: the slide-in
+  opens over the workspace, the title renders, Save/Cancel are in the right places, and the picker
+  correctly does NOT change — because my code returns early when `AfterSaved()` yields nothing rather than
+  inventing a selection. The blank-picker question the click-through was meant to settle is therefore
+  still **unobserved**, not answered.
+* **Any path that creates or edits an account**: the UI, an Action, an agent, a script. Not UI-specific.
+* The HubSpot importer in S6, which will create accounts by definition.
+
+### The fix is not ours
+
+Regenerate bizapps-common's CRUD procedures against this host, or apply the migration that was partially
+applied. **Do not work around it in this repo** — writing an Organization by raw SQL from sales would put
+this app in the business of maintaining another app's table, and the IsA chain exists precisely so it does
+not have to.
+
+**Contacts are probably fine and that has not been verified.** `spCreatePerson` exists, so
+`SalesContact` creation should work; I did not test it, and saying so is cheaper than implying I did.
+
+---
+
 ## 🔴 KI-22 (as originally recorded) — Orders' generated GraphQL resolvers are behind the database
 
 **The second half of KI-21, and it is a DIFFERENT problem with the same symptom.** With orders'
