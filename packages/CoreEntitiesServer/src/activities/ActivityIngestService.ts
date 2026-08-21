@@ -73,9 +73,33 @@ interface ConnectionRow {
 }
 
 export class ActivityIngestService {
-    private readonly writer = new ActivityWriterService();
-    private readonly filter = new RelevanceFilter();
-    private readonly matcher = new DealMatcher();
+    private readonly writer: ActivityWriterService;
+    private readonly filter: RelevanceFilter;
+    private readonly matcher: DealMatcher;
+
+    /**
+     * The collaborators are injectable, defaulting to the real ones.
+     *
+     * ── WHY, AND IT IS NOT FOR TIDINESS ──
+     *
+     * A mutation pass found that nothing exercised the LOOKUP-FAILURE path: reverting
+     * `RelevanceFilter`'s `failed: true` to `false` killed no check, because the only failure any check
+     * could force was a failed WRITE. So the branch that holds the watermark when a contact-method read
+     * blips was untested — the exact branch that stops a transient error discarding a batch of real
+     * mail permanently.
+     *
+     * A read failure cannot be provoked from outside without breaking the database for everything else.
+     * Injecting a filter that reports one is the only way to reach it, and it costs three fields.
+     */
+    public constructor(
+        writer: ActivityWriterService = new ActivityWriterService(),
+        filter: RelevanceFilter = new RelevanceFilter(),
+        matcher: DealMatcher = new DealMatcher(),
+    ) {
+        this.writer = writer;
+        this.filter = filter;
+        this.matcher = matcher;
+    }
 
     /**
      * Runs one sync for one connection.

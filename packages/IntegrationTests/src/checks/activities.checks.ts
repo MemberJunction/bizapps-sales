@@ -29,7 +29,9 @@ import {
     ActivityWriterService,
     FixtureActivitySource,
     MSGraphActivitySource,
+    MSGraphCalendarSource,
     RelevanceFilter,
+    type RelevanceResult,
     type NormalizedItem,
 } from '@mj-biz-apps/sales-core-entities-server';
 import type {
@@ -1273,6 +1275,157 @@ export const ActivitiesChecks: NamedCheck[] = [
                     !connection['LastSyncAt'],
                     'nothing was persisted to the watermark column either',
                 );
+            }),
+    },
+    {
+        Id: 'activities.AC21',
+        Name: 'AC21: the GRAPH calendar source reports ingest time, not the event start',
+        RequiresMutation: false,
+        Fn: async () => {
+            /**
+             * THE GAP THIS CLOSES, found by mutation rather than by reading.
+             *
+             * AC14 and AC19 both drive `FixtureActivitySource`, so reverting the watermark rule in
+             * `MSGraphCalendarSource` killed neither of them — the Graph source was never instantiated by
+             * any check. A guarantee that only the fixture upholds is not a guarantee.
+             *
+             * A stub fetcher makes the real source testable without a mailbox, exactly as AC11 does for the
+             * message source's tenant gate. `AllowLiveFetch: true` is safe here because the fetcher is a
+             * local object: nothing contacts Graph.
+             */
+            const eventStart = '2031-12-01T10:00:00.0000000';
+            const fetcher = {
+                calls: 0,
+                async GetEvents() {
+                    this.calls++;
+                    return {
+                        Success: true,
+                        Events: [
+                            {
+                                id: 'ac21-far-future-event',
+                                subject: 'AC21 planning session, years out',
+                                start: { dateTime: eventStart, timeZone: 'UTC' },
+                                end: { dateTime: '2031-12-01T11:00:00.0000000', timeZone: 'UTC' },
+                                organizer: { emailAddress: { address: 'organiser@example.invalid' } },
+                                attendees: [{ emailAddress: { address: 'attendee@example.invalid' } }],
+                            },
+                        ],
+                    };
+                },
+            };
+
+            const before = Date.now();
+            const source = new MSGraphCalendarSource(fetcher, true);
+            const batch = await source.Fetch({
+                Mailbox: 'ac21@example.invalid',
+                Since: null,
+                Limit: 10,
+            });
+            const after = Date.now();
+
+            AssertEqual(fetcher.calls, 1, 'the source did fetch');
+            AssertEqual(batch.Items.length, 1, 'and mapped the event');
+            AssertEqual(batch.Items[0].TypeCode, 'Meeting', 'as a Meeting');
+
+            const mappedStart = batch.Items[0].StartedAt.getTime();
+            Assert(!!batch.HighWatermark, 'a non-empty batch must report a watermark');
+
+            /**
+             * THE CLAIM. The event begins in 2031; the watermark must be the instant the source LOOKED,
+             * which is bounded by this check's own clock readings. Under `max(StartedAt)` it would be 2031
+             * and every meeting created afterwards for an earlier date would be discarded as already-seen —
+             * permanently, with no error.
+             */
+            Assert(
+                batch.HighWatermark!.getTime() < mappedStart,
+                `the watermark must precede the event start — got ${batch.HighWatermark!.toISOString()} for `
+                    + `an event at ${batch.Items[0].StartedAt.toISOString()}`,
+            );
+            Assert(
+                batch.HighWatermark!.getTime() >= before && batch.HighWatermark!.getTime() <= after,
+                'and it must be an ingest instant from THIS call, not a value derived from the payload',
+            );
+        },
+    },
+    {
+        Id: 'activities.AC22',
+        Name: 'AC22: a failed contact-method LOOKUP holds the watermark — not "nothing was relevant"',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+                await giveContactAnAddress(ctx, deal.ContactID);
+                const connectionID = await makeConnection(ctx, null);
+
+                /**
+                 * THE GAP MUTATION FOUND. Reverting `RelevanceFilter`'s `failed: true` to `false` killed no
+                 * check: AC20 forces a failed WRITE, and nothing could force a failed READ. So the branch
+                 * that holds the watermark when a contact-method lookup blips was untested — the branch that
+                 * stops a transient error discarding a batch of real mail permanently, since D-17 means
+                 * nothing the watermark passes can be fetched again.
+                 *
+                 * A read failure cannot be provoked from outside without breaking the database for
+                 * everything else, so the filter is INJECTED. This is the one check that substitutes a
+                 * collaborator rather than driving the real one, and it does so to reach a branch no
+                 * arrangement of real data can produce.
+                 */
+                class FailingFilter extends RelevanceFilter {
+                    public override async Apply(items: NormalizedItem[]): Promise<RelevanceResult> {
+                        return {
+                            Verdicts: items.map((item) => ({
+                                Item: item,
+                                IsRelevant: false,
+                                Matches: [],
+                                Unmatched: [],
+                            })),
+                            LookupFailed: true,
+                        };
+                    }
+                }
+
+                const ingestWithFailingLookup = new ActivityIngestService(
+                    new ActivityWriterService(),
+                    new FailingFilter(),
+                );
+
+                const before = (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length;
+                const run = await ingestWithFailingLookup.RunSync(
+                    connectionID,
+                    new FixtureActivitySource([item({ ExternalID: 'ac22-a' }), item({ ExternalID: 'ac22-b' })]),
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+
+                AssertEqual(run.Fetched, 2, 'both items were fetched');
+                AssertEqual(
+                    run.Failed,
+                    2,
+                    'and both counted as FAILED — a failed lookup means they were never judged, which is a '
+                        + 'different fact from being judged irrelevant',
+                );
+                AssertEqual(run.Irrelevant, 0, 'they must NOT be reported as irrelevant');
+                AssertEqual(run.Written, 0, 'nothing was written');
+                Assert(run.Success === false, 'and the run is not a success');
+                AssertEqual(
+                    run.WatermarkAdvancedTo,
+                    null,
+                    'the watermark was HELD — advancing here would discard both items permanently, because '
+                        + 'GetMessages has no date filter to re-fetch them with',
+                );
+                Assert(
+                    run.Issues.some((i) => i.includes('lookup failed')),
+                    `the run must say the lookup failed — got ${JSON.stringify(run.Issues)}`,
+                );
+
+                AssertEqual(
+                    (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length,
+                    before,
+                    'and the Activity table did not move',
+                );
+
+                const [connection] = await rows(ctx, E_SYNC_CONNECTION, `ID = '${connectionID}'`);
+                Assert(!connection['LastSyncAt'], 'nor was anything persisted to the watermark column');
             }),
     },
 ];
