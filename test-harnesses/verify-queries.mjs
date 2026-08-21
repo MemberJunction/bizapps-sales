@@ -84,6 +84,7 @@ const QUERIES = [
     ['Sales: Product Mix and Discount Depth', { ...SLICED, WonOnly: 'true' }],
     ['Sales: Deal Type Mix', SLICED],
     ['Sales: Forecast History', { ...SLICED, CapturedOnOrBefore: '2099-12-31' }],
+    ['Sales: Forecast by Owner', { ...SLICED, OwnerEmployeeID: owner?.OwnerEmployeeID }],
     ['Sales: Deal Roster', { ...SLICED, OwnerEmployeeID: owner?.OwnerEmployeeID, OpenOnly: 'true' }],
     ['Sales: Dashboard Summary', { CompanyID: company?.CompanyID, PipelineID: pipeline?.PipelineID }],
 ];
@@ -103,6 +104,9 @@ const EVIDENCE = {
     'Sales: Product Mix and Discount Depth': (r) => Number(r.LineCount ?? 0) > 0,
     'Sales: Deal Type Mix': (r) => Number(r.WonCount ?? 0) + Number(r.OpenCount ?? 0) > 0,
     'Sales: Forecast History': () => true,
+    // An owner-grain forecast with no open or won deals behind it proves nothing about the join to
+    // Employee or the owner GROUP BY, so require real deals rather than merely a row.
+    'Sales: Forecast by Owner': (r) => Number(r.OpenDealCount ?? 0) + Number(r.WonDealCount ?? 0) > 0,
     'Sales: Deal Roster': () => true,
     'Sales: Dashboard Summary': (r) => Number(r.TotalCount ?? 0) > 0,
 };

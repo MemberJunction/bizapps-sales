@@ -10,8 +10,25 @@
 -- those leave the current row carrying what it used to say. A forecast review that asks "we called
 -- 4.2 million on the first — where did it go?" cannot be answered from live data at all.
 --
--- So the answer has to be captured, not derived. `scripts/capture-forecast-snapshot.sql` writes one
--- row per company × pipeline × owner × period, and a Scheduled Job runs it. This query reads them.
+-- So the answer has to be captured, not derived. The `Sales.CaptureForecastSnapshot` Action writes one
+-- row per company × pipeline × period, on a daily ScheduledJob. This query reads them.
+--
+-- ⚠ OWNER GRAIN NEEDS THE COMPANION QUERY, and this query is built expecting it -- both LAG windows
+-- below partition by OwnerEmployeeID and the Employee join projects OwnerName. `Sales: Forecast by
+-- Category` groups by company and pipeline only, so an Action reading THAT writes every snapshot with
+-- OwnerEmployeeID = NULL. That means "across all owners" and is correct for a rollup -- but it makes
+-- this query render THIN rather than broken: one partition, no owner names, and nothing saying the
+-- grain is absent rather than the data empty.
+--
+-- `Sales: Forecast by Owner` is the companion that closes it. Same measures, same flags, same date
+-- split; it adds `OwnerEmployeeID` and `OwnerName` to the projection and nothing else. Point the
+-- capture at that query and these windows partition by a real owner, with no change here and no
+-- change to the Action -- its column mapping populates OwnerEmployeeID the moment a source query
+-- projects it.
+--
+-- It is a COMPANION rather than a widened `Forecast by Category` deliberately: that query is
+-- published, the dashboard consumes it, and changing a report's row shape to serve a second consumer
+-- is how one consumer breaks another.
 --
 -- ══ THE COLUMN NAMES DIVERGE FROM THE MASTER PLAN, DELIBERATELY ════════════════════════════════
 --

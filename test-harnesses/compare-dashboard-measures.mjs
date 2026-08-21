@@ -92,6 +92,19 @@ const slipped = deals.filter(
 );
 const client = {
     OpenAmount: open.reduce((sum, d) => sum + (d.Amount ?? 0), 0),
+    /**
+     * THE PRICED/STATED SPLIT, WHICH ONLY BECAME TESTABLE ONCE THE DATA CHANGED.
+     *
+     * Every deal carried AmountIsComputed = 0 when this harness was written, so these two columns
+     * were uniform: one was the whole open figure and the other was zero. A comparison over that data
+     * could not distinguish a correct split from a swapped one, or from a CASE that always took the
+     * same branch. Five deals are engine-priced now, so it can.
+     *
+     * That is the same lesson Slipped Deals taught -- a check is only as good as the data it was
+     * given -- applied before it costs anything rather than after.
+     */
+    OpenPricedAmount: open.filter((d) => d.AmountIsComputed === true).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
+    OpenStatedAmount: open.filter((d) => d.AmountIsComputed !== true).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
     OpenCount: open.length,
     TotalCount: deals.length,
     PastExpectedCloseCount: slipped.length,
@@ -112,6 +125,14 @@ record('Open deal count', client.OpenCount, Number(server.OpenCount ?? 0));
 record('Total deal count', client.TotalCount, Number(server.TotalCount ?? 0));
 record('Past expected close', client.PastExpectedCloseCount, Number(server.PastExpectedCloseCount ?? 0));
 record('Won count', client.WonCount, Number(server.WonCount ?? 0));
+record('Open priced amount', client.OpenPricedAmount, Number(server.OpenPricedAmount ?? 0));
+record('Open stated amount', client.OpenStatedAmount, Number(server.OpenStatedAmount ?? 0));
+// The split must also RECONSTITUTE the whole, or one branch is silently dropping rows.
+record(
+    'Priced + stated = open amount',
+    client.OpenAmount,
+    Number(server.OpenPricedAmount ?? 0) + Number(server.OpenStatedAmount ?? 0),
+);
 
 /* ── The two tables ──────────────────────────────────────────────────────────────────────────── */
 
