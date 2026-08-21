@@ -20,6 +20,12 @@ proven by a passing test, and it cannot be proven by a search either — not bef
 tree being searched is the tree being reported on. That is why this pass came after the merges rather
 than before them.
 
+> **THIS PASS IS NOT FINAL.** `feature/closewon-tasks` has since merged again at `fbf414d` (WT12, the
+> `Code` lookup, PR #42 on the host), and `feature/dashboard-queries` is still to come at `59d8527` or
+> later — it carries its own repair of `Sales: Slipped Deals`, which overlaps DN-19 and needs reconciling
+> to one writer rather than textually. The verdicts below hold as of 93 checks in 9 bundles; the full
+> re-run happens once that merge lands. `docs/INTEGRATION-LOG.md` carries the heads.
+
 Integrated for this pass, in order: `feature/closewon-tasks` (187c8a4), `feature/contracts-seam-v6`
 (a41473f, then again at 01b4437), `feature/activities-and-ingest` (1db90c9, then again at 99be05b). Five
 merges, of which three were corrections for a head that had moved — `docs/INTEGRATION-LOG.md` records
@@ -40,7 +46,7 @@ on them would repeat the mistake this pass exists to correct.
 
 The rule for this pass was *prove met criteria against the database, not the screen*. Three sources:
 
-1. **The 92 integration checks** across 9 bundles (`node scripts/assert-check-count.mjs`, which now runs
+1. **The 93 integration checks** across 9 bundles (`node scripts/assert-check-count.mjs`, which now runs
    the suite itself rather than trusting a log off disk). Every check hits a live database with nothing
    mocked and rolls back. Where a criterion maps to a check, the check id **is** the evidence, and
    `docs/CHECK-MUTATION-EVIDENCE.md` records which mutant proves that check can fail.
@@ -223,7 +229,7 @@ alone. Re-running the probe now reports `save returned false` with the stamp sti
 | `ContractTypeID` defaults to Order Form | **met, and it was broken in THREE places** | The policy named `"Standard"`, a contract type that exists on no host. Found in the metadata file by CT1, in the seeded DB row by CT6, and — during integration — a third time in `scripts/seed-demo-data.sh`'s pipeline `INSERT`, which is guarded by `IF NOT EXISTS` and so only fires on a host with no pipelines: every fresh install, and the one host nobody thinks to check. All three now `Order Form`. |
 | `CreatingEntityID` / `CreatingRecordID` typed pair | **met** | `setProvenance()`; CT1 asserts both-or-neither, which is also contracts' own CHECK constraint. |
 | `HasModifications` copied from the deal's flag | **met** | Was hardcoded `false` because `Deal` had no column to copy from. Built in this session: `Deal.StandardAgreementModified`. **`CT5`** proves the seam writes both values and reads absence as false; **`CT6`** drives the whole close and reads the contract it created. Mutants `M-CT2` and `M-CT3` cover the two hops separately — and M-CT3 is why CT6 exists, because mutating the close alone left every other check green. |
-| A finance contract-processing **Task** | **met** | `CloseWonTaskService`, called at `CloseDealOperation.ts:340`. **`close-won-tasks.WT4`** proves a contract-creating policy raises BOTH tasks; **`WT5`** proves the contract task falls back to the DEAL when no contract exists yet rather than going missing; **`WT6`** proves a missing task type is refused with a reason while the order review still lands. **E4** confirms the `Contract Processing` type exists outside a rolled-back transaction. |
+| A finance contract-processing **Task** | **met** | `CloseWonTaskService`, called at `CloseDealOperation.ts:340`. Task types now resolve by **`Code`** rather than `Name` — `close-won-tasks.WT12` proves the lookup uses `Code` where the column exists and falls back to `Name` only where it does not, so the vocabulary rule holds across the app boundary that KI/PR-#42 previously left open. **`close-won-tasks.WT4`** proves a contract-creating policy raises BOTH tasks; **`WT5`** proves the contract task falls back to the DEAL when no contract exists yet rather than going missing; **`WT6`** proves a missing task type is refused with a reason while the order review still lands. **E4** confirms the `Contract Processing` type exists outside a rolled-back transaction. |
 | An order-review **Task** | **met** | See #35. |
 | `AutoRenew`, `RenewalNoticeDays`, `CancellationWindowDays`, `AnnualIncreasePercent` defaulted **from the Contract Type record** | **not met, and not buildable from here** | Contracts' `ContractType` is `ID, Name, Description, RequiresExecutedDocument, Status, ParentStatusRequirement` — there are no per-type stored defaults to read. Sales sets three of the four only when the deal carries an explicit override (`setNegotiatedTerms`), and deliberately declines `RenewalNoticeDays` because contracts warns those two fields are not interchangeable. **An upstream ask on contracts**, independently recorded there as `D-9`. |
 | `ContractTemplateID` — the `ContractTemplate` where `Status = Active` | **not met** | `LiveContractsSeam.ts:319` returns `input.ContractTemplateID ?? null`; nothing resolves the active template. Contracts' `ContractTemplate` has no `Status` column to select on — recorded upstream as `D-10`. |
