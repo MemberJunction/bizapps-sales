@@ -637,23 +637,57 @@ for (const m of MUTATIONS) {
             continue;
         }
 
+        /**
+         * ── A DEADLOCKED RUN IS NOT A RESULT. RE-RUN IT. ────────────────────────────────────────
+         *
+         * The suite now takes an application lock, so two integration runs serialise instead of
+         * fighting. That does NOT cover every writer on the host: MJAPI serving Explorer reads the
+         * same tables, and a plain `SELECT TOP 1000 * FROM vwDeals` was captured in the deadlock
+         * graph as the other half of a cycle that killed a check mid-campaign.
+         *
+         * Left alone, that lands in this driver as a check failing under a mutation -- which is
+         * exactly the signal it is trying to measure, and indistinguishable from a real kill. A
+         * campaign of 75 mutants would then report a handful of kills that are pure noise, and the
+         * noise moves every run.
+         *
+         * So contention is DETECTED and the mutant re-run, rather than averaged over or explained
+         * away in the write-up. If it still shows after the retries, the result is MARKED rather
+         * than quietly trusted -- an unreliable measurement that says so is worth more than a clean
+         * number that is wrong.
+         */
+        const CONTENTION_RE = /was deadlocked on lock resources|deadlock victim/i;
+        const runSuiteOnce = () => {
+            try {
+                return execSync('node test-harnesses/integration.mjs', {
+                    cwd: REPO, stdio: 'pipe', encoding: 'utf8',
+                    env: { ...process.env, RUN_MUTATION_TESTS: '1' },
+                });
+            } catch (err) {
+                // a failing suite exits non-zero, which is the POINT
+                return String(err.stdout ?? '') + String(err.stderr ?? '');
+            }
+        };
+
         let out = '';
-        try {
-            out = execSync('node test-harnesses/integration.mjs', {
-                cwd: REPO, stdio: 'pipe', encoding: 'utf8',
-                env: { ...process.env, RUN_MUTATION_TESTS: '1' },
-            });
-        } catch (err) {
-            out = String(err.stdout ?? '') + String(err.stderr ?? '');   // a failing suite exits non-zero, which is the POINT
+        let contended = 0;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            out = runSuiteOnce();
+            if (!CONTENTION_RE.test(out)) break;
+            contended++;
+            if (attempt < 3) {
+                console.log(`${m.id.padEnd(7)} ⚠ deadlock during the run — discarding and re-running (${attempt + 1}/3)`);
+            }
         }
+        const stillContended = CONTENTION_RE.test(out);
 
         const failed = [...new Set([...out.matchAll(FAIL_RE)].map((x) => x[1]))].sort();
         const tally = out.match(TALLY_RE);
         const hit = m.expect.every((id) => failed.includes(id));
-        results.push({ ...m, failed, tally: tally?.[0] });
+        results.push({ ...m, failed, tally: tally?.[0], contended, stillContended });
         console.log(
             `${m.id.padEnd(7)} ${(hit ? 'OK' : 'MISS').padEnd(4)} failed=${(failed.join(',') || '-').padEnd(24)} ` +
-            `expect=${m.expect.join(',').padEnd(12)} (${tally?.[0] ?? 'NO TALLY'}, ${Math.round((Date.now() - started) / 1000)}s)`,
+            `expect=${m.expect.join(',').padEnd(12)} (${tally?.[0] ?? 'NO TALLY'}, ${Math.round((Date.now() - started) / 1000)}s)` +
+            (stillContended ? '  ⚠ CONTENDED — result unreliable' : contended ? `  (re-ran ${contended}x after deadlock)` : ''),
         );
     } finally {
         restore(abs, backup);

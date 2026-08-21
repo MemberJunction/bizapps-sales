@@ -94,6 +94,129 @@ const pool = await new sql.ConnectionPool({
     requestTimeout: 60_000,
 }).connect();
 
+/**
+ * ── THE SUITE SERIALISES ITSELF. Concurrent runs used to corrupt each other's results. ──────────
+ *
+ * Three sessions share one host, and the checks are not read-only: each one writes a deal, its lines,
+ * its instalments and a team row inside a transaction, then rolls back. Two of those overlapping take
+ * locks on the same tables in whatever order they happen to reach them, and SQL Server resolves the
+ * cycle by killing one -- so a run loses a check to `Transaction ... was deadlocked ... chosen as the
+ * deadlock victim`, surfaced to the reporter as a bland `create failed: unknown error`.
+ *
+ * WHAT MADE IT EXPENSIVE is that the victim is chosen by the server, so the FAILING CHECK CHANGES from
+ * run to run. That does not read like contention -- it reads like a flaky suite, or worse, like the
+ * change under test. It was diagnosed twice independently, and confirmed by running the pristine base
+ * commit and watching it fail identically with a different victim. Results were quietly unreliable for
+ * days before anyone proved why.
+ *
+ * The fix is to make concurrency SAFE rather than asking people to take turns, since "don't run the
+ * suite while I'm running the suite" is a convention that holds right up until someone is in a hurry.
+ * An exclusive application lock means a second run WAITS and then produces a real result, instead of
+ * racing and producing a plausible-looking wrong one.
+ *
+ * Why an applock and not a table or a lock file: it is held by the SQL SESSION, so it cannot outlive
+ * the process that took it. A killed run, a crashed run, a Ctrl-C -- the connection drops and the lock
+ * is released by the server. A lock file would need cleanup logic that is itself a source of stale-lock
+ * bugs, and would not survive a machine with two checkouts pointed at one database, which is exactly
+ * this situation.
+ *
+ * THE LOCK GETS ITS OWN CONNECTION, at `max: 1`. `@LockOwner = 'Session'` binds the lock to the
+ * session that took it, and a pooled request can be handed any connection in the pool -- so acquiring
+ * on the shared `pool` could take the lock on one session and release it from another, which fails.
+ * A dedicated single-connection pool makes "the session" unambiguous for the whole run.
+ */
+const LOCK_RESOURCE = 'bizapps-sales:integration-suite';
+const LOCK_TIMEOUT_MS = Number(process.env.MJ_INTEGRATION_LOCK_TIMEOUT_MS ?? 15 * 60_000);
+
+const lockPool = await new sql.ConnectionPool({
+    server: DB_HOST ?? 'localhost',
+    port: Number(DB_PORT ?? 1433),
+    database: DB_DATABASE,
+    user: DB_USERNAME,
+    password: DB_PASSWORD,
+    options: { trustServerCertificate: true, encrypt: true },
+    pool: { max: 1, min: 1 },
+    requestTimeout: LOCK_TIMEOUT_MS + 30_000, // the request must outlive the lock wait, or mssql times out first
+}).connect();
+
+/**
+ * `sp_getapplock` returns >= 0 on success (0 granted immediately, 1 granted after waiting) and a
+ * negative value on failure: -1 timeout, -2 cancelled, -3 deadlock victim, -999 parameter or other
+ * error. It is a RETURN VALUE, not a result set, so it needs an output parameter to read.
+ */
+async function acquireApplock(timeoutMs) {
+    const request = lockPool.request();
+    // Names must match the proc's own parameter names exactly -- `.execute()` binds by name, so a
+    // `timeout` input silently becomes `@timeout` and never reaches `@LockTimeout`.
+    request.input('Resource', sql.NVarChar(255), LOCK_RESOURCE);
+    request.input('LockMode', sql.NVarChar(32), 'Exclusive');
+    request.input('LockOwner', sql.NVarChar(32), 'Session');
+    request.input('LockTimeout', sql.Int, timeoutMs);
+    const result = await request.execute('sp_getapplock');
+    return result.returnValue;
+}
+
+/**
+ * A ZERO-TIMEOUT PROBE FIRST, purely so the waiting message is honest.
+ *
+ * Printing "waiting" unconditionally would be a lie on the common path, and printing it only after the
+ * blocking call returns would print it after the wait was already over. Probing with timeout 0 tells us
+ * whether the lock is actually contended BEFORE committing to a blocking wait, so the message appears
+ * at the moment the wait starts -- which is the only moment it is useful.
+ *
+ * A PAUSE THAT DOES NOT EXPLAIN ITSELF READS AS A HANG, and someone will Ctrl-C it and conclude the
+ * suite is broken. That is the failure this message exists to prevent.
+ */
+const probe = await acquireApplock(0);
+if (probe < 0) {
+    console.log(
+        `
+  ⏳ another integration run holds the suite lock on ${DB_DATABASE}.` +
+            `
+     WAITING up to ${Math.round(LOCK_TIMEOUT_MS / 1000)}s for it to finish — this is not a hang.` +
+            `
+     Runs serialise on purpose: overlapping them deadlocks and silently corrupts results.
+`,
+    );
+    const waitStart = Date.now();
+    const granted = await acquireApplock(LOCK_TIMEOUT_MS);
+    /**
+     * AN UNACQUIRED LOCK IS A FAILURE, NOT A REASON TO CARRY ON. Proceeding anyway would reintroduce
+     * exactly the contention this exists to prevent, while now also claiming the lock protected it.
+     * Exit 2 -- the same code this runner uses for "the environment is wrong", distinct from 1 for
+     * "checks failed" -- because nothing was measured either way.
+     */
+    if (granted < 0) {
+        console.error(
+            `
+✖ could not acquire the suite lock '${LOCK_RESOURCE}' within ` +
+                `${Math.round(LOCK_TIMEOUT_MS / 1000)}s (sp_getapplock returned ${granted}).` +
+                `
+  Another run is still holding it, or is wedged. Nothing was measured.` +
+                `
+  Raise MJ_INTEGRATION_LOCK_TIMEOUT_MS if the other run is legitimately this slow.
+`,
+        );
+        await lockPool.close();
+        await pool.close();
+        process.exit(2);
+    }
+    console.log(`  ✔ suite lock acquired after ${((Date.now() - waitStart) / 1000).toFixed(1)}s — starting.
+`);
+}
+
+/**
+ * Released explicitly on the ordinary exits for tidiness, but correctness does not depend on it: the
+ * lock is session-scoped, so closing the pool -- or dying without closing anything -- frees it.
+ */
+async function releaseRunLock() {
+    try {
+        await lockPool.close();
+    } catch {
+        /* the session is gone, which already released the lock */
+    }
+}
+
 const { setupSQLServerClient, SQLServerProviderConfigData } = await import(
     '@memberjunction/sqlserver-dataprovider'
 );
@@ -431,10 +554,12 @@ if (selected === 0) {
             '  Re-run as:  RUN_MUTATION_TESTS=1 npm run test:integration\n',
     );
     flushLog();
+    await releaseRunLock();
     await pool.close();
     process.exit(2);
 }
 
 flushLog();
+await releaseRunLock();
 await pool.close();
 process.exit(fail === 0 ? 0 : 1);
