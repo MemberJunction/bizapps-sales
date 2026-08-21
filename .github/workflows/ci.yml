@@ -80,6 +80,14 @@ jobs:
         run: pnpm run test:vocabulary-gate
 
       # ===================================================================================
+      # GATE 1b - a documented column the SQL does not return is a bug report waiting to
+      # happen. This gate exists because two new drifts appeared while fixing the first by
+      # hand, and because the script it runs used to print findings and exit 0.
+      # ===================================================================================
+      - name: Comment-versus-reality drift gate (docs match the SELECT list)
+        run: pnpm run test:comment-drift-gate
+
+      # ===================================================================================
       # GATE 2 — everything compiles, including the generated code.
       # ===================================================================================
       - name: Build all packages and apps

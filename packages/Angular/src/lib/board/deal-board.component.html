@@ -56,7 +56,18 @@
             <span class="db-col__meta">
               <span class="db-col__count">{{ column.Cards.length }}</span>
               <!-- A SUM of stored Deal.Amount values. Nothing here is priced. -->
-              <span class="db-col__total">{{ column.Total | currency:'USD':'symbol':'1.0-0' }}</span>
+              <!--
+                NO TOTAL WHEN THE COLUMN MIXES CURRENCIES. Adding EUR to USD produces a number that is
+                wrong in a way nobody can see; an absent figure prompts a question instead.
+              -->
+              @if (column.MixedCurrency) {
+                <span class="db-col__total db-col__total--mixed"
+                      title="This stage holds deals in more than one currency, so a single total would be meaningless.">
+                  mixed currencies
+                </span>
+              } @else {
+                <span class="db-col__total">{{ column.Total | currency:column.Currency:'symbol':'1.0-0' }}</span>
+              }
             </span>
             @if (column.Unpriced > 0) {
               <span class="db-col__partial"
@@ -97,7 +108,7 @@
                     @if (deal.Amount === null) {
                       <span class="db-card__noamount" title="No amount recorded yet">—</span>
                     } @else {
-                      {{ deal.Amount | currency:'USD':'symbol':'1.0-0' }}
+                      {{ deal.Amount | currency:(deal.CurrencyID ?? DefaultCurrency):'symbol':'1.0-0' }}
                     }
                     @if (deal.AmountIsComputed) {
                       <!-- Deal.Amount is a cached answer from orders; the marker says so rather than

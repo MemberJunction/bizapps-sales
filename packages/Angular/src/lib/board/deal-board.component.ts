@@ -53,6 +53,35 @@ import {
 import { DealWorkspaceService, type DealRosterRow } from '../workspace/deal-workspace.service';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
 
+/**
+ * The one currency a set of cards shares, or NULL when they do not share one.
+ *
+ * Uniformly-NULL counts as sharing: `Deal.CurrencyID` is unpopulated on every deal today, so treating
+ * that as a disagreement would suppress every total on the board and help nobody. What it must not do
+ * is treat NULL as the display default -- unknown and dollars are different claims, and conflating
+ * them is how a EUR deal ends up rendered as $48,000.
+ */
+export function SingleCurrencyOf(cards: readonly DealRosterRow[]): string | null {
+    if (cards.length === 0) {
+        return null;
+    }
+    const distinct = new Set(cards.map((d) => d.CurrencyID ?? ''));
+    if (distinct.size > 1) {
+        return null;
+    }
+    const only = [...distinct][0];
+    return only === '' ? DEFAULT_DISPLAY_CURRENCY : only;
+}
+
+/**
+ * What a figure is LABELLED as when no deal states a currency.
+ *
+ * A display default, not a fact about the money. It is here as one named constant rather than three
+ * hardcoded 'USD' literals so that the assumption is stated once, in a place a reader meets it, and
+ * so populating `Deal.CurrencyID` is a data change rather than a code hunt.
+ */
+export const DEFAULT_DISPLAY_CURRENCY = 'USD';
+
 /** One column: a stage, the deals sitting in it, and the two figures its header shows. */
 export interface BoardColumn {
     StageID: string;
@@ -62,6 +91,17 @@ export interface BoardColumn {
     Cards: DealRosterRow[];
     /** `SUM(Deal.Amount)` over `Cards`. Stored amounts, added for display. */
     Total: number;
+    /**
+     * The currency every card in this column is denominated in, or NULL when they disagree.
+     *
+     * NULL means DO NOT RENDER THE TOTAL. Three display sites used to hardcode 'USD', so a deal priced
+     * in EUR rendered as dollars and was added into a dollar column total -- a number that is wrong in
+     * a way no reader can see. Refusing beats guessing: a missing figure prompts a question, a
+     * confidently wrong one does not.
+     */
+    Currency: string | null;
+    /** True when the cards disagree about currency, so the template can say why the total is absent. */
+    MixedCurrency: boolean;
     /** Deals whose amount is null, so a footnote can say the total is partial rather than wrong. */
     Unpriced: number;
 }
@@ -130,7 +170,30 @@ export class DealBoardComponent {
                     IsClosing: !!stage.DealStatusTypeID && locking.has(stage.DealStatusTypeID),
                     Cards: cards,
                     // One pass over the cards. Each deal contributes its own stored amount exactly once.
+                    /**
+                     * A SUM OF STORED ANSWERS, AND THE NARROWEST DEFENSIBLE READING OF RULE #1.
+                     *
+                     * Sales never computes money -- it never multiplies quantity by price, applies a
+                     * discount, or derives a total from parts. This adds up figures that are already
+                     * answers, which is reporting rather than pricing, and is the same position the
+                     * dashboard's own file header takes.
+                     *
+                     * WHERE THIS SHOULD END UP: in a query. `Sales: Pipeline Summary` already computes
+                     * OpenAmount per pipeline AND stage server-side -- the exact grain of a board
+                     * column. It is not wired up here yet for one honest reason: that query is
+                     * open-deals-only, and this board renders closing columns too, so swapping it in
+                     * today would make closed columns read zero. Closing that gap means either a
+                     * board-shaped query or an all-status variant, and both are a bigger change than
+                     * this fix.
+                     *
+                     * `?? 0` treats a missing amount as zero for the SUM only. It is not a substitute
+                     * for the value: `Unpriced` below counts those cards, and the template renders the
+                     * count as a caveat ON the number rather than as a separate fact beside it.
+                     */
                     Total: cards.reduce((sum, d) => sum + (d.Amount ?? 0), 0),
+                    Currency: SingleCurrencyOf(cards),
+                    MixedCurrency: SingleCurrencyOf(cards) === null && cards.length > 0
+                        && new Set(cards.map((d) => d.CurrencyID ?? '')).size > 1,
                     Unpriced: cards.filter((d) => d.Amount === null || d.Amount === undefined).length,
                 };
             });
@@ -249,5 +312,8 @@ export class DealBoardComponent {
 
     /** Track by ID so a re-render does not tear down every card. */
     public TrackCard = (_: number, deal: DealRosterRow): string => deal.ID;
+    /** Exposed for the template's per-card fallback. See DEFAULT_DISPLAY_CURRENCY. */
+    public readonly DefaultCurrency = DEFAULT_DISPLAY_CURRENCY;
+
     public TrackColumn = (_: number, column: BoardColumn): string => column.StageID;
 }

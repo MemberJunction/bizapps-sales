@@ -7,10 +7,14 @@ check each one is actually in the SELECT list. A documented column that is not r
 report waiting to happen — a consumer writes against the description, gets undefined, and the fault
 looks like the data rather than the doc.
 """
-import io, json, os, re, glob
+import io, json, os, re, glob, sys
 
-SQLDIR = r'C:\v6\sales-dash\metadata\queries\SQL'
-JSONDIR = r'C:\v6\sales-dash\metadata\queries'
+# Repo-relative, NOT absolute. This hardcoded one developer's worktree, so on any other
+# machine it audited a directory that does not exist -- and because the script also exited 0
+# unconditionally, that read as a pass. Two defects that hid each other.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+JSONDIR = os.path.join(REPO, 'metadata', 'queries')
+SQLDIR = os.path.join(JSONDIR, 'SQL')
 
 def output_columns(sql_text):
     """The aliases the outermost SELECT actually produces."""
@@ -77,6 +81,13 @@ for f in sorted(glob.glob(os.path.join(SQLDIR, '*.sql'))):
                 continue
             findings.append((name, ident, 'metadata description names it; not in the SELECT list'))
 
+files = glob.glob(os.path.join(SQLDIR, '*.sql'))
+if not files:
+    # An empty scan is not a pass. The absolute path this used to carry made exactly this
+    # state look like success on every machine but one.
+    print('  ERROR: no .sql files found under %s' % SQLDIR)
+    sys.exit(2)
+
 if findings:
     print('  DRIFT FOUND:')
     seen = set()
@@ -88,4 +99,8 @@ if findings:
         print('    %-40s %-28s %s' % (f, ident, why))
 else:
     print('  no comment-versus-reality drift found')
-print('\n  %d file(s) scanned' % len(glob.glob(os.path.join(SQLDIR, '*.sql'))))
+print(chr(10) + '  %d file(s) scanned' % len(files))
+
+# EXIT NON-ZERO ON A FINDING. Without this the script printed 'DRIFT FOUND' and returned 0,
+# so no caller could ever have failed on it -- a report dressed as a gate.
+sys.exit(1 if findings else 0)

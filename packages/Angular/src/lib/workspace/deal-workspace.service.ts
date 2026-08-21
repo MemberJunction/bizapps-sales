@@ -108,6 +108,12 @@ export interface DealRosterRow {
     IsClosed: boolean;
     /** Open, and its expected close date has gone by. Computed against the SERVER's UTC date. */
     IsPastExpectedClose: boolean;
+    /**
+     * The currency `Amount` is denominated in. NULL means UNKNOWN, not "the display default" -- it is
+     * unpopulated on every deal today. A consumer must not total a set containing more than one
+     * distinct value; the board refuses to.
+     */
+    CurrencyID: string | null;
 }
 
 /** Raw roster shape before the account name is joined in. */
@@ -327,6 +333,30 @@ export class DealWorkspaceService {
         }
 
         const bool = (v: unknown): boolean => v === true || v === 1 || v === '1';
+        /**
+         * COERCE THE NUMERICS. They were CAST -- `as number | null` -- which tells TypeScript to trust
+         * and enforces nothing at runtime.
+         *
+         * Measured on this provider today, `Amount` and `Probability` do come back as `number`, so the
+         * cast is currently accurate. It is still the wrong construct: `bool()` above exists because
+         * this codebase has already met a SQL scalar arriving as `1` rather than `true`, the dashboard
+         * loader wraps every numeric in its own `num()`, and the browser reaches these rows over
+         * GraphQL rather than in-process -- a different transport that nothing here has verified.
+         *
+         * The failure mode if that assumption ever breaks is not a type error. `deal-board` reduces
+         * these with `+`, so a string turns addition into concatenation: two cards become
+         * "027480.000015000.0000", the currency pipe cannot parse it, and the board render dies with
+         * InvalidPipeArgumentError. Coercing costs nothing and removes the whole class.
+         */
+        const num = (v: unknown): number | null => {
+            if (v === null || v === undefined || v === '') {
+                return null;
+            }
+            const n = Number(v);
+            // NaN would propagate silently through every sum and total. A value that is not a number
+            // is reported as absent, which every consumer already handles.
+            return Number.isFinite(n) ? n : null;
+        };
         return ((result.Results ?? []) as Record<string, unknown>[]).map<DealRosterRow>((d) => ({
             ID: String(d['DealID'] ?? ''),
             DealNumber: (d['DealNumber'] as string | null) ?? null,
@@ -335,9 +365,9 @@ export class DealWorkspaceService {
             // Still an em dash rather than a blank: an unattached deal is a STATE, and an empty cell
             // reads as a rendering fault.
             CustomerName: (d['AccountName'] as string | null) ?? '—',
-            Amount: (d['Amount'] as number | null) ?? null,
+            Amount: num(d['Amount']),
             AmountIsComputed: bool(d['AmountIsComputed']),
-            Probability: (d['Probability'] as number | null) ?? null,
+            Probability: num(d['Probability']),
             ExpectedCloseDate: (d['ExpectedCloseDate'] as string | Date | null) ?? null,
             Pipeline: (d['PipelineName'] as string | null) ?? null,
             PipelineStage: (d['StageName'] as string | null) ?? null,
@@ -348,6 +378,7 @@ export class DealWorkspaceService {
             DealStatusTypeID: (d['DealStatusTypeID'] as string | null) ?? null,
             PipelineID: (d['PipelineID'] as string | null) ?? null,
             PipelineStageID: (d['PipelineStageID'] as string | null) ?? null,
+            CurrencyID: (d['CurrencyID'] as string | null) ?? null,
             IsOpen: bool(d['IsOpen']),
             IsWon: bool(d['IsWon']),
             IsLost: bool(d['IsLost']),

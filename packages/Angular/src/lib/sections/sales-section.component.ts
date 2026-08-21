@@ -72,7 +72,7 @@ import {
     type SalesNavBadges,
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
-import { DealBoardComponent } from '../board/deal-board.component';
+import { DealBoardComponent, DEFAULT_DISPLAY_CURRENCY } from '../board/deal-board.component';
 import { DealWorkspaceComponent } from '../workspace/deal-workspace.component';
 import {
     DealWorkspaceService,
@@ -401,11 +401,32 @@ export class MJSSalesSectionComponent implements OnInit {
      * A whole-currency figure. Formatting only — it neither derives nor rounds a stored value; the
      * number displayed is whatever came back, shown without decimals.
      */
-    private money(value: number): string {
-        return value.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+    private money(value: number | string | null | undefined): string {
+        /**
+         * COERCE BEFORE FORMATTING, because `toLocaleString` fails SILENTLY on a string.
+         *
+         * `String.prototype.toLocaleString` exists and ignores the options object entirely, so a value
+         * arriving as "27480.0000" renders as `27480.0000` -- no symbol, no separators, no error, and
+         * nothing in the output saying formatting did not happen. It looks like a styling bug rather
+         * than a type one, which is why it would survive review.
+         *
+         * Measured: this provider returns numbers today. The coercion is here because the cast that
+         * guaranteed it was an assertion, and because the browser reaches these figures over a
+         * transport this has not been tested against.
+         */
+        const n = Number(value);
+        if (!Number.isFinite(n)) {
+            // Never render NaN as money. An em dash is the same "no figure" the roster already uses.
+            return '—';
+        }
+        return n.toLocaleString(undefined, {
+            style: 'currency',
+            currency: DEFAULT_DISPLAY_CURRENCY,
+            maximumFractionDigits: 0,
+        });
     }
 
-    public Money(value: number | null): string {
+    public Money(value: number | string | null): string {
         return value === null || value === undefined ? '—' : this.money(value);
     }
 

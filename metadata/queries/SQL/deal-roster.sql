@@ -35,16 +35,29 @@ SELECT
     d.DealType                                  AS DealTypeName,
     d.DealStatusTypeID,
     d.DealStatusType                            AS StatusName,
-    st.IsOpen,
-    st.IsWon,
-    st.IsLost,
-    st.IsClosed,
+    -- A deal with no status is not open, won, lost or closed -- it is unclassified. ISNULL(...,0)
+    -- says exactly that, and keeps every consumer's boolean checks total.
+    ISNULL(st.IsOpen, 0)                        AS IsOpen,
+    ISNULL(st.IsWon, 0)                         AS IsWon,
+    ISNULL(st.IsLost, 0)                        AS IsLost,
+    ISNULL(st.IsClosed, 0)                      AS IsClosed,
+    -- Surfaced so a status-less deal is VISIBLE as one rather than merely reading as not-open.
+    CASE WHEN d.DealStatusTypeID IS NULL OR st.ID IS NULL THEN 1 ELSE 0 END AS HasNoStatus,
     d.ForecastCategoryType                      AS ForecastCategoryName,
     fc.IncludeInCommit,
     fc.IncludeInBestCase,
     d.OwnerEmployeeID,
     d.OwnerEmployee                             AS OwnerName,
     d.Amount,
+    /**
+     * THE CURRENCY THE AMOUNT IS IN. Selected because three display sites hardcode 'USD', and a deal
+     * priced in EUR would otherwise render as dollars and be summed into a dollar column total.
+     *
+     * Nullable, and NULL on every seeded deal today -- nothing populates it yet. A consumer must treat
+     * NULL as "unknown", not as the display default, and must refuse to total a set containing more
+     * than one distinct value. The board does both.
+     */
+    d.CurrencyID,
     -- Provenance, so a grid can mark a stated figure rather than presenting it as settled. This is
     -- the same distinction the board and dashboard now render.
     d.AmountIsComputed,
@@ -55,7 +68,7 @@ SELECT
     d.ActualCloseDate,
     -- "Past its expected close and still open" — the slipped flag the dashboard shows. Computed in
     -- UTC because everything stored is UTC.
-    CASE WHEN st.IsOpen = 1
+    CASE WHEN ISNULL(st.IsOpen, 0) = 1
           AND d.ExpectedCloseDate IS NOT NULL
           AND d.ExpectedCloseDate < CAST(SYSUTCDATETIME() AS DATE)
          THEN 1 ELSE 0 END                      AS IsPastExpectedClose,
@@ -63,7 +76,19 @@ SELECT
     d.ContractID,
     d.__mj_CreatedAt                            AS CreatedAt
 FROM [__mj_BizAppsSales].vwDeals d
-INNER JOIN [__mj_BizAppsSales].DealStatusType st
+/**
+ * LEFT JOIN, NOT INNER, AND THIS WAS A BUG.
+ *
+ * `Deal.DealStatusTypeID` is NULLABLE. An INNER JOIN here silently DROPS any deal with no status, or
+ * whose status row has been deleted -- and this query is the roster, so such a deal would vanish from
+ * the grid, from the board, from the "of N total" denominator, and from every §9 aggregate built on
+ * it. The client path this replaced was a plain RunView with no join at all, which counted every
+ * deal, so the INNER JOIN quietly turned a mechanism change into a MEASURE change.
+ *
+ * There are no status-less deals in the seeded data, which is the only reason it never showed. The
+ * flags below therefore have to tolerate NULL rather than assume a row: see the ISNULL wrappers.
+ */
+LEFT OUTER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
 LEFT OUTER JOIN [__mj_BizAppsSales].PipelineStage ps
         ON ps.ID = d.PipelineStageID
@@ -80,7 +105,7 @@ WHERE 1 = 1
   AND d.OwnerEmployeeID = {{ OwnerEmployeeID | sqlString }}
   {% endif %}
   {% if OpenOnly == "true" %}
-  AND st.IsOpen = 1
+  AND ISNULL(st.IsOpen, 0) = 1
   {% endif %}
   {% if PeriodStart %}
   AND COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) >= {{ PeriodStart | sqlString }}
@@ -89,6 +114,6 @@ WHERE 1 = 1
   AND COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) <= {{ PeriodEnd | sqlString }}
   {% endif %}
 ORDER BY
-    CASE WHEN st.IsOpen = 1 THEN 0 ELSE 1 END,
+    CASE WHEN ISNULL(st.IsOpen, 0) = 1 THEN 0 ELSE 1 END,
     d.ExpectedCloseDate,
     d.Amount DESC;
