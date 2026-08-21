@@ -191,6 +191,22 @@ export interface CloseWonTasksPolicyConfig {
  * Exported so the close operation can map policy to service input in one line rather than reaching
  * into the JSON itself — the shape belongs with the service that consumes it.
  */
+/**
+ * WHICH COLUMN THE TASK-TYPE LOOKUP WILL USE ON THIS HOST.
+ *
+ * Exported so the choice can be ASSERTED rather than inferred. The fallback announces itself with a
+ * `LogStatus`, and a log line is not an observable a check can fail on -- the same gap that let the
+ * D-19 collation check stay green while the fix it guarded was reverted.
+ *
+ * Reads ENTITY METADATA, not the physical column: `RunView` builds its select from `EntityField` rows,
+ * so a database that has the column while metadata does not would still fail a `Code` filter. Asking the
+ * same source the query is built from is the only probe that cannot disagree with it.
+ */
+export function ResolveTaskTypeColumn(provider: IMetadataProvider): 'Code' | 'Name' {
+    const info = provider.Entities.find((e) => e.Name === E_TASK_TYPE);
+    return info?.Fields?.some((f) => f.Name === 'Code') === true ? 'Code' : 'Name';
+}
+
 export function ReadCloseWonTaskConfig(policy: unknown): CloseWonTasksPolicyConfig {
     const holder = policy as { CloseWonTasks?: CloseWonTasksPolicyConfig } | null | undefined;
     return holder?.CloseWonTasks ?? {};
@@ -345,8 +361,8 @@ export class CloseWonTaskService {
             return null;
         }
 
-        const hasCode = info.Fields?.some((f) => f.Name === 'Code') === true;
-        const column = hasCode ? 'Code' : 'Name';
+        const column = ResolveTaskTypeColumn(provider);
+        const hasCode = column === 'Code';
         const value = hasCode ? code : TASK_TYPE_NAMES[code];
         if (!hasCode) {
             /**

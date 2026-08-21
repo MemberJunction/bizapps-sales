@@ -20,7 +20,12 @@
  */
 import { Metadata, RunView, type DatabaseProviderBase } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
-import { CloseWonTaskService, CloseDealOperation, type CloseWonTaskInput } from '@mj-biz-apps/sales-core-entities-server';
+import {
+    CloseWonTaskService,
+    CloseDealOperation,
+    ResolveTaskTypeColumn,
+    type CloseWonTaskInput,
+} from '@mj-biz-apps/sales-core-entities-server';
 import type { SalesCloseDealOutput, mjBizAppsSalesPipelineEntity } from '@mj-biz-apps/sales-entities';
 import type { mjBizAppsTasksTaskTypeEntity } from '@mj-biz-apps/tasks-entities';
 
@@ -607,6 +612,58 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                     `a fully configured close should report no issues — got ${JSON.stringify(out!.Issues)}`,
                 );
             }),
+    },
+    {
+        Id: 'close-won-tasks.WT11',
+        Name: 'WT11: the lookup uses Code where the column exists, and Name only where it does not',
+        RequiresMutation: false,
+        Fn: async (ctx) => {
+            requireTasks(ctx);
+            const provider = ProviderOf(ctx);
+
+            /**
+             * THE PROBE MUST AGREE WITH REALITY, asserted in both directions rather than pinned to `Code`.
+             *
+             * Pinning it would make this check fail on the pre-migration host we hand to somebody else --
+             * where the FALLBACK is the correct behaviour, not a defect. So the claim is that the probe
+             * reports whatever the metadata actually offers: `Code` on a migrated host, `Name` on one that
+             * predates bizapps-tasks PR #42. A probe that answered `Name` on a host that HAS the column
+             * would be the real bug, and it is the one this catches.
+             */
+            const info = provider.Entities.find((e) => e.Name === E_TASK_TYPE);
+            Assert(!!info, `setup: '${E_TASK_TYPE}' is not registered on this host`);
+            const metadataHasCode = info!.Fields?.some((f) => f.Name === 'Code') === true;
+
+            AssertEqual(
+                ResolveTaskTypeColumn(provider),
+                metadataHasCode ? 'Code' : 'Name',
+                'the lookup column must follow what EntityField metadata offers — RunView builds its select '
+                    + 'from those rows, so probing anything else could disagree with the query',
+            );
+
+            if (!metadataHasCode) {
+                /** A pre-#42 host. The fallback is correct here; nothing further to assert. */
+                return;
+            }
+
+            /**
+             * ON A MIGRATED HOST, PROVE THE CODES ARE REALLY THERE AND READABLE BY CODE. The service
+             * resolves by filtering on `Code`, so a column present but unpopulated would resolve nothing
+             * and every task would go uncreated with only an Issue to show for it.
+             */
+            for (const [code, id] of [
+                ['ORDER_REVIEW', ID_ORDER_REVIEW],
+                ['CONTRACT_PROCESSING', ID_CONTRACT_PROCESSING],
+            ] as const) {
+                const found = await rows(ctx, E_TASK_TYPE, `Code = '${code}'`);
+                AssertEqual(found.length, 1, `exactly one task type carries Code '${code}'`);
+                AssertEqual(
+                    String(found[0]['ID']).toLowerCase(),
+                    id.toLowerCase(),
+                    `and it is the row this repo seeds — the Code and the fixed UUID must name the same row`,
+                );
+            }
+        },
     },
 ];
 
