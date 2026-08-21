@@ -36,29 +36,6 @@
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /** The order header sales can state. Everything financial is absent by design. */
-/**
- * A line on an order handoff.
- *
- * ── KEPT ONLY BECAUSE ITS CONTAINER IS ─────────────────────────────────────────────────────────
- *
- * Nothing constructs one of these any more. It survives because `OrdersOrderHandoffInput` still
- * names it, and that type is imported by `CloseDealOperation.ts` — another session's file this turn.
- * Both go together, in the same edit that removes that import.
- *
- * ⚠ `DiscountPct` HAS NO STATED UNITS, AND THAT WAS THE BUG. Orders stores a FRACTION (0.25 = a
- * quarter off); the caller that used to build these sent a rep-entered PERCENTAGE (25). The two
- * methods that carried it straight through to `OrderLine` — `LiveOrdersSeam.CreateOrder` and
- * `PreviewOrderMoney` — are deleted, so nothing can reach the database with it any more. Anyone
- * reviving this type must convert, the way `scripts/assert-discount-conversion.mjs` requires.
- */
-export interface OrdersOrderLineSeamInput {
-    ProductID: string;
-    Quantity: number;
-    /** UNITS: a fraction, 0–1, per orders' CK_OrderLine_DiscountPct. Not a percentage. */
-    DiscountPct?: number;
-    UnitPrice?: number;
-    Description?: string | null;
-}
 
 export interface OrdersOrderHeaderSeamInput {
     CompanyID: string;
@@ -69,43 +46,6 @@ export interface OrdersOrderHeaderSeamInput {
     Description?: string | null;
 }
 
-/**
- * What sales hands orders when a won deal produces an order.
- *
- * ── WHY THIS IS NOT A `CreateOrderInState` PAYLOAD ANY MORE ─────────────────────────────────────
- *
- * This seam originally mirrored `Orders.CreateOrderInState`, transcribed from
- * `origin/mjdev/orders-flow`. **That operation does not exist on orders' `next`** — that branch never
- * merged, and orders ships no create-order operation of any name. Eleven operations are registered
- * (`Price Order`, `Preview Price`, `Advance Order State`, …) and none of them creates an order.
- *
- * Orders' own canonical creation path is the **entity graph** — `OrderEntityServer.Save()`, which is
- * what `order-builder.ts` drives. So sales creates the order the same way orders does: get the entity,
- * set the payer and the lines, save, and let orders' server code mint the order number, price the
- * lines through its engine and raise the initial payment. Creating it any other way would be the
- * divergent choice, not this one.
- *
- * `TargetStatus` is gone with the operation: the status is stated on the header (`Status`), because
- * that is where the entity graph takes it.
- */
-export interface OrdersOrderHandoffInput {
-    Header: OrdersOrderHeaderSeamInput;
-    Lines: OrdersOrderLineSeamInput[];
-    /**
-     * The status the order is created in. Set on the header, because that is where the entity graph
-     * takes it.
-     *
-     * It used to come from `CloseWonPolicy.OrderState`. That key is retired (D-OS1): a stage now says
-     * what entering it means for the order, via `PipelineStage.OrderStatusOnEntry`. Nothing in sales
-     * fills this field today — close-won creates no order — so it survives as part of the seam's
-     * shape for a caller that creates one directly.
-     */
-    Status: string;
-    /** Orders' own vocabulary for what kind of order this is. Sales always books a `Sale`. */
-    OrderType: string;
-    OrderDate?: string | null;
-    Reason?: string | null;
-}
 
 /* ────────────────────────────────────────────────────────────────────────────
  * CONTRACTS — the interface sales expects; served by `Contracts.SaveContract` when installed
@@ -272,3 +212,18 @@ export class StubDownstreamSeam implements IDownstreamSeam {
         };
     }
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * `OrdersOrderHandoffInput` and `OrdersOrderLineSeamInput` USED TO BE HERE.
+ *
+ * They described the payload for creating an order from a won deal. That route is gone: the order is
+ * embedded on the deal from creation, so `LiveOrdersSeam.CreateOrder` and `PreviewOrderMoney` were
+ * deleted and nothing constructs these any more. The last thing keeping them alive was a type-only
+ * import in `CloseDealOperation.ts`, which is removed in the same commit as this.
+ *
+ * ⚠ IF ANYTHING LIKE THEM COMES BACK, `DiscountPct` NEEDS UNITS IN ITS NAME OR ITS TYPE. These carried a
+ * bare `DiscountPct?: number` while orders stores a FRACTION and the caller sent a rep-entered
+ * PERCENTAGE. The two methods that passed it straight through would have recorded a 50% discount for a
+ * half-percent one — under 1% it slipped past `CK_OrderLine_DiscountPct` and saved cleanly.
+ * `scripts/assert-discount-conversion.mjs` is what a revival has to satisfy.
+ * ──────────────────────────────────────────────────────────────────────────── */

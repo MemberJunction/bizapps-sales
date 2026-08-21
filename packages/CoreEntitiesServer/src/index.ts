@@ -43,7 +43,7 @@ export * from './CloseDealOperation.js';
  * The REAL orders handoff. Selected automatically when orders' entities are registered; see
  * `resolveSeam` in CloseDealOperation. Exported so a test can install it deliberately.
  */
-export * from './LiveOrdersSeam.js';
+export * from './orders-availability.js';
 
 /** The REAL contracts handoff — selected automatically when contracts' entities are registered. */
 export * from './LiveContractsSeam.js';

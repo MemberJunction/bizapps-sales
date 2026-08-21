@@ -39,7 +39,6 @@ import {
     type ContractsRenewTermSeamInput,
     type ContractsSeamResult,
     type IDownstreamSeam,
-    type OrdersOrderHandoffInput,
     type SalesCloseDealInput,
     type SalesCloseDealOutput,
     type SalesCloseIssue,
@@ -50,7 +49,7 @@ import {
 } from '@mj-biz-apps/sales-entities';
 
 import { DealEntityServer } from './DealEntityServer.js';
-import { LiveOrdersSeam, OrdersIsInstalled } from './LiveOrdersSeam.js';
+import { OrdersIsInstalled } from './orders-availability.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
 import { CloseWonTaskDueAt, CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
 
@@ -171,45 +170,27 @@ function resolveSeam(user: UserInfo, provider: IMetadataProvider): IDownstreamSe
     }
 
     /**
-     * THE TWO DOWNSTREAMS ARE RESOLVED INDEPENDENTLY, which is the whole point.
+     * ── THERE IS ONLY ONE LIVE DOWNSTREAM LEFT, SO THERE IS ONLY ONE THING TO RESOLVE ───────────────
      *
-     * All four combinations are real deployments: neither sibling, orders only, contracts only, or
-     * both. A single seam that assumed they arrive together would make the contract path depend on
-     * orders being installed, which is not true of any of them. So orders' half comes from
-     * `LiveOrdersSeam` when orders is registered, contracts' half from `LiveContractsSeam` when
-     * contracts is, and either falls back to the stub on its own.
+     * This used to compose two halves: an orders seam wrapping a contracts seam, plus a stub-orders
+     * variant for a contracts-without-orders host. All of that existed because close-won CREATED the
+     * order a won deal earned. It does not any more — the order is embedded on the deal from creation —
+     * so `LiveOrdersSeam` lost its two real methods and ended as a 128-line pass-through that forwarded
+     * the contract calls to the seam it had been handed. Wrapping a seam in a class that only forwards to
+     * it is not composition; it is a layer to read past. Both it and `StubOrdersWithContracts` are gone.
+     *
+     * The independence the old comment defended is preserved and is now simply true by construction:
+     * contracts resolves on its own flag and orders is not consulted here at all. A host with contracts
+     * and no orders gets the live contracts seam, which is exactly what `StubOrdersWithContracts` was
+     * built to arrange.
+     *
+     * `OrdersIsInstalled()` still matters to the close — it decides whether an orders-dependent route is
+     * available — and now lives in `orders-availability.js`, because it answers a question about the HOST
+     * rather than about a seam.
      */
-    const contracts = ContractsIsInstalled()
-        ? new LiveContractsSeam(user, provider)
-        : new StubDownstreamSeam();
-
-    return OrdersIsInstalled() ? new LiveOrdersSeam(user, provider, contracts) : new StubOrdersWithContracts(contracts);
+    return ContractsIsInstalled() ? new LiveContractsSeam(user, provider) : new StubDownstreamSeam();
 }
 
-/**
- * Stub orders, live (or stub) contracts.
- *
- * Needed because the contract path must work on a host that has contracts and NOT orders — a
- * subscription-only deployment. Without this, `resolveSeam` would hand back the all-stub seam the
- * moment orders was absent and silently disable a contract route that was perfectly available.
- */
-class StubOrdersWithContracts extends StubDownstreamSeam {
-    public constructor(
-        private readonly contracts: Pick<IDownstreamSeam, 'CreateContractFromDeal' | 'RenewContractTerm'>,
-    ) {
-        super();
-    }
-
-    public override CreateContractFromDeal(
-        input: ContractsCreateFromDealSeamInput,
-    ): Promise<ContractsSeamResult> {
-        return this.contracts.CreateContractFromDeal(input);
-    }
-
-    public override RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult> {
-        return this.contracts.RenewContractTerm(input);
-    }
-}
 
 @RegisterClass(BaseRemotableOperation, 'Sales.CloseDeal')
 export class CloseDealOperation extends SalesCloseDealOperationBase {
