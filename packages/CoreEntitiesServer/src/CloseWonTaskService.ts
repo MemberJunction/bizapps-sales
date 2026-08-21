@@ -101,6 +101,20 @@ export interface CloseWonTaskAssignee {
 
 export interface CloseWonTaskInput {
     DealID: string;
+    /**
+     * The deal's NAME, for the task's own name.
+     *
+     * ── WHY THIS IS AN INPUT RATHER THAN A LOOKUP ───────────────────────────────────────────────────
+     *
+     * The task names interpolated `DealID`, so a finance work queue rendered as rows of hex — "Review
+     * order for deal 3006D3FB-6C13-40ED-9E4C-…" — which is unreadable exactly where a human has to
+     * choose what to work on next. The deal's name is what that row should say.
+     *
+     * Taken as an input because the caller already holds the deal entity; reading it back here would be a
+     * second query for a value the close is looking at. Required rather than optional so the compiler
+     * names every construction site instead of letting one quietly fall back to the id.
+     */
+    DealName: string;
     /** The deal's embedded order. The order-review task hangs off this. */
     OrderID: string;
     /** Read for its `CloseWonPolicy.CreateContract` flag — never for its name. */
@@ -295,13 +309,17 @@ export class CloseWonTaskService {
         const orderReview = (input.OrderID && orderReviewTypeID) ? await this.raise(
             'OrderReview',
             {
-                Name: `Review order for deal ${input.DealID}`,
+                Name: `Review order for ${input.DealName}`,
                 TypeID: orderReviewTypeID,
                 Description:
                     'Review the order for accuracy, correct it if needed, then advance it. Advancing is '
                     + 'the confirm that locks the order, books the journal entries and triggers invoicing.',
             },
-            { EntityName: 'MJ_BizApps_Orders: Order Headers', RecordID: input.OrderID },
+            // The order is what this task is ABOUT; the deal is how a rep finds it.
+            [
+                { EntityName: 'MJ_BizApps_Orders: Order Headers', RecordID: input.OrderID },
+                { EntityName: E_DEAL, RecordID: input.DealID },
+            ],
             input,
             provider,
             contextUser,
@@ -347,7 +365,7 @@ export class CloseWonTaskService {
                 const contractTask = await this.raise(
                     'ContractProcessing',
                     {
-                        Name: `Process contract for deal ${input.DealID}`,
+                        Name: `Process contract for ${input.DealName}`,
                         TypeID: contractTypeID,
                         Description:
                             'Attach the executed PDF, confirm the agreement version against the signed '
@@ -355,7 +373,13 @@ export class CloseWonTaskService {
                             + 'template was modified and capture any deviations, then move the contract to '
                             + 'its active status.',
                     },
-                    target,
+                    /**
+                     * The contract (or the deal, per the fallback above) is what this task is ABOUT, and the
+                     * deal is always appended so the work is reachable from it. When the fallback already
+                     * chose the deal these collapse to one link -- `raise` de-duplicates rather than
+                     * showing finance the same record twice.
+                     */
+                    [target, { EntityName: E_DEAL, RecordID: input.DealID }],
                     input,
                     provider,
                     contextUser,
@@ -459,7 +483,19 @@ export class CloseWonTaskService {
     private async raise(
         kind: CloseWonTaskKind,
         task: { Name: string; TypeID: string; Description: string },
-        target: CloseWonTaskTarget,
+        /**
+         * Every record this task should be reachable from, PRIMARY FIRST.
+         *
+         * It used to be a single target, which is how both tasks ended up unreachable from the deal that
+         * caused them: one pointed at the order header, the other at the contract, and neither at the
+         * deal. From a deal you could not find the work its own close had raised — which is the first
+         * navigation a rep tries.
+         *
+         * The primary is still what the result reports, so `LinkedEntityName` / `LinkedRecordID` keep
+         * their meaning: the record this task is fundamentally ABOUT. The deal is an additional way in,
+         * not a reclassification.
+         */
+        targets: readonly CloseWonTaskTarget[],
         input: CloseWonTaskInput,
         provider: IMetadataProvider,
         contextUser: UserInfo,
@@ -486,7 +522,31 @@ export class CloseWonTaskService {
             return null;
         }
 
-        const linked = await this.link(taskID, target, provider, contextUser, result, kind);
+        /**
+         * DE-DUPLICATED, because the contract task's own fallback already targets the deal when there is no
+         * contract to point at. Linking the same record twice would put two identical rows in front of
+         * finance and make the task look like two pieces of work.
+         */
+        const unique = targets.filter(
+            (t, i) => targets.findIndex(
+                (o) => o.EntityName === t.EntityName
+                    && o.RecordID.toLowerCase() === t.RecordID.toLowerCase(),
+            ) === i,
+        );
+        const primary = unique[0];
+
+        /**
+         * The PRIMARY link decides whether the task is usable at all; a secondary that fails leaves the
+         * task reachable and is reported rather than fatal. `link` already pushes an issue for each
+         * failure, so a partial outcome is visible without inventing a second channel for it.
+         */
+        let linked = false;
+        for (const [index, t] of unique.entries()) {
+            const ok = await this.link(taskID, t, provider, contextUser, result, kind);
+            if (index === 0) {
+                linked = ok;
+            }
+        }
         if (!linked) {
             result.Success = false;
         }
@@ -499,8 +559,8 @@ export class CloseWonTaskService {
         return {
             Kind: kind,
             TaskID: taskID,
-            LinkedEntityName: target.EntityName,
-            LinkedRecordID: target.RecordID,
+            LinkedEntityName: primary.EntityName,
+            LinkedRecordID: primary.RecordID,
             AssignmentID: assignmentID,
         };
     }

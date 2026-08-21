@@ -378,6 +378,15 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 const taskResult = await new CloseWonTaskService().CreateCloseWonTasks(
                     {
                         DealID: deal.ID,
+                        /**
+                         * The NAME, so the finance queue reads as deals rather than as hex. The service
+                         * used to interpolate the id into the task name; the id is still reachable, because
+                         * both tasks now carry a link to the deal itself.
+                         *
+                         * Falls back to the deal number and then to the id: a task named after nothing is
+                         * worse than one named after a key, and `Name` is nullable on the entity.
+                         */
+                        DealName: deal.Name?.trim() || deal.DealNumber || deal.ID,
                         // Read AFTER the save: provisioning happens inside it. See the note above.
                         OrderID: String(deal.OrderID ?? ''),
                         PipelineID: deal.PipelineID,

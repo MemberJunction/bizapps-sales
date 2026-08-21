@@ -2196,6 +2196,17 @@ investigation must not do.
 warning when a run BOTH fails and exceeds 150s. That turns the discriminator from something argued from
 memory into something on the same line as the red.
 
+### Calibration, added 2026-08-21 evening
+
+**The floor moves about 30% between conditions both called quiet** — 90–91s earlier in the day, 63s that
+evening, same machine, same person's judgement of "nothing else running". So the duration reported by the
+harness is currently only good for COMPARATIVE use: this run against the next, in one session.
+
+Two bands are defensible and nothing between them is: **over ~150s with a failure** has correlated with the
+multi-check red, and **60–102s** has correlated with clean. Reading a 130s run as "slow" would be inventing
+a threshold rather than reporting one. The 150s warning in `integration.mjs` sits clear of both observed
+bands deliberately, and the note in that file says so.
+
 ### What to do with SD25 specifically
 
 Another session watched it lose to a deadlock repeatedly on the same day. It is the write-heaviest check in

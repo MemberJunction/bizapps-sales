@@ -404,6 +404,20 @@ const MUTATIONS = [
       to: 'deal.DealStatusTypeID = deal.DealStatusTypeID;\n        if (input.ClosingStageID) {',
       note: 'the close stops setting the status. BROAD BY DESIGN -- every check that asserts a close outcome falls with it; CD17 is in the list, which is the point' },
 
+    // The task NAME. Reverting it to the id reproduces a finance queue rendered as rows of hex -- the
+    // defect exactly, and the reason WT15 asserts from both ends rather than just looking for the name.
+    { id: 'M-TN1', file: CWT, expect: ['WT15'],
+      from: 'Name: `Review order for ${input.DealName}`,',
+      to: 'Name: `Review order for deal ${input.DealID}`,',
+      note: 'the order-review task is named after a UUID again' },
+
+    // And the DEAL LINK. Without it neither task is reachable from the deal that caused it, which is the
+    // first navigation a rep tries and the one no other check looked for.
+    { id: 'M-TL1', file: CWT, expect: ['WT16'],
+      from: '                { EntityName: E_DEAL, RecordID: input.DealID },',
+      to: '',
+      note: 'the order-review task drops its deal link, so the work is unreachable from the deal' },
+
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
     // the agreement went. This flips exactly that bit and nothing else.

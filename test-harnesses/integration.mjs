@@ -303,6 +303,17 @@ const linkedApps = new Set(
  * and under a concurrent full build -- and none reproduced the multi-check failures seen earlier that day.
  * That is consistent with load, and this line is what makes the correlation checkable next time instead of
  * remembered.
+ *
+ * ── DO NOT READ AN INTERMEDIATE VALUE AS DIAGNOSTIC YET ────────────────────────────────────────────
+ *
+ * The floor itself moves. Runs called quiet by the same person on the same machine read 90-91s earlier in
+ * the day and 63s that evening -- roughly 30% -- so there is no established baseline to measure a middling
+ * number against. Only two things are currently defensible: over ~150s WITH a failure has correlated with
+ * the multi-check red, and 60-102s has correlated with clean. Anything between is unclassified, and calling
+ * a 130s run "slow" would be inventing a threshold rather than reporting one.
+ *
+ * The honest use of this number today is comparative -- same session, same conditions, one run against the
+ * next -- not absolute.
  */
 const RUN_STARTED_AT = Date.now();
 

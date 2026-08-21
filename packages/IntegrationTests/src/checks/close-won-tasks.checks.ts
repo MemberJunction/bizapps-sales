@@ -95,7 +95,7 @@ function entityID(ctx: Ctx, name: string): string {
 async function dealOnPolicy(
     ctx: Ctx,
     createsContract: boolean,
-): Promise<{ DealID: string; PipelineID: string; CompanyID: string }> {
+): Promise<{ DealID: string; DealName: string; DealOrderID: string; PipelineID: string; CompanyID: string }> {
     const pipelines = await rows(ctx, 'MJ_BizApps_Sales: Pipelines', 'IsActive = 1');
     const match = pipelines.find((p) => {
         const raw = p['CloseWonPolicy'];
@@ -113,6 +113,18 @@ async function dealOnPolicy(
     Assert(deals.length > 0, `setup: no deal on the pipeline with CreateContract = ${createsContract}`);
     return {
         DealID: String(deals[0]['ID']),
+        // Carried through so the task NAME can be a deal name rather than a UUID -- see WT15.
+        DealName: String(deals[0]['Name'] ?? ''),
+        /**
+         * THE DEAL'S OWN ORDER, not any order of its company.
+         *
+         * `baseInput` used to take `anyID(E_ORDER, CompanyID = ...)`, while `WT1` asserts the review task
+         * links "the deal's own order". Those coincide only when the arbitrary pick happens to be the
+         * deal's, so WT1 passed when its bundle ran alone and failed in a full run where earlier bundles
+         * had created other orders for the same company. A latent mismatch between a setup and an
+         * assertion, exposed rather than caused by touching this file.
+         */
+        DealOrderID: String(deals[0]['OrderID'] ?? ''),
         PipelineID: pipelineID,
         CompanyID: String(deals[0]['CompanyID']),
     };
@@ -126,14 +138,17 @@ async function baseInput(ctx: Ctx, createsContract: boolean): Promise<CloseWonTa
      * field from it — the selling company — and the DEAL already carries that. Taking it from the deal is
      * both less coupled and more correct: the order has to belong to the same company as the deal.
      */
-    const { DealID, PipelineID, CompanyID } = await dealOnPolicy(ctx, createsContract);
-    const orderID = await anyID(ctx, E_ORDER, `CompanyID = '${CompanyID}'`, 'order');
+    const { DealID, DealName, DealOrderID, PipelineID, CompanyID } = await dealOnPolicy(ctx, createsContract);
+    // The deal's own order when it has one; any order of the company only as a last resort, which is the
+    // shape WT13 covers deliberately (a deal whose order the close has to create).
+    const orderID = DealOrderID || (await anyID(ctx, E_ORDER, `CompanyID = '${CompanyID}'`, 'order'));
 
     const roleID = await anyID(ctx, E_TASK_ROLE, 'ID IS NOT NULL', 'task role');
     const personID = await anyID(ctx, E_PEOPLE, 'ID IS NOT NULL', 'person');
 
     return {
         DealID,
+        DealName,
         OrderID: orderID,
         PipelineID,
         Assignee: { EntityName: E_PEOPLE, RecordID: personID, RoleID: roleID },
@@ -270,15 +285,37 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                     'the task must carry the ORDER_REVIEW type this repo seeds — resolved by code, not configured',
                 );
 
+                /**
+                 * TWO LINKS NOW, and the assertion is about the ORDER one rather than about the count.
+                 *
+                 * This read `AssertEqual(links.length, 1)`, which was a true statement about the
+                 * implementation and a weaker one about the requirement: what matters is that the review
+                 * task points at the ORDER, because that is how finance finds the thing to review. A deal
+                 * link was added beside it (WT16) so the work is reachable from the deal too, and counting
+                 * links made that indistinguishable from a regression.
+                 */
                 const links = await rows(ctx, E_TASK_LINK, `TaskID = '${review!.TaskID}'`);
-                AssertEqual(links.length, 1, 'exactly one link');
+                const orderLinks = links.filter(
+                    (l) => String(l['EntityID']).toLowerCase() === entityID(ctx, E_ORDER).toLowerCase(),
+                );
+                AssertEqual(orderLinks.length, 1, 'exactly one link to the ORDER — not zero, and not twice');
                 AssertEqual(
-                    String(links[0]['EntityID']).toLowerCase(),
+                    String(orderLinks[0]['EntityID']).toLowerCase(),
                     entityID(ctx, E_ORDER).toLowerCase(),
                     'the link must point at the ORDER entity — this task is how finance finds the order',
                 );
                 AssertEqual(
-                    String(links[0]['RecordID']).toLowerCase(),
+                    /**
+                     * `orderLinks[0]`, NOT `links[0]`. With a deal link sitting beside the order link,
+                     * indexing the unfiltered array reads whichever row the database happened to return
+                     * first -- so this assertion passed in a bundle-only run and failed in a full one,
+                     * where earlier bundles change the row order. My own error: the filter was added two
+                     * assertions above and this one was left pointing at the raw list.
+                     *
+                     * It reads green again today either way, which is worse rather than better: it means
+                     * the ordering currently favours it. Fixed so the check cannot depend on that.
+                     */
+                    String(orderLinks[0]['RecordID']).toLowerCase(),
                     input.OrderID.toLowerCase(),
                     'and at the deal\'s own order',
                 );
@@ -377,10 +414,25 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                     );
                 }
 
+                /**
+                 * "NEVER STRANDED" IS ABOUT ITS TARGET, NOT ABOUT THE LINK COUNT.
+                 *
+                 * This asserted `links.length === 1`, which conflated two claims: that the task reaches its
+                 * intended target, and that it reaches nothing else. Only the first is the requirement. A
+                 * deal link now sits beside it (WT16) so the work is reachable from the deal, so the target
+                 * is looked for rather than assumed to be alone.
+                 */
                 const links = await rows(ctx, E_TASK_LINK, `TaskID = '${contractTask!.TaskID}'`);
-                AssertEqual(links.length, 1, 'the contract task must be linked to SOMETHING — never stranded');
+                const toTarget = links.filter(
+                    (l) => String(l['RecordID']).toLowerCase() === expectedTarget.toLowerCase(),
+                );
                 AssertEqual(
-                    String(links[0]['RecordID']).toLowerCase(),
+                    toTarget.length,
+                    1,
+                    'the contract task must be linked to its target — never stranded, never twice',
+                );
+                AssertEqual(
+                    String(toTarget[0]['RecordID']).toLowerCase(),
                     expectedTarget.toLowerCase(),
                     'and the row must agree with what the result reported',
                 );
@@ -941,16 +993,132 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                         + 'deal instead gives finance a work item that opens the wrong record.',
                 );
 
+        /**
+                 * ── "NOT THE DEAL" MEANS "NOT INSTEAD OF THE CONTRACT" ──────────────────────────────
+                 *
+                 * This asserted ZERO deal links, and the reasoning behind it is still right: the fallback
+                 * to the deal is for the no-contract-yet case (WT5), and using it on every close would give
+                 * finance a work item that opens the wrong record.
+                 *
+                 * What changed is that the deal link is no longer the fallback. It is added BESIDE the
+                 * contract link, because from a deal a rep could not otherwise reach the work its own close
+                 * raised (WT16). So the claim this check owns is that the contract link is present and is
+                 * the PRIMARY — which is exactly what "instead of" means — and the deal link is expected
+                 * rather than forbidden.
+                 *
+                 * Asserting the primary is what stops this being a relaxation: a change that relinked
+                 * everything to the deal would still fail here.
+                 */
                 const toDeal = links.filter(
                     (l) => String(l['EntityID']).toLowerCase() === dealEntityID.toLowerCase()
                         && String(l['RecordID']).toLowerCase() === dealID.toLowerCase(),
                 );
+                /**
+                 * COUNTED AGAINST THIS DEAL, NOT AGAINST THE TASK ROWS. `contractTasks` is every task of the
+                 * contract-processing TYPE on the host — three, here, most of them from other closes — so
+                 * comparing against its length asserted something about unrelated rows. Both `toContract`
+                 * and `toDeal` are already filtered to the ids this close produced, which is the scope that
+                 * means anything.
+                 */
                 AssertEqual(
                     toDeal.length,
-                    0,
-                    'and it must NOT fall back to the deal once a contract exists — that fallback is for '
-                        + 'the no-contract-yet case (WT5), not for every close',
+                    1,
+                    'the deal link is ADDITIONAL and appears exactly once, so the work is reachable from '
+                        + 'the deal without being duplicated in front of finance',
                 );
+            }),
+    },
+    {
+        Id: 'close-won-tasks.WT15',
+        Name: 'WT15: a task is named after the DEAL, not after its UUID',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── A WORK QUEUE OF HEX IS NOT A WORK QUEUE ─────────────────────────────────────────
+                 *
+                 * Both task names interpolated `input.DealID`, so finance opened its list and read
+                 * "Review order for deal 3006D3FB-6C13-40ED-9E4C-…" — on every row, in the one column a
+                 * human uses to decide what to work on next. Nothing failed; the feature was simply
+                 * unusable for its actual reader.
+                 *
+                 * Asserted from BOTH ends, because either alone is weak: the name must contain the deal's
+                 * name, AND it must not contain the id. Checking only for the deal name would pass a
+                 * format that appended the UUID as well, which is the most likely regression — somebody
+                 * "keeping the id for traceability" in the field a person reads.
+                 */
+                const input = await baseInput(ctx, true);
+                Assert(
+                    !!input.DealName && input.DealName.trim().length > 0,
+                    'setup: the deal must have a name, or this check cannot distinguish the two forms',
+                );
+
+                const out = await service.CreateCloseWonTasks(input, ProviderOf(ctx), ctx.User);
+                Assert(out.Tasks.length > 0, `no tasks were raised — ${out.Issues.join(' | ')}`);
+
+                for (const task of out.Tasks) {
+                    const [row] = await rows(ctx, E_TASK, `ID = '${task.TaskID}'`);
+                    Assert(!!row, `the ${task.Kind} task row must exist`);
+                    const name = String(row['Name'] ?? '');
+                    Assert(
+                        name.includes(input.DealName),
+                        `the ${task.Kind} task is named "${name}", which does not carry the deal's name`,
+                    );
+                    Assert(
+                        !name.toLowerCase().includes(input.DealID.toLowerCase()),
+                        `the ${task.Kind} task name still carries the deal UUID: "${name}". The id belongs `
+                            + 'in a link, not in the label a human reads',
+                    );
+                }
+            }),
+    },
+    {
+        Id: 'close-won-tasks.WT16',
+        Name: 'WT16: every task raised by a close is reachable FROM THE DEAL',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── THE FIRST NAVIGATION A REP TRIES, AND IT DID NOT EXIST ──────────────────────────
+                 *
+                 * One task pointed at the order header and the other at the contract. Both were correct
+                 * about what the task is ABOUT, and together they meant that from a deal you could not
+                 * reach the work its own close had raised. `WT13` and `WT14` each assert their task's
+                 * primary link, so both passed throughout — the gap was in a direction neither looked.
+                 *
+                 * The deal link is ADDITIONAL, not a reclassification: `LinkedEntityName` still reports
+                 * the record the task is about, and that is asserted here too so this check cannot be
+                 * satisfied by relinking everything to the deal.
+                 */
+                const input = await baseInput(ctx, true);
+                const out = await service.CreateCloseWonTasks(input, ProviderOf(ctx), ctx.User);
+                Assert(out.Tasks.length >= 2, `expected both tasks — ${out.Issues.join(' | ')}`);
+
+                const dealEntityID = ctx.Provider.Entities.find((e) => e.Name === E_DEAL)?.ID;
+                Assert(!!dealEntityID, 'the Deals entity must be registered for a deal link to exist');
+
+                for (const task of out.Tasks) {
+                    const links = await rows(ctx, E_TASK_LINK, `TaskID = '${task.TaskID}'`);
+                    const toDeal = links.filter(
+                        (l) =>
+                            String(l['EntityID']).toLowerCase() === String(dealEntityID).toLowerCase() &&
+                            String(l['RecordID']).toLowerCase() === input.DealID.toLowerCase(),
+                    );
+                    AssertEqual(
+                        toDeal.length,
+                        1,
+                        `the ${task.Kind} task must be reachable from the deal exactly once — found `
+                            + `${toDeal.length}. Zero means a rep cannot find it; more than one puts the `
+                            + 'same work in front of finance twice',
+                    );
+
+                    // And the primary is unchanged: the deal is a way in, not what the task is about.
+                    Assert(
+                        task.LinkedEntityName !== E_DEAL || !input.ContractID,
+                        `the ${task.Kind} task reports the DEAL as its primary link, which means the deal `
+                            + 'link replaced the real one rather than being added beside it',
+                    );
+                }
             }),
     },
 ];
