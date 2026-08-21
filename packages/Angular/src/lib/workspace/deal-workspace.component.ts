@@ -1229,12 +1229,40 @@ export class DealWorkspaceComponent implements OnInit {
      *
      * Called AFTER `ReloadActiveDeal()`, which calls `Revalidate()` and would otherwise wipe them.
      */
+    /**
+     * ── THE SERVER'S SECTION VOCABULARY IS NOT THIS SURFACE'S, AND THE CAST HID IT ───────────────────
+     *
+     * `SalesCloseIssue.Section` is a free string and the operations use `'deal'` for anything about the
+     * deal as a whole. `DealWorkspaceSection` is `party | lines | schedule | terms | variances` — there is
+     * no `'deal'`. Both issue handlers wrote `(i.Section ?? 'deal') as DealWorkspaceSection`, a cast to a
+     * value outside the union, and `IssuesForPane` then filters `i.Section === key` against the five real
+     * pane keys. So **every deal-level issue was silently dropped and rendered nowhere.**
+     *
+     * That is why `71-lost-and-reopen` still could not see the reopen's order warning after
+     * `SurfaceOperationIssues` was added: the warning was being produced, merged into `Validation`, and
+     * then filtered out by a pane list that has no bucket for it. It also means a REFUSED close carrying a
+     * deal-level reason showed only the one-line `Fail` message and never the issue itself.
+     *
+     * Coerced to a real pane rather than adding a sixth: `'party'` is the pane holding the deal's own
+     * header fields and the one a rep lands on, so a deal-level message is visible there. Filing it
+     * PERFECTLY would mean reconciling the server's vocabulary with this union — recorded as a decision
+     * rather than guessed at, because the operations' `Section` values are part of their output contract.
+     */
+    private static readonly PANE_KEYS: readonly DealWorkspaceSection[] = [
+        'party', 'lines', 'schedule', 'terms', 'variances',
+    ];
+
+    private toPaneSection(section: string | null | undefined): DealWorkspaceSection {
+        const found = DealWorkspaceComponent.PANE_KEYS.find((k) => k === section);
+        return found ?? 'party';
+    }
+
     private SurfaceOperationIssues(issues: SalesCloseDealOutput['Issues']): void {
         if (!issues?.length) {
             return;
         }
         const advisories = issues.map<DealWorkspaceIssue>((i) => ({
-            Section: (i.Section ?? 'deal') as DealWorkspaceSection,
+            Section: this.toPaneSection(i.Section),
             Field: i.Field ?? null,
             Severity: i.Severity === 'warning' ? 'warning' : 'error',
             Message: i.Message,
@@ -1248,7 +1276,7 @@ export class DealWorkspaceComponent implements OnInit {
             return;
         }
         const mapped = issues.map<DealWorkspaceIssue>((i) => ({
-            Section: (i.Section ?? 'deal') as DealWorkspaceSection,
+            Section: this.toPaneSection(i.Section),
             Field: i.Field ?? null,
             Severity: i.Severity === 'warning' ? 'warning' : 'error',
             Message: i.Message,

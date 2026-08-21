@@ -413,7 +413,38 @@ grep -A3 'dynamicPackages' mj.config.cjs      # orders-server must be listed
 
 ---
 
-## 🔴 KI-20 — Removing a line from an order is silently dropped, so the workspace's delete-line button does nothing
+## 🔴 KI-20 — Removing a line from an order FAILS THE WHOLE SAVE (updated 2026-08-21: it used to be silent)
+
+> ### ⚠️ THE SYMPTOM CHANGED, AND THE TITLE BELOW DESCRIBES THE OLD ONE
+>
+> Measured through the Explorer on 2026-08-21. Removing one of two lines and saving no longer drops the
+> removal quietly — it now refuses the entire save:
+>
+> ```
+> Save failed for OrderID_Object (MJ_BizApps_Orders: Order Headers): Failed to save order line 1:
+> Violation of UNIQUE KEY constraint 'UQ_OrderLine_OrderHeader_LineNumber'.
+> The duplicate key value is (b90e31c3-…, 1).
+> ```
+>
+> Orders renumbers the SURVIVING line from 2 to 1 while the removed row still holds LineNumber 1, so the
+> update collides with the row it is meant to replace. **A rep cannot remove a line at all**, and nothing
+> about the deal saves while a removal is staged.
+>
+> Loud is better than silent, and this is still orders' to fix — the cause remains in `savePendingLines`,
+> which is what the original entry describes. What changed is that it now announces itself.
+>
+> **How this was found is worth keeping.** `78-line-removal-tripwire` asserted "the UI must report NO
+> error", on the reasoning that KI-20's hazard was looking like success. That assertion had been passing
+> for the wrong reason: it searched for CSS classes that do not exist (`.dw-issue`, `.msg`; the real ones
+> are `.dw-issues li` and `.dw-msg`), so it matched nothing and could never fail. Fixing the selector is
+> what revealed the change. A tripwire pointed at a selector that matches nothing is indistinguishable
+> from a passing one.
+>
+> The spec now asserts the uniqueness violation by name, so it goes red the day the behaviour changes in
+> either direction.
+
+### The original entry, which still describes the cause
+
 
 **Measured on MJ_V6_Host, 2026-08-20, by `test-harnesses/prove-line-removal.mjs`.** The save reports
 SUCCESS and the row stays. Nothing logs, nothing throws, and the collection in memory is correct — so the

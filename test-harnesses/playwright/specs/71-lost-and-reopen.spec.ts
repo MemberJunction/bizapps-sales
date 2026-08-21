@@ -95,10 +95,49 @@ test.describe('closed lost and reopen — what happens to the order', () => {
          * `Sales.CloseDeal`, an explicit act. So the deal stayed open, the assertions below described a
          * close that had not happened, and the first one to notice was a null-status JOIN.
          *
-         * The stage is still MOVED first, because that is what makes the order Voided and this spec is
-         * about what happens to the order. Then the deal is closed for real.
+         * ── AND THE STAGE IS NO LONGER MOVED BY HAND, WHICH IS THE WHOLE POINT NOW ──────────────────
+         *
+         * This used to select the losing stage and Save before closing, to get the order voided. That
+         * pre-move was what kept the spec red after the reopen derivation landed: with the deal ALREADY in
+         * the losing stage, the close had nowhere to move it, its event recorded
+         * `FromStageID === ToStageID`, and the reopen correctly restored the stage the deal was already in
+         * — `close-deal.CD19`'s case, reached by accident.
+         *
+         * The close now derives its own closing stage from the outcome's flag
+         * (`closingStageForOutcome`), so the pre-move is redundant: closing as LOST lands the deal in the
+         * losing stage, that stage declares `OrderStatusOnEntry = 'Voided'`, and the order is voided by
+         * the same writer as before. The reopen then restores the stage the deal came FROM, that stage
+         * asks for `Quoted`, orders refuses because `Voided` is terminal — and the refusal is what this
+         * spec exists to see on screen.
+         *
+         * `losing` is still resolved above, and still asserted, because a pipeline with no losing stage
+         * would make the derivation return null and this scenario unreachable.
+         *
+         * ── BUT THE DEAL MUST BE QUOTED FIRST, AND THAT IS NOT SETUP PADDING ────────────────────────
+         *
+         * The reopen restores the stage the deal came FROM, and asks that stage what the order should be.
+         * `ComposeDeal` leaves the deal in the pipeline's FIRST stage, which in the seeded vocabulary
+         * declares no `OrderStatusOnEntry` at all — so the restore asks for nothing, the order writer never
+         * runs, and there is correctly nothing to warn about. Measured: that is why this spec stayed red
+         * after the derivation landed.
+         *
+         * Advancing to a stage that DOES declare an order status is the scenario the story describes — a
+         * deal gets quoted, is then lost, and is later reopened — and it is the only shape in which the
+         * order has something to refuse.
          */
-        await SelectByLabel(page, 'Stage', losing!.Name);
+        const quoting = await QueryOne<{ Name: string }>(`
+            SELECT TOP 1 s.Name
+              FROM __mj_BizAppsSales.PipelineStage s
+              JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = s.DealStatusTypeID
+             WHERE s.PipelineID = (SELECT PipelineID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}')
+               AND s.IsActive = 1 AND s.OrderStatusOnEntry IS NOT NULL AND t.LocksDeal = 0
+             ORDER BY s.DisplayOrder`);
+        expect(
+            quoting?.Name,
+            'the pipeline needs a non-closing stage that declares an OrderStatusOnEntry, or the order has ' +
+                'nothing to refuse on the way back',
+        ).toBeTruthy();
+        await SelectByLabel(page, 'Stage', String(quoting!.Name));
         await SaveDeal(page);
         await page.waitForTimeout(2_000);
 
@@ -211,7 +250,7 @@ test.describe('closed lost and reopen — what happens to the order', () => {
          * come back and re-tighten a spec that had been relaxed to match a bug.
          */
         await expect(
-            page.locator('.msg:visible, .dw-issue:visible').filter({ hasText: /order|Voided|could not/i }).first(),
+            page.locator('.dw-msg:visible, .dw-issues li:visible').filter({ hasText: /order|Voided|could not/i }).first(),
             'the reopen must SURFACE that the order could not follow — a silent success leaves a working ' +
                 'deal pointing at a voided order with nothing on screen saying so (DN-18)',
         ).toBeVisible({ timeout: 20_000 });

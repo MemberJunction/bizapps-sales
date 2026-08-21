@@ -92,14 +92,38 @@ test.describe('KI-20 tripwire — removing an order line through the UI', () => 
          * Scoped to the workspace's message and validation channels for the same reason — the regex was
          * matching page furniture, and the claim is about what the SURFACE reports after the save.
          */
-        const reported = (await page.locator('.msg:visible, .dw-issue:visible, .dw-field-error:visible')
+        const reported = (await page.locator('.dw-msg:visible, .dw-issues li:visible, .dw-field-error:visible')
             .allTextContents())
             .map((t) => t.replace(/\s+/g, ' ').trim())
             .filter((t) => /could not|failed|error/i.test(t));
+
+        /**
+         * ── KI-20'S SYMPTOM HAS CHANGED: IT IS NO LONGER SILENT ─────────────────────────────────────
+         *
+         * This asserted `toEqual([])` — "the UI must report NO error", because KI-20's whole hazard was
+         * that a dropped removal LOOKED like success. That assertion was passing for the wrong reason: it
+         * searched `.dw-issue` and `.msg`, neither of which exists (the real classes are `.dw-issues li`
+         * and `.dw-msg`), so it matched nothing and could never fail. Fixing the selector is what revealed
+         * the change.
+         *
+         * What actually happens now, measured:
+         *
+         *     Save failed for OrderID_Object: Failed to save order line 1: Violation of UNIQUE KEY
+         *     constraint 'UQ_OrderLine_OrderHeader_LineNumber'. The duplicate key value is (…, 1).
+         *
+         * Orders renumbers the SURVIVING line from 2 to 1 while the removed row still holds 1, so the
+         * update collides with the row it is supposed to be replacing. The removal is no longer dropped
+         * quietly — the whole save is refused.
+         *
+         * That is a DIFFERENT defect from the one KI-20 records, and arguably a better one: loud beats
+         * silent. But it means a rep cannot remove a line at all, and it is still orders' to fix.
+         * Asserted as it is, so that this spec goes red the day the behaviour changes in either direction.
+         */
         expect(
-            reported,
-            'the UI must report NO error — the whole hazard is that this looks like it worked',
-        ).toEqual([]);
+            reported.some((m) => /UQ_OrderLine_OrderHeader_LineNumber/i.test(m)),
+            'the removal is now refused with a LineNumber uniqueness violation — if this stopped being ' +
+                `true, orders' line handling changed and KI-20 needs re-reading. Saw: ${JSON.stringify(reported).slice(0, 300)}`,
+        ).toBe(true);
 
         // ── THE DATABASE, which disagrees ───────────────────────────────────
         const after = await QueryAll<{ ID: string; LineNumber: number }>(
