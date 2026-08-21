@@ -254,6 +254,21 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.SalesContact WHERE ID=@c4)
     VALUES (@c4, @lcOpp, @lsPart, N'Partner Principal', 0);
 
 -- ============================ PIPELINE 1 — and the point about labels ============================
+--
+-- CloseWonPolicy.ContractTypeCode IS 'Order Form', AND THE VALUE IS LOAD-BEARING.
+--
+-- It said 'Standard' until 2026-08-20, which was v1 contracts vocabulary. The 2026-08-18 contracts
+-- rebuild replaced MSA / Standard / Membership / Evergreen / Pilot -- names describing a commercial
+-- SHAPE -- with names describing what the DOCUMENT is: Order Form, Statement of Work, Payment Link,
+-- Change Order. Nothing matched 'Standard' any more, so every B2B close-won created no contract and
+-- reported 'No contract type matches Standard'. The close still SUCCEEDED and recorded the reason,
+-- which is exactly why it went unnoticed -- an honest report of a failure still reads as a pass to
+-- anyone watching the return value.
+--
+-- 'Order Form' is what S-US2 names as the default, and it is also the only safe class of answer: it
+-- has ParentStatusRequirement = NULL, so it STANDS ALONE. A type requiring a parent -- Change Order --
+-- is refused by ContractEntityServer.ValidateAsync(), because a change order that amends nothing has
+-- no lineage. Any future value here must satisfy that too.
 DECLARE @pipe1 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000001';
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe1)
   INSERT INTO __mj_BizAppsSales.Pipeline (ID, CompanyID, Name, Code, Description, DealTypeID, DefaultForecastCategoryTypeID,
@@ -267,6 +282,13 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe1)
       -- copy was found by close-won-contract.CT1 and the seeded DB row by CT6; this INSERT is guarded
       -- by IF NOT EXISTS, so it only fires on a host that has no pipelines yet -- which is exactly the
       -- host nobody would think to check.
+      --
+      -- BOTH SIDES OF THE MERGE AGREED ON 'Order Form' -- two people found the same defect
+      -- independently, which is worth knowing. The incoming line also carried "OrderState":"Confirmed",
+      -- and that is NOT taken: D-OS1 retired OrderState in favour of PipelineStage.OrderStatusOnEntry,
+      -- because a close-time key speaks once about one kind of close while a stage speaks on every
+      -- change. Reinstating it here would fail silently -- a key no code reads, in the one place a fresh
+      -- install seeds from, leaving the next reader to work out which design won.
       N'{"CreateContract":true,"ContractTypeCode":"Order Form","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","RequireApprovalTaskTypeCode":null}',
       1, 10, 1);
 

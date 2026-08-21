@@ -1,0 +1,67 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Pipeline Summary",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "What is in the open pipeline right now, by pipeline and stage, and how much of it is weighted?",
+      "Description": "Open and weighted pipeline by pipeline and stage (master plan §9.3 measures 1-2). Splits the total into PricedAmount and StatedAmount by Deal.AmountIsComputed, so a consumer can never present a hand-typed figure as an orders-engine answer.",
+      "SQL": "@file:SQL/pipeline-summary.sql",
+      "TechnicalDescription": "Grain: Deal. Date dimension: ExpectedCloseDate — a forward-looking question, so a deal belongs to the period it is expected to close in. Open is DealStatusType.IsOpen (a FLAG, never a status name). WeightedAmount is Amount * Probability / 100, which §9.3 names as a measure in those words; it is a forecast weighting, not a price, and sales computes no money. Joins PipelineStage only for DisplayOrder.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {
+      "MJ: Query Parameters": [
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "CompanyID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
+            "SampleValue": "C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PipelineID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "One pipeline. Omit for all pipelines.",
+            "SampleValue": "90111111-0000-4000-A000-000000000001",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodStart",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive start of the window. Omit for no lower bound.",
+            "SampleValue": "2026-01-01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodEnd",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive end of the window. Omit for no upper bound.",
+            "SampleValue": "2026-12-31",
+            "DetectionMethod": "Manual"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-000000000001"
+    }
+  }
+]

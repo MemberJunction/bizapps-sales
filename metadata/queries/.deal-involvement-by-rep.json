@@ -1,0 +1,67 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Deal Involvement by Rep (Attribution-Weighted)",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "Who contributed to which deals, and how much credit does each rep carry?",
+      "Description": "ATTRIBUTION BASIS: WEIGHTED BY AttributionPct. Credit is split across every active team member, so an SE who supported nine deals is visible at all — which the owner-filtered report cannot show by design. THIS DOES NOT SUM TO THE COMPANY'S BOOKINGS and is not meant to: nothing constrains a deal's attribution percentages to total 100. Use \"Sales: Bookings by Owner\" for any number that has to reconcile.",
+      "SQL": "@file:SQL/deal-involvement-by-rep.sql",
+      "TechnicalDescription": "Grain: DealTeamMember, deliberately WITHOUT an IsOwnerRole filter — its absence is the definition of this report. WeightedWonAmount is Amount * AttributionPct / 100; both are stored values, so this splits a figure rather than pricing anything. A NULL AttributionPct counts as ZERO credit, not full: inventing 100 for an unassigned share would manufacture the overcount this query exists to expose. UnstatedAttributionCount surfaces those rows. Date dimension: ActualCloseDate.",
+      "Status": "Approved",
+      "QualityRank": 9,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {
+      "MJ: Query Parameters": [
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "CompanyID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
+            "SampleValue": "C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PipelineID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "One pipeline. Omit for all pipelines.",
+            "SampleValue": "90111111-0000-4000-A000-000000000001",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodStart",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive start of the window. Omit for no lower bound.",
+            "SampleValue": "2026-01-01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodEnd",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive end of the window. Omit for no upper bound.",
+            "SampleValue": "2026-12-31",
+            "DetectionMethod": "Manual"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-000000000009"
+    }
+  }
+]

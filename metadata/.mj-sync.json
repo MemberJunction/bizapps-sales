@@ -38,6 +38,19 @@
     "the first entry in this list where the ordering is genuinely load-bearing rather than",
     "precautionary — get it wrong and the push fails on an unresolvable lookup."
   ],
+  "_comment_queries": [
+    "query-categories MUST precede queries, and the ordering is load-bearing in a way that is easy to",
+    "miss: 'queries' sorts BEFORE 'query-categories' alphabetically ('i' < 'y' at index 4), so without",
+    "these two entries the queries are pushed first, every CategoryID lookup fails, and `sync push`",
+    "HALTS there rather than skipping them -- taking every directory after it down too.",
+    "",
+    "bizapps-orders hit exactly this and documented it: the halt is what matters, not the queries. It",
+    "left their entity-fields and entity-relationships metadata absent from every host they pushed to,",
+    "which is bizapps-sales docs/KNOWN-ISSUES.md KI-22. Recorded here so the next person to add a",
+    "directory whose name is a prefix of another one knows to check.",
+    "",
+    "Both sit before applications for no reason beyond tidiness -- nothing in either references it."
+  ],
   "_comment_entity_relationships": [
     "entity-relationships is the odd one out: it does not seed rows at all. It fills in one column on",
     "three EntityRelationship rows CodeGen already created, turning them into typed writable child",
@@ -60,6 +73,8 @@
     "task-types",
     "remote-operation-categories",
     "remote-operations",
+    "query-categories",
+    "queries",
     "action-categories",
     "actions",
     "scheduled-jobs",

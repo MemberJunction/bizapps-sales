@@ -104,12 +104,25 @@ const policy = JSON.parse(contractPipe.CloseWonPolicy);
 
 // Does the type code the policy names actually exist in contracts' vocabulary?
 const typeRow = await one(
-    `SELECT ID, Name FROM __mj_BizAppsContracts.ContractType WHERE Name = '${String(policy.ContractTypeCode ?? '').replace(/'/g, "''")}'`,
+    `SELECT ID, Name, ParentStatusRequirement FROM __mj_BizAppsContracts.ContractType WHERE Name = '${String(policy.ContractTypeCode ?? '').replace(/'/g, "''")}'`,
 );
 record(
     !!typeRow,
     `the policy's ContractTypeCode '${policy.ContractTypeCode}' resolves to a seeded contract type`,
-    typeRow ? typeRow.Name : 'NO MATCH — v2 seeds Order Form / Statement of Work / Payment Link / Change Order',
+    typeRow
+        ? `${typeRow.Name} — and it stands alone (ParentStatusRequirement null), which a close-won requires`
+        : 'NO MATCH — v2 seeds Order Form / Statement of Work / Payment Link / Change Order',
+);
+
+/**
+ * A close-won names no parent contract, so the configured type must be one that STANDS ALONE.
+ * `ParentStatusRequirement = 'Required'` (Change Order) is refused by contracts' own validation, and
+ * that refusal is correct -- it is not something to work around at this end.
+ */
+record(
+    !!typeRow && typeRow.ParentStatusRequirement === null,
+    'the configured type requires no parent contract, so a close-won can create it',
+    typeRow ? `ParentStatusRequirement = ${typeRow.ParentStatusRequirement ?? 'null'}` : 'n/a',
 );
 
 const openIDs = (
@@ -133,35 +146,6 @@ const before = Number((await one(`SELECT COUNT(*) AS N FROM __mj_BizAppsContract
 await db.BeginTransaction();
 let out = null;
 try {
-    /**
-     * CORRECT THE STALE TYPE CODE IN-TRANSACTION, so the two questions stay separate.
-     *
-     * As seeded, the B2B policy names 'Standard' — v1 contracts vocabulary (MSA / Standard /
-     * Membership / Evergreen / Pilot) that the 2026-08-18 rebuild replaced with document-shaped names.
-     * The assertion above records that as the defect it is. But leaving it there would conflate a
-     * STALE SEED VALUE with a BROKEN ROUTE, and they need different fixes by different people.
-     *
-     * So the policy is pointed at a type that actually exists, inside the transaction, and rolled back
-     * with everything else. If the route then works, the route is fine and only the seed is wrong.
-     */
-    /**
-     * 'Order Form', which is what S-US2 names as the default -- and picking it by RULE rather than
-     * alphabetically matters. The first attempt took `ORDER BY Name` and got 'Change Order', whose
-     * `ParentStatusRequirement = 'Required'` made contracts refuse the save: a change order that amends
-     * nothing would never appear in the original agreement's lineage. That refusal is contracts' own
-     * validation working exactly as designed, so the filter below asks for a type that STANDS ALONE
-     * rather than assuming any active type will do.
-     */
-    const validType = await one(
-        `SELECT TOP 1 Name FROM __mj_BizAppsContracts.ContractType
-          WHERE Status = 'Active' AND ParentStatusRequirement IS NULL ORDER BY Name`,
-    );
-    const fixed = { ...policy, ContractTypeCode: validType.Name };
-    await db.ExecuteSQL(
-        `UPDATE __mj_BizAppsSales.Pipeline SET CloseWonPolicy = '${JSON.stringify(fixed).replace(/'/g, "''")}' WHERE ID = '${contractPipe.ID}'`,
-    );
-    record(true, `policy repointed in-transaction to '${validType.Name}' (rolled back after)`, '');
-
     const op = new CloseDealOperation();
     const raw = await op.Execute(
         { DealID: deal.ID, DealStatusTypeID: won.ID },
