@@ -80,10 +80,26 @@ test.describe('KI-20 tripwire — removing an order line through the UI', () => 
          * looks like.
          */
         await SaveDeal(page);
-        await expect(
-            page.getByText(/could not|failed|error/i).first(),
+        /**
+         * ASSERTED ON THE TEXT, NOT ON A COUNT.
+         *
+         * `.first()` plus `toHaveCount(0)` is a contradiction dressed as an assertion — `.first()` is a
+         * one-element locator, so the count is 0 or 1 and the failure says "Expected 0, Received 1"
+         * without ever telling you WHAT matched. On a loose regex over the whole page that is close to
+         * useless: it took a rerun to learn the match was the workspace's own visible text rather than an
+         * error at all. Collecting the strings makes the failure name itself.
+         *
+         * Scoped to the workspace's message and validation channels for the same reason — the regex was
+         * matching page furniture, and the claim is about what the SURFACE reports after the save.
+         */
+        const reported = (await page.locator('.msg:visible, .dw-issue:visible, .dw-field-error:visible')
+            .allTextContents())
+            .map((t) => t.replace(/\s+/g, ' ').trim())
+            .filter((t) => /could not|failed|error/i.test(t));
+        expect(
+            reported,
             'the UI must report NO error — the whole hazard is that this looks like it worked',
-        ).toHaveCount(0);
+        ).toEqual([]);
 
         // ── THE DATABASE, which disagrees ───────────────────────────────────
         const after = await QueryAll<{ ID: string; LineNumber: number }>(

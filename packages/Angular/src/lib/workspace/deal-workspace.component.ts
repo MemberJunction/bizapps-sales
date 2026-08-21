@@ -636,6 +636,59 @@ export class DealWorkspaceComponent implements OnInit {
          * the service. Which is why this is a FALLBACK and not the path — and why it reads the same
          * fields the service reads rather than inventing a format.
          */
+        /**
+         * ── THE ID THE SAVED ENTITY REPORTS IS NOT ALWAYS THE ID OF THE ROW THAT WAS WRITTEN ────────
+         *
+         * Measured in the browser, twice, on `SalesAccount`: the row landed as `7F220478-…` while the
+         * entity handed back by `AfterSaved()` reported `c7afc84f-…` — an id present in NEITHER
+         * `__mj_BizAppsCommon.Organization` NOR `__mj_BizAppsSales.SalesAccount`. Binding it gave the deal
+         * a **dangling `AccountID`**, and because the picker had already been given a synthetic option
+         * carrying that id and the right NAME, the screen looked perfect. The rep sees their new customer
+         * selected; the FK points at nothing.
+         *
+         * That is the worst failure shape this surface can have, and it is why the id is no longer trusted
+         * on its own. The cause is upstream — `SalesAccount` extends common's `Organization` (IsA, shared
+         * PK), and the create path evidently persists a key the client instance is never rebased onto; see
+         * `DECISIONS-NEEDED.md` DN-19. Sales cannot fix that, but it can refuse to act on it.
+         *
+         * SO THE CANONICAL ROW IS PREFERRED, BY LABEL, WHEN THE ID DOES NOT RESOLVE. The reload had the
+         * real row in it all along — same name, correct id — and the old code walked straight past it
+         * because it only ever looked the id up. Matching on the label finds it, and the count check is
+         * what keeps that honest: with two accounts of the same name there is no way to tell which one was
+         * just created, so the rep is asked rather than guessed at.
+         */
+        if (!match) {
+            const label = this.labelForCreated(created, target);
+            if (!label) {
+                this.Fail(
+                    'The record was created but could not be named, so it was not selected. Reopen the ' +
+                        'picker to choose it.',
+                );
+                return;
+            }
+
+            const byLabel = options.filter((o) => o.Name.trim() === label.trim());
+            if (byLabel.length === 1) {
+                // The canonical row, with the id the database actually holds.
+                match = byLabel[0];
+            } else if (byLabel.length > 1) {
+                this.Fail(
+                    `More than one ${target === 'AccountID' ? 'customer' : 'contact'} is named ` +
+                        `"${label}", so the new one could not be identified. Choose it in the picker.`,
+                );
+                return;
+            }
+        }
+
+        /**
+         * ONLY NOW may a synthetic option be minted — and only for the read-after-write case, where the
+         * row genuinely is not back yet. That case is real and measured (the record committed, the reload
+         * did not contain it, the option appeared moments later), so it keeps its fallback.
+         *
+         * The distinction that matters: above, the row WAS in the lookup under a different id, and
+         * synthesising there is what produced the dangling FK. Here nothing about the record is in the
+         * lookup at all, so the id in hand is the only one there is.
+         */
         if (!match) {
             const label = this.labelForCreated(created, target);
             if (!label) {
@@ -1084,6 +1137,9 @@ export class DealWorkspaceComponent implements OnInit {
             this.Message = out.IsWon ? 'Deal closed as won.' : 'Deal closed as lost.';
             await this.ReloadActiveDeal();
             await this.RefreshLock();
+            // Warnings on a SUCCESSFUL close — a stubbed downstream, an unraisable finance task, an
+            // order status the stage asked for and orders refused. See SurfaceOperationIssues.
+            this.SurfaceOperationIssues(out.Issues ?? []);
         } finally {
             this.Closing.set(false);
             this.cdr.detectChanges();
@@ -1127,6 +1183,15 @@ export class DealWorkspaceComponent implements OnInit {
             this.Message = 'Deal reopened. The close event remains in its history.';
             await this.ReloadActiveDeal();
             await this.RefreshLock();
+            /**
+             * THE REOPEN'S OWN WARNINGS, which are the ones that matter most.
+             *
+             * S-US8's reopen enters a stage asking for `Quoted` while the order sits at `Voided`, and
+             * orders treats Voided as terminal. The deal reopens anyway -- an order-side refusal must
+             * never block a stage change -- so the ONLY thing standing between the rep and a working
+             * deal pointing at a dead order is this line.
+             */
+            this.SurfaceOperationIssues(out.Issues ?? []);
         } finally {
             this.Closing.set(false);
             this.cdr.detectChanges();
@@ -1140,6 +1205,44 @@ export class DealWorkspaceComponent implements OnInit {
      * named, exactly like a validation failure — rather than in a second error channel the user has to
      * learn separately.
      */
+    /**
+     * ── WHAT A SUCCESSFUL OPERATION STILL HAS TO SAY ────────────────────────────────────────────
+     *
+     * `Sales.CloseDeal` and `Sales.ReopenDeal` both return `Success: true` WITH issues attached, and
+     * that is deliberate: a close whose contract seam is stubbed, a close-won that could not raise a
+     * finance task because no assignee is configured, and above all a REOPEN whose order could not come
+     * back because `Voided` is terminal in orders — all of these are outcomes to report, not reasons to
+     * refuse an operation that has already succeeded.
+     *
+     * Both handlers dropped every one of them. `ApplyCloseIssues` was called only on the `!Success`
+     * branch, so on the success path the rep got "Deal reopened. The close event remains in its history."
+     * and nothing else, while the deal sat pointing at a voided order. `71-lost-and-reopen` names that
+     * exactly: **a silent reopen is the bug**, because the deal looks workable and its order is dead.
+     *
+     * ── MERGED AS ADVISORIES, AND AFTER THE RELOAD ──────────────────────────────────────────────
+     *
+     * `MergeValidation` rather than `ApplyCloseIssues`, for two reasons. `ApplyCloseIssues` REPLACES
+     * `Validation` wholesale, which is right when the operation was refused and everything on screen is
+     * about that refusal, and wrong here — it would discard the record's own field validation. And these
+     * arrive as the `warnings` argument whatever severity they carry, because an operation that SUCCEEDED
+     * must never leave the form unsaveable; the severity is still carried on each issue for display.
+     *
+     * Called AFTER `ReloadActiveDeal()`, which calls `Revalidate()` and would otherwise wipe them.
+     */
+    private SurfaceOperationIssues(issues: SalesCloseDealOutput['Issues']): void {
+        if (!issues?.length) {
+            return;
+        }
+        const advisories = issues.map<DealWorkspaceIssue>((i) => ({
+            Section: (i.Section ?? 'deal') as DealWorkspaceSection,
+            Field: i.Field ?? null,
+            Severity: i.Severity === 'warning' ? 'warning' : 'error',
+            Message: i.Message,
+            RowIndex: null,
+        }));
+        this.Validation = MergeValidation(this.Validation, advisories, []);
+    }
+
     private ApplyCloseIssues(issues: SalesCloseDealOutput['Issues']): void {
         if (!issues?.length) {
             return;

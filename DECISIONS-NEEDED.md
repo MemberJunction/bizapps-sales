@@ -1771,7 +1771,11 @@ actually SUPPLY it".
 
 ---
 
-## DN-17 — 🛑 A rep's FIRST line is written to an orphan order, and the deal never sees it
+## DN-17 — ✅ FIXED — A rep's FIRST line was written to an orphan order
+
+**Fixed 2026-08-21 in `DealEntity.Save()`; `79-embedded-order-refresh.spec.ts` is green and was proven
+able to fail.** The record below is kept because the diagnosis was wrong twice before it was right, and
+the wrong versions are the instructive part.
 
 **Found by the Explorer pass on 2026-08-21, in a browser, on the primary create path. This is OUR bug,
 in this repo, and it loses data a rep entered.** Filed here rather than in `KNOWN-ISSUES.md` because
@@ -1789,14 +1793,26 @@ that file is for things this repo cannot fix, and this is squarely ours.
    `Deal.Amount` can never be refreshed from what the rep entered, and orders is left holding an orphan
    with real priced rows in it.
 
-### Why
+### Why — and the first answer was WRONG in a way worth keeping
 
-`DealWorkspaceComponent.Save()` keeps the same entity instance after a create, on the stated grounds
-that *"the same instance now carries the server's IDs, so this tab becomes an EDIT of a real record — no
-reload."* That was true when the CLIENT minted the order. It stopped being true when provisioning moved
-into `DealEntityServer.Save()`: `OrderID` is now written by the server and the client instance never
-learns it. `DeclareEmbeddedRecord` in `deal-entity.ts` declares no load policy, so
-`OrderID_EnsureObject()` sees `Value === null`, concludes there is no order, and creates one.
+The original write-up said *"`OrderID` is now written by the server and the client instance never learns
+it."* **That is false, and measuring it is what produced the real fix.** Read through Angular's dev hooks
+immediately after a create, the client holds `OrderID = DA871180-…`, exactly matching the row on disk. The
+framework already keeps `Save()`'s promise for the FIELD.
+
+What it does not carry is the **companion**. `EmbeddedRecord` gates `Value` on a private `exposed` flag,
+and only three things set it: `Ensure()`, `LoadEager()` (called from `InnerLoad`), and `Deserialize()` of a
+wire payload. A header-only create reaches none of them:
+
+- `OnOwnerNewRecord` leaves a **nullable** FK unexposed — correct, there is no order yet.
+- The companion payload travels only on the `MJ.SaveEntityGraph` remote operation, and `BaseEntity.Save()`
+  routes there only when `plan.NodeCount > 1`. A deal saved with no lines and no instalments is **one
+  node**, so the ordinary mutation runs and no companion comes back. *This is why the bug hid: a rep who
+  adds a line before the first save makes that save multi-node, and it works.*
+- `LoadEager` runs from `InnerLoad`, and a create never loads.
+
+So `OrderID` pointed at a real order while `OrderID_Object` was null, and `OrderID_EnsureObject()`
+concluded there was no order and minted one. Both halves behaved as designed; nothing owned the gap.
 
 **This is the same defect class as the `CloseWonTaskService` call site fixed in `07dc10e`** — a caller
 reading `deal.OrderID` around a `Save()` that now provisions it. That one was server-side and a check
@@ -1816,32 +1832,148 @@ They drive the entity graph **in process**, where the server's `Save()` sets `th
 instance the check then reads. There is no serialization boundary, so the value is always present.
 `SD24` asserts an existing deal gets an order on its next save and is correct; it cannot see this.
 
-### The fix, stated and NOT applied
+### The fix as APPLIED, and why this one of the three
 
-Deliberately not fixed in this pass, because Andrew's sequence is report → merge the other nine
-branches → second pass, and a behaviour change here needs its own verification cycle on the merged tree.
-Two candidates, in preference order:
+Three options were on the table: reload after save; give `DeclareEmbeddedRecord` a load policy; or have
+the save path put the server-written `OrderID` onto the instance.
 
-1. **Refresh the embedded peer after a create.** On `outcome.Created`, load the order the server just
-   provisioned so `Value` is populated and `Ensure()` returns it. Narrow, and it keeps the "no rebuilt
-   copy" property the current comment is protecting.
-2. **Reopen the deal from the server after a create**, which is what `Discard()` already does. Simpler,
-   but it discards the "same instance" property on purpose and would need a look at what unsaved child
-   state a create can still be holding at that moment.
+**The third turned out to be already done** — the field does come back, as measured above. So the only
+thing left to restore was the companion, and it is fixed in `DealEntity.Save()`:
+
+```ts
+const saved = await super.Save(options);
+if (saved && this.OrderID && !this.OrderID_Object) {
+    await this.OrderID_LoadObject();   // LoadEager from the persisted FK
+}
+```
+
+- **In the ENTITY, not the workspace.** The workspace is the surface that happened to find it; the board,
+  a client-side Action and an importer all reach the same state through plain `entity.Save()`. "My FK and
+  my peer agree" belongs on the entity, so it is fixed once for every caller.
+- **The guard is the design.** `this.OrderID && !this.OrderID_Object` fires in exactly the broken case: a
+  deal whose peer is already exposed (every server-side save, and every client save that took the graph
+  path) skips it, so it costs nothing and cannot clobber a peer holding unsaved edits. `DealEntityServer`
+  reaches it through `super.Save()` with the peer exposed by `provisionEmbeddedOrder()`, so the server path
+  is a no-op by construction rather than by luck.
+- **NOT a reload.** `Save()`'s comment is right that the instance should become an edit of a real record;
+  reloading would have conceded the point instead of restoring it.
+
+**The general fix still belongs upstream.** `DeclareEmbeddedRecord` has no load policy, so no declaration
+can say "resolve this peer from a persisted FK", and `Ensure()` cannot help — its own comment rightly says
+re-attachment "is not Ensure's job". Every app that embeds a record on a **nullable** FK will meet this,
+and each will fix it in its own entity. Worth proposing to MJ as either a load policy on the declaration
+or a post-save companion sync in `BaseEntity`. Recorded here as an upstream ask, not worked around twice.
 
 Whichever is chosen, the comment in `Save()` must change with it — it is currently the reason the bug
 looks intentional.
 
-### The tripwire, and the workaround that must be deleted with the fix
+### The tripwire, and the workaround that was deleted with the fix
 
-- `79-embedded-order-refresh.spec.ts` asserts the correct behaviour and **fails today, deliberately** —
-  same pattern as `78` for KI-20. It goes green when this is fixed.
-- `ComposeDeal` in `lib/deal-flow.ts` reopens from the roster to get past this, so the other specs can
-  test what they are actually for. `ComposeDealWithoutReload` exists solely so spec 79 can drive the
-  unreloaded path. Both notes point here.
+- `79-embedded-order-refresh.spec.ts` is **green**, and proven able to fail: reverting the guard to
+  `if (false && …)`, rebuilding and re-running reports `Expected: 1, Received: 0` on the line assertion —
+  the original symptom exactly.
+- `ComposeDeal`'s roster reload, added to get the other specs past this, is **removed**. Keeping it would
+  have masked a DN-17 regression in every spec except 79. `ComposeDealWithoutReload` is gone with it.
+- The fix also unblocked `70-lifecycle` and `78-line-removal-tripwire`, both of which had been failing on
+  line persistence and are now green.
 
 ### One more thing this exposed
 
 **The harness teardown cannot clean up after this defect.** It deletes orders reachable from a
 `PW-VERIFY%` deal, and an orphan is reachable from nothing. The four orphans had to be removed by hand.
 Any run that hits this leaks an order.
+
+---
+
+## DN-18 — A reopen never asks for the order back, so there is nothing to report
+
+**Found by `71-lost-and-reopen` on 2026-08-21.** The spec is red on purpose and goes green when this is
+decided; it is not a broken test.
+
+### What is true today
+
+Close a deal as lost into a stage declaring `OrderStatusOnEntry = 'Voided'`, then reopen it. The deal
+reopens, the append-only log keeps both events, and the order stays `Voided` — **and the screen says
+nothing about the order at all.** S-US8 describes the opposite: a reopen that enters a stage, asks the
+order to come back, and reports that orders refused because `Voided` is terminal.
+
+### Where it is NOT broken, which took two fixes to establish
+
+- **`Sales.ReopenDeal` is correct.** Its success output carries `Issues: orderStatusIssues(deal)`.
+- **The workspace WAS dropping those issues** — `ApplyCloseIssues` was called only on the `!Success`
+  branch, so every warning on a *successful* close or reopen was discarded. That is now fixed: both
+  handlers call `SurfaceOperationIssues` after the reload, merged as advisories so a succeeded operation
+  never leaves the form unsaveable. This mattered beyond the reopen — it is also why a stubbed contract
+  seam and an unraisable finance task were invisible on a successful close.
+- **And the fix changes nothing here**, because there is no warning to surface. The order-status writer
+  keys on the stage CHANGING, and `DealWorkspaceComponent.ReopenDeal()` sends `{ DealID, Reason }` with no
+  `StageID`. No stage entry, no attempt, nothing to refuse.
+
+### The decision
+
+1. **Re-apply the current stage's `OrderStatusOnEntry` on reopen.** Cheap, and it makes reopen symmetrical
+   with the close that voided the order. But the writer deliberately keys on a stage *change*, so this
+   needs an explicit "re-apply" path rather than passing the stage the deal is already in — and that path
+   is new machinery on the trigger DN-16 just consolidated.
+2. **Offer the rep a stage on the reopen panel.** Truer to S-US8 (a reopened deal usually belongs in a
+   different stage than the one it was lost in) and it makes the order attempt a consequence of a real
+   stage entry rather than a special case. More UI, and it asks the rep a question they may not expect.
+
+Either way the outcome the app must never have is the current one: a deal that looks workable, pointing at
+an order that cannot be revived, with nothing on screen saying so.
+
+---
+
+## DN-19 — ⚠️ INTERMITTENT: an inline-created customer can be bound to an id that was never written
+
+**Found while diagnosing `72-inline-create` on 2026-08-21. Evidence captured once, decisively; NOT
+reproduced on the two runs after it. Recorded because of what it does, not how often it does it.**
+
+### The measurement that matters
+
+One run of the slide-in create, read through Angular's dev hooks and checked straight against the
+database:
+
+| | |
+|---|---|
+| Account row written | `7F220478-2A4B-43C0-94F7-2F88E9727D22` |
+| `deal.AccountID` bound by the picker | `c7afc84f-f956-4627-b4fd-1f84b176bffa` |
+| That id in `__mj_BizAppsCommon.Organization` | **0 rows** |
+| That id in `__mj_BizAppsSales.SalesAccount` | **0 rows** |
+| Organizations with that name | 1 |
+| What the picker displayed | the new customer's name, correctly |
+
+So the deal was pointing at nothing, and **the screen agreed with the rep**. That is the worst failure
+shape this surface has: a dangling FK behind a form that looks finished.
+
+### What it is NOT
+
+Two later runs did **not** reproduce it. On both, the client's id matched the row exactly and the IsA pair
+was intact — `Organization` and `SalesAccount` on the same UUID, one lookup entry, no duplicate. So this is
+not "the create path always returns the wrong id", and any write-up saying so would be overclaiming.
+
+The likeliest shape, stated as a hypothesis rather than a finding: it interacts with the read-after-write
+lag already documented in `CreateRelated`. When the reload misses the just-written row, the old code
+synthesised an option from `created.Get('ID')` — and on that run, that id was not the one on disk.
+
+### The change made, which is safe either way
+
+`CreateRelated` no longer trusts the reported id on its own. When the id does not resolve in the reloaded
+lookup it now looks for the **canonical row by label** and binds that — the real row was in the list all
+along, and the old code walked past it because it only ever looked the id up. If two rows share the label
+it refuses and asks the rep to pick, rather than guessing. The synthetic-option fallback survives for the
+genuine read-after-write case, where nothing about the record is in the lookup at all.
+
+That change can only ever bind a row the picker is actually offering, so it removes the dangling-FK
+outcome whatever the underlying cause turns out to be.
+
+### What is still open
+
+- **`72-inline-create` is still red**, reporting `Received: "null"` — nothing bound. Verified separately
+  that the flow binds correctly in isolation (`accountID` matched the row, no message, no duplicate), so
+  the spec is failing on something the isolated probe does not reproduce: timing, or its own second
+  attempt. **Not diagnosed.** It is the one item from this session I could not take to a conclusion.
+- **Why the reported id ever differs from the written one** is unexplained and is the real question. It
+  sits on the IsA create path (`SalesAccount` extends common's `Organization`, shared PK), which is
+  upstream of this repo — the same territory as KI-1. Worth a characterisation run: create N accounts
+  through the slide-in and compare reported id to written id each time.

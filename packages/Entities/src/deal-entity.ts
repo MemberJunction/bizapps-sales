@@ -47,6 +47,7 @@
  */
 import {
     BaseEntity,
+    EntitySaveOptions,
     IRunViewProvider,
     ValidationErrorInfo,
     ValidationErrorType,
@@ -177,6 +178,78 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
      */
     public OrderID_EnsureObject(): mjBizAppsOrdersOrderHeaderEntity {
         return this.__embeddedOrder.Ensure();
+    }
+
+    /**
+     * Hydrates the embedded peer from a persisted `OrderID`, and returns it.
+     *
+     * `Ensure()` deliberately cannot do this — its own comment says re-attachment "is an explicit FK set,
+     * not Ensure's job", and it is right, because restamping a leftover peer's key after a `Clear()` would
+     * silently re-attach an orphan. Resolving a peer the FK ALREADY names is the different, safe question,
+     * and this is where it gets asked. `LoadEager` is the same call `InnerLoad` makes when a deal is read
+     * from the database, so a deal hydrated here is indistinguishable from a deal that was loaded.
+     */
+    public async OrderID_LoadObject(): Promise<mjBizAppsOrdersOrderHeaderEntity | null> {
+        await this.__embeddedOrder.LoadEager();
+        return this.__embeddedOrder.Value;
+    }
+
+    /**
+     * ── AFTER A SAVE, THE INSTANCE REALLY IS AN EDIT OF A REAL RECORD — INCLUDING ITS ORDER ─────────
+     *
+     * DN-17. Adding a line straight after creating a deal wrote it to a SECOND `OrderHeader` that nothing
+     * referenced: invisible to the rep, uncounted by `Deal.Amount`, and an orphan left in orders.
+     *
+     * ── WHAT WAS ACTUALLY BROKEN, WHICH IS NARROWER THAN IT FIRST LOOKED ────────────────────────────
+     *
+     * Not the round trip. Measured through Angular's dev hooks on a real create: afterwards
+     * `deal.OrderID` holds `DA871180-…`, exactly matching the row on disk. The framework already keeps
+     * the promise `DealWorkspaceComponent.Save()` makes — "the same instance now carries the server's
+     * IDs" — for the FIELD.
+     *
+     * What it does not carry is the COMPANION. `EmbeddedRecord` gates `Value` on a private `exposed`
+     * flag, and the only things that set it are `Ensure()`, `LoadEager()` (from `InnerLoad`) and
+     * `Deserialize()` of a wire payload. A header-only create reaches none of them:
+     *
+     *   · `OnOwnerNewRecord` leaves a NULLABLE FK unexposed — correct, there is no order yet.
+     *   · The companion wire only travels on `MJ.SaveEntityGraph`, and `BaseEntity.Save()` routes there
+     *     only when `plan.NodeCount > 1`. A deal saved with no lines and no instalments is ONE node, so
+     *     the ordinary mutation runs and no companion payload comes back. (This is why the bug hides when
+     *     a rep happens to add a line before the first save — that save IS multi-node.)
+     *   · `LoadEager` runs from `InnerLoad`, and a create never loads.
+     *
+     * So `OrderID` pointed at a real order while `OrderID_Object` was null, and the next
+     * `OrderID_EnsureObject()` concluded there was no order and minted one. Both halves were behaving as
+     * designed; nothing owned the gap between them.
+     *
+     * ── WHY HERE, AND NOT IN THE WORKSPACE ─────────────────────────────────────────────────────────
+     *
+     * Fixing `DealWorkspaceComponent.Save()` would fix the one surface that happened to find it. The
+     * board, an Action running client-side, an importer and the next surface nobody has written all reach
+     * the same state through plain `entity.Save()`. The entity is where "my FK and my peer agree" belongs,
+     * so it is fixed once, for every caller.
+     *
+     * ── THE GUARD IS THE WHOLE DESIGN ──────────────────────────────────────────────────────────────
+     *
+     * `this.OrderID && !this.OrderID_Object` fires in exactly the broken case and nowhere else. A deal
+     * whose peer is already exposed — every server-side save, and every client save that went through the
+     * graph path — skips it, so this costs nothing and cannot clobber a peer holding unsaved edits. A deal
+     * with no order at all skips it too.
+     *
+     * `DealEntityServer` calls this through `super.Save()` and reaches the guard with its peer exposed by
+     * `provisionEmbeddedOrder()`, so the server path is a no-op by construction rather than by luck.
+     *
+     * The general fix belongs upstream: `DeclareEmbeddedRecord` has no load policy, so no declaration can
+     * say "resolve this peer from a persisted FK". Every app that embeds a record on a nullable FK will
+     * meet this. Recorded in `DECISIONS-NEEDED.md` DN-17 as an MJ change to propose, not worked around
+     * twice.
+     */
+    public override async Save(options?: EntitySaveOptions): Promise<boolean> {
+        const saved = await super.Save(options);
+        if (saved && this.OrderID && !this.OrderID_Object) {
+            await this.OrderID_LoadObject();
+        }
+        return saved;
     }
 
     /**

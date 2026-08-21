@@ -16,6 +16,12 @@
  *
  * ── THE WARNING IS THE ASSERTION, NOT AN INCONVENIENCE ──────────────────────────────────────────
  *
+ * ⚠️ **THIS SPEC IS RED ON PURPOSE — see DN-18 and step 4.** Everything up to the final assertion passes:
+ * the loss voids the order, the reopen succeeds, the append-only log keeps both events, and the order
+ * stays `Voided`. What fails is the last claim — that the screen SAYS the order could not follow. It does
+ * not, because the workspace's reopen never asks for a stage, so nothing attempts the restore and there is
+ * no refusal to report. Asserted rather than relaxed, so it goes green when the gap is closed.
+ *
  * S-US8 wants the order restored on reopen and orders will not allow it. The designed outcome is that the
  * deal reopens ANYWAY and the refusal is reported: a stage change must never be blocked by an order-side
  * refusal. **A silent reopen is the bug** — it leaves a working deal pointing at a voided order with
@@ -168,11 +174,36 @@ test.describe('closed lost and reopen — what happens to the order', () => {
             'the order stays Voided — terminal in orders, and sales must not invent a way round it',
         ).toBe('Voided');
 
-        // ── 4. AND THE SCREEN SAYS SO. A silent reopen is the bug. ──────────
+        /**
+         * ── 4. AND THE SCREEN SAYS SO. THIS IS A TRIPWIRE AND IT IS RED — DN-18 ─────────────────
+         *
+         * A silent reopen is the bug, and today the reopen IS silent. The diagnosis, which took two
+         * fixes to reach and neither of them was this one:
+         *
+         *   · `Sales.ReopenDeal` is not at fault. Its success output carries
+         *     `Issues: orderStatusIssues(deal)` — it reports the refusal properly.
+         *   · The WORKSPACE dropped those issues: `ApplyCloseIssues` ran only on the `!Success` branch,
+         *     so every warning on a successful close or reopen was discarded. **Fixed** — both handlers
+         *     now call `SurfaceOperationIssues` after the reload.
+         *   · And that fix changes nothing here, because there is no warning to surface. The order-status
+         *     writer keys on the STAGE CHANGING, and `DealWorkspaceComponent.ReopenDeal()` sends only
+         *     `{ DealID, Reason }`. No `StageID` means no stage entry, which means nothing ever asks the
+         *     order to come back — so the deal is reopened, its order stays `Voided`, and there is
+         *     genuinely nothing to say because nothing was attempted.
+         *
+         * S-US8 describes a reopen that enters a stage and reports what the order refused. The operation
+         * can do that; the UI never asks it to. Closing the gap is a design decision — re-apply the
+         * current stage's `OrderStatusOnEntry` on reopen, or offer the rep a stage on the reopen panel —
+         * and it is recorded in `DECISIONS-NEEDED.md` DN-18 rather than guessed at here.
+         *
+         * Kept as an ASSERTION OF THE INTENT, the same way `78` was for KI-20 and `79` was for DN-17:
+         * both of those went green the day their defect was fixed, without anyone having to remember to
+         * come back and re-tighten a spec that had been relaxed to match a bug.
+         */
         await expect(
-            page.getByText(/order|Voided|could not/i).filter({ hasText: /(order|Voided)/i }).first(),
+            page.locator('.msg:visible, .dw-issue:visible').filter({ hasText: /order|Voided|could not/i }).first(),
             'the reopen must SURFACE that the order could not follow — a silent success leaves a working ' +
-                'deal pointing at a voided order with nothing on screen saying so',
+                'deal pointing at a voided order with nothing on screen saying so (DN-18)',
         ).toBeVisible({ timeout: 20_000 });
 
         expectOnlyKnownErrors(sink, [/Error in BaseEntity\.Load\(MJ_BizApps_Sales:/], 'lost and reopen');

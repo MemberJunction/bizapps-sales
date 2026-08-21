@@ -30,18 +30,7 @@ export interface ComposedDeal {
  * to compare the screen against rows, and taking the id from the screen would make both sides of that
  * comparison the same source.
  */
-/**
- * Composes and saves a deal WITHOUT reopening it afterwards.
- *
- * Exported for one caller only: `79-embedded-order-refresh.spec.ts`, whose entire subject is what
- * happens on the unreloaded instance. Everything else wants {@link ComposeDeal}, which reopens — see the
- * note at the end of this function for why that reopen exists.
- */
-export async function ComposeDealWithoutReload(
-    page: Page,
-    name: string,
-    pipeline?: string,
-): Promise<ComposedDeal> {
+export async function ComposeDeal(page: Page, name: string, pipeline?: string): Promise<ComposedDeal> {
     await OpenWorkspace(page);
     await SetField(page, 'Deal name', name);
 
@@ -89,36 +78,18 @@ export async function ComposeDealWithoutReload(
     expect(row, `the deal "${name}" must exist in the database after saving`).toBeTruthy();
 
     /**
-     * ── REOPENED FROM THE SERVER BEFORE ANYTHING ELSE TOUCHES IT — SEE SPEC 79 ───────────────────
+     * ── NO RELOAD HERE ANY MORE. DN-17 IS FIXED AT THE ENTITY ───────────────────────────────────
      *
-     * A WORKAROUND FOR A CONFIRMED DEFECT, not a tidy-up, and it is here rather than hidden in each
-     * spec so there is one place to delete when the defect is fixed.
+     * This used to reopen the deal from the roster before returning, to get past DN-17: a line added
+     * straight after a create landed on a second, orphaned order. `DealEntity.Save()` now hydrates the
+     * embedded peer from the `OrderID` the server wrote, so a freshly created deal is genuinely an edit
+     * of a real record and the workaround is not just unnecessary — it would be actively harmful to
+     * keep. A reload here would mask a DN-17 regression in every spec except 79.
      *
-     * After a successful create the workspace deliberately keeps the SAME entity instance and does not
-     * reload — its comment says "the same instance now carries the server's IDs". That was true until
-     * `OrderID` started being written by the SERVER inside `DealEntityServer.Save()`. The client's
-     * in-memory `OrderID` stays empty, so the next `OrderID_EnsureObject()` finds no peer and MINTS A
-     * SECOND ORDER: the rep's first line is written to an order no deal references, while
-     * `Deal.OrderID` still points at the empty provisioned one.
-     *
-     * Measured, not inferred. Adding a line straight after create produced zero rows on `Deal.OrderID`
-     * and an orphan `OrderHeader` holding the line — four orphans across four probe runs. Inserting a
-     * reload at exactly this point made the same line persist, priced by orders at 229. That pair of
-     * runs is the diagnosis.
-     *
-     * `79-embedded-order-refresh.spec.ts` asserts the correct behaviour and FAILS today. It is the
-     * tripwire; this line is what lets the other specs get past the defect to test what they are for.
+     * `79-embedded-order-refresh.spec.ts` is the guard, and `ReopenFromRoster` stays available because
+     * reopening from the roster is a path worth driving in its own right.
      */
     return { Name: name, DealID: row!.ID, OrderID: String(row!.OrderID) };
-}
-
-/**
- * The composer every spec but 79 should use: compose, save, and REOPEN from the roster.
- */
-export async function ComposeDeal(page: Page, name: string, pipeline?: string): Promise<ComposedDeal> {
-    const composed = await ComposeDealWithoutReload(page, name, pipeline);
-    await ReopenFromRoster(page, name);
-    return composed;
     expect(
         row!.OrderID,
         'and it must carry an embedded order — provisioning happens inside DealEntityServer.Save, so a ' +
@@ -322,15 +293,42 @@ export async function PurgeDeal(dealID: string, orderID: string | null): Promise
     for (const t of ['DealStageEvent', 'DealTeamMember', 'DealPaymentSchedule', 'DealContactRole']) {
         await QueryAll(`DELETE FROM __mj_BizAppsSales.${t} WHERE DealID = '${dealID}'`);
     }
-    // Tasks and their links point at the ORDER or the DEAL polymorphically; both are cleared by id.
+    /**
+     * ── TASKS RESOLVED BY ID FROM THEIR LINKS, NOT BY NAME OR BY LINK TARGET ────────────────────
+     *
+     * Two things were wrong here, and the second one broke a spec that was otherwise passing.
+     *
+     *   1. `Task WHERE Name LIKE '%dealID%'` was FRAGILE, not broken — and my first note here said it
+     *      was broken, which was wrong. The tasks are named "Review order for deal <id>", so the LIKE did
+     *      match. What made it look otherwise: a seeded task reading "Review order for deal 93111111…",
+     *      where `93111111-0000-4000-…` is the START OF A GUID and not a deal number at all. Matching a
+     *      name on a substring is still the wrong handle for a delete — it depends on a message format
+     *      nothing pins — which is why this now resolves tasks by id anyway.
+     *   2. Links were cleared for the DEAL and the ORDER only. The contract task links the CONTRACT
+     *      now — that was the point of the `ContractID` fix in `07dc10e` — so that link survived, and
+     *      deleting its task failed on `FK_TaskLink_Task`. `70-lifecycle` reached the end of its
+     *      assertions and then died in teardown, leaving the deal behind and reporting 8 deals against
+     *      a baseline of 7. The fix to the product broke the cleanup, which is a fair trade but has to
+     *      be followed through.
+     *
+     * So the tasks are found the way they are actually reachable — through their links, whatever those
+     * links point at — and then everything keyed on those task ids goes in FK order. One batch, because
+     * the id set has to survive across the three deletes.
+     */
     await QueryAll(`
-        DELETE tl FROM __mj_BizAppsTasks.TaskLink tl
-         WHERE tl.RecordID IN ('${dealID}', '${orderID ?? dealID}')`);
-    await QueryAll(`
-        DELETE ta FROM __mj_BizAppsTasks.TaskAssignment ta
-          JOIN __mj_BizAppsTasks.Task t ON t.ID = ta.TaskID
-         WHERE t.Name LIKE '%${dealID}%'`);
-    await QueryAll(`DELETE FROM __mj_BizAppsTasks.Task WHERE Name LIKE '%${dealID}%'`);
+        DECLARE @tasks TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+        INSERT INTO @tasks (ID)
+          SELECT DISTINCT tl.TaskID
+            FROM __mj_BizAppsTasks.TaskLink tl
+           WHERE tl.RecordID IN (
+                     '${dealID}',
+                     '${orderID ?? dealID}',
+                     ISNULL((SELECT CAST(ContractID AS NVARCHAR(50))
+                               FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'), '${dealID}')
+                 );
+        DELETE tl FROM __mj_BizAppsTasks.TaskLink tl JOIN @tasks t ON tl.TaskID = t.ID;
+        DELETE ta FROM __mj_BizAppsTasks.TaskAssignment ta JOIN @tasks t ON ta.TaskID = t.ID;
+        DELETE tk FROM __mj_BizAppsTasks.Task tk JOIN @tasks t ON tk.ID = t.ID;`);
 
     // The contract the close created, found by its provenance pair rather than by name.
     await QueryAll(`DELETE FROM __mj_BizAppsContracts.Contract WHERE CreatingRecordID = '${dealID}'`);

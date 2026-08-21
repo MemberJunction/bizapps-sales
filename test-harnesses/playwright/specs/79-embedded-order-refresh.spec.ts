@@ -2,14 +2,14 @@
  * @fileoverview A rep's FIRST line, added straight after creating the deal, must land on the deal's own
  * order — and must not mint a second one.
  *
- * ── THIS SPEC FAILS TODAY, DELIBERATELY, AND THAT IS ITS JOB ────────────────────────────────────
+ * ── THIS SPEC IS GREEN, AND IT IS WHAT KEEPS DN-17 FIXED ────────────────────────────────────────
  *
- * Same shape as `78-line-removal-tripwire.spec.ts`: it asserts the CORRECT behaviour against a defect
- * that is currently present, so the day the defect is fixed this goes green and nobody has to remember
- * it was broken. A spec that asserted today's wrong behaviour would have to be rewritten to notice the
- * fix, which is the wrong way round.
+ * It was written to fail: it asserted the correct behaviour against a defect that was present, on the
+ * same pattern as `78-line-removal-tripwire.spec.ts`. `DealEntity.Save()` now hydrates the embedded peer
+ * and it passes. Proven able to fail by reverting that one guard to `if (false && …)`, rebuilding, and
+ * re-running — it reports `Expected: 1, Received: 0` on the line assertion, the original symptom exactly.
  *
- * ── THE DEFECT, MEASURED ────────────────────────────────────────────────────────────────────────
+ * ── THE DEFECT IT GUARDS, MEASURED ──────────────────────────────────────────────────────────────
  *
  * `DealWorkspaceComponent.Save()` deliberately does not reload after a create. Its comment says:
  *
@@ -17,9 +17,12 @@
  *      no reload, and no rebuilt copy that could drift from what is on screen."
  *
  * That was true when the client minted the order. It stopped being true when provisioning moved INTO
- * `DealEntityServer.Save()` (`provisionEmbeddedOrder`): `Deal.OrderID` is now written by the SERVER, and
- * the client instance never learns it. `DeclareEmbeddedRecord` is declared with no load policy, so
- * `OrderID_EnsureObject()` sees `Value === null`, concludes there is no order, and creates one.
+ * `DealEntityServer.Save()` — but NOT in the way it first appeared. Measured through Angular's dev hooks:
+ * after a create `deal.OrderID` DOES match the row on disk. The field comes back; the COMPANION does not.
+ * `EmbeddedRecord` gates `Value` on a private `exposed` flag that only `Ensure()`, `LoadEager()` and a
+ * wire `Deserialize()` set, and a header-only create reaches none of them — the companion payload travels
+ * only on `MJ.SaveEntityGraph`, which `Save()` uses only when `plan.NodeCount > 1`. So `OrderID` pointed
+ * at a real order while `OrderID_Object` was null, and `OrderID_EnsureObject()` minted a second one.
  *
  * The rep then adds a line to that second order. The consequences, in order of how bad they are:
  *
@@ -42,7 +45,7 @@
 import { expect, test } from '@playwright/test';
 
 import { QueryAll, QueryOne } from '../lib/db';
-import { ComposeDealWithoutReload, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
+import { ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { OpenPane, RealOptionLabels, SaveDeal } from '../lib/workspace';
 
@@ -68,17 +71,16 @@ test.describe('the embedded order after create — one order, and the line lands
         );
 
         /**
-         * `ComposeDeal` reopens the deal from the roster as a workaround for this very defect, so it
-         * must NOT be used here — that reload is exactly what makes the bug disappear. This spec drives
-         * the unreloaded path, which is what `ComposeDealWithoutReload` exists for.
+         * `ComposeDeal` composes, saves, and does NOT reload — which is the path this spec is about. It
+         * briefly had a reload in it as a workaround for this very defect; that is gone now the entity
+         * fixes it, because a reload here would have made this spec pass without proving anything.
          */
-        const composed = await ComposeDealWithoutReload(page, `${RUN} control`);
+        const composed = await ComposeDeal(page, `${RUN} control`);
         dealID = composed.DealID;
         orderID = composed.OrderID;
 
-        // With the reload `ComposeDeal` performs, this same line DOES persist onto the deal's own
-        // order — that contrast is the diagnosis, and it is why the catalogue and the host are not
-        // plausible explanations for the failure below.
+        // Before the fix this same line landed on a second order and this assertion read 0. Proven by
+        // reverting only the guard in `DealEntity.Save()` and re-running: it fails with exactly that.
         await OpenPane(page, 'Product lines');
         const add = page.getByRole('button', { name: /Add line|Add product/i }).first();
         await expect(add, 'the Product lines pane must offer an add control').toBeVisible({ timeout: 20_000 });
