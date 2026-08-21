@@ -29,7 +29,19 @@ const REPO_ROOT = path.resolve(HERE, '..', '..', '..');
  * against a baseline of 7. Every prefix this harness uses begins `PW-`, and nothing a human would
  * name does.
  */
-const PREFIX = 'PW-';
+/**
+ * EVERY harness prefix, not just this file's original one.
+ *
+ * It was `PW-VERIFY`, then `PW-`, and both were too narrow in the same way: specs written by other
+ * sessions name their rows with their own tag. `70-activity-timeline`, `80-board-drag` and
+ * `90-workspace-tab-state` all use `TS-<timestamp>`, so their deals were invisible to this sweep and
+ * seven of them accumulated on the host across three runs.
+ *
+ * A prefix list rather than a wildcard: the point is that only rows a harness created are deletable, and
+ * a pattern loose enough to catch anything would eventually catch a real deal.
+ */
+const PREFIXES = ['PW-', 'TS-'];
+const PREFIX = PREFIXES.join('/');
 const quiet = process.argv.includes('--quiet');
 
 /** Read the repo-root .env without adding a dotenv dependency to the harness. */
@@ -71,27 +83,29 @@ function readEnv() {
  */
 const SQL = `
 SET NOCOUNT ON;
-DECLARE @p NVARCHAR(50) = N'${PREFIX}%';
+DECLARE @p NVARCHAR(50) = N'${PREFIXES[0]}%';
+DECLARE @p2 NVARCHAR(50) = N'${PREFIXES[1]}%';
 
 -- Captured BEFORE the deal rows go: Deal.OrderID is the only link to the provisioned order.
 DECLARE @orders TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
 INSERT INTO @orders (ID)
-  SELECT DISTINCT OrderID FROM __mj_BizAppsSales.Deal WHERE Name LIKE @p AND OrderID IS NOT NULL;
+  SELECT DISTINCT OrderID FROM __mj_BizAppsSales.Deal
+   WHERE (Name LIKE @p OR Name LIKE @p2) AND OrderID IS NOT NULL;
 
 DELETE ps FROM __mj_BizAppsSales.DealPaymentSchedule ps
-  JOIN __mj_BizAppsSales.Deal d ON ps.DealID = d.ID WHERE d.Name LIKE @p;
+  JOIN __mj_BizAppsSales.Deal d ON ps.DealID = d.ID WHERE d.Name LIKE @p OR d.Name LIKE @p2;
 DELETE tm FROM __mj_BizAppsSales.DealTeamMember tm
-  JOIN __mj_BizAppsSales.Deal d ON tm.DealID = d.ID WHERE d.Name LIKE @p;
+  JOIN __mj_BizAppsSales.Deal d ON tm.DealID = d.ID WHERE d.Name LIKE @p OR d.Name LIKE @p2;
 DELETE se FROM __mj_BizAppsSales.DealStageEvent se
-  JOIN __mj_BizAppsSales.Deal d ON se.DealID = d.ID WHERE d.Name LIKE @p;
+  JOIN __mj_BizAppsSales.Deal d ON se.DealID = d.ID WHERE d.Name LIKE @p OR d.Name LIKE @p2;
 DELETE cr FROM __mj_BizAppsSales.DealContactRole cr
-  JOIN __mj_BizAppsSales.Deal d ON cr.DealID = d.ID WHERE d.Name LIKE @p;
+  JOIN __mj_BizAppsSales.Deal d ON cr.DealID = d.ID WHERE d.Name LIKE @p OR d.Name LIKE @p2;
 
-DELETE FROM __mj_BizAppsSales.Deal WHERE Name LIKE @p;
+DELETE FROM __mj_BizAppsSales.Deal WHERE Name LIKE @p OR Name LIKE @p2;
 
 DELETE ps FROM __mj_BizAppsSales.PipelineStage ps
-  JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE p.Name LIKE @p;
-DELETE FROM __mj_BizAppsSales.Pipeline WHERE Name LIKE @p;
+  JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE p.Name LIKE @p OR p.Name LIKE @p2;
+DELETE FROM __mj_BizAppsSales.Pipeline WHERE Name LIKE @p OR Name LIKE @p2;
 
 -- The embedded orders, now that no deal references them. Line children first.
 -- OrderHeaderID, not OrderID: orders names the FK for the table it points at. Worth stating because
@@ -102,8 +116,8 @@ DELETE pc FROM __mj_BizAppsOrders.OrderLinePriceComponent pc
 DELETE ol FROM __mj_BizAppsOrders.OrderLine ol JOIN @orders o ON ol.OrderHeaderID = o.ID;
 DELETE oh FROM __mj_BizAppsOrders.OrderHeader oh JOIN @orders o ON oh.ID = o.ID;
 
-SELECT 'remaining_deals=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE Name LIKE @p;
-SELECT 'remaining_pipelines=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Pipeline WHERE Name LIKE @p;
+SELECT 'remaining_deals=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE Name LIKE @p OR Name LIKE @p2;
+SELECT 'remaining_pipelines=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Pipeline WHERE Name LIKE @p OR Name LIKE @p2;
 SELECT 'remaining_orders=' + CAST(COUNT(*) AS varchar)
   FROM __mj_BizAppsOrders.OrderHeader oh JOIN @orders o ON oh.ID = o.ID;
 `;

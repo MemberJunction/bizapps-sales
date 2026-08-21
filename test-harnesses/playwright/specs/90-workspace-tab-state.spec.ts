@@ -40,6 +40,8 @@
  * the seed it shadows.
  */
 import { expect, test } from '@playwright/test';
+
+import { SelectByRecordID, SetField } from '../lib/workspace';
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, drain, shot } from '../lib/explorer';
 import { CloseDb, QueryAll, QueryOne } from '../lib/db';
@@ -283,12 +285,120 @@ test.describe('deal workspace — state that belongs to one deal', () => {
         const name = page.locator('input[name="Name"], .dw-field input[type="text"]').first();
         await expect(name, 'and its fields must be typable').toBeEnabled();
     });
+
+    /**
+     * ── THE THIRD TEST THIS FILE ASKED FOR, WRITTEN ON ITS FIRST RUN ────────────────────────────────
+     *
+     * Mutation 5 in the list below says: *"neither test above covers this one, and that is worth knowing
+     * rather than assuming. It needs a third test: three tabs, close the middle one, assert the catalogue
+     * matches the tab that becomes active. Write it when this file is first run, or record here that
+     * CloseTab is uncovered."*
+     *
+     * This is that run, so it is written rather than recorded as a gap.
+     *
+     * ── WHY CLOSING A TAB IS ITS OWN PATH ───────────────────────────────────────────────────────────
+     *
+     * `SelectTab` re-syncs because the rep chose another deal. `CloseTab` re-syncs for a different
+     * reason: closing the ACTIVE tab activates a neighbour the rep did not choose, so the state on
+     * screen belongs to a deal nobody selected. Same stale-state class, different trigger — and it is
+     * exactly the shape that made `Lock` wrong in three separate places before it was fixed structurally.
+     *
+     * Three tabs, not two, and the middle one closed rather than the last: with two tabs the survivor is
+     * unambiguous and a broken implementation that simply kept the FIRST tab's state would still look
+     * right. With three, the tab that becomes active is a real choice.
+     */
+    test('closing the active tab re-syncs to whichever tab becomes active', async ({ page }) => {
+        const pair = await twoSellableCompanies();
+        test.skip(
+            pair === null,
+            'needs two companies that each own an active pipeline AND at least one Active, currently '
+                + 'available Product — same requirement as the first test.',
+        );
+        const [alpha, beta] = pair!;
+
+        const errors = captureConsoleErrors(page);
+        await page.goto(`${EXPLORER_BASE_URL}${SALES_APP}`);
+        await railItem(page, 'Workspace').click();
+
+        const first = `${RUN_TAG} close-tab A on ${alpha.CompanyName}`;
+        const middle = `${RUN_TAG} close-tab B on ${beta.CompanyName}`;
+        const last = `${RUN_TAG} close-tab C on ${alpha.CompanyName}`;
+
+        await createDeal(page, first, alpha.PipelineID);
+        await page.locator('.mj-tabs__new').click();
+        await createDeal(page, middle, beta.PipelineID);
+        await page.locator('.mj-tabs__new').click();
+        await createDeal(page, last, alpha.PipelineID);
+
+        // Back to the MIDDLE tab, so the tab being closed is the active one.
+        await page.locator('.mj-tabs__tab', { hasText: middle }).click();
+        await page.waitForTimeout(1_500);
+        await expect(
+            page.locator('.mj-tabs__tab--active'),
+            'setup: the middle tab must be active before it is closed',
+        ).toContainText(middle);
+
+        const onBeta = await productOptions(page);
+        expect(
+            onBeta.length,
+            `setup: company ${beta.CompanyName} must offer products, or the comparison below is empty`,
+        ).toBeGreaterThan(0);
+
+        /**
+         * CLOSE IT. The close control lives on the tab itself; scoped to the active tab so this cannot
+         * close a neighbour and then assert about the wrong survivor.
+         */
+        await page.locator('.mj-tabs__tab--active .mj-tabs__close').click();
+        await page.waitForTimeout(2_500);
+
+        const survivor = (await page.locator('.mj-tabs__tab--active').innerText()).trim();
+        expect(
+            survivor === '' ? '(none)' : survivor,
+            'closing the active tab must activate a neighbour, not leave the workspace with no active tab',
+        ).not.toBe('(none)');
+        expect(
+            survivor,
+            'and the tab that becomes active must be one of the two that remain',
+        ).toMatch(new RegExp(`${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+
+        /**
+         * ── THE ASSERTION. The catalogue must belong to the SURVIVOR, not to the closed tab ──────────
+         *
+         * Both remaining deals are on company alpha, so the catalogue must be alpha's. The failure this
+         * catches is the picker still holding beta's products — the state of a deal that is no longer
+         * open, on a tab nobody chose.
+         */
+        const afterClose = await productOptions(page);
+        const betaOnly = onBeta.filter((label) => !afterClose.includes(label));
+        const stale = afterClose.filter((label) => betaOnly.includes(label));
+        expect(
+            stale,
+            `after closing the ${beta.CompanyName} tab, the picker still offered products exclusive to `
+                + 'it. CloseTab activated a neighbour without re-syncing, so the catalogue belongs to a '
+                + 'deal that is no longer open.',
+        ).toEqual([]);
+        expect(
+            afterClose.length,
+            'and the survivor must have a usable catalogue -- an empty picker would satisfy the check '
+                + 'above while making the deal unquotable',
+        ).toBeGreaterThan(0);
+
+        expectNoConsoleErrors(errors);
+    });
 });
 
 /** Fill the minimum a deal needs and save it. */
 async function createDeal(page: import('@playwright/test').Page, name: string, pipelineID: string): Promise<void> {
-    await page.locator('.dw-field input[type="text"]').first().fill(name);
-    await page.locator('.dw-field select').first().selectOption(pipelineID);
+    /**
+     * BY LABELLED FIELD, NOT BY POSITION, and by the value Angular actually wrote.
+     *
+     * `.dw-field select').first()` assumed the Pipeline picker is the first select on the pane; the party
+     * pane has several and the order is a layout detail. And `selectOption(pipelineID)` could never match:
+     * these pickers bind `[ngValue]`, so the DOM value is `"<index>: <guid>"` and a bare GUID times out
+     * after thirty seconds with "did not find some options". `SelectByRecordID` handles both.
+     */
+    await SetField(page, 'Deal name', name);
+    await SelectByRecordID(page, 'Pipeline', pipelineID);
     await save(page);
     await expect(page.locator('.mj-tabs__tab--active')).toContainText(name);
 }
@@ -343,9 +453,10 @@ async function save(page: import('@playwright/test').Page): Promise<void> {
  *      fixture, so confirm the skip did NOT fire, or this mutation proves nothing.
  *
  * 5. **The CloseTab gap, restored.** Delete the `SyncToActiveDeal()` call from `CloseTab`.
- *    → neither test above covers this one, and that is worth knowing rather than assuming. It needs a
- *      third test: three tabs, close the middle one, assert the catalogue matches the tab that becomes
- *      active. Write it when this file is first run, or record here that CloseTab is uncovered.
+ *    → **now covered.** The third test asked for here was written on this file's first run (2026-08-21):
+ *      three tabs, the MIDDLE one active and closed, and the catalogue asserted to belong to whichever
+ *      tab becomes active. Three rather than two on purpose — with two survivors the choice is
+ *      unambiguous and an implementation that simply kept the first tab's state would still look right.
  *
  * A mutation that leaves the suite green marks a decorative assertion. Fix it before trusting the
  * spec -- an integration check in this repo (`AC14`) spent a day passing while asserting a defect,

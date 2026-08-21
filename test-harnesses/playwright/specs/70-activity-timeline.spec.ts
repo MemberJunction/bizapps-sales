@@ -131,9 +131,20 @@ async function linksFor(activityID: string): Promise<
 /** Opens the workspace with a deal loaded, ready for the timeline. */
 async function openDealInWorkspace(page: Page, deal: Subject): Promise<void> {
     await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`);
-    await railItem(page, 'Deals').click();
+    /**
+     * NO 'Deals' HOP. `mj-left-nav` renders the SUB-PAGES of the sales section — Dashboard, All deals,
+     * Board, Workspace (`sales-nav.model.ts:75-78`). The 'Deals' entry at line 64 of that same file is
+     * the APP-level item and lives on a different surface entirely, so clicking for it inside
+     * `mj-left-nav` waits thirty seconds and times out. The route already lands in the section.
+     */
     await railItem(page, 'All deals').click();
-    await page.getByText(deal.Name, { exact: true }).first().click();
+    /**
+     * SCOPED TO THE ALL-DEALS TABLE. Every page in the sales section is rendered and switched with
+     * `[hidden]` rather than `@if`, so the dashboard's "Closing soonest" table is still in the DOM with
+     * the same deal names in it. An unscoped `getByText(...).first()` resolves to that HIDDEN row and
+     * then spends thirty seconds reporting "element is not visible" about a cell nobody can click.
+     */
+    await page.locator('.wrap--list table.wl tbody tr').filter({ hasText: deal.Name }).first().click();
     // The timeline renders only for a SAVED deal — it needs an ID to link an activity to.
     await expect(page.locator('.dat')).toBeVisible({ timeout: 20_000 });
 }

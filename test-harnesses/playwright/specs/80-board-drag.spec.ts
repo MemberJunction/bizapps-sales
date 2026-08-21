@@ -150,7 +150,12 @@ async function eventsFor(dealID: string): Promise<
 
 async function openBoard(page: Page): Promise<void> {
     await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`);
-    await railItem(page, 'Deals').click();
+    /**
+     * NO 'Deals' HOP. `mj-left-nav` renders the SUB-PAGES of the sales section — Dashboard, All deals,
+     * Board, Workspace (`sales-nav.model.ts:75-78`). The 'Deals' entry at line 64 of that same file is
+     * the APP-level item and lives on a different surface entirely, so clicking for it inside
+     * `mj-left-nav` waits thirty seconds and times out. The route already lands in the section.
+     */
     await railItem(page, 'Board').click();
     await expect(page.locator('.db-cols')).toBeVisible({ timeout: 20_000 });
 }

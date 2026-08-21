@@ -116,6 +116,38 @@ export async function SelectByLabel(page: Page, field: string, option: string): 
     await page.waitForTimeout(300);
 }
 
+/**
+ * Selects the option carrying a given record ID, by LABELLED field.
+ *
+ * ── WHY A RAW GUID CANNOT BE PASSED TO `selectOption` HERE ───────────────────────────────────────
+ *
+ * Every picker in this workspace binds `[ngValue]`, so Angular writes the option's DOM value as
+ * `"<index>: <guid>"` — `"4: a0111111-…"`. `selectOption('a0111111-…')` therefore matches nothing and
+ * times out after thirty seconds with "did not find some options", which is what it did in
+ * `90-workspace-tab-state`. It is the same trap that made `72-inline-create` compare a picker's value
+ * against a bare GUID and fail for a reason unrelated to what it was testing.
+ *
+ * So the option is found by its VALUE SUFFIX and selected by the value Angular actually wrote. Compared
+ * case-insensitively: the client generates lowercase keys and the views return uppercase, which is a
+ * documented defect class in this repo, not a hypothetical.
+ */
+export async function SelectByRecordID(page: Page, field: string, id: string): Promise<void> {
+    const select = SelectFor(page, field);
+    await expect(select, `select "${field}" must be visible`).toBeVisible({ timeout: 15_000 });
+    const values = await select.locator('option').evaluateAll((opts) =>
+        opts.map((o) => (o as HTMLOptionElement).value),
+    );
+    const wanted = values.find((v) => v.toLowerCase().endsWith(id.toLowerCase()));
+    if (!wanted) {
+        throw new Error(
+            `select "${field}" offers no option for ${id}. Its option values are: ` +
+                `${values.join(' | ') || '(none)'}`,
+        );
+    }
+    await select.selectOption(wanted);
+    await page.waitForTimeout(300);
+}
+
 /** Clicks the workspace's save and waits for the button to settle. */
 export async function SaveDeal(page: Page): Promise<void> {
     const save = page.getByRole('button', { name: /^Save deal/i }).first();

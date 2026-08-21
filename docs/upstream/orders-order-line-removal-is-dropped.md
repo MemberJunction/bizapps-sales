@@ -1,8 +1,61 @@
-# bizapps-orders — removing an order line is silently dropped
+# bizapps-orders — removing an order line now FAILS THE WHOLE SAVE (was: silently dropped)
 
-**Severity:** data loss, silent. `Save()` returns `true` and the row survives.
-**Affects:** every caller. Reproduced through the entity layer, a remote operation, and the Explorer UI.
-**Reported by:** the bizapps-sales team. Tracked on our side as KI-20.
+**Severity: RAISED 2026-08-21.** This report originally described a silent drop. The behaviour has
+changed and is materially worse in one respect and better in another, so please re-read it rather than
+skimming the old summary.
+
+| | |
+|---|---|
+| **Now** | The save is REFUSED. `Violation of UNIQUE KEY constraint 'UQ_OrderLine_OrderHeader_LineNumber'`. |
+| **Consequence** | A user cannot remove a line at all — **and loses every other edit staged in that save.** |
+| **Was** | `Save()` returned `true`, the removal was dropped, the row reappeared on reload. |
+| **Affects** | Every caller. Reproduced through the entity layer, a remote operation, and the Explorer UI. |
+| **Reported by** | the bizapps-sales team. Tracked on our side as KI-20. |
+
+## What changed, and why the new shape is worse
+
+The old failure lost ONE intention: the removal. The new one fails the entire unit of work, so a user who
+removes a line and also edits a quantity, a discount and a service period loses all of it — and, in our
+workspace, cannot save the deal at all while a removal is staged. There is no way to get out of the state
+except discarding the edits.
+
+**Better in one way, and worth saying:** it is no longer silent. The old version was the more dangerous
+kind of bug because the screen agreed with the user. This one announces itself.
+
+### The exact error
+
+```
+Save failed for OrderID_Object (MJ_BizApps_Orders: Order Headers):
+  Failed to save order line 1: Error executing SQL
+  Violation of UNIQUE KEY constraint 'UQ_OrderLine_OrderHeader_LineNumber'.
+  Cannot insert duplicate key in object '__mj_BizAppsOrders.OrderLine'.
+  The duplicate key value is (b90e31c3-735b-4262-aff9-251089d66af3, 1).
+```
+
+The statement in flight is `spUpdateOrderLine` on the SURVIVING line, with
+`ChangesDescription = 'LineNumber changed from 2 to 1'`.
+
+### The mechanism, as far as we can see it from outside
+
+Removing line 1 of 2 makes `savePendingLines` renumber the survivor from 2 → 1 **before the removed row
+is deleted**, so the update collides with the row it is meant to replace. Either ordering would work on
+its own; it is the interleaving that fails:
+
+- delete first, then renumber → no collision;
+- renumber into a temporary range, delete, renumber down → no collision;
+- or defer the uniqueness check to the end of the transaction.
+
+We have not changed our calling pattern. The same `Remove()` + `Save()` shown below now produces this
+instead of a silent no-op.
+
+### How we noticed, which is a caution for your own tests
+
+Our tripwire for the original defect asserted "the UI reports no error" — the old hazard being that a
+dropped removal *looked* like success. That assertion had been passing for the wrong reason: it searched
+for CSS classes that do not exist in our own template, so it matched nothing and could never fail. Once
+the selector was corrected, the new error appeared immediately. **A test pointed at a selector that
+matches nothing is indistinguishable from a passing one**, and it hid a severity change for at least a
+week.
 
 ---
 
