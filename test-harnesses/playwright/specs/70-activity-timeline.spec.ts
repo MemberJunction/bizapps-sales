@@ -301,8 +301,10 @@ test.describe('deal activity timeline — S-US9 through the UI', () => {
  * reverting a specific piece of the fix, with the assertion that must go red. Apply one, rebuild
  * `packages/Angular` and `packages/Server`, run, restore.
  *
- * 1. **The original defect.** In `log-activity.action.ts`, drop `IncludeDealParties: true` from the
- *    `LogActivity` input (or set it `false`).
+ * 1. **The original defect.** In `log-activity.action.ts`, set `IncludeDealParties: false` on the
+ *    `LogActivity` input. It must be set to false EXPLICITLY, not deleted: the writer guards on
+ *    `input.IncludeDealParties !== false`, so an absent flag still attaches the parties and the
+ *    mutation would be a no-op that reads as a surviving mutant.
  *    → the account/contact participant assertions must fail. If they pass, the spec is not reading the
  *    links it claims to.
  *

@@ -332,8 +332,8 @@ test.describe('pipeline board — a drag writes three things, and never closes a
  *    drag applies the target stage's probability default — so with this mutation the numbers are
  *    plausible, self-consistent and wrong, and only a before-and-after comparison detects it.
  *
- * 3. **Two events per move.** In `DealEntityServer.saveWithStageEvent`, call `appendStageEvent(prior)`
- *    twice.
+ * 3. **Two events per move.** In `DealEntityServer.saveWithinScope`, duplicate the
+ *    `await this.appendStageEvent(work.stageMove)` call (:393).
  *    → the exactly-one assertion must fail.
  *
  * 4. **The order stops following.** In `DealEntityServer`, make `planStageOrderStatus()` return null.
