@@ -495,6 +495,13 @@ satisfy a comment is the wrong order of operations.
 
 ## DN-21 — DECIDED: what the demo's attribution values are chosen to prove
 
+> **NUMBERING COLLISION, not yet resolved.** Two entries in this file are numbered DN-21: this one, and
+> "REPORT ONLY: does `SelectableStatuses()` still need to offer anything?" further down. Two sessions
+> allocated the number independently. Left as-is rather than renumbered from here, because a reference to
+> either from a commit message or an issue would silently retarget; whoever renumbers should grep for
+> `DN-21` across the repo first. Flagged so a reader who follows a reference to "DN-21" knows to check
+> which one they landed on.
+
 Recorded because the numbers look arbitrary and are not.
 
 `DEAL-9005` (won) carries 60 / 25 / 15. Measured on the live database, the weighted report splits its
@@ -2029,6 +2036,81 @@ Three options, in the order I would consider them:
 Worth noting for whoever decides: a status set through this control survives only until the next stage
 move, because `callerSuppliedValue` is per-save (see the note in `applyStageDefaults`). If parking is meant
 to be sticky across stage moves, that is a different mechanism — a flag on the deal, not a status.
+
+### RECOMMENDATION (2026-08-21) — the per-save note above is not a footnote, it decides the question
+
+Asked to recommend rather than build. Nothing below is implemented.
+
+**The question "is parking a status or an action" is already answered by the write path, and the answer is
+that it is not a status — not today.** Verified in the merged tree rather than inferred:
+
+`DealEntityServer.applyStageDefaults()` re-derives `DealStatusTypeID` from the arriving stage whenever
+`callerSuppliedValue('DealStatusTypeID', …)` is false, and on a saved deal that function is exactly
+`GetFieldByName('DealStatusTypeID')?.Dirty` — dirty **in this save**. So:
+
+1. A rep picks `On Hold`. The field is dirty, the stage stands down, `On Hold` persists. Correct.
+2. Anyone later moves the stage — a workspace stage picker, a board drag, an importer, an agent, a plain
+   `BaseEntity.Save()`. In that save the status is not dirty, so the arriving stage's declared status
+   overwrites `On Hold`.
+
+**A rep who parks a deal and then drags its card has silently un-parked it.** No message, no refusal, no
+issue on the result. The one trace is `DealStageEvent.FromDealStatusTypeID = On Hold` beside
+`ToDealStatusTypeID = <open>` — so it is auditable after the fact and invisible at the time, which is the
+worse half of that pair.
+
+**The existing check already says this out loud.** `save-deal.SD34` is titled *"a status the caller STATED
+survives a stage move **in the same save**"*, and it picks its status by flag — not open, not won, not
+lost, not locking — which on the seeded vocabulary is `On Hold` itself. So the guarantee is scoped
+correctly and honestly, and there is no check for surviving a LATER move because there is no such
+behaviour. That gap is a true reflection of the code, not an oversight in the suite.
+
+**One comment in the source needs correcting whichever way this is decided.** `applyStageDefaults` says
+status re-derivation's *"observable effect is nil until somebody seeds two different open statuses across
+one pipeline's stages."* `On Hold` is not an open status — `IsOpen: false, IsClosed: false`, deliberately
+neither, per its own seeded description — and it is seeded now. The effect is therefore observable today,
+through the one control this DN is about.
+
+#### The root cause, stated once
+
+**A deal has nowhere to record that its status was CHOSEN rather than DERIVED.** `Dirty` is a proxy for
+that intent which survives exactly one save. Every option below is a different answer to where that bit
+lives.
+
+| | Where "chosen" lives | Cost | What it gets wrong |
+|---|---|---|---|
+| **A** | a `Parked` flag/column on `Deal` | new column, new vocabulary question, rollups updated | two places now describe one state; `On Hold` either retires or becomes a derived read |
+| **B** | inferred: *no stage declares this status* | one predicate in `applyStageDefaults` | cannot express "the rep deliberately chose the OPEN status"; needs an explicit un-park |
+| **C** | an explicit `DealStatusIsOverridden` bit | one column, one guard | says exactly what is meant and costs a migration |
+
+**Recommended: B, with option 2 from the list above.** Two reasons it is more than the cheap answer.
+
+*It makes the picker and the write path agree by construction.* Option 2 filters the control down to
+"statuses no stage declares", which is precisely the set B would protect. The filter that makes the
+control meaningful and the predicate that makes parking stick are the same sentence, so they cannot drift
+apart. Under A or C the picker's contents and the write path's rule remain two independent decisions.
+
+*It stays inside rule 2.* "Does any stage in this pipeline declare this status" is a query against
+`PipelineStage.DealStatusTypeID` — data, not a name comparison, and no new flag to seed. A and C both add
+a column that then needs its own answer to "what does a rollup asking *still live* do with it".
+
+**The wrinkle B has and the others do not, stated plainly:** un-parking becomes an act the rep has to
+perform, because a parked deal no longer follows its stage. The control therefore cannot offer *only*
+undeclared statuses — it needs a "follow the stage" entry that clears the override back to derived. That
+is a third state in a two-state control, and it is the part of B most likely to feel awkward in the UI. If
+that reads badly enough to reject, **C is the honest fallback**: it is the same behaviour with the
+override made explicit instead of inferred, at the price of a migration.
+
+**Do not pick option 1** (keep it, let it mean "override the stage"). It is the only option that leaves
+the current defect in place, because "override" is exactly what it does not do past the next save. It also
+reads as a decision when it is the absence of one.
+
+**Whichever is chosen, it needs a check the suite does not have:** park a deal, move its stage in a
+SEPARATE save, and assert the status. Today that check would go red, which is the point — it is the
+regression this DN exists to prevent, and `SD34` proves only the same-save half. Name it by flags, as
+`SD34` does, so it survives a vocabulary rename.
+
+**Out of scope on purpose:** the redundant open row can be dropped from the picker today under any of the
+three, since the stage fills it either way. That is a one-line filter and does not need this decision.
 
 ---
 
