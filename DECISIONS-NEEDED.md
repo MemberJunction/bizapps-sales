@@ -396,17 +396,55 @@ changes*, 0 errors.
 `CONTRACT_PROCESSING` for the two sales-owned rows, which is exactly what this repo declares. The two
 conventions agreed without being coordinated, so the push had nothing to do.
 
-### The instruction that still needs editing, and why not by me
+### The edit `docs/INTEGRATION-LOG.md` needs, and why not by me
 
-`docs/INTEGRATION-LOG.md` lines 98–101 in the **shared** worktree still says to push with
-`--exclude task-types`. That file was added after this branch's point and lives in another session's
-working tree, which is off limits here — so the edit is named rather than made. It should become:
+That file was added after this branch's point and lives in another session's working tree, so the block
+below is written out rather than applied. It replaces the `--exclude task-types` bullet at lines 98–101.
 
-> * **`metadata/task-types/` pushes cleanly.** It declares `TaskType.Code`, which bizapps-tasks PR #42
->   added; that migration is applied to MJ_V6_Host, so `mj sync push --dir metadata` needs no
->   `--exclude`. `CloseWonTaskService` resolves task types by `Code` on this host — verified by WT11,
->   which asserts the probe follows what `EntityField` metadata offers. The `Name` fallback remains for
->   hosts that predate the migration and is exercised on MJ_V6_Tasks2.
+**It deliberately says two things, because saying only the first would mislead.** The task-types
+exclusion is gone; query re-push is a *separate* open defect. Somebody who hits the second and reads a
+note claiming pushes are clean would reasonably conclude the first had regressed.
+
+> ### Known-incomplete, deliberately
+>
+> * **`metadata/task-types/` now pushes cleanly — the `--exclude` is gone.** It declares
+>   `TaskType.Code`, which bizapps-tasks PR #42 added, and that migration is applied to MJ_V6_Host.
+>   `mj sync push --dir metadata` needs no exclusion: verified at 15/15 directories, 0 errors, with
+>   `task-types` reporting *2 records, no changes*. No changes rather than 2 updated because the
+>   migration's own name-derived fallback produced `ORDER_REVIEW` and `CONTRACT_PROCESSING`, which is
+>   exactly what this repo declares — the two conventions agreed without being coordinated.
+>   `CloseWonTaskService` resolves by `Code` on this host; `WT12` asserts the probe follows what
+>   `EntityField` metadata offers, in both directions, so the `Name` fallback stays covered for hosts
+>   that predate the migration (exercised on MJ_V6_Tasks2).
+>
+> * **`MJ: Query Parameters` still fails on re-push, and it is a different problem.** MJ's push extracts
+>   query parameters from the Nunjucks template and then collides with the files' own explicit
+>   declarations, hitting `UQ_QueryParameter_QueryID_Name` and rolling the whole push back. So the 13
+>   queries land once on a clean database and fail on every push after. An open MJ defect, unrelated to
+>   task-types — **do not read it as the exclusion having regressed.** Verify the queries with a count,
+>   not with the push's exit code.
+>
+> ### Environment debt on MJ_V6_Host, from applying PR #42
+>
+> * **The tasks schema there is managed by MJ core, and PR #42 is applied but untracked.** The Flyway
+>   history records four tasks migrations and all four are MJ core's (`v6/V2026…__v6.1.x__…`); none of
+>   bizapps-tasks' own has ever run, not even its baseline. So `mj migrate` from bizapps-tasks is the
+>   wrong tool for this host — it would try to create tables that already exist. PR #42 was applied
+>   directly instead, placeholders substituted, and **no Flyway row was fabricated**: claiming a history
+>   under bizapps-tasks' versioning would be false, and claiming one under MJ core's would assert MJ
+>   shipped something it has not.
+>
+>   **The consequence:** the migration's first statement is a bare `ALTER TABLE … ADD Code` with no
+>   existence guard, so **a future equivalent from MJ core will fail on this host**. Five minutes to fix
+>   when it happens — mark it applied, or guard the ALTER — but invisible until then, which is the worst
+>   shape for environment debt. A rebuild from zero is unaffected.
+>
+> * **PR #42 adds cross-schema foreign keys from an app schema into MJ core.**
+>   `FK_TaskType_OnCreateAction` and `FK_TaskType_OnStatusChangeAction` both reference
+>   `__mj.Action(ID)`. That is the intended workflow-hooks feature, but it is a change to the dependency
+>   graph rather than just a column: the tasks schema now has a structural dependency on MJ core's
+>   `Action` table, and anything that drops or reorders those objects has to account for it.
+
 
 ---
 

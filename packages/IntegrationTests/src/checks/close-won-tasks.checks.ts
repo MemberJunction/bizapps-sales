@@ -614,8 +614,16 @@ export const CloseWonTasksChecks: NamedCheck[] = [
             }),
     },
     {
-        Id: 'close-won-tasks.WT11',
-        Name: 'WT11: the lookup uses Code where the column exists, and Name only where it does not',
+        Id: 'close-won-tasks.WT12',
+        /**
+         * WT12, NOT WT11, and the renumber is the whole point of this comment.
+         *
+         * Another session added a different `close-won-tasks.WT11` -- "a LOST close raises NO tasks" --
+         * five lines from here, and it is already merged. Two checks sharing one `Id` is the failure mode
+         * git is least able to help with: both hunks apply, there is no conflict marker and no compile
+         * error, and the registry silently ends up with a duplicate key.
+         */
+        Name: 'WT12: the lookup uses Code where the column exists, and Name only where it does not',
         RequiresMutation: false,
         Fn: async (ctx) => {
             requireTasks(ctx);
