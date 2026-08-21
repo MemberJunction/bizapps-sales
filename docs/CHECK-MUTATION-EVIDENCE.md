@@ -1,4 +1,10 @@
-# Mutation evidence — every integration check has been proven able to FAIL
+# Mutation evidence — which integration checks have been proven able to FAIL
+
+> **Scope, because the earlier title overclaimed.** This said *every* check. That was true of the four
+> bundles round one covered and quietly became false as bundles were added: `activities` and
+> `forecast` stood uncovered for a day while the claim stood, and `board-move` still is. The
+> per-round scope is stated at the head of each section, and the gaps are listed at the end of round
+> four.
 
 A green suite is not evidence. A check can be green because the behaviour it names is correct, or because
 it is asserting something that is true no matter what the code does — and the two are indistinguishable
@@ -214,3 +220,119 @@ whether it can fail.
 
 Proven, not assumed: appending a comment to `DealEntityServer.ts`, running `M-SD18`, and comparing the
 file's checksum before and after — identical, with the mutation applied and reverted in between.
+
+---
+---
+
+# Round four — `activities` (22) and `forecast` (13), 2026-08-21
+
+**These two bundles had no mutant at all** while the title of this file claimed every check in the suite
+was proven able to fail. 35 checks were nominally covered by nothing, and three of the five defects a
+review found that day were in code those bundles supposedly covered. The claim was not a small
+exaggeration — it was the reason nobody looked.
+
+**15 mutations. 14 killed. 1 survivor, documented below rather than quietly dropped.**
+
+## The runner was wrong first, and nearly got reported
+
+The first attempt returned **all 15 surviving, each with a full passing tally**. That is not a result 15
+structurally different mutations produce, and the reason it was obvious is worth keeping: a uniform
+outcome across unrelated changes means the changes are not reaching the code.
+
+The cause was that the runner rebuilt with `tsc -p <path>` from the repository root and **never verified
+the mutant was present in the served `dist`** — the one gate every earlier campaign in this file used. By
+hand, the same mutant killed `AC11` immediately.
+
+The rerun makes that gate mandatory: a mutant that cannot be found in `dist` is reported as
+`NOT-IN-DIST` and scored as nothing, never as a survivor. **A mutation campaign needs its own tripwire,
+for exactly the reason the campaign exists.**
+
+## Result
+
+| Mutation | Product change | Killed by |
+|---|---|---|
+| `M-CAL-WATERMARK` | `MSGraphCalendarSource` · calendar watermark back to `max(StartedAt)` | AC21 ¹ |
+| `M-FIXTURE-WATERMARK` | `FixtureActivitySource` · fixture stops mirroring each surface's rule | AC14, AC19 |
+| `M-WATERMARK-ON-FAIL` | `ActivityIngestService` · watermark advances regardless of failures | AC20 |
+| `M-SUCCESS-UNCONDITIONAL` | `ActivityIngestService` · run reports success with failures in it | AC20 |
+| `M-FILTER-FAILS-OPEN` | `RelevanceFilter` · everything judged relevant | AC6, AC7 |
+| `M-DEDUPE-REMOVED` | `ActivityWriterService` · external-key lookup skipped | AC8, AC13 |
+| `M-PARTIES-UNDER-SALES` | `activity-vocabulary` · parties linked under sales entities | AC3, AC13 |
+| `M-CANCELLED-AS-COMPLETED` | `ActivityIngestService` · cancelled meeting stored `Completed` | AC18 |
+| `M-GRAPH-GATE-OPEN` | `MSGraphActivitySource` · tenant gate removed | AC11 |
+| `M-FORECAST-SUCCESS-UNCOND` | `ForecastSnapshotJob` · zero-rows-with-issues reported as success | FS8 ¹ |
+| `M-FORECAST-CLOSED-COLUMN` | `QueryForecastSource` · `ClosedWonAmount` mapping removed | FS11, FS12 |
+| `M-FORECAST-RERUN-REPLACES` | `ForecastSnapshotJob` · same-day guard removed | FS3 |
+| `M-FORECAST-PERIOD-UNCHECKED` | `ForecastSnapshotJob` · reversed period accepted | FS6 |
+| `M-FORECAST-MONTH-LOCAL` | `ForecastSnapshotJob` · month boundary read in local time | FS7 ¹ |
+| `M-LOOKUP-FAILS-SILENT` | `RelevanceFilter` · a failed read reported as a successful one | **nothing — see below** |
+
+¹ Killed only after a check was added or corrected in response to it surviving. Those four are the
+findings; the rest is confirmation.
+
+## What surviving mutants found
+
+### `AC14` was asserting the defect
+
+It expected the calendar watermark to equal the meeting's `StartedAt` — the broken value — and passed
+because `FixtureActivitySource` reproduced the same rule. **A fixture that repeats a bug cannot detect
+it.** The fixture now mirrors each surface's real rule, `AC14` asserts the ingest instant and explicitly
+asserts the watermark is *not* the meeting start, and `AC19` covers the consequence: a meeting years out,
+then a meeting for an earlier date created after it, which under the defect was never seen again.
+
+### The Graph calendar source was covered by nothing
+
+`AC14` and `AC19` both drive the fixture, so no check ever instantiated `MSGraphCalendarSource`. Its
+watermark rule was upheld only by the fixture, which is not a guarantee at all. `AC21` drives the real
+source with a stub fetcher — the technique `AC11` already used for the message gate — and asserts the
+watermark precedes a 2031 event and falls inside the call.
+
+### `FS8` asserted the wrong half
+
+It checked that nothing was *written* when a forecast query is missing. That is equally true of a quiet
+quarter. `Success` was the entire distinction the source seam exists to preserve and **nothing asserted
+it**, so removing the guard changed no observable. `FS8` now asserts it.
+
+### `FS7` was asserting a boundary it could not test
+
+It used `2026-03-31T23:30Z`. On this host (UTC-4) that is still 31 March locally, so swapping
+`getUTCMonth()` for `getMonth()` changed nothing. It now uses just after midnight UTC on the 1st, where
+UTC says April and everything behind Greenwich still says March — plus the original instant, which covers
+a host ahead of Greenwich.
+
+## The one survivor, and why it is left standing
+
+**`M-LOOKUP-FAILS-SILENT`** reverts `RelevanceFilter.lookup`'s failure return from `failed: true` to
+`failed: false`. Nothing kills it, and nothing in this repository can without breaking the database for
+everything else.
+
+The mutation targets the filter *reporting* a failed `ContactMethod` read. To provoke that, a check would
+have to make a `RunView` against a registered entity fail — which means revoking a permission, dropping a
+view, or killing the connection, none of which is available inside a rolled-back transaction and all of
+which would take the rest of the suite with them.
+
+**What IS covered is the consequence.** `AC22` injects a filter that reports a failed lookup and asserts
+the ingest counts the items as *failed* rather than *irrelevant*, holds the watermark, and says so. So the
+handling is proven; only the reporting is not.
+
+**The residual risk, stated plainly:** if someone reverted that one line, `AC22` would still pass, and a
+real read failure would once again be filed as a batch of irrelevant mail — with the watermark advancing
+over it, permanently, because `GetMessages` has no date filter. That is a live gap, not a resolved one.
+It is recorded here rather than closed because the alternative was a check that pretends to test it.
+
+## Scope of this file, corrected
+
+The title claimed **every** integration check had been proven able to fail. That was true of the four
+bundles round one covered and became false as bundles were added — `activities` and `forecast` were
+uncovered for a day while the claim stood, which is precisely the failure mode this file exists to
+prevent, applied to itself.
+
+**Covered by a mutation round:** `save-deal`, `close-deal`, `product-picker`, `close-won-order`,
+`close-won-tasks`, `close-won-contract`, `activities`, `forecast`.
+
+**Not covered:** `board-move`. Four checks, no mutant. Stated here so the gap is visible rather than
+implied by an absence.
+
+**The rule this should have followed from the start:** a new bundle is not finished when its checks pass.
+It is finished when at least one mutant per guarantee has been shown to make them fail, and this file
+lists it.
