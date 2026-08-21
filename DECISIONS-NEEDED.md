@@ -2138,3 +2138,69 @@ close/reopen symmetrical; asking is truer to a rep who may want a specific stage
 now depends on `applyStageDefaults`'s new gate (`SD35`) to not double-close, and on the declared-transition
 suppression to keep the closing status authoritative (`CD17`). Both are in place and mutant-proven; the
 point is that they are load-bearing for that change rather than incidental.
+
+---
+
+## DN-22 — SD25 and AC9: measured, and NEITHER is what the hypothesis said
+
+**Investigated 2026-08-21 after both appeared in two consecutive full-suite captures. Ten runs across
+four conditions. Neither reproduced once.** Recorded because a failure that will not reproduce is a
+standing tax on every future red, and the next person should start from these measurements rather than
+repeat them.
+
+### What was measured
+
+| Condition | Runs | Result |
+|---|---|---|
+| `activities` bundle alone | 3 | 22/22 every time |
+| `save-deal` + `activities` | 2 | 53/53 both — **SD25 green** |
+| `close-won-tasks` + `activities` | 2 | 36/36 both |
+| Full suite, quiet host | 4 | 121/0 ×3 at 90–91s; 120/1 once (AC3) at 93s |
+| Full suite immediately after a Playwright run | 1 | 121/0 at 95s |
+| Full suite under a concurrent full `turbo build` | 1 | 121/0 at 102s |
+
+**AC9 never failed again. SD25 never failed again.** They failed together in the two captures taken
+earlier the same day, which is what made them look like the two real ones.
+
+### The watermark hypothesis is DISPROVED, not merely unconfirmed
+
+The reasoning was that AC9 asserts a watermark, a watermark is persistent cross-run state, so its starting
+conditions are what a teardown change would alter. Reading the check settles it the other way:
+
+- `AC9` runs inside `InRolledBackTransaction` and creates its OWN connection via `makeConnection(ctx, null)`.
+  The watermark it advances belongs to a row it just made and which is rolled back.
+- The host carries **zero** residue to be state-dependent on: `Activity` = 0,
+  `ActivitySyncConnection` = 0, `ActivitySyncRule` = 0.
+
+So there is no cross-run watermark for a sweep to perturb.
+
+### And the sweep is not implicated either
+
+The caution was right that the sweep lives in the Playwright harness and can only touch the integration
+checks when a Playwright run falls between two captures — which is exactly what happened. So it was
+tested directly: a Playwright run (whose global teardown invokes the sweep) followed immediately by a full
+capture came back **121/0**. One trial, so not conclusive, but it is evidence against rather than for.
+
+### What the evidence does point at, and the gap in it
+
+Every run measured here sat in the **fast band, 90–102s**, and every one was clean or lost a single check.
+The two sessions that characterised this host found the bad runs take **170–187s against ~120s**. So the
+correlation with duration holds in my data too, from the other end: I never observed a slow run, and I
+never reproduced a multi-check failure.
+
+**The gap is mine: I did not time the bad captures.** The failing counts (4, 6, 11) are recorded and their
+durations are not, so I cannot put those runs in a band. That is the one thing a repeat of this
+investigation must not do.
+
+`test-harnesses/integration.mjs` now prints the run duration on every invocation, and prints an explicit
+warning when a run BOTH fails and exceeds 150s. That turns the discriminator from something argued from
+memory into something on the same line as the red.
+
+### What to do with SD25 specifically
+
+Another session watched it lose to a deadlock repeatedly on the same day. It is the write-heaviest check in
+the write-heaviest bundle — it provisions a deal and reads the order back — so it is the most likely victim
+of contention rather than the cause of anything. It passed in all six full runs and both `save-deal` pair
+runs here. **Do not change it on the strength of the two captures**; if it recurs, capture the duration and
+check `sys.dm_tran_locks` / the deadlock graph while it is failing, because "deadlock victim" is a claim
+about the other transaction, not about this check.

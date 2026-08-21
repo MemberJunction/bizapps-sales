@@ -290,6 +290,22 @@ const linkedApps = new Set(
         .filter(([, pkg]) => optionalLoads.includes(`${pkg}: loaded`))
         .map(([app]) => app),
 );
+/**
+ * -- THE RUN'S OWN DURATION, REPORTED, BECAUSE IT IS THE DISCRIMINATOR ------------------------------
+ *
+ * This host produces intermittent failures whose IDENTITY changes between runs, and two sessions
+ * independently found that the bad runs are SLOW: 170-187s against a normal ~120s. Duration is therefore
+ * the one signal separating "a real failure" from "this run was fighting for the machine" -- and it was
+ * not printed, so every report of a red had to be argued from a memory of how long it felt.
+ *
+ * Measured on a quiet host on 2026-08-21: six full runs at 90-102s, five of them 121/0 and one losing a
+ * single activities check. Conditions varied deliberately -- quiet, immediately after a Playwright run,
+ * and under a concurrent full build -- and none reproduced the multi-check failures seen earlier that day.
+ * That is consistent with load, and this line is what makes the correlation checkable next time instead of
+ * remembered.
+ */
+const RUN_STARTED_AT = Date.now();
+
 const ALL_BUNDLES = Object.entries(MANIFEST.bundles)
     .filter(([, spec]) => spec.requires === null || linkedApps.has(spec.requires))
     .map(([bundle]) => bundle);
@@ -380,7 +396,20 @@ if (failures.length && process.env.IT_VERBOSE) {
     for (const f of failures) console.log(`\n--- ${f.Id} ---\n${f.stack}`);
 }
 
-console.log(`\n${fail === 0 && selected > 0 ? '✅' : '❌'} ${pass} passed, ${fail} failed, ${skipped} skipped`);
+const RUN_SECONDS = Math.round((Date.now() - RUN_STARTED_AT) / 1000);
+console.log(`\n${fail === 0 && selected > 0 ? '✅' : '❌'} ${pass} passed, ${fail} failed, ${skipped} skipped` + ` -- ${RUN_SECONDS}s`);
+
+/**
+ * A red on a SLOW run is not evidence on its own. Said here, next to the failure, rather than in a
+ * document nobody opens with a red in front of them.
+ */
+if (fail > 0 && RUN_SECONDS > 150) {
+    console.log(
+        `\n  WARNING: this run took ${RUN_SECONDS}s. Runs over ~150s on this host have produced failures`
+        + `\n  whose identity changes between runs, so REPEAT before acting on the red, and say which runs`
+        + `\n  you are reporting. A quiet host completes in 90-120s.`,
+    );
+}
 
 // ── The vacuous-pass guard ─────────────────────────────────────────────────────────────────────
 if (selected === 0) {
