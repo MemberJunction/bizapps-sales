@@ -417,6 +417,105 @@ by `save-deal.SD24` and its mutant `M-PV1`.
 
 ---
 
+## DN-18 — OPEN: `mj sync push` cannot write `MJ: Query Parameters` on this host
+
+Pushing `metadata/queries` fails with `Failed to save MJ: Query Parameters record at MJ: Queries[0]/MJ:
+Query Parameters[0]: Error executing SQL`, and **rolls back cleanly** — nothing is half-written.
+
+**The 13 queries and their 58 parameters are already in the database and complete**, so this is not a
+blocker for reading the reports. It is a blocker for CHANGING them: the file is now the only correct copy
+until this is fixed, and a push cannot carry an edit across.
+
+Two observations, and I am deliberately not claiming the mechanism:
+
+* The push attempts to **CREATE** parameters that already exist, with freshly generated UUIDs, rather
+  than matching them. So even without the SQL error, re-pushing would duplicate rather than update.
+  Whether the definitions should carry stable parameter UUIDs is a real question for whoever owns them.
+* The error output includes a table definition listing `__mj_CreatedAt`, `__mj_UpdatedAt`, `CreatedAt`
+  AND `UpdatedAt`, which looks like the `@ResultTable`-versus-columns mismatch CLAUDE.md documents. I
+  checked and could NOT substantiate it: `spCreateQueryParameter` declares no such columns and the
+  entity's registered fields match the view exactly. So the four-timestamp table comes from somewhere
+  else in MJ core's save path and I stopped rather than guess further.
+
+**Needs someone with MJ core context.** Everything above is what a reader needs to not repeat the
+investigation.
+
+**Meanwhile:** `metadata/queries/SQL/slippage.sql` was fixed (see below) and the live `Query.SQL` was
+updated with a targeted `UPDATE __mj.Query SET SQL = <file contents>` — the same content the push would
+have written, verified by executing the stored SQL afterwards. That is a workaround and it is recorded as
+one; it does not scale to a parameter or definition change.
+
+---
+
+## DN-19 — RESOLVED: `Sales: Slipped Deals` could never have returned a row
+
+**A real defect, found by fixing the seed rather than by reading the query.** The join was
+
+```sql
+INNER JOIN vwDeals d ON d.ID = s.RecordID
+```
+
+and `__mj.RecordChange.RecordID` is a **composite-key string** — `'ID|93111111-0000-...'`, not a GUID.
+That does not merely fail to match: SQL Server converts toward `uniqueidentifier` and the statement dies
+with `Conversion failed when converting from a character string to uniqueidentifier`.
+
+**It looked healthy because nothing qualified.** No seeded deal had ever had its `ExpectedCloseDate`
+changed, so the CTE was empty, the join never evaluated, and the report returned zero rows — which reads
+as "nothing has slipped". The error appeared the instant the demo recorded its first real date move.
+
+A query that cannot run, hidden behind empty input, is indistinguishable from a query that is working and
+has nothing to say. That is the whole argument for seeding data these reports can actually answer, and it
+paid for itself on the first one.
+
+Fixed by extracting the id in the CTE with `TRY_CONVERT` over the `Field|Value` form. `TRY_CONVERT`
+rather than `CONVERT` deliberately: a future entity with a multi-column key yields NULL and is dropped by
+the join, instead of taking the whole report down again.
+
+**No other query reads `RecordChange`** — checked, it is the only one.
+
+---
+
+## DN-20 — OPEN: the involvement report promised a column it does not ship, and coverage is the wrong grain
+
+`deal-involvement-by-rep.sql`'s header said `AttributionCoveragePct` "exposes that ratio per deal-set".
+**There is no such column.** The SELECT ships `AvgAttributionPct` and `UnstatedAttributionCount`. Found by
+seeding the data the report reads and then looking at the output instead of the comment.
+
+The comment is corrected rather than the column added, because **coverage is a property of a DEAL and this
+query groups by REP**. "Do this deal's members' shares total 100?" cannot be answered on a row that says
+"this rep averaged 27.5%". Adding a column at the wrong grain would have made the promise true and the
+number useless.
+
+**The decision needed:** whether a per-deal attribution-coverage report is worth its own query. §9.4's
+concern is real and the demo data now contains a live instance of it — `DEAL-9006` carries 100 + 30 = 130
+— but nothing surfaces it as a coverage figure. Not built, because inventing a fourteenth read model to
+satisfy a comment is the wrong order of operations.
+
+---
+
+## DN-21 — DECIDED: what the demo's attribution values are chosen to prove
+
+Recorded because the numbers look arbitrary and are not.
+
+`DEAL-9005` (won) carries 60 / 25 / 15. Measured on the live database, the weighted report splits its
+27,480 into 16,488 / 6,870 / 4,122 — **which adds back to 27,480 exactly**, while bookings-by-owner
+credits the whole amount to the AE once. Two true answers to two different questions, reconciling.
+
+The same three rows each carry `UnweightedWonAmount = 27,480`. Summing that column gives **82,440 for a
+27,480 deal** — §9.4's triple-count, visible on screen in a report that is otherwise correct. That is a
+better demonstration than the prose, and it is the reason the clean split went on the WON deal.
+
+`DEAL-9006` (lost) carries 100 + 30 = 130. **Be precise about what this does and does not show:** because
+the deal was lost it contributes no money, so the 130 surfaces only through `AvgAttributionPct` and the
+involvement counts, not as an inflated amount. Demonstrating over-attribution on real revenue would need
+a second won deal, and adding one to make a rhetorical point is not what a demo is for. What it does
+prove is that a LOSS carries a team, which is what makes win rate by rep answerable at all.
+
+**Only one closed won deal exists**, so a clean split and an inflated split cannot both be shown on
+money. The reconciliation was judged the more valuable of the two. That is the trade, stated.
+
+---
+
 ## DN-17 — NOT A DECISION, A TRAP: `mj sync push` resets the seeded pipelines to Default Company
 
 Recorded because it cost a confusing suite run and will do so again. `metadata/pipelines/` seeds the

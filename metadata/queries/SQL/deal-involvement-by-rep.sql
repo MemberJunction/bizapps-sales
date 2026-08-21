@@ -12,10 +12,22 @@
 --
 -- Nothing constrains a deal's AttributionPct values to total 100. If a deal's three members carry 60
 -- / 30 / 30, this reports 120% of it; if they carry 50 / 20, it reports 70%. Both are legitimate
--- statements about credit and neither is a statement about revenue. `AttributionCoveragePct` below
--- exposes that ratio per deal-set so a reader can see when it is off — a silent 120% is precisely the
--- double-count §9.4 warns about, and the fix is to make it visible rather than to normalise it here
--- and hide a data-entry problem.
+-- statements about credit and neither is a statement about revenue.
+--
+-- ── WHAT ACTUALLY EXPOSES THAT, AND A CORRECTION ────────────────────────────────────────────────
+--
+-- This comment used to promise an `AttributionCoveragePct` column. THERE IS NO SUCH COLUMN — the SELECT
+-- ships `AvgAttributionPct` and `UnstatedAttributionCount`. Caught by seeding the demo data these
+-- reports read and then looking at the output instead of the comment. Corrected here rather than by
+-- adding the column, because a per-rep row is the wrong grain for a coverage ratio: coverage is a
+-- property of a DEAL (do its members' shares total 100?), and this query groups by rep. A row saying
+-- "this rep averaged 27.5%" cannot tell you which deal was over-attributed.
+--
+-- So the honest position: `AvgAttributionPct` and `UnstatedAttributionCount` tell a reader that shares
+-- are unstated or unusual and worth investigating. A per-deal coverage report is a separate query that
+-- does not exist yet; DECISIONS-NEEDED.md records it rather than leaving this comment implying it is
+-- here. A silent 120% is still precisely the double-count §9.4 warns about, and the fix is still to make
+-- it visible rather than to normalise it here and hide a data-entry problem.
 --
 -- USE `bookings-by-owner.sql` FOR ANY NUMBER THAT HAS TO RECONCILE — a board figure, a commission
 -- input, an accounting tie-out. Use this one for coverage and involvement. §9.4: "There is no safe

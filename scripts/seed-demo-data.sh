@@ -66,6 +66,20 @@ if [[ "${1:-}" == "--remove" ]]; then
     cat > "$TMP" <<'SQL'
 SET NOCOUNT ON;
 -- Child-first, because the S1 foreign keys are real.
+-- THE AUDIT ROWS THIS SEED CAUSED, and deleting them is deliberate rather than tidy-minded.
+--
+-- Normally a teardown has no business touching __mj.RecordChange. Here it does, for one specific reason:
+-- the demo deals use FIXED UUIDs so the seed is idempotent, so audit rows left behind would RE-ATTACH to
+-- the next set of deals seeded under the same ids. The demo would come back carrying a slip history it
+-- had not created, and the entity-layer step that seeds that history counts what exists before adding
+-- more -- so it would skip, and the numbers on screen would be whatever had accumulated.
+--
+-- Scoped to the demo record ids only, in MJ's Field|Value form. An audit row for any other record is
+-- somebody else's evidence.
+DELETE rc FROM __mj.RecordChange rc
+  JOIN __mj.Entity e ON e.ID = rc.EntityID
+ WHERE e.Name = 'MJ_BizApps_Sales: Deals'
+   AND rc.RecordID IN (SELECT 'ID|' + CAST(ID AS varchar(50)) FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.DealStageEvent  WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.DealTeamMember  WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 -- THE EMBEDDED ORDER, and the order of these two statements is the whole trick.
@@ -373,9 +387,16 @@ INSERT INTO __mj_BizAppsSales.Deal (ID, DealNumber, Name, PipelineID, PipelineSt
  (@d1, N'DEAL-9001', N'Northwind Health — Platform Rollout', @pipe1, @s4, @dtNew, @stOpen,
   @acc1, @c1, @co1, @emp1, 185000.0000, 0, 24, '2026-09-30', 75, @fcComm, @lsRef,
   N'Multi-site rollout. In Negotiation, forecast Commit.', N'Legal redlines back from their counsel', '2026-08-12'),
+ -- EXPECTED CLOSE IS IN THE PAST, DELIBERATELY. `Sales: Slipped Deals` and the dashboard's "Past
+ -- expected close" KPI both select open deals whose ExpectedCloseDate has gone, and with every seeded
+ -- date in the future BOTH read zero -- the same silence as the by-rep reports below, from a different
+ -- cause. This deal is the one that has slipped: still open, still in Qualification, and past the date
+ -- it was meant to land. It also puts it beyond the stage's RottingDays, so the rotting indicator has a
+ -- subject too. A fixed past date rather than a relative one, because every other date in this file is
+ -- fixed and a demo that drifts with the clock is worse than one that is plainly dated.
  (@d2, N'DEAL-9002', N'Cascade Manufacturing — Pilot', @pipe1, @s2, @dtNew, @stOpen,
-  @acc2, @c2, @co1, @emp1, 42000.0000, 0, 12, '2026-11-15', 25, @fcPipe, @lsOut,
-  N'Early. Champion identified, economic buyer not yet confirmed.', N'Book discovery with their CFO', '2026-08-08'),
+  @acc2, @c2, @co1, @emp1, 42000.0000, 0, 12, '2026-08-05', 25, @fcPipe, @lsOut,
+  N'Early. Champion identified, economic buyer not yet confirmed. SLIPPED: expected close has passed and it is still open.', N'Book discovery with their CFO', '2026-08-08'),
  (@d3, N'DEAL-9003', N'Northwind Health — Year 2 Renewal', @pipe1, @s3, @dtRen, @stOpen,
   @acc1, @c1, @co1, @emp2, 96000.0000, 0, 12, '2026-10-31', 50, @fcBest, @lsRef,
   N'RENEWAL: DealType.RequiresRenewalSource=1, so closing this routes to Contracts.RenewTerm rather than CreateFromDeal.',
@@ -474,6 +495,61 @@ INSERT INTO __mj_BizAppsSales.DealTeamMember (DealID, EmployeeID, PersonID, Deal
  -- D-6: a partner rep who is a common.Person with NO Employee record. EmployeeID is NULL here.
  (@d4, NULL, @c4,   @rolePM,    NULL,   1, N'D-6: partner principal, a Person with no Employee record. The exactly-one-of CHECK allows exactly this.');
 
+-- ============ THE CLOSED DEALS NEED TEAMS, OR TWO REPORTS ANSWER WITH SILENCE ============
+--
+-- ══ THIS WAS A REAL GAP, AND THE SYMPTOM WAS INDISTINGUISHABLE FROM A BROKEN QUERY ══════════════
+--
+-- Every team row above sits on an OPEN deal, and both by-rep reports key on ActualCloseDate joined
+-- through DealTeamMember. So `Sales: Bookings by Owner` and
+-- `Sales: Deal Involvement by Rep (Attribution-Weighted)` returned ZERO ROWS on seeded data -- the two
+-- reports §9.4 exists to distinguish, both silent. A query that runs clean and returns nothing looks
+-- exactly like one that is broken, and the reader has no way to tell which they are looking at.
+--
+-- The deals already carried OwnerEmployeeID. That made it worse rather than better: the stamp is
+-- SERVER-DERIVED from the owner-role team row, so a closed deal with a stamp and no team row is a state
+-- the app's own rules forbid (save-deal.SD3/SD26) sitting in the demo as though it were normal.
+--
+-- ══ THE ATTRIBUTION VALUES ARE CHOSEN TO MAKE §9.4's DISTINCTION VISIBLE ════════════════════════
+--
+-- The two reports are not variants of one another and must never be substituted, and the demo now shows
+-- WHY rather than only asserting it:
+--
+--   DEAL-9005 (WON, owner @emp1): 60 / 25 / 15 -- sums to exactly 100.
+--       The reconciliation case, and it is the headline. Measured on the live database: bookings-by-owner
+--       credits the whole 27,480 to @emp1 ONCE, while the weighted report splits the SAME deal
+--       16,488 / 6,870 / 4,122 -- which adds back to 27,480 exactly. Same deal, same money, two answers
+--       that are both true and neither substitutable.
+--
+--       And the trap is visible in the same rows: `UnweightedWonAmount` reads 27,480 on EVERY one of the
+--       three. Summing that column gives 82,440 for a 27,480 deal. That is §9.4's triple-count, on
+--       screen, in a report that is otherwise correct -- which is exactly why §9.4 says to state the
+--       basis in the report definition rather than trust a reader to pick the right column.
+--
+--   DEAL-9006 (LOST, owner @emp3): 100 / 30 -- sums to 130.
+--       Nothing constrains attribution to total 100, and this deal does not. BE PRECISE ABOUT WHAT IT
+--       DEMONSTRATES, THOUGH: because the deal was LOST, the weighted report shows it as
+--       WonDealsInvolvedIn = 0 and no money, so the 130% surfaces only through `AvgAttributionPct` and
+--       the involvement counts -- not as an inflated amount. Showing over-attribution on real revenue
+--       would need a second WON deal, and inventing one to make a point is not what a demo is for.
+--       What this case does prove is that a LOSS carries a team at all, which is what makes win RATE by
+--       rep answerable rather than just bookings.
+--
+-- Bookings-by-owner is UNAFFECTED by both: it filters on DealRole.IsOwnerRole and sums Deal.Amount, so
+-- it counts each deal exactly once whatever the percentages say. That is the whole point of the pair,
+-- and it is now observable in the data rather than only in the query comments.
+--
+-- DIFFERENT OWNERS ON PURPOSE (@emp1 and @emp3), so the by-rep reports return more than one row --
+-- a single-row report cannot show whether grouping works.
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealTeamMember WHERE DealID=@d5)
+INSERT INTO __mj_BizAppsSales.DealTeamMember (DealID, EmployeeID, PersonID, DealRoleID, AttributionPct, IsActive, Notes) VALUES
+ (@d5, @emp1, NULL, @roleOwner, 60.00, 1, N'Owner. Matches Deal.OwnerEmployeeID, which is a server-derived stamp OF this row -- the team is the source of truth.'),
+ (@d5, @emp2, NULL, @roleSE,    25.00, 1, N'Sales engineer. Ran the Line 2 capacity modelling that won it.'),
+ (@d5, @emp3, NULL, @roleSDR,   15.00, 1, N'Sourced the expansion conversation. 60/25/15 = 100: credit splits cleanly here.');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealTeamMember WHERE DealID=@d6)
+INSERT INTO __mj_BizAppsSales.DealTeamMember (DealID, EmployeeID, PersonID, DealRoleID, AttributionPct, IsActive, Notes) VALUES
+ (@d6, @emp3, NULL, @roleOwner, 100.00, 1, N'Owner, and the deal was lost -- a loss has a team too, which is what makes win RATE by rep answerable at all.'),
+ (@d6, @emp2, NULL, @roleSE,    30.00, 1, N'Sales engineer. 100+30 = 130: this deal is the one that makes AttributionCoveragePct visibly non-decorative.');
+
 -- ============================ BUYING COMMITTEE ============================
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealContactRole WHERE DealID=@d1)
 INSERT INTO __mj_BizAppsSales.DealContactRole (DealID, SalesContactID, BuyingRoleTypeID, Influence, Notes) VALUES
@@ -569,6 +645,32 @@ UNION ALL SELECT '  deals            ' + CAST(COUNT(*) AS varchar) FROM __mj_Biz
 UNION ALL SELECT '  deals w/ order   ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE OrderID IS NOT NULL
 UNION ALL SELECT '  payment sched.   ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealPaymentSchedule
 UNION ALL SELECT '  team members     ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealTeamMember
+-- The two counts the by-rep reports actually depend on. A team-member total says nothing about whether
+-- those reports can answer: what matters is whether the CLOSED deals have members, because both key on
+-- ActualCloseDate. Zero here means both reports return silence.
+UNION ALL SELECT '  closed w/ team   ' + CAST(COUNT(DISTINCT d.ID) AS varchar)
+  FROM __mj_BizAppsSales.Deal d
+  JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
+  JOIN __mj_BizAppsSales.DealTeamMember tm ON tm.DealID = d.ID
+ WHERE t.IsClosed = 1 AND d.ActualCloseDate IS NOT NULL
+-- PAST DUE is the DASHBOARD question -- its 'Past expected close' KPI -- and the rotting indicator's.
+-- NO DOUBLE QUOTE MAY APPEAR ANYWHERE IN THIS BLOCK. It sits inside sqlcmd -Q argument, which the
+-- shell quotes with double quotes, so a single stray one closes that string and bash begins executing
+-- the SQL as commands -- reported as: Sales:: command not found. A confusing way to learn it. It is NOT
+-- what `Sales: Slipped Deals` reports -- that one reads __mj.RecordChange for deals whose expected close
+-- date was MOVED, which no SQL seed can produce because RecordChange is a side effect of a save. The
+-- entity-layer step at the bottom of this script creates that history; these two counters are different
+-- questions and were briefly conflated here.
+UNION ALL SELECT '  past due open    ' + CAST(COUNT(*) AS varchar)
+  FROM __mj_BizAppsSales.Deal d
+  JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
+ WHERE t.IsOpen = 1 AND d.ExpectedCloseDate < CAST(SYSUTCDATETIME() AS date)
+UNION ALL SELECT '  close-date moves ' + CAST(COUNT(*) AS varchar)
+  FROM __mj.RecordChange rc
+  JOIN __mj.Entity e ON e.ID = rc.EntityID
+ WHERE e.Name = 'MJ_BizApps_Sales: Deals'
+   AND ISJSON(rc.ChangesJSON) = 1
+   AND JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.field') IS NOT NULL
 UNION ALL SELECT '  buying committee ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealContactRole
 UNION ALL SELECT '  stage events     ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.DealStageEvent
 UNION ALL SELECT '  forecast snaps   ' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.ForecastSnapshot

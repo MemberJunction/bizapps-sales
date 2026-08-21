@@ -283,6 +283,93 @@ if (pricedCount === 0 || statedCount === 0) {
     note(false, 'the demo needs BOTH: one case alone makes the distinction invisible');
 }
 
+/**
+ * ── A REAL SLIP HISTORY, WHICH ONLY THE ENTITY LAYER CAN CREATE ─────────────────────────────────
+ *
+ * `Sales: Slipped Deals` does NOT report deals whose expected close date has passed. It reports deals
+ * whose expected close date has BEEN MOVED, reconstructing each move from `__mj.RecordChange` — the
+ * audit trail MJ writes when a tracked field changes through a save. I assumed the former and was wrong;
+ * the query is the authority and its comment says so plainly.
+ *
+ * That makes it unreachable from SQL by construction. `RecordChange` rows are a side effect of
+ * `BaseEntity.Save()`; an INSERT into the demo tables produces none, and hand-writing audit rows would
+ * be a fixture forging provenance — the same objection that keeps this file from using
+ * `Sales.ReopenDeal` to unlock the closed deals. So the seed MOVES A DATE, twice, and lets MJ record it.
+ *
+ * TWO MOVES, IN OPPOSITE DIRECTIONS, on purpose. The query filters on `FromDate <> ToDate` and reports
+ * the dates rather than only a count, so a pull-in is as legitimate a row as a push-out. One of each
+ * means a reader can see the report distinguishing them instead of inferring that it would.
+ *
+ * Change tracking was verified ON for this entity before relying on it (`Entity.TrackRecordChanges`).
+ * If it is ever switched off, this step will report a failure rather than silently seeding nothing.
+ */
+console.log('');
+const SLIP_DEAL = 'DEAL-9003';
+const SLIP_MOVES = [
+    ['2026-09-15', 'pulled IN — the champion asked to accelerate'],
+    ['2026-11-30', 'pushed OUT — procurement review added six weeks. This is the slip.'],
+];
+
+const slipRow = (await q(`
+    SELECT ID, CONVERT(varchar(10), ExpectedCloseDate, 23) AS ecd
+      FROM __mj_BizAppsSales.Deal WHERE DealNumber = '${SLIP_DEAL}'`))[0];
+
+/**
+ * IDEMPOTENT BY COUNTING WHAT ALREADY EXISTS, because the thing being seeded is APPEND-ONLY.
+ *
+ * Every other step in this file overwrites: clear the lines, add the lines. Audit history cannot work
+ * that way and should not — deleting RecordChange rows to make a seed repeatable would be a fixture
+ * editing the record of what happened. So this step asks first. Without the guard, each run added two
+ * more moves and the report's SlipCount climbed 2, 4, 6 across re-runs, which is true of the database
+ * and useless as a demo.
+ */
+const priorMoves = (await q(`
+    SELECT COUNT(*) n FROM __mj.RecordChange rc
+      JOIN __mj.Entity e ON e.ID = rc.EntityID
+     WHERE e.Name = 'MJ_BizApps_Sales: Deals'
+       AND rc.RecordID = 'ID|' + '${slipRow?.ID ?? ''}'
+       AND ISJSON(rc.ChangesJSON) = 1
+       AND JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.field') IS NOT NULL`))[0].n;
+
+if (!slipRow) {
+    note(false, `${SLIP_DEAL} is missing, so no slip history could be recorded`);
+} else if (priorMoves >= SLIP_MOVES.length) {
+    note(true, `${SLIP_DEAL} already carries ${priorMoves} expected-close-date move(s) — left alone`);
+} else {
+    for (const [to, why] of SLIP_MOVES) {
+        const deal = await md.GetEntityObject('MJ_BizApps_Sales: Deals', user);
+        if (!(await deal.Load(slipRow.ID))) {
+            note(false, `${SLIP_DEAL} could not be loaded to move its expected close date`);
+            break;
+        }
+        const from = deal.ExpectedCloseDate;
+        deal.ExpectedCloseDate = new Date(`${to}T00:00:00Z`);
+        note(
+            await deal.Save(),
+            `${SLIP_DEAL}: expected close ${String(from).slice(0, 10)} -> ${to} (${why})` +
+                (deal.LatestResult?.Success === false ? ` [${deal.LatestResult?.CompleteMessage}]` : ''),
+        );
+    }
+
+    // The audit trail is the deliverable here, not the date. Verified, because a save that succeeded
+    // while writing no RecordChange row would leave the report empty and this step looking done.
+    const moves = (await q(`
+        SELECT COUNT(*) n FROM __mj.RecordChange rc
+          JOIN __mj.Entity e ON e.ID = rc.EntityID
+         WHERE e.Name = 'MJ_BizApps_Sales: Deals'
+           -- 'ID|<guid>', not a bare guid: MJ records the primary key in Field|Value form so an
+           -- entity with a multi-column key can be audited at all. Comparing the bare guid finds
+           -- nothing, which is how this verification first reported zero against rows that existed --
+           -- and the same mistake the slippage query itself was making in its join.
+           AND rc.RecordID = 'ID|' + '${slipRow.ID}'
+           AND ISJSON(rc.ChangesJSON) = 1
+           AND JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.field') IS NOT NULL`))[0].n;
+    note(
+        moves >= 2,
+        `${moves} recorded expected-close-date move(s) — Sales: Slipped Deals reads these, not the date itself`,
+    );
+}
+
 console.log(failures === 0 ? '\n  Order lines seeded.\n' : `\n  ${failures} problem(s) — see the ! lines above.\n`);
 await pool.close();
 process.exit(failures === 0 ? 0 : 1);

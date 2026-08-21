@@ -24,7 +24,29 @@
 -- people learn to discount.
 WITH slips AS (
     SELECT
-        rc.RecordID,
+        /*
+         * RecordID IS A COMPOSITE-KEY STRING, NOT A GUID -- 'ID|93111111-0000-...'. MJ writes the
+         * primary key in `Field|Value` form so an entity with a multi-column key can be recorded at all.
+         *
+         * This query joined `d.ID = s.RecordID` directly, and that does not merely fail to match: SQL
+         * Server implicitly converts the string toward `uniqueidentifier` and the statement dies with
+         * `Conversion failed when converting from a character string to uniqueidentifier`.
+         *
+         * It looked healthy for as long as it did because NOTHING QUALIFIED. With no deal whose expected
+         * close date had ever been changed, the CTE was empty, the join never evaluated, and the report
+         * returned zero rows -- indistinguishable from "nothing has slipped". The error appeared the
+         * moment the demo seed recorded its first real date move. A report that cannot run, hidden by
+         * empty input, is the exact failure mode this pair of reports exists to make visible.
+         *
+         * Extracted here rather than in the join so it is computed once and the join reads plainly.
+         * TRY_CONVERT rather than CONVERT: a future entity with a multi-column key would yield NULL and
+         * be dropped by the join, instead of taking the whole report down with it.
+         */
+        TRY_CONVERT(UNIQUEIDENTIFIER,
+            CASE WHEN CHARINDEX('|', rc.RecordID) > 0
+                 THEN SUBSTRING(rc.RecordID, CHARINDEX('|', rc.RecordID) + 1, 200)
+                 ELSE rc.RecordID
+            END)                                                                    AS DealID,
         rc.ChangedAt,
         TRY_CONVERT(DATE, JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.oldValue')) AS FromDate,
         TRY_CONVERT(DATE, JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.newValue')) AS ToDate
@@ -64,10 +86,11 @@ SELECT
     MAX(s.ChangedAt)                            AS LastSlippedAt
 FROM slips s
 INNER JOIN [__mj_BizAppsSales].vwDeals d
-        ON d.ID = s.RecordID
+        ON d.ID = s.DealID
 INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
-WHERE s.FromDate IS NOT NULL
+WHERE s.DealID IS NOT NULL
+  AND s.FromDate IS NOT NULL
   AND s.ToDate IS NOT NULL
   AND s.FromDate <> s.ToDate
   {% if CompanyID %}
