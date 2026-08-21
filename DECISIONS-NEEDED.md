@@ -1726,3 +1726,45 @@ mapping populates it — **no change in this repo at all.** The grain arrives; t
 
 **And what to watch for meanwhile:** a forecast history view that looks thin rather than broken. That is
 the shape this limitation produces, and it is the reason it is written down instead of left to be noticed.
+
+---
+
+## DN-16 — the `PipelineStageID` trigger has ONE writer now, and the phase is DECLARED (decided)
+
+**Decided here, not deferred**, because the alternative was a fifth clause on a gate nobody could read
+whole. Recorded because the shape is a precedent, not because anything is outstanding.
+
+**The state that prompted it.** Four separate pieces of code wrote to the stage log or keyed off the stage
+changing: `DealEntityServer`'s event appender and its stage-defaults applier, plus `Sales.CloseDeal` and
+`Sales.ReopenDeal`, each hand-writing a `DealStageEvent` and then moving the stage. Every one was correct
+read alone. Read together they produced three defects, and all three had the same cause — a decision taken
+in four places with no shared statement of what it depended on:
+
+- a close or reopen that named a stage wrote **two rows for one transition**, into an append-only log;
+- one of the three comparisons was **case-sensitive**, so a caller that normalised its GUIDs was recorded
+  as moving a deal to the stage it was already in;
+- a reopen naming a stage **silently invoked the defaults writer**, re-deriving a probability the reopen's
+  own event had just stamped.
+
+**The ruling.** `DealStageEvent` has exactly one writer — `DealEntityServer.appendStageEvent`. A caller
+that owns a governed transition calls `DeclareTransition(kind, note)` and supplies only what the entity
+cannot derive: the note. The entity then answers both questions once — *is an event owed* (yes if the stage
+moved, and yes if a transition is declared, which is what preserves a status-only close) and *do the
+stage's defaults apply* (no on a declared transition, because that probability is a human's figure).
+
+**Why declaring beats a flag.** A flag says "skip the defaults"; a declaration says *what is happening*,
+and the entity decides what follows from it. The next phase — a re-forecast, a bulk stage migration — adds
+a kind and states its consequences in one place, instead of a fifth clause on a gate that four callers each
+have to reason about correctly.
+
+**The generalisation underneath it, which was a separate defect in two more places.** "Is this value the
+caller's, or mine to fill?" now lives in `callerSuppliedValue()`. On an update the answer is `Dirty`; on a
+create `Dirty` is *useless* — a first assignment does not mark a field dirty, and the first write becomes
+the `OldValue`. `applyStageDefaults` knew this; `planStageEvent` and `ownerStampEditRefusal` did not, and
+both were wrong in the same direction. See `save-deal.SD30`–`SD32` and `close-deal.CD15`–`CD16`, and
+`M-ST1`–`M-ST4` / `M-OW2` for the mutants that prove they can fail.
+
+**What is worth knowing before extending this.** `close-deal.CD1`–`CD14` never passed `ClosingStageID`, so
+fourteen checks watched the close path while the input that makes it move a stage went unexercised for a
+whole phase. When adding an operation input, the question to ask is not "is it covered" but "does any check
+actually SUPPLY it".

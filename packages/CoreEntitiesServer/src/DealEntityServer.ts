@@ -119,6 +119,18 @@ interface StageOrderPlan {
  * A snapshot rather than a read at write time, because by then `super.Save()` has overwritten the
  * values. See {@link DealEntityServer.planStageEvent}.
  */
+/**
+ * The kinds of governed transition a remote operation can declare. Both are transactional acts that own
+ * their own provenance — `Sales.CloseDeal` and `Sales.ReopenDeal`. An ordinary stage move declares
+ * nothing; it is detected, not announced.
+ */
+export type DealTransitionKind = 'Close' | 'Reopen';
+
+interface DeclaredTransition {
+    Kind: DealTransitionKind;
+    Note: string | null;
+}
+
 interface StageMoveSnapshot {
     StageID: string | null;
     StatusID: string | null;
@@ -188,6 +200,7 @@ export class DealEntityServer extends DealEntity {
         this._orderStatusWarnings.length = 0;
         this._orderJustProvisioned = false;
         this._lockedAtSave = false;
+        this._lastStageEventID = null;
 
         /**
          * THE CLOSE LOCK (L-17, master plan §7.3) — enforced HERE and nowhere else.
@@ -303,7 +316,13 @@ export class DealEntityServer extends DealEntity {
          * stamping its order from the closing stage would be exactly the corruption the lock exists to
          * stop.
          */
-        const stageDefaults = this._lockedAtSave ? null : await this.planStageDefaults();
+        /**
+         * AND NEITHER RUNS ON A DECLARED TRANSITION. See `DeclareTransition`: a close's probability and a
+         * reopen's are the caller's considered figures, already stamped onto the event, and re-deriving
+         * them from the arriving stage is how a reopen came to disagree with its own provenance row.
+         */
+        const stageDefaults =
+            this._lockedAtSave || this._declaredTransition ? null : await this.planStageDefaults();
 
         // Nothing to number: an existing deal, or one that already has a number. A number is only ever
         // assigned once — it appears in contracts, orders and people's email, so re-saving a deal must
@@ -315,6 +334,10 @@ export class DealEntityServer extends DealEntity {
             : await this.saveWithinScope(options, {
                   stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
               });
+
+        // A declaration governs ONE save. Left standing, it would suppress the stage defaults on the next
+        // unrelated edit to the same in-memory record and put its note on that edit's event.
+        this._declaredTransition = null;
 
         if (!saved) {
             this.explainOrderProvisioningFailure();
@@ -349,8 +372,44 @@ export class DealEntityServer extends DealEntity {
      * MOVE. It is a birth, and `DealStageEvent` is a log of movement.
      */
     private planStageEvent(): StageMoveSnapshot | null {
+        /**
+         * A DEAL BEING CREATED OWES NO EVENT, and `OldValue === null` is not a reliable way to ask.
+         *
+         * `NewDeal()` preselects a pipeline and its first stage; the rep then picks the stage they
+         * actually want. That is TWO assignments before the first save, so the first becomes `OldValue`
+         * and the guard below saw a "transition" from a stage the deal was never in — and wrote it into
+         * an append-only log, where it cannot be corrected afterwards.
+         *
+         * `IsSaved` is the question that holds however many times the field was touched. `DealStageEvent`
+         * is a log of MOVEMENT, and nothing has moved until there is a row to move from.
+         */
+        if (!this.IsSaved) {
+            return null;
+        }
+
         const priorStageID = (this.GetFieldByName('PipelineStageID')?.OldValue as string | null) ?? null;
-        if (priorStageID === null || priorStageID === (this.PipelineStageID ?? null)) {
+        /**
+         * COMPARED CASE-INSENSITIVELY, like every other id comparison in this class.
+         *
+         * `planStageOrderStatus` and `planStageDefaults` both lowercase before comparing; this one did
+         * not. SQL Server hands back uppercase GUIDs and client code generates lowercase, so a caller
+         * that normalised its ids — an importer, an Action, anything round-tripping through JSON — got a
+         * SELF-TRANSITION recorded: an append-only row saying the deal moved from a stage to itself.
+         * Three writers on one trigger and only two of them agreed on how to compare a key.
+         */
+        const stageMoved =
+            priorStageID !== null &&
+            priorStageID.toLowerCase() !== String(this.PipelineStageID ?? '').toLowerCase();
+
+        /**
+         * A DECLARED TRANSITION IS OWED AN EVENT WHETHER OR NOT THE STAGE MOVED.
+         *
+         * `Sales.CloseDeal` without a `ClosingStageID` changes the STATUS only, and that is still the most
+         * consequential thing that ever happens to a deal. It owes a row. This is the case that made the
+         * close operation hand-write its own event, and writing it here instead is what removes the second
+         * row for the case where the stage DID move.
+         */
+        if (!stageMoved && !this._declaredTransition) {
             return null;
         }
         return {
@@ -514,6 +573,9 @@ export class DealEntityServer extends DealEntity {
         event.ChangedAt = new Date();
         event.AmountAtTransition = prior.Amount;
         event.ProbabilityAtTransition = prior.Probability;
+        // A declared transition's reason — the close's routing note, the reopen's justification. An
+        // ordinary stage move carries none, which is why this is null far more often than not.
+        event.Notes = this._declaredTransition?.Note ?? null;
 
         if (!(await event.Save())) {
             // THROWN, not returned: the caller's scope must roll the deal move back with it.
@@ -521,6 +583,10 @@ export class DealEntityServer extends DealEntity {
                 `the stage event could not be written: ${event.LatestResult?.CompleteMessage ?? 'unknown error'}`,
             );
         }
+
+        // Read back by `Sales.CloseDeal` / `Sales.ReopenDeal` for their `DealStageEventID` result. They
+        // used to have it because they wrote the row; this is what replaces that.
+        this._lastStageEventID = event.ID;
     }
 
 
@@ -765,6 +831,39 @@ export class DealEntityServer extends DealEntity {
      *   · An importer that supplies a historical probability keeps it; one that supplies none inherits
      *     the pipeline's design instead of landing on null.
      */
+    /**
+     * Did the CALLER put this value here in this save, or is it mine to fill?
+     *
+     * ── TWO OF MJ'S SEMANTICS BITE ON CREATE, AND THE ANSWER DIFFERS BECAUSE OF THEM ─────────────
+     *
+     * On an UPDATE, `Dirty` is exactly the question: it is true when this save changed the value.
+     *
+     * On a CREATE it is useless. A first assignment does not mark a field dirty, and the first write
+     * BECOMES the `OldValue` — so `Dirty` is false for a value the caller definitely supplied, and
+     * `OldValue` is a value that was never on disk. Asking `Dirty` on a new record therefore says "not
+     * theirs" about everything the caller just set.
+     *
+     * `applyStageDefaults` already knew this and guarded with `creating = !this.IsSaved`. Two other
+     * places did not, and both were wrong in the same direction:
+     *
+     *   · `planStageEvent` inferred a birth from `OldValue === null`. But a new deal whose stage is set
+     *     TWICE before the first save — `NewDeal()` preselects a pipeline and its first stage, the rep
+     *     then picks a different one — has a non-null `OldValue` holding a stage the deal was NEVER IN.
+     *     It appended a transition event for it, into an append-only log. `BD1` asserts against exactly
+     *     that and passes only because it assigns the stage once.
+     *   · `ownerStampEditRefusal` asked `Dirty`, so an importer doing `NewRecord()` ->
+     *     `OwnerEmployeeID = X` -> `Save()` slipped straight through the refusal and created a deal whose
+     *     owner column and owner-role roster name different people — the state SD26 exists to forbid.
+     *
+     * So the question lives here now, once, and the callers ask it rather than each re-deriving it.
+     */
+    private callerSuppliedValue(fieldName: string, current: unknown): boolean {
+        if (!this.IsSaved) {
+            return current !== null && current !== undefined && current !== '';
+        }
+        return !!this.GetFieldByName(fieldName)?.Dirty;
+    }
+
     private applyStageDefaults(plan: StageDefaultsPlan): void {
         /**
          * ── TWO DIFFERENT TESTS, BECAUSE `Dirty` DOES NOT MEAN THE SAME THING ON A NEW RECORD ───────
@@ -782,19 +881,12 @@ export class DealEntityServer extends DealEntity {
          *               feature exists for: dragging a card should move the probability with it, and
          *               `Dirty` is exactly "the caller touched it this time".
          */
-        const creating = !this.IsSaved;
-
-        const probabilityIsTheirs = creating
-            ? this.Probability !== null && this.Probability !== undefined
-            : !!this.GetFieldByName('Probability')?.Dirty;
-        if (!probabilityIsTheirs) {
+        // The create-versus-update distinction now lives in `callerSuppliedValue`. It was written out
+        // twice here first, which is how two other places came to get it wrong independently.
+        if (!this.callerSuppliedValue('Probability', this.Probability)) {
             this.Probability = plan.Probability;
         }
-
-        const forecastIsTheirs = creating
-            ? !!this.ForecastCategoryTypeID
-            : !!this.GetFieldByName('ForecastCategoryTypeID')?.Dirty;
-        if (!forecastIsTheirs) {
+        if (!this.callerSuppliedValue('ForecastCategoryTypeID', this.ForecastCategoryTypeID)) {
             this.ForecastCategoryTypeID = plan.ForecastCategoryTypeID;
         }
     }
@@ -1123,6 +1215,51 @@ export class DealEntityServer extends DealEntity {
      * So the lock now reports what it found. Nothing else may recompute it: two places deciding whether a
      * deal is locked is how they come to disagree.
      */
+    /**
+     * ── ONE WRITER FOR THE STAGE LOG, AND CALLERS DECLARE INSTEAD OF WRITING ────────────────────────
+     *
+     * `PipelineStageID` had FOUR writers by the end of the last round — this class's event appender and
+     * defaults applier, plus `Sales.CloseDeal` and `Sales.ReopenDeal`, each hand-writing a
+     * `DealStageEvent` and then moving the stage. The sequence was never audited whole, and all three
+     * consequences were of the same kind:
+     *
+     *   · **Two rows for one transition.** `stampClose` wrote its event, then set
+     *     `deal.PipelineStageID = input.ClosingStageID`, and the save that followed saw a stage change and
+     *     appended a SECOND row. `close-deal.CD4` could not see it because it never passes
+     *     `ClosingStageID` — the only input that makes the stage move. Reopen had it too, identically.
+     *   · **A self-transition.** `planStageEvent` compared stage ids case-sensitively while the two
+     *     writers beside it lowercased first, so a caller that normalised its ids got an append-only row
+     *     saying the deal moved from a stage to itself.
+     *   · **A reopen losing its probability.** `ReopenDeal` passing a `StageID` silently invoked the
+     *     DEFAULTS writer, which re-derived `Probability` from the arriving stage — after the reopen
+     *     event had already stamped the old one. The stamp said 60 and the deal said 10.
+     *
+     * The fix is not a fourth special case behind a wider gate. A caller now DECLARES that this save is a
+     * governed transition and supplies the note that belongs on it; the entity remains the only thing that
+     * writes to `DealStageEvent`, and it reads the declaration to answer the two questions the callers
+     * were each answering for themselves:
+     *
+     *   · **Is an event owed?** Yes if the stage moved — and also yes if a transition is declared, which
+     *     is what makes a close that does NOT move the stage still leave provenance. That case was the
+     *     reason `stampClose` wrote its own row in the first place.
+     *   · **Do the stage's defaults apply?** No. A declared transition's probability is the caller's
+     *     considered value — a close's final number, a reopen's hand-tuned one — and re-deriving it from
+     *     the pipeline would overwrite the very figure the event just stamped.
+     *
+     * Declared per save and cleared when it finishes, like every other per-save field here: a declaration
+     * that outlived its save would silently suppress the defaults on the next unrelated edit.
+     */
+    public DeclareTransition(kind: DealTransitionKind, note: string | null): void {
+        this._declaredTransition = { Kind: kind, Note: note };
+    }
+
+    /** The id of the `DealStageEvent` the last save appended, or null if it owed none. */
+    public get LastStageEventID(): string | null {
+        return this._lastStageEventID;
+    }
+
+    private _declaredTransition: DeclaredTransition | null = null;
+    private _lastStageEventID: string | null = null;
     private _lockedAtSave = false;
 
     /**
@@ -1328,8 +1465,8 @@ export class DealEntityServer extends DealEntity {
         if (this.Team.IsLoaded || this.Team.Count > 0) {
             return null;   // the roster is part of this save; the stamp is derived from it below
         }
-        if (!this.GetFieldByName('OwnerEmployeeID')?.Dirty) {
-            return null;   // nobody touched it. The common case.
+        if (!this.callerSuppliedValue('OwnerEmployeeID', this.OwnerEmployeeID)) {
+            return null;   // nobody supplied it. The common case.
         }
         return (
             'Deal.OwnerEmployeeID is a server-maintained stamp derived from the DealTeamMember holding ' +

@@ -245,6 +245,47 @@ const MUTATIONS = [
       to: '                if (false && work.assignNumber) {\n                    this.DealNumber = null;',
       note: 'a rolled-back deal number survives, and the deal becomes unsaveable' },
 
+    // ── THE FOUR-WRITERS ROUND. One mechanism replaced four special cases, so these five prove the
+    // five distinct things it now decides. Every one of them was a live defect a week ago.
+
+    // TWO ROWS FOR ONE TRANSITION, which is what a close that moved the stage actually produced: the
+    // operation wrote its event and then moved the stage, so the save wrote a second. Reproduced by
+    // calling the single writer twice -- appendStageEvent builds a NEW entity per call, so this really
+    // does insert two rows. CD4 counts events on a close that does not move the stage; CD15 counts them
+    // on one that does, which is the case nothing covered while the defect was live.
+    { id: 'M-ST1', file: DES, expect: ['CD4', 'CD15', 'BD2'],
+      from: 'await this.appendStageEvent(work.stageMove);',
+      to: 'await this.appendStageEvent(work.stageMove); await this.appendStageEvent(work.stageMove);',
+      note: 'one transition, two append-only rows. BROAD BY NATURE: it doubles EVERY event, so seven count-based checks fall (BD1, BD2, BD4, CD4, CD11, CD15, CD16). The three named above are the ones that must, and CD15 is the one that could not before it existed' },
+
+    // THE CASE-SENSITIVE COMPARE. Three writers on one trigger and only this one used ===, so a caller
+    // that lowercased its ids was recorded as moving the deal to the stage it was already in.
+    { id: 'M-ST2', file: DES, expect: ['SD32'],
+      from: "priorStageID.toLowerCase() !== String(this.PipelineStageID ?? '').toLowerCase()",
+      to: "priorStageID !== String(this.PipelineStageID ?? '')",
+      note: 'a normalised id reads as a stage move, and a self-transition is logged' },
+
+    // THE DEFAULTS WRITER RUNNING ON A DECLARED TRANSITION. A reopen naming a stage had its probability
+    // re-derived from that stage, AFTER its own event had stamped the figure being left behind.
+    { id: 'M-ST3', file: DES, expect: ['CD16'],
+      from: 'this._lockedAtSave || this._declaredTransition ? null : await this.planStageDefaults()',
+      to: 'this._lockedAtSave ? null : await this.planStageDefaults()',
+      note: 'a reopen loses the probability a human set, and disagrees with its own provenance row' },
+
+    // THE CREATE GUARD ON THE STAGE LOG. A new deal whose stage is set twice -- what NewDeal() plus a
+    // rep's choice does -- looked like a MOVE, because the first assignment becomes the OldValue.
+    { id: 'M-ST4', file: DES, expect: ['SD30'],
+      from: 'if (!this.IsSaved) {\n            return null;\n        }\n\n        const priorStageID',
+      to: 'if (false) {\n            return null;\n        }\n\n        const priorStageID',
+      note: 'a deal being created logs a transition out of a stage it was never in' },
+
+    // THE SAME QUESTION ON THE OWNER STAMP. Dirty is the right question on an update and useless on a
+    // create, so an importer set the column directly and walked past the refusal SD26 pins.
+    { id: 'M-OW2', file: DES, expect: ['SD31'],
+      from: "if (!this.callerSuppliedValue('OwnerEmployeeID', this.OwnerEmployeeID)) {",
+      to: "if (!this.GetFieldByName('OwnerEmployeeID')?.Dirty) {",
+      note: 'a created deal keeps a hand-set owner column, disagreeing with its own roster' },
+
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
     // the agreement went. This flips exactly that bit and nothing else.

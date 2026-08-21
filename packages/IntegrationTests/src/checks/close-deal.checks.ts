@@ -174,12 +174,52 @@ async function stageEvents(ctx: Ctx, dealID: string): Promise<Record<string, unk
             ExtraFilter: `DealID = '${dealID}'`,
             OrderBy: 'ChangedAt ASC',
             ResultType: 'simple',
-            Fields: ['ID', 'ToDealStatusTypeID', 'AmountAtTransition', 'ProbabilityAtTransition', 'Notes'],
+            Fields: [
+                'ID',
+                // FromStageID/ToStageID are read because CD15 needs to tell one row from another. Without
+                // them a duplicated transition and a single one look identical in this projection.
+                'FromStageID',
+                'ToStageID',
+                'ToDealStatusTypeID',
+                'AmountAtTransition',
+                'ProbabilityAtTransition',
+                'Notes',
+            ],
         },
         ctx.User,
     );
     Assert(r.Success, `reading stage events failed — ${r.ErrorMessage}`);
     return (r.Results ?? []) as Record<string, unknown>[];
+}
+
+/**
+ * Another stage on the same pipeline, and its probability.
+ *
+ * `ClosingStageID` is the input that makes a close move the stage, and no fixture field carries a second
+ * stage — which is exactly why CD1–CD14 never passed one, and why the close spent a round writing two
+ * provenance rows for every close that did. Resolved by DisplayOrder rather than by name: a stage called
+ * "Signed" is a label (§3), and this must keep working on a pipeline that calls it anything else.
+ */
+async function otherStage(
+    ctx: Ctx,
+    pipelineID: string,
+    notStageID: string,
+): Promise<{ ID: string; Probability: number | null }> {
+    const rv = new RunView();
+    const r = await rv.RunView(
+        {
+            EntityName: 'MJ_BizApps_Sales: Pipeline Stages',
+            ExtraFilter: `PipelineID = '${pipelineID}' AND ID <> '${notStageID}'`,
+            OrderBy: 'DisplayOrder DESC',
+            ResultType: 'simple',
+            Fields: ['ID', 'Probability'],
+        },
+        ctx.User,
+    );
+    Assert(r.Success, `reading the pipeline's stages failed — ${r.ErrorMessage}`);
+    const row = (r.Results ?? [])[0] as { ID?: string; Probability?: number | null } | undefined;
+    Assert(!!row?.ID, 'setup: the pipeline needs a second stage for a close to move INTO');
+    return { ID: String(row?.ID), Probability: row?.Probability ?? null };
 }
 
 /** The deal's INSTALMENT rows, read through the provider so the check's open transaction is visible. */
@@ -742,6 +782,157 @@ export const CloseDealChecks: NamedCheck[] = [
                     ctx, `SELECT Amount FROM ${SALES_SCHEMA}.DealPaymentSchedule WHERE ID = '${target.ID}'`,
                 );
                 AssertEqual(Number(finalRow.Amount), 41000, 'the stored amount is still the pre-close value');
+            }),
+    },
+    {
+        Id: 'close-deal.CD15',
+        Name: 'CD15: a close that MOVES the stage writes ONE event, not two',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── THE BLIND SPOT CD4 LEFT, AND THE DEFECT THAT LIVED IN IT ────────────────────────
+                 *
+                 * CD4 already asserts "exactly one event was appended". It stayed green through a round in
+                 * which every close that moved a stage appended TWO, because no check in this bundle ever
+                 * passed `ClosingStageID` — the only input that makes the stage move. `stampClose` wrote
+                 * its row and then set `deal.PipelineStageID`, and the save that followed saw a stage
+                 * change and wrote a second row for the same transition, into an append-only log.
+                 *
+                 * So this is CD4's assertion under the input CD4 never supplied. The row that survives
+                 * must also be the RIGHT one: `From` the stage the deal was in, `To` the closing stage,
+                 * and carrying the routing note — the entity's own appender had no note to write, so a
+                 * null `Notes` here would mean the wrong writer won.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD15 one row',
+                );
+                const closing = await otherStage(ctx, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID);
+
+                const before = (await stageEvents(ctx, dealID)).length;
+                const out = await close(ctx, {
+                    DealID: dealID,
+                    DealStatusTypeID: f.WonStatusID,
+                    ClosingStageID: closing.ID,
+                });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+
+                const after = await stageEvents(ctx, dealID);
+                AssertEqual(
+                    after.length,
+                    before + 1,
+                    'ONE event for one transition — two means the operation and the entity both wrote it',
+                );
+
+                const last = after[after.length - 1];
+                AssertEqual(
+                    String(last.FromStageID).toLowerCase(),
+                    f.OrderOnlyPolicyStageID.toLowerCase(),
+                    'the surviving row records the stage the deal moved OUT of',
+                );
+                AssertEqual(
+                    String(last.ToStageID).toLowerCase(),
+                    closing.ID.toLowerCase(),
+                    'and the closing stage it moved INTO',
+                );
+                Assert(
+                    typeof last.Notes === 'string' && (last.Notes as string).length > 0,
+                    'and it carries the routing note, so the row that survived is the CLOSE\'s row',
+                );
+
+                // The stage really did move. Otherwise the count above could be satisfied by a close that
+                // silently ignored ClosingStageID.
+                const row = await TxOne<{ PipelineStageID: string }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(row.PipelineStageID).toLowerCase(),
+                    closing.ID.toLowerCase(),
+                    'and the deal is left in the closing stage',
+                );
+
+                // And the DealStageEventID the operation reports is a row that exists — it used to come
+                // from the hand-written event, and now comes back from the save.
+                Assert(
+                    !!out.DealStageEventID &&
+                        after.some((e) => String(e.ID).toLowerCase() === String(out.DealStageEventID).toLowerCase()),
+                    'the reported DealStageEventID names one of the deal\'s actual events',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD16',
+        Name: 'CD16: a reopen INTO a stage writes one event and keeps the probability a human set',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── THE THIRD CONSEQUENCE OF FOUR WRITERS ON ONE TRIGGER ────────────────────────────
+                 *
+                 * `ReopenDeal` passing a `StageID` did three things nobody had audited together: it wrote
+                 * its event, moved the stage — which made the save write a SECOND event — and, because the
+                 * stage moved, silently invoked the stage-DEFAULTS writer, which re-derived `Probability`
+                 * from the arriving stage AFTER the event had stamped the old one. The provenance row and
+                 * the deal it described disagreed, and CD11 could not see any of it because it reopens
+                 * without a stage.
+                 *
+                 * The probability assertion is the sharp one: it must be the figure the human set, and it
+                 * must NOT be the arriving stage's default. Asserted as inequality too, because if the two
+                 * happened to be equal the check would pass while proving nothing.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD16 reopen into a stage',
+                );
+                const landing = await otherStage(ctx, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID);
+
+                // A deliberately odd figure, and one the stage cannot be carrying.
+                const HAND_SET = 37;
+                Assert(
+                    Number(landing.Probability ?? -1) !== HAND_SET,
+                    `setup: the landing stage's own probability must differ from ${HAND_SET}, or this check ` +
+                        'cannot tell the two apart',
+                );
+
+                const priced = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await priced.Load(dealID), 'the open deal loads');
+                priced.Probability = HAND_SET;
+                Assert(await priced.Save(), `an open deal accepts a probability — ${priced.LatestResult?.CompleteMessage ?? ''}`);
+
+                Assert((await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID })).Success, 'closed');
+                const afterClose = (await stageEvents(ctx, dealID)).length;
+
+                const out = await reopen(ctx, {
+                    DealID: dealID,
+                    Reason: 'Signature bounced; back to legal.',
+                    StageID: landing.ID,
+                });
+                Assert(out.Success, `the reopen failed: ${JSON.stringify(out.Issues)}`);
+
+                const after = await stageEvents(ctx, dealID);
+                AssertEqual(after.length, afterClose + 1, 'the reopen appends ONE event, not two');
+                Assert(
+                    typeof after[after.length - 1].Notes === 'string' &&
+                        (after[after.length - 1].Notes as string).startsWith('REOPENED:'),
+                    'and the surviving row is the REOPEN\'s, carrying its reason',
+                );
+
+                const row = await TxOne<{ Probability: number | null; PipelineStageID: string }>(
+                    ctx,
+                    `SELECT Probability, PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(row.PipelineStageID).toLowerCase(),
+                    landing.ID.toLowerCase(),
+                    'the deal lands in the stage the reopen named',
+                );
+                AssertEqual(
+                    Number(row.Probability),
+                    HAND_SET,
+                    'and KEEPS the probability a human set — the arriving stage does not re-derive it on a ' +
+                        'declared transition',
+                );
             }),
     },
 ];

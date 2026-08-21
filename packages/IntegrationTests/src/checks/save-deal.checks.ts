@@ -67,6 +67,8 @@ import {
     E_DEAL,
     E_EMPLOYEE,
     E_SCHEDULE,
+    E_STAGE,
+    E_STAGE_EVENT,
     E_TEAM,
     InRolledBackTransaction,
     ProviderOf,
@@ -115,6 +117,21 @@ async function newDeal(
     deal.TermMonths = 12;
     shape?.(deal);
     return deal;
+}
+
+/** How many stage events a deal has. Append-only, so this only ever grows -- which is the point. */
+async function stageEventCount(ctx: Parameters<NamedCheck['Fn']>[0], dealID: string): Promise<number> {
+    const r = await new RunView().RunView<{ ID: string }>(
+        {
+            EntityName: E_STAGE_EVENT,
+            ExtraFilter: `DealID = '${dealID}'`,
+            ResultType: 'simple',
+            Fields: ['ID'],
+        },
+        ctx.User,
+    );
+    Assert(r.Success, `reading stage events failed -- ${r.ErrorMessage}`);
+    return (r.Results ?? []).length;
 }
 
 /** Re-reads a saved deal with its collections populated — what a surface does when it opens one. */
@@ -1493,6 +1510,182 @@ export const SaveDealChecks: NamedCheck[] = [
                     null,
                     'and the number must be cleared, or the retry re-inserts one the sequence has re-issued ' +
                         'and the deal is unsaveable until the tab is recreated',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD30',
+        Name: 'SD30: a deal whose stage is chosen TWICE before its first save gets NO stage event',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── A BIRTH IS NOT A MOVE, AND `OldValue` WAS THE WRONG WAY TO ASK ──────────────────
+                 *
+                 * `planStageEvent` inferred "this deal is new, so it owes no event" from
+                 * `OldValue === null`. On MJ's create semantics the FIRST assignment becomes the
+                 * `OldValue` — so a new deal whose stage is set twice before `Save()` looked exactly like
+                 * a deal that had MOVED, and one row went into an append-only log describing a transition
+                 * out of a stage the deal was never in.
+                 *
+                 * That is not a contrived sequence: it is what the workspace does. `NewDeal()` preselects
+                 * a pipeline and its first stage so the form opens with something valid, and then the rep
+                 * picks the stage they actually want. Every deal created through the UI that way carried a
+                 * fictional event.
+                 *
+                 * `BD1` asserts a new deal owes no event and stayed green throughout, because it assigns
+                 * the stage ONCE. The difference between the two checks is the second assignment, and that
+                 * is the whole defect.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+
+                const stages = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: E_STAGE,
+                        ExtraFilter: `PipelineID = '${f.PipelineID}' AND ID <> '${f.StageID}'`,
+                        OrderBy: 'DisplayOrder DESC',
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                    },
+                    ctx.User,
+                );
+                Assert(stages.Success, `reading stages failed — ${stages.ErrorMessage}`);
+                const secondChoice = (stages.Results ?? [])[0]?.ID;
+                Assert(!!secondChoice, 'the fixture pipeline needs a second stage for this check to mean anything');
+
+                // THE SEQUENCE, EXACTLY AS THE WORKSPACE PRODUCES IT: preselected, then changed.
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD30 stage chosen twice'; });
+                created.PipelineStageID = secondChoice;
+                await saveOk(created, 'create with a stage the rep changed their mind about');
+
+                AssertEqual(
+                    await stageEventCount(ctx, created.ID),
+                    0,
+                    'a deal being CREATED owes no stage event, however many times its stage was set',
+                );
+
+                // And the stage that was actually chosen is the one stored — a guard that fixed the event
+                // by ignoring the second assignment would be worse than the bug.
+                const row = await TxOne<{ PipelineStageID: string }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                AssertEqual(
+                    String(row.PipelineStageID).toLowerCase(),
+                    String(secondChoice).toLowerCase(),
+                    'and the deal is in the stage the rep chose second',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD31',
+        Name: 'SD31: a hand-set OwnerEmployeeID is refused ON CREATE too, not just on edit',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── SD26'S RULE, ON THE PATH SD26 COULD NOT REACH ───────────────────────────────────
+                 *
+                 * SD26 proves a hand-set owner stamp is refused on an EDIT. The refusal asked
+                 * `GetFieldByName('OwnerEmployeeID').Dirty`, which is the right question on an update and
+                 * useless on a create: a first assignment does not mark a field dirty, so an importer
+                 * doing `NewRecord()` -> `OwnerEmployeeID = X` -> `Save()` walked straight past the guard
+                 * and created the exact state SD26 exists to forbid — an owner column and an owner-role
+                 * roster naming different people, on the highest-volume path there is.
+                 *
+                 * Both places now ask `callerSuppliedValue`, which knows that on a create the question is
+                 * "is there a value here" rather than "did this save change it".
+                 */
+                const f = await ResolveSalesFixture(ctx);
+
+                const other = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: E_EMPLOYEE,
+                        ExtraFilter: `Active = 1 AND ID <> '${f.EmployeeID}'`,
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                    },
+                    ctx.User,
+                );
+                Assert(other.Success, `reading employees failed — ${other.ErrorMessage}`);
+                const otherID = (other.Results ?? [])[0]?.ID;
+                Assert(!!otherID, 'the host needs a second active employee for this check to mean anything');
+
+                const created = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD31 owner stamp on create';
+                    d.OwnerEmployeeID = otherID;
+                });
+                AssertEqual(
+                    await created.Save(),
+                    false,
+                    'setting the owner stamp on a NEW deal must be refused, exactly as on an edit',
+                );
+
+                // A refused create writes nothing at all.
+                const rows = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: E_DEAL,
+                        ExtraFilter: `Name = 'SD31 owner stamp on create'`,
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                    },
+                    ctx.User,
+                );
+                Assert(rows.Success, `reading deals failed — ${rows.ErrorMessage}`);
+                AssertEqual((rows.Results ?? []).length, 0, 'and no deal row was written');
+
+                /**
+                 * AND THE REFUSAL IS STILL NARROW — the same create WITHOUT the stamp must succeed. The
+                 * server fills it from the roster, which is the whole reason the column is not writable.
+                 */
+                const clean = await newDeal(ctx, f, (d) => { d.Name = 'SD31 ordinary create'; });
+                await saveOk(clean, 'a create that leaves the server-owned stamp alone');
+            }),
+    },
+    {
+        Id: 'save-deal.SD32',
+        Name: 'SD32: re-stating the SAME stage in a different letter case is not a move',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── A GUID IS A GUID IN EITHER CASE, AND ONE OF THREE WRITERS DISAGREED ─────────────
+                 *
+                 * `planStageEvent` compared the prior stage id to the new one with `===`, while the two
+                 * writers either side of it — the order-status writer and the defaults writer — both
+                 * lowercased first. SQL Server renders `uniqueidentifier` in UPPER case and client code
+                 * generates lower, so any caller that normalised its ids on the way in was telling the
+                 * server "the stage is unchanged" and being recorded as having MOVED THE DEAL TO THE STAGE
+                 * IT WAS ALREADY IN — a self-transition, in an append-only log that cannot be corrected.
+                 *
+                 * Importers, Actions and anything round-tripping a deal through JSON all normalise. This
+                 * is the shape of that save: load, re-state the same stage in the other case, save.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD32 same stage, other case'; });
+                await saveOk(created, 'create');
+
+                const stored = await TxOne<{ PipelineStageID: string }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                const asStored = String(stored.PipelineStageID);
+                const flipped = asStored === asStored.toUpperCase() ? asStored.toLowerCase() : asStored.toUpperCase();
+                Assert(
+                    flipped !== asStored && flipped.toLowerCase() === asStored.toLowerCase(),
+                    'setup: the flipped id must differ only in case',
+                );
+
+                const before = await stageEventCount(ctx, created.ID);
+
+                const edited = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await edited.Load(created.ID), 'the deal reloads');
+                edited.PipelineStageID = flipped;
+                edited.NextStep = 'a normalised save that changes nothing about the stage';
+                await saveOk(edited, 'a save that re-states the same stage in the other case');
+
+                AssertEqual(
+                    await stageEventCount(ctx, created.ID),
+                    before,
+                    'no event: the deal did not move, so the log must say nothing',
                 );
             }),
     },
