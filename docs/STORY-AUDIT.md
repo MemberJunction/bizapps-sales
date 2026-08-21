@@ -20,22 +20,48 @@ proven by a passing test, and it cannot be proven by a search either — not bef
 tree being searched is the tree being reported on. That is why this pass came after the merges rather
 than before them.
 
-> **THIS PASS IS NOT FINAL.** `feature/closewon-tasks` has since merged again at `fbf414d` (WT12, the
-> `Code` lookup, PR #42 on the host), and `feature/dashboard-queries` is still to come at `59d8527` or
-> later — it carries its own repair of `Sales: Slipped Deals`, which overlaps DN-19 and needs reconciling
-> to one writer rather than textually. The verdicts below hold as of 93 checks in 9 bundles; the full
-> re-run happens once that merge lands. `docs/INTEGRATION-LOG.md` carries the heads.
+## THE ANSWER, IN ONE LINE
 
-Integrated for this pass, in order: `feature/closewon-tasks` (187c8a4), `feature/contracts-seam-v6`
-(a41473f, then again at 01b4437), `feature/activities-and-ingest` (1db90c9, then again at 99be05b). Five
-merges, of which three were corrections for a head that had moved — `docs/INTEGRATION-LOG.md` records
-which commit each one consumed and the shape it was checked against.
+**Four of the nine are met outright** — #35, #116, #117, #121. Of the five that are not, **the remaining
+gap is upstream in every case except one**, and that one is #33's.
 
-**The last two merges arrived after these verdicts were written**, and they do not change any of them:
-they carry #40's read model (13 MJ Queries) and the ForecastSnapshot job, which are not among the stories
-audited here. What they do change is the evidence base — 92 checks in 9 bundles rather than 81 in 8 — so
-every check id cited below still holds and there are now two bundles' worth of coverage nobody claimed
-credit for in this document. #40 is unaudited and deliberately unclaimed.
+| Issue | Verdict | The remaining gap | Whose |
+|---|---|---|---|
+| **#33** S-US1 Create a deal | partially met | Line removal (below); and stage-driven probability/forecast is UI-deep only, so an Action, an agent or the S6 import gets whatever the caller supplied | **ours** + orders |
+| **#34** S-US2 Contract + tasks | partially met | `ContractType` has no per-type renewal defaults; `ContractTemplate` has no `Status`, so the active template cannot be selected | contracts (D-9, D-10) |
+| **#35** S-US3 Order-review task | **met** | — | — |
+| **#114** S-US4 Deal line items | partially met | Removing an order line is silently dropped (KI-20) | orders |
+| **#115** S-US5 Order status follows | partially met | `Voided` is terminal, so a reopened lost deal's order cannot return | orders |
+| **#116** S-US6 Close as Won | **met** | — | — |
+| **#117** S-US7 Close as Lost | **met** | — | — |
+| **#118** S-US8 Reopen | partially met | The same terminal `Voided` | orders |
+| **#121** S-US11 Board + dashboard | **met** | — | — |
+
+**The only gap that is ours is server-side stage-driven probability and forecast category** (#33's body,
+`deal-workspace.component.ts`). Everything else outstanding is one of three upstream facts: orders drops a
+line removal, orders treats `Voided` as terminal, and contracts lacks two columns.
+
+**One verdict I nearly got wrong, and the check stopped me.** I drafted "#114 moves to met, KI-20 no longer
+reproduces" — then read `save-deal.SD6`, which asserts `after.length === 2`, i.e. that the removal IS
+dropped. It passes. So KI-20 still reproduces and #114 stays partially met. The tripwire did exactly what a
+tripwire is for: it refused a verdict I wanted to give.
+
+**These last four merges moved no verdict**, and that is the expected result rather than a disappointment.
+They carry #40's read model (now 15 MJ Queries, with the dashboard reading them) and the forecast job moved
+from written to proven — none of which is among the nine stories in scope.
+
+Everything below is the detail behind those verdicts.
+
+Integrated across this effort, in order: `feature/closewon-tasks` (187c8a4, then `fbf414d`),
+`feature/contracts-seam-v6` (a41473f, then `01b4437`), `feature/activities-and-ingest` (1db90c9, then
+`99be05b`), `feature/forecast-query-source` (`d348a88`), `feature/dashboard-queries` (`172a6d8`). Nine
+merges, of which **four were corrections for a head that had already moved**.
+`docs/INTEGRATION-LOG.md` records which commit each one consumed and the expected shape it was checked
+against — which is why the last four were diffs against a stated baseline rather than guesses.
+
+**Evidence base: 96 integration checks across 9 bundles**, 0 failed, 0 skipped, plus E1–E4 from
+`scripts/audit-story-evidence.mjs` and `test-harnesses/compare-dashboard-measures.mjs` at 11 agree / 0
+differ.
 
 Settled before this run and deliberately not re-examined: **#37/#38/#39** are superseded, **#93** and
 **#83** are met, **#120** is strictly broader than #38/#39 combined. S-US9 (#119) and the Outlook ingest
@@ -59,7 +85,7 @@ The rule for this pass was *prove met criteria against the database, not the scr
 
 | Issue | Verdict |
 |---|---|
-| **#33** S-US1 Create a deal record | **partially met** — 4 of 5 met; the one gap left is line removal, which is upstream (KI-20) |
+| **#33** S-US1 Create a deal record | **partially met** — 4 of 5 checklist criteria met; line removal is upstream (KI-20), and the body's stage-driven probability is the one gap in this whole audit that is OURS |
 | **#34** S-US2 Contract + tasks on Closed Won (B2B) | **partially met** — contract and both tasks are real; two field-level criteria are upstream gaps |
 | **#35** S-US3 Order-review task on Closed Won | **met** |
 | **#114** S-US4 Add and manage deal line items | **partially met** — add and edit work; removal is dropped upstream |

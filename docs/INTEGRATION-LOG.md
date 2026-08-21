@@ -41,6 +41,56 @@ which is why the expected shape belongs here in writing.
 
 ---
 
+## Integration 4 — 2026-08-21, onto `feature/embed-order-on-deal`
+
+Four merges. Two were re-merges of heads that had moved again since integration 3; two were branches this
+session had not been told about until they were ready.
+
+| # | Branch | Head consumed | Brought |
+|---|---|---|---|
+| 1 | `feature/closewon-tasks` | `fbf414d` | WT12 (the `Code` lookup), tasks PR #42 on the host |
+| 2 | `feature/forecast-query-source` | `d348a88` | `QueryForecastSource` proven, FS11–FS13, the capture script demoted to a manual tool |
+| 3 | `feature/dashboard-queries` | `172a6d8` | The dashboard on MJ Queries, `Sales: Dashboard Summary`, `Sales: Forecast by Owner` |
+
+(Three rows, four merges: `closewon-tasks` also appears in integration 3 at `187c8a4`.)
+
+### Expected shape, stated before measuring — and how it was derived
+
+This is the part worth copying. Neither branch's own total could be used directly, because both predated
+the WT11/WT12 rename and so reported `close-won-tasks` as 11 where this tree has 12:
+
+| Branch | Its own reported total | Difference from this tree | What it actually adds |
+|---|---|---|---|
+| `dashboard-queries` @ 172a6d8 | 92 | −1, entirely `close-won-tasks` 11 vs 12 | **0 checks** |
+| `forecast-query-source` @ d348a88 | 95 | +3 −1 on the same basis | **exactly 3** (FS11–FS13) |
+
+So: 93 + 0 + 3 = **96 across 9 bundles**, with `forecast` 10 → 13 and `close-won-tasks` staying 12.
+
+| Claim | Expected | Measured |
+|---|---|---|
+| Integration checks | 96 | **96**, 0 failed, 0 skipped |
+| Bundles | 9 | **9** |
+| `forecast` bundle | 13 | **13** |
+| `close-won-tasks` bundle | 12 | **12** |
+| `metadata/queries/` definitions | 15 | **15** (`ls -a`) |
+| `metadata/queries/SQL/` files | 15 | **15** |
+| Dashboard measure agreement | 11 comparisons | **11 agree, 0 differ**; 213,720 priced + 37,500 stated = 251,220 |
+
+The manifest auto-merged to exactly 96 without a hand edit, which is the first time the arithmetic and the
+merge agreed with no intervention.
+
+### Verified rather than assumed, because assuming has cost twice
+
+* **`scripts/capture-forecast-snapshot.sql` did not conflict**, and was checked anyway — it still carries
+  the demoted `NOT THE FORECAST SNAPSHOT WRITER. A MANUAL TOOL, DELIBERATELY UNSEEDED` header, so the
+  pre-demotion copy did not come back in.
+* **The three metadata files both sessions touched were read**, not trusted to agree.
+* **A rename the merge would have left stale:** `UnweightedWonAmount` → `WonAmountOfDealsTouched`. Two
+  places outside the query cited the old name and now cite the new one. A comment naming a column that
+  does not exist is exactly how the `AttributionCoveragePct` problem started.
+
+---
+
 ## Integration 3 — 2026-08-20, onto `feature/embed-order-on-deal`
 
 Five merges. The last two exist because the first three consumed heads that had already moved.
