@@ -95,13 +95,44 @@ Beyond `bizapps-common`: **orders**, **contracts** and now **tasks**, all checke
 
 ### Known-incomplete, deliberately
 
-* **`metadata/task-types/` cannot be pushed.** It declares `TaskType.Code`, a column this host does not
-  have until bizapps-tasks PR #42 lands (`D-8`). `mj sync push --dir metadata` therefore fails validation
-  on it; push with `--exclude task-types`. Until then `CloseWonTaskService` resolves task types by `Name`
-  and says so out loud in a warning.
-* **`MJ: Query Parameters` inserts fail on re-push.** The queries and their parameters are in the database
-  and complete, but pushing again attempts to CREATE parameters that already exist, with fresh UUIDs, and
-  dies inside MJ core's `spCreateQueryParameter`. Worth knowing before anyone reads that failure as the
+* ~~**`metadata/task-types/` cannot be pushed.**~~ **RESOLVED — do not use `--exclude task-types`.**
+  bizapps-tasks PR #42 is applied to `MJ_V6_Host`, `TaskType.Code` exists, and a full
+  `mj sync push --dir metadata` runs clean. `CloseWonTaskService` resolves task types by `Code`, and the
+  by-`Name` fallback with its warning is now the exception rather than the normal path.
+
+  **Two things about HOW it was applied that outlive the fix, because they change what a later migration
+  may assume.**
+
+  **It is untracked in Flyway.** The column was added to this host by a bare `ALTER TABLE … ADD Code`; no
+  schema-history row was fabricated for it, and that was deliberate rather than an oversight. A row under
+  bizapps-tasks' versioning would claim a migration ran that did not; a row under MJ core's would assert
+  MJ shipped something it has not. Both are false statements written into the one table whose job is to
+  be true. **The consequence, stated so nobody meets it as a surprise:** a future MJ-core or tasks
+  migration that adds `TaskType.Code` will FAIL on this host, because the column is already there and
+  Flyway has no record explaining why. Whoever hits that should expect to baseline or skip it, not debug
+  it.
+
+  **It introduced two cross-schema foreign keys**: `FK_TaskType_OnCreateAction` and
+  `FK_TaskType_OnStatusChangeAction`, both into `__mj.Action(ID)`. That is a dependency-graph change, not
+  a detail — **the tasks schema now depends structurally on MJ core's `Action` table.** Anything that
+  drops, recreates or reorders those objects has to account for it: a core rebuild that takes `__mj.Action`
+  down before tasks is no longer safe in either order, and a schema-only restore of one without the other
+  will fail on the constraint rather than on anything that names tasks.
+* **`MJ: Query Parameters` inserts fail on re-push — A DIFFERENT PROBLEM FROM THE ONE ABOVE, AND STILL
+  OPEN.** Read this bullet and the previous one together: there are now **two unrelated ways a push can
+  fail**, and both surface as *the push failed*. The task-types exclusion is genuinely resolved and the
+  flag must not be reintroduced. This one is not resolved and no flag avoids it.
+
+  The push extracts parameters from the Nunjucks template in each query's SQL, then collides with the
+  parameter declarations the metadata files carry themselves — a duplicate on
+  `UQ_QueryParameter_QueryID_Name` — and **rolls the entire push back**. An MJ defect, not a defect in
+  this repo's metadata.
+
+  The queries and their parameters are in the database and complete, so nothing is broken for reading the
+  reports. What is broken is CHANGING them: the file is the only correct copy and a push cannot carry an
+  edit across. That is why `metadata/queries/SQL/slippage.sql`'s fix was applied by updating the live
+  `Query.SQL` directly (DN-18/DN-19) — a workaround for THIS bullet, not evidence that the bullet above
+  regressed. Worth knowing before anyone reads that failure as the
   queries not having landed — they have. Verify with a count, not with the push's exit code.
 
 ---
