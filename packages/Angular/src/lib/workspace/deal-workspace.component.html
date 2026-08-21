@@ -267,14 +267,19 @@
                   <option [ngValue]="a.ID">{{ a.Name }}</option>
                 }
               </select>
-              <!-- RELATED record: opens as its own Explorer tab, not in this workspace. -->
+              <!-- OPEN goes to an Explorer tab: an account outlives the deal and is edited on its own
+                   terms. CREATE opens a slide-in and selects the result back into this field, because
+                   S-US1 says the rep can do it without leaving the deal. Hidden when the field is not
+                   editable, so a locked deal cannot create a record it would then fail to attach. -->
               <span class="dw-related">
                 @if (deal.AccountID) {
                   <button type="button" class="dw-linkbtn"
                           (click)="OpenRelated(AccountEntity, deal.AccountID)">Open account</button>
                 }
-                <button type="button" class="dw-linkbtn"
-                        (click)="CreateRelated(AccountEntity)">New account</button>
+                @if (IsFieldEditable('AccountID')) {
+                  <button type="button" class="dw-linkbtn"
+                          (click)="CreateRelated(AccountEntity, 'AccountID')">New account</button>
+                }
               </span>
             </label>
 
@@ -286,14 +291,16 @@
                   <option [ngValue]="c.ID">{{ c.Name }}</option>
                 }
               </select>
-              <!-- RELATED record: opens as its own Explorer tab, not in this workspace. -->
+              <!-- Same split as the customer field above: OPEN leaves, CREATE does not. -->
               <span class="dw-related">
                 @if (deal.PrimaryContactID) {
                   <button type="button" class="dw-linkbtn"
                           (click)="OpenRelated(ContactEntity, deal.PrimaryContactID)">Open contact</button>
                 }
-                <button type="button" class="dw-linkbtn"
-                        (click)="CreateRelated(ContactEntity)">New contact</button>
+                @if (IsFieldEditable('PrimaryContactID')) {
+                  <button type="button" class="dw-linkbtn"
+                          (click)="CreateRelated(ContactEntity, 'PrimaryContactID')">New contact</button>
+                }
               </span>
             </label>
 

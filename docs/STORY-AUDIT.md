@@ -53,7 +53,7 @@ The rule for this pass was *prove met criteria against the database, not the scr
 
 | Issue | Verdict |
 |---|---|
-| **#33** S-US1 Create a deal record | **partially met** — 3 of 5 met outright, 2 partially: line removal (upstream) and inline create-and-return |
+| **#33** S-US1 Create a deal record | **partially met** — 4 of 5 met; the one gap left is line removal, which is upstream (KI-20) |
 | **#34** S-US2 Contract + tasks on Closed Won (B2B) | **partially met** — contract and both tasks are real; two field-level criteria are upstream gaps |
 | **#35** S-US3 Order-review task on Closed Won | **met** |
 | **#114** S-US4 Add and manage deal line items | **partially met** — add and edit work; removal is dropped upstream |
@@ -76,7 +76,7 @@ ours is #33's inline create-and-return.
 | Creating a deal creates its embedded order in Draft, same action | **met** | `DealEntityServer.ts:480` `provisionEmbeddedOrder()`; declared at `deal-entity.ts:155`. `save-deal.SD18`. **E1: 7/7 seeded deals carry an order**, each Draft unless a stage moved it. |
 | Adding a line creates an order line; removing removes it | **partially met** | Add and edit: `save-deal.SD1`, `SD14` (two levels down, one save). **Removal is silently dropped** — `save-deal.SD6` is a tripwire pinned to the current wrong behaviour, cause diagnosed in orders' `savePendingLines`, `docs/KNOWN-ISSUES.md` KI-20. |
 | No deal-level line-item records exist anywhere | **met** | **E2: no table matches `%DealLine%`, no entity matches `Deal Line`.** The only surviving occurrence of the name is `Pipeline.RequiresDealLines`, a policy flag choosing priced vs header-only mode — not a record. |
-| The rep can create the account or contact inline without leaving the deal workspace | **partially met** | `deal-workspace.component.ts:473` `CreateRelated()` calls `nav.OpenNewEntityRecord()`. **The rep does leave** — it is a new Explorer tab — and the new record is not returned to the picker. See finding (a). |
+| The rep can create the account or contact inline without leaving the deal workspace | **met, after a fix in this session** | `CreateRelated()` now opens a **slide-in** via `MJFormPresenterService` — the pattern `OpenLineDetail` already established — reads the created record from `AfterSaved()`, reloads the lookups, and selects it into the field it was launched from. The workspace never goes away. See finding (a). |
 | The owner column matches the Owner-role team member **and cannot be edited directly** | **met, after a fix in this session** | Matches: `DealEntityServer.ts:1021` `stampOwnerFromTeam()`, `save-deal.SD3`. **Cannot be edited directly: was NOT met, now is** — `ownerStampEditRefusal()`, `SD26`, `M-OW1`. See finding (b). |
 
 **Three more items from the story body, not in its checklist:**
@@ -110,10 +110,31 @@ deliberate design position rather than an oversight. **The finding stands anyway
 *without leaving the deal workspace*, and a new Explorer tab is leaving. The rep must create the account, come
 back, reopen the picker, and select it.
 
-That reasoning is sound about *silent* selection. It is not an argument against **returning the record** — a
-modal or slide-in resolving to the created id would satisfy both the criterion and the concern. That is real
-work (MJ offers no app-level create-and-return primitive this surface can call today), so it is named here
-rather than quietly done.
+That reasoning is sound about *silent* selection. It is not an argument against **returning the record**.
+
+**FIXED in this session, and the old reasoning was half right rather than wrong.** The claim that there is
+no reliable moment to come back at was a fact about the TAB, not about the problem: a tab has no lifecycle
+the component can await, so there genuinely was no moment. A slide-in has exactly that moment.
+
+`CreateRelated()` now uses `MJFormPresenterService.Open` with `Presentation: 'slide-in'` and no
+`RecordId` — the presenter's own contract for a new record — which is the same pattern `OpenLineDetail`
+established for order lines. `AfterSaved()` resolves with the created `BaseEntity`, so the id is available
+without guessing. My earlier note that "MJ offers no app-level create-and-return primitive" was **wrong**:
+the primitive was already in use in this file, one method away, for child records.
+
+Three details that are not incidental:
+
+* **The lookups reload BEFORE the value is assigned.** A `<select>` holding a value with no matching
+  `<option>` renders blank, so the other order shows an empty picker for one change-detection pass — which
+  reads exactly like the create having failed.
+* **The label is re-read rather than composed.** `SalesAccount` IS an Organization and `SalesContact` IS a
+  Person (same UUID), so a lookup's display name comes from the parent row through the view, and contacts'
+  is assembled from `FirstName`/`LastName` by the service. Guessing it locally could disagree with the
+  database; re-reading cannot.
+* **The half of the old reasoning worth keeping is kept.** An explicit `switch` over a
+  `DealRelatedTarget` union writes only the field the rep launched from — never a field they were not
+  looking at. The create button is also now hidden when that field is not editable, so a locked deal
+  cannot create a record it would then fail to attach; it was previously offered unconditionally.
 
 ---
 
@@ -340,8 +361,9 @@ Done during this session, kept here so the trail is legible:
 
 Still open, ours:
 
-6. **Create-and-return for the inline account/contact picker** (finding (a)). Needs an MJ-level primitive
-   this surface does not have, so it is a real piece of work rather than a fix.
+6. ~~**Create-and-return for the inline account/contact picker**~~ **DONE** — a slide-in via
+   `MJFormPresenterService`, the pattern already in this file. My note that MJ lacked the primitive was
+   wrong; it was one method away.
 7. **Rename `Pipeline.RequiresDealLines`** → `RequiresOrderLines`. Cosmetic, but it is the last place the
    retired table's name survives, and a reader will misread a policy flag as a pointer to a table.
    Independently raised on the closewon-tasks branch as `D-3`, which is some evidence it misleads.

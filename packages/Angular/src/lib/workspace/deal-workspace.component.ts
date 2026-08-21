@@ -143,6 +143,15 @@ interface OpenDeal {
  */
 type DealDateField = 'ExecutionDate' | 'StartDate' | 'ExpectedCloseDate' | 'NextStepDate';
 
+/**
+ * The deal fields a created-inline record may be selected into.
+ *
+ * A UNION rather than a plain `string`, so the template cannot ask for a field that does not exist and
+ * `CreateRelated`'s switch is exhaustive by construction. Both names are also `Deal` field names, which is
+ * what lets `IsFieldEditable` gate the create button with the same rule that gates the picker itself.
+ */
+export type DealRelatedTarget = 'AccountID' | 'PrimaryContactID';
+
 @Component({
     standalone: true,
     selector: 'mjs-deal-workspace',
@@ -468,18 +477,93 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     /**
-     * Creates a new account or contact without leaving the deal being composed.
+     * Creates a new account or contact IN A SLIDE-IN, and selects it back into the field that launched it.
      *
      * THE CASE THIS EXISTS FOR: a rep is entering a deal for a customer that is not in the system yet.
-     * Before this, the only route was to abandon the draft, go and create the account, and start again.
+     * Before any of this, the only route was to abandon the draft, go and create the account, and start
+     * again.
      *
-     * It deliberately does NOT try to select the new record back into the picker afterwards. The record
-     * opens in its own tab, so there is no reliable moment to come back at, and a picker that silently
-     * changed while the rep was elsewhere is worse than one they set themselves. Reopening the picker
-     * after creating shows the new row, because the lookups reload with the surface.
+     * ── WHY THIS REPLACED AN EXPLORER TAB, AND WHY THE OLD REASONING WAS ONLY HALF RIGHT ────────────
+     *
+     * The previous version called `nav.OpenNewEntityRecord()` and deliberately returned nothing to the
+     * picker. Its argument was that there is no reliable moment to come back at, and that a picker which
+     * silently changed while the rep was elsewhere is worse than one they set themselves.
+     *
+     * The second half of that is sound and is preserved below — this only ever writes the field the rep
+     * launched from, never a field they were not looking at. The first half was a consequence of the
+     * TAB, not a fact about the problem: a tab has no lifecycle this component can await, so there
+     * genuinely was no moment. A slide-in has exactly that moment. `AfterSaved()` resolves with the
+     * created record, over a workspace that never went away — so the rep is still looking at the field
+     * when it fills in, which is the opposite of a silent change.
+     *
+     * And S-US1's criterion is *without leaving the deal workspace*. A new Explorer tab is leaving, and
+     * it left the rep to navigate back and re-find a record they had just made.
+     *
+     * ── THE PATTERN IS THE ONE ALREADY HERE ─────────────────────────────────────────────────────────
+     *
+     * {@link OpenLineDetail} established it: `MJFormPresenterService.Open` with
+     * `Presentation: 'slide-in'`. Omitting `RecordId` is what makes it a NEW record — the presenter's own
+     * contract, not a trick. The only difference is that this reads the resolved record rather than
+     * discarding it.
+     *
+     * ── WHY THE LOOKUPS ARE RELOADED RATHER THAN APPENDED TO ────────────────────────────────────────
+     *
+     * Setting the id alone would leave the `<select>` holding a value with no matching `<option>`, which
+     * renders BLANK — the rep would see an empty picker having just created the thing in it, and conclude
+     * it had not worked. Appending a row locally would fix the display, but the label a lookup shows is
+     * not the child's to give: `SalesAccount` IS an Organization and `SalesContact` IS a Person (same
+     * UUID), so the name comes from the parent row through the view, and contacts' display name is
+     * composed from `FirstName`/`LastName` by the service. Re-reading is one round trip on an infrequent
+     * action and it cannot disagree with the database. Guessing the label could.
+     *
+     * Nothing is prefilled onto the new record. There is an obvious candidate — pointing a new contact at
+     * the deal's account — and it is deliberately not done: `SalesContact` extends `Person`, and which
+     * field would carry that association is a question for whoever owns the identity model, not something
+     * to invent from a picker.
      */
-    public CreateRelated(entityName: string): void {
-        this.nav.OpenNewEntityRecord(entityName);
+    public async CreateRelated(entityName: string, target: DealRelatedTarget): Promise<void> {
+        const deal = this.Deal;
+        if (!deal || !this.IsFieldEditable(target)) {
+            return;   // a locked deal must not create a record it then cannot attach
+        }
+
+        const ref = this.forms.Open({
+            EntityName: entityName,
+            Presentation: 'slide-in',
+            EditMode: true,
+            Title: entityName === this.AccountEntity ? 'New customer' : 'New contact',
+        });
+
+        const created = await ref.AfterSaved();
+        if (!created) {
+            return;   // cancelled — writing the field here would invent a selection
+        }
+
+        const id = String(created.Get('ID') ?? '');
+        if (!id) {
+            this.Fail('The record was saved but returned no ID, so it could not be selected.');
+            return;
+        }
+
+        // Reload FIRST, so the option exists before the value that needs it. The other order renders a
+        // blank picker for one change-detection pass, which reads exactly like a failure.
+        this.Lookups = await this.service.LoadLookups();
+
+        /**
+         * An explicit switch rather than `deal[target] = id`. Two reasons, and the second is the one
+         * that matters: a dynamic write would need an index signature or a cast, and this repo does not
+         * take casts to satisfy the compiler; and being explicit is what guarantees this can only ever
+         * write the field the rep launched from, which is the half of the old reasoning worth keeping.
+         */
+        switch (target) {
+            case 'AccountID':
+                deal.AccountID = id;
+                break;
+            case 'PrimaryContactID':
+                deal.PrimaryContactID = id;
+                break;
+        }
+        this.Touch();
     }
 
     // ── The child collections ──────────────────────────────────────────────────
