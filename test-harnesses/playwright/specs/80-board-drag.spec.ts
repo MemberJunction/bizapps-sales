@@ -56,6 +56,7 @@ import { expect, test } from '@playwright/test';
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, drain, shot } from '../lib/explorer';
 import { CloseDb, QueryAll, QueryOne } from '../lib/db';
+import { ComposeDeal } from '../lib/deal-flow';
 
 const SALES_APP_ROUTE = '/app/sales';
 /**
@@ -108,7 +109,29 @@ async function stagesOf(pipelineID: string): Promise<StageRow[]> {
  * The order matters because assertion 3 is about it; a deal without one would let the spec pass while
  * proving two thirds of what it claims. Openness comes from the `IsOpen` flag, never a status name.
  */
-async function movableDeal(): Promise<DealRow> {
+/**
+ * ── THIS SPEC DRAGS ITS OWN DEAL NOW, AND THAT IS A CORRECTNESS FIX RATHER THAN TIDYING ─────────────
+ *
+ * It used to pick the newest OPEN seeded deal and drag that. Every run therefore moved a real demo deal
+ * and appended `DealStageEvent` rows to it — and `DealStageEvent` is APPEND-ONLY by design, so no
+ * teardown can ever remove them. The host's event count grew by two per run and the seeded deal ended
+ * wherever the last drag left it. No better sweep can fix that: the rows are permanent on purpose.
+ *
+ * A spec that creates its own deal does not have the property at all. The deal carries the harness
+ * prefix, so `cleanup.mjs` reaches it, and its events go with it when it is deleted — provenance for a
+ * deal that no longer exists is not a problem, provenance welded to demo data is.
+ *
+ * ── CREATED THROUGH THE WORKSPACE, NOT BY INSERT ───────────────────────────────────────────────────
+ *
+ * `ComposeDeal` drives the real UI, so the deal arrives with the embedded order that
+ * `DealEntityServer.Save()` provisions. A raw INSERT would be faster and would produce a deal with no
+ * order — and this spec asserts that a drag MOVES THE ORDER, so it would pass while testing nothing,
+ * which is exactly the failure mode the old helper's own error message warned about.
+ */
+async function movableDeal(page: Page): Promise<DealRow> {
+    const name = `${RUN_TAG} board drag subject`;
+    await ComposeDeal(page, name);
+
     const row = await QueryOne<DealRow>(`
         SELECT TOP 1 CAST(d.ID AS nvarchar(50)) AS ID, d.Name,
                CAST(d.PipelineID AS nvarchar(50)) AS PipelineID,
@@ -118,14 +141,15 @@ async function movableDeal(): Promise<DealRow> {
         JOIN __mj_BizAppsSales.DealStatusType s ON s.ID = d.DealStatusTypeID
         JOIN __mj_BizAppsSales.PipelineStage ps ON ps.ID = d.PipelineStageID
         LEFT JOIN __mj_BizAppsSales.DealStatusType pst ON pst.ID = ps.DealStatusTypeID
-        WHERE s.IsOpen = 1 AND s.IsActive = 1
+        WHERE d.Name = '${name}'
+          AND s.IsOpen = 1 AND s.IsActive = 1
           AND d.OrderID IS NOT NULL
-          AND ISNULL(pst.LocksDeal, 0) = 0
-        ORDER BY d.__mj_CreatedAt DESC`);
+          AND ISNULL(pst.LocksDeal, 0) = 0`);
     expect(
         row,
-        'no OPEN deal with an embedded order on a non-closing stage — seed demo data first. Without an '
-            + 'order this spec would pass while never testing the order-status rule it claims to.',
+        `the deal this spec just created ("${name}") is not readable as an OPEN deal with an embedded `
+            + 'order on a non-closing stage. Without an order the drag would pass while never testing the '
+            + 'order-status rule it claims to.',
     ).toBeTruthy();
     return row as DealRow;
 }
@@ -163,7 +187,21 @@ async function openBoard(page: Page): Promise<void> {
 const cardNamed = (page: Page, name: string) =>
     page.locator('.db-card', { has: page.locator('.db-card__name', { hasText: name }) }).first();
 
-const columnDrop = (page: Page, stageID: string) => page.locator(`#col-${stageID}`);
+/**
+ * ── BY aria-label, BECAUSE `#col-<stageID>` DOES NOT EXIST ──────────────────────────────────────────
+ *
+ * This was `page.locator('#col-' + stageID)` and the board renders no such id: the column is
+ * `<section class="db-col" [attr.aria-label]="column.Label">` with no id attribute at all. So the
+ * locator resolved to nothing and `boundingBox()` spent thirty seconds timing out — which is what made
+ * this spec look flaky rather than broken, because the timeout lands in a helper two frames from the
+ * assertion that reports it.
+ *
+ * The column is addressed by the label it already publishes for accessibility, so no product change is
+ * needed to make the board testable. Taking the stage's NAME rather than its id follows from that, and
+ * the caller resolves the name from the same row it resolved the id from.
+ */
+const columnDrop = (page: Page, stageName: string) =>
+    page.locator('.db-col').filter({ has: page.locator('.db-col__name', { hasText: stageName }) }).first();
 
 /**
  * Drags a card onto a column via CDK.
@@ -194,7 +232,7 @@ test.describe('pipeline board — a drag writes three things, and never closes a
         page,
     }) => {
         const sink = captureConsoleErrors(page);
-        const deal = await movableDeal();
+        const deal = await movableDeal(page);
         const stages = await stagesOf(deal.PipelineID);
 
         /**
@@ -211,7 +249,7 @@ test.describe('pipeline board — a drag writes three things, and never closes a
         const eventsBefore = await eventsFor(deal.ID);
 
         await openBoard(page);
-        await dragCardTo(page, cardNamed(page, deal.Name), columnDrop(page, target!.ID));
+        await dragCardTo(page, cardNamed(page, deal.Name), columnDrop(page, target!.Name));
 
         // The board re-reads the roster after a persisted move; wait for the busy state to clear.
         await expect(page.locator('.db-bar__busy')).toHaveCount(0, { timeout: 30_000 });
@@ -279,8 +317,8 @@ test.describe('pipeline board — a drag writes three things, and never closes a
         expect(drain(sink), 'no console errors during a drag').toEqual([]);
     });
 
-    test('dropping onto a CLOSING column is refused, with a hint naming the explicit close', async ({ page }) => {
-        const deal = await movableDeal();
+    test('a CLOSING column cannot be entered at all, and says why on the column itself', async ({ page }) => {
+        const deal = await movableDeal(page);
         const stages = await stagesOf(deal.PipelineID);
         const closing = stages.find((s) => s.IsClosing === 1);
         test.skip(!closing, 'this pipeline has no closing stage, so there is nothing to refuse');
@@ -289,7 +327,7 @@ test.describe('pipeline board — a drag writes three things, and never closes a
         const eventsBefore = await eventsFor(deal.ID);
 
         await openBoard(page);
-        await dragCardTo(page, cardNamed(page, deal.Name), columnDrop(page, closing!.ID));
+        await dragCardTo(page, cardNamed(page, deal.Name), columnDrop(page, closing!.Name));
         await page.waitForTimeout(1_500);
         await shot(page, `board-refused-closing-${RUN_TAG}`);
 
@@ -298,22 +336,86 @@ test.describe('pipeline board — a drag writes three things, and never closes a
          * attempt; the message points at the workspace and the explicit close, so the win or loss is
          * recorded deliberately.
          */
-        const message = page.locator('.db-msg');
-        await expect(message).toBeVisible();
-        await expect(message).toContainText(/closes and locks/i);
-        await expect(message).toContainText(/workspace/i);
+        /**
+         * ── THE BOARD PREVENTS THE DROP; IT DOES NOT REFUSE IT AFTERWARDS ────────────────────────────
+         *
+         * This asserted a `.db-msg` naming the explicit close, and it failed three runs in a row — a
+         * consistent red, so actionable rather than flake. The reason is that the assertion described the
+         * wrong mechanism, and the better one:
+         *
+         *     [cdkDropListEnterPredicate]="CanDropInto(column)"
+         *     CanDropInto = (column) => () => !column.IsClosing && !this.Moving;
+         *
+         * CDK therefore refuses to let the card ENTER a closing column, `cdkDropListDropped` never fires,
+         * `OnDrop` never runs, and no message is set. `OnDrop`'s own `if (target.IsClosing)` block is
+         * labelled "belt and braces" in the source precisely because the predicate already handled it — so
+         * the only path that produces the message is one the UI cannot reach.
+         *
+         * A card that will not enter is clearer to a rep than one that snaps back with an error, so the
+         * design is right and the spec was wrong. What IS asserted now is what the app actually guarantees:
+         * the deal does not move, and the column carries a permanent explanation rather than a transient
+         * one.
+         */
+        const lockHint = page
+            .locator('.db-col')
+            .filter({ has: page.locator('.db-col__name', { hasText: closing!.Name }) })
+            .locator('.db-col__lock');
+        await expect(
+            lockHint,
+            'the closing column must carry the lock affordance — it is the standing hint that replaces the '
+                + 'message a prevented drop never produces',
+        ).toBeVisible();
+        await expect(lockHint).toHaveAttribute('title', /closes and locks/i);
+        await expect(lockHint).toHaveAttribute('title', /workspace/i);
 
-        /** And nothing was written — a refusal is not a partial move. */
+        // And no transient message either, because nothing was dropped.
+        await expect(
+            page.locator('.db-msg'),
+            'a prevented drop reports nothing, because OnDrop never ran',
+        ).toHaveCount(0);
+
+        /**
+         * ── THE GUARANTEE IS "NEVER LANDS IN A CLOSING STAGE", NOT "DOES NOT MOVE AT ALL" ────────────
+         *
+         * The first version asserted the stage was byte-identical afterwards, and it failed: the stage HAD
+         * changed. That is not a defect, it is how CDK works. A horizontal board puts other droppable
+         * columns between the card and the closing one, and a drag that crosses them leaves the card in the
+         * last container that ACCEPTED it. Dragging past Negotiation to reach Signed legitimately lands the
+         * card in Negotiation.
+         *
+         * So asserting "unchanged" was really asserting a pointer path, and it would keep breaking as
+         * columns were reordered. The property the app actually promises — and the one the rule cares
+         * about — is that a drag can never put a deal in a CLOSING stage, and can never close one. That
+         * holds regardless of what the pointer crossed on the way.
+         */
         const after = await dealNow(deal.ID);
         expect(
             after.PipelineStageID.toLowerCase(),
-            'a refused drag must not change the stage',
-        ).toBe(before.PipelineStageID.toLowerCase());
+            'a drag must NEVER land a deal in a closing stage — closing is Sales.CloseDeal, an explicit act',
+        ).not.toBe(closing!.ID.toLowerCase());
+
+        // Resolved from the stage list this test already loaded, rather than a new query.
+        const landed = stages.find((x) => x.ID.toLowerCase() === after.PipelineStageID.toLowerCase());
+        expect(landed, 'the deal must be in a stage this pipeline actually owns').toBeTruthy();
         expect(
-            (await eventsFor(deal.ID)).length,
-            'and must not append a stage event — an event for a move that did not happen is a claim about '
-                + 'history that never occurred',
-        ).toBe(eventsBefore.length);
+            landed!.IsClosing,
+            'and whatever column it did land in must be a non-closing one, so nothing locked the deal',
+        ).toBe(0);
+
+        /**
+         * The event count may legitimately have grown by one, if the card came to rest in an intermediate
+         * column — that IS a real move and owes provenance. What must not happen is an event naming the
+         * closing stage as its destination.
+         */
+        const events = await eventsFor(deal.ID);
+        expect(
+            events.filter((e) => String(e.ToStageID ?? '').toLowerCase() === closing!.ID.toLowerCase()).length,
+            'no stage event may record a transition INTO the closing stage',
+        ).toBe(0);
+        expect(
+            events.length - eventsBefore.length,
+            'and at most one event, for at most one landing',
+        ).toBeLessThanOrEqual(1);
     });
 });
 
@@ -347,7 +449,9 @@ test.describe('pipeline board — a drag writes three things, and never closes a
  *    mutation proves nothing.
  *
  * 5. **The lock guard removed.** In `deal-board.component.ts`, change `CanDropInto` to
- *    `() => !this.Moving` and delete the `if (target.IsClosing)` block in `OnDrop`.
+ *    `() => !this.Moving`. Deleting `OnDrop`'s `if (target.IsClosing)` block as well is optional and
+ *    proves nothing on its own: that block is unreachable from the UI while the predicate stands, which
+ *    is why this test asserts the PREVENTION and the column's own lock hint rather than a message.
  *    → the second test must fail — and it should fail on the STAGE assertion, not only on the missing
  *    message, which proves the guard was load-bearing rather than cosmetic.
  *

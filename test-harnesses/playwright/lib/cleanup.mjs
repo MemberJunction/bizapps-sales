@@ -39,8 +39,20 @@ const REPO_ROOT = path.resolve(HERE, '..', '..', '..');
  *
  * A prefix list rather than a wildcard: the point is that only rows a harness created are deletable, and
  * a pattern loose enough to catch anything would eventually catch a real deal.
+ *
+ * ── THE LIST IS DERIVED FROM THE SPECS, NOT GUESSED ────────────────────────────────────────────────
+ *
+ * Every tag was collected by grepping the specs for their own `RUN`/`RUN_TAG` constants, which turned up
+ * SIX distinct prefixes where this file had two: `PW-`, `TS-`, `BD-`, `AT-`, `CL-`, `RT-`. Each addition
+ * so far has been discovered the same way — by finding rows left on the host — so the grep is the
+ * maintenance instruction:
+ *
+ *     grep -rhoE "const RUN(_TAG)? = .[A-Za-z-]+" test-harnesses/playwright/specs/*.ts
+ *
+ * A spec that invents a seventh tag and does not add it here leaks silently, which is why the sweep
+ * REPORTS its remaining counts rather than just running.
  */
-const PREFIXES = ['PW-', 'TS-'];
+const PREFIXES = ['PW-', 'TS-', 'BD-', 'AT-', 'CL-', 'RT-'];
 const PREFIX = PREFIXES.join('/');
 const quiet = process.argv.includes('--quiet');
 
@@ -83,29 +95,30 @@ function readEnv() {
  */
 const SQL = `
 SET NOCOUNT ON;
-DECLARE @p NVARCHAR(50) = N'${PREFIXES[0]}%';
-DECLARE @p2 NVARCHAR(50) = N'${PREFIXES[1]}%';
+-- One table variable rather than N parameters, so the list length is not baked into the SQL.
+DECLARE @pfx TABLE (P NVARCHAR(50) PRIMARY KEY);
+INSERT INTO @pfx (P) VALUES ${PREFIXES.map((x) => `(N'${x}%')`).join(', ')};
 
 -- Captured BEFORE the deal rows go: Deal.OrderID is the only link to the provisioned order.
 DECLARE @orders TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
 INSERT INTO @orders (ID)
   SELECT DISTINCT OrderID FROM __mj_BizAppsSales.Deal
-   WHERE (Name LIKE @p OR Name LIKE @p2) AND OrderID IS NOT NULL;
+   WHERE (EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P)) AND OrderID IS NOT NULL;
 
 DELETE ps FROM __mj_BizAppsSales.DealPaymentSchedule ps
-  JOIN __mj_BizAppsSales.Deal d ON ps.DealID = d.ID WHERE d.Name LIKE @p OR d.Name LIKE @p2;
+  JOIN __mj_BizAppsSales.Deal d ON ps.DealID = d.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE d.Name LIKE P);
 DELETE tm FROM __mj_BizAppsSales.DealTeamMember tm
-  JOIN __mj_BizAppsSales.Deal d ON tm.DealID = d.ID WHERE d.Name LIKE @p OR d.Name LIKE @p2;
+  JOIN __mj_BizAppsSales.Deal d ON tm.DealID = d.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE d.Name LIKE P);
 DELETE se FROM __mj_BizAppsSales.DealStageEvent se
-  JOIN __mj_BizAppsSales.Deal d ON se.DealID = d.ID WHERE d.Name LIKE @p OR d.Name LIKE @p2;
+  JOIN __mj_BizAppsSales.Deal d ON se.DealID = d.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE d.Name LIKE P);
 DELETE cr FROM __mj_BizAppsSales.DealContactRole cr
-  JOIN __mj_BizAppsSales.Deal d ON cr.DealID = d.ID WHERE d.Name LIKE @p OR d.Name LIKE @p2;
+  JOIN __mj_BizAppsSales.Deal d ON cr.DealID = d.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE d.Name LIKE P);
 
-DELETE FROM __mj_BizAppsSales.Deal WHERE Name LIKE @p OR Name LIKE @p2;
+DELETE FROM __mj_BizAppsSales.Deal WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
 
 DELETE ps FROM __mj_BizAppsSales.PipelineStage ps
-  JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE p.Name LIKE @p OR p.Name LIKE @p2;
-DELETE FROM __mj_BizAppsSales.Pipeline WHERE Name LIKE @p OR Name LIKE @p2;
+  JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE p.Name LIKE P);
+DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
 
 -- The embedded orders, now that no deal references them. Line children first.
 -- OrderHeaderID, not OrderID: orders names the FK for the table it points at. Worth stating because
@@ -116,8 +129,8 @@ DELETE pc FROM __mj_BizAppsOrders.OrderLinePriceComponent pc
 DELETE ol FROM __mj_BizAppsOrders.OrderLine ol JOIN @orders o ON ol.OrderHeaderID = o.ID;
 DELETE oh FROM __mj_BizAppsOrders.OrderHeader oh JOIN @orders o ON oh.ID = o.ID;
 
-SELECT 'remaining_deals=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE Name LIKE @p OR Name LIKE @p2;
-SELECT 'remaining_pipelines=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Pipeline WHERE Name LIKE @p OR Name LIKE @p2;
+SELECT 'remaining_deals=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
+SELECT 'remaining_pipelines=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
 SELECT 'remaining_orders=' + CAST(COUNT(*) AS varchar)
   FROM __mj_BizAppsOrders.OrderHeader oh JOIN @orders o ON oh.ID = o.ID;
 `;
