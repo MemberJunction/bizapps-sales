@@ -84,6 +84,7 @@ import './checks/close-won-contract.checks.js';
 import './checks/board-move.checks.js';
 import './checks/close-won-tasks.checks.js';
 import './checks/activities.checks.js';
+import './checks/forecast.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
@@ -93,4 +94,5 @@ export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
 export { BoardMoveChecks } from './checks/board-move.checks.js';
 export { CloseWonTasksChecks } from './checks/close-won-tasks.checks.js';
 export { ActivitiesChecks } from './checks/activities.checks.js';
+export { ForecastChecks } from './checks/forecast.checks.js';
 export * from './fixture.js';

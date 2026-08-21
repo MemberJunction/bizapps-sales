@@ -20,6 +20,10 @@ where `docs/DECISIONS.md` records a ruling that supersedes it.
 - **`docs/DECISIONS.md`** — the rulings that govern this app, each with its reasoning. Includes one
   documented divergence from the master plan (`ForecastSnapshot` column names, D6).
 - **`docs/KNOWN-ISSUES.md`** — live risks that cannot be fixed from this repo.
+- **`docs/INTEGRATION-LOG.md`** — which branch HEAD each integration consumed, and the expected shape it
+  was checked against. Read it before merging feature branches together: twice an integration has been
+  reported complete against branch names while the branches had moved on, and the second time it was
+  green while missing an entire story's read model. A green suite cannot detect work that never arrived.
 
 > ## ⚠️ KNOWN ISSUE — read before touching the IsA extensions
 >

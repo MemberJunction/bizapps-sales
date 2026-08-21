@@ -163,13 +163,12 @@ export class MSGraphCalendarSource implements IActivitySource {
         }
 
         /**
-         * A CANCELLED MEETING IS STILL A FACT, and is captured rather than dropped — "they cancelled" is
-         * something a rep wants on the timeline. It is carried as a `Cancelled` marker in `Raw` for a
-         * surface to badge; `Activity.Status` is set by the ingest, which does not yet branch on it. That
-         * is a deliberate stopping point rather than a miss: mapping cancellation onto
-         * `Activity.Status = 'Cancelled'` would need the ingest to stop hardcoding `'Completed'`, and
-         * whether a cancelled meeting should read as Cancelled or as Completed-and-noted is a product
-         * question. See D-25.
+         * A CANCELLED MEETING IS STILL A FACT, and is captured rather than dropped -- "they
+         * cancelled" is something a rep wants on the timeline.
+         *
+         * It is reported on `NormalizedItem.Cancelled`, and the ingest maps that to
+         * `Activity.Status = 'Cancelled'` (D-25). Storing it as `Completed` was the earlier
+         * behaviour and was simply wrong: a meeting that did not happen is not a completed activity.
          */
         const participants: ItemParticipant[] = [];
         const organizer = normalize(event.organizer?.emailAddress?.address);
@@ -220,7 +219,8 @@ export class MSGraphCalendarSource implements IActivitySource {
              */
             Direction: 'Internal',
             Participants: participants,
-            Raw: { ...event, iCalUId: event.iCalUId ?? null, Cancelled: event.isCancelled === true },
+            Cancelled: event.isCancelled === true,
+            Raw: { ...event, iCalUId: event.iCalUId ?? null },
         };
     }
 }

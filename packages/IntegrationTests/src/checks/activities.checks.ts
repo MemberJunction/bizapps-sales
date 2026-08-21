@@ -177,6 +177,7 @@ function item(overrides: Partial<NormalizedItem> = {}): NormalizedItem {
             { Address: FIXTURE_ADDRESS, Name: 'Fixture Contact', Role: 'From' },
             { Address: STRANGER_ADDRESS, Name: null, Role: 'To' },
         ],
+        Cancelled: false,
         Raw: { fixture: true },
         ...overrides,
     };
@@ -1049,6 +1050,59 @@ export const ActivitiesChecks: NamedCheck[] = [
                     await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx)),
                     0,
                     'nor touch the deal',
+                );
+            }),
+    },
+    {
+        Id: 'activities.AC18',
+        Name: 'AC18: a CANCELLED meeting is stored Cancelled, not Completed (D-25)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+                await giveContactAnAddress(ctx, deal.ContactID);
+                const connectionID = await makeConnection(ctx, null);
+
+                const cancelled = item({
+                    ExternalID: 'ac18-cancelled',
+                    TypeCode: 'Meeting',
+                    Subject: 'AC18 meeting that did not happen',
+                    Direction: 'Internal',
+                    Cancelled: true,
+                });
+                const held = item({
+                    ExternalID: 'ac18-held',
+                    TypeCode: 'Meeting',
+                    Subject: 'AC18 meeting that did happen',
+                    Direction: 'Internal',
+                    StartedAt: new Date('2026-08-18T10:00:00.000Z'),
+                });
+
+                const run = await ingest.RunSync(
+                    connectionID,
+                    new FixtureActivitySource([held, cancelled], 'Calendar'),
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+                Assert(run.Success, `the run failed — ${run.Issues.join(' | ')}`);
+                AssertEqual(run.Written, 2, 'both meetings were filed — a cancellation is still a fact');
+
+                const [off] = await rows(ctx, E_ACTIVITY, `ExternalID = 'ac18-cancelled'`);
+                const [on] = await rows(ctx, E_ACTIVITY, `ExternalID = 'ac18-held'`);
+                Assert(!!off && !!on, 'both activities must resolve to rows');
+
+                AssertEqual(
+                    String(off['Status']),
+                    'Cancelled',
+                    'a meeting that did not happen is NOT a completed activity — CK_Activity_Status already '
+                        + 'allows Cancelled, so nothing had to be invented',
+                );
+                AssertEqual(String(on['Status']), 'Completed', 'and one that did happen still reads Completed');
+                Assert(
+                    off['Outcome'] === null,
+                    'Outcome stays NULL: the nearest seeded value is NoShow, which means a meeting went ahead '
+                        + 'and somebody failed to attend — a different fact, and a false one here',
                 );
             }),
     },

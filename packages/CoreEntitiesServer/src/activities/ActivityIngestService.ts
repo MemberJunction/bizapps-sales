@@ -241,7 +241,20 @@ export class ActivityIngestService {
                     EndedAt: item.EndedAt,
                     Location: item.Location,
                     Direction: item.Direction,
-                    Status: 'Completed',
+                    /**
+                     * D-25, DECIDED: a cancelled meeting is `Cancelled`, not `Completed`.
+                     *
+                     * A meeting that did not happen is not a completed activity, and anyone reading a
+                     * timeline would be misled by one that says it was. `CK_Activity_Status` already
+                     * allows `'Cancelled'`, so this needs no new vocabulary -- the value was there and
+                     * the earlier version simply was not using it.
+                     *
+                     * `Outcome` is deliberately left NULL. The nearest seeded outcome is `NoShow`, and
+                     * that is a DIFFERENT fact: a no-show is a meeting that went ahead and somebody
+                     * failed to attend. Reusing it for a meeting called off in advance would put a
+                     * false claim in a column reports read.
+                     */
+                    Status: item.Cancelled ? 'Cancelled' : 'Completed',
                     /**
                      * `Integration`, never `Manual` — and only when the source actually contacted a
                      * remote. A fixture run writes `System`, so a database can never be read as holding

@@ -69,6 +69,18 @@ export interface NormalizedItem {
     Location: string | null;
     Direction: ActivityDirection;
     Participants: ItemParticipant[];
+    /**
+     * The item was called off and did not happen.
+     *
+     * A FIRST-CLASS FIELD rather than something to dig out of `Raw`, because the ingest branches on
+     * it: `CK_Activity_Status` already allows `'Cancelled'`, so a cancelled meeting is recorded as
+     * cancelled rather than as completed. Left in `Raw` it would have been a fact nothing could act
+     * on without knowing which provider shape to look inside.
+     *
+     * Always false for messages: a sent mail cannot be un-sent.
+     */
+    Cancelled: boolean;
+
     /** The provider payload, verbatim. Stringified into `Activity.Details`. */
     Raw: Record<string, unknown>;
 }

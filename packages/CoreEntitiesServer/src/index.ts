@@ -78,6 +78,16 @@ export * from './activities/DealMatcher.js';
 export * from './activities/ActivityIngestService.js';
 export * from './activities/ActivitySyncJob.js';
 
+/**
+ * FORECAST SNAPSHOTS (#40). The same three parts as the activity sync -- a seam, a factory whose default
+ * reads nothing, and an entry point a scheduled Action calls -- because sales has no other precedent for
+ * a scheduled job and a second one matching the first is worth more than any variation.
+ */
+export * from './forecast/ForecastSource.js';
+export * from './forecast/FixtureForecastSource.js';
+export * from './forecast/QueryForecastSource.js';
+export * from './forecast/ForecastSnapshotJob.js';
+
 import { DealEntityServer } from './DealEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 
