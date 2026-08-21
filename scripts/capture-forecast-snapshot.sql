@@ -1,4 +1,25 @@
 -- =============================================================================
+-- ⚠ NOT THE FORECAST SNAPSHOT WRITER. A MANUAL TOOL, DELIBERATELY UNSEEDED.
+--
+-- `Sales.CaptureForecastSnapshot` is the writer -- an MJ Action, driven by the
+-- seeded `Sales - Forecast Snapshot (daily)` ScheduledJob. This script is NOT
+-- wired to any job and must not be: two writers for one table is worse than
+-- either of them, and this one and the Action disagree about same-day re-runs
+-- (see below), so running both would make `ForecastSnapshot` mean different
+-- things on different days.
+--
+-- Its original header argued for being a plain script rather than an Action.
+-- That argument predates the Action existing and is no longer the choice on
+-- offer; it is left corrected rather than deleted because THIS IS THE ONLY
+-- WORKING PER-OWNER CAPTURE IN THE REPO. The Action's source reads
+-- `Sales: Forecast by Category`, which groups by company and pipeline only, so
+-- the owner grain that `forecast-history.sql` partitions its LAG windows by
+-- cannot come from it yet. When a companion owner-grain query is written, the
+-- GROUP BY at the bottom of this file is the reference for what it must project.
+--
+-- Run it by hand if you need a one-off capture and understand that it REPLACES
+-- today's rows. Do not seed a ScheduledJob for it.
+-- =============================================================================
 -- capture-forecast-snapshot.sql — writes one ForecastSnapshot row per
 -- company × pipeline × owner × period. Master plan §9.5.
 --
@@ -20,25 +41,32 @@
 --
 -- ── HOW IT IS RUN ────────────────────────────────────────────────────────────
 --
--- An MJ Scheduled Job, nightly. It is deliberately a plain SQL script rather
--- than an Action: it reads and writes only sales' own tables, needs no entity
--- behaviour, and a job that must survive being run at 02:00 unattended is
--- better with fewer moving parts.
+-- BY HAND, and by nothing else. The line that used to sit here said "an MJ
+-- Scheduled Job, nightly" -- that was never true (nothing ever seeded one) and
+-- is now the Action's job. Corrected rather than left, because a comment
+-- claiming a schedule that does not exist is how somebody concludes snapshots
+-- are being captured when they are not.
+---- ── IDEMPOTENT PER DAY -- AND IT DISAGREES WITH THE ACTION, WHICH WINS ───────
 --
--- ── IDEMPOTENT PER DAY, BY DESIGN ────────────────────────────────────────────
+-- This script REPLACES today's rows: it deletes them and re-inserts. The Action
+-- SKIPS a grain already captured today, leaving the first capture standing. That
+-- difference is settled and the Action's behaviour is the ruling.
 --
--- Re-running on the same UTC day REPLACES that day's rows rather than adding a
--- second set. A job that retries after a transient failure must not leave two
--- contradictory pictures of the same morning, and a forecast history with
--- duplicate captures silently doubles every movement calculation in
--- `forecast-history.sql`. Deleting today's rows first is what makes a retry
--- safe.
+-- The argument originally made here -- that duplicate captures would double every
+-- movement calculation in `forecast-history.sql`, whose LAG windows step by
+-- `CapturedAt` -- is true, and does NOT choose between the two: skip and replace
+-- both yield exactly one row per day, so both avoid it.
 --
--- Yesterday's rows are never touched. The whole point is that history is
--- immutable once captured — "pen, not pencil", the same discipline
--- `DealStageEvent` follows.
+-- What chooses is what `CapturedAt` is FOR. It answers "what did we think on the
+-- 1st", and that only holds if the first capture survives. Replace lets a later
+-- run silently rewrite recorded history -- and unlike a duplicate, which is
+-- visible as two rows, an overwrite leaves nothing behind to notice. That is the
+-- failure you cannot detect afterwards, so it is the one to refuse.
 --
--- ── WHAT A PERIOD IS ─────────────────────────────────────────────────────────
+-- Yesterday's rows are never touched by either. "Pen, not pencil", the same
+-- discipline `DealStageEvent` follows -- this script simply applies it one day
+-- later than the Action does.
+---- ── WHAT A PERIOD IS ─────────────────────────────────────────────────────────
 --
 -- The current calendar MONTH, in UTC. Everything stored is UTC and a snapshot
 -- taken at 02:00 local must not land in the previous period for half the year.

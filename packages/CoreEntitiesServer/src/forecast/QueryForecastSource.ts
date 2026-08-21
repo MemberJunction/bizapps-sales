@@ -24,22 +24,50 @@ import type {
 } from './ForecastSource.js';
 
 /**
- * The column names this expects back from the query.
+ * The column names to read each measure from, in order of preference.
  *
- * DECLARED HERE, not discovered, and that is the contract with whoever writes the query: these are the
- * names it must project. Discovering them by shape — "the first decimal column is Commit" — would make
- * the snapshot silently wrong the day somebody reorders a SELECT.
+ * -- WHY THIS IS A LIST NOW, AND WHAT IT COST TO FIND OUT --
+ *
+ * This started as one name per measure, declared as the contract a forecast query must project. Two of
+ * the seven assumptions were wrong when checked against the real query (`Sales: Forecast by Category`),
+ * and both were exactly the kind of failure `readRow` was isolated to surface:
+ *
+ *   1. **`ClosedAmount` is projected as `ClosedWonAmount`.** Not sloppiness on the query's part -- it is
+ *      MORE precise: it sums deals whose status carries `IsWon`, not everything closed, and a lost deal
+ *      is closed too. The storage column is `ClosedAmount` (D6), so the mapping translates a
+ *      deliberately-narrower query name onto the wider storage one. Left unmapped it read as null, and a
+ *      snapshot would have recorded no closed figure for a period that measured 27,480.
+ *
+ *   2. **`OwnerEmployeeID` is not projected at all.** `Sales: Forecast by Category` groups by company and
+ *      pipeline only. That is not a gap: null means "across all owners" on `ForecastSnapshot`, which is
+ *      the honest description of a company-by-pipeline rollup. But it means THIS query cannot produce the
+ *      per-owner grain, and anything expecting one needs a different query. See D-33.
+ *
+ * A list rather than a rename because both names are legitimate and a future query may use either: the
+ * query's own name first, the storage column name second. Declared, never inferred from position or
+ * type -- guessing "the first decimal column is Commit" would make the snapshot silently wrong the day
+ * somebody reorders a SELECT.
  */
 export const FORECAST_QUERY_COLUMNS = {
-    CompanyID: 'CompanyID',
-    PipelineID: 'PipelineID',
-    OwnerEmployeeID: 'OwnerEmployeeID',
-    CommitAmount: 'CommitAmount',
-    BestCaseAmount: 'BestCaseAmount',
-    PipelineAmount: 'PipelineAmount',
-    ClosedAmount: 'ClosedAmount',
+    CompanyID: ['CompanyID'],
+    PipelineID: ['PipelineID'],
+    OwnerEmployeeID: ['OwnerEmployeeID'],
+    CommitAmount: ['CommitAmount'],
+    BestCaseAmount: ['BestCaseAmount'],
+    PipelineAmount: ['PipelineAmount'],
+    /** The query's name first; the `ForecastSnapshot` column name second. See the note above. */
+    ClosedAmount: ['ClosedWonAmount', 'ClosedAmount'],
 } as const;
 
+/** The first of the candidate names actually present on the row. */
+function pick(raw: Record<string, unknown>, candidates: readonly string[]): unknown {
+    for (const name of candidates) {
+        if (name in raw) {
+            return raw[name];
+        }
+    }
+    return undefined;
+}
 export class QueryForecastSource implements IForecastSource {
     public readonly IsLive = true;
 
@@ -104,22 +132,22 @@ export class QueryForecastSource implements IForecastSource {
      * only company on the host — attribute another tenant's forecast to it.
      */
     private readRow(raw: Record<string, unknown>, issues: string[]): ForecastMeasureRow | null {
-        const companyID = text(raw[FORECAST_QUERY_COLUMNS.CompanyID]);
+        const companyID = text(pick(raw, FORECAST_QUERY_COLUMNS.CompanyID));
         if (!companyID) {
             issues.push(
-                `A forecast row from '${this.Name}' carried no ${FORECAST_QUERY_COLUMNS.CompanyID} and was `
+                `A forecast row from '${this.Name}' carried no CompanyID and was `
                     + 'skipped. The query must project it — it is NOT NULL on ForecastSnapshot.',
             );
             return null;
         }
         return {
             CompanyID: companyID,
-            PipelineID: text(raw[FORECAST_QUERY_COLUMNS.PipelineID]),
-            OwnerEmployeeID: text(raw[FORECAST_QUERY_COLUMNS.OwnerEmployeeID]),
-            CommitAmount: money(raw[FORECAST_QUERY_COLUMNS.CommitAmount]),
-            BestCaseAmount: money(raw[FORECAST_QUERY_COLUMNS.BestCaseAmount]),
-            PipelineAmount: money(raw[FORECAST_QUERY_COLUMNS.PipelineAmount]),
-            ClosedAmount: money(raw[FORECAST_QUERY_COLUMNS.ClosedAmount]),
+            PipelineID: text(pick(raw, FORECAST_QUERY_COLUMNS.PipelineID)),
+            OwnerEmployeeID: text(pick(raw, FORECAST_QUERY_COLUMNS.OwnerEmployeeID)),
+            CommitAmount: money(pick(raw, FORECAST_QUERY_COLUMNS.CommitAmount)),
+            BestCaseAmount: money(pick(raw, FORECAST_QUERY_COLUMNS.BestCaseAmount)),
+            PipelineAmount: money(pick(raw, FORECAST_QUERY_COLUMNS.PipelineAmount)),
+            ClosedAmount: money(pick(raw, FORECAST_QUERY_COLUMNS.ClosedAmount)),
         };
     }
 }

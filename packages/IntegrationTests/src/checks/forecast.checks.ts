@@ -9,7 +9,7 @@
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
-import { RunView } from '@memberjunction/core';
+import { RunQuery, RunView } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import {
     CurrentForecastSourceFactory,
@@ -30,6 +30,26 @@ const E_SNAPSHOT = 'MJ_BizApps_Sales: Forecast Snapshots';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 
 /** The seeded rows, from `metadata/`. Fixed there, so fixed here. */
+/** The real query, as registered in `MJ: Queries` by `metadata/queries/.forecast-by-category.json`. */
+const FORECAST_QUERY = 'Sales: Forecast by Category';
+
+/**
+ * A window WIDE ENOUGH to contain the demo data, for the checks that drive the real query.
+ *
+ * `TEST_PERIOD` (2031) is deliberately empty so a leaked snapshot is obviously a test artefact -- which
+ * is right for the fixture checks and useless for the live ones. The first version of FS11 used it and
+ * failed with "expected 2, got 0": the direct `RunQuery` passed no parameters and saw every row, while
+ * the source passed the 2031 period and correctly saw none.
+ *
+ * That failure was the check's, not the mapping's -- but it is the same trap in reverse, and worth the
+ * note: a live check pointed at an empty window proves nothing and looks like a mapping bug. Both live
+ * checks now assert a non-zero row count before asserting anything about the rows.
+ */
+const LIVE_PERIOD = {
+    PeriodStart: new Date(Date.UTC(2026, 0, 1)),
+    PeriodEnd: new Date(Date.UTC(2026, 11, 31)),
+};
+
 const ID_FORECAST_ACTION = '5A1E5000-0000-4000-8000-000000000111';
 const ID_FORECAST_JOB = '5A1E5000-0000-4000-8000-000000000202';
 
@@ -65,8 +85,19 @@ function measure(companyID: string, overrides: Partial<ForecastMeasureRow> = {})
     };
 }
 
-async function snapshotsFor(ctx: Ctx): Promise<Record<string, unknown>[]> {
-    return rows(ctx, E_SNAPSHOT, `PeriodStart = '2031-01-01' AND PeriodEnd = '2031-01-31'`);
+/**
+ * Snapshots for a period. Defaults to the empty 2031 window the fixture checks use.
+ *
+ * Parameterised because the live checks capture into `LIVE_PERIOD` -- and a helper hardcoded to 2031
+ * would have found nothing there and reported it as "the writer stored no rows".
+ */
+async function snapshotsFor(ctx: Ctx, period = TEST_PERIOD): Promise<Record<string, unknown>[]> {
+    const day = (d: Date): string => d.toISOString().slice(0, 10);
+    return rows(
+        ctx,
+        E_SNAPSHOT,
+        `PeriodStart = '${day(period.PeriodStart)}' AND PeriodEnd = '${day(period.PeriodEnd)}'`,
+    );
 }
 
 /**
@@ -414,6 +445,201 @@ export const ForecastChecks: NamedCheck[] = [
                     'the default factory must be restored — otherwise FS1 passes or fails by ordering',
                 );
             }),
+    },
+    {
+        Id: 'forecast.FS11',
+        Name: 'FS11: the REAL query maps onto ForecastMeasureRow — every column, by name',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE ONE CLAIM A FIXTURE CANNOT MAKE. Everything else about the forecast job is proved
+                 * against `FixtureForecastSource`, which hands over `ForecastMeasureRow` already shaped.
+                 * `QueryForecastSource.readRow` is the only code that has to agree with a real query's
+                 * column names, and it is where both mapping assumptions turned out to be wrong.
+                 *
+                 * So this reads the query DIRECTLY as well as through the source, and asserts the two
+                 * agree. Comparing the source against itself would prove nothing; comparing it against
+                 * `RunQuery`'s own output is the independent oracle.
+                 */
+                /**
+                 * THE SAME WINDOW THE SOURCE WILL USE. Passing no parameters here and a period there
+                 * would compare two different questions -- which is exactly how the first version of
+                 * this check failed.
+                 */
+                const direct = await new RunQuery().RunQuery(
+                    {
+                        QueryName: FORECAST_QUERY,
+                        Parameters: {
+                            PeriodStart: LIVE_PERIOD.PeriodStart.toISOString().slice(0, 10),
+                            PeriodEnd: LIVE_PERIOD.PeriodEnd.toISOString().slice(0, 10),
+                        },
+                    },
+                    ctx.User,
+                );
+                Assert(
+                    direct?.Success === true,
+                    `setup: '${FORECAST_QUERY}' did not run — ${direct?.ErrorMessage ?? 'no reason given'}. `
+                        + 'The queries are pushed to the host from metadata/queries/; verify with a row count, '
+                        + 'not with a push exit code.',
+                );
+                const rawRows = (direct.Results ?? []) as Record<string, unknown>[];
+                Assert(
+                    rawRows.length > 0,
+                    'setup: the forecast query returned ZERO rows, so this check would pass without ever '
+                        + 'exercising the mapping. That is exactly how Sales: Slipped Deals reported healthy '
+                        + 'while being unable to execute. Seed demo data before trusting a green result here.',
+                );
+
+                /** The column names the mapping depends on must actually be on the row. */
+                const first = rawRows[0];
+                Assert('CompanyID' in first, 'the query must project CompanyID — it is NOT NULL on the snapshot');
+                Assert(
+                    'ClosedWonAmount' in first || 'ClosedAmount' in first,
+                    'the query must project a closed figure under one of the two accepted names',
+                );
+
+                const source = new QueryForecastSource(FORECAST_QUERY, ctx.User);
+                const batch = await source.Measure(LIVE_PERIOD);
+
+                AssertEqual(
+                    batch.Rows.length,
+                    rawRows.length,
+                    'every row the query returned must survive the mapping — a dropped row would be a '
+                        + 'silently smaller forecast',
+                );
+
+                /**
+                 * THE MAPPING, COLUMN BY COLUMN, against the raw row rather than against a constant. A
+                 * hardcoded expectation would go stale the moment the demo data changes and would then be
+                 * "fixed" by editing the expectation rather than the code.
+                 */
+                for (const mapped of batch.Rows) {
+                    const raw = rawRows.find(
+                        (r) => String(r['CompanyID']).toLowerCase() === mapped.CompanyID.toLowerCase()
+                            && String(r['PipelineID'] ?? '').toLowerCase() === String(mapped.PipelineID ?? '').toLowerCase(),
+                    );
+                    Assert(!!raw, `mapped row for company ${mapped.CompanyID} matches no query row`);
+
+                    AssertEqual(mapped.CommitAmount, Number(raw!['CommitAmount']), 'CommitAmount maps');
+                    AssertEqual(mapped.BestCaseAmount, Number(raw!['BestCaseAmount']), 'BestCaseAmount maps');
+                    AssertEqual(mapped.PipelineAmount, Number(raw!['PipelineAmount']), 'PipelineAmount maps');
+
+                    /**
+                     * THE ASSUMPTION THAT WAS WRONG. The query projects `ClosedWonAmount`; the snapshot
+                     * column is `ClosedAmount`. Unmapped this read as null, and a snapshot would have
+                     * recorded no closed figure for a period that measured one.
+                     */
+                    AssertEqual(
+                        mapped.ClosedAmount,
+                        Number(raw!['ClosedWonAmount']),
+                        'ClosedAmount must come from ClosedWonAmount — the query name is narrower than the '
+                            + 'storage name on purpose, and reading the storage name alone yields null',
+                    );
+
+                    /**
+                     * THE SECOND ASSUMPTION THAT WAS WRONG, asserted rather than glossed. This query groups
+                     * by company and pipeline only, so there is no owner — and null means "across all
+                     * owners" on the snapshot, which is the honest reading of a rollup.
+                     */
+                    AssertEqual(
+                        mapped.OwnerEmployeeID,
+                        null,
+                        'OwnerEmployeeID is null because Forecast by Category does not group by owner — see D-33',
+                    );
+                }
+            }),
+    },
+    {
+        Id: 'forecast.FS12',
+        Name: 'FS12: the job captures the real query, and the stored row equals what the query said',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE WHOLE PATH, with nothing fixture-shaped in it: real query -> readRow -> writer ->
+                 * ForecastSnapshot. Then the stored row is read back and compared to the query's own
+                 * output, so the assertion is that the pipe is LOSSLESS rather than that a number is 27480.
+                 *
+                 * Sales computes nothing here and neither does this check — D-30. It compares two readings
+                 * of the same figure; it never derives one.
+                 */
+                /**
+                 * THE SAME WINDOW THE SOURCE WILL USE. Passing no parameters here and a period there
+                 * would compare two different questions -- which is exactly how the first version of
+                 * this check failed.
+                 */
+                const direct = await new RunQuery().RunQuery(
+                    {
+                        QueryName: FORECAST_QUERY,
+                        Parameters: {
+                            PeriodStart: LIVE_PERIOD.PeriodStart.toISOString().slice(0, 10),
+                            PeriodEnd: LIVE_PERIOD.PeriodEnd.toISOString().slice(0, 10),
+                        },
+                    },
+                    ctx.User,
+                );
+                Assert(direct?.Success === true, `setup: the query did not run — ${direct?.ErrorMessage}`);
+                const rawRows = (direct.Results ?? []) as Record<string, unknown>[];
+                Assert(rawRows.length > 0, 'setup: zero rows would make this vacuous — see FS11');
+
+                const result = await job.Capture(
+                    LIVE_PERIOD,
+                    new QueryForecastSource(FORECAST_QUERY, ctx.User),
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+                Assert(result.Success, `the capture failed — ${result.Issues.join(' | ')}`);
+                AssertEqual(result.Measured, rawRows.length, 'it measured every row the query returned');
+                AssertEqual(result.Written, rawRows.length, 'and wrote one snapshot each');
+
+                const stored = await snapshotsFor(ctx, LIVE_PERIOD);
+                AssertEqual(stored.length, rawRows.length, 'the snapshots are in the table');
+
+                for (const raw of rawRows) {
+                    const row = stored.find(
+                        (s) => String(s['CompanyID']).toLowerCase() === String(raw['CompanyID']).toLowerCase()
+                            && String(s['PipelineID'] ?? '').toLowerCase() === String(raw['PipelineID'] ?? '').toLowerCase(),
+                    );
+                    Assert(!!row, `no snapshot stored for company ${String(raw['CompanyID'])}`);
+
+                    AssertEqual(Number(row!['CommitAmount']), Number(raw['CommitAmount']), 'commit round-trips');
+                    AssertEqual(Number(row!['BestCaseAmount']), Number(raw['BestCaseAmount']), 'best case');
+                    AssertEqual(Number(row!['PipelineAmount']), Number(raw['PipelineAmount']), 'pipeline');
+                    AssertEqual(
+                        Number(row!['ClosedAmount']),
+                        Number(raw['ClosedWonAmount']),
+                        'and the closed figure survives the name change end to end',
+                    );
+
+                    /** Provenance says a LIVE source produced it — the thing a fixture run can never claim. */
+                    const provenance = JSON.parse(String(row!['SnapshotJSON'])) as {
+                        Source?: string;
+                        SourceIsLive?: boolean;
+                    };
+                    AssertEqual(provenance.Source, FORECAST_QUERY, 'naming the query');
+                    AssertEqual(provenance.SourceIsLive, true, 'and recording that it was live');
+                }
+            }),
+    },
+    {
+        Id: 'forecast.FS13',
+        Name: 'FS13: the DEFAULT factory is still the empty fixture — a real source is a swap, not a default',
+        RequiresMutation: false,
+        Fn: async (ctx) => {
+            /**
+             * THE SEAM SURVIVES BEING PROVEN. Pointing the source at a real query is what FS11 and FS12
+             * do explicitly; the DEFAULT must stay null, because that is what stops the seeded hourly-daily
+             * job writing anything by accident. Making the live source the default would be the easy way to
+             * test it and would silently arm a scheduled job against production data.
+             */
+            AssertEqual(
+                CurrentForecastSourceFactory()(ctx.User),
+                null,
+                'the default forecast source must remain null — FS1 depends on it, and so does the safety of '
+                    + 'shipping the daily job Active',
+            );
+        },
     },
 ];
 
