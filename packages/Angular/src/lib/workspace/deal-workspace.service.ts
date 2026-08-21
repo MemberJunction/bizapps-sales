@@ -16,7 +16,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { Injectable } from '@angular/core';
-import { EntitySaveOptions, LogError, Metadata, RunView, RunViewParams } from '@memberjunction/core';
+import { EntitySaveOptions, LogError, Metadata, RunQuery, RunView, RunViewParams } from '@memberjunction/core';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 
 import {
@@ -54,6 +54,25 @@ const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
  * roster reads accounts once and joins in memory — which is also why this lives here rather than in the
  * component, so the workaround exists in exactly one place.
  */
+/**
+ * The four dashboard headline figures, already reduced.
+ *
+ * Returned by the `Sales: Dashboard Summary` query rather than computed in the browser. Master plan
+ * §9.5 requires read models to be MJ Queries so Skip, the query builder and report snapshots can all
+ * reach them; a measure that only exists inside a component getter is reachable by nothing else.
+ */
+export interface DealDashboardSummary {
+    OpenAmount: number;
+    OpenCount: number;
+    TotalCount: number;
+    PastExpectedCloseCount: number;
+    WonCount: number;
+    /** How much of the open figure the orders engine priced, and how much a person typed. */
+    OpenPricedAmount: number;
+    OpenStatedAmount: number;
+    OpenNoAmountCount: number;
+}
+
 export interface DealRosterRow {
     ID: string;
     DealNumber: string | null;
@@ -76,6 +95,19 @@ export interface DealRosterRow {
     /** Grouping keys for the board. Names render; IDs group. */
     PipelineID: string | null;
     PipelineStageID: string | null;
+    /**
+     * STATUS FLAGS, APPLIED SERVER-SIDE, so no consumer has to resolve them from a second fetch.
+     *
+     * `Sales: Deal Roster` returns these per row. Before, the section loaded every DealStatusType
+     * separately and looked each row's status up by ID to read a flag -- correct, but it made every
+     * consumer of a roster row responsible for carrying a lookup table alongside it.
+     */
+    IsOpen: boolean;
+    IsWon: boolean;
+    IsLost: boolean;
+    IsClosed: boolean;
+    /** Open, and its expected close date has gone by. Computed against the SERVER's UTC date. */
+    IsPastExpectedClose: boolean;
 }
 
 /** Raw roster shape before the account name is joined in. */
@@ -263,38 +295,64 @@ export class DealWorkspaceService {
      * Returns an empty array on failure rather than throwing, because a roster that cannot load should
      * render as an empty list with a message, not take the whole section down.
      */
+    /**
+     * The deal roster, from the `Sales: Deal Roster` MJ Query.
+     *
+     * -- WHAT THIS REPLACED, AND WHY IT IS NOT JUST A RELOCATION --
+     *
+     * It was two RunViews: every deal, plus every account, joined in the browser with a Map to fill
+     * in a customer name. The query does that join in SQL, so the second read and the client-side
+     * join both go away -- and with them a whole class of drift, because the roster the dashboard
+     * shows and the roster the §9 aggregates are built on are now literally the same definition.
+     *
+     * It also carries the STATUS FLAGS and IsPastExpectedClose per row, which is what lets the section
+     * drop its separate status fetch for flag resolution and its hand-built UTC date comparison.
+     *
+     * Master plan §9.5 is the rule this satisfies: read models are MJ Queries, so Skip, the query
+     * builder and report snapshots reach the same definitions the UI does.
+     *
+     * COLUMN NAMES ARE MAPPED, NOT PASSED THROUGH. The query names things for a report reader
+     * (DealName, AccountName, StageName); DealRosterRow names them for a component (Name,
+     * CustomerName, PipelineStage). Mapping here keeps both audiences served and means renaming a
+     * column on either side is a one-file change.
+     */
     public async LoadRoster(): Promise<DealRosterRow[]> {
-        const rv = new RunView();
-        const results = await rv.RunViews([
-            {
-                EntityName: E_DEAL,
-                OrderBy: 'ExpectedCloseDate ASC, Name ASC',
-                ResultType: 'simple',
-                Fields: [
-                    'ID', 'DealNumber', 'Name', 'AccountID', 'Amount', 'AmountIsComputed', 'Probability',
-                    'ExpectedCloseDate', 'Pipeline', 'PipelineStage', 'DealType', 'DealStatusType',
-                    'OwnerEmployee', 'ForecastCategoryType', 'DealStatusTypeID',
-                    // The IDs, not just the display names: a board groups deals into stage columns and
-                    // filters by pipeline, and neither can be done from a rendered name.
-                    'PipelineID', 'PipelineStageID',
-                ],
-            },
-            { EntityName: E_ACCOUNT, ResultType: 'simple', Fields: ['ID', 'Name'] },
-        ]);
-
-        if (!results?.[0]?.Success) {
+        const result = await new RunQuery().RunQuery({
+            QueryName: 'Sales: Deal Roster',
+            CategoryPath: 'Sales',
+        });
+        if (!result?.Success) {
+            LogError(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
             return [];
         }
-        const accounts = new Map<string, string>(
-            (results[1]?.Success ? ((results[1].Results ?? []) as NamedRow[]) : []).map((a) => [a.ID, a.Name]),
-        );
 
-        return ((results[0].Results ?? []) as DealRosterQueryRow[]).map<DealRosterRow>((d) => ({
-            ...d,
-            AmountIsComputed: d.AmountIsComputed === true,
-            // "—" rather than a blank cell: an unattached deal is a state, and an empty cell reads as a
-            // rendering fault.
-            CustomerName: (d.AccountID ? accounts.get(d.AccountID) : null) ?? '—',
+        const bool = (v: unknown): boolean => v === true || v === 1 || v === '1';
+        return ((result.Results ?? []) as Record<string, unknown>[]).map<DealRosterRow>((d) => ({
+            ID: String(d['DealID'] ?? ''),
+            DealNumber: (d['DealNumber'] as string | null) ?? null,
+            Name: String(d['DealName'] ?? ''),
+            AccountID: (d['AccountID'] as string | null) ?? null,
+            // Still an em dash rather than a blank: an unattached deal is a STATE, and an empty cell
+            // reads as a rendering fault.
+            CustomerName: (d['AccountName'] as string | null) ?? '—',
+            Amount: (d['Amount'] as number | null) ?? null,
+            AmountIsComputed: bool(d['AmountIsComputed']),
+            Probability: (d['Probability'] as number | null) ?? null,
+            ExpectedCloseDate: (d['ExpectedCloseDate'] as string | Date | null) ?? null,
+            Pipeline: (d['PipelineName'] as string | null) ?? null,
+            PipelineStage: (d['StageName'] as string | null) ?? null,
+            DealType: (d['DealTypeName'] as string | null) ?? null,
+            DealStatusType: (d['StatusName'] as string | null) ?? null,
+            OwnerEmployee: (d['OwnerName'] as string | null) ?? null,
+            ForecastCategoryType: (d['ForecastCategoryName'] as string | null) ?? null,
+            DealStatusTypeID: (d['DealStatusTypeID'] as string | null) ?? null,
+            PipelineID: (d['PipelineID'] as string | null) ?? null,
+            PipelineStageID: (d['PipelineStageID'] as string | null) ?? null,
+            IsOpen: bool(d['IsOpen']),
+            IsWon: bool(d['IsWon']),
+            IsLost: bool(d['IsLost']),
+            IsClosed: bool(d['IsClosed']),
+            IsPastExpectedClose: bool(d['IsPastExpectedClose']),
         }));
     }
 
@@ -495,5 +553,53 @@ export class DealWorkspaceService {
                 ErrorMessage: err instanceof Error ? err.message : String(err),
             };
         }
+    }
+
+    /**
+     * The dashboard's four figures, from the `Sales: Dashboard Summary` MJ Query.
+     *
+     * -- WHY A QUERY AND NOT A GETTER --
+     *
+     * These were computed in `sales-section.component.ts` by reducing over the loaded roster. The
+     * answers were right; the mechanism was the problem. Master plan §9.5: read models belong in MJ
+     * Queries rather than hand-rolled Angular aggregation, so Skip, the query builder and report
+     * snapshots all get them for free. A measure living in a component getter is reachable by exactly
+     * one caller, and silently diverges the moment a second surface needs the same number.
+     *
+     * It also stops the tiles depending on the roster being fully loaded to be correct: the old
+     * TotalCount was `this.Deals.length`, so any future paging or filtering of the roster would have
+     * quietly changed a headline figure that is supposed to describe the whole book.
+     *
+     * Proven equivalent BEFORE the switch: `test-harnesses/compare-dashboard-measures.mjs` runs both
+     * implementations over the same data and fails on any disagreement. All eight comparisons agreed,
+     * including the closing-soon ORDER and the slipped set by deal identity rather than by count.
+     */
+    public async LoadDashboardSummary(): Promise<DealDashboardSummary | null> {
+        const result = await new RunQuery().RunQuery({
+            QueryName: 'Sales: Dashboard Summary',
+            CategoryPath: 'Sales',
+        });
+        if (!result?.Success) {
+            LogError(`Sales: Dashboard Summary failed - ${result?.ErrorMessage ?? 'unknown error'}`);
+            return null;
+        }
+        const row = (result.Results ?? [])[0] as Record<string, unknown> | undefined;
+        if (!row) {
+            return null;
+        }
+        // The query aggregates, so it returns a row even over an empty table. A null from here means
+        // the query did not RUN, which is a different thing from a database with no deals -- and the
+        // caller renders those two states differently.
+        const num = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
+        return {
+            OpenAmount: num(row['OpenAmount']),
+            OpenCount: num(row['OpenCount']),
+            TotalCount: num(row['TotalCount']),
+            PastExpectedCloseCount: num(row['PastExpectedCloseCount']),
+            WonCount: num(row['WonCount']),
+            OpenPricedAmount: num(row['OpenPricedAmount']),
+            OpenStatedAmount: num(row['OpenStatedAmount']),
+            OpenNoAmountCount: num(row['OpenNoAmountCount']),
+        };
     }
 }

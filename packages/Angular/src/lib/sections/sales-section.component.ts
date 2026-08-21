@@ -74,7 +74,11 @@ import {
 } from '../nav/sales-nav.model';
 import { DealBoardComponent } from '../board/deal-board.component';
 import { DealWorkspaceComponent } from '../workspace/deal-workspace.component';
-import { DealWorkspaceService, type DealRosterRow } from '../workspace/deal-workspace.service';
+import {
+    DealWorkspaceService,
+    type DealDashboardSummary,
+    type DealRosterRow,
+} from '../workspace/deal-workspace.service';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
 
 /**
@@ -162,8 +166,15 @@ export class MJSSalesSectionComponent implements OnInit {
     /** Set when the roster could not be read, or a row could not be opened. Shown verbatim. */
     public Message = '';
 
-    /** Status flags, so nothing here has to compare a status NAME. */
-    private statuses: DealStatusLookup[] = [];
+
+    /**
+     * The four tile figures, from `Sales: Dashboard Summary`.
+     *
+     * NULL means the QUERY DID NOT RUN, which the template renders differently from a database with
+     * no deals: the query aggregates, so it returns a row of zeroes over an empty table. Collapsing
+     * those two states would show a confident set of zeroes when the truth is that nothing was read.
+     */
+    private summary: DealDashboardSummary | null = null;
 
     /**
      * Pipelines, stages and statuses the BOARD renders from.
@@ -218,14 +229,16 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Loading = true;
         this.cdr.detectChanges();
 
-        const [roster, lookups] = await Promise.all([
+        const [roster, lookups, summary] = await Promise.all([
             this.service.LoadRoster(),
-            // Only needed for the status FLAGS the KPIs branch on. The workspace loads its own copy;
-            // one extra read on section mount is cheaper than threading state between the two.
+            // Still needed: the BOARD renders from these, and StatusTone reads them for the roster
+            // pill. The KPI tiles no longer do -- their flags are applied server-side by the query.
             this.service.LoadLookups(),
+            // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
+            this.service.LoadDashboardSummary(),
         ]);
         this.Deals = roster;
-        this.statuses = lookups.DealStatusTypes;
+        this.summary = summary;
         this.Pipelines = lookups.Pipelines;
         this.Stages = lookups.Stages;
         this.DealStatusTypes = lookups.DealStatusTypes;
@@ -300,33 +313,38 @@ export class MJSSalesSectionComponent implements OnInit {
      * renaming "Won" to "Signed".
      */
     public get Kpis(): SalesKpi[] {
-        const open = this.Deals.filter((d) => this.hasFlag(d, 'IsOpen'));
-        const won = this.Deals.filter((d) => this.hasFlag(d, 'IsWon'));
-        const slipped = this.SlippedDeals;
-
-        // A rollup of figures that are already answers — NOT pricing arithmetic. See the file header.
-        const openValue = open.reduce((sum, d) => sum + (d.Amount ?? 0), 0);
+        const s = this.summary;
+        if (!s) {
+            // The query did not run. Say so rather than rendering four zeroes, which would read as a
+            // quiet, confident 'you have no pipeline'.
+            return [
+                { Label: 'Open pipeline', Value: '—', Footnote: 'figures unavailable', Tone: 'warn' },
+                { Label: 'Open deals', Value: '—', Footnote: 'figures unavailable' },
+                { Label: 'Past expected close', Value: '—', Footnote: 'figures unavailable' },
+                { Label: 'Won', Value: '—', Footnote: 'figures unavailable' },
+            ];
+        }
 
         return [
             {
                 Label: 'Open pipeline',
-                Value: this.money(openValue),
-                Footnote: `across ${open.length} open ${open.length === 1 ? 'deal' : 'deals'}`,
+                Value: this.money(s.OpenAmount),
+                Footnote: `across ${s.OpenCount} open ${s.OpenCount === 1 ? 'deal' : 'deals'}`,
             },
             {
                 Label: 'Open deals',
-                Value: String(open.length),
-                Footnote: `of ${this.Deals.length} total`,
+                Value: String(s.OpenCount),
+                Footnote: `of ${s.TotalCount} total`,
             },
             {
                 Label: 'Past expected close',
-                Value: String(slipped.length),
+                Value: String(s.PastExpectedCloseCount),
                 Footnote: 'still open, close date gone',
-                Tone: slipped.length ? 'warn' : undefined,
+                Tone: s.PastExpectedCloseCount ? 'warn' : undefined,
             },
             {
                 Label: 'Won',
-                Value: String(won.length),
+                Value: String(s.WonCount),
                 Footnote: 'closed won to date',
             },
         ];
@@ -335,20 +353,25 @@ export class MJSSalesSectionComponent implements OnInit {
     /**
      * Open deals whose expected close date has already passed.
      *
-     * Compared in UTC against a date-only string, because `ExpectedCloseDate` is a DATE and everything
-     * stored is UTC — using local-time getters here would move the boundary by a day for anyone west of
-     * Greenwich.
+     * READS THE FLAG THE ROSTER QUERY ALREADY APPLIED. `Sales: Deal Roster` computes
+     * `IsPastExpectedClose` against `CAST(SYSUTCDATETIME() AS DATE)`, so the comparison happens on the
+     * server against the server's clock.
+     *
+     * That is a real improvement over what this replaced, not just a relocation. The old version built
+     * a UTC date string here with `getUTC*` getters specifically to avoid the boundary moving a day
+     * for anyone west of Greenwich -- a correct workaround for a problem the browser should never have
+     * been asked to solve. Now the client's clock is not involved at all.
+     *
+     * The COUNT on the tile comes from the summary query rather than from this list, so the badge and
+     * the tile cannot disagree about how many there are while the roster is still loading.
      */
     public get SlippedDeals(): DealRosterRow[] {
-        const today = new Date();
-        const todayUtc = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
-        return this.Deals.filter(
-            (d) => this.hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate && UtcDatePart(d.ExpectedCloseDate) < todayUtc,
-        );
+        return this.Deals.filter((d) => d.IsPastExpectedClose === true);
     }
-
     public get Badges(): SalesNavBadges {
-        return { Slipped: this.SlippedDeals.length };
+        // The summary's count when it ran, the list's length otherwise -- so the badge still says
+        // something true if the query failed but the roster loaded.
+        return { Slipped: this.summary?.PastExpectedCloseCount ?? this.SlippedDeals.length };
     }
 
     /**
@@ -365,7 +388,7 @@ export class MJSSalesSectionComponent implements OnInit {
      * has to work around.
      */
     public get ClosingSoon(): DealRosterRow[] {
-        return this.Deals.filter((d) => this.hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate)
+        return this.Deals.filter((d) => d.IsOpen && !!d.ExpectedCloseDate)
             .slice()
             .sort((a, b) => UtcDatePart(a.ExpectedCloseDate!).localeCompare(UtcDatePart(b.ExpectedCloseDate!)))
             .slice(0, 8);
@@ -373,14 +396,6 @@ export class MJSSalesSectionComponent implements OnInit {
 
     // ── Display helpers ────────────────────────────────────────────────────────
 
-    /** True when a deal's status carries the given behaviour flag. */
-    private hasFlag(row: DealRosterRow, flag: 'IsOpen' | 'IsWon' | 'IsLost' | 'IsClosed'): boolean {
-        if (!row.DealStatusTypeID) {
-            return false;
-        }
-        const status = this.statuses.find((s) => s.ID === row.DealStatusTypeID);
-        return status ? status[flag] === true : false;
-    }
 
     /**
      * A whole-currency figure. Formatting only — it neither derives nor rounds a stored value; the
@@ -399,13 +414,13 @@ export class MJSSalesSectionComponent implements OnInit {
      * Returns a class name; the CSS decides what it looks like.
      */
     public StatusTone(row: DealRosterRow): string {
-        if (this.hasFlag(row, 'IsWon')) {
+        if (row.IsWon) {
             return 'ok';
         }
-        if (this.hasFlag(row, 'IsLost')) {
+        if (row.IsLost) {
             return 'err';
         }
-        if (this.hasFlag(row, 'IsOpen')) {
+        if (row.IsOpen) {
             return 'open';
         }
         return 'muted';
