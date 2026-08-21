@@ -83,6 +83,8 @@ import { DealActivityTimelineComponent } from '../activities/deal-activity-timel
 import type { ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
     EmptyValidation,
+    DiscountRefusalIssues,
+    MergeValidation,
     ProjectValidation,
     type DealWorkspaceIssue,
     type DealWorkspaceSection,
@@ -1389,12 +1391,26 @@ export class DealWorkspaceComponent implements OnInit {
 
         const entity = ProjectValidation(deal.Validate());
         const advisories = this.LineAdvisories(deal);
-        this.Validation = {
-            // Advisories are warnings, so they never change whether the deal can be saved. Recomputing
-            // rather than or-ing keeps that fact in one place.
-            IsValid: entity.IsValid,
-            Issues: [...entity.Issues, ...advisories],
-        };
+
+        /**
+         * A REFUSED DISCOUNT NOW BLOCKS THE SAVE, which it did not.
+         *
+         * `DiscountRefusals` was read by the template and by nothing else, so `CanSave` never saw it: a
+         * rep typed `0.5`, saw the refusal, and saved a line still holding the previous `0.10`. The
+         * screen had said so nowhere, and a hundred-fold discount error is a number nobody questions.
+         *
+         * Mapped through the LINE'S POSITION so the issue lands on the row that caused it — the grid
+         * iterates `Lines.Items`, so the index is what both sides already agree on. A refusal against a
+         * line that is no longer in the collection (removed after being refused) yields a null index and
+         * still blocks: losing the row marker is acceptable, letting the save through is not.
+         */
+        const lines = deal.OrderID_Object?.Lines.Items ?? [];
+        const refusals = [...this.DiscountRefusals.entries()].map(([line, Reason]) => {
+            const at = lines.indexOf(line);
+            return { RowIndex: at >= 0 ? at : null, Reason };
+        });
+
+        this.Validation = MergeValidation(entity, advisories, DiscountRefusalIssues(refusals));
         this.cdr.detectChanges();
     }
 

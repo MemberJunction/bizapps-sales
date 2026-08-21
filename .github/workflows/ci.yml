@@ -80,10 +80,27 @@ jobs:
         run: pnpm run test:vocabulary-gate
 
       # ===================================================================================
-      # GATE 2 — everything compiles, including the generated code.
+      # GATE 2 — the two pure-function gates, which were NOT in CI until now.
+      #
+      # `test:discount-gate` has existed and been described as a gate since the DealLine retirement, and
+      # this workflow never ran it: it was in `npm run verify` and in nobody's pipeline. A gate that only
+      # runs when somebody remembers is a convention, not a gate.
+      #
+      # `test:validation-gate` is new, and it covers two confirmed defects that no integration check
+      # could reach — every order-line error landing on the wrong pane, and a refused discount not
+      # blocking the save. Both are browser-path code, which is why 98 green checks said nothing.
+      #
+      # ORDERED AFTER THE BUILD, deliberately: both import from `dist`, so running them first would
+      # assert against whatever the last build left behind.
       # ===================================================================================
       - name: Build all packages and apps
         run: pnpm run build
+
+      - name: Discount conversion gate (percent vs fraction, both directions)
+        run: pnpm run test:discount-gate
+
+      - name: Workspace validation gate (pane attribution, and what blocks a save)
+        run: pnpm run test:validation-gate
 
       # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
       # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a

@@ -212,6 +212,21 @@ const MUTATIONS = [
       to: '        if (true) {',
       note: 'the stage default always overwrites a stated probability' },
 
+    // DEFECT 1, REPLAYED. Reading OrderID before the save is the state the code shipped in: provisioning
+    // moved into Save() and the task call stayed twenty lines above it. Every seeded, legacy and imported
+    // deal then closed with a warning saying it had no order, while the save created one.
+    { id: 'M-TK1', file: CDO, expect: ['WT13'],
+      from: "                        // Read AFTER the save: provisioning happens inside it. See the note above.\n                        OrderID: String(deal.OrderID ?? ''),",
+      to: "                        OrderID: String(''),",
+      note: 'the task service sees an empty OrderID. A PROXY, not an exact replay: the real defect only emptied it for deals that had no order YET, whereas this empties it always, which is why WT10 falls too. The driver takes one from/to pair, and moving a 30-line block is not expressible as one' },
+
+    // DEFECT 2, REPLAYED. Dropping ContractID from the input literal makes the service's contract branch
+    // unreachable again, so every contract-processing task links the deal.
+    { id: 'M-TK2', file: CDO, expect: ['WT14'],
+      from: '                        ContractID: deal.ContractID ?? undefined,',
+      to: '                        ContractID: undefined,',
+      note: 'the contract task links the deal, and the service cannot know otherwise' },
+
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
     // the agreement went. This flips exactly that bit and nothing else.

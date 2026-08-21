@@ -335,13 +335,56 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              * the surface exists to badge it.
              */
             const taskIssues: SalesCloseIssue[] = [];
+
+            const stageEvent = await this.stampClose(deal, input, target, routing, provider, user);
+
+            if (!(await deal.Save())) {
+                throw new Error(
+                    `the deal could not be saved: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+                );
+            }
+
+            /**
+             * ── THE TASKS RUN **AFTER** THE SAVE, AND THAT IS THE FIX RATHER THAN A TIDY-UP ──────────
+             *
+             * This block used to sit twenty lines earlier, before `deal.Save()`, and it read
+             * `deal.OrderID`. That was correct until provisioning MOVED INTO `Save()` this round. After
+             * that move, closing any deal that did not already carry an order — every seeded, legacy and
+             * imported deal — read an EMPTY OrderID, so the service reported
+             *
+             *     "The deal has no order, so no order-review task was created…"
+             *
+             * as a warning on a SUCCESSFUL close, raised no order-review task, and then `Save()` created
+             * the order a moment later. Finance got nothing, and the warning stated the opposite of what
+             * had just happened. Two rules that were each right on their own, in the wrong order.
+             *
+             * Reading after the save is the smaller of the two available fixes: provisioning explicitly
+             * beforehand would put a second caller in the business of knowing when an order is due, which
+             * is exactly what moving it into `Save()` was for.
+             *
+             * STILL INSIDE THE TRANSACTION. `CommitTransaction` is below, so the tasks remain
+             * all-or-none with the close — `close-won-tasks.WT9` is the check that pins that.
+             *
+             * ── AND `ContractID` IS PASSED, WHICH IT NEVER WAS ──────────────────────────────────────
+             *
+             * `executeRoute` sets `deal.ContractID` in the routing loop that runs before this, so the
+             * value has been available all along and the input literal simply omitted it. The service's
+             * `if (input.ContractID)` branch was therefore UNREACHABLE from production, and its
+             * "contracts is not installed" fallback was dead code. Every contract-processing task linked
+             * the DEAL instead of the contract it exists to process, and nothing reported it, because the
+             * branch that would have reported it is the one that never ran.
+             */
             if (target.IsWon) {
                 const cfg = ReadCloseWonTaskConfig(policy);
                 const taskResult = await new CloseWonTaskService().CreateCloseWonTasks(
                     {
                         DealID: deal.ID,
+                        // Read AFTER the save: provisioning happens inside it. See the note above.
                         OrderID: String(deal.OrderID ?? ''),
                         PipelineID: deal.PipelineID,
+                        // Set by the routing loop above. Omitting it is what made the contract task link
+                        // the deal, and made the service's own fallback message unreachable.
+                        ContractID: deal.ContractID ?? undefined,
                         // No task-type IDs: the service resolves both by Code from rows this repo
                         // seeds. What the policy still carries is the part that varies — the assignee.
                         Assignee: cfg.AssigneeRecordID
@@ -358,14 +401,6 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 for (const message of taskResult.Issues) {
                     taskIssues.push({ Section: 'deal', Field: null, Severity: 'warning', Message: message });
                 }
-            }
-
-            const stageEvent = await this.stampClose(deal, input, target, routing, provider, user);
-
-            if (!(await deal.Save())) {
-                throw new Error(
-                    `the deal could not be saved: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
-                );
             }
 
             await db.CommitTransaction();

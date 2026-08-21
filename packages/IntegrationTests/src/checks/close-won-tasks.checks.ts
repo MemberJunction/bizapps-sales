@@ -160,6 +160,86 @@ async function hideTaskType(ctx: Ctx, id: string): Promise<void> {
 
 const service = new CloseWonTaskService();
 
+
+/** Raw SQL inside the check's transaction. `ExecuteSQL` is on the DATABASE provider, not on IMetadataProvider. */
+async function execSql(ctx: Ctx, sql: string, why: string): Promise<void> {
+    const p = ProviderOf(ctx) as unknown as {
+        ExecuteSQL: (
+            sql: string,
+            params: Record<string, unknown>,
+            options: { isMutation: boolean; description: string },
+            user: unknown,
+        ) => Promise<unknown>;
+    };
+    await p.ExecuteSQL(sql, {}, { isMutation: true, description: why }, ctx.User);
+}
+
+/**
+ * Drives a real close-won on a contract-creating pipeline and hands back what it produced.
+ *
+ * `stripOrder` is the whole reason this exists. Every other check in this bundle takes its deal from a
+ * fixture that has ALREADY been saved once, so the deal arrives carrying an order — which is not the
+ * shape production hands the close. A seeded, legacy or imported deal has `OrderID = NULL` until
+ * something saves it, and that is the case the close got wrong.
+ */
+async function closeWonOnContractPipeline(
+    ctx: Ctx,
+    opts: { stripOrder: boolean },
+): Promise<{ dealID: string; out: SalesCloseDealOutput; contractID: string | null }> {
+    const pipelines = await rows(ctx, 'MJ_BizApps_Sales: Pipelines', 'IsActive = 1');
+    const contractPipe = pipelines.find((pl) => {
+        const rawPolicy = pl['CloseWonPolicy'];
+        if (typeof rawPolicy !== 'string' || !rawPolicy) return false;
+        try { return (JSON.parse(rawPolicy) as { CreateContract?: boolean }).CreateContract === true; }
+        catch { return false; }
+    });
+    Assert(!!contractPipe, 'setup: no active pipeline whose policy has CreateContract = true');
+    const pipelineID = String(contractPipe!['ID']);
+
+    const openStatuses = await rows(ctx, 'MJ_BizApps_Sales: Deal Status Types', 'IsOpen = 1 AND IsActive = 1');
+    const openIDs = openStatuses.map((r) => String(r['ID']).toLowerCase());
+    const candidates = await rows(ctx, E_DEAL, `PipelineID = '${pipelineID}' AND OrderID IS NOT NULL`);
+    const deal = candidates.find((d) => openIDs.includes(String(d['DealStatusTypeID']).toLowerCase()));
+    Assert(!!deal, 'setup: no OPEN deal on the contract pipeline carrying an order');
+    const dealID = String(deal!['ID']);
+
+    if (opts.stripOrder) {
+        // The pre-provisioning shape: saved, and pointing at no order. Same technique as save-deal.SD24,
+        // because there is no other way to reach the state a legacy row is already in.
+        await execSql(
+            ctx,
+            `UPDATE __mj_BizAppsSales.Deal SET OrderID = NULL WHERE ID = '${dealID}'`,
+            'WT13: simulate a deal that predates order provisioning',
+        );
+    }
+
+    const wonRows = await rows(ctx, 'MJ_BizApps_Sales: Deal Status Types', 'IsWon = 1 AND IsActive = 1');
+    Assert(wonRows.length > 0, 'setup: no WON status on this host');
+
+    const personID = await anyID(ctx, E_PEOPLE, 'ID IS NOT NULL', 'person');
+    const md = new Metadata();
+    const pipe = await md.GetEntityObject<mjBizAppsSalesPipelineEntity>('MJ_BizApps_Sales: Pipelines', ctx.User);
+    Assert(await pipe.Load(pipelineID), 'setup: the pipeline could not be loaded');
+    const basePolicy = JSON.parse(String(pipe.Get('CloseWonPolicy') ?? '{}')) as Record<string, unknown>;
+    basePolicy.CloseWonTasks = { AssigneeEntityName: E_PEOPLE, AssigneeRecordID: personID };
+    pipe.Set('CloseWonPolicy', JSON.stringify(basePolicy));
+    Assert(await pipe.Save(), `setup: the policy could not be written — ${pipe.LatestResult?.CompleteMessage}`);
+
+    const op = new CloseDealOperation();
+    const rawOut = await op.Execute(
+        { DealID: dealID, DealStatusTypeID: String(wonRows[0]['ID']) },
+        { provider: ProviderOf(ctx), user: ctx.User },
+    );
+    const out = (rawOut as { Output?: SalesCloseDealOutput })?.Output;
+    Assert(!!out, `Sales.CloseDeal returned no Output envelope: ${JSON.stringify(rawOut).slice(0, 300)}`);
+    Assert(out!.Success, `the close failed — ${JSON.stringify(out!.Issues).slice(0, 400)}`);
+
+    const stamped = await TxOne<{ ContractID: string | null }>(
+        ctx, `SELECT ContractID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'`,
+    );
+    return { dealID, out: out!, contractID: stamped.ContractID };
+}
+
 export const CloseWonTasksChecks: NamedCheck[] = [
     {
         Id: 'close-won-tasks.WT1',
@@ -744,6 +824,134 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                 );
             }
         },
+    },
+    {
+        Id: 'close-won-tasks.WT13',
+        Name: 'WT13: a deal with NO ORDER YET still gets its order-review task, linked to the order the close created',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE DEFECT THIS EXISTS FOR, AND WHY TEN CHECKS MISSED IT.
+                 *
+                 * Order provisioning moved into `DealEntityServer.Save()` this round. The close's task
+                 * call sat twenty lines EARLIER and read `deal.OrderID`. So for any deal that did not
+                 * already carry an order — every seeded, legacy and imported one — the service saw an
+                 * empty OrderID, reported "The deal has no order, so no order-review task was created"
+                 * as a WARNING ON A SUCCESSFUL CLOSE, raised nothing, and then `Save()` created the
+                 * order a moment later. Finance got no work item and the warning said the opposite of
+                 * what had just happened.
+                 *
+                 * WT1-WT12 could not see it because they all take their deal from a fixture that has
+                 * already been saved once, so it arrives WITH an order. That is not the shape production
+                 * hands the close. `stripOrder` reproduces the real one.
+                 *
+                 * ── HOW TO MAKE THIS FAIL ──
+                 * Move the `if (target.IsWon)` task block back above `await deal.Save()`. This check goes
+                 * red and every other check in the bundle stays green — which is exactly what happened.
+                 */
+                requireTasks(ctx);
+                const { dealID, out } = await closeWonOnContractPipeline(ctx, { stripOrder: true });
+
+                /**
+                 * THE WARNING MUST NOT BE THERE. Asserted before the task itself, because this is the
+                 * half that lied: a close that reports "no order" while creating one is worse than a
+                 * close that quietly does nothing, since the message sends whoever reads it looking in
+                 * the wrong place.
+                 */
+                const noOrderWarnings = out.Issues.filter((i) => /has no order/i.test(i.Message ?? ''));
+                AssertEqual(
+                    noOrderWarnings.length,
+                    0,
+                    'the close must not claim the deal has no order — provisioning happens inside the '
+                        + `save, so by the time tasks run there is one. Got: ${JSON.stringify(noOrderWarnings)}`,
+                );
+
+                // The order the close provisioned, read back from the deal rather than assumed.
+                const after = await TxOne<{ OrderID: string | null }>(
+                    ctx, `SELECT OrderID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(!!after.OrderID, 'the close must have provisioned an order on the way through');
+
+                const orderEntityID = entityID(ctx, E_ORDER);
+                const links = await rows(
+                    ctx, E_TASK_LINK, `EntityID = '${orderEntityID}' AND RecordID = '${after.OrderID}'`,
+                );
+                AssertEqual(
+                    links.length,
+                    1,
+                    'exactly one task must be linked to that order — finance reviews the ORDER, and a '
+                        + 'deal with no order at close time is the commonest deal there is',
+                );
+
+                const [task] = await rows(ctx, E_TASK, `ID = '${String(links[0]['TaskID'])}'`);
+                AssertEqual(
+                    String(task['TypeID']).toLowerCase(),
+                    ID_ORDER_REVIEW.toLowerCase(),
+                    'and it carries the seeded ORDER_REVIEW type',
+                );
+            }),
+    },
+    {
+        Id: 'close-won-tasks.WT14',
+        Name: 'WT14: the contract-processing task links the CONTRACT, not the deal',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * `CloseWonTaskService` has always known how to link the contract — `if (input.ContractID)`
+                 * — and the close never passed it. So that branch was UNREACHABLE from production and its
+                 * "contracts is not installed" fallback was dead code. Every contract-processing task
+                 * pointed at the deal instead of the agreement it exists to process, and nothing reported
+                 * it, because the branch that would have reported it is the one that never ran.
+                 *
+                 * WT4 asserts BOTH tasks are raised and WT5 asserts the fallback to the deal when there is
+                 * no contract YET — so between them they were satisfied by the broken behaviour. Nothing
+                 * asserted the case where a contract DOES exist. That is the gap.
+                 *
+                 * ── HOW TO MAKE THIS FAIL ──
+                 * Delete `ContractID: deal.ContractID ?? undefined` from the task input literal in
+                 * `CloseDealOperation`. This check goes red; WT4 and WT5 stay green.
+                 */
+                requireTasks(ctx);
+                const { dealID, contractID } = await closeWonOnContractPipeline(ctx, { stripOrder: false });
+
+                Assert(
+                    !!contractID,
+                    'setup: the close must have created a contract, or there is nothing for the task to '
+                        + 'link to and this check would pass vacuously',
+                );
+
+                const contractTasks = await rows(ctx, E_TASK, `TypeID = '${ID_CONTRACT_PROCESSING}'`);
+                Assert(contractTasks.length >= 1, 'a contract-creating policy must raise the contract task');
+
+                const contractEntityID = entityID(ctx, E_CONTRACT);
+                const dealEntityID = entityID(ctx, E_DEAL);
+                const taskIDs = contractTasks.map((t) => `'${String(t['ID'])}'`).join(',');
+                const links = await rows(ctx, E_TASK_LINK, `TaskID IN (${taskIDs})`);
+
+                const toContract = links.filter(
+                    (l) => String(l['EntityID']).toLowerCase() === contractEntityID.toLowerCase()
+                        && String(l['RecordID']).toLowerCase() === String(contractID).toLowerCase(),
+                );
+                AssertEqual(
+                    toContract.length,
+                    1,
+                    'the contract-processing task must link the CONTRACT it exists to process. Linking the '
+                        + 'deal instead gives finance a work item that opens the wrong record.',
+                );
+
+                const toDeal = links.filter(
+                    (l) => String(l['EntityID']).toLowerCase() === dealEntityID.toLowerCase()
+                        && String(l['RecordID']).toLowerCase() === dealID.toLowerCase(),
+                );
+                AssertEqual(
+                    toDeal.length,
+                    0,
+                    'and it must NOT fall back to the deal once a contract exists — that fallback is for '
+                        + 'the no-contract-yet case (WT5), not for every close',
+                );
+            }),
     },
 ];
 

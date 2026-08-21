@@ -53,7 +53,7 @@
       "Kept as history rather than deleted, because the next person to face a two-branch count collision",
       "should be able to find the reasoning rather than re-derive it."
     ],
-    "close-won-tasks": { "count": 12, "requires": "tasks", "ids": "WT1-WT12" },
+    "close-won-tasks": { "count": 14, "requires": "tasks", "ids": "WT1-WT14" },
     "activities": { "count": 18, "requires": "common", "ids": "AC1-AC18" },
     "forecast": { "count": 13, "requires": null, "ids": "FS1-FS13" }
   },
