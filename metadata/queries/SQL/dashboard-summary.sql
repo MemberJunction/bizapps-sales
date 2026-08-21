@@ -41,8 +41,12 @@ SELECT
     SUM(CASE WHEN st.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END)              AS OpenAmount,
     SUM(CASE WHEN st.IsOpen = 1 THEN 1 ELSE 0 END)                                AS OpenCount,
 
-    -- TILE 2 — the denominator: every deal, whatever its status.
+    -- TILE 2 — the denominator: every deal, whatever its status. COUNT(*) over the OUTER join, so a
+    -- status-less deal is counted here even though it lands in none of the flag-driven figures.
     COUNT(*)                                                                      AS TotalCount,
+    -- Visible rather than merely absent: if this is non-zero, OpenCount + WonCount will not reconcile
+    -- to TotalCount and a reader deserves to know why.
+    SUM(CASE WHEN st.ID IS NULL THEN 1 ELSE 0 END)                                AS NoStatusCount,
 
     -- TILE 3 — open, and its expected close date has gone by.
     SUM(CASE WHEN st.IsOpen = 1
@@ -62,7 +66,20 @@ SELECT
                                                                                   AS OpenStatedAmount,
     SUM(CASE WHEN st.IsOpen = 1 AND d.Amount IS NULL THEN 1 ELSE 0 END)           AS OpenNoAmountCount
 FROM [__mj_BizAppsSales].Deal d
-INNER JOIN [__mj_BizAppsSales].DealStatusType st
+/**
+ * LEFT JOIN, NOT INNER -- `Deal.DealStatusTypeID` is NULLABLE.
+ *
+ * With an INNER JOIN, a deal with no status disappears from every figure here, including TotalCount,
+ * which is the denominator of the "of N total" tile. The client implementation this replaced counted
+ * `this.Deals.length` with no join at all, so an INNER JOIN would have silently changed what the tile
+ * MEANS -- and this file's header claims a mechanism change, not a measure change. Keeping that claim
+ * true requires the outer join.
+ *
+ * The counts below already branch on flags, and a NULL flag fails every CASE, so an unclassified deal
+ * lands in TotalCount and in none of the others. That is the correct reading: it exists, and it is
+ * neither open nor won.
+ */
+LEFT OUTER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
 WHERE 1 = 1
   {% if CompanyID %}
