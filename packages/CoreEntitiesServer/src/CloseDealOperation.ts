@@ -52,13 +52,15 @@ import {
 import { DealEntityServer } from './DealEntityServer.js';
 import { LiveOrdersSeam, OrdersIsInstalled } from './LiveOrdersSeam.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
-import { CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
+import { CloseWonTaskDueAt, CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const DEAL_TYPE_ENTITY = 'MJ_BizApps_Sales: Deal Types';
 const LOSS_REASON_ENTITY = 'MJ_BizApps_Sales: Loss Reasons';
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
+// Read to resolve a closing stage by the FLAG its status carries -- see closingStageForOutcome.
+const STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
 /**
  * READ, never written. This operation stopped writing to the stage log — it declares the transition and
  * `DealEntityServer` appends the one row it owes (see `DeclareTransition`). It reads the log because the
@@ -340,7 +342,15 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              */
             const taskIssues: SalesCloseIssue[] = [];
 
-            this.stampClose(deal, input, target, routing, user);
+            /**
+             * The stage this close lands in, resolved BEFORE the stamp because `stampClose` is
+             * synchronous and this needs two reads. `input.ClosingStageID` wins when supplied.
+             */
+            const derivedClosingStageID = input.ClosingStageID
+                ? null
+                : await this.closingStageForOutcome(deal.PipelineID, target, provider, user);
+
+            this.stampClose(deal, input, target, routing, user, derivedClosingStageID);
 
             if (!(await deal.Save())) {
                 throw new Error(
@@ -393,6 +403,20 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                         // Set by the routing loop above. Omitting it is what made the contract task link
                         // the deal, and made the service's own fallback message unreachable.
                         ContractID: deal.ContractID ?? undefined,
+                        /**
+                         * ── A DUE DATE, WHICH THESE TASKS HAVE NEVER HAD ────────────────────────
+                         *
+                         * `CloseWonTaskService` accepts `DueAt` and passes it straight to tasks'
+                         * `CreateTask`; this operation simply never supplied one. So every task the app
+                         * has ever raised carried a NULL due date, and everything downstream that reads
+                         * one was inert for our tasks: `Task.DueAt`, `IsOverdue`, the Overdue KPI and the
+                         * `OnOverdue` hook all already exist in tasks and all had nothing to act on.
+                         *
+                         * Nothing to build there — only to populate. Dated from the close itself rather
+                         * than from `new Date()` so the task's clock and the deal's provenance agree, and
+                         * so a close replayed inside a transaction is deterministic.
+                         */
+                        DueAt: CloseWonTaskDueAt(deal.ClosedAt ?? new Date(), cfg.DueInDays),
                         // No task-type IDs: the service resolves both by Code from rows this repo
                         // seeds. What the policy still carries is the part that varies — the assignee.
                         Assignee: cfg.AssigneeRecordID
@@ -622,6 +646,85 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         plan.Executed = false;
     }
 
+    /**
+     * The stage a close should land in, when the caller did not name one.
+     *
+     * ── THE MIRROR OF `priorStageFromCloseEvent`, AND THE OTHER HALF OF DN-18 ───────────────────────
+     *
+     * `CD18` proves a reopen restores the stage the deal came from. It could not help a deal closed
+     * through the browser, because `DealWorkspaceComponent.ConfirmClose()` sends no `ClosingStageID` — so
+     * no browser-driven close ever moved the stage, every close event recorded
+     * `FromStageID === ToStageID`, and the reopen correctly derived the stage the deal was already in.
+     * The mechanism was right and the UI could not reach it. `71-lost-and-reopen` is the spec that names
+     * this.
+     *
+     * Fixed in the OPERATION rather than in `ConfirmClose`, for the fourth time and the same reason: an
+     * agent, an importer and an API caller all close deals too, and a rule the app owns belongs on the
+     * write path. `input.ClosingStageID` stays an override.
+     *
+     * ── CHOSEN BY FLAG, WHICH IS THE ONLY WAY THIS CAN WORK ────────────────────────────────────────
+     *
+     * The stage on the deal's OWN pipeline whose declared `DealStatusType` matches the outcome being
+     * recorded — `IsWon` for a won close, `IsLost` for a lost one. Never a name: a pipeline is free to
+     * call its winning stage "Signed", "Booked" or anything else, and §3 is what makes that a label.
+     *
+     * Returns null rather than guessing when the pipeline declares no such stage. A deal on a pipeline
+     * with no losing stage closes as lost without moving, exactly as it did before this existed — the
+     * close is never blocked by the absence of somewhere to put it.
+     *
+     * ── AND IT LEANS ON TWO GUARDS THAT ARE NOW LOAD-BEARING ───────────────────────────────────────
+     *
+     * Moving into a stage that declares a LOCKING status is only safe because `applyStageDefaults` refuses
+     * to derive a locking status (`SD35`), so the stage cannot close the deal a second time; and the
+     * closing status stays authoritative because a declared transition suppresses stage defaults entirely
+     * (`CD17`). Both are mutant-proven. Without them this change would double-close every deal it touched.
+     */
+    private async closingStageForOutcome(
+        pipelineID: string | null,
+        target: StatusFlags,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<string | null> {
+        if (!pipelineID || (!target.IsWon && !target.IsLost)) {
+            return null;   // an outcome that is neither won nor lost names no stage
+        }
+        const view = provider as unknown as IRunViewProvider;
+        const statuses = await view.RunView(
+            {
+                EntityName: DEAL_STATUS_ENTITY,
+                ExtraFilter: target.IsWon ? 'IsWon = 1' : 'IsLost = 1',
+                ResultType: 'simple',
+                Fields: ['ID'],
+            },
+            user,
+        );
+        if (!statuses.Success) {
+            return null;
+        }
+        const ids = (statuses.Results ?? []).map((r) => String((r as { ID: string }).ID)).filter(Boolean);
+        if (ids.length === 0) {
+            return null;
+        }
+
+        const quoted = ids.map((id) => `'${id}'`).join(', ');
+        const stages = await view.RunView(
+            {
+                EntityName: STAGE_ENTITY,
+                ExtraFilter:
+                    `PipelineID = '${pipelineID}' AND IsActive = 1 AND DealStatusTypeID IN (${quoted})`,
+                OrderBy: 'DisplayOrder ASC',
+                ResultType: 'simple',
+                Fields: ['ID'],
+            },
+            user,
+        );
+        if (!stages.Success) {
+            return null;
+        }
+        const row = (stages.Results ?? [])[0] as { ID?: string } | undefined;
+        return row?.ID ? String(row.ID) : null;
+    }
+
     /* ── The close stamp (§7.2 step 6) ──────────────────────────────────────── */
 
     /**
@@ -641,6 +744,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         target: StatusFlags,
         routing: SalesCloseRoutingResult[],
         user: UserInfo,
+        derivedClosingStageID: string | null,
     ): void {
         /**
          * ── DECLARED, NOT WRITTEN. THIS METHOD USED TO APPEND THE ROW ITSELF ────────────────────────
@@ -663,8 +767,11 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         // Everything stored is UTC — getUTC*, never local-time getters, for anything persisted.
         const now = new Date();
         deal.DealStatusTypeID = target.ID;
-        if (input.ClosingStageID) {
-            deal.PipelineStageID = input.ClosingStageID;
+        // Derived when the caller named no stage -- see closingStageForOutcome. This is what gives a
+        // browser-driven close a stage to move into, and therefore gives the reopen something to restore.
+        const closingStage = input.ClosingStageID ?? derivedClosingStageID;
+        if (closingStage) {
+            deal.PipelineStageID = closingStage;
         }
         if (input.LossReasonID) {
             deal.LossReasonID = input.LossReasonID;

@@ -883,6 +883,14 @@ CREATE TABLE __mj_BizAppsSales.DealStageEvent (
 
     -- The point-in-time stamps. See the header note.
     AmountAtTransition DECIMAL(19, 4) NULL,
+    -- WHOSE NUMBER WAS IT. 1 = the orders engine priced it, 0 = a person stated it, NULL = the
+    -- transition was recorded before this was tracked. Nullable on purpose: for rows written earlier the
+    -- answer is genuinely unknown, and a 0 would assert they were hand-typed. Finance reads close
+    -- amounts out of this table and could not classify them, because the flag it needs lives on
+    -- Deal.AmountIsComputed -- which describes the deal as it is NOW, so a repriced deal makes its own
+    -- close amount unclassifiable in retrospect. See the additive migration that also ALTERs the CRUD
+    -- procs; CodeGen could not be used to add it (see that file's header).
+    AmountAtTransitionIsComputed BIT NULL,
     ProbabilityAtTransition DECIMAL(5, 2) NULL,
 
     Notes NVARCHAR(MAX) NULL,

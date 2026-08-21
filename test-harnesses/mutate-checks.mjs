@@ -42,6 +42,7 @@ const CDO = 'packages/CoreEntitiesServer/src/CloseDealOperation.ts';
 const PF = 'packages/Entities/src/product-filter.ts';
 const DE = 'packages/Entities/src/deal-entity.ts';
 const SEQ = 'packages/CoreEntitiesServer/src/SequenceService.ts';
+const CWT = 'packages/CoreEntitiesServer/src/CloseWonTaskService.ts';
 const SEAM = 'packages/Entities/src/downstream-seams.ts';
 const LCS = 'packages/CoreEntitiesServer/src/LiveContractsSeam.ts';
 
@@ -324,6 +325,49 @@ const MUTATIONS = [
       from: 'if (status.Success && flags && flags.LocksDeal !== true) {',
       to: 'if (status.Success && flags) {',
       note: 'a stage whose status locks closes the deal on an ordinary save, with no close event, no routing and no contract' },
+
+    // ── THE THREE FIXES OF 2026-08-21 (post-merge) ───────────────────────────────────────────────
+
+    // The amount's provenance. Without the stamp the column is NULL on every new close and Finance is
+    // back to joining Deal.AmountIsComputed -- a mutable row -- to classify a historical booking.
+    { id: 'M-AP1', file: DES, expect: ['CD20'],
+      from: "event.Set('AmountAtTransitionIsComputed', prior.AmountIsComputed);",
+      to: "event.Set('AmountAtTransitionIsComputed', null);",
+      note: 'a close records no provenance, so the amount is unclassifiable the moment the deal is repriced' },
+
+    // And that it is stamped from the value BEFORE the transition, not after. Reading the current value
+    // would make the stamp describe what the deal acquired by arriving.
+    { id: 'M-AP2', file: DES, expect: ['CD20'],
+      from: "(this.GetFieldByName('AmountIsComputed')?.OldValue as boolean | null | undefined) ?? null,",
+      to: "this.AmountIsComputed ?? null,",
+      note: 'the stamp follows the deal instead of freezing it. A STANDING MISS, documented rather than removed: CD20 sets AmountIsComputed and SAVES before closing, so at the close OldValue === current and the two readings are indistinguishable. Catching it needs a close whose OWN save changes the flag -- i.e. a deal with priced order lines, where refreshAmountFromOrder flips it inside the closing save -- and this bundle deliberately avoids the orders catalogue (see its header). Kept because the day CD20 gains a priced line it starts working' },
+
+    // The due date. Tasks ships DueAt, IsOverdue, an Overdue KPI and an OnOverdue hook; a null makes all
+    // of it inert, which is how orders' own overdue arithmetic stayed wrong for months.
+    { id: 'M-DA1', file: CDO, expect: ['CD21'],
+      from: 'DueAt: CloseWonTaskDueAt(deal.ClosedAt ?? new Date(), cfg.DueInDays),',
+      to: 'DueAt: undefined,',
+      note: 'every close-won task goes back to a null due date' },
+
+    // And that the arithmetic is a DATE offset rather than milliseconds-as-days -- the 46,264-day shape.
+    { id: 'M-DA2', file: CWT, expect: ['CD21'],
+      from: 'Date.UTC(closedAt.getUTCFullYear(), closedAt.getUTCMonth(), closedAt.getUTCDate() + days),',
+      to: 'closedAt.getTime() + days,',
+      note: 'days are added as MILLISECONDS, so the due date lands microscopically after the close' },
+
+    // The derived closing stage. Without it no close driven from a browser moves the stage, so no reopen
+    // driven from a browser can restore one -- DN-18, verbatim.
+    { id: 'M-CS1', file: CDO, expect: ['CD22'],
+      from: 'const closingStage = input.ClosingStageID ?? derivedClosingStageID;',
+      to: 'const closingStage = input.ClosingStageID;',
+      note: 'a close with no ClosingStageID leaves the stage alone, and the reopen has nothing to restore' },
+
+    // And that the stage is chosen by the OUTCOME's flag rather than by display order alone: swapping the
+    // predicate sends a won close into the losing stage.
+    { id: 'M-CS2', file: CDO, expect: ['CD22'],
+      from: "ExtraFilter: target.IsWon ? 'IsWon = 1' : 'IsLost = 1',",
+      to: "ExtraFilter: target.IsWon ? 'IsLost = 1' : 'IsWon = 1',",
+      note: 'a won close lands in the stage that declares LOST' },
 
     // CD17 CANNOT BE FELLED BY A SINGLE EDIT TO THE STATUS WRITER, and that is a finding rather than a
     // gap. Measured: M-ST3 removes the declared-transition suppression so the defaults writer DOES run on

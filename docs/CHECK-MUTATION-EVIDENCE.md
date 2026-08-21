@@ -18,23 +18,24 @@ because both were arithmetically stale the moment they merged:
 
 | | |
 |---|---|
-| Checks registered across 9 bundles | **118** |
-| Mutants defined in `test-harnesses/mutate-checks.mjs` | **54** |
-| Checks a mutant is DECLARED to kill (`expect` lists) | **54** |
+| Checks registered across 9 bundles | **121** |
+| Mutants defined in `test-harnesses/mutate-checks.mjs` | **60** |
+| Checks a mutant is DECLARED to kill (`expect` lists) | **57** |
 | Checks additionally proven by measured collateral kills | **2** (BD1, BD4 — see `M-ST1`) |
-| **Checks proven able to fail** | **56 of 118** |
+| **Checks proven able to fail** | **59 of 121** |
 
-118 is agreed by two independent routes: the per-key arithmetic in
+**The merged figure was verified at 118 by two independent routes**: the per-key arithmetic in
 `scripts/expected-check-counts.json`, and grepping registered `Id:` values straight out of
-`packages/IntegrationTests/src/checks/*.checks.ts` (118, same per-bundle split, no duplicate ids). The
-suite then ran 118, 0 failed, 0 skipped.
+`packages/IntegrationTests/src/checks/*.checks.ts` — same total, same per-bundle split, no duplicate ids.
+Round 6 then added CD20–CD22 for the three server-side fixes, giving **121**. The suite ran 121, 0 failed,
+0 skipped.
 
 ### Per bundle
 
 | Bundle | Checks | Proven | Not proven |
 |---|---|---|---|
 | `save-deal` | 31 | 22 | 9 |
-| `close-deal` | 19 | 16 | 3 |
+| `close-deal` | 22 | 19 | 3 |
 | `product-picker` | 4 | 4 | — |
 | `close-won-order` | 5 | 3 | 2 |
 | `close-won-contract` | 4 | 3 | 1 |
@@ -83,12 +84,14 @@ hiding.
 
 The final rebuild is new and was added after it cost real time — see Round 5.
 
-**Declared versus measured.** 54 of the 56 are the mutants' own `expect` lists: each was run at least once
+**Declared versus measured.** 57 of the 59 are the mutants' own `expect` lists: each was run at least once
 and the named check fell. The other 2 (BD1, BD4) are collateral kills recorded from an actual `M-ST1` run.
+One mutant — `M-AP2` — is a standing MISS and is counted in neither figure; see Round 6.
+
 Where this file says "proven", it means a run was observed — not that the campaign was re-run end to end
-against the merged tree. **It has not been.** Re-running all 54 on the merged tree is roughly 100 minutes
-and is the obvious next verification; until then, treat the per-bundle table as a claim about the code the
-mutants were run against, which for 50 of them predates this merge.
+against the merged tree. **It has not been.** The six Round 6 mutants ran against the merged code; the
+other 54 predate the merge. Re-running all 60 is roughly two hours and is the obvious next verification;
+until then, treat the per-bundle table as a claim about the code each mutation was run against.
 
 ---
 
@@ -196,7 +199,7 @@ whose job is to break things on purpose must not be able to leave them broken.
 
 ## What this file does NOT establish
 
-That the suite is adequate. It establishes that **56 of 118 checks fail for the reason they claim to**,
+That the suite is adequate. It establishes that **59 of 121 checks fail for the reason they claim to**,
 each against a specific mutation, on the code that mutation was run against. The 62 unproven include two
 entire bundles and eleven of fourteen close-won-task checks. And no mutation campaign says anything about
 behaviour no check covers at all — for that, see the Explorer specs under

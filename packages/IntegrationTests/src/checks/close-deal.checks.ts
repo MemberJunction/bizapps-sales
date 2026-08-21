@@ -52,6 +52,7 @@ import {
     type mjBizAppsSalesDealEntity,
 } from '@mj-biz-apps/sales-entities';
 import {
+    DEFAULT_DUE_IN_DAYS,
     OrdersIsInstalled,
     ResetDownstreamSeam,
     SetDownstreamSeam,
@@ -160,6 +161,31 @@ async function reopen(ctx: Ctx, input: SalesReopenDealInput): Promise<SalesReope
     const output = (result as { Output?: SalesReopenDealOutput })?.Output;
     Assert(!!output, `Sales.ReopenDeal returned no Output envelope: ${JSON.stringify(result).slice(0, 300)}`);
     return output as SalesReopenDealOutput;
+}
+
+/** Tasks' schema, named here because sales holds no compile-time dependency on it. */
+const TASKS_SCHEMA = '__mj_BizAppsTasks';
+
+/**
+ * EVERY row of raw SQL, through the provider so it sees the check's open transaction.
+ *
+ * `TxOne` is the fixture's single-row reader and asserts a row exists; this is the same call without that
+ * assertion, because "how many tasks did the close raise" is a question whose answer can legitimately be
+ * more than one and must not be truncated to the first.
+ */
+async function TxAll<T extends Record<string, unknown>>(ctx: Ctx, sql: string): Promise<T[]> {
+    const provider = ctx.Provider as unknown as {
+        ExecuteSQL: (
+            sql: string,
+            params: Record<string, unknown>,
+            options: { isMutation: boolean; description: string },
+            user: unknown,
+        ) => Promise<Record<string, unknown>[]>;
+    };
+    const rows = await provider.ExecuteSQL(
+        sql, {}, { isMutation: false, description: 'sales check read (multi-row)' }, ctx.User,
+    );
+    return (rows ?? []) as T[];
 }
 
 /**
@@ -1126,10 +1152,48 @@ export const CloseDealChecks: NamedCheck[] = [
                  * special case is needed for this — but if the derivation ever started returning something
                  * else, a reopen would silently relocate a deal that never went anywhere.
                  */
+                /**
+                 * ── HOW THIS CASE IS REACHED CHANGED, AND THE PROPERTY DID NOT ──────────────────────
+                 *
+                 * This used to omit `ClosingStageID` and rely on the close leaving the stage alone. That
+                 * stopped being true the moment `closingStageForOutcome` landed: a close with no stage now
+                 * DERIVES one, which is the entire point of that fix. The check was asserting the absence
+                 * of a feature.
+                 *
+                 * The status-only transition is still perfectly reachable — put the deal IN the stage the
+                 * outcome names FIRST, so the derivation resolves to the stage it is already in. Then
+                 * `FromStageID === ToStageID`, nothing moved, and nothing may fire. Same property, reached
+                 * deliberately instead of by omission, and it stays the direction `M-RO2` cannot fell.
+                 *
+                 * Moving into that stage with a PLAIN SAVE is only safe because of `SD35`: the stage
+                 * declares a locking status, and the defaults writer refuses to derive one. If that guard
+                 * regresses, this check's setup closes the deal early and the assertions below say so.
+                 */
                 const f = await ResolveSalesFixture(ctx);
-                const startStage = f.OrderOnlyPolicyStageID;
+                const winningStage = await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsWon = 1');
+                Assert(!!winningStage, 'the pipeline needs a stage declaring a WON status');
+                const startStage = String(winningStage!.ID);
+
                 const dealID = await openDeal(
-                    ctx, f, f.OrderOnlyPolicyPipelineID, startStage, 'CD19 nothing to restore',
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD19 nothing to restore',
+                );
+
+                const parked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await parked.Load(dealID), 'the deal loads so it can be parked in the winning stage');
+                parked.PipelineStageID = startStage;
+                Assert(
+                    await parked.Save(),
+                    `setup: the plain move must succeed — ${parked.LatestResult?.CompleteMessage ?? ''}`,
+                );
+                const stillOpen = await TxOne<{ IsOpen: boolean }>(
+                    ctx,
+                    `SELECT t.IsOpen FROM ${SALES_SCHEMA}.Deal d
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = d.DealStatusTypeID
+                      WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    stillOpen.IsOpen === true,
+                    'setup: a plain move into a closing stage must NOT have closed the deal (SD35)',
                 );
 
                 const orderBefore = await TxOne<{ Status: string }>(
@@ -1138,7 +1202,7 @@ export const CloseDealChecks: NamedCheck[] = [
                       JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
                 );
 
-                // No ClosingStageID: the status moves, the stage does not.
+                // No ClosingStageID: the derivation resolves to the stage the deal is already in.
                 Assert(
                     (await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID })).Success,
                     'the status-only close must succeed',
@@ -1149,7 +1213,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 AssertEqual(
                     String(closed.PipelineStageID).toLowerCase(),
                     startStage.toLowerCase(),
-                    'setup: a close without a ClosingStageID leaves the stage alone',
+                    'setup: the derived stage is the one the deal is already in, so nothing moved',
                 );
 
                 const out = await reopen(ctx, { DealID: dealID, Reason: 'CD19: no stage to restore.' });
@@ -1173,6 +1237,243 @@ export const CloseDealChecks: NamedCheck[] = [
                     String(orderAfter.Status),
                     String(orderBefore.Status),
                     'and the order was never asked to move, because no stage was entered',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD20',
+        Name: 'CD20: the stage event stamps WHOSE number the amount was, and a later reprice cannot rewrite it',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── THE PROVENANCE OF A CLOSE AMOUNT, WHICH FINANCE COULD NOT RECOVER ───────────────
+                 *
+                 * `AmountAtTransition` was stamped and its provenance was not. The flag that carries it
+                 * lives on `Deal.AmountIsComputed` — a mutable row — so the moment a closed deal was
+                 * repriced, the question "was this booking priced by the engine or typed by a person"
+                 * became unanswerable for that close. Every historical close was unclassifiable.
+                 *
+                 * The second half of this check is the part that matters and the part a column on `Deal`
+                 * can never satisfy: after the event is written, the deal's own flag is FLIPPED, and the
+                 * stamp must not move. That is the difference between a stamp and a join.
+                 *
+                 * Read through `Get` because the column is registered by an additive migration and the
+                 * generated subclass does not carry a typed property for it yet — CodeGen cannot be run
+                 * against this database (see the migration header).
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD20 amount provenance',
+                );
+
+                // A STATED amount: typed, not priced. That is the interesting case, because it is the one
+                // a reader would otherwise trust.
+                const stated = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await stated.Load(dealID), 'the open deal loads');
+                stated.Amount = 40404;
+                stated.AmountIsComputed = false;
+                Assert(await stated.Save(), `a stated amount must save — ${stated.LatestResult?.CompleteMessage ?? ''}`);
+
+                Assert(
+                    (await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID })).Success,
+                    'the close must succeed',
+                );
+
+                const event = await TxOne<{ AmountAtTransition: number; Provenance: boolean | null }>(
+                    ctx,
+                    `SELECT TOP 1 AmountAtTransition, AmountAtTransitionIsComputed AS Provenance
+                       FROM ${SALES_SCHEMA}.DealStageEvent
+                      WHERE DealID = '${dealID}' ORDER BY ChangedAt DESC`,
+                );
+                AssertEqual(Number(event.AmountAtTransition), 40404, 'the amount is stamped');
+                AssertEqual(
+                    event.Provenance === true,
+                    false,
+                    'and it is stamped as NOT engine-priced — a stated figure recorded as stated',
+                );
+                Assert(
+                    event.Provenance !== null,
+                    'and NOT null: null means "written before this was tracked", which a close made now ' +
+                        'is not',
+                );
+
+                /**
+                 * NOW REPRICE THE DEAL, which is what made this unrecoverable before. The deal is closed
+                 * and locked, so this goes through the sanctioned reopen rather than around the lock.
+                 */
+                Assert(
+                    (await reopen(ctx, { DealID: dealID, Reason: 'CD20: reprice after the close.' })).Success,
+                    'the reopen must succeed',
+                );
+                const repriced = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await repriced.Load(dealID), 'the reopened deal loads');
+                repriced.AmountIsComputed = true;
+                repriced.Amount = 99999;
+                Assert(await repriced.Save(), `the reprice must save — ${repriced.LatestResult?.CompleteMessage ?? ''}`);
+
+                const after = await TxOne<{ AmountAtTransition: number; Provenance: boolean | null }>(
+                    ctx,
+                    `SELECT TOP 1 AmountAtTransition, AmountAtTransitionIsComputed AS Provenance
+                       FROM ${SALES_SCHEMA}.DealStageEvent
+                      WHERE DealID = '${dealID}' AND ToDealStatusTypeID = '${f.WonStatusID}'
+                      ORDER BY ChangedAt DESC`,
+                );
+                AssertEqual(
+                    Number(after.AmountAtTransition),
+                    40404,
+                    'the CLOSE event still holds the amount as it was — provenance is pen, not pencil',
+                );
+                AssertEqual(
+                    after.Provenance === true,
+                    false,
+                    'and still says a person stated it, though the deal now says otherwise. This is the ' +
+                        'whole reason the flag cannot live on Deal',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD21',
+        Name: 'CD21: close-won tasks carry a DUE DATE, computed from the close',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * Every task this app has ever raised had a NULL due date, because `CloseWonTaskService`
+                 * accepts `DueAt` and the operation never supplied one. Tasks already ships `Task.DueAt`,
+                 * `IsOverdue`, an Overdue KPI and an `OnOverdue` hook — all of it inert for our rows.
+                 *
+                 * Asserted as a REAL DATE at the expected offset rather than merely non-null, because
+                 * "non-null" is what orders' own overdue worklist had when it reported one month overdue
+                 * as 46,264 days. A due-date feature that has never seen a real date is untested by
+                 * construction.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.ContractPolicyPipelineID ?? f.OrderOnlyPolicyPipelineID,
+                    f.ContractPolicyStageID ?? f.OrderOnlyPolicyStageID, 'CD21 task due dates',
+                );
+
+                const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+
+                const tasks = await TxAll<{ Name: string; DueAt: string | null; ClosedAt: string }>(
+                    ctx,
+                    `SELECT t.Name, CONVERT(varchar(33), t.DueAt, 126) AS DueAt,
+                            CONVERT(varchar(33), d.ClosedAt, 126) AS ClosedAt
+                       FROM ${TASKS_SCHEMA}.Task t
+                       JOIN ${TASKS_SCHEMA}.TaskLink tl ON tl.TaskID = t.ID
+                       JOIN ${SALES_SCHEMA}.Deal d ON d.ID = '${dealID}'
+                      WHERE tl.RecordID IN ('${dealID}', CAST(ISNULL(
+                                (SELECT CAST(OrderID AS NVARCHAR(50)) FROM ${SALES_SCHEMA}.Deal
+                                  WHERE ID = '${dealID}'), '${dealID}') AS NVARCHAR(50)))`,
+                );
+                Assert(tasks.length > 0, 'the close must raise at least one task for this to say anything');
+
+                for (const t of tasks) {
+                    Assert(
+                        !!t.DueAt,
+                        `"${t.Name}" has a NULL due date — every downstream due-date feature is inert for it`,
+                    );
+                    const due = new Date(String(t.DueAt));
+                    const closed = new Date(String(t.ClosedAt));
+                    /**
+                     * ── AN EXACT OFFSET, NOT A PLAUSIBLE RANGE. THE RANGE WAS THE BUG ───────────────
+                     *
+                     * This first asserted `days >= 0 && days <= 60`, and mutant `M-DA2` — which replaces
+                     * the date arithmetic with `closedAt.getTime() + days`, adding the offset as
+                     * MILLISECONDS — sailed straight through it: five milliseconds after the close rounds
+                     * to 0 days, and 0 satisfies `>= 0`. The check was written to guard exactly that class
+                     * of error (orders' overdue worklist reporting one month as 46,264 days) and would not
+                     * have caught it.
+                     *
+                     * The offset is compared to `DEFAULT_DUE_IN_DAYS` because this fixture configures no
+                     * `DueInDays`, so the default is the contract. A range cannot distinguish a wrong unit
+                     * from a right one; an equality can.
+                     */
+                    /**
+                     * BOTH SIDES TRUNCATED TO UTC MIDNIGHT BEFORE DIFFERENCING, and the first version of
+                     * this line was wrong in the way the fix's own comment warns about: `DueAt` is a
+                     * midnight DATE while `ClosedAt` is a full timestamp, so subtracting them lost the
+                     * afternoon and a five-day offset measured as four. The check had the day-arithmetic
+                     * bug it was written to catch.
+                     */
+                    const closedMidnight = Date.UTC(
+                        closed.getUTCFullYear(), closed.getUTCMonth(), closed.getUTCDate(),
+                    );
+                    const days = Math.round((due.getTime() - closedMidnight) / 86_400_000);
+                    AssertEqual(
+                        days,
+                        DEFAULT_DUE_IN_DAYS,
+                        `"${t.Name}" is due ${days} days after the close, not ${DEFAULT_DUE_IN_DAYS} — ` +
+                            'either the offset changed or the arithmetic is in the wrong unit',
+                    );
+                    // And the date is a real UTC midnight, like Deal.ActualCloseDate. A time component
+                    // makes "due today" depend on the reader's timezone.
+                    AssertEqual(
+                        due.getUTCHours() + due.getUTCMinutes() + due.getUTCSeconds(),
+                        0,
+                        `"${t.Name}" carries a time of day, so "due today" is timezone-dependent`,
+                    );
+                }
+            }),
+    },
+    {
+        Id: 'close-deal.CD22',
+        Name: 'CD22: a close with NO ClosingStageID still moves into the stage its outcome names',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── THE OTHER HALF OF DN-18, AND WHAT MAKES CD18 REACHABLE FROM A BROWSER ───────────
+                 *
+                 * `ConfirmClose()` sends no `ClosingStageID`, so before this every browser-driven close
+                 * left the stage where it was, every close event recorded `FromStageID === ToStageID`, and
+                 * the reopen had nothing to restore. `CD18` proved a mechanism the UI could not reach.
+                 *
+                 * The stage is resolved by the FLAG its status carries, so this passes on a pipeline that
+                 * calls its winning stage anything at all — which is why the expectation below is computed
+                 * the same way rather than hardcoded.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const start = f.OrderOnlyPolicyStageID;
+                const expected = await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsWon = 1');
+                Assert(!!expected, 'the pipeline needs a stage declaring a WON status');
+                Assert(
+                    String(expected!.ID).toLowerCase() !== start.toLowerCase(),
+                    'setup: the deal must not already be in the winning stage, or nothing is proven',
+                );
+
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, start, 'CD22 derived closing stage',
+                );
+                Assert(
+                    (await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID })).Success,
+                    'the close must succeed',
+                );
+
+                const row = await TxOne<{ PipelineStageID: string }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(row.PipelineStageID).toLowerCase(),
+                    String(expected!.ID).toLowerCase(),
+                    'the close lands in the stage its OUTCOME names, with no ClosingStageID supplied',
+                );
+
+                // And the event records a real move, which is what gives the reopen something to restore.
+                const ev = await TxOne<{ FromStageID: string; ToStageID: string }>(
+                    ctx,
+                    `SELECT TOP 1 FromStageID, ToStageID FROM ${SALES_SCHEMA}.DealStageEvent
+                      WHERE DealID = '${dealID}' ORDER BY ChangedAt DESC`,
+                );
+                AssertEqual(
+                    String(ev.FromStageID).toLowerCase(), start.toLowerCase(),
+                    'the event records the stage it came FROM — this is what CD18 reads',
+                );
+                Assert(
+                    String(ev.ToStageID).toLowerCase() !== String(ev.FromStageID).toLowerCase(),
+                    'and From differs from To, so this was a real transition rather than a self-move',
                 );
             }),
     },

@@ -142,6 +142,13 @@ interface StageMoveSnapshot {
     StageID: string | null;
     StatusID: string | null;
     Amount: number | null;
+    /**
+     * Whether {@link Amount} came from the orders engine, as of the moment BEFORE this transition.
+     *
+     * Read from `OldValue` for the same reason the amount is: the stamp describes what the deal was worth
+     * and where that figure came from on the way OUT, not what it acquired by arriving.
+     */
+    AmountIsComputed: boolean | null;
     Probability: number | null;
 }
 
@@ -423,6 +430,8 @@ export class DealEntityServer extends DealEntity {
             StageID: priorStageID,
             StatusID: (this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null) ?? null,
             Amount: (this.GetFieldByName('Amount')?.OldValue as number | null) ?? null,
+            AmountIsComputed:
+                (this.GetFieldByName('AmountIsComputed')?.OldValue as boolean | null | undefined) ?? null,
             Probability: (this.GetFieldByName('Probability')?.OldValue as number | null) ?? null,
         };
     }
@@ -561,9 +570,7 @@ export class DealEntityServer extends DealEntity {
      * downstream call. A stage change is a stage change; closing is `Sales.CloseDeal` and stays an
      * explicit act, even when the stage a deal moves into is the one a pipeline calls Signed.
      */
-    private async appendStageEvent(
-        prior: { StageID: string | null; StatusID: string | null; Amount: number | null; Probability: number | null },
-    ): Promise<void> {
+    private async appendStageEvent(prior: StageMoveSnapshot): Promise<void> {
         const provider = this.ProviderToUse as unknown as IMetadataProvider;
         const user = this.ContextCurrentUser;
         const event = await provider.GetEntityObject<mjBizAppsSalesDealStageEventEntity>(
@@ -579,6 +586,25 @@ export class DealEntityServer extends DealEntity {
         event.ChangedByUserID = user?.ID ?? null;
         event.ChangedAt = new Date();
         event.AmountAtTransition = prior.Amount;
+        /**
+         * ── AND WHOSE NUMBER IT WAS, STAMPED BESIDE IT ──────────────────────────────────────────────
+         *
+         * Finance reads close amounts out of this table and could not classify them. The amount was
+         * stamped; its provenance was not — and the flag that carries it, `Deal.AmountIsComputed`, is on a
+         * row that keeps changing. So a deal repriced after its close made its own close amount
+         * unclassifiable, and there was no way to tell an engine-priced booking from a typed one after the
+         * fact.
+         *
+         * `Set` rather than a typed property: the column is registered as an `EntityField` by an additive
+         * migration, and the generated entity subclass does not carry it until CodeGen next runs — which
+         * cannot be run against this database (see that migration's header for why). The field exists in
+         * metadata, so this writes through the same path every other field does.
+         *
+         * NOT BACKFILLABLE, which is the whole argument for adding it now: every row already written has
+         * NULL here and always will, because the answer for those transitions is genuinely unknown. Its
+         * value starts today.
+         */
+        event.Set('AmountAtTransitionIsComputed', prior.AmountIsComputed);
         event.ProbabilityAtTransition = prior.Probability;
         // A declared transition's reason — the close's routing note, the reopen's justification. An
         // ordinary stage move carries none, which is why this is null far more often than not.

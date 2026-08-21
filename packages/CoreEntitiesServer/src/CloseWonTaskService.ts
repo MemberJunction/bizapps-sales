@@ -182,6 +182,16 @@ export interface CloseWonTasksPolicyConfig {
     AssigneeRecordID?: string | null;
     /** Which `TaskRole` the assignee holds. Optional — `TaskAssignment.RoleID` is nullable. */
     AssigneeRoleID?: string | null;
+    /**
+     * How many days after the close the finance work is due. Omit to take {@link DEFAULT_DUE_IN_DAYS}.
+     *
+     * Per-deployment because it is a service-level commitment, not a rule: a team that reviews orders
+     * same-day and one that batches weekly both want these tasks, on different clocks.
+     *
+     * A non-positive value is honoured — 0 means "due today" — but a non-finite or absent one falls back
+     * to the default rather than producing an invalid date.
+     */
+    DueInDays?: number | null;
 }
 
 /**
@@ -204,6 +214,40 @@ export interface CloseWonTasksPolicyConfig {
 export function ResolveTaskTypeColumn(provider: IMetadataProvider): 'Code' | 'Name' {
     const info = provider.Entities.find((e) => e.Name === E_TASK_TYPE);
     return info?.Fields?.some((f) => f.Name === 'Code') === true ? 'Code' : 'Name';
+}
+
+/**
+ * How long a close-won task gets by default.
+ *
+ * Five days rather than one or thirty: the order review gates the invoice, so it cannot sit for a month,
+ * and finance is not on call, so it cannot be due in an hour. It is a default precisely because it is
+ * arguable — `DueInDays` in the policy is how a deployment disagrees.
+ */
+export const DEFAULT_DUE_IN_DAYS = 5;
+
+/**
+ * The due date for work created by a close, in UTC.
+ *
+ * ── THE ARITHMETIC IS DELIBERATELY DONE THIS WAY, AND THERE IS A CAUTIONARY TALE ────────────────
+ *
+ * `Date.UTC` with an out-of-range day is the whole trick: `Date.UTC(2026, 0, 30 + 5)` is 4 February, and
+ * month-end, month-length and year rollover are the platform's problem rather than this function's. The
+ * alternative — adding milliseconds, or building a string — is where day arithmetic goes wrong.
+ *
+ * It goes wrong quietly. Orders' own `GetOverdueWorklistOperation` carried broken day arithmetic for
+ * MONTHS: it reported an order one month overdue as **46,264 days** overdue, and nobody noticed, because
+ * `DueDate` was NULL on every order in the system so the code path never ran on real data. That is the
+ * same shape as the bug being fixed here — a due-date feature made inert by a null — and it is the reason
+ * this returns a date at all rather than leaving the column empty and the feature untested.
+ *
+ * Truncated to UTC midnight, like `Deal.ActualCloseDate`: a due DATE is a day, and stamping 23:47 makes
+ * "due today" depend on the reader's timezone.
+ */
+export function CloseWonTaskDueAt(closedAt: Date, dueInDays?: number | null): Date {
+    const days = Number.isFinite(dueInDays) ? Number(dueInDays) : DEFAULT_DUE_IN_DAYS;
+    return new Date(
+        Date.UTC(closedAt.getUTCFullYear(), closedAt.getUTCMonth(), closedAt.getUTCDate() + days),
+    );
 }
 
 export function ReadCloseWonTaskConfig(policy: unknown): CloseWonTasksPolicyConfig {
