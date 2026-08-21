@@ -12,10 +12,29 @@
 --
 -- Nothing constrains a deal's AttributionPct values to total 100. If a deal's three members carry 60
 -- / 30 / 30, this reports 120% of it; if they carry 50 / 20, it reports 70%. Both are legitimate
--- statements about credit and neither is a statement about revenue. `AttributionCoveragePct` below
--- exposes that ratio per deal-set so a reader can see when it is off — a silent 120% is precisely the
--- double-count §9.4 warns about, and the fix is to make it visible rather than to normalise it here
--- and hide a data-entry problem.
+-- statements about credit and neither is a statement about revenue.
+--
+-- AN EARLIER VERSION OF THIS COMMENT PROMISED AN "AttributionCoveragePct" COLUMN. It does not
+-- exist, and the fix is to delete the promise rather than add the column: coverage is a property of a
+-- DEAL (do its members' shares total 100?), and this query groups by REP. A per-rep row has no
+-- coverage to report, so the column could only ever have been misleading here.
+--
+-- `UnstatedAttributionCount` below is the part of that intent this grain CAN honestly carry: it
+-- counts members whose share was never stated, which is the most common cause of coverage being off.
+--
+-- Deal-level coverage belongs in a deal-grained report. It is not built; noted so the next person
+-- reads an absence rather than a broken reference.
+--
+-- ══ WHICH COLUMNS ARE ADDITIVE ACROSS ROWS, BECAUSE ONLY SOME ARE ═════════════════════════════
+--
+--   ADDITIVE      WeightedWonAmount -- shares of a deal, so totalling them returns the deal.
+--   ADDITIVE      UnstatedAttributionCount -- a count of member rows, and rows are what this grain is.
+--   NOT ADDITIVE  WonAmountOfDealsTouched -- the whole deal, repeated per member. See its note.
+--   NOT ADDITIVE  DealsInvolvedIn / WonDealsInvolvedIn -- one deal counts once per member who touched it.
+--   NOT ADDITIVE  AvgAttributionPct -- an average; averaging averages across reps is not an average.
+--
+-- Stated here rather than left to a reader's judgement because the failure is silent: every one of
+-- those non-additive columns produces a plausible-looking number when summed.
 --
 -- USE `bookings-by-owner.sql` FOR ANY NUMBER THAT HAS TO RECONCILE — a board figure, a commission
 -- input, an accounting tie-out. Use this one for coverage and involvement. §9.4: "There is no safe
@@ -41,7 +60,17 @@ SELECT
     SUM(CASE WHEN st.IsWon = 1
              THEN ISNULL(d.Amount, 0) * ISNULL(tm.AttributionPct, 0) / 100.0
              ELSE 0 END)                        AS WeightedWonAmount,
-    SUM(CASE WHEN st.IsWon = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END) AS UnweightedWonAmount,
+    /**
+     * NOT ADDITIVE ACROSS ROWS. Renamed from "UnweightedWonAmount", which read like something you
+     * could total up. It is the FULL value of the deals this rep touched, repeated in full on every
+     * member's row -- so summing the column across reps multiplies each shared deal by its team size.
+     *
+     * Measured on the seeded won deal: 27,480 split 60/25/15 gives 16,488 + 6,870 + 4,122, which sums
+     * back to 27,480 exactly. The same deal contributes 27,480 to all three rows here, so summing
+     * this column gives 82,440 -- three times a deal that was worth 27,480 once. That is §9.4's
+     * double-count, arriving through a column name rather than through a missing filter.
+     */
+    SUM(CASE WHEN st.IsWon = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END) AS WonAmountOfDealsTouched,
     AVG(CAST(ISNULL(tm.AttributionPct, 0) AS FLOAT))                AS AvgAttributionPct,
     SUM(CASE WHEN tm.AttributionPct IS NULL THEN 1 ELSE 0 END)      AS UnstatedAttributionCount
 FROM [__mj_BizAppsSales].vwDeals d
