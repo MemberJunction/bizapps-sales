@@ -80,6 +80,14 @@ jobs:
         run: pnpm run test:vocabulary-gate
 
       # ===================================================================================
+      # GATE 1b - RULE ONE, which had no automated defender until now. A per-column money
+      # figure assembled by `cards.reduce(...)` shipped in the board and was caught by
+      # review. A heuristic with an annotated escape hatch beats nothing watching at all.
+      # ===================================================================================
+      - name: Money gate (sales records intent; orders computes the number)
+        run: pnpm run test:money-gate
+
+      # ===================================================================================
       # GATE 2 — the two pure-function gates, which were NOT in CI until now.
       #
       # `test:discount-gate` has existed and been described as a gate since the DealLine retirement, and

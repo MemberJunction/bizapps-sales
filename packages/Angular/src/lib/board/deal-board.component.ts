@@ -202,8 +202,40 @@ export class DealBoardComponent {
                      * `?? 0` treats a missing amount as zero for the SUM only. It is not a substitute
                      * for the value: `Unpriced` below counts those cards, and the template renders the
                      * count as a caveat ON the number rather than as a separate fact beside it.
+                     *
+                     * ── AND THE ARGUMENT IS NOW MACHINE-VISIBLE, BECAUSE PROSE IS NOT A DECISION ─────
+                     *
+                     * `scripts/assert-no-money-arithmetic.mjs` fires on this line and is right to: a
+                     * regex cannot tell a rollup from a derivation, so the rule is that a legitimate case
+                     * is ANNOTATED rather than excused by weakening the pattern. The comment above made
+                     * the argument and left no reviewable record of it. The trailing annotation is that
+                     * record.
+                     *
+                     * Three things were checked rather than asserted before allowing it:
+                     *
+                     *   1. **The identical operation already exists, in SQL.**
+                     *      `metadata/queries/SQL/dashboard-summary.sql:41` is
+                     *      `SUM(CASE WHEN st.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END)`. Same
+                     *      addition over the same column. The gate's own header states SQL is unscanned
+                     *      *by design*, so this operation is accepted by policy where it runs in the
+                     *      database. The difference here is WHERE it happens, not WHAT it is.
+                     *   2. **Nothing consumes the result.** Rule #1 forbids deriving a figure that gets
+                     *      STORED or SENT -- a line total, a header total, a discounted price. This total
+                     *      is recomputed on every render, written to no column, and passed to no app.
+                     *      `Deal.Amount` remains the only cached answer, and it keeps its provenance
+                     *      (`AmountIsComputed` / `AmountComputedAt` / `AmountSourceHash`) untouched.
+                     *   3. **The grain blocker is real, not reluctance.**
+                     *      `metadata/queries/SQL/pipeline-summary.sql:36` carries `AND st.IsOpen = 1`, so
+                     *      it cannot serve a board that renders closing columns -- they would read zero.
+                     *      Moving this into a query is blocked on that, and the fix is an all-status
+                     *      variant or a board-shaped query.
+                     *
+                     * The one honest caveat: on this host every deal carries `AmountIsComputed = 0`, so
+                     * this total is currently a sum of HAND-TYPED figures. That is a labelling problem
+                     * rather than an arithmetic one, and it is already disclosed -- `Unpriced`,
+                     * `NonePriced` and `PricingNote` exist for exactly that.
                      */
-                    Total: cards.reduce((sum, d) => sum + (d.Amount ?? 0), 0),
+                    Total: cards.reduce((sum, d) => sum + (d.Amount ?? 0), 0),   // money-grep-allow: a rollup of stored answers for display -- never stored, never sent. The same SUM runs in dashboard-summary.sql:41; moving it into a query is blocked on pipeline-summary.sql:36 being open-deals-only. See the note above.
                     Currency: SingleCurrencyOf(cards),
                     MixedCurrency: SingleCurrencyOf(cards) === null && cards.length > 0
                         && new Set(cards.map((d) => d.CurrencyID ?? '')).size > 1,

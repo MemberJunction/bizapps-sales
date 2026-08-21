@@ -50,12 +50,23 @@ import { join, relative, sep } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
-/** Server-side source only. The UI may legitimately show a name; it may not BRANCH on one. */
+/**
+ * EVERY package that carries hand-written source — not just the server ones.
+ *
+ * This listed four of six. `packages/Angular/src` and `packages/Entities/src` were absent, so rule
+ * two held where the gate looked and was simply unverified everywhere else — and the UI is exactly
+ * where "show the name" slides into "branch on the name", because both look like rendering.
+ *
+ * The old comment said the UI may show a name but may not BRANCH on one. That is the right rule,
+ * and it was being enforced on the half of the codebase least likely to break it.
+ */
 const SEARCH_ROOTS = [
     'packages/Server/src',
     'packages/CoreEntitiesServer/src',
     'packages/Actions/src',
     'packages/IntegrationTests/src',
+    'packages/Angular/src',
+    'packages/Entities/src',
 ];
 
 /** Never generated code, never build output, never tests' own fixture vocabulary. */
@@ -143,6 +154,16 @@ function* walk(dir) {
         if (statSync(full).isDirectory()) {
             if (!SKIP_DIR.has(name)) yield* walk(full);
         } else if (/\.(ts|mts|cts)$/.test(name) && !/\.d\.ts$/.test(name)) {
+            yield full;
+        } else if (/\.html$/.test(name)) {
+            /**
+            * ANGULAR TEMPLATES, which were invisible to this gate at any root.
+            *
+            * `@if (row.DealStatusType === 'Closed Won')` in a template is the same violation as
+            * in a component, so adding the Angular root while walking only `.ts` would still
+            * have missed it. A template IS source; splitting a component across two files is an
+            * Angular implementation detail, not a statement about what counts as code.
+            */
             yield full;
         }
     }
