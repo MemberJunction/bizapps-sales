@@ -1308,6 +1308,194 @@ export const SaveDealChecks: NamedCheck[] = [
                 await saveOk(ordinary, 'a header-only save that touches nothing server-owned');
             }),
     },
+    {
+        Id: 'save-deal.SD27',
+        Name: 'SD27: a permitted edit to a LOCKED deal provisions NO order',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE LOCK AND THE PROVISIONER COULD NOT SEE EACH OTHER.
+                 *
+                 * `Description` is deliberately editable while locked, so a permitted edit passes the lock
+                 * and reaches the rest of `Save()`. Provisioning then ran unconditionally: a closed legacy
+                 * deal with no order got an empty Draft one INSERTED, `Deal.OrderID` rewritten on a frozen
+                 * row, and the stage writer free to stamp that order from the CLOSING stage — `Voided`,
+                 * for a lost deal. Three writes to provenance that is supposed to be immutable, from
+                 * editing a description.
+                 *
+                 * The state is reached in SQL because there is no other way to get there: a deal that
+                 * predates provisioning is exactly what the app can no longer create.
+                 *
+                 * ── HOW TO MAKE THIS FAIL ── remove the `if (!this._lockedAtSave)` guard around
+                 * `provisionEmbeddedOrder()`.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD27 locked legacy deal'; });
+                await saveOk(created, 'create');
+
+                const lockingStatus = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.DealStatusType WHERE LocksDeal = 1 AND IsActive = 1`,
+                );
+                Assert(!!lockingStatus.ID, 'setup: a locking status is required');
+
+                // The legacy shape: locked, and pointing at no order. Both in SQL, so the app never had a
+                // chance to provision on the way in.
+                await execSql(
+                    ctx,
+                    `UPDATE ${SALES_SCHEMA}.Deal SET OrderID = NULL, DealStatusTypeID = '${lockingStatus.ID}'
+                      WHERE ID = '${created.ID}'`,
+                    'SD27: a closed deal that predates order provisioning',
+                );
+
+                const ordersBefore = await TxOne<{ N: number }>(
+                    ctx, `SELECT COUNT(*) AS N FROM __mj_BizAppsOrders.OrderHeader`,
+                );
+
+                const edited = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await edited.Load(created.ID), 'the locked deal loads');
+                edited.Description = 'SD27: a permitted edit to a frozen deal';
+                await saveOk(edited, 'the permitted edit must be allowed — the lock is field-by-field');
+
+                const after = await TxOne<{ OrderID: string | null }>(
+                    ctx, `SELECT OrderID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                AssertEqual(
+                    after.OrderID,
+                    null,
+                    'a locked deal must NOT acquire an order from a description edit — rewriting OrderID on ' +
+                        'a frozen row is a change to the record of what was agreed',
+                );
+
+                const ordersAfter = await TxOne<{ N: number }>(
+                    ctx, `SELECT COUNT(*) AS N FROM __mj_BizAppsOrders.OrderHeader`,
+                );
+                AssertEqual(
+                    Number(ordersAfter.N),
+                    Number(ordersBefore.N),
+                    'and no empty Draft order may be inserted into orders at all',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD28',
+        Name: 'SD28: an order with NO LINES is not "priced at zero" — the amount stays untouched',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * WHAT THIS ACTUALLY PINS, after the premise it was written for turned out to be wrong.
+                 *
+                 * It was written to catch "an empty order caches Amount = 0, AmountIsComputed = 1",
+                 * on the stated grounds that orders' rollup is `SUM(ISNULL(l.LineTotal, 0))` and so
+                 * returns 0. Measured: `OrderHeader.TotalGross` is **NULL** for an order with no lines,
+                 * because `SUM` over no rows is NULL whatever the inner `ISNULL` does — and
+                 * `OrderLine.UnitPrice` is NOT NULL, so a line cannot exist unpriced either. The 0 case
+                 * is unreachable on this schema, and a guard written for it was removed rather than
+                 * shipped as dead code in a money path.
+                 *
+                 * The check is KEPT because the behaviour is worth pinning on its own terms: an empty
+                 * order must leave the amount alone, starting from a NULL amount — which is the state
+                 * SD23 never reaches, since its fixture already carries a hand-typed figure and returns
+                 * at the earlier guard. If `UnitPrice` ever becomes nullable, this is the check that will
+                 * need a sibling for the lines-present-but-unpriced case.
+                 *
+                 * ── THE ORIGINAL NOTE, kept because the reasoning about WHY 0-marked-computed is bad
+                 * still stands and is the reason to care ──
+                 *
+                 * `refreshAmountFromOrder` skipped when `TotalGross` was null, and its comment claimed
+                 * that covered "no priced lines". It never did: orders' rollup is
+                 * `SUM(ISNULL(l.LineTotal, 0))`, so an order with nothing on it returns **0**. Zero is
+                 * finite, so it passed the guard and cached `Amount = 0, AmountIsComputed = 1`.
+                 *
+                 * That is worse than a stale figure in two ways. The priced/stated split counts the deal
+                 * as PRICED at nothing — the very "computed amount of nothing" the method's own comment
+                 * calls worse than either honest answer. And it permanently destroys the hand-typed
+                 * protection: once `AmountIsComputed` is 1, the guard that refuses to overwrite a human's
+                 * number no longer applies to that deal.
+                 *
+                 * SD23 did not catch it because its fixture already carries a hand-typed amount, so it
+                 * returns at the earlier guard and never reaches this one. This check starts from a NULL
+                 * amount, which is the state that exposes it.
+                 *
+                 * ── HOW TO MAKE THIS FAIL ── delete the `total === null` guard in
+                 * `refreshAmountFromOrder`. That is the guard that actually carries this case.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const created = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD28 no lines, no price';
+                    d.Amount = null;
+                });
+                await saveOk(created, 'create');
+
+                const lines = await orderLines(ctx, String(created.OrderID), ['ID']);
+                AssertEqual(lines.length, 0, 'setup: this deal must have NO order lines');
+
+                const row = await TxOne<{ Amount: number | null; AmountIsComputed: boolean; Hash: string | null }>(
+                    ctx,
+                    `SELECT Amount, AmountIsComputed, AmountSourceHash AS Hash FROM ${SALES_SCHEMA}.Deal
+                      WHERE ID = '${created.ID}'`,
+                );
+                AssertEqual(
+                    row.Amount,
+                    null,
+                    'an order with no lines must leave the amount NULL — 0 marked computed says the deal ' +
+                        'was priced at nothing, which is a different and false claim',
+                );
+                AssertEqual(
+                    row.AmountIsComputed === true,
+                    false,
+                    'and must NOT stamp AmountIsComputed, which is what destroys the hand-typed protection',
+                );
+                AssertEqual(row.Hash, null, 'and must write no source hash for a figure it did not compute');
+            }),
+    },
+    {
+        Id: 'save-deal.SD29',
+        Name: 'SD29: a deal number drawn inside a ROLLED-BACK save does not survive in memory',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE DEAL THAT COULD NEVER BE SAVED AGAIN.
+                 *
+                 * `DealNumber` is drawn from the sequence inside the save's scope. When the save then
+                 * failed, the rollback returned the counter but the value stayed on the in-memory record —
+                 * and `Save()` decides whether to draw one by asking `this.IsSaved || this.DealNumber`. So
+                 * the retry took the `assignNumber: false` branch and re-inserted a number the sequence
+                 * had already re-issued.
+                 *
+                 * The deal was unsaveable for the life of the tab, and the error named a unique index on
+                 * DealNumber — a field the rep had never touched — instead of whatever failed first.
+                 *
+                 * The failure is forced by breaking a NOT NULL the entity validates: that fails inside
+                 * `super.Save`, which is exactly where a real failure lands, AFTER the number is drawn.
+                 *
+                 * ── HOW TO MAKE THIS FAIL ── remove `this.DealNumber = null` from the rollback branch.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                deal.NewRecord();
+                deal.Name = 'SD29 rolled back numbering';
+                deal.PipelineID = f.PipelineID;
+                deal.PipelineStageID = f.StageID;
+                deal.DealTypeID = f.DealTypeID;
+                deal.DealStatusTypeID = f.OpenStatusID;
+                deal.AccountID = f.AccountID;
+
+                // Invalid on purpose: Name is NOT NULL, so `super.Save` refuses AFTER the number is drawn.
+                deal.Name = null as unknown as string;
+
+                AssertEqual(await deal.Save(), false, 'the save must fail — that is the premise of the check');
+                AssertEqual(
+                    deal.DealNumber ?? null,
+                    null,
+                    'and the number must be cleared, or the retry re-inserts one the sequence has re-issued ' +
+                        'and the deal is unsaveable until the tab is recreated',
+                );
+            }),
+    },
 ];
 
 for (const check of SaveDealChecks) {

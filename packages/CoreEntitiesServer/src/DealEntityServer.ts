@@ -187,6 +187,7 @@ export class DealEntityServer extends DealEntity {
         // one's. Cleared before the close lock can return early — an abandoned save has no warnings.
         this._orderStatusWarnings.length = 0;
         this._orderJustProvisioned = false;
+        this._lockedAtSave = false;
 
         /**
          * THE CLOSE LOCK (L-17, master plan §7.3) — enforced HERE and nowhere else.
@@ -231,9 +232,22 @@ export class DealEntityServer extends DealEntity {
             return false;
         }
 
-        // AFTER the company stamp, deliberately. See the method for why it cannot be earlier and why
-        // it does not belong in the workspace.
-        this.provisionEmbeddedOrder();
+        /**
+         * AFTER the company stamp, deliberately — and NOT AT ALL on a locked deal.
+         *
+         * The lock check above has already run, so `_lockedAtSave` is trustworthy here. A locked deal
+         * that reaches this point is one making a PERMITTED edit (Description, NextStep), and permitted
+         * does not mean "and also create an order for it": a closed deal's order is either already there
+         * or was never going to be, and minting one now rewrites `Deal.OrderID` on a row whose whole
+         * purpose is to be the frozen record of what was agreed.
+         *
+         * A legacy closed deal therefore keeps its NULL OrderID. That is the honest outcome — SD24 gives
+         * it one the moment it is legitimately reopened and saved, which is the path that is allowed to
+         * change it.
+         */
+        if (!this._lockedAtSave) {
+            this.provisionEmbeddedOrder();
+        }
 
         /**
          * WHAT THIS STAGE CHANGE ASKS OF THE ORDER (S-US5) — resolved here, applied inside the
@@ -246,7 +260,7 @@ export class DealEntityServer extends DealEntity {
          * The READ happens before any transaction opens, for the same reason the close lock does: it is
          * one lookup, and work that might not be needed should not lengthen a critical section.
          */
-        const stageOrder = await this.planStageOrderStatus();
+        const stageOrder = this._lockedAtSave ? null : await this.planStageOrderStatus();
 
         /**
          * AND WHAT IT OWES THE APPEND-ONLY LOG — snapshotted here, for the same reason.
@@ -281,7 +295,15 @@ export class DealEntityServer extends DealEntity {
         // The stage's forecast defaults, on the same trigger as the three above. Read here, applied
         // inside the scope, for the same reason the others are: work that might not be needed should not
         // lengthen a critical section.
-        const stageDefaults = await this.planStageDefaults();
+        /**
+         * NEITHER STAGE WRITER RUNS ON A LOCKED DEAL. The stage cannot legitimately move on one — the
+         * closing transition itself is the save where the status is still OPEN in the database, so it
+         * passes the lock and reaches here with `_lockedAtSave === false`. Anything that gets here WITH
+         * the flag set is a permitted edit to a frozen deal, and re-deriving its probability or re-
+         * stamping its order from the closing stage would be exactly the corruption the lock exists to
+         * stop.
+         */
+        const stageDefaults = this._lockedAtSave ? null : await this.planStageDefaults();
 
         // Nothing to number: an existing deal, or one that already has a number. A number is only ever
         // assigned once — it appears in contracts, orders and people's email, so re-saving a deal must
@@ -422,6 +444,25 @@ export class DealEntityServer extends DealEntity {
             const saved = await super.Save(options);
             if (!saved) {
                 await scope.Rollback();
+                /**
+                 * ── THE NUMBER GOES BACK TOO, OR THE DEAL BECOMES UNSAVEABLE ────────────────────────
+                 *
+                 * `DealNumber` was drawn from the sequence INSIDE this scope. The rollback returns the
+                 * counter, but the value stayed on the in-memory record — and `Save()` decides whether to
+                 * draw one by asking `this.IsSaved || this.DealNumber`. So the retry took the
+                 * `assignNumber: false` branch and re-inserted a number the sequence had already
+                 * re-issued to somebody else.
+                 *
+                 * The deal was then unsaveable for the life of the tab, and the error named a unique index
+                 * on DealNumber rather than whatever had actually failed the first time — so the rep saw a
+                 * duplicate-key message about a field they had never touched.
+                 *
+                 * Cleared only when THIS scope drew it: a retry of an already-numbered deal must keep its
+                 * number, because that number is in contracts, orders and people's email.
+                 */
+                if (work.assignNumber) {
+                    this.DealNumber = null;
+                }
                 return false;
             }
 
@@ -983,8 +1024,30 @@ export class DealEntityServer extends DealEntity {
         const raw = (result.Results ?? [])[0]?.TotalGross;
         const total = raw === null || raw === undefined ? null : Number(raw);
         if (total === null || !Number.isFinite(total)) {
-            return;   // no priced lines, or no usable answer — either way, nothing to cache
+            return;   // no usable answer — see the note above; this still guards the mid-transaction read
         }
+
+        /**
+         * ── "NO PRICED LINES" IS NOT REACHABLE ON THIS SCHEMA, AND THE COMMENT ABOVE OVERCLAIMED ───────
+         *
+         * A review flagged that the guard above cannot cover "no priced lines", on the grounds that
+         * orders' rollup is `SUM(ISNULL(l.LineTotal, 0))` and so returns 0 rather than NULL. Measured
+         * against the live schema, that case cannot arise:
+         *
+         *   · `OrderLine.UnitPrice` is **NOT NULL**, so a line cannot exist unpriced. Zero rows carry a
+         *     null total today, and none can.
+         *   · `OrderHeader.TotalGross` is **NULL** for an order with no lines — `SUM` over no rows is
+         *     NULL regardless of any inner `ISNULL` — so the `total === null` guard above already fires,
+         *     correctly, for the empty-order case.
+         *
+         * A guard was written here for the 0-with-lines case and then removed rather than shipped: it was
+         * dead code for a state the schema forbids, and dead code in a money path is worse than none
+         * because the next reader trusts it. If `UnitPrice` ever becomes nullable this becomes reachable,
+         * and the guard to add then is "is any line priced", not "are there lines".
+         *
+         * `save-deal.SD28` pins the empty-order behaviour from a NULL starting amount, which is the case
+         * SD23 does not reach.
+         */
 
         /**
          * The fingerprint, so a surface can say "stale, reprice" instead of showing an untraceable
@@ -1045,6 +1108,21 @@ export class DealEntityServer extends DealEntity {
     private _orderJustProvisioned = false;
 
     /**
+     * Whether the PERSISTED status locks this deal — set by {@link checkCloseLock} on every save.
+     *
+     * The lock used to answer one question ("may this edit proceed?") and nothing else, so the writers
+     * further down the save could not tell a frozen deal from a live one. `provisionEmbeddedOrder` in
+     * particular ran unconditionally, and Description is deliberately editable while locked — so editing
+     * the description of a closed legacy deal INSERTED an empty Draft order, rewrote `Deal.OrderID` on a
+     * frozen row, and let the stage writer stamp that order from the CLOSING stage (`Voided`, for a lost
+     * deal). Every one of those is a write to provenance that is supposed to be immutable.
+     *
+     * So the lock now reports what it found. Nothing else may recompute it: two places deciding whether a
+     * deal is locked is how they come to disagree.
+     */
+    private _lockedAtSave = false;
+
+    /**
      * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.
      *
      * It moved to `@mj-biz-apps/sales-entities` so the Explorer Deal form can apply the same list. A
@@ -1084,6 +1162,11 @@ export class DealEntityServer extends DealEntity {
         if (!(await this.statusLocksDeal(persistedStatusID))) {
             return null;
         }
+
+        // FROM HERE THE DEAL IS LOCKED, whatever this particular edit turns out to be. Recorded before
+        // the field-by-field verdict below, because the writers downstream care about the LOCK, not about
+        // whether this one edit was permitted.
+        this._lockedAtSave = true;
 
         const changed = this.Fields.filter(
             (f) => f.Dirty && !DealEntityServer.LOCK_EDITABLE_FIELDS.has(f.Name),

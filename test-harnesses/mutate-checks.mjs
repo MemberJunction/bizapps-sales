@@ -227,6 +227,19 @@ const MUTATIONS = [
       to: '                        ContractID: undefined,',
       note: 'the contract task links the deal, and the service cannot know otherwise' },
 
+    // DEFECT 5. Un-gate provisioning and a permitted edit to a frozen deal mints an order again.
+    { id: 'M-LK1', file: DES, expect: ['SD27'],
+      from: '        if (!this._lockedAtSave) {\n            this.provisionEmbeddedOrder();',
+      to: '        if (true) {\n            this.provisionEmbeddedOrder();',
+      note: 'a locked deal provisions an order from a description edit' },
+
+
+    // DEFECT 7. Leave the number in memory and the retry re-inserts a re-issued one.
+    { id: 'M-DN1', file: DES, expect: ['SD29'],
+      from: '                if (work.assignNumber) {\n                    this.DealNumber = null;',
+      to: '                if (false && work.assignNumber) {\n                    this.DealNumber = null;',
+      note: 'a rolled-back deal number survives, and the deal becomes unsaveable' },
+
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
     // the agreement went. This flips exactly that bit and nothing else.
