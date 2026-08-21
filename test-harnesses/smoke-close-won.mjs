@@ -161,15 +161,16 @@ const saved = await deal.Save();
 step('deal saved with a picker-set line', saved, saved ? `${deal.DealNumber ?? deal.ID} · ${products[0].Name} ×4` : deal.LatestResult?.CompleteMessage);
 
 // ── 4. Money preview, BEFORE anything is created ────────────────────────────
-const { LiveOrdersSeam } = await import(local('CoreEntitiesServer'));
-const seam = new LiveOrdersSeam(user, provider);
-const preview = await seam.PreviewOrderMoney({
-    Header: { CompanyID: pipeline.CompanyID, OrganizationID: account.ID },
-    Lines: [{ ProductID: products[0].ID, Quantity: 4 }],
-    Status: 'Draft',
-    OrderType: 'Sale',
-});
-step('Orders.PriceOrder returns money for the draft', preview.Success && Number(preview.Amount) > 0, `amount ${preview.Amount}`);
+/**
+ * THE MONEY-PREVIEW STEP IS GONE, and its removal is the point rather than a loss of coverage.
+ *
+ * It called `LiveOrdersSeam.PreviewOrderMoney` to price a draft before close. Close-won no longer
+ * creates or prices an order — the order is embedded on the deal from creation and orders prices it
+ * on its own save — so the method described a route that no longer exists and has been deleted.
+ *
+ * This was its only caller anywhere. Pricing is still covered where it actually happens: the embedded
+ * order's own save path, and the `Resolved*` assertions in the save-deal checks.
+ */
 
 // ── 5. Close won ────────────────────────────────────────────────────────────
 const op = new SalesCloseDealOperation();

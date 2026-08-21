@@ -1,31 +1,35 @@
 /**
- * @fileoverview The REAL orders handoff — the implementation `StubDownstreamSeam` stands in for.
+ * @fileoverview What is left of the orders handoff: a wrapper that forwards the CONTRACT route.
  *
- * ── WHY THIS CREATES THE ORDER THROUGH THE ENTITY GRAPH ─────────────────────────────────────────
+ * ── THIS CLASS NO LONGER TOUCHES ORDERS, AND THAT IS THE POINT ─────────────────────────────────
  *
- * The obvious objection is that sales writes another app's entities directly. It is worth answering,
- * because the answer is what makes this the non-divergent choice rather than a shortcut.
+ * It used to create the order a won deal earned, through orders' own entity graph. Close-won does not
+ * create an order any more — the order is embedded on the deal from creation — so `CreateOrder` and
+ * `PreviewOrderMoney` described a route that no longer exists. Both are gone, along with the money
+ * boundary essay that justified them.
  *
- * Orders ships **no create-order operation**. `Orders.CreateOrderInState` — which this seam was
- * originally written against — lives only on the unmerged `origin/mjdev/orders-flow`; orders' `next`
- * registers eleven operations and not one of them creates an order. Orders' own canonical creation
- * path IS the entity graph: `order-builder.ts` gets an `Order Headers` entity, sets the payer, adds
- * lines and saves, and `OrderEntityServer.Save()` does the rest — mints the order number, prices the
- * lines through orders' engine, raises the initial payment.
+ * ── ONE OF THEM WAS A LIVE HAZARD, NOT JUST DEAD WEIGHT ────────────────────────────────────────
  *
- * So this class does exactly what orders does. Every invariant orders enforces on creation runs,
- * because it is orders' own server code running. Calling anything else would be the divergence.
+ * Both passed `DiscountPct` straight through to `OrderLine`, and the seam input documented no units.
+ * Orders stores a FRACTION (0.25 for a quarter off); the caller that used to feed this sent a rep-
+ * entered PERCENTAGE (25). With the caller deleted the conversion went with it, leaving two exported,
+ * typechecked methods that would write a 25% discount as 2500% — except `CK_OrderLine_DiscountPct`
+ * caps it, so the realistic outcome was a 50% discount recorded for a half-percent one, saved
+ * cleanly, with nothing to notice.
  *
- * ── THE MONEY BOUNDARY, RESTATED WHERE IT IS EASIEST TO BREAK ───────────────────────────────────
+ * That is precisely what `scripts/assert-discount-conversion.mjs` exists to prevent, and it was
+ * sitting on a published interface with no test on it since the CW and D check bundles were retired.
+ * Deleting the methods removes the hazard outright rather than documenting it.
  *
- * Sales sends `ProductID`, `Quantity`, a requested `DiscountPct` and a service period. It does not
- * send a price, and there is no arithmetic anywhere in this file — no multiply, no sum, no round.
+ * ── WHY THE CLASS SURVIVES AT ALL ──────────────────────────────────────────────────────────────
  *
- * `UnitPrice` is omitted ENTIRELY when unset rather than sent as 0, because 0 means "free", which is a
- * different statement from "you decide". When it IS set it is a negotiated override — an INPUT to the
- * pricing engine, never a replacement for it.
+ * `CreateContractFromDeal` and `RenewContractTerm` below are pure delegation to the contracts seam it
+ * is handed. So this is now a pass-through, and `CloseDealOperation.resolveSeam` could return that
+ * contracts seam directly instead of wrapping it — at which point this whole file goes. That edit is
+ * in `CloseDealOperation.ts`, which another session is merging, so it is left stated rather than made.
  *
- * The amount that comes back from `PreviewOrderMoney` is orders' number, carried verbatim.
+ * `OrdersIsInstalled()` is the one thing here still doing work: the close reads it to decide whether
+ * an orders-dependent route is available at all.
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */
@@ -40,8 +44,6 @@ import {
 import { MJGlobal } from '@memberjunction/global';
 import {
     type IDownstreamSeam,
-    type OrdersOrderHandoffInput,
-    type OrdersPreviewResult,
     type OrdersSeamResult,
     type ContractsCreateFromDealSeamInput,
     type ContractsRenewTermSeamInput,
@@ -91,7 +93,6 @@ export function OrdersIsInstalled(): boolean {
 }
 
 export class LiveOrdersSeam implements IDownstreamSeam {
-    public readonly IsLive = true;
 
     /**
      * The contract half is delegated to whatever the composer supplied — the live contracts seam when
@@ -109,110 +110,7 @@ export class LiveOrdersSeam implements IDownstreamSeam {
         this.contracts = contracts ?? new StubDownstreamSeam();
     }
 
-    /**
-     * Ask orders what this draft costs, creating nothing.
-     *
-     * `OrderHeaderID` is deliberately absent from the payload: `PriceOrder` accepts a draft that was
-     * never persisted, which is what makes a genuine PREVIEW possible rather than a create-then-read.
-     */
-    public async PreviewOrderMoney(input: OrdersOrderHandoffInput): Promise<OrdersPreviewResult> {
-        if (!OrdersIsInstalled()) {
-            return { Success: false, Message: 'bizapps-orders is not installed in this deployment.' };
-        }
 
-        const op = MJGlobal.Instance.ClassFactory.CreateInstance<BaseRemotableOperation>(
-            BaseRemotableOperation,
-            OP_PRICE_ORDER,
-        );
-        if (!op) {
-            return { Success: false, Message: `${OP_PRICE_ORDER} is not registered in this process.` };
-        }
-
-        const result = await op.ExecuteServer(
-            {
-                CompanyID: input.Header.CompanyID,
-                BillToOrganizationID: input.Header.OrganizationID ?? null,
-                BillToPersonID: input.Header.PersonID ?? null,
-                OrderDate: input.OrderDate ?? null,
-                Lines: input.Lines.map((l) => ({
-                    ProductID: l.ProductID,
-                    Quantity: l.Quantity,
-                    ...(l.UnitPrice === undefined ? {} : { UnitPrice: l.UnitPrice }),
-                    ...(l.DiscountPct === undefined ? {} : { DiscountPct: l.DiscountPct }),
-                    ServicePeriodStart: l.ServicePeriodStart ?? null,
-                    ServicePeriodEnd: l.ServicePeriodEnd ?? null,
-                })),
-            },
-            // `emitProgress` is required by the context and unused by a Sync operation.
-            { provider: this.provider, user: this.user, emitProgress: () => undefined },
-        );
-
-        if (!result?.Success) {
-            return { Success: false, Message: result?.ErrorMessage ?? 'Orders.PriceOrder failed.' };
-        }
-        /**
-         * `Totals.Gross` is ORDERS' own field name (`PriceOrderOutput.Totals`), carried back untouched.
-         * Gross rather than Net on purpose: it is what the customer owes, and it is what the booked
-         * order's `TotalGross` holds — so the preview and the booking are comparable without sales
-         * adding, subtracting or rounding anything to make them line up.
-         */
-        const payload = (result.Output ?? {}) as {
-            Totals?: { Gross?: number };
-            CurrencyID?: string;
-        };
-        return { Success: true, Amount: payload.Totals?.Gross ?? null, CurrencyID: payload.CurrencyID ?? null };
-    }
-
-    /**
-     * Create and book the order, through orders' own entity graph.
-     *
-     * The save is ONE call on the header. Lines are attached as related records so orders sees a single
-     * composite save and its server code runs once over the whole graph — which is what mints the
-     * number, prices the lines and raises the payment. Saving lines separately afterwards would produce
-     * an order that was briefly headerless-but-real, and would run orders' hooks in the wrong order.
-     */
-    public async CreateOrder(input: OrdersOrderHandoffInput): Promise<OrdersSeamResult> {
-        if (!OrdersIsInstalled()) {
-            return { Success: false, Message: 'bizapps-orders is not installed in this deployment.' };
-        }
-
-        const header = await this.provider.GetEntityObject<OrderHeaderLike>(E_ORDER_HEADER, this.user);
-        header.NewRecord();
-        header.Set('CompanyID', input.Header.CompanyID);
-        header.Set('OrderDate', input.OrderDate ?? new Date().toISOString().slice(0, 10));
-        header.Set('OrderType', input.OrderType);
-        header.Set('Status', input.Status);
-        if (input.Header.OrganizationID) header.Set('BillToOrganizationID', input.Header.OrganizationID);
-        if (input.Header.PersonID) header.Set('BillToPersonID', input.Header.PersonID);
-        if (input.Header.CurrencyID) header.Set('CurrencyID', input.Header.CurrencyID);
-        if (input.Header.Description) header.Set('Description', input.Header.Description);
-
-        for (const line of input.Lines) {
-            // Through ORDERS' OWN collection, so its sequencing and join-field handling apply.
-            const ol = await header.Lines.Create();
-            ol.Set('ProductID', line.ProductID);
-            ol.Set('Quantity', line.Quantity);
-            // NO UnitPrice unless it was negotiated — see the money boundary in the file header.
-            if (line.UnitPrice !== undefined) ol.Set('UnitPrice', line.UnitPrice);
-            if (line.DiscountPct !== undefined) ol.Set('DiscountPct', line.DiscountPct);
-            if (line.ServicePeriodStart) ol.Set('ServicePeriodStart', line.ServicePeriodStart);
-            if (line.ServicePeriodEnd) ol.Set('ServicePeriodEnd', line.ServicePeriodEnd);
-            if (line.Description) ol.Set('Description', line.Description);
-        }
-
-        const saved = await header.Save();
-        if (!saved) {
-            const errors = header.LatestResult?.Message ?? 'unknown error';
-            return { Success: false, Message: `orders refused the order: ${errors}` };
-        }
-
-        return {
-            Success: true,
-            OrderID: String(header.Get('ID')),
-            Status: String(header.Get('Status') ?? input.Status),
-            Message: `Order ${String(header.Get('OrderNumber') ?? header.Get('ID'))} created by Sales.CloseDeal.`,
-        };
-    }
 
     public CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {
         return this.contracts.CreateContractFromDeal(input);
