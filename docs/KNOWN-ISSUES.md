@@ -108,7 +108,7 @@ cannot be regenerated cleanly on any host that carries common's schema. `DECISIO
 
 ---
 
-## 🔴 KI-23 — `spCreateOrganization` and `spUpdateOrganization` do not exist on `MJ_V6_Host`, so no SalesAccount can be created or edited through the entity layer
+## ✅ KI-23 — RESOLVED: `spCreateOrganization` and `spUpdateOrganization` were missing from `MJ_V6_Host` (host damage, not a common defect)
 
 **Found by clicking, not by reading**, while verifying #33's inline create-and-return in the Explorer.
 Creating a customer from the deal workspace fails with:
@@ -155,15 +155,44 @@ schema that is otherwise complete — so nothing looks broken until something tr
 * **Any path that creates or edits an account**: the UI, an Action, an agent, a script. Not UI-specific.
 * The HubSpot importer in S6, which will create accounts by definition.
 
-### The fix is not ours
+### RESOLVED — host damage, repaired additively
 
-Regenerate bizapps-common's CRUD procedures against this host, or apply the migration that was partially
-applied. **Do not work around it in this repo** — writing an Organization by raw SQL from sales would put
-this app in the business of maintaining another app's table, and the IsA chain exists precisely so it does
-not have to.
+**It was not a defect in bizapps-common.** Common's baseline creates all three procedures; two were lost
+from this host. The likely moment is the CodeGen run that reported them as permissions failures — which is
+what my own note that "a permissions step failing because the object is missing is a different fact" was
+pointing at without following through.
 
-**Contacts are probably fine and that has not been verified.** `spCreatePerson` exists, so
-`SalesContact` creation should work; I did not test it, and saying so is cheaper than implying I did.
+**Enumerated before repairing, rather than assuming it was only those two.** All 16 tables in
+`__mj_BizAppsCommon` were checked for a complete create/update/delete trio:
+
+| Result | |
+|---|---|
+| Tables checked | 16 |
+| Complete trios | 15 |
+| Incomplete | **1 — `Organization` (create and update missing, delete present)** |
+| Procedures found | 46, against 48 expected for 16 tables — consistent with exactly two lost |
+| Triggers | all 16 present, including `trgUpdateOrganization` |
+
+One correction to my own first pass: I reported `Person` as missing its view. It is not —
+the view is `vwPeople`, and my check had guessed `vwPersons`. A naming guess of mine, not a gap.
+
+**Repaired the same way contracts was**, additively and with no CodeGen: the last definitions of both
+procedures were extracted from `V202608132239__v5.34.x__Layered_Base_Views_Metadata.sql` — the newest
+migration that defines them, and the one whose output matches the current columns — the
+`${flyway:defaultSchema}` placeholder substituted for `__mj_BizAppsCommon`, and the eight resulting
+batches run. No drops of anything else; `trgUpdateOrganization` is recreated from the same generated
+definition it already had. The three existing Organization rows were untouched, and the procedure count is
+now 48 with no incomplete trios.
+
+**The extracted SQL is deliberately NOT committed to this repo.** Sales carrying another app's schema
+fragment is the thing the IsA chain exists to avoid; it was run as a one-off host repair and is described
+here so it can be reproduced.
+
+**Verified by using it**, not by inspecting it: creating a customer from the deal workspace now writes both
+the `Organization` and the `SalesAccount` IsA child, `IsActive = 1`, visible in `vwSalesAccounts`. The
+three test records created while verifying were removed afterwards; the demo is back to its three accounts.
+
+**Contacts were never blocked** — `spCreatePerson` was present throughout.
 
 ---
 

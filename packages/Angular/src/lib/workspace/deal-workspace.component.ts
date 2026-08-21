@@ -46,7 +46,7 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, inject, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { CompositeKey } from '@memberjunction/core';
+import { CompositeKey, type BaseEntity } from '@memberjunction/core';
 import { MJFormPresenterService } from '@memberjunction/ng-base-forms';
 import { NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
@@ -286,6 +286,9 @@ export class DealWorkspaceComponent implements OnInit {
     public async OpenDeal(dealID: string): Promise<boolean> {
         const tabId = `deal-${dealID}`;
         if (this.store.Activate(tabId)) {
+            // Already open: this is a tab SWITCH, so it owes the same lock refresh as SelectTab. Without
+            // it, re-opening a deal from the roster inherits the previous deal's lock state.
+            await this.RefreshLock();
             this.cdr.detectChanges();
             return true;
         }
@@ -315,9 +318,31 @@ export class DealWorkspaceComponent implements OnInit {
         return true;
     }
 
+    /**
+     * Brings a workspace tab to the front — AND re-resolves the close lock for the deal it holds.
+     *
+     * ── THE LOCK IS ONE FIELD AND THE TABS ARE MANY ─────────────────────────────────────────────
+     *
+     * `this.Lock` is a single component-level value, so it holds whatever the LAST deal to load set.
+     * This method activated the tab and revalidated, and never touched it — so opening a CLOSED deal
+     * and switching back to an open one left `Lock.IsLocked === true` against a deal that is not
+     * locked. Every `[disabled]="!IsFieldEditable(...)"` binding in the form then rendered read-only,
+     * on the wrong deal, until something else happened to reload.
+     *
+     * A pre-existing defect rather than a new one: the fields have always been disabled on the wrong
+     * tab. What changed is that it became VISIBLE — the inline create buttons are now gated on the same
+     * rule, so a stale lock removes controls instead of only greying inputs, and a rep looking for
+     * "New account" finds nothing rather than finding it disabled. Found while verifying that gating in
+     * the browser, which is the only way it would have been found.
+     *
+     * `void` on the promise deliberately: the template binds to `Lock`, so the refresh lands on a later
+     * change-detection pass and there is nothing for a caller to await. Making the method async would
+     * force every template click handler to become a promise for no benefit.
+     */
     public SelectTab(id: string): void {
         this.store.Activate(id);
         this.Revalidate();
+        void this.RefreshLock().then(() => this.cdr.detectChanges());
     }
 
     public CloseTab(id: string): void {
@@ -550,17 +575,101 @@ export class DealWorkspaceComponent implements OnInit {
         this.Lookups = await this.service.LoadLookups();
 
         /**
-         * An explicit switch rather than `deal[target] = id`. Two reasons, and the second is the one
-         * that matters: a dynamic write would need an index signature or a cast, and this repo does not
-         * take casts to satisfy the compiler; and being explicit is what guarantees this can only ever
-         * write the field the rep launched from, which is the half of the old reasoning worth keeping.
+         * ── BIND THE ID THE OPTION CARRIES, NOT THE ONE THE ENTITY GENERATED ────────────────────────
+         *
+         * This assigned `id` directly and the picker rendered BLANK — with the correct option sitting
+         * right there in the list. Found by clicking, and it could not have been found any other way:
+         * the record was created, `deal.AccountID` was set (the "Open account" control appeared, which
+         * only renders when it is truthy), the `<option>` existed with the right label, and the select
+         * still showed nothing.
+         *
+         * The cause is GUID CASE. `NewRecord()` generates the key client-side in LOWERCASE — the insert
+         * carries `eadf6a48-36f9-...` — while `vwSalesAccounts` returns it UPPERCASE, so the lookup
+         * options are uppercase. `[ngValue]` compares by value, the two strings differ, and Angular
+         * selects nothing. Every part of the app is individually right and the field is empty.
+         *
+         * So the id is resolved THROUGH the reloaded lookup and the option's own value is assigned. That
+         * fixes the case question by not having one, and it makes the "created but not offered" case
+         * explicit rather than silent: a record that saved but is filtered out of the picker (inactive,
+         * wrong company, a filter added later) now reports instead of leaving a blank box the rep has to
+         * interpret.
+         */
+        const options: DealLookup[] =
+            target === 'AccountID' ? this.Lookups.Accounts : this.Lookups.Contacts;
+        let match = options.find((o) => o.ID.toLowerCase() === id.toLowerCase());
+
+        /**
+         * ── THE RELOAD IS NOT GUARANTEED TO CONTAIN THE ROW THAT WAS JUST WRITTEN ───────────────────
+         *
+         * Measured, not theorised. On the second run of this flow the record was committed —
+         * `Organization` and `SalesAccount` both present, `IsActive = 1`, visible in
+         * `vwSalesAccounts` — `AfterSaved()` returned the entity, and the list that came back from
+         * `LoadLookups()` DID NOT INCLUDE IT. The option appeared in the picker moments later, so the
+         * data was fine and the read was early: a read-after-write lag between the save and what the
+         * account query returns.
+         *
+         * That makes "reload, then find" racy BY CONSTRUCTION, and the failure is the ugly kind — the
+         * record exists, the rep did nothing wrong, and the field they were looking at stays empty with
+         * a message telling them to go and find it themselves.
+         *
+         * So the reload is now an OPTIMISATION rather than the mechanism. When it contains the row, its
+         * label is used, because that label is the canonical one the view composes. When it does not,
+         * the option is synthesised from the record in hand and inserted, and the picker is correct
+         * immediately. The next ordinary reload replaces the synthetic row with the canonical one, and
+         * because both carry the same ID nothing the rep did is disturbed when it does.
+         *
+         * COMPOSING THE LABEL IS THE PART I ARGUED AGAINST EARLIER, and the objection still stands as
+         * far as it goes: `SalesAccount` IS an Organization and `SalesContact` IS a Person, so the
+         * canonical display name comes from the parent through the view, and contacts' is assembled by
+         * the service. Which is why this is a FALLBACK and not the path — and why it reads the same
+         * fields the service reads rather than inventing a format.
+         */
+        if (!match) {
+            const label = this.labelForCreated(created, target);
+            if (!label) {
+                this.Fail(
+                    'The record was created but could not be named, so it was not selected. Reopen the ' +
+                        'picker to choose it.',
+                );
+                return;
+            }
+            match = { ID: id, Name: label };
+
+            /**
+             * A NEW, DE-DUPLICATED ARRAY rather than `options.unshift(match)`.
+             *
+             * Unshifting left the picker offering the same account TWICE — observed in the browser: the
+             * synthetic row was inserted, a later reload brought the canonical row into the same array,
+             * and both were rendered. Harmless-looking, and exactly the kind of thing a rep reports as
+             * "the list is wrong" three weeks later.
+             *
+             * Filtering by ID first makes the insertion idempotent however many times it runs and
+             * whatever else has already put the row there, which is a stronger property than getting the
+             * ordering right once.
+             */
+            const merged: DealLookup[] = [
+                match,
+                ...options.filter((o) => o.ID.toLowerCase() !== id.toLowerCase()),
+            ];
+            this.Lookups =
+                target === 'AccountID'
+                    ? { ...this.Lookups, Accounts: merged }
+                    : { ...this.Lookups, Contacts: merged };
+        }
+
+        /**
+         * An explicit switch rather than `deal[target] = match.ID`. Two reasons, and the second is the
+         * one that matters: a dynamic write would need an index signature or a cast, and this repo does
+         * not take casts to satisfy the compiler; and being explicit is what guarantees this can only
+         * ever write the field the rep launched from, which is the half of the old reasoning worth
+         * keeping.
          */
         switch (target) {
             case 'AccountID':
-                deal.AccountID = id;
+                deal.AccountID = match.ID;
                 break;
             case 'PrimaryContactID':
-                deal.PrimaryContactID = id;
+                deal.PrimaryContactID = match.ID;
                 break;
         }
         this.Touch();
@@ -718,6 +827,24 @@ export class DealWorkspaceComponent implements OnInit {
         // no unsaved work in the collection to discard — which is the only thing the guard protects.
         await deal.OrderID_Object?.Lines.Load(true);
         this.Touch();
+    }
+
+    /**
+     * A display label for a record this session just created, for the case where the lookup reload has
+     * not caught up with it yet.
+     *
+     * Mirrors what `DealWorkspaceService.LoadLookups` builds, deliberately: accounts show `Name`, and
+     * contacts are `FirstName LastName` collapsed of surrounding space, falling back to `Name` and then
+     * to `Email`. Reading the same fields in the same order is what keeps the temporary label from
+     * looking different to the canonical one that replaces it.
+     */
+    private labelForCreated(record: BaseEntity, target: DealRelatedTarget): string | null {
+        const text = (field: string): string => String(record.Get(field) ?? '').trim();
+        if (target === 'AccountID') {
+            return text('Name') || null;
+        }
+        const composed = `${text('FirstName')} ${text('LastName')}`.trim();
+        return composed || text('Name') || text('Email') || null;
     }
 
     // ── Dates ──────────────────────────────────────────────────────────────────

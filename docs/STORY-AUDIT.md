@@ -150,16 +150,33 @@ Three details that are not incidental:
 | The title comes from the launching field | **verified** — "New customer" |
 | Save left, Cancel right (house convention) | **verified** |
 | The create button is gated on `IsFieldEditable` | **verified** — on the WON, locked `DEAL-9005` only `Open account`/`Open contact` render; on a new deal only `New account`/`New contact` |
-| The created record is selected back into the picker | **NOT OBSERVABLE ON THIS HOST** — see below |
-| The picker does not render blank after a successful create | **UNOBSERVED** — no successful create was possible |
+| The created record is selected back into the picker | **verified**, after KI-23 was repaired and two defects of mine were fixed |
+| The picker does not render blank after a successful create | **verified** — the select shows the new name as its selected value |
 
-The create fails before my code runs: `spCreateOrganization` does not exist on `MJ_V6_Host`
-(`docs/KNOWN-ISSUES.md` KI-23). `SalesAccount` IS an Organization, so the save reaches for the parent and
-finds no insert procedure. **The picker correctly stayed unchanged**, because `CreateRelated` returns early
-when `AfterSaved()` yields nothing rather than inventing a selection — so what was observed is the
-failed-save path behaving right, not the success path. The blank-picker question the click-through was
-meant to settle is therefore still open, and I would rather say that than let a verified-looking table
-imply otherwise.
+The first attempt could not create anything at all: `spCreateOrganization` did not exist on this host
+(KI-23, since repaired). `SalesAccount` IS an Organization, so the save reached for the parent and found no
+insert procedure, and `CreateRelated` correctly returned early rather than inventing a selection — the
+failed-save path behaving right, not the success path.
+
+**Once the create worked, the click-through found two defects in my own code that no test would have.**
+Both are the kind that only appear when a real save completes:
+
+* **GUID case.** `NewRecord()` generates the key client-side in LOWERCASE; `vwSalesAccounts` returns it
+  UPPERCASE. `[ngValue]` compares by value, so nothing matched and **the picker rendered blank with the
+  correct option sitting in the list** — the exact failure I had claimed to prevent by reloading first.
+  Every part was individually right. Fixed by resolving the id THROUGH the reloaded lookup and binding the
+  option's own value, so there is no case question to get wrong.
+* **A read-after-write race.** On the next run the record was committed and `LoadLookups()` still did not
+  include it — the option appeared moments later. So "reload, then find" is racy by construction, and it
+  fails in the ugliest way: the record exists, the rep did nothing wrong, and their field stays empty. The
+  reload is now an optimisation; when it has not caught up, the option is synthesised from the record in
+  hand, de-duplicated by ID so the insertion is idempotent.
+
+A third defect surfaced on the way and is **pre-existing, not mine**: `SelectTab` never called
+`RefreshLock`, and `Lock` is a single component-level field — so opening a closed deal and switching back
+left an open deal rendering read-only. It had always disabled the fields on the wrong tab; gating the
+create buttons on the same rule is what made it visible, because a missing control is louder than a greyed
+input. Fixed in `SelectTab` and in `OpenDeal`'s already-open path.
 
 ---
 
