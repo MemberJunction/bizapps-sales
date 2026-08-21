@@ -39,6 +39,7 @@ import type { mjBizAppsTasksTaskLinkEntity } from '@mj-biz-apps/tasks-entities';
 
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_TASK_LINK = 'MJ_BizApps_Tasks: Task Links';
+const E_DEAL_FOR_LINK = 'MJ_BizApps_Sales: Deals';
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_TASK_TYPE = 'MJ_BizApps_Tasks: Task Types';
@@ -132,6 +133,43 @@ export interface CloseWonTaskInput {
     Assignee?: CloseWonTaskAssignee;
     AssignedByPersonID?: string;
     DueAt?: Date;
+}
+
+/**
+ * How a task NAMES the deal it is about.
+ *
+ * Both task names used to interpolate `input.DealID`, so a real close produced
+ * `Review order for deal 93111111-0000-4000-A000-000000000002` — a task list that reads as rows of hex.
+ * Measured on this host, not hypothesised.
+ *
+ * RESOLVED HERE RATHER THAN PASSED IN, deliberately. Adding a `DealLabel` to `CloseWonTaskInput` would
+ * put the burden on every caller and let one of them supply a stale or wrong label; the service already
+ * holds a provider and the deal's ID, so the label has exactly one source. It also keeps
+ * `CloseDealOperation` untouched.
+ *
+ * FALLS BACK TO THE ID, never to a blank. A task whose name is a GUID is bad; a task called
+ * "Review order for deal " is worse, because it looks like a bug in the naming rather than a deal that
+ * could not be read.
+ */
+async function dealLabel(
+    dealID: string,
+    provider: IMetadataProvider,
+    contextUser: UserInfo,
+): Promise<string> {
+    const rv = await new RunView().RunView<{ DealNumber: string | null; Name: string | null }>(
+        {
+            EntityName: E_DEAL_FOR_LINK,
+            ExtraFilter: `ID = '${dealID.replace(/'/g, "''")}'`,
+            ResultType: 'simple',
+            Fields: ['DealNumber', 'Name'],
+        },
+        contextUser,
+    );
+    const row = rv?.Success ? (rv.Results ?? [])[0] : undefined;
+    const number = row?.DealNumber?.trim();
+    const name = row?.Name?.trim();
+    if (number && name) return `${number} — ${name}`;
+    return number || name || dealID;
 }
 
 /** Which of the two tasks a result row describes. A discriminator in this code, not a row in a table. */
@@ -292,10 +330,12 @@ export class CloseWonTaskService {
         const orderReviewTypeID = input.OrderID
             ? await this.resolveTaskType(CODE_ORDER_REVIEW, provider, contextUser, result)
             : null;
+        // One read, reused by both task names below.
+        const label = await dealLabel(input.DealID, provider, contextUser);
         const orderReview = (input.OrderID && orderReviewTypeID) ? await this.raise(
             'OrderReview',
             {
-                Name: `Review order for deal ${input.DealID}`,
+                Name: `Review order for ${label}`,
                 TypeID: orderReviewTypeID,
                 Description:
                     'Review the order for accuracy, correct it if needed, then advance it. Advancing is '
@@ -347,7 +387,7 @@ export class CloseWonTaskService {
                 const contractTask = await this.raise(
                     'ContractProcessing',
                     {
-                        Name: `Process contract for deal ${input.DealID}`,
+                        Name: `Process contract for ${label}`,
                         TypeID: contractTypeID,
                         Description:
                             'Attach the executed PDF, confirm the agreement version against the signed '
@@ -489,6 +529,40 @@ export class CloseWonTaskService {
         const linked = await this.link(taskID, target, provider, contextUser, result, kind);
         if (!linked) {
             result.Success = false;
+        }
+
+        /**
+         * AND A SECOND LINK, TO THE DEAL — so the relationship is navigable in both directions.
+         *
+         * Measured on this host after the first real close: the order-review task linked to the order
+         * header and the contract task to the contract, and NOTHING linked to the deal. So from a deal
+         * you could not reach the tasks its own close had raised; only the reverse. For a surface whose
+         * entire job is "what happened to this deal", that is the wrong direction to be able to travel.
+         *
+         * Skipped when the target IS the deal, which happens on the contract task when no contract was
+         * created — otherwise the same row would be written twice and the second write would be a
+         * duplicate rather than a second fact.
+         *
+         * A failure here does NOT fail the close. The task exists and is reachable from its downstream
+         * record; losing the convenience link is a lesser fact than losing the task, and a close that
+         * rolls back over a navigation aid would be the wrong trade.
+         */
+        if (target.EntityName !== E_DEAL_FOR_LINK) {
+            const dealLinked = await this.link(
+                taskID,
+                { EntityName: E_DEAL_FOR_LINK, RecordID: input.DealID },
+                provider,
+                contextUser,
+                result,
+                kind,
+            );
+            if (!dealLinked) {
+                result.Issues.push(
+                    `The ${kind} task was created and linked to its record, but the convenience link back `
+                        + 'to the deal could not be written. The task is still reachable from the record it '
+                        + 'hangs off.',
+                );
+            }
         }
 
         const assignmentID = await this.route(taskID, input, provider, contextUser, result, kind);

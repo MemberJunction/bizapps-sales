@@ -281,7 +281,7 @@ configured on the pipeline's CloseWonPolicy (CloseWonTasks.AssigneeRecordID)."* 
 it is fixable by editing one JSON policy. It is also exactly the "refused with its stated reason" the
 brief asked for, arriving on the tasks rather than on the contract.
 
-**The contract was routed**, and it is a shell:
+**The contract was routed:**
 
 ```
 CTR-000009   type "Order Form"   customer Cascade Manufacturing
@@ -291,10 +291,34 @@ AutoRenew  0             HasModifications  0  CancellationWindowDays  NULL
 ```
 
 Right type, right customer, and provenance recorded on both sides (`Deal.ContractID` set,
-`Contract.CreatingEntityID/CreatingRecordID` pointing back). **And no commercial terms whatsoever** —
-despite B2B's policy stating `TermMonths: 12` and the deal itself carrying `TermMonths = 12`. The KI-16 /
-DN-16 refusal is resolved (`Order Form` is seeded, `vwContracts` reads cleanly), so the path works; what
-it produces is a stub that finance would have to complete by hand.
+`Contract.CreatingEntityID/CreatingRecordID` pointing back). The KI-16 / DN-16 refusal is resolved —
+`Order Form` is seeded and `vwContracts` reads cleanly — so the path works.
+
+> ### Retracted: those NULLs are the design, not a shortfall
+>
+> An earlier version of this section called the contract "a shell" with "no commercial terms
+> whatsoever", and read the NULL dates as something missing. **Wrong on all four fields.**
+>
+> `LiveContractsSeam.ts:92-120` documents each absence and why it is deliberate. The load-bearing one:
+> contracts v2 has no status column, so **a contract's lifecycle is DERIVED from its dates.** Stamping
+> an `EffectiveDate` would make every auto-created contract announce itself as *live and in force* the
+> moment a deal was won — before a human had read the paper, and precisely the opposite of what §7.2
+> asks for. `ExecutedDate` is withheld for the same reason one field over: sales does not know whether
+> anything was signed, and `Deal.ExecutionDate` is when the *deal* was executed, not the document.
+>
+> **An unstarted contract is the truthful representation of one nobody has approved.** That is the
+> reusable part, and it generalises past this table: where a lifecycle is derived from data, writing
+> that data is asserting the lifecycle.
+>
+> The other two were my error rather than a design question. `TermMonths` **was** passed
+> (`CloseDealOperation.ts:877`, `policy.TermMonths ?? deal.TermMonths`). `AnnualIncreasePercent` and
+> `CancellationWindowDays` are written only when the deal carries an override
+> (`AnnualIncreasePctOverride`, `CancellationNoticeDaysOverride`) — `DEAL-9002` carries neither, so NULL
+> is the correct output for that deal rather than a dropped value. I read four NULLs and inferred one
+> cause; there were three, and none of them was a defect.
+>
+> Retracted in place rather than deleted, for the same reason the port claim was: the correction is
+> worth more than the tidy version.
 
 `LineCount: 0` on the routing plan is **structural, not a failure**: contracts' v2 rebuild removed
 `ContractLine` entirely, so there is nowhere for `SubscriptionLinesTo: "Contract"` to put anything. The
@@ -310,15 +334,70 @@ Qualification -> Signed    Open -> Won    Amount 16,240    Probability 25.00
 `25.00` is the **departing** probability, from Qualification — not the 100 that Signed declares. That is
 the provenance rule working.
 
+### Verification run — DEAL-9003, after three fixes
+
+The first run found one thing genuinely wrong by configuration and two wrong in code. All three were
+fixed and the close was run again, on `DEAL-9003`, after a second `COPY_ONLY` backup
+(`MJ_V6_Host_preverify_20260821.bak`). Preview first, again: `Success`, no issues, byte-identical
+snapshot.
+
+| Fix | Where | Verified by |
+|---|---|---|
+| Task names carry the deal, not its GUID | `CloseWonTaskService` resolves a label itself, so no caller changes and `CloseDealOperation` stays untouched | `Review order for DEAL-9003 — Northwind Health — Year 2 Renewal` |
+| Every task is reachable **from** the deal | a second `TaskLink` to `MJ_BizApps_Sales: Deals`, skipped when the target already *is* the deal | both new tasks carry a Deals link to `…000000000003` |
+| Both tasks routed to an assignee | `CloseWonTasks` block added to both pipeline policies — `metadata/pipelines/`, `seed-demo-data.sh`, and the live rows | `taskAssignments` **0 → 2** |
+
+Deltas: `stageEvents` 6 → 7, `tasks` 3 → 5, `taskLinks` 2 → 5, `taskAssignments` **0 → 2**.
+
+**The order was not touched at all this time** — status, total, and even the header's `__mj_UpdatedAt`
+are unchanged, because Proposal and Signed both declare `OrderStatusOnEntry = Quoted` so there was no
+status to move. That is a cleaner demonstration of "the close does not touch the order" than the
+`DEAL-9002` run, where the Draft → Quoted move made the point harder to see.
+
+**And the contract took the OTHER branch — refused, with its reason:**
+
+```
+{"Target":"Contract","Planned":true,"Executed":false,"LineCount":0,"RecordID":null,
+ "Reason":"A renewal needs the contract being renewed (Deal.RenewsContractID)."}
+```
+
+`DEAL-9003` is a renewal and carries no `RenewsContractID`, so the seam declined rather than inventing a
+parent. `contracts` stayed at 1. Note the refusal arrives in `Routing[].Reason` and **not** in
+`Issues`, which is empty — a caller that only reads `Issues` would see an unqualified success. Worth
+knowing before a UI is written against it.
+
+So between the two runs both contract branches are now demonstrated on this host: **routed** on
+`DEAL-9002`, **refused with a stated reason** on `DEAL-9003`.
+
+Stage event: `Proposal → Signed`, amount 73,080, probability **50.00** — the departing value from
+Proposal, again.
+
+### On the assignee, which is a stop-gap
+
+The policy now routes to **Ravi Shankar** (`C0111111-…-000000000004`), chosen because he is the only
+`Person` on the host who is *not* a customer contact — the other three are the primary contacts on
+`DEAL-9001/9003`, `DEAL-9002/9005` and `DEAL-9004/9006/9007`. Routing an internal finance task to the
+buyer would be worse than leaving it unrouted, which is the state this replaced.
+
+**The real gap is that the seed has no internal finance person at all**, and no `Person` row matches any
+`Employee`. `TaskAssignment` needs a concrete record and nothing models "finance" as a group, so this is
+configuration standing in for a fixture that does not exist. Worth seeding properly before a demo names
+the assignee out loud.
+
 ### The cost of having run it
 
-`DEAL-9002` is now Won and **locked** (`DealStatusType.LocksDeal = 1`). Consequences for the demo set:
+`DEAL-9002` **and `DEAL-9003`** are now Won and **locked** (`DealStatusType.LocksDeal = 1`).
+Consequences for the demo set:
 
-- The board loses its only Qualification card; B2B Qualification becomes a fourth empty column.
-- `Sales: Dashboard Summary` moves to 4 open / 234,980 open, and **`PastExpectedCloseCount` drops from 1
-  to 0** — `DEAL-9002` was the only deal that tile counted.
-- `Win Rate` becomes 3 closed / 2 won / 1 lost.
-- The one legal drag on B2B is now Proposal ⇄ Negotiation only.
+- The board loses its only Qualification card **and its only Proposal card**; both become empty
+  columns, taking B2B's open stages down to Negotiation alone.
+- **`Sales: Slipped Deals` returns nothing at all.** `DEAL-9003` was its only row, and the query is
+  open-deals-only. That tile now has no story, which is the largest single cost of this run.
+- `Sales: Dashboard Summary`: **`PastExpectedCloseCount` drops from 1 to 0** — `DEAL-9002` was the only
+  deal it counted.
+- `Win Rate` becomes 4 closed / 3 won / 1 lost.
+- **There is no legal drag left on B2B**: one open card, in one stage, with every neighbour empty or
+  closing.
 
 Undo is surgical rather than a restore, because a full restore of this shared host would destroy two other
 sessions' work. The baseline to return to is **stage_events 5, tasks 1, task_links 0, contracts 0**, and

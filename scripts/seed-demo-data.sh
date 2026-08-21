@@ -303,7 +303,7 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe1)
       -- because a close-time key speaks once about one kind of close while a stage speaks on every
       -- change. Reinstating it here would fail silently -- a key no code reads, in the one place a fresh
       -- install seeds from, leaving the next reader to work out which design won.
-      N'{"CreateContract":true,"ContractTypeCode":"Order Form","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","RequireApprovalTaskTypeCode":null}',
+      N'{"CreateContract":true,"ContractTypeCode":"Order Form","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","RequireApprovalTaskTypeCode":null,"CloseWonTasks":{"AssigneeEntityName":"MJ_BizApps_Common: People","AssigneeRecordID":"C0111111-0000-4000-A000-000000000004","DueInDays":5}}',
       1, 10, 1);
 
 -- REPOINTED, NOT RE-INSERTED, and this is the seam between two seeding mechanisms.
@@ -352,7 +352,7 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe2)
         RequiresDealLines, CloseWonPolicy, IsDefault, DisplayRank, IsActive)
     VALUES (@pipe2, @co2, N'D2C', N'D2C',
       N'A different company, a different motion (master plan §4.2). RequiresDealLines = 0: these deals never carry catalog lines — the flag survived the DealLine retirement and now means the deal''s EMBEDDED ORDER stays empty, so the amount is entered by hand and AmountIsComputed stays 0.',
-      @dtNew, @fcPipe, 0, N'{"CreateContract":false,"OneTimeLinesTo":"Order"}', 1, 20, 1);
+      @dtNew, @fcPipe, 0, N'{"CreateContract":false,"OneTimeLinesTo":"Order","CloseWonTasks":{"AssigneeEntityName":"MJ_BizApps_Common: People","AssigneeRecordID":"C0111111-0000-4000-A000-000000000004","DueInDays":5}}', 1, 20, 1);
 
 -- Repointed for the same reason as B2B — and this one carries the multi-company case (L-14 / §9.2),
 -- which is the whole point of it having a DIFFERENT selling company from the pipeline above. The
