@@ -501,7 +501,7 @@ Recorded because the numbers look arbitrary and are not.
 27,480 into 16,488 / 6,870 / 4,122 — **which adds back to 27,480 exactly**, while bookings-by-owner
 credits the whole amount to the AE once. Two true answers to two different questions, reconciling.
 
-The same three rows each carry `UnweightedWonAmount = 27,480`. Summing that column gives **82,440 for a
+The same three rows each carry `WonAmountOfDealsTouched = 27,480`. Summing that column gives **82,440 for a
 27,480 deal** — §9.4's triple-count, visible on screen in a report that is otherwise correct. That is a
 better demonstration than the prose, and it is the reason the clean split went on the WON deal.
 

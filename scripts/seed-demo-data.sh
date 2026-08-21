@@ -520,7 +520,7 @@ INSERT INTO __mj_BizAppsSales.DealTeamMember (DealID, EmployeeID, PersonID, Deal
 --       16,488 / 6,870 / 4,122 -- which adds back to 27,480 exactly. Same deal, same money, two answers
 --       that are both true and neither substitutable.
 --
---       And the trap is visible in the same rows: `UnweightedWonAmount` reads 27,480 on EVERY one of the
+--       And the trap is visible in the same rows: `WonAmountOfDealsTouched` reads 27,480 on EVERY one of the
 --       three. Summing that column gives 82,440 for a 27,480 deal. That is §9.4's triple-count, on
 --       screen, in a report that is otherwise correct -- which is exactly why §9.4 says to state the
 --       basis in the report definition rather than trust a reader to pick the right column.

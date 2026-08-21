@@ -13,15 +13,27 @@
 -- So the answer has to be captured, not derived. The `Sales.CaptureForecastSnapshot` Action writes one
 -- row per company × pipeline × period, on a daily ScheduledJob. This query reads them.
 --
--- ⚠ NO OWNER GRAIN YET, and this query is built expecting one -- both LAG windows below partition by
--- OwnerEmployeeID and the Employee join projects OwnerName. The Action reads
--- `Sales: Forecast by Category`, which groups by company and pipeline only, so every snapshot carries
--- OwnerEmployeeID = NULL. That means "across all owners" and is correct for a rollup -- but it makes
--- this query render THIN rather than broken: one partition, no owner names, and nothing anywhere
--- saying the grain is absent rather than the data empty. The fix is a companion owner-grain query
--- rather than reshaping Forecast by Category: it is published and Approved and has NO in-repo consumer,
--- so who reads it -- Explorer, a metadata dashboard, a person -- cannot be enumerated from here, and
--- neither can the blast radius of changing what it projects.
+-- ⚠ OWNER GRAIN NEEDS THE COMPANION QUERY, and this query is built expecting it -- both LAG windows
+-- below partition by OwnerEmployeeID and the Employee join projects OwnerName.
+--
+-- THE ACTION IS THE WRITER. That is settled (D-32), and it is the half a reader needs first: exactly one
+-- thing writes ForecastSnapshot, and `scripts/capture-forecast-snapshot.sql` is a manual tool that is
+-- deliberately unseeded rather than a second path. So "what grain do these rows have" is a question about
+-- WHICH QUERY THE ACTION READS, and nothing else.
+--
+-- Today it reads `Sales: Forecast by Category`, which groups by company and pipeline only, so every
+-- snapshot carries OwnerEmployeeID = NULL. That means "across all owners" and is correct for a rollup --
+-- but it makes this query render THIN rather than broken: one partition, no owner names, and nothing
+-- anywhere saying the grain is absent rather than the data empty.
+--
+-- `Sales: Forecast by Owner` is the companion that closes it. Same measures, same flags, same date split;
+-- it adds `OwnerEmployeeID` and `OwnerName` to the projection and nothing else. Point the capture at that
+-- query and these windows partition by a real owner, with no change here and no change to the Action --
+-- its column mapping populates OwnerEmployeeID the moment a source query projects it.
+--
+-- It is a COMPANION rather than a widened `Forecast by Category` deliberately: that query is published,
+-- the dashboard consumes it, and changing a report's row shape to serve a second consumer is how one
+-- consumer breaks another.
 --
 -- ══ THE COLUMN NAMES DIVERGE FROM THE MASTER PLAN, DELIBERATELY ════════════════════════════════
 --

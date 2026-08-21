@@ -14,6 +14,17 @@
 -- actual bookings, that one does not and is not meant to. §9.4: "There is no safe default that works
 -- for both."
 --
+-- ══ EVERY MONEY COLUMN HERE IS ADDITIVE, AND THAT IS THE POINT OF THE OWNER FILTER ════════════
+--
+-- BookedAmount, LostAmount, BookedStatedAmount and the counts all total correctly across rows,
+-- because the IsOwnerRole filter means each deal appears on exactly ONE row. WinRateByCount is the
+-- single exception -- it is a ratio, and ratios never average across rows.
+--
+-- Contrast the paired report, `deal-involvement-by-rep.sql`, where most columns are NOT additive:
+-- there a deal appears once per team member. Measured on the seeded won deal, its
+-- WonAmountOfDealsTouched column totals 82,440 for a deal worth 27,480. This query is the one to
+-- reach for whenever a figure has to reconcile.
+--
 -- WHY NOT `Deal.OwnerEmployeeID`, WHICH IS RIGHT THERE. Because it is a DENORMALISED STAMP — server
 -- code derives it FROM the owner-role team row on every save, and CLAUDE.md is explicit that
 -- DealTeamMember is the source of truth for membership, including the owner. Reading the stamp would

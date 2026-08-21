@@ -60,6 +60,31 @@ the grain, the dimension and the measures on them are unchanged, only the source
   what fills the table is the `Sales.CaptureForecastSnapshot` Action, on the seeded `Sales - Forecast Snapshot (daily)` ScheduledJob. (`scripts/capture-forecast-snapshot.sql` is a manual tool and is deliberately unseeded.) Live
   and point-in-time are different questions and stay different queries.
 
+## The forecast pair, and why there are two live ones
+
+`Sales: Forecast by Category` groups by company and pipeline. `Sales: Forecast by Owner` reports the
+same measures with the owner added. Both are live reports over `Deal`; neither supersedes the other.
+
+The second exists because `Sales: Forecast History` partitions its movement windows by
+`OwnerEmployeeID` — it is built expecting owner-grained snapshots. A capture reading only
+`Forecast by Category` writes every snapshot with a null owner, which is a correct rollup and makes
+the history render *thin* rather than broken: one partition, no owner names, and nothing saying the
+grain is missing rather than the data. Pointing the capture at `Forecast by Owner` closes that with
+no change to the history query and none to the Action — its column mapping populates
+`OwnerEmployeeID` as soon as a source query projects it.
+
+It is a companion rather than a widened `Forecast by Category` on purpose: that query is published,
+the dashboard consumes it, and changing a report's row shape to serve a second consumer is how one
+consumer breaks another.
+
+**Attribution basis** (§9.4): `Forecast by Owner` groups by `Deal.OwnerEmployeeID`, the
+server-maintained stamp, so each deal lands on exactly one row and every amount totals correctly.
+Joining `DealTeamMember` instead would multiply each deal by its team size — measured on the seeded
+won deal, 27,480 becomes 82,440. That is deliberately a different basis from
+`Sales: Bookings by Owner`, which reads the team table filtered to `DealRole.IsOwnerRole` because it
+is a *reconciling revenue* figure and must not rest on a denormalised copy. Grouping deals BY an
+owner and attributing revenue TO one are different jobs.
+
 ## Layout
 
 `.<name>.json` carries the record; the SQL lives beside it in `SQL/<name>.sql` and is pulled in with
