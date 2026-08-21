@@ -77,7 +77,9 @@ The rule for this pass was *prove met criteria against the database, not the scr
 1. **The 98 integration checks** across 9 bundles (`node scripts/assert-check-count.mjs`, which now runs
    the suite itself rather than trusting a log off disk). Every check hits a live database with nothing
    mocked and rolls back. Where a criterion maps to a check, the check id **is** the evidence, and
-   `docs/CHECK-MUTATION-EVIDENCE.md` records which mutant proves that check can fail.
+   `docs/CHECK-MUTATION-EVIDENCE.md` records which mutant proves that check can fail — for the **44 of 103**
+   it covers. `activities` (18) and `forecast` (13) have no mutant at all, so for those the honest
+   statement is that they pass rather than that they work. That document used to claim all of them.
 2. **`scripts/audit-story-evidence.mjs`** — four things no check answers, cited below as **E1–E4**.
    E4 exists because WT1–WT10 prove what the close *writes* inside a transaction that rolls back; it asks
    the different question of whether the rows they resolve exist outside one.

@@ -1,4 +1,30 @@
-# Mutation evidence — every integration check has been proven able to FAIL
+# Mutation evidence — which integration checks have been proven able to FAIL, and which have not
+
+> **THE TITLE USED TO CLAIM ALL OF THEM, AND THAT WAS FALSE.** It read "every integration check has been
+> proven able to fail" while the mutants covered 44 of 103 checks. `docs/STORY-AUDIT.md` cites this file as
+> its evidence, so the overclaim propagated into a verdict document — which is the worst place for it.
+>
+> **44 of 103 checks are mutant-proven.** The gap is concentrated, not scattered:
+>
+> | Bundle | Checks | Mutants |
+> |---|---|---|
+> | `save-deal` | 25 | 16 |
+> | `close-deal` | 14 | 12 |
+> | `product-picker` | 4 | 4 |
+> | `close-won-order` | 5 | 3 |
+> | `close-won-contract` | 4 | 3 |
+> | `board-move` | 6 | 3 |
+> | `close-won-tasks` | 14 | 3 |
+> | **`activities`** | **18** | **0** |
+> | **`forecast`** | **13** | **0** |
+>
+> `activities` and `forecast` — 31 checks, nearly a third of the suite — have NO mutant at all. Neither
+> bundle has ever been shown able to fail, so for those 31 the honest statement is that they pass, not that
+> they work. Both arrived by merge from sessions that did not use this driver, which is the mechanism
+> rather than an excuse.
+>
+> **What this file DOES establish** is that the 44 named below fail for the reason they claim to, each
+> against a specific one-line mutation. That is worth having and is not the same as coverage.
 
 A green suite is not evidence. A check can be green because the behaviour it names is correct, or because
 it is asserting something that is true no matter what the code does — and the two are indistinguishable
@@ -14,7 +40,7 @@ bizapps-contracts absent. 39 checks across 4 bundles: `save-deal` (16), `close-d
 `product-picker` (4), `close-won-order` (5). `close-won-contract` needs contracts and was not expected on
 this host.
 
-## Result: 39 of 39 checks were made to fail
+## Result: 44 checks were made to fail, of 103 in the suite
 
 Three rounds were needed, and the reason there were three is the point of the exercise — round 1's
 misses were findings, not retries.

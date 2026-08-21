@@ -188,6 +188,45 @@ const expectedTotal = [...expected.values()].reduce((a, b) => a + b.count, 0);
  * passes while the suite has executed nothing. That is the vacuous pass this whole script exists to
  * catch, arriving through the one door it did not have a check on.
  */
+/**
+ * ── A MISSING SIBLING IS A HARD FAILURE, because the empty-expectation guard below cannot fire ────
+ *
+ * The guard underneath asserts that SOMETHING was expected, on the stated grounds that "every bundle in
+ * the manifest now names a sibling app it requires". That stopped being true when `forecast` arrived with
+ * `requires: null` — correctly, because its checks touch only sales' own tables.
+ *
+ * The consequence is the vacuous pass wearing a new coat. On a clone where `orders-entities` does not
+ * resolve, `save-deal`, `close-deal`, `product-picker`, `close-won-order` and `board-move` are all
+ * excluded — 51 checks — `expected` is not empty because forecast survives, and the gate reports a
+ * confident pass on 13. Five bundles' worth of silence, and a green tick.
+ *
+ * So the question is asked the other way round: any sibling a bundle NAMES must be linked. `mj-app.json`
+ * declares orders a hard dependency and `save-deal`'s own header says a host without it is misconfigured
+ * rather than minimal — so "orders is absent" is never a legitimate reason to measure less. Stating it
+ * here means the gate fails loudly on the misconfiguration instead of quietly grading a fraction of the
+ * suite.
+ */
+const requiredApps = [
+    ...new Set(
+        Object.entries(manifest.bundles)
+            .filter(([name]) => !name.startsWith('$'))
+            .map(([, spec]) => spec.requires)
+            .filter((r) => r !== null && r !== undefined),
+    ),
+];
+const missingApps = requiredApps.filter((app) => !linked.has(app));
+if (reported && missingApps.length > 0) {
+    console.error(
+        `\n\u2716 Integration coverage assertion FAILED\n\n` +
+            `  \u00b7 These sibling apps are NOT linked: ${missingApps.join(', ')}\n` +
+            `    Every bundle that names one was skipped, so the suite measured a fraction of itself and\n` +
+            `    the tally below is not evidence of anything. mj-app.json declares orders a hard\n` +
+            `    dependency; a host without it is misconfigured rather than minimal.\n\n` +
+            `  Link them and re-run -- see docs/WORKSPACE-SETUP.md.\n`,
+    );
+    process.exit(1);
+}
+
 if (expected.size === 0) {
     console.error(
         `\n\u2716 Integration coverage assertion FAILED\n\n` +

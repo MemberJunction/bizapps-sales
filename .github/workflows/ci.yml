@@ -102,6 +102,11 @@ jobs:
       - name: Workspace validation gate (pane attribution, and what blocks a save)
         run: pnpm run test:validation-gate
 
+      # Was unwired AND unable to fail: no sys.exit, and a path hardcoded into another working copy, so it
+      # audited 15 files nobody was shipping and reported clean about them. Both fixed.
+      - name: Query comment-drift gate (a documented column that is not returned)
+        run: python scripts/assert-no-comment-drift.py
+
       # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
       # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a
       # permanent red X asserting nothing. Guarded rather than omitted, so the first real test file

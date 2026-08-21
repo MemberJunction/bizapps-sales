@@ -72,9 +72,14 @@ const MUTATIONS = [
       to: '        if (false && (!this.Name || !this.Name.trim())) {' },
     { id: 'M-SD9', file: SEQ, expect: ['SD9'],
       from: '    return value;\n}', to: "    return value.replace('DEAL-', 'DEAL-0');\n}" },
+    // RETARGETED. This named `saveApplyingStageOrderStatus` and `saveWithNewDealNumber`, two methods that
+    // were merged into `saveWithinScope` rounds ago. The anchor therefore matched ZERO times, the driver
+    // reported a SKIP and exited 1 — so the one script whose job is to prove checks can fail was itself
+    // failing to run, quietly, on every invocation. Now aimed at the routing decision that survived.
     { id: 'M-SD10', file: DES, expect: ['SD10'],
-      from: '        const saved = this.IsSaved || this.DealNumber\n            ? await this.saveApplyingStageOrderStatus(options, stageOrder)\n            : await this.saveWithNewDealNumber(options, stageOrder);',
-      to: '        const saved = await this.saveWithNewDealNumber(options, stageOrder);' },
+      from: 'assignNumber: false,',
+      to: 'assignNumber: true,',
+      note: 'an existing deal is renumbered on every save, which is what SD10 forbids' },
     { id: 'M-SD11', file: SEQ, expect: ['SD11'],
       from: '    const rows = await sqlProvider.ExecuteSQL(',
       to: "    await sqlProvider.ExecuteSQL(sql, {}, { isMutation: true, description: 'MUTANT double-take' }, contextUser);\n    const rows = await sqlProvider.ExecuteSQL(" },

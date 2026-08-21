@@ -433,8 +433,9 @@ export class DealWorkspaceComponent implements OnInit {
         // A stage from the previous pipeline is meaningless now.
         const stages = this.StagesFor(pipelineID);
         if (!stages.some((s) => s.ID === deal.PipelineStageID)) {
+            // The stage moves because the pipeline did; its probability and forecast category are the
+            // server's to fill on save. See OnStageChange for why this no longer writes them.
             deal.PipelineStageID = stages[0]?.ID ?? null;
-            this.ApplyStageDefaults(deal, deal.PipelineStageID);
         }
 
         // The company just moved, so the catalogue has too. Not awaited: this runs from a template
@@ -450,22 +451,31 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     /**
-     * A stage carries the probability and forecast category the pipeline designer chose for it, so moving
-     * stages inherits them rather than asking the rep to retype what the process already knows. Both
-     * remain editable afterwards.
+     * ── THE STAGE'S DEFAULTS ARE THE SERVER'S TO APPLY, AND THIS NO LONGER WRITES THEM ──────────────
+     *
+     * `ApplyStageDefaults` used to live here and assign `Probability` and `ForecastCategoryTypeID`
+     * UNCONDITIONALLY. That destroyed a rep-typed value before the server ever saw it: type 85, move the
+     * stage, and 85 was gone — replaced by the arriving stage's number, in memory, before Save.
+     *
+     * The server's `applyStageDefaults` implements fill-but-don't-overwrite and its comment claimed "the
+     * UI copy and this one cannot fight, because the UI sets both fields so they arrive dirty and are
+     * respected". That was WRONG, and wrong in the direction that matters: arriving dirty is exactly what
+     * made the server respect a value the UI had already overwritten. `board-move.BD6` stayed green
+     * because it drives the entity layer directly and never goes near this method, so every real user got
+     * the opposite of what the check asserted.
+     *
+     * ── WHY DELETED RATHER THAN TAUGHT THE RULE ────────────────────────────────────────────────────
+     *
+     * The rule is "is this value the caller's, or mine to fill?" — and the UI cannot answer it. It cannot
+     * tell 75-because-the-rep-typed-it from 75-because-the-last-stage-set-it; only a save boundary can,
+     * which is what the server has and this does not. A heuristic here would be a second writer with a
+     * worse view of the same question, and two writers is how they came to disagree in the first place.
+     *
+     * So the deal keeps whatever the rep typed, the server fills what they left alone, and the reload
+     * after save shows the answer. One writer.
      */
-    public ApplyStageDefaults(deal: DealEntity, stageID: string | null): void {
-        const stage = this.Lookups.Stages.find((s) => s.ID === stageID);
-        if (!stage) {
-            return;
-        }
-        deal.Probability = stage.Probability;
-        deal.ForecastCategoryTypeID = stage.ForecastCategoryTypeID;
-    }
-
     public OnStageChange(deal: DealEntity, stageID: string | null): void {
         deal.PipelineStageID = stageID;
-        this.ApplyStageDefaults(deal, stageID);
         this.Touch();
     }
 

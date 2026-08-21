@@ -756,9 +756,12 @@ export class DealEntityServer extends DealEntity {
      *   · A rep dragging a card sets no probability -> not dirty -> the stage's number lands.
      *   · A rep who moves the stage AND types 85 -> dirty -> 85 stands, which is the point of the
      *     workspace comment promising both stay editable.
-     *   · The workspace's own `ApplyStageDefaults` sets both before saving -> dirty -> respected, so the
-     *     UI copy and this one cannot fight. That is why the UI version is kept rather than deleted: it
-     *     gives the rep the number immediately, and this guarantees it for everyone else.
+     *   · THERE IS NO UI COPY ANY MORE. The claim that stood here — that the workspace's own
+     *     `ApplyStageDefaults` set both fields before saving, so they arrived dirty and were respected,
+     *     so "the UI copy and this one cannot fight" — was WRONG, in the damaging direction. Arriving
+     *     dirty is precisely what made this method respect a number the UI had ALREADY overwritten.
+     *     Two copies did it, the workspace's and the board's, and BD6 stayed green because it drives the
+     *     entity layer and never touches either. Both are deleted; this is the only writer.
      *   · An importer that supplies a historical probability keeps it; one that supplies none inherits
      *     the pipeline's design instead of landing on null.
      */

@@ -32,6 +32,8 @@ import {
     MergeValidation,
     ProjectValidation,
 } from '../packages/Angular/dist/lib/workspace/deal-workspace.validation.js';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join as joinPath } from 'node:path';
 
 let failures = 0;
 
@@ -128,6 +130,62 @@ console.log('\n  what blocks a save\n');
         MergeValidation(clean, [], DiscountRefusalIssues([{ RowIndex: null, Reason: 'x' }])).IsValid,
         false,
     );
+}
+
+console.log('\n  one writer for the stage defaults\n');
+
+/**
+ * ── A SOURCE-LEVEL GUARD, BECAUSE THE DEFECT WAS A SECOND WRITER ────────────────────────────────
+ *
+ * Two Angular components used to assign a stage's `Probability` onto the deal UNCONDITIONALLY — the
+ * workspace's stage picker and the board's drag. Both destroyed a rep-typed value before the server's
+ * fill-but-don't-overwrite rule could see it, and `board-move.BD6` stayed green throughout because it
+ * drives the entity layer and never touches either.
+ *
+ * `BD6` pins the server's rule. Nothing pinned the ABSENCE of a second writer, and that absence is the
+ * actual fix — so it is asserted here by reading the source, the same way the vocabulary gate does. No
+ * behavioural check can see this: the moment a component starts writing the field again, every
+ * server-side check still passes.
+ */
+{
+    const offenders = [];
+    const walk = (dir) => {
+        for (const name of readdirSync(dir)) {
+            if (name === 'node_modules' || name === 'dist' || name === 'generated') continue;
+            const full = joinPath(dir, name);
+            if (statSync(full).isDirectory()) walk(full);
+            else if (name.endsWith('.ts')) {
+                readFileSync(full, 'utf8').split(/\r?\n/).forEach((line, i) => {
+                    // Writes only. A comment or a read of these fields is fine; an assignment sourced
+                    // from a stage is the thing that reinstates the defect.
+                    if (/^\s*\/\//.test(line) || /^\s*\*/.test(line)) return;
+                    if (/\.(Probability|ForecastCategoryTypeID)\s*=\s*.*stage/i.test(line)) {
+                        offenders.push(`${full}:${i + 1}  ${line.trim()}`);
+                    }
+                });
+            }
+        }
+    };
+    walk('packages/Angular/src');
+
+    const pass = offenders.length === 0;
+    if (!pass) failures += 1;
+    console.log(
+        `  ${pass ? 'PASS' : 'FAIL'}  no Angular component writes a stage's probability or forecast category`,
+    );
+    for (const o of offenders) console.log(`          ${o}`);
+    if (!pass) {
+        console.log(
+            [
+                '',
+                '        The server applies these inside the save — same trigger, same transaction — and',
+                "        respects a value the caller stated. A component cannot answer \"is this the rep's",
+                '        number or mine to fill?\" because it has no save boundary, so writing them here',
+                '        reinstates the defect BD6 could not see.',
+                '',
+            ].join('\n'),
+        );
+    }
 }
 
 console.log(
