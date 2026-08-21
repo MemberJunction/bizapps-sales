@@ -420,8 +420,12 @@
                       <td class="dw-num dw-readonly">{{ line.LineTotalNet ?? '—' }}</td>
                       <td class="dw-num">
                             <!-- Percent in, fraction stored. The conversion refuses an ambiguous 0-1
-                                 value rather than guessing -- see SetDiscountPercent. -->
-                            <input type="number" min="0" max="100" step="1"
+                                 value rather than guessing -- see SetDiscountPercent.
+                                 step is 0.01 because that is what OrderLine.DiscountPct
+                                 DECIMAL(7,4) can hold: a hundredth of one percent. It was 1, which
+                                 marked every stored sub-percent discount invalid in the control
+                                 itself -- the browser refusing a number the column stores exactly. -->
+                            <input type="number" min="0" max="100" step="0.01"
                                    [ngModel]="DiscountPercentFor(line)"
                                    (ngModelChange)="SetDiscountPercent(line, $event)" />
                             @if (DiscountRefusals.has(line)) {

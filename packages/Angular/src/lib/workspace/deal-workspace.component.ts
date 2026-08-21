@@ -75,7 +75,11 @@ import {
     type MJTabReorder,
     type MJWorkspaceTab,
 } from '@memberjunction/ng-ui-components';
-import { DiscountFractionToPercent, DiscountPercentToFraction } from '@mj-biz-apps/sales-entities';
+import {
+    DiscountFractionToPercent,
+    DiscountPercentToFraction,
+    RoundDiscountPercent,
+} from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from './deal-workspace.service';
 import { FromDateInput, ToDateInput } from './deal-workspace.dates';
 /** S-US9's timeline — standalone, so importing it is the whole cost. */
@@ -211,12 +215,56 @@ export class DealWorkspaceComponent implements OnInit {
     public Lookups: DealWorkspaceLookups = EmptyLookups();
 
     /**
-     * The products the ACTIVE deal may reference, refreshed when its selling company changes.
+     * The loaded catalogue, TAGGED WITH THE COMPANY IT IS ABOUT.
      *
-     * Per-deal rather than per-session: products are per-company, and the company comes from the deal's
-     * pipeline. A session-wide list would show the first-opened deal's catalogue on every other deal.
+     * ── WHY THE TAG, AND NOT JUST A REFRESH IN ONE MORE PLACE ───────────────────────────────────
+     *
+     * This was a bare `ProductLookup[]`, and it held whatever the LAST deal to load had put there --
+     * the same sentence `SelectTab` already carried about `Lock`, applied to a second field. Open a
+     * deal for company A, open one for company B, switch back, and the picker still offered company
+     * B's catalogue. `AddLine` then stamped `CompanyID` from the ACTIVE deal's pipeline, so the line
+     * carried company A against a company-B product. `OrderLine`'s foreign key is to `Product`, not
+     * to company, so nothing refused it.
+     *
+     * The tab-switch gap could have been closed by adding one more `RefreshProducts()` call beside
+     * the `RefreshLock()` in `SelectTab`. That is exactly the fix that produced this bug: the lock
+     * was repaired one method at a time, and two of its own paths were missed in the process
+     * (`NewDeal` never cleared it, `CloseTab` never re-resolved it). A per-deal value reached
+     * through a shared field will keep growing new stale paths as long as correctness depends on
+     * remembering to call something.
+     *
+     * So the value states what it describes and the getter below refuses to hand it to the wrong
+     * deal. Staleness stops being a thing to remember and becomes a thing that cannot be
+     * represented. The worst case is an EMPTY picker -- visible, and the failure mode
+     * `RefreshProducts` already chose deliberately -- rather than a wrong one.
      */
-    public Products: ProductLookup[] = [];
+    private Catalogue: { CompanyID: string | null; Items: ProductLookup[] } = {
+        CompanyID: null,
+        Items: [],
+    };
+
+    /**
+     * The products the ACTIVE deal may reference.
+     *
+     * Derived, not assigned. Reads the same company expression `AddLine` stamps onto a line, so the
+     * claim in that method -- "a selectable product's company and the deal's are the same value by
+     * construction" -- is now true by construction rather than by coincidence of call order.
+     */
+    public get Products(): ProductLookup[] {
+        return this.Catalogue.CompanyID === this.ActiveCompanyID ? this.Catalogue.Items : [];
+    }
+
+    /**
+     * The selling company of the ACTIVE deal, from the pipeline first.
+     *
+     * One expression, used by the picker, by the catalogue load and by `AddLine`'s stamp. It was
+     * three: `RefreshProducts` filtered on `deal.CompanyID` while `AddLine` stamped
+     * `CompanyIDFromPipeline ?? deal.CompanyID`, which agree today only because `SelectPipeline`
+     * happens to write both.
+     */
+    public get ActiveCompanyID(): string | null {
+        return this.CompanyIDFromPipeline ?? this.Deal?.CompanyID ?? null;
+    }
     public readonly Loading = signal(true);
     public readonly Saving = signal(false);
     /** Last outcome, shown verbatim. The server's words, not a paraphrase of them. */
@@ -274,8 +322,9 @@ export class DealWorkspaceComponent implements OnInit {
             Status: 'draft',
             State: { Deal: deal, ActivePane: 'party' },
         });
-        await this.RefreshProducts();
-        this.Revalidate();
+        // The sync, not just a product refresh: a blank deal opened after a CLOSED one inherited that
+        // deal's lock and rendered every field read-only.
+        await this.SyncToActiveDeal();
     }
 
     /**
@@ -288,10 +337,10 @@ export class DealWorkspaceComponent implements OnInit {
     public async OpenDeal(dealID: string): Promise<boolean> {
         const tabId = `deal-${dealID}`;
         if (this.store.Activate(tabId)) {
-            // Already open: this is a tab SWITCH, so it owes the same lock refresh as SelectTab. Without
-            // it, re-opening a deal from the roster inherits the previous deal's lock state.
-            await this.RefreshLock();
-            this.cdr.detectChanges();
+            // Already open: this is a tab SWITCH, so it owes the FULL sync, not just the lock. It
+            // refreshed the lock alone, which is how the roster path came to inherit the previous
+            // deal's product catalogue.
+            await this.SyncToActiveDeal();
             return true;
         }
         this.Loading.set(true);
@@ -312,11 +361,9 @@ export class DealWorkspaceComponent implements OnInit {
             State: { Deal: deal, ActivePane: 'party' },
         });
         this.store.MarkClean(tabId);
-        await this.RefreshProducts();
         // The lock is resolved on OPEN, not on save: a deal that arrives already closed must render
         // frozen from the first paint, rather than inviting an edit the server will refuse.
-        await this.RefreshLock();
-        this.Revalidate();
+        await this.SyncToActiveDeal();
         return true;
     }
 
@@ -343,16 +390,24 @@ export class DealWorkspaceComponent implements OnInit {
      */
     public SelectTab(id: string): void {
         this.store.Activate(id);
-        this.Revalidate();
-        void this.RefreshLock().then(() => this.cdr.detectChanges());
+        void this.SyncToActiveDeal();
     }
 
+    /**
+     * Closes a tab -- which, when it is the ACTIVE tab, makes a different deal active.
+     *
+     * `MJWorkspaceTabStore.Close` activates the neighbour at the closed index, so this is a
+     * deal-switch path as surely as `SelectTab` is. It called `Revalidate()` alone, so it left both
+     * the lock and the catalogue pointing at the deal that had just been closed.
+     */
     public CloseTab(id: string): void {
         this.store.Close(id);
         if (this.store.Count === 0) {
+            // NewDeal syncs on its own; a second pass would only race it.
             void this.NewDeal();
+            return;
         }
-        this.Revalidate();
+        void this.SyncToActiveDeal();
     }
 
     public ReorderTabs(move: MJTabReorder): void {
@@ -1408,13 +1463,75 @@ export class DealWorkspaceComponent implements OnInit {
     /**
      * Reloads the product catalogue for whichever company the active deal sells for.
      *
-     * Called when a deal is opened and when its pipeline changes, because those are the only two moments
-     * `CompanyID` can move. Failure yields an empty list rather than an error: the picker then offers
-     * nothing, which is visible, instead of a partial catalogue, which is not.
+     * ── THE OLD COMMENT HERE WAS THE BUG, WRITTEN DOWN ─────────────────────────────────────────
+     *
+     * It said this is "called when a deal is opened and when its pipeline changes, because those are
+     * the only two moments `CompanyID` can move". Both halves are true and the conclusion is wrong:
+     * no `CompanyID` moves when the user switches tabs, and yet the company IN VIEW changes. A
+     * per-deal value in a shared field goes stale on every path that changes which deal is active,
+     * not only on the paths that change the deal.
+     *
+     * Failure yields an empty list rather than an error: the picker then offers nothing, which is
+     * visible, instead of a partial catalogue, which is not.
      */
+    /**
+     * Everything that is ABOUT THE ACTIVE DEAL, re-derived because a different deal is now active.
+     *
+     * ── THE ONE RULE, AND THE FULL LIST IT APPLIES TO ───────────────────────────────────────────
+     *
+     * `SelectTab` already stated the class: a single component-level value "holds whatever the LAST
+     * deal to load set". That was written about `Lock` and fixed for `Lock` in that one method. The
+     * audit it implies had not been done, and the same sentence was true of five other fields --
+     * including two paths of `Lock` itself:
+     *
+     *   Lock            NewDeal never cleared it, so opening a CLOSED deal and then clicking
+     *                   "New deal" rendered a brand-new blank deal entirely read-only. CloseTab
+     *                   never re-resolved it, and closing the active tab activates a neighbour.
+     *   Products        SelectTab and OpenDeal's already-open branch never refreshed it. The
+     *                   reported defect; see the Catalogue field for what it cost.
+     *   CloseRouting    the order and contract numbers a close created -- shown against whatever
+     *     + RoutedRecordNumbers
+     *                   deal is on screen once the tab changes. A claim about downstream records,
+     *                   attached to the wrong deal.
+     *   ClosePanelOpen  an open close panel, with a typed loss reason and notes, survived a tab
+     *   + the Close and  switch. The close acts on the ACTIVE deal, so a rep who opened the panel on
+     *     Reopen drafts one deal, switched, and pressed Close would have closed the other one with
+     *                   the first one's reason.
+     *   Message         "Deal closed as won." reads as a statement about what is on screen.
+     *
+     * Routing this through one method is the point. Six fields across four call sites is
+     * twenty-four things to remember; this is one. The close and reopen flows deliberately do NOT
+     * call it -- they call `RefreshLock` directly, because they have just SET `CloseRouting` and
+     * `Message` and a reset would erase the result they exist to show.
+     */
+    private async SyncToActiveDeal(): Promise<void> {
+        // Per-deal transient UI, cleared before anything reads it. Not carried across, not merged.
+        this.CloseRouting = [];
+        this.RoutedRecordNumbers = {};
+        this.ClosePanelOpen = false;
+        this.CloseOutcome = null;
+        this.CloseLossReasonID = null;
+        this.CloseLossNotes = '';
+        this.CloseNotes = '';
+        this.ReopenPanelOpen = false;
+        this.ReopenReason = '';
+        this.Message = '';
+        this.MessageIsError = false;
+        // A refusal is recorded per LINE, and the lines belong to the deal that just left.
+        this.DiscountRefusals.clear();
+
+        await this.RefreshProducts();
+        await this.RefreshLock();
+        this.Revalidate();
+        this.cdr.detectChanges();
+    }
+
     private async RefreshProducts(): Promise<void> {
-        const deal = this.Deal;
-        this.Products = deal ? await this.service.LoadProducts(deal.CompanyID) : [];
+        const company = this.ActiveCompanyID;
+        const items = company ? await this.service.LoadProducts(company) : [];
+        // Tagged on assignment. If the active deal changed while this was in flight, the getter will
+        // decline to show it rather than presenting another company's catalogue as this one's.
+        this.Catalogue = { CompanyID: company, Items: items };
         this.cdr.detectChanges();
     }
 
@@ -1483,6 +1600,43 @@ export class DealWorkspaceComponent implements OnInit {
      * rather than guessed at. Pinned by scripts/assert-discount-conversion.mjs.
      */
     public SetDiscountPercent(line: OrderLineEntity, percent: number | null): void {
+        /**
+         * ── A VALUE WE PRODUCED IS NOT AN ENTRY, AND MUST NOT MEET THE ENTRY GUARD ───────────────
+         *
+         * `DiscountPercentFor` renders a stored `0.005` as `0.5`, and `DiscountPercentToFraction`
+         * refuses `0.5` as ambiguous. Both are right. Put together they made a legitimately
+         * negotiated half percent unsaveable: it displayed in the box, and the moment that box
+         * re-emitted its own contents the row went red on a value nobody had typed.
+         *
+         * The fix is not to relax the guard -- a typed `0.5` really is ambiguous, and the
+         * hundred-fold error it prevents is the worst outcome in this file. The fix is that the
+         * DISPLAY PATH STOPS BEING AN INPUT PATH. If what arrived is what we are already showing,
+         * nothing was entered, so there is nothing to convert and nothing to refuse.
+         *
+         * This is a real equality, not a tolerance: both sides are rounded at
+         * `DISCOUNT_PERCENT_DECIMALS`, which is the precision `OrderLine.DiscountPct DECIMAL(7,4)`
+         * can hold, so two percents that compare equal here store the same fraction.
+         *
+         * A typed `0.5` on a line storing `0.29` is still a CHANGE, and still refused. What no
+         * longer happens is the app failing its own output.
+         *
+         * The residual limit, stated rather than hidden: a rep cannot TYPE a new sub-one-percent
+         * discount. `0.5` in a percent box is ambiguous no matter who sent it, and resolving that
+         * needs a control that carries its unit -- a product decision about how reps enter
+         * sub-percent discounts, not something to guess at here. What works today is that such a
+         * discount survives: it renders, it round-trips, and it saves alongside edits to every
+         * other field on the line.
+         */
+        if (percent !== null && percent !== undefined) {
+            if (RoundDiscountPercent(percent) === this.DiscountPercentFor(line)) {
+                // Any refusal recorded against this line is now moot -- the field agrees with what
+                // is stored -- so clear it, or a stale message keeps the save button disabled.
+                this.DiscountRefusals.delete(line);
+                this.Revalidate();
+                return;
+            }
+        }
+
         const converted = DiscountPercentToFraction(percent);
         if (!converted.Ok) {
             this.DiscountRefusals.set(line, converted.Reason);
