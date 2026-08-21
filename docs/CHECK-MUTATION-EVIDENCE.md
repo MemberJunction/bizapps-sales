@@ -19,10 +19,10 @@ because both were arithmetically stale the moment they merged:
 | | |
 |---|---|
 | Checks registered across 9 bundles | **121** |
-| Mutants defined in `test-harnesses/mutate-checks.mjs` | **60** |
-| Checks a mutant is DECLARED to kill (`expect` lists) | **57** |
-| Checks additionally proven by measured collateral kills | **2** (BD1, BD4 — see `M-ST1`) |
-| **Checks proven able to fail** | **59 of 121** |
+| Mutants defined in `test-harnesses/mutate-checks.mjs` | **75** |
+| Checks a mutant is DECLARED to kill (`expect` lists) | **75** |
+| Checks additionally proven by measured collateral kills | **3** (BD1, BD4 — see `M-ST1`; AC22 — see round 7) |
+| **Checks proven able to fail** | **77 of 121** |
 
 **The merged figure was verified at 118 by two independent routes**: the per-key arithmetic in
 `scripts/expected-check-counts.json`, and grepping registered `Id:` values straight out of
@@ -41,15 +41,19 @@ Round 6 then added CD20–CD22 for the three server-side fixes, giving **121**. 
 | `close-won-contract` | 4 | 3 | 1 |
 | `board-move` | 6 | 5 | 1 (BD3) |
 | `close-won-tasks` | 14 | 3 | **11** |
-| **`activities`** | **22** | **0** | **22** |
-| **`forecast`** | **13** | **0** | **13** |
+| `activities` | 22 | 12 | 10 |
+| `forecast` | 13 | 6 | 7 |
 
 ---
 
-## The two bundles with NO mutant at all, and a commit title that reads otherwise
+## The two bundles that had NO mutant at all — CLOSED 2026-08-21, and the failure mode worth keeping
 
-`activities` (22) and `forecast` (13) — **35 checks, 30% of the suite — have never been shown able to
-fail.** For those the honest statement is that they pass, not that they work.
+`activities` (22) and `forecast` (13) — **35 checks, 30% of the suite — had never been shown able to
+fail.** 15 mutants now cover them (`M-AC1`–`M-AC10`, `M-FS1`–`M-FS5`); the run is round 7 below. 18 of the
+35 are proven, 17 are not, and the remaining gap is itemised there rather than summarised away.
+
+**The rest of this section is kept as written, because how the wrong claim got in matters more than the
+claim.**
 
 This needs saying precisely, because the merged history looks like it was fixed. Commit `1352b2c` on
 `feature/forecast-query-source` is titled *"mutants for activities and forecast, and four checks that
@@ -197,10 +201,81 @@ whose job is to break things on purpose must not be able to leave them broken.
 
 ---
 
+## Round 7 (2026-08-21) — the activities and forecast mutants, landed and run
+
+**15 mutants, 14 killed, 1 standing miss.** `M-AC1`–`M-AC10` and `M-FS1`–`M-FS5`, named for the check
+family they target as `M-CD*`/`M-CT*` are. Every anchor was re-verified against this merged tree rather
+than carried across from the by-hand campaign, because the merge moved code under several of them.
+
+| Mutant | What it breaks | Killed |
+|---|---|---|
+| `M-AC1` | the external-key dedupe read's answer is ignored | AC8, AC13 |
+| `M-AC2` | party links land under the sales child, not common's parent | AC3, AC13, AC18, AC22 |
+| `M-AC3` | relevance fails OPEN — nothing is irrelevant | AC6, AC7 |
+| `M-AC4` | a failed contact-method read reported as a successful one | **nothing — standing miss** |
+| `M-AC5` | a cancelled meeting stored as one that happened | AC18 |
+| `M-AC6` | the watermark advances past items whose write failed | AC20 |
+| `M-AC7` | a sync with failures in it reports success | AC20 |
+| `M-AC8` | the fixture stops mirroring each surface's real watermark rule | AC14, AC19 |
+| `M-AC9` | the live Graph calendar reports the newest event start as its watermark | AC21 |
+| `M-AC10` | the tenant-admin gate on a live mailbox read is removed | AC11 |
+| `M-FS1` | a query that could not run reads like a period with no deals | FS8 |
+| `M-FS2` | the `ClosedWonAmount` → `ClosedAmount` mapping dropped | FS11, FS12 |
+| `M-FS3` | a second run the same day writes a second snapshot | FS3 |
+| `M-FS4` | a reversed period reaches the CHECK constraint | FS6 |
+| `M-FS5` | the month boundary read in the host's timezone | FS7 |
+
+### `M-AC4` is a standing miss, in the shape `M-AP2` already uses
+
+It reverts `RelevanceFilter.lookup`'s failure report from `failed: true` to `failed: false`, so a
+`ContactMethod` read that blipped is filed as *"nothing was relevant"* — and the watermark advances over a
+batch of real mail that can never be fetched again, because `GetMessages` has no date filter to re-fetch
+it with (D-17).
+
+Nothing in this repository can kill it, and that is measured rather than assumed. Provoking a real
+`RunView` failure against a registered entity means revoking a permission, dropping a view or killing the
+connection: none is available inside a rolled-back transaction, and each would take the rest of the suite
+with it. `AC22` covers the CONSEQUENCE by INJECTING a filter that reports a failed lookup, which is
+exactly why `AC22` cannot fall to this mutant — it never calls the real `lookup`.
+
+So the handling is proven and the reporting is not. Its `expect` names `AC22` deliberately, so the driver
+reports MISS on every run and exits 1. **The gap is stated rather than implied by an absence.**
+
+`AC22` *is* nonetheless proven able to fail — collaterally, by `M-AC2`. Worth separating: a check can be
+provably falsifiable while the specific guard a mutant aims at remains untested.
+
+### Four cross-bundle failures that are NOT attributed, and how that was decided
+
+Three runs reported failures outside the bundle they mutated: `SD25` (twice), `FS2`, `FS3`, `FS5` and
+`WT13`. None is counted as proven, on two independent grounds.
+
+**Causality.** A check is credited only where the mutated symbol is in its path. `M-AC4`'s mutation is
+unreachable without a genuine read failure — that is the whole standing-miss argument above — so it cannot
+have felled `FS2` or `SD25`. `M-AC3` mutates `RelevanceFilter`, which no forecast or save-deal check
+touches. And `M-AC2` mutates `E_PERSON`, consumed only by `ActivityReader`, `ActivityWriterService` and
+the activities checks; `close-won-tasks.checks.ts` declares its **own** `E_PEOPLE` literal at line 41, so
+`WT13` is out of reach of that edit.
+
+**Reproduction.** The suite was then run **four consecutive times against the clean tree: 121 passed, 0
+failed, every time.** None of those checks fails on its own.
+
+What the six failures do correlate with is duration: the three runs that produced them took 170s, 171s and
+187s against ~120s for the other twelve. That points at contention on the shared host — `MJ_V6_Host` is
+worked by more than one session — rather than at anything in the code.
+
+**The rule this establishes for the driver's output:** the driver prints every check that went red, which
+is right, and it also summarised "22 checks proven able to fail" for this run. The honest figure is 18.
+A collateral kill is evidence only when the mutated code is in the failing check's path; otherwise it is
+noise, and on a shared database noise is expected. Read the `failed=` column, do not sum it.
+
+---
+
 ## What this file does NOT establish
 
-That the suite is adequate. It establishes that **59 of 121 checks fail for the reason they claim to**,
-each against a specific mutation, on the code that mutation was run against. The 62 unproven include two
-entire bundles and eleven of fourteen close-won-task checks. And no mutation campaign says anything about
+That the suite is adequate. It establishes that **77 of 121 checks fail for the reason they claim to**,
+each against a specific mutation, on the code that mutation was run against. The 44 unproven are now
+concentrated rather than wholesale — eleven of fourteen close-won-task checks, ten of twenty-two
+activities, seven of thirteen forecast, nine of thirty-one save-deal — and every one of those figures is
+counted from a recorded run rather than from a commit message. And no mutation campaign says anything about
 behaviour no check covers at all — for that, see the Explorer specs under
 `test-harnesses/playwright/specs/`, which is where DN-17, DN-18 and DN-19 came from.
