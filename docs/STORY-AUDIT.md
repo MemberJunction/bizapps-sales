@@ -61,7 +61,7 @@ merges, of which **four were corrections for a head that had already moved**.
 `docs/INTEGRATION-LOG.md` records which commit each one consumed and the expected shape it was checked
 against — which is why the last four were diffs against a stated baseline rather than guesses.
 
-**Evidence base: 114 integration checks across 9 bundles**, 0 failed, 0 skipped, plus E1–E4 from
+**Evidence base: 118 integration checks across 9 bundles**, 0 failed, 0 skipped, plus E1–E4 from
 `scripts/audit-story-evidence.mjs` and `test-harnesses/compare-dashboard-measures.mjs` at 11 agree / 0
 differ.
 
@@ -74,11 +74,11 @@ on them would repeat the mistake this pass exists to correct.
 
 The rule for this pass was *prove met criteria against the database, not the screen*. Three sources:
 
-1. **The 114 integration checks** across 9 bundles (`node scripts/assert-check-count.mjs`, which now runs
+1. **The 118 integration checks** across 9 bundles (`node scripts/assert-check-count.mjs`, which now runs
    the suite itself rather than trusting a log off disk). Every check hits a live database with nothing
    mocked and rolls back. Where a criterion maps to a check, the check id **is** the evidence, and
-   `docs/CHECK-MUTATION-EVIDENCE.md` records which mutant proves that check can fail — for the **56 of 114**
-   it covers. `activities` (18) and `forecast` (13) have no mutant at all, so for those the honest
+   `docs/CHECK-MUTATION-EVIDENCE.md` records which mutant proves that check can fail — for the **56 of 118**
+   it covers. `activities` (22) and `forecast` (13) have no mutant at all, so for those the honest
    statement is that they pass rather than that they work. That document used to claim all of them.
 2. **`scripts/audit-story-evidence.mjs`** — four things no check answers, cited below as **E1–E4**.
    E4 exists because WT1–WT10 prove what the close *writes* inside a transaction that rolls back; it asks
