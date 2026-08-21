@@ -97,6 +97,17 @@ interface StageOrderStatusRow {
  * A plan exists ONLY when there is something to do: the stage actually changed, and the new stage names
  * a status. Everything else is `null`, so the ordinary save path is untouched by this feature.
  */
+/**
+ * What a stage says a deal's forecast fields should become on entry.
+ *
+ * `null` on either field is a real answer — a stage that states no probability leaves the deal's at null
+ * rather than inventing one — so this carries the values rather than a "should apply" flag.
+ */
+interface StageDefaultsPlan {
+    Probability: number | null;
+    ForecastCategoryTypeID: string | null;
+}
+
 interface StageOrderPlan {
     StageID: string;
     Target: OrderStatus;
@@ -267,12 +278,21 @@ export class DealEntityServer extends DealEntity {
         const order = this.OrderID_Object;
         const amountMayHaveMoved = !!order && (order.Dirty || order.Lines.Dirty);
 
+        // The stage's forecast defaults, on the same trigger as the three above. Read here, applied
+        // inside the scope, for the same reason the others are: work that might not be needed should not
+        // lengthen a critical section.
+        const stageDefaults = await this.planStageDefaults();
+
         // Nothing to number: an existing deal, or one that already has a number. A number is only ever
         // assigned once — it appears in contracts, orders and people's email, so re-saving a deal must
         // never renumber it.
         const saved = this.IsSaved || this.DealNumber
-            ? await this.saveWithinScope(options, { stageOrder, stageMove, amountMayHaveMoved, assignNumber: false })
-            : await this.saveWithinScope(options, { stageOrder, stageMove, amountMayHaveMoved, assignNumber: true });
+            ? await this.saveWithinScope(options, {
+                  stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
+              })
+            : await this.saveWithinScope(options, {
+                  stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
+              });
 
         if (!saved) {
             this.explainOrderProvisioningFailure();
@@ -354,11 +374,18 @@ export class DealEntityServer extends DealEntity {
         work: {
             stageOrder: StageOrderPlan | null;
             stageMove: StageMoveSnapshot | null;
+            stageDefaults: StageDefaultsPlan | null;
             amountMayHaveMoved: boolean;
             assignNumber: boolean;
         },
     ): Promise<boolean> {
-        if (!work.assignNumber && !work.stageOrder && !work.stageMove && !work.amountMayHaveMoved) {
+        if (
+            !work.assignNumber &&
+            !work.stageOrder &&
+            !work.stageMove &&
+            !work.stageDefaults &&
+            !work.amountMayHaveMoved
+        ) {
             return super.Save(options);
         }
 
@@ -378,6 +405,15 @@ export class DealEntityServer extends DealEntity {
                     this.ContextCurrentUser,
                     this.ProviderToUse as unknown as IMetadataProvider,
                 );
+            }
+            /**
+             * BEFORE the order status and before the save, because these are columns on the DEAL and the
+             * save is what persists them. The order-status writer talks to another app's record and the
+             * stage event is appended afterwards; this one has to be in place by the time `super.Save`
+             * runs or it writes nothing.
+             */
+            if (work.stageDefaults) {
+                this.applyStageDefaults(work.stageDefaults);
             }
             if (work.stageOrder) {
                 await this.applyStageOrderStatus(work.stageOrder);
@@ -595,6 +631,130 @@ export class DealEntityServer extends DealEntity {
      * created Quoted rather than created Draft and then moved — one row, one state, no history of a
      * status it was never really in.
      */
+    /**
+     * What the stage says this deal's probability and forecast category become — read BEFORE the
+     * transaction, like every other plan in this class.
+     *
+     * ── WHY THIS IS ON THE WRITE PATH AND NOT IN THE WORKSPACE ──────────────────────────────────
+     *
+     * It was in the workspace: `DealWorkspaceComponent.ApplyStageDefaults`, called from the stage picker.
+     * So a stage set by an agent, by the S6 HubSpot importer, by an Action or by any API caller got
+     * NEITHER value — the deal landed with whatever probability the caller happened to supply, or null,
+     * while the pipeline designer's answer sat unused in the stage row. Exactly the shape of the order
+     * provisioning that used to live in the workspace and now lives in `Save()`: a rule the UI enforces
+     * is a rule only the UI obeys.
+     *
+     * ── SAME TRIGGER AS THE OTHER THREE, DELIBERATELY A SEPARATE READ ───────────────────────────
+     *
+     * Keyed on `PipelineStageID` changing, like the order-status writer and the stage event. It reads the
+     * stage row a second time rather than widening `planStageOrderStatus`, and that is a considered
+     * trade: one extra read on a stage change — a rare event — against touching a method whose exact
+     * behaviour is pinned by `close-won-order.CO3`, `CO5` and three mutants. Cheap insurance beats a
+     * clever saving here.
+     *
+     * ── IT DOES NOT FIRE ON PROVISIONING, unlike the order-status writer ────────────────────────
+     *
+     * `planStageOrderStatus` also runs when an existing deal acquires an order (`_orderJustProvisioned`,
+     * SD25), because an order that has just come into existence has never been told anything. These
+     * fields are different: the deal has held them all along, and re-applying a stage default to a deal
+     * whose stage did not move would overwrite a number a rep tuned by hand.
+     */
+    private async planStageDefaults(): Promise<StageDefaultsPlan | null> {
+        const stageID = this.PipelineStageID;
+        if (!stageID) {
+            return null;
+        }
+        if (this.IsSaved) {
+            const previous = this.GetFieldByName('PipelineStageID')?.OldValue as string | null | undefined;
+            if (previous && String(previous).toLowerCase() === String(stageID).toLowerCase()) {
+                return null;   // the stage did not move; these fields are not this save's business
+            }
+        }
+
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await view.RunView<{ Probability: number | null; ForecastCategoryTypeID: string | null }>(
+            {
+                EntityName: STAGE_ENTITY,
+                ExtraFilter: `ID = '${stageID}'`,
+                ResultType: 'simple',
+                Fields: ['Probability', 'ForecastCategoryTypeID'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            // Not fatal, for the same reason the order-status read is not: a stage lookup that fails must
+            // not stop a rep moving a card. Recorded as a warning like anything else that did not happen.
+            this._orderStatusWarnings.push(
+                `Stage defaults were not applied: the stage could not be read ` +
+                `(${result.ErrorMessage ?? 'unknown error'}).`,
+            );
+            return null;
+        }
+
+        const row = (result.Results ?? [])[0];
+        if (!row) {
+            return null;
+        }
+        return {
+            Probability: row.Probability ?? null,
+            ForecastCategoryTypeID: row.ForecastCategoryTypeID ?? null,
+        };
+    }
+
+    /**
+     * Fills the forecast fields from the stage, WITHOUT overwriting a value this save set deliberately.
+     *
+     * ── THE RULE IS THE AMOUNT CACHE'S RULE ─────────────────────────────────────────────────────
+     *
+     * `Deal.Amount` distinguishes a computed figure from a stated one and never overwrites the stated
+     * one (SD22). The same distinction applies here and is read the same way: a field the caller TOUCHED
+     * in this save is theirs, and a field they did not touch is the stage's to fill.
+     *
+     * `Dirty` is what expresses that. It is true only when this save changed the value, so:
+     *
+     *   · A rep dragging a card sets no probability -> not dirty -> the stage's number lands.
+     *   · A rep who moves the stage AND types 85 -> dirty -> 85 stands, which is the point of the
+     *     workspace comment promising both stay editable.
+     *   · The workspace's own `ApplyStageDefaults` sets both before saving -> dirty -> respected, so the
+     *     UI copy and this one cannot fight. That is why the UI version is kept rather than deleted: it
+     *     gives the rep the number immediately, and this guarantees it for everyone else.
+     *   · An importer that supplies a historical probability keeps it; one that supplies none inherits
+     *     the pipeline's design instead of landing on null.
+     */
+    private applyStageDefaults(plan: StageDefaultsPlan): void {
+        /**
+         * ── TWO DIFFERENT TESTS, BECAUSE `Dirty` DOES NOT MEAN THE SAME THING ON A NEW RECORD ───────
+         *
+         * The first version used `Dirty` for both cases and `board-move.BD2` caught it immediately: a
+         * deal CREATED with probability 30 had it silently replaced by its stage's 10, because on a new
+         * record a field the caller assigned is not reported dirty. The stage event then stamped 10 as
+         * the departure value and BD2 said so — expected 30, got 10. Exactly the check doing its job.
+         *
+         * So the question is asked the way it actually differs:
+         *
+         *   CREATING  — respect any value the caller supplied, fill only what they left empty. `Dirty` is
+         *               not usable here, and "is it null" is precisely the intent anyway.
+         *   MOVING    — respect a value set in THIS save, otherwise take the stage's. This is the case the
+         *               feature exists for: dragging a card should move the probability with it, and
+         *               `Dirty` is exactly "the caller touched it this time".
+         */
+        const creating = !this.IsSaved;
+
+        const probabilityIsTheirs = creating
+            ? this.Probability !== null && this.Probability !== undefined
+            : !!this.GetFieldByName('Probability')?.Dirty;
+        if (!probabilityIsTheirs) {
+            this.Probability = plan.Probability;
+        }
+
+        const forecastIsTheirs = creating
+            ? !!this.ForecastCategoryTypeID
+            : !!this.GetFieldByName('ForecastCategoryTypeID')?.Dirty;
+        if (!forecastIsTheirs) {
+            this.ForecastCategoryTypeID = plan.ForecastCategoryTypeID;
+        }
+    }
+
     private async planStageOrderStatus(): Promise<StageOrderPlan | null> {
         const stageID = this.PipelineStageID;
         if (!stageID) {

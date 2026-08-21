@@ -112,6 +112,47 @@ function draft(f: SalesFixture, name: string, overrides: Partial<DealDraft> = {}
         ...overrides,
     };
 }
+/**
+ * Two stages on the fixture's pipeline that DISAGREE about probability and both name a forecast category.
+ *
+ * `twoStages` above takes the first two in DisplayOrder, which is right for testing that a move happened.
+ * It is NOT enough for testing that a stage's DEFAULTS were applied: if both stages carry the same
+ * probability, the assertion passes whether the code copied it or did nothing at all. So this picks a pair
+ * that cannot agree by accident.
+ */
+async function twoDisagreeingStages(
+    ctx: Ctx,
+    f: SalesFixture,
+): Promise<{ from: StageRow; to: StageRow } | null> {
+    const rv = new RunView();
+    const r = await rv.RunView<StageRow>(
+        {
+            EntityName: E_STAGE,
+            ExtraFilter:
+                `PipelineID = '${f.PipelineID}' AND IsActive = 1 ` +
+                `AND Probability IS NOT NULL AND ForecastCategoryTypeID IS NOT NULL`,
+            OrderBy: 'DisplayOrder ASC',
+            ResultType: 'simple',
+            Fields: ['ID', 'Probability', 'ForecastCategoryTypeID'],
+        },
+        ctx.User,
+    );
+    Assert(r.Success, `reading stages failed — ${r.ErrorMessage}`);
+    const stages = r.Results ?? [];
+    const from = stages[0];
+    if (!from) {
+        return null;
+    }
+    const to = stages.find((st) => Number(st.Probability) !== Number(from.Probability));
+    return to ? { from, to } : null;
+}
+
+interface StageRow {
+    ID: string;
+    Probability: number | null;
+    ForecastCategoryTypeID: string | null;
+}
+
 /** Two stages on the fixture's pipeline, in DisplayOrder — a move needs somewhere to go. */
 async function twoStages(ctx: Ctx, f: SalesFixture): Promise<{ from: string; to: string } | null> {
     const rv = new RunView();
@@ -264,6 +305,129 @@ export const BoardMoveChecks: NamedCheck[] = [
                 AssertEqual(String(events[0].ToStageID).toLowerCase(), to.toLowerCase(), 'first went forward');
                 AssertEqual(String(events[1].ToStageID).toLowerCase(), from.toLowerCase(), 'second came back');
                 Assert(!!events[0].ChangedByUserID, 'and each records who moved it');
+            }),
+    },
+    {
+        Id: 'board-move.BD5',
+        Name: "BD5: a stage change through the ENTITY LAYER applies the stage's probability and forecast category",
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * #33's last criterion that was OURS, and the defect was that it only ever worked in a
+                 * browser.
+                 *
+                 * `ApplyStageDefaults` lived in `DealWorkspaceComponent` and ran from the stage picker, so
+                 * a stage set by an agent, an Action, the S6 HubSpot importer or any API caller got
+                 * NEITHER value: the pipeline designer's answer sat unused in the stage row while the deal
+                 * landed with whatever the caller supplied, or null. The same shape as the order
+                 * provisioning that used to live in the workspace — a rule the UI enforces is a rule only
+                 * the UI obeys.
+                 *
+                 * NO UI IS INVOLVED HERE. `save()` loads a deal, assigns `PipelineStageID` and saves,
+                 * which is what every non-UI caller does. If the defaults arrive, they arrived on the
+                 * write path.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const pair = await twoDisagreeingStages(ctx, f);
+                Assert(
+                    !!pair,
+                    'setup: this pipeline needs two stages that disagree on probability and both name a ' +
+                        'forecast category, or the assertion could pass without anything being applied',
+                );
+
+                const created = await save(ctx, draft(f, 'BD5 defaults on the write path', {
+                    PipelineStageID: pair!.from.ID,
+                }));
+                Assert(created.Success, `setup: ${JSON.stringify(created.Issues)}`);
+
+                // THE MOVE, and nothing else touched — no probability, no forecast category.
+                const moved = await save(ctx, draft(f, 'BD5 defaults on the write path', {
+                    ID: created.DealID!,
+                    PipelineStageID: pair!.to.ID,
+                }));
+                Assert(moved.Success, `the move failed: ${JSON.stringify(moved.Issues)}`);
+
+                const after = await TxOne<{ Probability: number | null; ForecastCategoryTypeID: string | null }>(
+                    ctx,
+                    `SELECT Probability, ForecastCategoryTypeID FROM ${SALES_SCHEMA}.Deal ` +
+                        `WHERE ID = '${created.DealID}'`,
+                );
+                AssertEqual(
+                    Number(after.Probability),
+                    Number(pair!.to.Probability),
+                    "the arriving stage's probability was applied by the SERVER, with no UI in the picture",
+                );
+                AssertEqual(
+                    String(after.ForecastCategoryTypeID).toLowerCase(),
+                    String(pair!.to.ForecastCategoryTypeID).toLowerCase(),
+                    'and its forecast category with it',
+                );
+            }),
+    },
+    {
+        Id: 'board-move.BD6',
+        Name: 'BD6: a probability the CALLER states survives the move — the stage FILLS, it does not overwrite',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE OTHER HALF, and the half that makes this safe to put on the write path at all.
+                 *
+                 * The workspace has always promised both fields stay editable, and an importer carrying
+                 * historical probabilities has to be able to keep them. So the rule is the amount cache's
+                 * rule: a value the caller stated in this save is theirs; one they did not state is the
+                 * stage's to fill. Without this check the feature sits one line away from an overwrite
+                 * that quietly discards somebody's judgement.
+                 *
+                 * `BD2` guards the neighbouring claim — that the stage EVENT stamps the DEPARTURE value —
+                 * and it is what caught the first version of this code, which asked `Dirty` on creation
+                 * where `Dirty` does not mean what it means on an update.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const pair = await twoDisagreeingStages(ctx, f);
+                Assert(!!pair, 'setup: two stages that disagree on probability are needed');
+
+                const created = await save(ctx, draft(f, 'BD6 a stated probability is respected', {
+                    PipelineStageID: pair!.from.ID,
+                }));
+                Assert(created.Success, `setup: ${JSON.stringify(created.Issues)}`);
+
+                // A DELIBERATE figure that no stage carries, so a pass cannot come from a coincidence.
+                const STATED = 41;
+                AssertEqual(
+                    Number(pair!.to.Probability) === STATED || Number(pair!.from.Probability) === STATED,
+                    false,
+                    `setup: neither stage may carry ${STATED}`,
+                );
+
+                const moved = await save(ctx, draft(f, 'BD6 a stated probability is respected', {
+                    ID: created.DealID!,
+                    PipelineStageID: pair!.to.ID,
+                    Probability: STATED,   // stated IN THE SAME SAVE as the move
+                }));
+                Assert(moved.Success, `the move failed: ${JSON.stringify(moved.Issues)}`);
+
+                const after = await TxOne<{ Probability: number | null; ForecastCategoryTypeID: string | null }>(
+                    ctx,
+                    `SELECT Probability, ForecastCategoryTypeID FROM ${SALES_SCHEMA}.Deal ` +
+                        `WHERE ID = '${created.DealID}'`,
+                );
+                AssertEqual(
+                    Number(after.Probability),
+                    STATED,
+                    'the stated probability stands — a stage default must not overwrite it',
+                );
+
+                /**
+                 * AND THE FIELD THEY DID NOT STATE STILL FILLS. Respecting one field must not switch the
+                 * whole feature off, which is the obvious way to get this wrong.
+                 */
+                AssertEqual(
+                    String(after.ForecastCategoryTypeID).toLowerCase(),
+                    String(pair!.to.ForecastCategoryTypeID).toLowerCase(),
+                    'the forecast category was not stated, so the arriving stage still supplies it',
+                );
             }),
     },
 ];

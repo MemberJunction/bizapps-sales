@@ -87,7 +87,20 @@ const utcDatePart = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : S
 
 const open = deals.filter((d) => hasFlag(d, 'IsOpen'));
 const won = deals.filter((d) => hasFlag(d, 'IsWon'));
-const slipped = deals.filter(
+/**
+ * ── PAST DUE, NOT "SLIPPED" — the naming matters and it used to collide ─────────────────────────
+ *
+ * This set is OPEN DEALS WHOSE EXPECTED CLOSE DATE HAS PASSED. It backs the dashboard's "Past expected
+ * close" tile and it was called `slipped`, which is a different thing: `Sales: Slipped Deals` reports
+ * deals whose expected close date was MOVED, reconstructed from __mj.RecordChange, and on the seeded data
+ * the two answer with DIFFERENT deals -- DEAL-9002 is past due, DEAL-9003 is the one that slipped.
+ *
+ * Both user-facing labels were already distinct; only the internal name overlapped, which is the worst
+ * place for it: a reader comparing this harness against that query would have found two "slipped" figures
+ * that disagree and no way to tell which was wrong. Renamed here rather than in the query, because
+ * "slipped" conventionally means the date moved and the query is the one using it correctly.
+ */
+const pastDue = deals.filter(
     (d) => hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate && utcDatePart(d.ExpectedCloseDate) < todayUtc,
 );
 const client = {
@@ -107,7 +120,7 @@ const client = {
     OpenStatedAmount: open.filter((d) => d.AmountIsComputed !== true).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
     OpenCount: open.length,
     TotalCount: deals.length,
-    PastExpectedCloseCount: slipped.length,
+    PastExpectedCloseCount: pastDue.length,
     WonCount: won.length,
 };
 
@@ -157,14 +170,14 @@ if (roster?.Success) {
         .map((d) => String(d.DealID).toLowerCase());
     record('Closing-soon deal IDs, in order', clientSoon.join(','), querySoon.join(','));
 
-    // The slipped set by identity, not merely by count — two different deals would still tally.
-    const clientSlipped = slipped.map((d) => d.ID.toLowerCase()).sort().join(',');
-    const querySlipped = (roster.Results ?? [])
+    // The past-due set by IDENTITY, not merely by count — two different deals would still tally.
+    const clientPastDue = pastDue.map((d) => d.ID.toLowerCase()).sort().join(',');
+    const queryPastDue = (roster.Results ?? [])
         .filter((d) => d.IsPastExpectedClose === 1 || d.IsPastExpectedClose === true)
         .map((d) => String(d.DealID).toLowerCase())
         .sort()
         .join(',');
-    record('Slipped deal IDs', clientSlipped, querySlipped);
+    record('Past-due deal IDs', clientPastDue, queryPastDue);
 } else {
     record('Deal Roster query ran', 'yes', `NO — ${roster?.ErrorMessage ?? 'unknown'}`);
 }

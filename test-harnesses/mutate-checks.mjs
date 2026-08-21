@@ -177,6 +177,41 @@ const MUTATIONS = [
       to: 'const taskIssues: SalesCloseIssue[] = [];\n            if (true) {',
       note: 'a lost close raises the won deal\'s tasks' },
 
+    // ── ID PREFIXES FOLLOW THE TARGET BUNDLE, and this comment exists because I broke that ──────────
+    //
+    // The three below were first written as M-SD1/2/3 -- and `M-SD2` and `M-SD3` ALREADY EXISTED, aimed
+    // at save-deal's SD2 and SD3. Two mutants per id, five hundred lines apart, in the file whose whole
+    // job is to tell you which check caught which defect. `--list` showed the duplicates immediately,
+    // which is the only reason it was a minute's work rather than a wrong conclusion later.
+    //
+    // So: the prefix names the BUNDLE the mutant is aimed at. M-SD* for save-deal, M-CD* for close-deal,
+    // M-BD* for board-move, M-CT* for close-won-contract, M-WT* for close-won-tasks, and so on. Check
+    // `--list` before adding one; it is the same lesson the WT11/WT12 rename taught one merge earlier.
+
+    // #33's last criterion that was ours. Skipping the apply puts the defaults back where they were --
+    // working in the browser and nowhere else -- which is the state BD5 exists to forbid.
+    { id: 'M-BD1', file: DES, expect: ['BD5'],
+      from: 'if (work.stageDefaults) {\n                this.applyStageDefaults(work.stageDefaults);',
+      to: 'if (false && work.stageDefaults) {\n                this.applyStageDefaults(work.stageDefaults);',
+      note: 'the write path stops applying the stage defaults' },
+
+    // THE ORIGINAL BUG, REPLAYED — and it is not what I first labelled it. Mutating the ternary's
+    // CONDITION leaves `(false && creating) ? A : B`, so creation falls through to the `Dirty` branch,
+    // which is exactly the first version of this code. BD2 catches it, because a deal created with a
+    // probability has it overwritten and the stage event then stamps the wrong departure value. Expecting
+    // BD6 here was my mistake; the driver reported BD2 and the driver was right.
+    { id: 'M-BD2', file: DES, expect: ['BD2'],
+      from: '        const probabilityIsTheirs = creating',
+      to: '        const probabilityIsTheirs = false && creating',
+      note: 'creation asks Dirty again — the defect BD2 found the first time' },
+
+    // OVERWRITE INSTEAD OF FILL, which is the version a reasonable person writes first: the stage always
+    // wins and a probability somebody typed is discarded. BD6 is the only check that forbids it.
+    { id: 'M-BD3', file: DES, expect: ['BD6'],
+      from: '        if (!probabilityIsTheirs) {',
+      to: '        if (true) {',
+      note: 'the stage default always overwrites a stated probability' },
+
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
     // the agreement went. This flips exactly that bit and nothing else.
