@@ -34,7 +34,7 @@ import { expect, test } from '@playwright/test';
 
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
-import { AssertBaseline, ComposeDeal, PurgeDeal } from '../lib/deal-flow';
+import { AssertBaseline, CloseLost, ComposeDeal, PurgeByPrefix, PurgeDeal, ReopenDeal } from '../lib/deal-flow';
 import { SaveDeal, SelectByLabel } from '../lib/workspace';
 
 const RUN = `PW-LOST-${Date.now().toString(36)}`;
@@ -45,6 +45,9 @@ test.describe('closed lost and reopen — what happens to the order', () => {
     test.afterAll(async () => {
         if (dealID) {
             await PurgeDeal(dealID, orderID || null);
+            // And by NAME: a failure inside ComposeDeal means dealID was never returned, so the
+            // purge above runs on an empty string while a real deal sits in the database.
+            await PurgeByPrefix(RUN.split(' ')[0]);
         }
         const left = await QueryOne<{ N: number }>(
             `SELECT COUNT(*) AS N FROM __mj_BizAppsSales.Deal WHERE Name LIKE '${RUN}%'`,
@@ -77,17 +80,28 @@ test.describe('closed lost and reopen — what happens to the order', () => {
             'the pipeline needs a losing stage that declares Voided, or this rule cannot be exercised',
         ).toBeTruthy();
 
-        // ── 1. CLOSE LOST, with the mandatory reason ────────────────────────
+        /**
+         * ── 1. CLOSE LOST, THROUGH THE CLOSE PANEL ──────────────────────────────────────────────
+         *
+         * This selected the losing STAGE and pressed Save, which does not close a deal and was never
+         * going to: `DealEntityServer` moves the stage and stamps the order status from
+         * `OrderStatusOnEntry`, and leaves the deal's STATUS alone on purpose -- closing is
+         * `Sales.CloseDeal`, an explicit act. So the deal stayed open, the assertions below described a
+         * close that had not happened, and the first one to notice was a null-status JOIN.
+         *
+         * The stage is still MOVED first, because that is what makes the order Voided and this spec is
+         * about what happens to the order. Then the deal is closed for real.
+         */
         await SelectByLabel(page, 'Stage', losing!.Name);
+        await SaveDeal(page);
+        await page.waitForTimeout(2_000);
 
         const reason = await QueryOne<{ Name: string }>(
             `SELECT TOP 1 Name FROM __mj_BizAppsSales.LossReason WHERE IsActive = 1 AND RequiresNotes = 0
               ORDER BY DisplayRank`,
         );
         expect(reason?.Name, 'a loss reason that does not demand notes is needed').toBeTruthy();
-        await SelectByLabel(page, 'Loss reason', reason!.Name).catch(() => undefined);
-        await SaveDeal(page);
-        await page.waitForTimeout(3_000);
+        await CloseLost(page, String(reason!.Name), 'Explorer pass: lost path.');
 
         const lost = await QueryOne<{ IsLost: boolean; LossReasonID: string | null; OrderStatus: string }>(`
             SELECT t.IsLost, d.LossReasonID, o.Status AS OrderStatus
@@ -95,6 +109,18 @@ test.describe('closed lost and reopen — what happens to the order', () => {
               JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
               LEFT JOIN __mj_BizAppsOrders.OrderHeader o ON o.ID = d.OrderID
              WHERE d.ID = '${dealID}'`);
+        /**
+         * ROW FIRST, FIELD SECOND. `lost!.IsLost` reported
+         * `Cannot read properties of undefined (reading 'IsLost')` -- which names the field and says
+         * nothing about the cause, because the row itself was absent: the deal had a NULL status and the
+         * `JOIN DealStatusType` dropped it. A non-null assertion on a query result turns "no row" into a
+         * message about whatever field is read first, so the join is asserted separately now.
+         */
+        expect(
+            lost,
+            'the deal must resolve a status through DealStatusType — no row here means a NULL ' +
+                'DealStatusTypeID, which every IsOpen/IsWon rollup silently skips',
+        ).toBeTruthy();
         expect(lost!.IsLost, 'the deal must land in a status carrying IsLost').toBe(true);
         expect(lost!.LossReasonID, 'and carry the loss reason — the most-skipped, highest-value field')
             .toBeTruthy();
@@ -103,23 +129,17 @@ test.describe('closed lost and reopen — what happens to the order', () => {
             'THE ORDER MUST BE VOIDED — a lost deal\'s order has to stop being something finance may act on',
         ).toBe('Voided');
 
-        // ── 2. REOPEN, with a reason ────────────────────────────────────────
-        const reopen = page.getByRole('button', { name: /Reopen/i }).first();
-        await expect(reopen, 'a locked deal must offer the sanctioned reopen path').toBeVisible({
-            timeout: 30_000,
-        });
-        await reopen.click();
-        await page.waitForTimeout(800);
-
-        const reasonBox = page.getByRole('textbox').filter({ hasNotText: /^$/ }).last();
-        await page
-            .locator('textarea, input[type="text"]')
-            .last()
-            .fill('PW: reopened to assert the order-status warning')
-            .catch(() => undefined);
-        void reasonBox;
-        await page.getByRole('button', { name: /^(Reopen|Confirm)$/i }).last().click();
-        await page.waitForTimeout(6_000);
+        /**
+         * ── 2. REOPEN, with a reason ────────────────────────────────────────────────────────────
+         *
+         * The previous version filled `.locator('textarea, input[type="text"]').last()` and swallowed
+         * the failure with `.catch(() => undefined)` — so on a page where that resolved to something
+         * else, the reason went somewhere harmless, the confirm was pressed with an EMPTY reason, and
+         * `Sales.ReopenDeal` refused it. The spec then asserted against a deal that was still closed.
+         * Two guesses and a swallowed error, in the one step whose whole point is that a reason is
+         * mandatory. `reopen-reason` is the field's own testid.
+         */
+        await ReopenDeal(page, 'PW: reopened to assert the order-status warning');
 
         // ── 3. THE DEAL REOPENED, and the close event SURVIVED ──────────────
         const after = await QueryOne<{ IsOpen: boolean; OrderStatus: string }>(`

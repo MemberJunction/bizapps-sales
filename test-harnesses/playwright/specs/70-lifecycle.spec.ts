@@ -31,7 +31,7 @@ import { expect, test } from '@playwright/test';
 
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
-import { AddLines, AssertBaseline, ComposeDeal, PurgeDeal } from '../lib/deal-flow';
+import { AddLines, AssertBaseline, CloseWon, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
 import { SelectFor, SelectByLabel, SaveDeal, OpenPane } from '../lib/workspace';
 
 const RUN = `PW-LIFE-${Date.now().toString(36)}`;
@@ -42,6 +42,9 @@ test.describe('lifecycle — create, price, advance, close won', () => {
     test.afterAll(async () => {
         if (dealID) {
             await PurgeDeal(dealID, orderID || null);
+            // And by NAME: a failure inside ComposeDeal means dealID was never returned, so the
+            // purge above runs on an empty string while a real deal sits in the database.
+            await PurgeByPrefix(RUN.split(' ')[0]);
         }
         const left = await QueryOne<{ N: number }>(
             `SELECT COUNT(*) AS N FROM __mj_BizAppsSales.Deal WHERE Name LIKE '${RUN}%'`,
@@ -138,23 +141,19 @@ test.describe('lifecycle — create, price, advance, close won', () => {
             'entering a stage that declares Quoted must move the ORDER — the stage is the writer',
         ).toBe('Quoted');
 
-        // ── 4. CLOSE WON ────────────────────────────────────────────────────
-        const closeBtn = page.getByRole('button', { name: /Close deal|Close won|Close/i }).first();
-        await expect(closeBtn, 'the workspace must offer an explicit close action').toBeVisible({
-            timeout: 30_000,
-        });
-        await closeBtn.click();
-        await page.waitForTimeout(1_000);
-
-        const wonStatus = await QueryOne<{ Name: string }>(
-            `SELECT TOP 1 Name FROM __mj_BizAppsSales.DealStatusType WHERE IsWon = 1 AND IsActive = 1`,
-        );
-        const outcome = page.locator('.dw-close select, .dw-field select').filter({ hasText: /./ }).first();
-        if (await outcome.isVisible().catch(() => false)) {
-            await outcome.selectOption({ label: String(wonStatus!.Name) }).catch(() => undefined);
-        }
-        await page.getByRole('button', { name: /^(Close|Confirm|Close deal)$/i }).last().click();
-        await page.waitForTimeout(6_000);
+        /**
+         * ── 4. CLOSE WON, THROUGH THE PANEL THAT ACTUALLY CLOSES A DEAL ─────────────────────────
+         *
+         * This used to fish for a button by text and then guess at an outcome `<select>`. Both were
+         * wrong: the close panel is behind `data-testid="close-open"`, the outcome is a pair of BUTTONS
+         * (`close-won` / `close-lost`) rather than a status dropdown, and `close-confirm` is what
+         * invokes `Sales.CloseDeal`. The old version clicked whatever matched `/Close/i` first, which on
+         * this shell can be an unrelated control, and then asserted against a deal nothing had closed.
+         *
+         * The outcome is chosen by ROLE IN THE FLOW, never by a status name — which is also what keeps
+         * this spec on the right side of the vocabulary rule.
+         */
+        await CloseWon(page, 'Explorer pass: closing won through the workspace panel.');
 
         const closed = await QueryOne<{ IsWon: boolean; OrderStatus: string; ContractID: string | null }>(`
             SELECT t.IsWon, o.Status AS OrderStatus, d.ContractID

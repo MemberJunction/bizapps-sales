@@ -38,7 +38,10 @@ async function openFromRoster(page: import('@playwright/test').Page, name: strin
     const nav = page.locator('mj-left-nav').getByRole('button', { name: /^All deals/i });
     await expect(nav, 'the Sales left-nav must offer All deals').toBeVisible({ timeout: 90_000 });
     await nav.click();
-    const row = page.locator('.sx-table tbody tr', { hasText: name }).first();
+    // `.wrap--list table.wl`, NOT the invented `.sx-table`. Every page in the section is rendered and
+    // switched with [hidden] rather than @if, so `table.wl` alone matches the dashboard's "Closing
+    // soonest" table as well -- scoping to the wrap is what makes this row unambiguous.
+    const row = page.locator('.wrap--list table.wl tbody tr', { hasText: name }).first();
     await expect(row, `the roster must list "${name}"`).toBeVisible({ timeout: 60_000 });
     await row.click();
     await expect(page.locator(WORKSPACE_ROOT), 'the workspace must open').toBeVisible({ timeout: 60_000 });
@@ -47,7 +50,7 @@ async function openFromRoster(page: import('@playwright/test').Page, name: strin
 
 /** Brings an already-open workspace tab to the front by its label. */
 async function selectTab(page: import('@playwright/test').Page, fragment: string): Promise<void> {
-    const tab = page.locator('.dw-tabs__tab, .mj-workspace-tab', { hasText: fragment }).first();
+    const tab = page.locator('.mj-tabs__tab', { hasText: fragment }).first();
     await expect(tab, `a workspace tab matching "${fragment}" must be open`).toBeVisible({ timeout: 30_000 });
     await tab.click();
     await page.waitForTimeout(1_500);

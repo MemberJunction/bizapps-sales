@@ -96,11 +96,28 @@ test.describe('inline create — the record comes back to the field it was launc
                 .toBeVisible({ timeout: 30_000 });
 
             /**
-             * `exact: true` matters: the workspace behind the panel has a "Deal name" field, and a loose
-             * match would fill THAT and then save an empty account — a spec that appears to work while
-             * testing nothing.
+             * ── BY `fieldname`, NOT BY ROLE — AND THAT IS NOT A STYLE CHOICE ─────────────────────────
+             *
+             * This asked for `getByRole('textbox', { name: 'Name', exact: true })` and matched NOTHING.
+             * MJ's generated form renders `<mj-form-field fieldname="Name" type="textbox">` containing a
+             * `<label class="mj-forms-field-label">Name</label>` and an `<input class="mj-forms-field-input">`
+             * — with **no `id`, no `name`, no `aria-label`, and no `for=` tying the label to the input**.
+             * So the input has no accessible name at all and `getByRole(..., { name })` cannot ever find
+             * it. Confirmed by dumping the element, not inferred.
+             *
+             * `fieldname` is the attribute MJ itself puts there, which makes it the most stable handle
+             * available — it changes only if the entity field is renamed, in which case this spec SHOULD
+             * fail.
+             *
+             * SCOPED TO THE EDITING PANEL, for two reasons. The obvious one is the workspace's own "Deal
+             * name" field behind the slide-in. The subtler one, found while probing: Explorer RESTORES
+             * PREVIOUSLY OPEN TABS, so several deal workspaces exist in the DOM at once and an unscoped
+             * `.first()` can resolve into a background tab that no click will ever reach. The panel scope
+             * plus `:visible` is what keeps this pointed at the form actually on screen.
              */
-            const nameBox = page.getByRole('textbox', { name: 'Name', exact: true }).first();
+            const nameBox = page
+                .locator('.mj-forms-panel-content mj-form-field[fieldname="Name"] input:visible')
+                .first();
             await expect(nameBox, `attempt ${attempt}: the slide-in must offer a Name field`)
                 .toBeVisible({ timeout: 20_000 });
             await nameBox.fill(name);
@@ -129,10 +146,25 @@ test.describe('inline create — the record comes back to the field it was launc
             ).toBe(1);
 
             // ── CLAIM 1: the record is selected back into the field ─────────
-            await expect(
-                customer,
+            /**
+             * ── COMPARED ON THE GUID INSIDE ANGULAR'S `[ngValue]` ENCODING ───────────────────────
+             *
+             * The template binds `[ngValue]="a.ID"`, and Angular writes the option's DOM value as
+             * `"<index>: <value>"` — this run reported `4: facc8848-...`. `toHaveValue(created.ID)`
+             * therefore could never pass, whatever the picker did, so the assertion said nothing about
+             * the behaviour it was written to pin.
+             *
+             * The index is Angular's bookkeeping and must not be asserted on; the GUID after it is the
+             * claim. Compared case-insensitively for the reason recorded at `CreateRelated` — the client
+             * generates lowercase keys and the view returns uppercase, which is the bug this spec exists
+             * to guard.
+             */
+            const selected = await customer.inputValue();
+            const selectedID = selected.includes(': ') ? selected.split(': ').slice(1).join(': ') : selected;
+            expect(
+                selectedID.toLowerCase(),
                 `attempt ${attempt}: the created account must be SELECTED, not merely offered`,
-            ).toHaveValue(row!.ID, { timeout: 30_000, ignoreCase: true });
+            ).toBe(String(row!.ID).toLowerCase());
 
             // ── CLAIM 2: the picker shows the name, not a blank box ─────────
             /**

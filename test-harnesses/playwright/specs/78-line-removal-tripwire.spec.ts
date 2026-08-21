@@ -30,7 +30,7 @@ import { expect, test } from '@playwright/test';
 
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
-import { AddLines, AssertBaseline, ComposeDeal, PurgeDeal } from '../lib/deal-flow';
+import { AddLines, AssertBaseline, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
 import { OpenPane, SaveDeal } from '../lib/workspace';
 
 const RUN = `PW-KI20-${Date.now().toString(36)}`;
@@ -41,6 +41,9 @@ test.describe('KI-20 tripwire — removing an order line through the UI', () => 
     test.afterAll(async () => {
         if (dealID) {
             await PurgeDeal(dealID, orderID || null);
+            // And by NAME: a failure inside ComposeDeal means dealID was never returned, so the
+            // purge above runs on an empty string while a real deal sits in the database.
+            await PurgeByPrefix(RUN.split(' ')[0]);
         }
         const left = await QueryOne<{ N: number }>(
             `SELECT COUNT(*) AS N FROM __mj_BizAppsSales.Deal WHERE Name LIKE '${RUN}%'`,

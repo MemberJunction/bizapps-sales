@@ -94,10 +94,25 @@ test.describe('dashboard — every tile against the database', () => {
         await dash.click();
 
         // ── The four tiles ──────────────────────────────────────────────────
+        /**
+         * ── MATCHED ON THE LABEL ELEMENT, NOT THE TILE'S TEXT ───────────────────────────────────
+         *
+         * `.kpi` with `hasText: /Open deals/i` returned the WRONG TILE, and the reason is worth
+         * recording: the "Open pipeline" tile's footnote reads `across 7 open deals`, so it satisfies
+         * that regex too and `.first()` picked it. The spec then compared 251,220 against a count of 7
+         * and reported it as a dashboard defect.
+         *
+         * `.l` is the label div (`.v` value, `.f` footnote — sales-section.component.html), so anchoring
+         * the match there makes a tile's own name the only thing that can identify it.
+         */
         const tile = (label: RegExp) =>
-            page.locator('.sx-kpi', { hasText: label }).first().locator('.sx-kpi__value');
+            page
+                .locator('.wrap--dashboard .kpi')
+                .filter({ has: page.locator('.l').filter({ hasText: label }) })
+                .first()
+                .locator('.v');
 
-        const openPipeline = tile(/Open pipeline/i);
+        const openPipeline = tile(/^Open pipeline$/i);
         await expect(openPipeline, 'the Open pipeline tile must render').toBeVisible({ timeout: 60_000 });
 
         expect(
@@ -106,17 +121,17 @@ test.describe('dashboard — every tile against the database', () => {
         ).toBe(Number(expected!.OpenAmount));
 
         expect(
-            digits(await tile(/Open deals/i).textContent()),
+            digits(await tile(/^Open deals$/i).textContent()),
             'Open deals must equal the COUNT of IsOpen deals',
         ).toBe(Number(expected!.OpenCount));
 
         expect(
-            digits(await tile(/Past expected close/i).textContent()),
+            digits(await tile(/^Past expected close$/i).textContent()),
             'Past expected close must equal open deals whose ExpectedCloseDate has gone',
         ).toBe(Number(expected!.PastDue));
 
         expect(
-            digits(await tile(/^Won/i).textContent()),
+            digits(await tile(/^Won$/i).textContent()),
             'Won must equal the COUNT of deals whose status carries IsWon',
         ).toBe(Number(expected!.WonCount));
 
@@ -126,7 +141,7 @@ test.describe('dashboard — every tile against the database', () => {
          * rely on the roster query's ORDER BY two files away; it now sorts for itself. A spec that only
          * checked which deals appeared would pass on a reversed list.
          */
-        const rowNames = await page.locator('.sx-table tbody tr td:first-child').allTextContents();
+        const rowNames = await page.locator('.wrap--dashboard table.wl tbody tr td:first-child').allTextContents();
         const shown = rowNames.map((r) => r.trim()).filter(Boolean);
         expect(shown.length, 'the closing-soon table must render rows').toBeGreaterThan(0);
 
@@ -149,7 +164,7 @@ test.describe('dashboard — every tile against the database', () => {
          * are the same kind of number. The count of `stated` markers must equal the count of open deals
          * carrying AmountIsComputed = 0, and it must not be zero or all of them.
          */
-        const statedMarkers = await page.locator('.sx-table tbody tr .flag', { hasText: /stated/i }).count();
+        const statedMarkers = await page.locator('.wrap--dashboard table.wl tbody tr .flag', { hasText: /stated/i }).count();
         const statedRows = await QueryOne<{ N: number }>(`
             SELECT COUNT(*) AS N
               FROM __mj_BizAppsSales.Deal d

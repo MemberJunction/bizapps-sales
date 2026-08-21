@@ -1768,3 +1768,80 @@ both were wrong in the same direction. See `save-deal.SD30`–`SD32` and `close-
 fourteen checks watched the close path while the input that makes it move a stage went unexercised for a
 whole phase. When adding an operation input, the question to ask is not "is it covered" but "does any check
 actually SUPPLY it".
+
+---
+
+## DN-17 — 🛑 A rep's FIRST line is written to an orphan order, and the deal never sees it
+
+**Found by the Explorer pass on 2026-08-21, in a browser, on the primary create path. This is OUR bug,
+in this repo, and it loses data a rep entered.** Filed here rather than in `KNOWN-ISSUES.md` because
+that file is for things this repo cannot fix, and this is squarely ours.
+
+### What happens
+
+1. A rep creates a deal and saves. `DealEntityServer.Save()` provisions the embedded `OrderHeader` and
+   writes `Deal.OrderID` — server-side.
+2. Without leaving the tab, the rep opens **Product lines**, adds a line, picks a product, states a
+   quantity, and saves. The Save button is enabled; validation passes; no error appears; the workspace
+   reports success.
+3. **The line is not on the deal's order.** It is on a SECOND `OrderHeader` that nothing references.
+   `Deal.OrderID` still points at the empty provisioned order, so the workspace shows no lines,
+   `Deal.Amount` can never be refreshed from what the rep entered, and orders is left holding an orphan
+   with real priced rows in it.
+
+### Why
+
+`DealWorkspaceComponent.Save()` keeps the same entity instance after a create, on the stated grounds
+that *"the same instance now carries the server's IDs, so this tab becomes an EDIT of a real record — no
+reload."* That was true when the CLIENT minted the order. It stopped being true when provisioning moved
+into `DealEntityServer.Save()`: `OrderID` is now written by the server and the client instance never
+learns it. `DeclareEmbeddedRecord` in `deal-entity.ts` declares no load policy, so
+`OrderID_EnsureObject()` sees `Value === null`, concludes there is no order, and creates one.
+
+**This is the same defect class as the `CloseWonTaskService` call site fixed in `07dc10e`** — a caller
+reading `deal.OrderID` around a `Save()` that now provisions it. That one was server-side and a check
+caught it. This one is only reachable across the wire.
+
+### Measured, not inferred
+
+Four probe runs, each adding one line straight after create: **zero** `OrderLine` rows on `Deal.OrderID`
+every time, and four orphan `OrderHeader` rows (ORD-000069, 72, 74, 77). Inserting a reload at exactly
+that point made the identical line persist onto the deal's own order, priced by orders at 229. The
+contrast between those two runs is the whole diagnosis. All probe rows were removed afterwards and the
+host is back to 7 deals / 57 orders / 63 lines.
+
+### Why 108 green integration checks did not see it
+
+They drive the entity graph **in process**, where the server's `Save()` sets `this.OrderID` on the very
+instance the check then reads. There is no serialization boundary, so the value is always present.
+`SD24` asserts an existing deal gets an order on its next save and is correct; it cannot see this.
+
+### The fix, stated and NOT applied
+
+Deliberately not fixed in this pass, because Andrew's sequence is report → merge the other nine
+branches → second pass, and a behaviour change here needs its own verification cycle on the merged tree.
+Two candidates, in preference order:
+
+1. **Refresh the embedded peer after a create.** On `outcome.Created`, load the order the server just
+   provisioned so `Value` is populated and `Ensure()` returns it. Narrow, and it keeps the "no rebuilt
+   copy" property the current comment is protecting.
+2. **Reopen the deal from the server after a create**, which is what `Discard()` already does. Simpler,
+   but it discards the "same instance" property on purpose and would need a look at what unsaved child
+   state a create can still be holding at that moment.
+
+Whichever is chosen, the comment in `Save()` must change with it — it is currently the reason the bug
+looks intentional.
+
+### The tripwire, and the workaround that must be deleted with the fix
+
+- `79-embedded-order-refresh.spec.ts` asserts the correct behaviour and **fails today, deliberately** —
+  same pattern as `78` for KI-20. It goes green when this is fixed.
+- `ComposeDeal` in `lib/deal-flow.ts` reopens from the roster to get past this, so the other specs can
+  test what they are actually for. `ComposeDealWithoutReload` exists solely so spec 79 can drive the
+  unreloaded path. Both notes point here.
+
+### One more thing this exposed
+
+**The harness teardown cannot clean up after this defect.** It deletes orders reachable from a
+`PW-VERIFY%` deal, and an orphan is reachable from nothing. The four orphans had to be removed by hand.
+Any run that hits this leaks an order.
