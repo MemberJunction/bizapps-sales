@@ -159,6 +159,19 @@ const { linked, reported } = linkedApps();
 /** The bundles this host is expected to have run, and how many checks each must register. */
 const expected = new Map();
 for (const [bundle, spec] of Object.entries(manifest.bundles)) {
+    /**
+     * `$`-PREFIXED KEYS ARE COMMENTS, SKIPPED ON PURPOSE RATHER THAN BY LUCK.
+     *
+     * The manifest carries per-bundle notes inline — `$comment_close_won_tasks` explains a count that
+     * looked wrong for a day. Those entries were already being excluded, but only as a side effect: an
+     * array has no `.requires`, so `undefined === null` is false and `linked.has(undefined)` is false, and
+     * the entry fell out. That works until someone writes a note as an OBJECT, at which point
+     * `requires` is undefined, `count` is undefined, and the gate starts demanding a bundle named
+     * `$comment_...` that can never run. Stating the rule costs one line.
+     */
+    if (bundle.startsWith('$')) {
+        continue;
+    }
     if (spec.requires === null || linked.has(spec.requires)) {
         expected.set(bundle, spec);
     }
@@ -273,7 +286,9 @@ if (problems.length) {
     process.exit(1);
 }
 
-const skippedBundles = Object.keys(manifest.bundles).filter((b) => !expected.has(b));
+// Same `$` rule as the expectation loop above: a comment key is not an unlinked bundle, and
+// reporting it as one turns a passing gate into a line that reads like a missing app.
+const skippedBundles = Object.keys(manifest.bundles).filter((b) => !b.startsWith('$') && !expected.has(b));
 console.log(
     `✓ coverage assertion passed — ${ran} checks ran across ${expected.size} bundles ` +
         `(${passed} passed, ${failed} failed)` +

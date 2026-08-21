@@ -1412,3 +1412,138 @@ naming the source. Worth knowing before somebody reads a forecast series as veri
 
 **What is needed:** a decision on whether the measures get their own sanity assertions somewhere — most
 naturally as checks against the queries themselves, on the session that owns them, rather than here.
+
+---
+
+# D-8 — RESOLVED, and one thing about MJ_V6_Host that outlives it
+
+## The push exclusion is gone
+
+`metadata/task-types/` declared `TaskType.Code` against a host that lacked the column, so
+`mj sync push --dir metadata` failed validation and had to be run with `--exclude task-types`.
+
+**bizapps-tasks PR #42 has now been applied to MJ_V6_Host and the exclusion is unnecessary.** Verified by
+running the full push with no exclusion: 15 of 15 directories, `task-types` processed as *2 records, no
+changes*, 0 errors.
+
+*No changes* rather than *2 updated* is worth noticing — the migration's own fallback
+(`UPDATE TaskType SET Code = UPPER(REPLACE(Name,' ','_')) WHERE Code IS NULL`) derived `ORDER_REVIEW` and
+`CONTRACT_PROCESSING` for the two sales-owned rows, which is exactly what this repo declares. The two
+conventions agreed without being coordinated, so the push had nothing to do.
+
+### The edit `docs/INTEGRATION-LOG.md` needs, and why not by me
+
+That file was added after this branch's point and lives in another session's working tree, so the block
+below is written out rather than applied. It replaces the `--exclude task-types` bullet at lines 98–101.
+
+**It deliberately says two things, because saying only the first would mislead.** The task-types
+exclusion is gone; query re-push is a *separate* open defect. Somebody who hits the second and reads a
+note claiming pushes are clean would reasonably conclude the first had regressed.
+
+> ### Known-incomplete, deliberately
+>
+> * **`metadata/task-types/` now pushes cleanly — the `--exclude` is gone.** It declares
+>   `TaskType.Code`, which bizapps-tasks PR #42 added, and that migration is applied to MJ_V6_Host.
+>   `mj sync push --dir metadata` needs no exclusion: verified at 15/15 directories, 0 errors, with
+>   `task-types` reporting *2 records, no changes*. No changes rather than 2 updated because the
+>   migration's own name-derived fallback produced `ORDER_REVIEW` and `CONTRACT_PROCESSING`, which is
+>   exactly what this repo declares — the two conventions agreed without being coordinated.
+>   `CloseWonTaskService` resolves by `Code` on this host; `WT12` asserts the probe follows what
+>   `EntityField` metadata offers, in both directions, so the `Name` fallback stays covered for hosts
+>   that predate the migration (exercised on MJ_V6_Tasks2).
+>
+> * **`MJ: Query Parameters` still fails on re-push, and it is a different problem.** MJ's push extracts
+>   query parameters from the Nunjucks template and then collides with the files' own explicit
+>   declarations, hitting `UQ_QueryParameter_QueryID_Name` and rolling the whole push back. So the 13
+>   queries land once on a clean database and fail on every push after. An open MJ defect, unrelated to
+>   task-types — **do not read it as the exclusion having regressed.** Verify the queries with a count,
+>   not with the push's exit code.
+>
+> ### Environment debt on MJ_V6_Host, from applying PR #42
+>
+> * **The tasks schema there is managed by MJ core, and PR #42 is applied but untracked.** The Flyway
+>   history records four tasks migrations and all four are MJ core's (`v6/V2026…__v6.1.x__…`); none of
+>   bizapps-tasks' own has ever run, not even its baseline. So `mj migrate` from bizapps-tasks is the
+>   wrong tool for this host — it would try to create tables that already exist. PR #42 was applied
+>   directly instead, placeholders substituted, and **no Flyway row was fabricated**: claiming a history
+>   under bizapps-tasks' versioning would be false, and claiming one under MJ core's would assert MJ
+>   shipped something it has not.
+>
+>   **The consequence:** the migration's first statement is a bare `ALTER TABLE … ADD Code` with no
+>   existence guard, so **a future equivalent from MJ core will fail on this host**. Five minutes to fix
+>   when it happens — mark it applied, or guard the ALTER — but invisible until then, which is the worst
+>   shape for environment debt. A rebuild from zero is unaffected.
+>
+> * **PR #42 adds cross-schema foreign keys from an app schema into MJ core.**
+>   `FK_TaskType_OnCreateAction` and `FK_TaskType_OnStatusChangeAction` both reference
+>   `__mj.Action(ID)`. That is the intended workflow-hooks feature, but it is a change to the dependency
+>   graph rather than just a column: the tasks schema now has a structural dependency on MJ core's
+>   `Action` table, and anything that drops or reorders those objects has to account for it.
+
+
+---
+
+## D-31 · MJ_V6_Host's tasks schema is managed by MJ core, and PR #42 was applied out-of-band
+
+**Found while applying it, and it matters more than the migration itself.**
+
+The Flyway history on MJ_V6_Host records four tasks migrations and **all four are MJ core's**, under
+`v6/V2026…__v6.1.x__…` names. None of bizapps-tasks' own migrations — not even its baseline
+`B202604011500__v1.0.x_Schema_and_Tables.sql` — has ever been applied there.
+
+So `mj migrate` from bizapps-tasks is **not** the tool for this host: it would try to run that baseline
+over tables that already exist. The PR #42 script was therefore applied directly, with its two
+placeholders substituted (`${flyway:defaultSchema}` → `__mj_BizAppsTasks`, `${mjSchema}` → `__mj`), under
+`sqlcmd -b` so it would stop on the first error. It did not stop; every statement succeeded.
+
+**No Flyway history row was fabricated for it,** deliberately. Inventing one under bizapps-tasks'
+versioning would claim a history this host does not have, and inventing one under MJ core's would claim
+MJ shipped something it has not. The honest state is that the schema change is present and untracked.
+
+**The consequence, which somebody will meet:** the migration is **not idempotent** — its first statement
+is a bare `ALTER TABLE … ADD Code` with no existence guard. If MJ core later ships an equivalent
+migration, it will fail on this host because the column is already there. That is a five-minute fix when
+it happens (mark it applied, or guard the ALTER) but it is invisible until it happens, which is why it is
+written down here.
+
+A rebuild from zero is unaffected: whichever source ships the tasks schema will bring `Code` with it.
+
+---
+
+## D-32 · What PR #42 actually did, for the record
+
+Read before applying, and it does more than add a column. Nothing was unexpected, and two things are
+worth naming.
+
+**Structural:**
+
+| Change | Detail |
+|---|---|
+| `TaskType.Code` | `NVARCHAR(50)`, backfilled, then set `NOT NULL` with `UQ_TaskType_Code` |
+| `TaskType` action hooks | `OnCreateActionID`, `OnStatusChangeActionID` |
+| `TaskTypeStatus` | new table + entity (19 `EntityField` rows), per-type lifecycle |
+| `Task.TaskTypeStatusID` | nullable FK to the new table |
+| Generated half | 34 `DROP` + recreate of tasks' own views, sprocs, functions and triggers |
+
+**The two worth naming:**
+
+1. **It adds cross-schema foreign keys into MJ core.** `FK_TaskType_OnCreateAction` and
+   `FK_TaskType_OnStatusChangeAction` both reference `__mj.Action(ID)`. That is the intended "workflow
+   action hooks" feature, but it is a new structural dependency from the tasks schema onto MJ core, and it
+   is the only thing this migration does outside its own schema besides metadata registration.
+
+2. **The generated half drops and recreates 34 objects.** That is the same class of statement that took
+   out contracts' views and procedures, so it was checked rather than assumed: **all 34 DROPs are
+   `${flyway:defaultSchema}`-qualified**, no statement names a hardcoded schema, and every `DELETE FROM`
+   is inside a generated `spDelete…` body rather than at top level. Only two schemas are referenced in the
+   whole 5,257-line script — tasks' own and `__mj` — and the only entity registered is
+   `MJ_BizApps_Tasks: Task Type Status`. Nothing reaches another app.
+
+**Pre-flight checks run before applying,** because `UQ_TaskType_Code` is UNIQUE and the fallback derives
+codes from names: no collisions among the seven rows, none over 50 characters, and all five hardcoded
+backfill IDs matched real rows on this host — which is what gives `Follow-up` the correct `FOLLOW_UP`
+rather than the hyphenated `FOLLOW-UP` the fallback would have produced.
+
+A `COPY_ONLY` full backup was taken first and verified with `RESTORE VERIFYONLY … WITH CHECKSUM`:
+`MJ_V6_Host_preTasksPR42_20260821T005446Z.bak`. `COPY_ONLY` because the database is in FULL recovery and
+two other sessions are working against it — a normal full backup would have reset their differential base.

@@ -39,7 +39,21 @@
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
     "close-won-contract": { "count": 4, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild" },
     "board-move": { "count": 4, "requires": "orders", "ids": "BD1-BD4" },
-    "close-won-tasks": { "count": 11, "requires": "tasks", "ids": "WT1-WT11" },
+    "$comment_close_won_tasks": [
+      "12, AND THE TRANSIENT STATE THAT MADE THIS NUMBER ODD IS NOW RESOLVED -- it resolved exactly here.",
+      "",
+      "Two sessions each added an eleventh check to this bundle. WT1-WT10 were shared; the integrated",
+      "branch added WT11 (a LOST close raises no tasks) and the tasks branch added what was also called",
+      "WT11 (the task-type lookup column), renamed to WT12 before merging. Neither branch had both, so",
+      "the tasks branch deliberately set 12 while registering 11 and let its own gate read 11-of-12 --",
+      "on the reasoning that 11 would have been green on the branch and silently wrong the moment it",
+      "merged, and the silently-wrong version is the one nobody notices. That call was right and this",
+      "merge is what closes it: 12 registered, 12 expected.",
+      "",
+      "Kept as history rather than deleted, because the next person to face a two-branch count collision",
+      "should be able to find the reasoning rather than re-derive it."
+    ],
+    "close-won-tasks": { "count": 12, "requires": "tasks", "ids": "WT1-WT12" },
     "activities": { "count": 18, "requires": "common", "ids": "AC1-AC18" },
     "forecast": { "count": 10, "requires": null, "ids": "FS1-FS10" }
   },
