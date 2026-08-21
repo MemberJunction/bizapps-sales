@@ -286,6 +286,56 @@ const MUTATIONS = [
       to: "if (!this.GetFieldByName('OwnerEmployeeID')?.Dirty) {",
       note: 'a created deal keeps a hand-set owner column, disagreeing with its own roster' },
 
+    // ── THE STATUS COMES FROM THE STAGE (item 1), AND THE REOPEN RESTORES IT (item 2) ────────────
+
+    // The derivation itself. Without it a deal created with no status keeps NULL and every IsOpen/IsWon
+    // rollup skips it -- which is the state that made it invisible to every surface in the app.
+    { id: 'M-ST5', file: DES, expect: ['SD33'],
+      from: 'if (plan.DealStatusTypeID) {',
+      to: 'if (false && plan.DealStatusTypeID) {',
+      note: 'a deal created with no status stays NULL and is counted by nothing' },
+
+    // The fill-but-don't-overwrite half. Dropping the guard makes the stage overwrite a status the
+    // caller stated in the same save -- a second writer, which is what this design exists to avoid.
+    { id: 'M-ST6', file: DES, expect: ['SD34'],
+      from: "if (!this.callerSuppliedValue('DealStatusTypeID', this.DealStatusTypeID)) {",
+      to: "if (true) {",
+      note: 'the arriving stage overwrites a status the caller stated' },
+
+    // The reopen's derivation. Without it no stage is re-entered, OrderStatusOnEntry never fires, and a
+    // reopened deal keeps pointing at an order nothing asked to come back -- DN-18, verbatim.
+    { id: 'M-RO1', file: CDO, expect: ['CD18'],
+      from: 'const landingStage = input.StageID ?? (await this.priorStageFromCloseEvent(deal.ID, provider, user));',
+      to: 'const landingStage = input.StageID ?? null;',
+      note: 'a reopen leaves the deal in the closing stage, so nothing asks the order back' },
+
+    // And the other direction: if the derivation returned the stage the deal moved TO rather than the one
+    // it came FROM, a stage-moving close would reopen into the closing stage (CD18) while a status-only
+    // close would still look correct -- which is exactly why CD19 alone is not enough.
+    { id: 'M-RO2', file: CDO, expect: ['CD18'],
+      from: "Fields: ['FromStageID', 'ChangedAt'],",
+      to: "Fields: ['ToStageID' + ' AS FromStageID', 'ChangedAt'],",
+      note: 'the reopen restores the stage the close moved TO, not the one it came from' },
+
+    // THE GATE THAT KEEPS A STAGE FROM CLOSING A DEAL. Without it an ordinary save into a winning or
+    // losing stage locks the deal, sets IsWon, and skips everything a close owes -- a board drag books
+    // revenue. This is the mutation that reproduces the bug SD33 introduced and SD35 now forbids.
+    { id: 'M-ST8', file: DES, expect: ['SD35'],
+      from: 'if (status.Success && flags && flags.LocksDeal !== true) {',
+      to: 'if (status.Success && flags) {',
+      note: 'a stage whose status locks closes the deal on an ordinary save, with no close event, no routing and no contract' },
+
+    // CD17 CANNOT BE FELLED BY A SINGLE EDIT TO THE STATUS WRITER, and that is a finding rather than a
+    // gap. Measured: M-ST3 removes the declared-transition suppression so the defaults writer DOES run on
+    // a close, and CD17 stays green -- because the closing status also arrives dirty, so
+    // callerSuppliedValue answers "theirs" anyway. Two independent mechanisms protect it. This mutant
+    // therefore proves the check is not VACUOUS rather than isolating one guard: it stops the close
+    // setting the status at all, which naturally fells everything that asserts a close outcome.
+    { id: 'M-ST7', file: CDO, expect: ['CD17'],
+      from: 'deal.DealStatusTypeID = target.ID;\n        if (input.ClosingStageID) {',
+      to: 'deal.DealStatusTypeID = deal.DealStatusTypeID;\n        if (input.ClosingStageID) {',
+      note: 'the close stops setting the status. BROAD BY DESIGN -- every check that asserts a close outcome falls with it; CD17 is in the list, which is the point' },
+
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
     // the agreement went. This flips exactly that bit and nothing else.
@@ -385,6 +435,32 @@ for (const m of MUTATIONS) {
         );
     } finally {
         restore(abs, backup);
+        /**
+         * ── AND REBUILD, OR THE MUTANT OUTLIVES THE RUN ─────────────────────────────────────────────
+         *
+         * Restoring the SOURCE is not enough. Every mutation is applied by editing the .ts and running
+         * `npm run build:packages`, so when the run ends `dist/` still holds the LAST MUTANT while the
+         * source is clean — and nothing that reads `dist/` can tell.
+         *
+         * That is not theoretical. After a mutation session, an Explorer spec spent three runs failing on
+         * a defect that had already been fixed, because MJAPI was serving a `dist/` in which the fix had
+         * been mutated out. The source was right, `git diff` was clean, the integration suite (which the
+         * driver rebuilds for) was green — and the browser was testing something else entirely. It cost
+         * two API restarts and a false hypothesis before the compiled output was read.
+         *
+         * A tool whose job is to break things on purpose must not be able to leave them broken. Same
+         * principle as the copy-aside restore above; this is the half that was missing.
+         */
+        try {
+            execSync('npm run build:packages', { cwd: REPO, stdio: 'pipe' });
+        } catch (err) {
+            console.error(
+                `
+  ⚠️  REBUILD AFTER RESTORE FAILED for ${m.id}. dist/ may still hold the mutant — ` +
+                `run \`npm run build\` before trusting anything that reads it.
+${String(err.stdout ?? err)}`,
+            );
+        }
     }
 }
 

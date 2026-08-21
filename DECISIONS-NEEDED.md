@@ -1977,3 +1977,82 @@ outcome whatever the underlying cause turns out to be.
   sits on the IsA create path (`SalesAccount` extends common's `Organization`, shared PK), which is
   upstream of this repo — the same territory as KI-1. Worth a characterisation run: create N accounts
   through the slide-in and compare reported id to written id each time.
+
+---
+
+## DN-20 — NOT BUILT: a reopen should be hard-blocked when the order is already Confirmed
+
+**Raised by Finance and noted here deliberately without building it.** A reopen today succeeds whatever
+state the order is in — it restores the prior stage (DN-18) and reports what the order refused. Finance
+asked for something stronger: when the order has been **Confirmed**, a reopen should be refused outright,
+because the ledger has moved and the correct instrument is a reversing or change order rather than an
+edited deal.
+
+That is a **new requirement, not an inference** from anything already in the tree, and it needs a
+`ConfirmedAt` (or equivalent) check on `OrderHeader` that this repo does not currently read. It also needs
+a decision about what the refusal says and what it points the rep at — a reversing order is an orders
+concept and sales would be naming a workflow it does not own.
+
+Its own cycle. Recorded so it is not half-built as a side effect of DN-18.
+
+---
+
+## DN-21 — REPORT ONLY: does `SelectableStatuses()` still need to offer anything?
+
+Asked while deriving the deal's status from its stage, and **not changed** — this is a UI question.
+
+Today:
+
+```ts
+public SelectableStatuses(): DealStatusLookup[] {
+    return this.Lookups.DealStatusTypes.filter((s) => !s.IsWon && !s.IsLost);
+}
+```
+
+With the status derived from the stage, the Status select's remaining job is narrow. On the seeded
+vocabulary it offers exactly two rows — the open status every stage already declares, and `On Hold`
+(`IsOpen = 0`, `IsWon = 0`, `IsLost = 0`, `LocksDeal = 0`), which no stage declares. So:
+
+- **The open option is now redundant**: picking it re-states what the stage would have filled anyway.
+- **`On Hold` is the only thing the picker adds** — a deliberate parking state that is not a close and
+  belongs to no stage. That is a real capability and the argument for keeping the control.
+
+Three options, in the order I would consider them:
+
+1. **Keep it, and let it mean "override the stage".** Cheapest, and it is already how it behaves. But an
+   open deal now shows a control whose only useful setting is a state most reps will never want.
+2. **Offer only the statuses no stage declares.** The picker becomes "park this deal", which is what it is
+   actually for once the stage supplies the norm. Needs a label change, not just a filter.
+3. **Remove it from the header** and surface parking as an explicit action. Truest to "the stage declares
+   the status", and the most work.
+
+Worth noting for whoever decides: a status set through this control survives only until the next stage
+move, because `callerSuppliedValue` is per-save (see the note in `applyStageDefaults`). If parking is meant
+to be sticky across stage moves, that is a different mechanism — a flag on the deal, not a status.
+
+---
+
+## DN-18 addendum (2026-08-21) — the reopen half is BUILT; the close half is the remaining decision
+
+The reopen now derives its landing stage from `DealStageEvent.FromStageID` when the caller names none
+(`close-deal.CD18`, mutant-proven by `M-RO1` and `M-RO2`), and the no-op direction is pinned by `CD19`.
+`input.StageID` stays an override, so an agent, an importer and an API caller get the same restoration a
+rep does.
+
+**What that did NOT fix, and could not:** `DealWorkspaceComponent.ConfirmClose()` sends no
+`ClosingStageID`. So a close driven from the browser never moves the stage; its event records
+`FromStageID === ToStageID`; and the reopen correctly derives the stage the deal is already in. The
+mechanism is right and the UI cannot reach it — the exact mirror of the reopen's missing `StageID`.
+
+`71-lost-and-reopen` demonstrates this and stays red: it moves the deal into the losing stage with a plain
+save, then closes through the panel, so the close is status-only by construction.
+
+**The decision, and it is the same shape as the one just made:** derive the closing stage in the operation
+— the pipeline stage whose declared `DealStatusType` matches the outcome (`IsWon`/`IsLost`, by flag) — or
+offer the rep a closing stage on the close panel. Deriving it keeps the write-path principle and makes
+close/reopen symmetrical; asking is truer to a rep who may want a specific stage. Not guessed at here.
+
+**One caution for whoever builds it:** a close that moves the stage into one declaring a LOCKING status
+now depends on `applyStageDefaults`'s new gate (`SD35`) to not double-close, and on the declared-transition
+suppression to keep the closing status authoritative (`CD17`). Both are in place and mutant-proven; the
+point is that they are load-bearing for that change rather than incidental.

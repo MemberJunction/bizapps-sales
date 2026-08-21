@@ -59,8 +59,12 @@ const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const DEAL_TYPE_ENTITY = 'MJ_BizApps_Sales: Deal Types';
 const LOSS_REASON_ENTITY = 'MJ_BizApps_Sales: Loss Reasons';
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
-// No STAGE_EVENT_ENTITY here any more: this operation no longer writes to the stage log. It declares
-// the transition and DealEntityServer appends the one row it owes. See DeclareTransition.
+/**
+ * READ, never written. This operation stopped writing to the stage log — it declares the transition and
+ * `DealEntityServer` appends the one row it owes (see `DeclareTransition`). It reads the log because the
+ * log is where the answer to "what stage was this deal in before it closed" already lives.
+ */
+const STAGE_EVENT_ENTITY = 'MJ_BizApps_Sales: Deal Stage Events';
 
 /** The behaviour flags a close reads off the target status. Never its name. */
 interface StatusFlags {
@@ -876,8 +880,18 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             deal.DeclareTransition('Reopen', `REOPENED: ${input.Reason.trim()}`);
 
             deal.DealStatusTypeID = target.ID;
-            if (input.StageID) {
-                deal.PipelineStageID = input.StageID;
+
+            /**
+             * THE PRIOR STAGE, DERIVED WHEN THE CALLER DID NOT NAME ONE — DN-18.
+             *
+             * `input.StageID` stays an override: a caller who knows where the deal should land says so.
+             * Absent that, the close event says where it came from, and restoring it is what makes
+             * `OrderStatusOnEntry` fire so the order is asked to come back. A status-only close left the
+             * stage where it was, so this resolves to the stage the deal is already in and nothing fires.
+             */
+            const landingStage = input.StageID ?? (await this.priorStageFromCloseEvent(deal.ID, provider, user));
+            if (landingStage) {
+                deal.PipelineStageID = landingStage;
             }
             // The close stamps describe a close that is no longer in effect; clearing them keeps every
             // rollup that tests `ClosedAt IS NOT NULL` honest. The event above preserves the history
@@ -937,6 +951,90 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
         );
         const row = (r.Results ?? [])[0] as { ID: string; LocksDeal?: boolean } | undefined;
         return r.Success && row ? { ID: String(row.ID), LocksDeal: row.LocksDeal === true } : null;
+    }
+
+    /**
+     * The stage a deal was in before it was closed, from the append-only log.
+     *
+     * ── WHY THE OPERATION DERIVES THIS AND THE WORKSPACE DOES NOT SUPPLY IT ─────────────────────────
+     *
+     * DN-18. The story says a reopened deal returns to its prior stage; `DealStageEvent.FromStageID`
+     * records exactly that, and `input.StageID` already existed. The only missing piece was that nobody
+     * sent it — so nothing ever re-entered a stage, `OrderStatusOnEntry` never fired, and a reopened deal
+     * sat pointing at a `Voided` order with nothing on screen saying so.
+     *
+     * Deriving it HERE rather than in the workspace keeps `input.StageID` an override instead of a
+     * requirement, and means an agent, an importer and an API caller get the same restoration a rep does.
+     * That is the same write-path principle as the deal number, the company stamp, the owner stamp and the
+     * embedded order: if the rule is the app's, the server owns it.
+     *
+     * ── WHICH EVENT, AND BY FLAG RATHER THAN BY NAME ────────────────────────────────────────────────
+     *
+     * The most recent event whose `ToDealStatusTypeID` carries `LocksDeal` — the closing transition. Read
+     * as a set of status ids first because `RunView` cannot join, and selected by the flag so a pipeline
+     * calling its winning stage "Signed" and its status "Booked" is unaffected (§3).
+     *
+     * A deal closed more than once has several such events; `ChangedAt DESC` takes the last one, which is
+     * the close being undone.
+     *
+     * ── THE TWO CASES THAT MAKE THIS CORRECT RATHER THAN CONVENIENT ─────────────────────────────────
+     *
+     *   · **A stage-moving close** stamped `FromStageID` = the stage before the close and `ToStageID` = the
+     *     closing stage. Restoring `FromStageID` moves the stage back, so the order-status writer fires
+     *     through the existing mechanism and the order follows — or refuses, and says so.
+     *   · **A status-only close** (no `ClosingStageID`) never moved the stage, so the event holds
+     *     `FromStageID === ToStageID`. Restoring it assigns the stage the deal is already in, the writer's
+     *     own comparison finds no move, and NOTHING fires. There is nothing to restore and nothing
+     *     happens — which is the behaviour that has to hold for this to be safe, and it holds without a
+     *     special case.
+     *
+     * Returns null when there is no close event to read — a deal closed by SQL, an import that wrote no
+     * provenance, or a log that was never written. The reopen then leaves the stage alone rather than
+     * guessing, which is the same answer as "the caller sent no StageID" and needs no extra branch.
+     */
+    private async priorStageFromCloseEvent(
+        dealID: string,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<string | null> {
+        const view = provider as unknown as IRunViewProvider;
+
+        const locking = await view.RunView(
+            {
+                EntityName: DEAL_STATUS_ENTITY,
+                ExtraFilter: 'LocksDeal = 1',
+                ResultType: 'simple',
+                Fields: ['ID'],
+            },
+            user,
+        );
+        if (!locking.Success) {
+            return null;
+        }
+        const ids = (locking.Results ?? [])
+            .map((r) => String((r as { ID: string }).ID))
+            .filter(Boolean);
+        if (ids.length === 0) {
+            return null;   // nothing in this host's vocabulary locks a deal, so nothing closed it
+        }
+
+        const quoted = ids.map((id) => `'${id}'`).join(', ');
+        const events = await view.RunView(
+            {
+                EntityName: STAGE_EVENT_ENTITY,
+                ExtraFilter: `DealID = '${dealID}' AND ToDealStatusTypeID IN (${quoted})`,
+                OrderBy: 'ChangedAt DESC',
+                ResultType: 'simple',
+                Fields: ['FromStageID', 'ChangedAt'],
+            },
+            user,
+        );
+        if (!events.Success) {
+            return null;
+        }
+        const row = (events.Results ?? [])[0] as { FromStageID?: string | null } | undefined;
+        const from = row?.FromStageID;
+        return from ? String(from) : null;
     }
 
     /** The default landing status — chosen by the `IsOpen` FLAG, never by a status name. */

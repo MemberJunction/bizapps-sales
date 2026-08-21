@@ -4,13 +4,12 @@
 > proven able to fail" while the mutants covered 44 of 103 checks. `docs/STORY-AUDIT.md` cites this file as
 > its evidence, so the overclaim propagated into a verdict document — which is the worst place for it.
 >
-> **51 of 108 checks are mutant-proven** (was 44 of 103 — the four-writers round added six checks and
-> proved seven, two of which had been green and unproven since S3). The gap is concentrated, not scattered:
+> **56 of 114 checks are mutant-proven.** The gap is concentrated, not scattered:
 >
 > | Bundle | Checks | Mutants |
 > |---|---|---|
-> | `save-deal` | 28 | 19 |
-> | `close-deal` | 16 | 14 |
+> | `save-deal` | 31 | 22 |
+> | `close-deal` | 19 | 16 |
 > | `product-picker` | 4 | 4 |
 > | `close-won-order` | 5 | 3 |
 > | `close-won-contract` | 4 | 3 |
@@ -24,7 +23,7 @@
 > they work. Both arrived by merge from sessions that did not use this driver, which is the mechanism
 > rather than an excuse.
 >
-> **What this file DOES establish** is that the 51 named below fail for the reason they claim to, each
+> **What this file DOES establish** is that the 56 named below fail for the reason they claim to, each
 > against a specific one-line mutation. That is worth having and is not the same as coverage.
 
 A green suite is not evidence. A check can be green because the behaviour it names is correct, or because
@@ -41,7 +40,7 @@ bizapps-contracts absent. 39 checks across 4 bundles: `save-deal` (16), `close-d
 `product-picker` (4), `close-won-order` (5). `close-won-contract` needs contracts and was not expected on
 this host.
 
-## Result: 51 checks were made to fail, of 108 in the suite
+## Result: 56 checks were made to fail, of 114 in the suite
 
 Three rounds were needed, and the reason there were three is the point of the exercise — round 1's
 misses were findings, not retries.
@@ -78,6 +77,58 @@ the stage, so the save wrote a second. With one writer left, "two rows" cannot b
 one-line edit; re-adding a writer is a thirty-line insertion. `M-ST1` reproduces the SYMPTOM faithfully
 (two rows for one transition, same `From`/`To`, inside the same transaction) by calling the single writer
 twice, and its note in the driver says so. It is a proxy, labelled as one, exactly like `M-TK1`.
+
+---
+
+## Round 5 (2026-08-21) — the stage declares the status, and the reopen restores the stage
+
+| Mutant | What it reverts | Checks it fells |
+|---|---|---|
+| `M-ST5` | deriving `DealStatusTypeID` from the stage | **SD33** |
+| `M-ST6` | the `callerSuppliedValue` guard on the status | **SD34** |
+| `M-RO1` | deriving the reopen's landing stage from the close event | **CD18** |
+| `M-RO2` | reads `ToStageID` instead of `FromStageID` | **CD18** |
+| `M-ST7` | the close setting the status at all | CD4, CD5, CD13, CD14, **CD17**, CD18 |
+| `M-ST8` | the `LocksDeal` gate on the derived status | **SD35** |
+
+### CD17 could not be felled by a single edit, and that is the finding
+
+`CD17` asserts the closing status beats the status the closing stage declares. **Two independent
+mechanisms already protect it**, so no one-line mutation of the status writer can break it:
+
+1. A declared transition suppresses stage defaults entirely, so `planStageDefaults()` is never called on
+   a close or reopen.
+2. Even if it were, the closing status is assigned before the save and arrives **dirty**, so
+   `callerSuppliedValue` answers "the caller's".
+
+Measured rather than argued: `M-ST3` removes mechanism (1) — the suppression — and **CD17 stays green**,
+because (2) still holds. So `M-ST7` stops the close setting a status at all; that proves CD17 is not
+vacuous, at the cost of felling five other close checks with it. CD17 is a **regression guard against a
+future change**, not a live single-point defence, and it is worth having on exactly those terms.
+
+### The round that nearly shipped a rule violation, and the driver bug it exposed
+
+`SD33` — the status derived from the stage — **broke the rule the app exists to uphold** on its first
+version. The seeded pipelines declare a LOCKING status on their winning and losing stages, so an ordinary
+save into one of those stages closed the deal by side effect: locked, `IsWon` set, no close event, no
+routing, no contract, no tasks, `Sales.CloseDeal` never invoked. A board drag would have booked revenue.
+The whole suite stayed green, because until then nothing about a stage could close a deal and so no check
+ever moved one into a closing stage. `SD35` does now, and `M-ST8` proves it.
+
+It was found by an Explorer spec, not by the suite — and finding it took three false starts, because
+**`mutate-checks.mjs` restored the source but never rebuilt.** After a mutation session `dist/` still held
+the last mutant while the source was clean and `git diff` was empty, so MJAPI served mutated code and a
+browser spec failed on a defect that had already been fixed. The driver now rebuilds in its `finally`,
+alongside the copy-aside restore. A tool whose job is to break things on purpose must not be able to leave
+them broken.
+
+### CD19 has no mutant of its own, deliberately
+
+`CD19` pins the other direction — after a status-only close the stage never moved, so there is nothing to
+restore and nothing fires. `M-RO2` (restore the wrong end of the transition) **does not fell it**, and
+cannot: on a status-only close `FromStageID === ToStageID`, so swapping them is invisible there. That is
+precisely why CD18 is the check that catches it and why CD19 alone would have been insufficient — the pair
+is the assertion, not either half.
 
 ---
 

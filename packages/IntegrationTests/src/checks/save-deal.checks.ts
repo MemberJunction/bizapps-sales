@@ -119,6 +119,19 @@ async function newDeal(
     return deal;
 }
 
+/**
+ * One row, asserted to exist. `TxOne` is the transaction-aware read this bundle uses; this wraps a plain
+ * lookup where the absence of a row is a setup failure rather than the thing under test.
+ */
+async function QueryOneRow<T extends Record<string, unknown>>(
+    ctx: Parameters<NamedCheck['Fn']>[0],
+    sql: string,
+): Promise<T> {
+    const row = await TxOne<T>(ctx, sql);
+    Assert(!!row, `setup query returned no row: ${sql}`);
+    return row;
+}
+
 /** How many stage events a deal has. Append-only, so this only ever grows -- which is the point. */
 async function stageEventCount(ctx: Parameters<NamedCheck['Fn']>[0], dealID: string): Promise<number> {
     const r = await new RunView().RunView<{ ID: string }>(
@@ -1687,6 +1700,192 @@ export const SaveDealChecks: NamedCheck[] = [
                     before,
                     'no event: the deal did not move, so the log must say nothing',
                 );
+            }),
+    },
+    {
+        Id: 'save-deal.SD33',
+        Name: 'SD33: a deal created with NO status takes the one its STAGE declares',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── A DEAL WITH NO STATUS IS INVISIBLE, AND NOTHING USED TO GIVE IT ONE ─────────────
+                 *
+                 * `NewDeal()` seeds no status and the column is nullable with no default, so a rep who
+                 * never touched the Status select saved a deal that every `IsOpen`/`IsWon` rollup skipped
+                 * — and while the roster and summary queries INNER JOINed that FK, invisible to every
+                 * surface in the app. `PipelineStage.DealStatusTypeID` is seeded on every stage and the
+                 * pipeline board already reads it as authoritative for `IsClosing`; this is the write path
+                 * agreeing with the reader.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const stage = await QueryOneRow<{ DealStatusTypeID: string | null }>(
+                    ctx, `SELECT DealStatusTypeID FROM ${SALES_SCHEMA}.PipelineStage WHERE ID = '${f.StageID}'`,
+                );
+                Assert(
+                    !!stage.DealStatusTypeID,
+                    'the fixture stage must declare a status, or this rule cannot be exercised',
+                );
+
+                const created = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD33 status from the stage';
+                    d.DealStatusTypeID = null;   // exactly what the workspace produces
+                });
+                await saveOk(created, 'create with no status');
+
+                const row = await TxOne<{ DealStatusTypeID: string | null }>(
+                    ctx, `SELECT DealStatusTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID ?? '').toLowerCase(),
+                    String(stage.DealStatusTypeID).toLowerCase(),
+                    'the deal takes the status its stage declares — a NULL here is a deal no rollup counts',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD34',
+        Name: 'SD34: a status the caller STATED survives a stage move in the same save',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE OTHER HALF OF SD33, and the half that makes it fill-but-don't-overwrite rather than
+                 * a second writer. A caller who states a status keeps it: it arrives dirty, so
+                 * `callerSuppliedValue` answers "theirs" and the stage's declaration stands down — the same
+                 * rule probability and forecast category follow.
+                 *
+                 * The status is chosen BY ITS FLAGS: not open, not won, not lost, and not locking. That is
+                 * a status no stage in the fixture declares, which is what makes the comparison mean
+                 * something — and picking it by flag rather than by name is what keeps this passing on a
+                 * host that calls it something else (§3).
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const held = await QueryOneRow<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.DealStatusType
+                      WHERE IsActive = 1 AND IsOpen = 0 AND IsWon = 0 AND IsLost = 0 AND LocksDeal = 0
+                      ORDER BY DisplayRank`,
+                );
+                Assert(
+                    !!held.ID,
+                    'the host needs a non-open, non-closing status for this check to tell the two writers apart',
+                );
+
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD34 stated status wins'; });
+                await saveOk(created, 'create');
+
+                const stages = await new RunView().RunView<{ ID: string; DealStatusTypeID: string | null }>(
+                    {
+                        EntityName: E_STAGE,
+                        ExtraFilter: `PipelineID = '${f.PipelineID}' AND ID <> '${f.StageID}'`,
+                        OrderBy: 'DisplayOrder ASC',
+                        ResultType: 'simple',
+                        Fields: ['ID', 'DealStatusTypeID'],
+                    },
+                    ctx.User,
+                );
+                Assert(stages.Success, `reading stages failed — ${stages.ErrorMessage}`);
+                const target = (stages.Results ?? [])[0];
+                Assert(!!target?.ID, 'the fixture pipeline needs a second stage');
+                Assert(
+                    String(target!.DealStatusTypeID ?? '').toLowerCase() !== String(held.ID).toLowerCase(),
+                    'the arriving stage must declare a DIFFERENT status, or nothing is being distinguished',
+                );
+
+                // BOTH in one save — the stage moves and the caller states a status.
+                const edited = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await edited.Load(created.ID), 'the deal reloads');
+                edited.PipelineStageID = String(target!.ID);
+                edited.DealStatusTypeID = String(held.ID);
+                await saveOk(edited, 'a stage move carrying a stated status');
+
+                const row = await TxOne<{ DealStatusTypeID: string | null; PipelineStageID: string }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID ?? '').toLowerCase(),
+                    String(held.ID).toLowerCase(),
+                    'the STATED status survives — the stage fills what the caller left alone, never overwrites',
+                );
+                AssertEqual(
+                    String(row.PipelineStageID).toLowerCase(),
+                    String(target!.ID).toLowerCase(),
+                    'and the stage still moved, so this is not passing because nothing happened',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD35',
+        Name: 'SD35: moving into a stage whose status LOCKS does not close the deal',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── THE RULE SD33 NEARLY BROKE ──────────────────────────────────────────────────────
+                 *
+                 * Stages carry no `IsWon`/`IsClosed`; they point at a status that does, so that
+                 * "Closed Won" is a LABEL and closing stays an explicit act — `Sales.CloseDeal` — even
+                 * when the stage a deal enters is the one a pipeline calls Signed.
+                 *
+                 * Deriving the stage's status without a gate broke exactly that. The seeded pipelines
+                 * declare a LOCKING status on their winning and losing stages, so an ordinary save that
+                 * moved a deal there closed it by side effect: locked, `IsWon` set, and none of what a
+                 * close owes — no routing, no contract, no tasks, no close event. A board drag would have
+                 * booked revenue.
+                 *
+                 * Nothing in the suite caught it, because until then no stage could close a deal and so no
+                 * check ever moved one into a closing stage. This is that check.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+
+                const closingStage = await QueryOneRow<{ ID: string; DealStatusTypeID: string }>(
+                    ctx,
+                    `SELECT TOP 1 s.ID, s.DealStatusTypeID
+                       FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.PipelineID}' AND s.IsActive = 1 AND t.LocksDeal = 1
+                      ORDER BY s.DisplayOrder`,
+                );
+                Assert(
+                    !!closingStage.ID,
+                    'the fixture pipeline needs a stage declaring a LOCKING status, or this rule cannot be ' +
+                        'exercised',
+                );
+
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD35 a stage cannot close a deal'; });
+                await saveOk(created, 'create');
+                const before = await TxOne<{ DealStatusTypeID: string }>(
+                    ctx, `SELECT DealStatusTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+
+                // A PLAIN SAVE into the closing stage. Not a close — nobody called Sales.CloseDeal.
+                const moved = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await moved.Load(created.ID), 'the deal reloads');
+                moved.PipelineStageID = String(closingStage.ID);
+                await saveOk(moved, 'a plain stage move into a closing stage');
+
+                const after = await TxOne<{ DealStatusTypeID: string; PipelineStageID: string }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                AssertEqual(
+                    String(after.PipelineStageID).toLowerCase(),
+                    String(closingStage.ID).toLowerCase(),
+                    'setup: the stage really did move',
+                );
+                AssertEqual(
+                    String(after.DealStatusTypeID).toLowerCase(),
+                    String(before.DealStatusTypeID).toLowerCase(),
+                    'the STATUS is untouched — a stage may name the status a deal sits in, never close it',
+                );
+
+                // And the deal is still editable, which is the observable consequence of not being closed.
+                const edit = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await edit.Load(created.ID), 'the deal reloads again');
+                edit.NextStep = 'still editable, because nothing closed it';
+                await saveOk(edit, 'an ordinary edit after the move into a closing stage');
             }),
     },
 ];

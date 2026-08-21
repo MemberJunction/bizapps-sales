@@ -162,6 +162,12 @@ async function reopen(ctx: Ctx, input: SalesReopenDealInput): Promise<SalesReope
     return output as SalesReopenDealOutput;
 }
 
+/**
+ * Orders' schema, named here rather than imported: sales holds no compile-time dependency on orders, and
+ * the sibling bundles spell it out the same way.
+ */
+const ORDERS_SCHEMA = '__mj_BizAppsOrders';
+
 const routeTo = (out: SalesCloseDealOutput, target: string): SalesCloseRoutingResult | undefined =>
     out.Routing.find((r) => r.Target === target);
 
@@ -220,6 +226,28 @@ async function otherStage(
     const row = (r.Results ?? [])[0] as { ID?: string; Probability?: number | null } | undefined;
     Assert(!!row?.ID, 'setup: the pipeline needs a second stage for a close to move INTO');
     return { ID: String(row?.ID), Probability: row?.Probability ?? null };
+}
+
+/**
+ * The first stage on a pipeline whose declared `DealStatusType` satisfies a FLAG predicate.
+ *
+ * Flags, never names: the caller passes `IsWon = 1` or `IsLost = 1` and gets whatever that pipeline calls
+ * the stage. Used to build the deliberately-contradictory pairing CD17 needs.
+ */
+async function stageDeclaring(
+    ctx: Ctx,
+    pipelineID: string,
+    statusFlagPredicate: string,
+): Promise<{ ID: string } | null> {
+    const row = await TxOne<{ ID: string }>(
+        ctx,
+        `SELECT TOP 1 s.ID
+           FROM ${SALES_SCHEMA}.PipelineStage s
+           JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+          WHERE s.PipelineID = '${pipelineID}' AND s.IsActive = 1 AND ${statusFlagPredicate}
+          ORDER BY s.DisplayOrder`,
+    );
+    return row?.ID ? { ID: String(row.ID) } : null;
 }
 
 /** The deal's INSTALMENT rows, read through the provider so the check's open transaction is visible. */
@@ -932,6 +960,219 @@ export const CloseDealChecks: NamedCheck[] = [
                     HAND_SET,
                     'and KEEPS the probability a human set — the arriving stage does not re-derive it on a ' +
                         'declared transition',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD17',
+        Name: 'CD17: the CLOSING status wins over the status the closing stage declares',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── THE THIRD CASE OF "THE STATUS COMES FROM THE STAGE" ─────────────────────────────
+                 *
+                 * A stage now declares the deal's status (SD33/SD34), and a close both sets a status AND
+                 * may move the stage. If the two writers raced, a close would land whatever the closing
+                 * stage happens to declare instead of the outcome the caller asked for — silently, and on
+                 * the one transition that is the provenance of a contract.
+                 *
+                 * They cannot race, and the reason is structural rather than lucky: a DECLARED TRANSITION
+                 * suppresses stage defaults entirely, so `planStageDefaults()` is never called on a close.
+                 *
+                 * THE PAIRING HERE IS DELIBERATELY CONTRADICTORY — closing as LOST into a stage that
+                 * declares a WON status. Nobody would do this on purpose, and that is the point: it is the
+                 * only shape in which the two writers can be told apart, because on every sane pairing
+                 * they agree and the check would pass while proving nothing.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD17 status source',
+                );
+
+                const wonStage = await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsWon = 1');
+                Assert(
+                    !!wonStage,
+                    'the pipeline needs a stage declaring a WON status for this contradiction to be built',
+                );
+
+                const reason = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.LossReason WHERE IsActive = 1 AND RequiresNotes = 0
+                      ORDER BY DisplayRank`,
+                );
+                Assert(!!reason?.ID, 'a loss reason that demands no notes is needed');
+
+                const out = await close(ctx, {
+                    DealID: dealID,
+                    DealStatusTypeID: f.LostStatusID,
+                    ClosingStageID: wonStage!.ID,
+                    LossReasonID: String(reason!.ID),
+                });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+
+                const row = await TxOne<{ DealStatusTypeID: string; PipelineStageID: string }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID).toLowerCase(),
+                    f.LostStatusID.toLowerCase(),
+                    'the deal lands in the status the CLOSE asked for, not the one its stage declares',
+                );
+                AssertEqual(
+                    String(row.PipelineStageID).toLowerCase(),
+                    wonStage!.ID.toLowerCase(),
+                    'and it really is in that stage, so the stage writer was reachable and stood down',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD18',
+        Name: 'CD18: a reopen with NO StageID restores the stage the deal was in before the close',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── DN-18. THE LOG ALREADY HELD THE ANSWER ──────────────────────────────────────────
+                 *
+                 * The story says a reopened deal returns to its prior stage. `DealStageEvent.FromStageID`
+                 * records exactly that and `input.StageID` already existed — the workspace simply never
+                 * sent one, so no stage was ever re-entered, `OrderStatusOnEntry` never fired, and a
+                 * reopened deal sat pointing at a voided order with nothing on screen saying so.
+                 *
+                 * Derived in the OPERATION, so an agent, an importer and an API caller get the same
+                 * restoration a rep does, and `input.StageID` stays an override rather than a requirement.
+                 *
+                 * The order assertion is an either/or on purpose, and it is D-OS1: the restored stage's
+                 * `OrderStatusOnEntry` is either applied, or the operation SAYS it could not. What must
+                 * never happen is silence — a reopened deal whose order neither followed nor complained.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const startStage = f.OrderOnlyPolicyStageID;
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, startStage, 'CD18 restore the stage',
+                );
+
+                const closing = await otherStage(ctx, f.OrderOnlyPolicyPipelineID, startStage);
+                Assert(
+                    (await close(ctx, {
+                        DealID: dealID,
+                        DealStatusTypeID: f.WonStatusID,
+                        ClosingStageID: closing.ID,
+                    })).Success,
+                    'the stage-moving close must succeed',
+                );
+
+                const closed = await TxOne<{ PipelineStageID: string }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(closed.PipelineStageID).toLowerCase(),
+                    closing.ID.toLowerCase(),
+                    'setup: the close moved the stage, which is what gives the reopen something to restore',
+                );
+
+                // NO StageID — the whole point. The operation reads it out of the close event.
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD18: restoring the prior stage.' });
+                Assert(out.Success, `the reopen failed: ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{ PipelineStageID: string }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(after.PipelineStageID).toLowerCase(),
+                    startStage.toLowerCase(),
+                    'the reopen restores the stage the deal was in BEFORE the close — from FromStageID',
+                );
+
+                /**
+                 * AND THE ORDER EITHER FOLLOWED OR SAID WHY NOT (D-OS1). Read the restored stage's
+                 * declaration and compare; if it does not match, an issue must name it.
+                 */
+                const restored = await TxOne<{ OrderStatusOnEntry: string | null }>(
+                    ctx,
+                    `SELECT OrderStatusOnEntry FROM ${SALES_SCHEMA}.PipelineStage WHERE ID = '${startStage}'`,
+                );
+                if (restored.OrderStatusOnEntry) {
+                    const order = await TxOne<{ Status: string }>(
+                        ctx,
+                        `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                          JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                    );
+                    const followed =
+                        String(order.Status).toLowerCase() === String(restored.OrderStatusOnEntry).toLowerCase();
+                    Assert(
+                        followed || out.Issues.length > 0,
+                        `the restored stage declares '${restored.OrderStatusOnEntry}' and the order is ` +
+                            `'${order.Status}' — so the reopen owed a warning and reported none. Silence is ` +
+                            'the one outcome D-OS1 forbids',
+                    );
+                }
+            }),
+    },
+    {
+        Id: 'close-deal.CD19',
+        Name: 'CD19: after a STATUS-ONLY close there is nothing to restore, and nothing fires',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE OTHER DIRECTION, and it is what makes CD18 safe rather than merely convenient.
+                 *
+                 * A close with no `ClosingStageID` never moved the stage, so its event holds
+                 * `FromStageID === ToStageID`. The reopen therefore derives the stage the deal is ALREADY
+                 * in, the order-status writer's own comparison finds no move, and nothing happens. No
+                 * special case is needed for this — but if the derivation ever started returning something
+                 * else, a reopen would silently relocate a deal that never went anywhere.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const startStage = f.OrderOnlyPolicyStageID;
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, startStage, 'CD19 nothing to restore',
+                );
+
+                const orderBefore = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+
+                // No ClosingStageID: the status moves, the stage does not.
+                Assert(
+                    (await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID })).Success,
+                    'the status-only close must succeed',
+                );
+                const closed = await TxOne<{ PipelineStageID: string }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(closed.PipelineStageID).toLowerCase(),
+                    startStage.toLowerCase(),
+                    'setup: a close without a ClosingStageID leaves the stage alone',
+                );
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD19: no stage to restore.' });
+                Assert(out.Success, `the reopen failed: ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{ PipelineStageID: string }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(after.PipelineStageID).toLowerCase(),
+                    startStage.toLowerCase(),
+                    'the deal is where it always was — a derivation that moved it here would be a bug',
+                );
+
+                const orderAfter = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(orderAfter.Status),
+                    String(orderBefore.Status),
+                    'and the order was never asked to move, because no stage was entered',
                 );
             }),
     },

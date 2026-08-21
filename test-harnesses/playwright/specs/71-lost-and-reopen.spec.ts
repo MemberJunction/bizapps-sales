@@ -185,11 +185,21 @@ test.describe('closed lost and reopen — what happens to the order', () => {
          *   · The WORKSPACE dropped those issues: `ApplyCloseIssues` ran only on the `!Success` branch,
          *     so every warning on a successful close or reopen was discarded. **Fixed** — both handlers
          *     now call `SurfaceOperationIssues` after the reload.
-         *   · And that fix changes nothing here, because there is no warning to surface. The order-status
-         *     writer keys on the STAGE CHANGING, and `DealWorkspaceComponent.ReopenDeal()` sends only
-         *     `{ DealID, Reason }`. No `StageID` means no stage entry, which means nothing ever asks the
-         *     order to come back — so the deal is reopened, its order stays `Voided`, and there is
-         *     genuinely nothing to say because nothing was attempted.
+         *   · The reopen NOW DERIVES its landing stage from the close event's `FromStageID`
+         *     (DN-18, `close-deal.CD18`), so `input.StageID` is an override rather than a requirement and
+         *     an agent gets the same restoration a rep does.
+         *   · **And it still cannot help THIS flow, for a reason worth stating.** This spec moves the deal
+         *     into the losing stage with a PLAIN SAVE and only then closes it through the panel. So the
+         *     close never moved the stage, its event holds `FromStageID === ToStageID`, and the reopen
+         *     correctly derives the stage the deal is already in — `CD19`'s case exactly. Nothing is
+         *     restored because nothing moved, and nothing warns because nothing was attempted.
+         *   · Which exposes the remaining half: **`DealWorkspaceComponent.ConfirmClose()` sends no
+         *     `ClosingStageID` either.** No close driven from the browser ever moves the stage, so no
+         *     reopen driven from the browser can restore one. The mechanism works — `CD18` proves it
+         *     end to end — and the UI cannot reach it. That is the mirror image of the reopen's missing
+         *     `StageID`, and closing it is the same kind of decision: derive the closing stage in the
+         *     operation from the pipeline stage whose declared status matches the outcome, or ask the rep.
+         *     Recorded in DN-18; deliberately not guessed at here.
          *
          * S-US8 describes a reopen that enters a stage and reports what the order refused. The operation
          * can do that; the UI never asks it to. Closing the gap is a design decision — re-apply the

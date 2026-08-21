@@ -106,6 +106,13 @@ interface StageOrderStatusRow {
 interface StageDefaultsPlan {
     Probability: number | null;
     ForecastCategoryTypeID: string | null;
+    /**
+     * The status the stage declares. `PipelineStage.DealStatusTypeID` is seeded on every stage — the open
+     * ones by `@lookup:…Code=OPEN` — and the pipeline board already reads it as authoritative when it
+     * derives `IsClosing`. So the column exists for this, is populated, and has a consumer; this makes the
+     * write path agree with the reader.
+     */
+    DealStatusTypeID: string | null;
 }
 
 interface StageOrderPlan {
@@ -779,12 +786,16 @@ export class DealEntityServer extends DealEntity {
         }
 
         const view = this.ProviderToUse as unknown as IRunViewProvider;
-        const result = await view.RunView<{ Probability: number | null; ForecastCategoryTypeID: string | null }>(
+        const result = await view.RunView<{
+            Probability: number | null;
+            ForecastCategoryTypeID: string | null;
+            DealStatusTypeID: string | null;
+        }>(
             {
                 EntityName: STAGE_ENTITY,
                 ExtraFilter: `ID = '${stageID}'`,
                 ResultType: 'simple',
-                Fields: ['Probability', 'ForecastCategoryTypeID'],
+                Fields: ['Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'],
             },
             this.ContextCurrentUser,
         );
@@ -802,9 +813,54 @@ export class DealEntityServer extends DealEntity {
         if (!row) {
             return null;
         }
+
+        /**
+         * ── A STAGE MAY NAME THE STATUS A DEAL SITS IN. IT MAY NOT CLOSE ONE ────────────────────────
+         *
+         * Deriving the status from the stage without this gate broke the rule this app exists to uphold.
+         * The seeded pipelines declare a LOCKING status on their winning and losing stages — "Signed" ->
+         * Won, "Lost" -> Lost — so an ordinary save that moved a deal into one of those stages CLOSED IT
+         * BY SIDE EFFECT: locked, `IsWon` set, no `DealStageEvent` naming a close, no routing evaluated,
+         * no contract, no tasks, and `Sales.CloseDeal` never invoked. A board drag would have booked
+         * revenue.
+         *
+         * That is precisely what the master plan forbids: stages carry no `IsWon`/`IsClosed` of their own
+         * and point at a status that does, so that "Closed Won" is a LABEL — and closing stays an explicit
+         * act even when the stage a deal enters is the one a pipeline calls Signed.
+         *
+         * Found by `71-lost-and-reopen`, which moves a deal into the losing stage with a plain save before
+         * closing it through the panel: the deal arrived at the close already locked, so the close could
+         * not stamp its loss reason. A green integration suite did not see it — no check moved a deal into
+         * a closing stage, because until now nothing about a stage could close one. `SD35` does now.
+         *
+         * The gate reads `LocksDeal` off the status row, never a name (§3). A stage whose status locks
+         * contributes nothing here; the deal keeps whatever status it had and only `Sales.CloseDeal` can
+         * change that.
+         */
+        const stageStatusID = row.DealStatusTypeID ?? null;
+        let derivableStatusID: string | null = null;
+        if (stageStatusID) {
+            const status = await view.RunView<{ LocksDeal: boolean }>(
+                {
+                    EntityName: DEAL_STATUS_ENTITY,
+                    ExtraFilter: `ID = '${stageStatusID}'`,
+                    ResultType: 'simple',
+                    Fields: ['LocksDeal'],
+                },
+                this.ContextCurrentUser,
+            );
+            const flags = (status.Results ?? [])[0];
+            // Unreadable is treated as "do not derive". Failing closed here costs a rep one dropdown; the
+            // other direction closes deals nobody asked to close.
+            if (status.Success && flags && flags.LocksDeal !== true) {
+                derivableStatusID = stageStatusID;
+            }
+        }
+
         return {
             Probability: row.Probability ?? null,
             ForecastCategoryTypeID: row.ForecastCategoryTypeID ?? null,
+            DealStatusTypeID: derivableStatusID,
         };
     }
 
@@ -888,6 +944,46 @@ export class DealEntityServer extends DealEntity {
         }
         if (!this.callerSuppliedValue('ForecastCategoryTypeID', this.ForecastCategoryTypeID)) {
             this.ForecastCategoryTypeID = plan.ForecastCategoryTypeID;
+        }
+
+        /**
+         * ── THE STATUS COMES FROM THE STAGE, AND A DEAL WITH NO STATUS IS INVISIBLE ──────────────────
+         *
+         * `DealWorkspaceService.NewDeal()` is `NewRecord()` and nothing else, and `DealStatusTypeID` is
+         * nullable with no column default. So a rep who never touched the Status select saved a deal that
+         * every `IsOpen`/`IsWon` rollup skipped — and while the roster and summary queries still INNER
+         * JOINed that FK, such a deal was invisible to every surface in the app. It was also what made
+         * `71-lost-and-reopen` fail on a JOIN rather than on its subject.
+         *
+         * The answer was already three-quarters built. `PipelineStage.DealStatusTypeID` is seeded on every
+         * stage, `StageRow` loads it, and `deal-board.component.ts` derives `IsClosing` from it — reading
+         * it as the source of truth. All that was missing was the write path agreeing.
+         *
+         * ── WHAT THE `callerSuppliedValue` GUARD BUYS, AND ONE THING IT DOES NOT ─────────────────────
+         *
+         * A status the caller supplied IN THIS SAVE wins: it arrives dirty (or, on a create, simply
+         * present), so a rep who picked one keeps it. That is the same rule probability and forecast
+         * category follow, and it is why this belongs here rather than in a fourth writer.
+         *
+         * What it does NOT do is protect a status set in an EARLIER save from a later stage move. `Dirty`
+         * is per-save, so dragging a card re-derives the status from the arriving stage exactly as it
+         * re-derives the probability. For probability that is the designed behaviour; for status it is
+         * worth knowing, and it is reported rather than special-cased — every stage is seeded with an OPEN
+         * status today, so the observable effect is nil until somebody seeds two different open statuses
+         * across one pipeline's stages.
+         *
+         * ── AND THE CLOSE IS NOT AFFECTED, STRUCTURALLY RATHER THAN BY LUCK ──────────────────────────
+         *
+         * `Sales.CloseDeal` sets the closing status and may move the stage with it. It does not race this
+         * writer: a DECLARED TRANSITION suppresses stage defaults entirely (see `DeclareTransition`), so
+         * `planStageDefaults()` is never even called on a close or reopen. The closing status wins because
+         * this code does not run, not because dirty-tracking happened to favour it.
+         */
+        if (!this.callerSuppliedValue('DealStatusTypeID', this.DealStatusTypeID)) {
+            // Only when the stage actually declares one. A stage with no status must not blank a deal's.
+            if (plan.DealStatusTypeID) {
+                this.DealStatusTypeID = plan.DealStatusTypeID;
+            }
         }
     }
 
