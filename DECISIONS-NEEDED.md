@@ -1412,3 +1412,90 @@ naming the source. Worth knowing before somebody reads a forecast series as veri
 
 **What is needed:** a decision on whether the measures get their own sanity assertions somewhere — most
 naturally as checks against the queries themselves, on the session that owns them, rather than here.
+
+---
+
+## D-31 · Two writers for `ForecastSnapshot` now exist on the same tree, and only one is wired
+
+Found on `a2abcfd`, which is the first tree carrying both halves. **This is the item on this list that
+needs a decision rather than a note.**
+
+| | `Sales.CaptureForecastSnapshot` (Action + ScheduledJob) | `scripts/capture-forecast-snapshot.sql` |
+|---|---|---|
+| Grain | company × pipeline | company × pipeline × **owner** |
+| Source | `Sales: Forecast by Category` through `IForecastSource` | inline SQL over `vwDeals` |
+| Same-day re-run | **skips** — the first capture survives | **deletes and re-inserts** — the last survives |
+| Period | current calendar month, UTC | current calendar month, UTC |
+| Wired to a `ScheduledJob` row | **yes**, seeded in `metadata/scheduled-jobs/` | **no** — its comment says "an MJ Scheduled Job, nightly" but nothing seeds one |
+
+So today the Action is the one that actually runs, and the script is documentation of an intent.
+
+**On skip versus replace, their reasoning is better than mine was and still does not separate the two.**
+The script argues that duplicate captures "silently double every movement calculation in
+`forecast-history.sql`" — which is true and concrete: that query uses
+`LAG(…) OVER (PARTITION BY … ORDER BY CapturedAt)`, so a second capture on the same day inserts a
+spurious zero-delta step into the movement column. But **skip and replace both produce one row per day**,
+so both avoid it. The only difference is which reading survives when two runs disagree: mine keeps the
+earlier (provenance-preserving, D-29), theirs keeps the later (freshest). Both are defensible and the
+choice should be made once, not twice.
+
+**The grain difference is the substantive one, and it is not symmetrical.** See D-32.
+
+**What is needed:** one writer. If it is the Action, it needs an owner-grain query (D-32) and a ruling on
+skip versus replace. If it is the script, my `ScheduledJob` row should point at something that runs it —
+and the seam, the fixture source and FS1–FS13 lose their subject, which would be worth saying out loud
+rather than leaving as dead code.
+
+---
+
+## D-32 · The forecast query cannot produce the owner grain `forecast-history.sql` is built to read
+
+`Sales: Forecast by Category` groups by `d.CompanyID, d.Company, d.PipelineID, d.Pipeline` and does not
+project `OwnerEmployeeID` at all. So every snapshot my source produces carries `OwnerEmployeeID = null`.
+
+That is **correct rather than broken** — null means "across all owners" on `ForecastSnapshot`, which is
+the honest description of a company-by-pipeline rollup, and FS11 asserts it deliberately rather than
+tolerating it.
+
+**But `forecast-history.sql` partitions by `OwnerEmployeeID`** in both of its `LAG` windows, and joins
+`__mj.Employee` to project an `OwnerName` column. It is built expecting the per-owner grain. Fed only
+null-owner rows it still works — every row lands in one partition and `OwnerName` is always null — but it
+delivers materially less than it was written to show, and nothing anywhere reports that the grain is
+missing rather than empty.
+
+The SQL capture script does produce the owner grain: its `GROUP BY` is
+`d.CompanyID, d.PipelineID, d.OwnerEmployeeID`.
+
+**Interim choice:** the source maps what the query projects and no more. Deriving an owner grain here
+would mean grouping deals by owner inside the source — a second implementation of a measure, which is
+exactly what D-30 refuses.
+
+**What is needed:** an owner-grain forecast query (`Sales: Forecast by Category and Owner`, or an
+`IncludeOwner` parameter on the existing one), owned by whoever owns the queries. The mapping is already
+ready for it — `FORECAST_QUERY_COLUMNS.OwnerEmployeeID` is declared and will populate the moment a query
+projects that column, with no code change here.
+
+---
+
+## D-33 · `Sales: Forecast by Category` places open and won deals on different date columns
+
+Not a defect — the query documents it — but it changes what a snapshot's period means, and anyone reading
+`ForecastSnapshot.PeriodStart`/`PeriodEnd` should know.
+
+Open deals are filtered on `ExpectedCloseDate`; won deals on `ActualCloseDate`. So one snapshot row mixes
+two date dimensions: `CommitAmount`/`BestCaseAmount`/`PipelineAmount` describe deals *expected* to land in
+the window, while `ClosedWonAmount` describes deals that *actually* landed in it. The query's own comment
+says so and gives the reason — "each row uses the date that actually answers its question" — which is
+right for a forecast review reading attainment against the same window.
+
+The consequence for the stored snapshot is that `PeriodStart`/`PeriodEnd` are not one filter over one
+column, and a consumer computing anything across the four amounts is combining two populations. Nothing
+does today.
+
+**Verified on the demo data:** `ExpectedCloseDate` spans 2026-07-15 → 2026-11-30 and `ActualCloseDate`
+spans 2026-07-14 → 2026-07-28, so the two dimensions genuinely differ in range — a period covering only
+August would report pipeline figures and zero closed, which is correct and could easily be read as a
+capture failure.
+
+**What is needed:** nothing in code. It belongs in whatever documents the snapshot table, so the first
+person to see a zero `ClosedAmount` beside a large `PipelineAmount` does not treat it as a bug.
