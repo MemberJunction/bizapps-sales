@@ -31,7 +31,7 @@
       "DealTypeID": "@lookup:MJ_BizApps_Sales: Deal Types.Code=NEW",
       "DefaultForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",
       "RequiresDealLines": true,
-      "CloseWonPolicy": "{\"CreateContract\":true,\"ContractTypeCode\":\"Order Form\",\"TermMonths\":12,\"SubscriptionLinesTo\":\"Contract\",\"OneTimeLinesTo\":\"Order\",\"RequireApprovalTaskTypeCode\":null}",
+      "CloseWonPolicy": "{\"CreateContract\":true,\"ContractTypeCode\":\"Order Form\",\"TermMonths\":12,\"SubscriptionLinesTo\":\"Contract\",\"OneTimeLinesTo\":\"Order\",\"RequireApprovalTaskTypeCode\":null,\"CloseWonTasks\":{\"AssigneeEntityName\": \"MJ_BizApps_Common: People\", \"AssigneeRecordID\": \"C0111111-0000-4000-A000-000000000004\", \"DueInDays\": 5}}",
       "IsDefault": true,
       "DisplayRank": 10,
       "IsActive": true
@@ -64,7 +64,7 @@
       "DealTypeID": "@lookup:MJ_BizApps_Sales: Deal Types.Code=NEW",
       "DefaultForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",
       "RequiresDealLines": false,
-      "CloseWonPolicy": "{\"CreateContract\":false,\"OneTimeLinesTo\":\"Order\"}",
+      "CloseWonPolicy": "{\"CreateContract\":false,\"OneTimeLinesTo\":\"Order\",\"CloseWonTasks\":{\"AssigneeEntityName\": \"MJ_BizApps_Common: People\", \"AssigneeRecordID\": \"C0111111-0000-4000-A000-000000000004\", \"DueInDays\": 5}}",
       "IsDefault": false,
       "DisplayRank": 20,
       "IsActive": true
