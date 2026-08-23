@@ -418,6 +418,25 @@ const MUTATIONS = [
       to: '',
       note: 'the order-review task drops its deal link, so the work is unreachable from the deal' },
 
+    // WT1 had NO mutant, and WT1 is the check that read green while guessing -- it indexed an unfiltered
+    // link list, so it passed or failed on whichever row the database returned first. A check with that
+    // history is the last one that should be trusted on an unproven green. This points the review task's
+    // primary at the deal instead of the order, which is precisely what WT1 claims cannot happen: finance
+    // opens the review task and there is no order on it.
+    { id: 'M-WT1O', file: CWT, expect: ['WT1'],
+      from: "                { EntityName: 'MJ_BizApps_Orders: Order Headers', RecordID: input.OrderID },",
+      to: '                { EntityName: E_DEAL, RecordID: input.DealID },',
+      note: 'the review task points at the deal instead of the order, so nothing links to the order' },
+
+    // WT4 had no mutant either. Its claim is that the contract task is never STRANDED, which is a
+    // different statement from WT14's (that it does not fall back to the deal INSTEAD of the contract) --
+    // so it needs its own. This drops the contract task's own target and leaves only the deal link, which
+    // is the shape where the task exists, looks linked, and cannot reach the contract it is about.
+    { id: 'M-WT4L', file: CWT, expect: ['WT4'],
+      from: '                    [target, { EntityName: E_DEAL, RecordID: input.DealID }],',
+      to: '                    [{ EntityName: E_DEAL, RecordID: input.DealID }],',
+      note: 'the contract task keeps only its deal link, stranding it from the contract' },
+
     // CT4's mutant. A downstream that reports success without writing is the worst of the three
     // possible failures -- worse than throwing, because nothing looks wrong until somebody asks where
     // the agreement went. This flips exactly that bit and nothing else.
