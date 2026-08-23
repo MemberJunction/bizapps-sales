@@ -561,6 +561,105 @@ export const CloseDealChecks: NamedCheck[] = [
             }),
     },
     {
+        Id: 'close-deal.CD23',
+        Name: 'CD23: a refused downstream route reports a WARNING in Issues, and does NOT fail the close',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE GAP THIS CLOSES IS PROGRAMMATIC, NOT VISUAL.
+                 *
+                 * `Routing[].Reason` already carried the refusal, and the workspace already renders it —
+                 * `deal-workspace.component.html` shows `not created: {{ r.Reason }}` on a failed row, so a
+                 * rep sees it. What did not carry it was `Issues`, the field every OTHER failure mode in
+                 * this operation reports through. An API client, an agent or an importer that checks
+                 * `Success` and reads `Issues` saw `Success: true` and an empty array on a close whose
+                 * contract had been declined.
+                 *
+                 * Measured before the fix: `DEAL-9003` is a renewal with no `RenewsContractID`, the seam
+                 * declined with exactly that reason, and the envelope reported unqualified success.
+                 *
+                 * ── BOTH HALVES ARE ASSERTED, AND THE SECOND IS THE POINT ────────────────────────────
+                 *
+                 * The obvious regression is the warning going missing. The DANGEROUS one is the opposite:
+                 * somebody reads a warning-severity Issue as a defect and "fixes" it by failing the close.
+                 * That would trade a recorded win for an unrecorded one over a contract that legitimately
+                 * could not be derived — a renewal with no parent, or a subscription route still waiting on
+                 * orders' C0. So `Success` staying true is asserted as loudly as the warning appearing, and
+                 * the same for the deal actually being won in the database.
+                 *
+                 * Uses the stub seam for the same reason CD7 does: on a host where the siblings ARE
+                 * reachable the route would execute, and a check about refusals would have nothing to
+                 * observe.
+                 */
+                const previousSeam = SetDownstreamSeam(new StubDownstreamSeam());
+                try {
+                    const f = await ResolveSalesFixture(ctx);
+                    const dealID = await openDeal(
+                        ctx, f, f.ContractPolicyPipelineID, f.ContractPolicyStageID,
+                        'CD23 refusal is a warning', twoInstalments(),
+                    );
+
+                    const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+
+                    const refused = out.Routing.filter((r) => r.Planned === true && r.Executed !== true);
+                    Assert(
+                        refused.length > 0,
+                        'setup: the stub seam must refuse at least one planned route, or this check has '
+                            + 'nothing to assert about',
+                    );
+
+                    // ── half one: the warning is there, and it carries the reason ──────────────────
+                    const warnings = (out.Issues ?? []).filter((i) => i.Severity === 'warning');
+                    Assert(
+                        warnings.length >= refused.length,
+                        `each refused route owes one warning Issue — ${refused.length} refused, `
+                            + `${warnings.length} warning(s) in Issues: ${JSON.stringify(out.Issues)}`,
+                    );
+                    for (const r of refused) {
+                        const carried = warnings.find((w) => w.Message.includes(r.Target));
+                        Assert(
+                            !!carried,
+                            `${r.Target} was refused and no Issue names it — a caller reading Issues alone `
+                                + 'still cannot tell',
+                        );
+                        Assert(
+                            typeof r.Reason === 'string' && carried!.Message.includes(r.Reason as string),
+                            `the Issue for ${r.Target} must carry the SAME reason Routing gives, or the two `
+                                + `channels can drift: Routing said "${r.Reason}", Issues said `
+                                + `"${carried!.Message}"`,
+                        );
+                    }
+
+                    // ── half two: none of that failed the close ────────────────────────────────────
+                    Assert(
+                        out.Success,
+                        'A REFUSED DOWNSTREAM ROUTE MUST NOT FAIL A WON DEAL. If this line is red because '
+                            + 'somebody made refusals fatal, that is the regression this check exists for — '
+                            + 'the deal is won, the status is written and the order is intact; rolling that '
+                            + 'back over a contract that could not be derived is the wrong trade.',
+                    );
+                    AssertEqual(
+                        (out.Issues ?? []).filter((i) => i.Severity === 'error').length, 0,
+                        'and a refusal is a warning, never an error',
+                    );
+                    Assert(out.IsWon, 'the outcome is still a win');
+
+                    const row = await TxOne<{ DealStatusTypeID: string | null; ActualCloseDate: string | null }>(
+                        ctx, `SELECT DealStatusTypeID, ActualCloseDate FROM ${SALES_SCHEMA}.Deal `
+                            + `WHERE ID = '${dealID}'`,
+                    );
+                    AssertEqual(
+                        String(row.DealStatusTypeID).toLowerCase(), String(f.WonStatusID).toLowerCase(),
+                        'and the DATABASE agrees the deal is won — the warning did not roll anything back',
+                    );
+                    Assert(!!row.ActualCloseDate, 'the close date was written');
+                } finally {
+                    SetDownstreamSeam(previousSeam);
+                }
+            }),
+    },
+    {
         Id: 'close-deal.CD7',
         Name: 'CD7: a stubbed downstream reports Executed:false WITH a reason, and fabricates no ID',
         RequiresMutation: true,

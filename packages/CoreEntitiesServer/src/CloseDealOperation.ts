@@ -118,6 +118,47 @@ function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
 }
 
 /**
+ * A planned downstream route that did NOT execute, as a warning Issue.
+ *
+ * ── WHY THIS EXISTS WHEN `Routing` ALREADY CARRIES THE REASON ───────────────────────────────────
+ *
+ * It carries it for anyone who reads `Routing`. The workspace does — `deal-workspace.component.html`
+ * renders `— not created: {{ r.Reason }}` on a `--failed` row — so a REP closing a deal already sees
+ * the refusal and why. That surface is fine and is not what this is for.
+ *
+ * The gap is programmatic. An API client, an agent or an importer that checks `Success` and reads
+ * `Issues` — the two fields every other failure mode in this operation reports through — sees
+ * `Success: true` and an EMPTY `Issues` array on a close whose contract was refused. Measured on this
+ * host: `DEAL-9003` is a renewal with no `RenewsContractID`, the seam declined with a clear reason, and
+ * the envelope reported unqualified success. Nothing was wrong with the close; everything was wrong
+ * with how a non-browser caller would have read it.
+ *
+ * ── SEVERITY IS `warning`, AND `Success` IS DELIBERATELY UNTOUCHED ──────────────────────────────
+ *
+ * A refused downstream route must not fail a won deal. The deal IS won: the status is written, the
+ * stage event is stamped, the order is intact. Rolling that back because a contract could not be
+ * derived would trade a recorded win for an unrecorded one, and the refusals are the expected cases —
+ * a renewal with no parent contract, a subscription route waiting on orders' C0.
+ *
+ * So this is the same shape as {@link orderStatusIssues} one function above, for the same reason: the
+ * thing must be loud without being fatal. `close-deal.CD23` pins BOTH halves, because the regression to
+ * fear is not the warning disappearing — it is somebody reading a warning as a bug and "fixing" it by
+ * failing the close.
+ */
+function routingIssues(routing: readonly SalesCloseRoutingResult[]): SalesCloseIssue[] {
+    return routing
+        .filter((r) => r.Planned === true && r.Executed !== true)
+        .map((r) => ({
+            Section: 'deal' as const,
+            Field: null,
+            Severity: 'warning' as const,
+            // Worded to match what the workspace shows, so a rep reading the screen and an agent
+            // reading the envelope are quoting the same sentence back at each other.
+            Message: `${r.Target} was planned but not created: ${r.Reason ?? 'no reason given'}`,
+        }));
+}
+
+/**
  * The seam the close flow calls downstream.
  *
  * A module-level default rather than a constructor argument because remote operations are built by the
@@ -285,9 +326,11 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
 
             if (input.PreviewOnly) {
                 // Nothing written, nothing locked — the caller just wanted to see the consequences.
+                // A refusal IS one of those consequences, so the preview reports it too: a caller that
+                // previews before closing should not learn about it only after committing.
                 return {
                     Success: true,
-                    Issues: [],
+                    Issues: routingIssues(routing),
                     IsWon: target.IsWon,
                     IsLost: target.IsLost,
                     Locked: false,
@@ -446,7 +489,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  * written inside `deal.Save()` a few lines further down. So a reader of the array reads
                  * the close in sequence, which is the only ordering that means anything here.
                  */
-                Issues: [...taskIssues, ...orderStatusIssues(deal)],
+                Issues: [...taskIssues, ...orderStatusIssues(deal), ...routingIssues(routing)],
                 IsWon: target.IsWon,
                 IsLost: target.IsLost,
                 Locked: target.LocksDeal,
