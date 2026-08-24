@@ -75,6 +75,22 @@ test.describe('KI-20 tripwire — removing an order line through the UI', () => 
         await page.waitForTimeout(600);
 
         /**
+         * CAPTURED HERE, BEFORE THE SAVE, AND THAT ORDERING IS THE REPAIR.
+         *
+         * The decline is held in the component as a Set keyed on the LINE OBJECT. A save reloads the
+         * deal, the line objects are new instances, nothing in the Set matches a current row any more,
+         * and the issue stops rendering. So reading it after `SaveDeal` -- which is where this spec read
+         * it -- can only ever see an empty list, whatever the guard did.
+         *
+         * That is not a bug in the guard: once the save has happened there is nothing outstanding to
+         * warn about. It does mean the gesture-level decline is only observable between the click and
+         * the save, which is exactly where a rep sees it too.
+         */
+        const declined = (await page.locator('.dw-issues li:visible, .dw-field-error:visible')
+            .allTextContents())
+            .map((t) => t.replace(/\s+/g, ' ').trim());
+
+        /**
          * THE UI'S OWN CLAIM, ASSERTED FIRST. The grid drops to one row and the save succeeds — that is
          * what makes the defect dangerous rather than merely broken. A rep sees exactly what success
          * looks like.
@@ -95,7 +111,10 @@ test.describe('KI-20 tripwire — removing an order line through the UI', () => 
         const reported = (await page.locator('.dw-msg:visible, .dw-issues li:visible, .dw-field-error:visible')
             .allTextContents())
             .map((t) => t.replace(/\s+/g, ' ').trim())
-            .filter((t) => /could not|failed|error/i.test(t));
+            // WIDENED to include 'cannot'. The interim's decline reads "This line is already saved and
+            // cannot be removed yet" -- no 'could not', no 'failed', no 'error' -- so the old filter
+            // dropped the very message this spec now exists to see, and `reported` came back empty.
+            .filter((t) => /could not|cannot|failed|error|refused|declined/i.test(t));
 
         /**
          * ── KI-20'S SYMPTOM HAS CHANGED: IT IS NO LONGER SILENT ─────────────────────────────────────
@@ -119,11 +138,33 @@ test.describe('KI-20 tripwire — removing an order line through the UI', () => 
          * silent. But it means a rep cannot remove a line at all, and it is still orders' to fix.
          * Asserted as it is, so that this spec goes red the day the behaviour changes in either direction.
          */
+        /**
+         * ── THE TRIPWIRE FIRED, AND THIS IS IT BEING ANSWERED ───────────────────────────────────
+         *
+         * It asserted a `UQ_OrderLine_OrderHeader_LineNumber` violation and said, correctly, that if
+         * that stopped being true the behaviour had changed and KI-20 needed re-reading. It has
+         * changed: the KI-20 interim declines a saved line's removal AT THE GESTURE, so the database
+         * is never reached and there is no constraint name to see. `reported` came back empty.
+         *
+         * The underlying limit is unchanged -- a saved line still cannot be removed -- so the tripwire
+         * is still worth having. What moved is WHERE it is refused, and the difference is the whole
+         * point of the interim: a rep now reads a sentence about the line instead of a constraint name.
+         *
+         * Asserted on the gesture-level decline, and still in both directions: this goes red if the
+         * decline disappears (removal silently allowed) AND if a raw constraint name ever reappears,
+         * which would mean the gesture-level guard had been bypassed.
+         */
+        expect(
+            declined.some((m) => /already saved and cannot be removed/i.test(m)),
+            'a saved line must have its removal declined at the GESTURE, with a sentence a rep can read '
+                + `— KI-20's interim moved this off the database. Saw: ${JSON.stringify(declined).slice(0, 300)}`,
+        ).toBe(true);
+
         expect(
             reported.some((m) => /UQ_OrderLine_OrderHeader_LineNumber/i.test(m)),
-            'the removal is now refused with a LineNumber uniqueness violation — if this stopped being ' +
-                `true, orders' line handling changed and KI-20 needs re-reading. Saw: ${JSON.stringify(reported).slice(0, 300)}`,
-        ).toBe(true);
+            'and NO raw constraint name should surface any more — one here means the gesture-level '
+                + 'decline was bypassed and the save reached the database after all',
+        ).toBe(false);
 
         // ── THE DATABASE, which disagrees ───────────────────────────────────
         const after = await QueryAll<{ ID: string; LineNumber: number }>(
