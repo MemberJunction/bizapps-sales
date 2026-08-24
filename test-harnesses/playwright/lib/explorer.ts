@@ -248,13 +248,46 @@ export async function closeRestoredRecordTabs(page: Page): Promise<number> {
 }
 
 /** Navigate into the generated Sales application. */
+/**
+ * Waits for the app to have actually RENDERED, rather than for a number of seconds.
+ *
+ * ── THE ORDER-DEPENDENCE THIS FIXES, MEASURED ───────────────────────────────────────────────────
+ *
+ * `openSalesApp` slept a fixed 4000ms. On a COLD app that is not enough: measured on this host, at 4s
+ * the entity panel has not rendered at all — `Deals` matches ZERO nodes — and by 8s it is there and
+ * visible. `openAllEntities` then found no panel, fell through to its chevron fallback, clicked
+ * whatever that matched, and the entity was never listed. The spec reported
+ * `entity "Deals" must be listed in the app`, which points at the app rather than at the clock.
+ *
+ * In-suite the app is warm from earlier specs, so 4s was enough and the same specs got past the list.
+ * That is the whole of the standalone-versus-in-suite divergence in 10, 20 and 30 — one fixed sleep
+ * sitting where a condition belonged.
+ *
+ * A fixed sleep is always either too short somewhere or wasted everywhere; this waits for the thing
+ * itself and returns as soon as it appears, so the warm case does not pay for the cold one.
+ */
+async function waitForSalesAppShell(page: Page): Promise<void> {
+  // Either the entity panel (the usual landing) or a grid heading — the landing screen VARIES with
+  // what was last visited, which is why this accepts both rather than demanding one.
+  const panel = page.getByText(/entities available|All Entities|My Favorites/i).first();
+  const grid = page.locator('h1, h2, .entity-title').first();
+  await expect
+    .poll(async () => (await panel.count()) > 0 || (await grid.count()) > 0, {
+      timeout: 30_000,
+      message:
+        'the generated Sales application never rendered its landing — neither the entity panel nor a '
+        + 'grid heading appeared within 30s',
+    })
+    .toBe(true);
+}
+
 export async function openSalesApp(page: Page): Promise<void> {
   await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(4000);
+  await waitForSalesAppShell(page);
   // Restored tabs hijack the landing — see closeRestoredRecordTabs. Clear them, then re-enter the app.
   if (await closeRestoredRecordTabs(page)) {
     await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(3000);
+    await waitForSalesAppShell(page);
   }
   expect(page.url(), 'should be inside the generated Sales application').toContain('mjbizappssales');
 }

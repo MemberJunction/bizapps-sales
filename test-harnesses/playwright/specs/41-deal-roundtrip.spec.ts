@@ -304,49 +304,92 @@ test.describe('deal workspace — the related-record-collection round trip', () 
         });
 
         // ── 3. Explicit removal ─────────────────────────────────────────────────
-        await test.step('removing a line and saving DELETES it', async () => {
+        await test.step('removing an UNSAVED line and saving never writes it', async () => {
+            /**
+             * ── RETARGETED ONTO AN UNSAVED LINE, BECAUSE A SAVED ONE CANNOT BE REMOVED ───────────
+             *
+             * This removed one of the two lines the previous steps had already saved. KI-20's interim
+             * (35a0f4d) declines a SAVED line's removal at the gesture, so the row stayed and the grid
+             * showed 2 where this expected 1. The interim is right and this spec's premise expired with
+             * it — `78-line-removal-tripwire` now asserts that refusal positively.
+             *
+             * An unsaved line is the only removable kind while the interim stands, so the removal moves
+             * there. What 41 exists to prove is unchanged and still proved: that the delete affordance
+             * calls `Remove()` on the collection rather than splicing `Items`.
+             *
+             * THE RE-READ IS STILL WHAT TELLS THEM APART, which is why this is not weaker than the old
+             * version. A splice would take the row off the screen exactly as `Remove()` does — but the
+             * collection would still be holding it, the save would write it, and the re-open in the next
+             * step would show THREE lines. Only the round trip can distinguish "removed" from "hidden".
+             *
+             * Handing removal entirely to 78 would have lost this: 78 covers the REFUSAL, which is a
+             * different claim from the collection semantics.
+             */
             await openPane(page, 'Product lines');
-            // Located by INPUT VALUE, not by `hasText` — see `lineNames` for why a text filter cannot
-            // see a product name at all.
-            const before = await lineNames(page);
-            const doomedRow = before.indexOf(lineProducts[1]);
-            expect(doomedRow, 'the line to remove must be present').toBeGreaterThanOrEqual(0);
+            await expect(page.locator('.dw-table tbody tr'), 'the two saved lines are the starting point')
+                .toHaveCount(2, { timeout: 20_000 });
 
-            // Targeted by TITLE, not by position. A line row now carries TWO icon buttons — open-detail
-            // and remove — so `.dw-iconbtn.first()` silently became "open the slide-in", the removal never
+            const addLine = page.locator('.dw-addbtn', { hasText: 'Add line' }).first();
+            await addLine.click();
+            await page.waitForTimeout(400);
+
+            const rows = page.locator('.dw-table tbody tr');
+            await expect(rows, 'a third, UNSAVED line is added to be removed').toHaveCount(3, { timeout: 10_000 });
+
+            /**
+             * The new row is given a product and a quantity before it is removed, deliberately.
+             *
+             * An unlinked line blocks the save ("Choose a product for this line"), and a null quantity
+             * blocks it too — so an incomplete row that is then removed would prove nothing about the
+             * removal, because the save it survives would have been blocked anyway. Filling it first
+             * means the save afterwards is one the row could have travelled on.
+             */
+            const fresh = rows.nth(2);
+            await fresh.locator('select.dw-cell-product').selectOption({ index: 1 });
+            await fresh.locator('td.dw-num input[type="number"]').first().fill('7');
+            await page.waitForTimeout(300);
+
+            // Targeted by TITLE, not by position. A line row carries TWO icon buttons — open-detail and
+            // remove — so `.dw-iconbtn.first()` silently became "open the slide-in", the removal never
             // happened, and the failure surfaced one assertion later as a wrong row count. A positional
             // selector says "wherever it happens to be"; this says which control.
-            await page.locator('.dw-table tbody tr').nth(doomedRow)
-                .locator('.dw-iconbtn[title="Remove this line"]').click();
+            await fresh.locator('.dw-iconbtn[title="Remove this line"]').click();
             await page.waitForTimeout(600);
 
-            await expect(page.locator('.dw-table tbody tr'), 'the grid must show one line after the removal')
-                .toHaveCount(1, { timeout: 10_000 });
+            await expect(rows, 'the grid must drop back to the two saved lines').toHaveCount(2, { timeout: 10_000 });
 
-            await saveDeal(page, 'the save after removing a line');
+            await saveDeal(page, 'the save after removing an unsaved line');
             await shot(page, '41-05-removed');
         });
 
-        await test.step('and the removal SURVIVES a re-open', async () => {
+        await test.step('and the removed line was NEVER WRITTEN', async () => {
             /**
-             * The point of the whole step. Removal is explicit now: the collection deletes only what was
-             * passed to `Remove()`. If a delete affordance were ever wired to a splice on `Items` instead,
-             * the row would disappear from the screen exactly as it does above — and reappear here,
-             * because it was never deleted. Only the re-read can tell the two apart.
+             * The point of the whole step, and the reason the count is the assertion.
+             *
+             * Removal is explicit: the collection deletes only what was passed to `Remove()`. Wire the
+             * delete affordance to a splice on `Items` instead and the row leaves the screen exactly as
+             * it does above — but the collection still holds it, the save writes it, and THREE lines come
+             * back here. Only the re-read separates "removed" from "hidden", and the row count is what
+             * carries that, because the third line may legitimately reference the same product as one of
+             * the survivors on a two-product catalogue.
              */
             await reopenFromRoster(page);
             await openPane(page, 'Product lines');
 
             const rows = page.locator('.dw-table tbody tr');
-            await expect(rows, 'exactly one line must remain after the re-read').toHaveCount(1, { timeout: 20_000 });
+            await expect(
+                rows,
+                'exactly the two saved lines must come back — a third means the removal only hid the row',
+            ).toHaveCount(2, { timeout: 20_000 });
 
             const names = await lineNames(page);
-            expect(names, 'the kept line survived').toContain(lineProducts[0]);
-            expect(names, 'the removed line must be GONE from the database, not just from the screen')
-                .not.toContain(lineProducts[1]);
+            expect(names, 'the first saved line survived').toContain(lineProducts[0]);
+            expect(names, 'the second saved line survived').toContain(lineProducts[1]);
 
-            await expect(page.locator('.dw-table tbody tr').first().locator('input').nth(1), 'and it kept its quantity')
-                .toHaveValue('100');
+            await expect(
+                rows.first().locator('td.dw-num input[type="number"]').first(),
+                'and the kept line held its quantity through the round trip',
+            ).toHaveValue('100');
             await shot(page, '41-06-removal-survived');
         });
 
