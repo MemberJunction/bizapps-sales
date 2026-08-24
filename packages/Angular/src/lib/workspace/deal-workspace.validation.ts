@@ -218,6 +218,54 @@ export function DiscountRefusalIssues(
 }
 
 /**
+ * A line that has not been given a product yet, as a blocking issue on its own row.
+ *
+ * ── WHY VALIDATION AND NOT REMOVING THE PICKER'S "not linked" OPTION ────────────────────────────
+ *
+ * Both were on the table and they answer different questions. Removing the option asserts that "not
+ * linked" was never a legal state; validating asserts it is a state you can be in briefly and cannot
+ * save. **The second one is true, and the code says so plainly:** `AddLine()` calls
+ * `order.Lines.Create()` and sets `CompanyID` and nothing else — it never touches `ProductID`. So a
+ * line is unlinked from the instant the rep clicks Add, before the picker has been opened at all.
+ *
+ * Removing the option therefore would not remove the state. It would only remove the ability to SEE
+ * it: an Angular `<select>` whose model matches no option renders an implicit blank, so the rep would
+ * get an empty dropdown with no label saying why, on a row that still cannot be saved. That is a worse
+ * screen and the same defect.
+ *
+ * ── AND WHY IT IS AN ERROR RATHER THAN A WARNING ────────────────────────────────────────────────
+ *
+ * `OrderLine.ProductID` is `UNIQUEIDENTIFIER NOT NULL` with a real FK. The save does not merely
+ * misbehave without it — the database refuses the whole statement, and the rep gets a constraint name.
+ * That is the KI-20 shape: an ordinary gesture answered by raw SQL. Blocking here means the Save button
+ * is disabled with the reason on the row, which is the same trade the refused-discount fix made one
+ * function above.
+ *
+ * Note this is deliberately NOT a check on whether the product is still SELLABLE. A line quoted before
+ * a product was withdrawn keeps a valid `ProductID` and must stay saveable; `ProductLabel()` marks it
+ * "(no longer offered)" and that is a hint, not a block. The two rules look adjacent and are opposites:
+ * one is about a value being absent, the other about a value being old.
+ */
+export function UnlinkedLineIssues(
+    lines: readonly { ProductID?: string | null }[],
+): DealWorkspaceIssue[] {
+    const issues: DealWorkspaceIssue[] = [];
+    lines.forEach((line, index) => {
+        if (!line?.ProductID) {
+            issues.push({
+                Section: 'lines' as DealWorkspaceSection,
+                Field: 'ProductID',
+                RowIndex: index,
+                Severity: 'error' as const,
+                Message: 'Choose a product for this line. A line without one cannot be saved.',
+            });
+        }
+    });
+    return issues;
+}
+
+
+/**
  * Combines the entity's own verdict with warnings and with issues that must BLOCK the save.
  *
  * The component used to assemble this inline as `IsValid: entity.IsValid`, with a comment explaining

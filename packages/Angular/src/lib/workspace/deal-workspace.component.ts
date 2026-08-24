@@ -88,6 +88,7 @@ import type { ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
     EmptyValidation,
     DiscountRefusalIssues,
+    UnlinkedLineIssues,
     MergeValidation,
     ProjectValidation,
     type DealWorkspaceIssue,
@@ -1713,7 +1714,22 @@ export class DealWorkspaceComponent implements OnInit {
             return { RowIndex: at >= 0 ? at : null, Reason };
         });
 
-        this.Validation = MergeValidation(entity, advisories, DiscountRefusalIssues(refusals));
+        /**
+         * AND A LINE WITH NO PRODUCT BLOCKS TOO, for the KI-20 reason rather than a stylistic one.
+         *
+         * `OrderLine.ProductID` is NOT NULL with a real FK, so saving an unlinked line does not degrade
+         * — it is refused by the database, and the rep reads a constraint name for having clicked Add
+         * and then Save. `AddLine()` never sets `ProductID`, so that is the state EVERY new line starts
+         * in: the most ordinary gesture in the pane led straight to a raw SQL error.
+         *
+         * Blocking here turns it into a disabled Save with the reason on the row, and leaves the
+         * picker's "not linked" option in place — it is the only thing that labels the state a new line
+         * is already in. See `UnlinkedLineIssues` for why the option was kept rather than removed.
+         */
+        this.Validation = MergeValidation(entity, advisories, [
+            ...DiscountRefusalIssues(refusals),
+            ...UnlinkedLineIssues(lines),
+        ]);
         this.cdr.detectChanges();
     }
 

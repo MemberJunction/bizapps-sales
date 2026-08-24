@@ -31,6 +31,7 @@ import {
     DiscountRefusalIssues,
     MergeValidation,
     ProjectValidation,
+    UnlinkedLineIssues,
 } from '../packages/Angular/dist/lib/workspace/deal-workspace.validation.js';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
@@ -186,6 +187,69 @@ console.log('\n  one writer for the stage defaults\n');
             ].join('\n'),
         );
     }
+}
+
+
+/**
+ * ── A LINE WITH NO PRODUCT: THE THIRD DEFECT OF THE SAME SHAPE ──────────────────────────────────
+ *
+ * `OrderLine.ProductID` is `UNIQUEIDENTIFIER NOT NULL` with a real FK — verified in orders' migration
+ * and on the host, where 0 of 63 lines carry a null. `AddLine()` calls `order.Lines.Create()`, sets
+ * `CompanyID`, and never touches `ProductID`. So the most ordinary gesture in the pane — click Add,
+ * click Save — put a null into a NOT NULL column and answered the rep with a database constraint name.
+ *
+ * That is the KI-20 shape exactly: a normal action, a raw SQL error, and nothing on screen that says
+ * which row or why. It blocks now, attributed to the line.
+ *
+ * WHY THESE ASSERTIONS AND NOT A REMOVED PICKER OPTION. Removing `— not linked —` would assert the
+ * state was never legal. It is: a new line is unlinked before the picker is ever opened, so removing
+ * the option only removes the LABEL for a state the rep is already in, leaving a blank select on an
+ * unsaveable row. The option stays (relabelled to an instruction) and the save is refused instead.
+ *
+ * These assertions still matter if somebody removes the option later — they are about the refusal, not
+ * about the dropdown, and they would go red the day the block is dropped either way.
+ */
+console.log('\n  a line with no product blocks the save, on its own row\n');
+{
+    const issues = UnlinkedLineIssues([{ ProductID: null }]);
+    ok('one unlinked line yields exactly one issue', issues.length, 1);
+    ok('attributed to the LINES pane, not the default one', issues[0]?.Section, 'lines');
+    ok('and to the field that owns it', issues[0]?.Field, 'ProductID');
+    ok('and to the ROW, so the grid can mark it', issues[0]?.RowIndex, 0);
+    ok('as an ERROR — a NOT NULL column is not an advisory', issues[0]?.Severity, 'error');
+    // The message is what a rep reads INSTEAD of a constraint name, so it is asserted for content
+    // rather than mere presence: it must say what to do and must not leak SQL.
+    const msg = String(issues[0]?.Message ?? '');
+    ok('the message tells the rep what to do', /choose a product/i.test(msg), true);
+    ok('and names no constraint, table or column', /FK_|NOT NULL|OrderLine|ProductID/.test(msg), false);
+}
+
+{
+    // The row index is the whole point of attribution: the SECOND line's issue must not land on the first.
+    const issues = UnlinkedLineIssues([{ ProductID: 'p1' }, { ProductID: null }, { ProductID: 'p3' }]);
+    ok('only the unlinked line is flagged', issues.length, 1);
+    ok('and it is flagged at ITS index, not the first', issues[0]?.RowIndex, 1);
+}
+
+{
+    const issues = UnlinkedLineIssues([{ ProductID: 'p1' }, { ProductID: 'p2' }]);
+    ok('a fully linked order raises nothing', issues.length, 0);
+    // Empty string and undefined are the same absence as null -- a picker that writes '' would
+    // otherwise slip through and hit the same constraint.
+    ok('an empty-string product is still unlinked', UnlinkedLineIssues([{ ProductID: '' }]).length, 1);
+    ok('an absent product key is still unlinked', UnlinkedLineIssues([{}]).length, 1);
+}
+
+{
+    // And that it actually reaches IsValid, which is what CanSave reads. The refused-discount defect
+    // was exactly this: an issue the template rendered and the save never consulted.
+    const merged = MergeValidation(
+        { IsValid: true, Issues: [] }, [], UnlinkedLineIssues([{ ProductID: null }]),
+    );
+    ok('an unlinked line makes the projection invalid', merged.IsValid, false);
+    ok('and the issue survives the merge', merged.Issues.length, 1);
+    const clean = MergeValidation({ IsValid: true, Issues: [] }, [], UnlinkedLineIssues([{ ProductID: 'p' }]));
+    ok('a linked line leaves it valid', clean.IsValid, true);
 }
 
 console.log(

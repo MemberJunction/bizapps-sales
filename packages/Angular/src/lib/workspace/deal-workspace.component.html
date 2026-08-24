@@ -404,7 +404,12 @@
                         <select class="dw-cell-product" [ngModel]="line.ProductID"
                                 (ngModelChange)="OnProductChange(line, $event)"
                                 [title]="ProductLabel(line)">
-                          <option [ngValue]="null">— not linked —</option>
+                          <!-- KEPT, and it is not a choice: AddLine() never sets ProductID, so
+                               every new line is already in this state and this option is the only
+                               thing that labels it. Removing it would render a blank select on a
+                               row that still cannot be saved. The save is blocked instead --
+                               see UnlinkedLineIssues. -->
+                          <option [ngValue]="null">— choose a product —</option>
                           @for (p of Products; track p.ID) {
                             <option [ngValue]="p.ID">{{ p.SKU ? p.Name + ' (' + p.SKU + ')' : p.Name }}</option>
                           }
