@@ -460,6 +460,25 @@ const MUTATIONS = [
       to: 'StandardAgreementModified: false,',
       note: 'the close reports the flag as false regardless of what the deal says' },
 
+    // CD23's two mutants, one per half, because the check makes two independent claims and a single
+    // mutant that felled both would not tell you which one was load-bearing.
+
+    // Half one: the warning stops reaching Issues. Routing still carries the reason, the workspace still
+    // renders it, and a programmatic caller is blind again -- which is exactly the state before the fix.
+    { id: 'M-RI1', file: CDO, expect: ['CD23'],
+      from: 'Issues: [...taskIssues, ...orderStatusIssues(deal), ...routingIssues(routing)],',
+      to: 'Issues: [...taskIssues, ...orderStatusIssues(deal)],',
+      note: 'a refused downstream route is reported in Routing only, so a caller reading Success and Issues sees unqualified success' },
+
+    // Half two: THE ONE THAT MATTERS. Somebody reads a warning-severity Issue as a defect and "fixes" it
+    // by failing the close. The deal is won, the status is written, the order is intact -- and the whole
+    // thing rolls back over a contract that legitimately could not be derived. CD23 asserts Success as
+    // loudly as it asserts the warning, and this proves that half is live rather than decorative.
+    { id: 'M-RI2', file: CDO, expect: ['CD23'],
+      from: '                Success: true,\n                /**\n                 * TWO SOURCES OF NON-FATAL WARNINGS, ONE FIELD, AND A STATED ORDER.',
+      to: '                Success: routingIssues(routing).length === 0,\n                /**\n                 * TWO SOURCES OF NON-FATAL WARNINGS, ONE FIELD, AND A STATED ORDER.',
+      note: 'a refused route now FAILS the close -- the regression CD23 exists to catch, not the warning going missing' },
+
     // ══ activities · AC1-AC22 ═════════════════════════════════════════════════════════════════
     //
     // The ingest is a four-stage pipeline behind a source seam -- fetch, filter for relevance, match a
