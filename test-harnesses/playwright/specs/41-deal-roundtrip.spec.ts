@@ -44,8 +44,14 @@ const EXECUTION_DATE = '2026-09-15';
 const EXPECTED_CLOSE = '2026-11-20';
 const INSTALMENT_DATE = '2026-10-01';
 
-const LINE_KEEP = `${RUN_TAG} Platform seats`;
-const LINE_DOOMED = `${RUN_TAG} Onboarding`;
+/**
+ * The two products this run picks, captured as it picks them.
+ *
+ * These were fixed strings typed into a line's name field. An OrderLine has no name -- its identity
+ * is the product it references -- so they cannot be decided in advance: the catalogue decides, and
+ * the spec records what it chose. Index 0 is the line kept, index 1 the line removed.
+ */
+const lineProducts: string[] = [];
 
 type Page = import('@playwright/test').Page;
 
@@ -104,7 +110,8 @@ async function lineNames(page: Page): Promise<string[]> {
     const rows = page.locator('.dw-table tbody tr');
     const names: string[] = [];
     for (let i = 0; i < (await rows.count()); i++) {
-        names.push((await rows.nth(i).locator('input').first().inputValue()).trim());
+        // The PRODUCT, not a typed name: an OrderLine carries no free text of its own.
+        names.push((await rows.nth(i).locator('select.dw-cell-product option:checked').innerText()).trim());
     }
     return names;
 }
@@ -207,10 +214,27 @@ test.describe('deal workspace — the related-record-collection round trip', () 
 
             const rows = page.locator('.dw-table tbody tr');
             await expect(rows, 'two line rows must exist').toHaveCount(2, { timeout: 10_000 });
-            for (const [i, name] of [LINE_KEEP, LINE_DOOMED].entries()) {
-                const inputs = rows.nth(i).locator('input');
-                await inputs.nth(0).fill(name);
-                await inputs.nth(1).fill(i === 0 ? '100' : '1');
+            /**
+             * ── REWRITTEN AGAINST THE ORDER-LINE GRID ────────────────────────────────────────────
+             *
+             * This typed a line NAME into the first input and a quantity into the second. That was the
+             * DealLine grid; Andrew descoped DealLine this morning (issues #36–#39 closed as not
+             * planned — "An embedded Order record will store products and prices associated with the
+             * deal"), which is D-DL1 (:461) reached from the product side.
+             *
+             * An OrderLine row is product picker, quantity, read-only unit price, read-only line total,
+             * discount percent — so the first input is a NUMBER and the old loop failed with "Cannot
+             * type text into input[type=number]".
+             *
+             * A line's identity is now the product it references, so lineProducts[0] / lineProducts[1] become the
+             * two product LABELS this run picked, captured here and asserted downstream.
+             */
+            for (const i of [0, 1]) {
+                const picker = rows.nth(i).locator('select.dw-cell-product');
+                await picker.selectOption({ index: i + 1 });   // 0 is the "choose a product" placeholder
+                lineProducts.push((await picker.locator('option:checked').innerText()).trim());
+                await rows.nth(i).locator('td.dw-num input[type="number"]').first()
+                    .fill(i === 0 ? '100' : '1');
                 await page.waitForTimeout(200);
             }
 
@@ -241,8 +265,8 @@ test.describe('deal workspace — the related-record-collection round trip', () 
                 .toHaveCount(2, { timeout: 20_000 });
 
             const names = await lineNames(page);
-            expect(names, 'the kept line must read back with its name').toContain(LINE_KEEP);
-            expect(names, 'the second line must read back with its name').toContain(LINE_DOOMED);
+            expect(names, 'the kept line must read back with its name').toContain(lineProducts[0]);
+            expect(names, 'the second line must read back with its name').toContain(lineProducts[1]);
             await shot(page, '41-03-reopened-lines');
         });
 
@@ -285,7 +309,7 @@ test.describe('deal workspace — the related-record-collection round trip', () 
             // Located by INPUT VALUE, not by `hasText` — see `lineNames` for why a text filter cannot
             // see a product name at all.
             const before = await lineNames(page);
-            const doomedRow = before.indexOf(LINE_DOOMED);
+            const doomedRow = before.indexOf(lineProducts[1]);
             expect(doomedRow, 'the line to remove must be present').toBeGreaterThanOrEqual(0);
 
             // Targeted by TITLE, not by position. A line row now carries TWO icon buttons — open-detail
@@ -317,9 +341,9 @@ test.describe('deal workspace — the related-record-collection round trip', () 
             await expect(rows, 'exactly one line must remain after the re-read').toHaveCount(1, { timeout: 20_000 });
 
             const names = await lineNames(page);
-            expect(names, 'the kept line survived').toContain(LINE_KEEP);
+            expect(names, 'the kept line survived').toContain(lineProducts[0]);
             expect(names, 'the removed line must be GONE from the database, not just from the screen')
-                .not.toContain(LINE_DOOMED);
+                .not.toContain(lineProducts[1]);
 
             await expect(page.locator('.dw-table tbody tr').first().locator('input').nth(1), 'and it kept its quantity')
                 .toHaveValue('100');
