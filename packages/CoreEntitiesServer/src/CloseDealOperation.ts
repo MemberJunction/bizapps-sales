@@ -31,6 +31,17 @@ import {
     UserInfo,
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
+
+/**
+ * ORDERS' OWN PREDICATE, imported rather than restated -- the same reason
+ * `DealEntityServer` imports `CanTransition` from this module.
+ *
+ * `IsBooked` is `Confirmed | Posted | Fulfilled`, and orders documents it as "journal entries
+ * exist and the receivable is real". Writing `status === 'Confirmed'` here instead would be a
+ * vocabulary string-comparison against ANOTHER APP'S words -- exactly what the vocabulary gate
+ * exists to catch -- and it would also be wrong twice over. See the refusal below.
+ */
+import { IsBooked } from '@mj-biz-apps/orders-entities';
 import {
     SalesCloseDealOperation as SalesCloseDealOperationBase,
     SalesReopenDealOperation as SalesReopenDealOperationBase,
@@ -999,6 +1010,63 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
                 return {
                     ...empty,
                     Issues: [issue('deal', 'Cannot reopen into a status that locks the deal.', 'DealStatusTypeID')],
+                };
+            }
+
+            /**
+             * ── DN-20: A BOOKED ORDER REFUSES THE REOPEN OUTRIGHT ───────────────────────────────
+             *
+             * Raised by Finance. Until now a reopen succeeded whatever state the order was in: it
+             * restored the prior stage and reported what the order refused. That is not enough once the
+             * order has BOOKED, because the ledger has moved -- the correct instrument is then an
+             * order-side one, and editing the deal behind a live receivable is not it.
+             *
+             * ── WHY `IsBooked` AND NOT THE TWO OBVIOUS TESTS ────────────────────────────────────
+             *
+             * Both alternatives are wrong, in opposite directions, and the data on the host showed it:
+             *
+             *   `Status === 'Confirmed'` UNDER-blocks. The lifecycle runs on to `Posted` and then
+             *   `Fulfilled`, so an equality test lets through precisely the orders whose ledger has
+             *   moved FURTHEST. It is also a string comparison against orders' vocabulary, which is the
+             *   shape rule two forbids.
+             *
+             *   `ConfirmedAt IS NOT NULL` OVER-blocks. That column is a timestamp, and an order that was
+             *   confirmed and later VOIDED keeps it forever. Refusing there would block the one case
+             *   where the ledger has been SETTLED: orders records a reversal as its own record (D53), so
+             *   a voided order is not a live receivable and the deal behind it is safe to reopen.
+             *
+             * `IsBooked` is the only one of the three that means "the ledger currently stands", and it
+             * gives the confirmed-then-voided case the right answer for free -- `IsBooked('Voided')` is
+             * false. The two directions are the point: a later "simplification" to
+             * `status === 'Confirmed'` breaks both, and `close-deal.CD23` exists to catch that.
+             *
+             * ── WHAT IT SAYS, AND WHAT IT DELIBERATELY DOES NOT ─────────────────────────────────
+             *
+             * The message states only what sales owns: that it refuses, which order, orders' own verdict,
+             * and an explicit handoff. It names NO remedy. The right instrument differs by status -- a
+             * `Fulfilled` order is a void plus a return order, a `Confirmed` one is not -- and sales
+             * narrating another app's workflow would be worse than an honest handoff. If a named remedy
+             * is wanted later, orders exports it and sales quotes it, the way it quotes
+             * `CanTransition`'s `Reason` today.
+             *
+             * A deal with NO order has no peer here and is not refused, which is the correct reading:
+             * there is no ledger to have moved.
+             */
+            const order = deal.OrderID_Object;
+            const orderStatus = order?.Status ?? null;
+            if (orderStatus && IsBooked(orderStatus)) {
+                return {
+                    ...empty,
+                    Issues: [
+                        issue(
+                            'deal',
+                            `This deal cannot be reopened: order ${order?.OrderNumber ?? '(unnumbered)'} has `
+                                + `booked, so the ledger has already moved. Reopening would edit a deal whose `
+                                + `order can no longer be edited. What to do about the order is an orders `
+                                + `decision — resolve it there first, then reopen this deal.`,
+                            'DealID',
+                        ),
+                    ],
                 };
             }
 
