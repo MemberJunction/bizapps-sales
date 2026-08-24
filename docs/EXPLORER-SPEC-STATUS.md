@@ -183,6 +183,63 @@ the `UserSetting` rows that name it — is the experiment that should close it. 
 `DELETE` against MJ core tables was refused by the sandbox, and I did not work around it.** It needs
 either an approval or another session's hand.
 
+## RE-MEASURED 2026-08-24 after clearing the orphan — 20 -> 16 failures, 6 -> 10 passes
+
+**The prediction was partly right, and I am reporting the gap rather than reconciling it.**
+
+Predicted: 8 failures and all 3 skips clear -> 12 failures, 0 skips.
+Actual: **4 failures cleared -> 16 failures, 3 skips unchanged.** Dead-pipeline console error 13 -> **0**.
+
+Cleared, exactly as predicted: `73-lock-across-tabs`, `75-dashboard`, `79-embedded-order-refresh`,
+`80-board-drag` t1 — the four dirty-console specs.
+
+Did NOT clear: `70-lifecycle` (still console errors, but different ones), `20-demo-tour` (still "Deals
+must be listed"), and all three probe skips.
+
+### The delete alone did nothing. The API restart was the missing half.
+
+This is the part worth keeping. Clearing all three database homes —
+`UserRecordLog` (one row, by primary key, captured to `.auth/orphan-14FDE6FC-backup.txt` first),
+`Workspace`, `UserSetting` — and re-running produced **20 failed / 3 skipped / 6 passed: identical,
+test-for-test, to the two runs before it.** 14 -> 14 -> 13 console occurrences. The reference was back in
+`Workspace` afterwards with `UserRecordLog` still at zero.
+
+**MJAPI had cached the user state at startup.** Every database clear was invisible to it, and it wrote
+the stale value back on the next request. Restarting the API — with the rows already cleared — is what
+made `/app/mjbizappssales` stop redirecting to the dead record. Same class as the warning in CLAUDE.md
+about restarting after a rebuild, arriving from a direction nobody had it written down for: **clearing
+persisted UI state needs an API restart to take effect, or the clear is a no-op you cannot see.**
+
+Order matters and both halves are required: clear `UserRecordLog` first (it re-seeds `Workspace`), then
+`Workspace`, then restart the API.
+
+### And two specs moved rather than cleared, which changes the map
+
+`10-deal-crud` and `30-demo-setup-columns` no longer fail on "must be listed" — they now fail on
+`locator.click` timeout, the **Cause 2** shape. They got past the entity list and into the Add-line
+class, so they were never entity-browser failures at heart; the orphan was hiding a second cause behind
+the first. Only `20-demo-tour` is still blocked on the list itself.
+
+`78-line-removal-tripwire` now fails with *"the removal is now refused with a LineNumber uniqueness
+violation"* — which is the tripwire **doing its job**. KI-20 changed from failing silently to refusing
+the whole save, and the spec's expectation predates that. Spec-side, and a one-line fix.
+
+### Where that leaves the 16
+
+| Shape | Count | Specs |
+|---|---|---|
+| Cause 2 — Add line before a save landed | **10** | 10, 30, 40, 41, 60×4, 90×2 |
+| Entity list still not reached | 1 | 20 |
+| Console errors, cause not yet identified | 1 | 70-lifecycle |
+| Genuine product candidate | 1 | 72-inline-create |
+| Spec expectation out of date | 1 | 78 (KI-20 now refuses) |
+| Cascade | 1 | 71 |
+| Untriaged | 1 | 70-activity-timeline t1 |
+
+Cause 2 is now **ten of sixteen**, and it is the settled one: the product is healthy there and each spec
+needs a complete Party-info fill plus a confirmed save. That is the next round's work and it is
+mechanical.
+
 ## Baseline
 
 | | Before | After two runs |
