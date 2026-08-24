@@ -132,6 +132,6 @@ test.describe('the embedded order after create — one order, and the line lands
             'no order created by this spec may be left unreferenced',
         ).toEqual([]);
 
-        expectNoConsoleErrors(sink);
+        expectNoConsoleErrors(sink, 'refreshing the embedded order after a line change');
     });
 });

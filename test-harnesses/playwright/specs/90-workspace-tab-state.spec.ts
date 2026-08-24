@@ -43,7 +43,7 @@ import { expect, test } from '@playwright/test';
 
 import { SelectByRecordID, SetField } from '../lib/workspace';
 import { EXPLORER_BASE_URL } from '../lib/env';
-import { captureConsoleErrors, drain, shot } from '../lib/explorer';
+import { captureConsoleErrors, drain, expectNoConsoleErrors, shot } from '../lib/explorer';
 import { CloseDb, QueryAll, QueryOne } from '../lib/db';
 
 const SALES_APP = '/app/sales';
@@ -383,7 +383,7 @@ test.describe('deal workspace — state that belongs to one deal', () => {
                 + 'above while making the deal unquotable',
         ).toBeGreaterThan(0);
 
-        expectNoConsoleErrors(errors);
+        expectNoConsoleErrors(errors, 'switching workspace tabs and reloading the picker');
     });
 });
 
