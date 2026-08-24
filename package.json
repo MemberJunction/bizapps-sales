@@ -6,6 +6,21 @@
   "workspaces": [
     "packages/*"
   ],
+  "_comment_verify": [
+    "ORDER IS LOAD-BEARING. Two gates IMPORT BUILD OUTPUT: assert-discount-conversion reads",
+    "packages/Entities/dist/discount-conversion.js and assert-workspace-validation reads",
+    "packages/Angular/dist/lib/workspace/deal-workspace.validation.js. They must run AFTER `build`.",
+    "",
+    "They used to run before it. On a tree that had never been built -- a fresh clone, or a worktree",
+    "where nobody had run build yet -- verify died at the second gate on a missing or stale export,",
+    "and every gate after it, including the spec typecheck, never ran at all. CI hid this because CI",
+    "builds first; only local verify was wrong. That is this repo's THIRD stale-artefact incident and",
+    "the first one inside a gate rather than a test.",
+    "",
+    "So: the four gates that read SOURCES run first and fail fast, then build, then the two that read",
+    "dist. Adding a gate that imports from dist/ means adding it after `npm run build` here -- or",
+    "better, making it read sources like the other four."
+  ],
   "scripts": {
     "prebuild": "node -e \"try { require.resolve('turbo') } catch (e) { console.error('\\n❌ Dependencies not installed. Run: npm install\\n'); process.exit(1); }\"",
     "build": "npm run build:stream",
@@ -25,7 +40,7 @@
     "test:coverage-gate": "node scripts/assert-check-count.mjs",
     "test:vocabulary-gate": "node scripts/assert-no-vocabulary-comparisons.mjs",
     "test:money-gate": "node scripts/assert-no-money-arithmetic.mjs",
-    "verify": "npm run test:vocabulary-gate && npm run test:money-gate && npm run test:discount-gate && npm run test:validation-gate && npm run test:drift-gate && npm run test:spec-gate && npm run build",
+    "verify": "npm run test:vocabulary-gate && npm run test:money-gate && npm run test:drift-gate && npm run test:spec-gate && npm run build && npm run test:discount-gate && npm run test:validation-gate",
     "test:explorer:auth": "playwright test --config test-harnesses/playwright/playwright.config.ts --project auth-setup",
     "test:explorer": "playwright test --config test-harnesses/playwright/playwright.config.ts --project crud",
     "test:explorer:report": "playwright show-report test-harnesses/playwright/playwright-report",
