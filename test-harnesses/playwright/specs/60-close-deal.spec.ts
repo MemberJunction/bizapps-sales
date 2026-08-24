@@ -88,8 +88,33 @@ async function createDealWithLine(page: Page, suffix: string): Promise<string> {
     // non-closing statuses now, so index 1 is the first of those — closing is the close action's job.
     await fieldSelect(page, 'Status').selectOption({ index: 1 });
 
+    /**
+     * ── THE FIRST SAVE, BEFORE ANY LINE ──────────────────────────────────────────────────────────
+     *
+     * `Add line` is gated on `CanAddLine` = `!!Deal?.IsSaved`: the embedded order is provisioned inside
+     * `DealEntityServer.Save()` on the first save (S-US4), so before then there is no order for a line
+     * to belong to. The button says exactly that in its title, "Save the deal first".
+     *
+     * This spec had one save, AFTER the lines, so it clicked a disabled button until Playwright gave
+     * up — a 30s timeout reported as a broken control rather than a missing step. Two saves is not
+     * redundancy: the first buys the order, the second commits the lines.
+     *
+     * The MESSAGE is asserted, not just the click, because a save that silently did not land leaves
+     * `Add line` disabled for the same reason and would look identical at the next line.
+     */
+    await page.getByRole('button', { name: /^Save deal/i }).locator('visible=true').first().click();
+    await expect(
+        page.locator('.dw-msg'),
+        'the first save must land — the order is provisioned by it, and without one no line can be added',
+    ).toContainText(/created|saved/i, { timeout: 30_000 });
+
     await page.locator('.dw-panes__tab', { hasText: 'Product lines' }).first().click();
-    await page.getByRole('button', { name: /Add line/i }).first().click();
+    const addLine = page.getByRole('button', { name: /Add line/i }).first();
+    await expect(
+        addLine,
+        'Add line must be enabled once the deal is saved — if this is disabled the first save did not land',
+    ).toBeEnabled({ timeout: 20_000 });
+    await addLine.click();
 
     /**
      * The picker: choose whatever the FIRST real product is rather than naming a SKU, so this spec
@@ -106,8 +131,37 @@ async function createDealWithLine(page: Page, suffix: string): Promise<string> {
      */
     const productSelect = page.locator('.dw-cell-product').locator('visible=true').first();
     await productSelect.selectOption({ index: 1 });
-    const typeSelect = page.locator('select').filter({ hasText: /One-Time/i }).locator('visible=true').first();
-    await typeSelect.selectOption({ label: 'One-Time' });
+
+    /**
+     * AND A QUANTITY, which this spec never set.
+     *
+     * `OrderLine.Quantity` is NOT NULL, so an added line with no quantity leaves Save disabled with the
+     * title "Quantity cannot be null" — and the failure surfaces 30s later as a click timeout on Save,
+     * pointing at the button rather than at the empty cell that disabled it.
+     *
+     * It was previously masked: the line-type `selectOption` timed out first, so the run never reached
+     * the save. Removing that retired control did not create this, it revealed it.
+     *
+     * Scoped to the row that holds the product picker, because `.dw-num input` also matches the discount
+     * cell — quantity is the FIRST number input in the line row, and picking the wrong one would set a
+     * discount and leave quantity null, which fails identically.
+     */
+    const lineRow = page.locator('tr', { has: page.locator('.dw-cell-product') }).first();
+    await lineRow.locator('td.dw-num input[type="number"]').first().fill('2');
+    /**
+     * NO LINE-TYPE SELECTION ANY MORE, because there is no such control.
+     *
+     * This chose "One-Time" from a per-line type select. `DealLineType` was retired with `DealLine`, and
+     * the line row now offers product, quantity, unit price, line total and discount — no type. The
+     * locator therefore matched nothing and `selectOption` timed out after 30s, which reads as a broken
+     * dropdown rather than an absent one.
+     *
+     * Removed rather than retargeted: the type was FIXTURE SCAFFOLDING here — this spec is about closing
+     * a deal, and it needed a saveable line, not a line of a particular type. Where a spec asserts the
+     * retired vocabulary as its SUBJECT rather than its setup, deleting the assertion would be deleting
+     * the test, and that is a decision rather than a repair. See 40-deal-workspace's recurring-path
+     * assertion and 20-demo-tour's Deal Lines step.
+     */
 
     await page.getByRole('button', { name: /^Save deal/i }).locator('visible=true').first().click();
     await expect(page.locator('.dw-msg')).toContainText(/created|saved/i, { timeout: 30_000 });
