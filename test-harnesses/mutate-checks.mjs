@@ -400,6 +400,37 @@ const MUTATIONS = [
     // a close, and CD17 stays green -- because the closing status also arrives dirty, so
     // callerSuppliedValue answers "theirs" anyway. Two independent mechanisms protect it. This mutant
     // therefore proves the check is not VACUOUS rather than isolating one guard: it stops the close
+        /**
+         * -- DN-20: THE TWO DIRECTIONS OF THE BOOKED-ORDER REFUSAL --------------------------------
+         *
+         * `close-deal.CD24` asserts both halves of one rule: a BOOKED order refuses the reopen, and a
+         * confirmed-then-VOIDED one does not. The two mutants below break one direction each, because
+         * the plausible future edit here is a "simplification" that looks tidier and is wrong twice.
+         *
+         * `IsBooked` is `Confirmed | Posted | Fulfilled`. The two things someone would write instead:
+         *
+         *   `orderStatus === 'Confirmed'` UNDER-blocks -- the lifecycle runs on to Posted and Fulfilled,
+         *   where the ledger has moved furthest. It is also a string comparison against ANOTHER APP'S
+         *   vocabulary, which is the shape the vocabulary gate exists to catch.
+         *
+         *   anything timestamp-shaped (`ConfirmedAt IS NOT NULL`, here modelled as "any status at all")
+         *   OVER-blocks -- a confirmed-then-voided order keeps ConfirmedAt forever, and refusing there
+         *   blocks the one case where the ledger has been SETTLED.
+         *
+         * One mutant per direction, so a future edit cannot satisfy the check by breaking the half it
+         * was not aimed at.
+         */
+        { id: 'M-RB1', file: CDO, expect: ['CD24'],
+          from: '            if (orderStatus && IsBooked(orderStatus)) {',
+          to: "            if (orderStatus && orderStatus === 'Confirmed') {",
+          note: 'the refusal narrows to an equality test, so a POSTED order reopens behind a moved ledger' },
+
+        { id: 'M-RB2', file: CDO, expect: ['CD24'],
+          from: '            if (orderStatus && IsBooked(orderStatus)) {',
+          to: '            if (orderStatus) {',
+          note: 'the refusal widens to any status, so a confirmed-then-VOIDED order is refused a reopen it should get' },
+
+
     // setting the status at all, which naturally fells everything that asserts a close outcome.
     { id: 'M-ST7', file: CDO, expect: ['CD17'],
       from: '        const now = new Date();\n        deal.DealStatusTypeID = target.ID;',

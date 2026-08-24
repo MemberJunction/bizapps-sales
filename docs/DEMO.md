@@ -1,5 +1,19 @@
 # Demo walkthrough — BizApps Sales (S0/S1)
 
+> ## ⚠️ PARTS OF THIS WALKTHROUGH DESCRIBE A MODEL THAT NO LONGER EXISTS
+>
+> Last substantively updated **2026-08-14**, before the deal-line redesign. **`DealLine` is retired.**
+> A deal now carries an **embedded `OrderHeader`**, provisioned inside `DealEntityServer.Save()`, and
+> its lines live on that order as `OrderLine` rows in orders' schema. There is no "Deal Lines" screen
+> to navigate to.
+>
+> Every passage that depended on it is struck through and marked **[STALE — NEEDS REBUILDING]** rather than rewritten. **A
+> replacement script is being written separately** — two walkthroughs edited in parallel would diverge
+> immediately, so this file records what is false and stops there.
+>
+> Everything NOT marked has been left alone and is still believed accurate.
+
+
 **What this demo is:** a CRUD-level Sales app running on MJ Explorer. Schema and CodeGen only, no
 business logic. Every screen is a generated form over the S1 baseline.
 
@@ -41,7 +55,7 @@ column actually appears in the grid afterwards.
 | **Deals** | Status · Amount · Close date · Probability · Pipeline · Stage · Company — a deal legible at a glance |
 | **Pipeline Stages** | Order · Probability · Rotting Days · Pipeline · Forecast Category · **Deal Status Type** ← the whole argument |
 | **Deal Team Members** | **Person ID** · Attribution · Deal · **Employee** · Role — the two ID columns adjacent, so D-6 is visible |
-| **Deal Lines** | Quantity · Requested Discount · Line Type · **Resolved Unit Price · Resolved Extended · Priced At** ← deliberately empty |
+| ~~**Deal Lines**~~ | **[STALE — NEEDS REBUILDING]** — no such screen. The lines are `OrderLine` rows on the deal's embedded order, in orders' schema. |
 | **Deal Stage Events** | Changed At · **Amount At Transition** · Probability At Transition · Days In Previous Stage |
 | **Deal Status Types** | Code · Is Open · Is Closed · **Is Won · Is Lost · Locks Deal** — the behaviour flags themselves |
 
@@ -130,13 +144,14 @@ Reaching a grid is always the same two moves, so it's written once here:
 | **3** | `[GO]` → `pipe` → **Pipeline Stages** | 9 stages. **"Booked" → Won** and **"Signed" → Won** | **The keystone.** *"Two stages, different names, both map to status Won. There is no string 'Closed Won' anywhere in the code — behaviour comes from `DealStatusType.IsWon`. Rename the stage, nothing changes."* |
 | **4** | `[GO]` → `deal stat` → **Deal Status Types** | `Is Open · Is Closed · Is Won · Is Lost · Locks Deal` | *"That's the configuration layer. On Hold is neither open nor closed — which is why those two aren't inverses. And a CI grep fails the build if any server file ever compares a status name."* |
 | **5** | `[GO]` → `sales acc` → **Sales Accounts** | Northwind / Cascade / Beacon | *"These names aren't columns in this table — they come from the parent Organization row. Sales extends the shared Person/Organization graph instead of forking identity."* |
-| **6** | `[GO]` → `deal li` → **Deal Lines** | Qty 250, Disc 12 — **Resolved Unit Price / Resolved Extended / Priced At all `—`** | *"That emptiness is the feature. Sales records intent and asks `Orders.PreviewOrder` for the number. It never multiplies quantity by price."* |
+| ~~**6**~~ | **[STALE — NEEDS REBUILDING]** — this step navigated to a **Deal Lines** screen that no longer exists. The money guarantee it demonstrated is now visible on the deal's embedded order instead; the replacement step has not been written here. |
 | **7** | `[GO]` → `deal team` → **Deal Team Members** | Last row: **Person ID set, Employee empty**, role Partner Manager | *"That's D-6. A partner rep isn't an employee, so the table takes either — with a database constraint enforcing exactly one. Also: three rows on one deal, so summing Amount here triple-counts it."* |
 | **8** | `[GO]` → `deal stage` → **Deal Stage Events** | **Amount At Transition: 120,000 → 120,000 → 150,000 → 185,000** | *"The deal is 185k today. In May it was 120k, and this table knows, because each transition stamped its own amount. Append-only, never edited."* |
 | **9** | `[GO]` → `deals` → click **Northwind — Platform Rollout** → the **pencil** | The record form, then edit mode | *"Pipeline and Company resolve to names, not UUIDs — that's the generated base view. And these three: `Amount Is Computed`, `Amount Computed At`, `Amount Source Hash` — Amount is a cached answer with a receipt. Right now it's 0: a human typed it."* |
 
-**If you only have two minutes:** steps 1 → 3 → 6. Deals for credibility, Pipeline Stages for the design
-argument, Deal Lines for the money guarantee.
+**If you only have two minutes:** steps 1 → 3, then the money guarantee.
+
+> **[STALE — NEEDS REBUILDING]** — this read "steps 1 → 3 → 6 … Deal Lines for the money guarantee". Step 6 is struck above, so the third leg of the short path needs choosing again.
 
 ---
 
@@ -185,17 +200,21 @@ UUIDs — that's the generated base view's denormalized columns working.
 Click the **pencil** to edit and point at three fields: **`Amount Is Computed`**,
 **`Amount Computed At`**, **`Amount Source Hash`**.
 
-**Say:** *"`Amount` is a cached answer, not a fact. These three columns are its receipt. When the pricing
-bridge lands at S2, every number comes back from `Orders.PreviewOrder` and the hash fingerprints the
-line set it came from — so the UI can say 'this figure is stale, reprice' instead of showing a number
-nobody can trace. Right now `AmountIsComputed` is 0: a human typed it."*
+**Say:** *"`Amount` is a cached answer, not a fact. These three columns are its receipt. The number
+comes back from orders — sales caches `OrderHeader.TotalGross` and never computes any part of it — and
+`AmountSourceHash` fingerprints the order it came from, so the UI can say 'this figure is stale,
+reprice' instead of showing a number nobody can trace."*
 
-Then open **Deal Lines**. `Quantity` 250, `Requested Discount` 12 — and **`Override Unit Price`,
-`Resolved Unit Price`, `Resolved Extended Amount` are all empty.**
+> Corrected 2026-08-24: this said the hash fingerprints "the line set it came from". It fingerprints
+> `sha256(OrderID|total)`. While it still described a `DealLine` set, nothing repopulated `Amount` at
+> all — it kept whatever it last held. Check the seeded value before relying on the last sentence,
+> which used to read *"Right now `AmountIsComputed` is 0: a human typed it."*
 
-**Say:** *"That emptiness is the feature. Sales records intent — product, quantity, requested discount,
-term — and asks orders for the number. It never multiplies quantity by price. The resolved columns are
-write-only from a PreviewOrder response."*
+> **[STALE — NEEDS REBUILDING]** — this passage opened a **Deal Lines** screen and read four columns off it (`Quantity`, `Requested Discount`, `Override Unit Price`, `Resolved Unit Price`, `Resolved Extended Amount`). None of those live on a deal any more.
+
+**The point it was making still stands, and is worth making from whatever screen replaces it:** sales
+records intent — product, quantity, requested discount, term — and asks orders for the number. It
+never multiplies quantity by price. What changed is only WHERE the line lives.
 
 ### 5. Deal Team Members — the decision you ruled on tonight
 
@@ -248,8 +267,9 @@ acronyms. Cosmetic; fixable with a `DisplayName` in entity-field metadata.
 afterwards. One known wrinkle: deleting a record whose tab is still open logs a console error as MJ's
 tab manager tries to reload it (`docs/KNOWN-ISSUES.md` KI-5). The delete itself is fine.
 
-**"What's next?"** S2 is the pricing bridge — `DealLine` ↔ `Orders.PreviewOrder` with provenance
-stamping, plus the integration check that fails if `Deal.Amount` ever disagrees with PreviewOrder. It's
+**"What's next?"** S2 is the pricing bridge — the deal's embedded `OrderHeader`/`OrderLine` with provenance
+stamping, plus the integration check that fails if `Deal.Amount` ever disagrees with the order's
+`TotalGross`. It's
 blocked on two seams that don't exist in orders yet (`Subscription.BillingMode` and the pricing-resolver
 slot), which is the critical path for the whole revenue stack.
 

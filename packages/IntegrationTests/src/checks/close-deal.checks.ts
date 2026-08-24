@@ -188,6 +188,26 @@ async function TxAll<T extends Record<string, unknown>>(ctx: Ctx, sql: string): 
     return (rows ?? []) as T[];
 }
 
+    /**
+     * The same call with `isMutation: true`, for the one check that has to MOVE an order's status.
+     *
+     * CD24 needs an order that is Confirmed, and then the same order Voided with its `ConfirmedAt` still
+     * standing. Neither state is reachable by driving sales -- sales never confirms an order, which is
+     * the whole point of the boundary -- so the row is moved directly, inside the check's own
+     * transaction, and rolled back with everything else.
+     */
+async function TxExec(ctx: Ctx, sql: string, description: string): Promise<void> {
+    const provider = ctx.Provider as unknown as {
+        ExecuteSQL: (
+            sql: string,
+            params: Record<string, unknown>,
+            options: { isMutation: boolean; description: string },
+            user: unknown,
+        ) => Promise<unknown>;
+    };
+    await provider.ExecuteSQL(sql, {}, { isMutation: true, description }, ctx.User);
+}
+
 /**
  * Orders' schema, named here rather than imported: sales holds no compile-time dependency on orders, and
  * the sibling bundles spell it out the same way.
@@ -1574,6 +1594,167 @@ export const CloseDealChecks: NamedCheck[] = [
                     String(ev.ToStageID).toLowerCase() !== String(ev.FromStageID).toLowerCase(),
                     'and From differs from To, so this was a real transition rather than a self-move',
                 );
+            }),
+    },
+    {
+        Id: 'close-deal.CD24',
+        Name: 'CD24: a BOOKED order refuses the reopen; a confirmed-then-VOIDED one does not (DN-20)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── DN-20, AND BOTH DIRECTIONS ARE THE POINT ────────────────────────────────────
+                 *
+                 * Finance asked for a reopen to be refused outright once the order has booked, because
+                 * the ledger has moved and editing the deal behind a live receivable is not the
+                 * instrument. The refusal reads orders' own `IsBooked` -- `Confirmed | Posted |
+                 * Fulfilled` -- rather than either obvious alternative, and this check exists because
+                 * BOTH alternatives fail one half of it:
+                 *
+                 *   `Status === 'Confirmed'` passes half A and FAILS half B only by luck; it also
+                 *   under-blocks `Posted`/`Fulfilled`, which this check's half A would still catch if
+                 *   the fixture advanced further. It is a vocabulary string-compare besides.
+                 *
+                 *   `ConfirmedAt IS NOT NULL` passes half A and FAILS HALF B OUTRIGHT. That is the
+                 *   assertion below that earns its keep: the voided order still carries `ConfirmedAt`,
+                 *   so a timestamp test refuses a reopen that must be allowed.
+                 *
+                 * A later "simplification" to either one goes red here rather than in production.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const startStage = f.OrderOnlyPolicyStageID;
+
+                /* ── HALF A: booked refuses ──────────────────────────────────────────────────── */
+                const bookedDeal = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, startStage, 'CD24 booked order refuses',
+                );
+                Assert(
+                    (await close(ctx, { DealID: bookedDeal, DealStatusTypeID: f.WonStatusID })).Success,
+                    'setup: the close must succeed, or there is nothing to reopen',
+                );
+
+                const bookedOrder = await TxOne<{ ID: string; OrderNumber: string }>(
+                    ctx,
+                    `SELECT o.ID, o.OrderNumber FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${bookedDeal}'`,
+                );
+                await TxExec(
+                    ctx,
+                    `UPDATE ${ORDERS_SCHEMA}.OrderHeader
+                        SET Status = 'Confirmed', ConfirmedAt = SYSDATETIMEOFFSET()
+                      WHERE ID = '${bookedOrder.ID}'`,
+                    'CD24: book the order',
+                );
+
+                const refused = await reopen(
+                    ctx, { DealID: bookedDeal, Reason: 'CD24: attempting a reopen behind a booked order.' },
+                );
+                Assert(refused.Success === false, 'a reopen behind a BOOKED order must be refused');
+                Assert(refused.Unlocked === false, 'and the deal must stay locked');
+                Assert(
+                    refused.Issues.some((i) => /booked/i.test(i.Message ?? '')),
+                    `the refusal must say the order has booked — got ${JSON.stringify(refused.Issues)}`,
+                );
+                /**
+                 * The order NUMBER, not its id. A rep cannot act on a UUID, and naming the order is the
+                 * whole of the handoff this message is allowed to make.
+                 */
+                Assert(
+                    refused.Issues.some((i) => (i.Message ?? '').includes(bookedOrder.OrderNumber)),
+                    `the refusal must name the order — got ${JSON.stringify(refused.Issues)}`,
+                );
+                /**
+                 * AND IT MUST NOT PRESCRIBE AN INSTRUMENT. The remedy differs by status and belongs to
+                 * orders; sales narrating another app's workflow is worse than an honest handoff.
+                 */
+                Assert(
+                    !refused.Issues.some((i) => /\b(void|reversing|credit note|change order)\b/i.test(i.Message ?? '')),
+                    `the refusal must not name an orders instrument — got ${JSON.stringify(refused.Issues)}`,
+                );
+                const stillClosed = await TxOne<{ n: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS n FROM ${SALES_SCHEMA}.Deal d
+                       JOIN ${SALES_SCHEMA}.DealStatusType st ON st.ID = d.DealStatusTypeID
+                      WHERE d.ID = '${bookedDeal}' AND st.IsOpen = 1`,
+                );
+                AssertEqual(Number(stillClosed.n), 0, 'and the deal was not reopened behind the refusal');
+
+                /**
+                 * ── AND AGAIN AT `Posted`, WHICH IS THE ASSERTION THAT KILLS THE OBVIOUS SHORTCUT ──
+                 *
+                 * If `Confirmed` were the only booked state tested, `IsBooked(...)` could be "simplified"
+                 * to `status === 'Confirmed'` and every assertion above would still pass. The lifecycle
+                 * runs `Confirmed -> Posted -> Fulfilled`, and the ledger has moved FURTHEST at the far
+                 * end -- so the equality test lets through exactly the orders that most need refusing.
+                 *
+                 * Same order, advanced one step. It must still refuse.
+                 */
+                await TxExec(
+                    ctx,
+                    `UPDATE ${ORDERS_SCHEMA}.OrderHeader SET Status = 'Posted' WHERE ID = '${bookedOrder.ID}'`,
+                    'CD24: advance the order past Confirmed',
+                );
+                const refusedPosted = await reopen(
+                    ctx, { DealID: bookedDeal, Reason: 'CD24: attempting a reopen behind a POSTED order.' },
+                );
+                Assert(
+                    refusedPosted.Success === false,
+                    'a reopen behind a POSTED order must be refused too — Posted is past Confirmed, not '
+                        + 'short of it. If this passes and the Confirmed case above still fails, the guard '
+                        + `has been narrowed to an equality test. Got ${JSON.stringify(refusedPosted.Issues)}`,
+                );
+
+                /* ── HALF B: confirmed-then-voided does NOT refuse ───────────────────────────── */
+                const voidedDeal = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, startStage, 'CD24 voided order allows',
+                );
+                Assert(
+                    (await close(ctx, { DealID: voidedDeal, DealStatusTypeID: f.WonStatusID })).Success,
+                    'setup: the second close must succeed too',
+                );
+
+                const voidedOrder = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT o.ID FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${voidedDeal}'`,
+                );
+                /**
+                 * CONFIRMED FIRST, THEN VOIDED -- and `ConfirmedAt` is left standing, because that is
+                 * exactly what a real confirm-then-void leaves behind. It is what makes this half a
+                 * test of `IsBooked` rather than of the timestamp.
+                 */
+                await TxExec(
+                    ctx,
+                    `UPDATE ${ORDERS_SCHEMA}.OrderHeader
+                        SET Status = 'Voided', ConfirmedAt = SYSDATETIMEOFFSET()
+                      WHERE ID = '${voidedOrder.ID}'`,
+                    'CD24: confirm then void the order',
+                );
+                const carried = await TxOne<{ ConfirmedAt: string | null; Status: string }>(
+                    ctx,
+                    `SELECT ConfirmedAt, Status FROM ${ORDERS_SCHEMA}.OrderHeader WHERE ID = '${voidedOrder.ID}'`,
+                );
+                Assert(
+                    !!carried.ConfirmedAt,
+                    'setup: the voided order must still carry ConfirmedAt, or half B proves nothing',
+                );
+                AssertEqual(String(carried.Status), 'Voided', 'setup: and it must be Voided');
+
+                const allowed = await reopen(
+                    ctx, { DealID: voidedDeal, Reason: 'CD24: reopening behind a voided order.' },
+                );
+                Assert(
+                    allowed.Success,
+                    'a reopen behind a CONFIRMED-THEN-VOIDED order must be ALLOWED — the reversal is its '
+                        + `own record, so that ledger is settled. Got ${JSON.stringify(allowed.Issues)}`,
+                );
+                const reopened = await TxOne<{ n: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS n FROM ${SALES_SCHEMA}.Deal d
+                       JOIN ${SALES_SCHEMA}.DealStatusType st ON st.ID = d.DealStatusTypeID
+                      WHERE d.ID = '${voidedDeal}' AND st.IsOpen = 1`,
+                );
+                AssertEqual(Number(reopened.n), 1, 'and the deal really is open again');
             }),
     },
 ];
