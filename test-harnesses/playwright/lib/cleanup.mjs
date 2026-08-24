@@ -95,13 +95,38 @@ function readEnv() {
  */
 const SQL = `
 SET NOCOUNT ON;
--- One table variable rather than N parameters, so the list length is not baked into the SQL.
-DECLARE @pfx TABLE (P NVARCHAR(50) PRIMARY KEY);
-INSERT INTO @pfx (P) VALUES ${PREFIXES.map((x) => `(N'${x}%')`).join(', ')};
-
--- The same six prefixes as an UNANCHORED pattern, for rows that quote a deal's name INSIDE their own.
+/*
+ * ONE PATTERN TABLE, UNANCHORED. There were two: @pfx as N'PW-%' and @inner as N'%PW-%'. The anchored
+ * one is gone because nothing should use it -- the specs put the prefix in the MIDDLE of a name
+ * ("Workspace smoke PW-...", "Close CL-... won"), so anchoring matched nothing and the sweep reported
+ * success over 30 surviving deals. Leaving @pfx declared-but-unused would invite somebody to reach for
+ * the wrong one again.
+ *
+ * A table variable rather than N parameters, so the list length is not baked into the SQL.
+ */
 DECLARE @inner TABLE (P NVARCHAR(50) PRIMARY KEY);
 INSERT INTO @inner (P) VALUES ${PREFIXES.map((x) => `(N'%${x}%')`).join(', ')};
+
+/*
+ * ── THE SEEDED SET, EXCLUDED EXPLICITLY, BECAUSE THE PATTERN BELOW IS UNANCHORED ────────────────
+ *
+ * Matching a prefix anywhere in the name is what makes this sweep work at all -- the specs name deals
+ * "Workspace smoke PW-...", "Round trip RT-...", "Close CL-... won", so the prefix sits in the MIDDLE
+ * and an anchored LIKE 'PW-%' matched none of them. That is why the host reached 37 deals and 87
+ * orders while the sweep reported remaining_deals=0 on every run.
+ *
+ * But unanchored matching is sharp in both directions. %RT-% also matches SMART-, PART-, ALERT-;
+ * %CL-% matches CYCL-. On a shared dev host that is somebody's real deal, deleted silently by a
+ * cleanup step nobody was watching.
+ *
+ * So the demo set is named and excluded rather than trusted to not collide. DEAL-90% is the seeded
+ * range and it is stable -- these are the seven rows every measurement in docs/DEMO-INVENTORY.md is
+ * counted against. Belt and braces with the print below: the exclusion stops the known-precious rows,
+ * and the print lets a human stop the unknown ones.
+ */
+DECLARE @keep TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+INSERT INTO @keep (ID)
+  SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-90%';
 
 /* ── EVERYTHING IS CAPTURED BEFORE ANYTHING IS DELETED ──────────────────────────────────────────
  *
@@ -115,7 +140,19 @@ INSERT INTO @inner (P) VALUES ${PREFIXES.map((x) => `(N'%${x}%')`).join(', ')};
  */
 DECLARE @deals TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
 INSERT INTO @deals (ID)
-  SELECT ID FROM __mj_BizAppsSales.Deal WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
+  SELECT ID FROM __mj_BizAppsSales.Deal
+   WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P)
+     AND ID NOT IN (SELECT ID FROM @keep);
+
+/*
+ * NAMED BEFORE DELETED, not counted after.
+ *
+ * A count printed afterwards cannot be second-guessed: "12 deals removed" is unreviewable, and if one
+ * of them was a human's SMART- or CYCL- deal nobody will ever know. The names go to stdout first, so a
+ * person reading the run output can see what went and challenge it.
+ */
+SELECT 'will_delete: ' + LEFT(Name, 70) FROM __mj_BizAppsSales.Deal d
+  JOIN @deals x ON x.ID = d.ID ORDER BY Name;
 
 -- Deal.OrderID is the only link to the provisioned order, and it dies with the deal row.
 DECLARE @orders TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
@@ -145,9 +182,10 @@ INSERT INTO @orders (ID)
  */
 DECLARE @doomed TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
 INSERT INTO @doomed (ID)
-  SELECT ID FROM __mj_BizAppsSales.Deal     WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P)
+  SELECT ID FROM @deals                                     -- already unanchored and keep-filtered
   UNION
-  SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
+  SELECT ID FROM __mj_BizAppsSales.Pipeline
+   WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
 
 /*
  * The four DealPaymentSchedule / DealTeamMember / DealStageEvent / DealContactRole deletes that
@@ -247,8 +285,8 @@ DELETE cr FROM __mj_BizAppsSales.DealContactRole cr JOIN @deals d ON cr.DealID =
 DELETE d FROM __mj_BizAppsSales.Deal d JOIN @deals x ON x.ID = d.ID;
 
 DELETE ps FROM __mj_BizAppsSales.PipelineStage ps
-  JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE p.Name LIKE P);
-DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
+  JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE EXISTS (SELECT 1 FROM @inner WHERE p.Name LIKE P);
+DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
 
 /*
  * Tabs blanked, layout reset, nothing else touched -- and ONLY for a workspace that actually names one of
@@ -275,8 +313,18 @@ DELETE ol FROM __mj_BizAppsOrders.OrderLine ol JOIN @orders o ON ol.OrderHeaderI
 DELETE oh FROM __mj_BizAppsOrders.OrderHeader oh JOIN @orders o ON oh.ID = o.ID;
 
 SELECT 'workspace_tabs_cleared=' + CAST(@wsCleared AS varchar);
-SELECT 'remaining_deals=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
-SELECT 'remaining_pipelines=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
+/*
+ * THESE ASK THE SAME QUESTION THE DELETE ASKED, and that is the whole point of changing them.
+ *
+ * They used the anchored table while the delete used it too, so they agreed -- and both were wrong
+ * together, which
+ * is how "remaining_deals=0" was printed over 30 surviving rows for days. A verification that shares
+ * the defect of the thing it verifies is not verification.
+ */
+SELECT 'remaining_deals=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal
+  WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P) AND ID NOT IN (SELECT ID FROM @keep);
+SELECT 'remaining_pipelines=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Pipeline
+  WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
 SELECT 'remaining_orders=' + CAST(COUNT(*) AS varchar)
   FROM __mj_BizAppsOrders.OrderHeader oh JOIN @orders o ON oh.ID = o.ID;
 SELECT 'remaining_tasks=' + CAST(COUNT(*) AS varchar)
