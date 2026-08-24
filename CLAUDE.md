@@ -169,6 +169,47 @@ Corollary for review: after a stale merge, read the diff against your own pre-me
 (`git diff <pre-merge-sha> --stat`) rather than the merge's conflict list. A merge that *should* be
 content-neutral and is not has just told you something, and the conflict list will not mention it.
 
+### 6. NEVER KILL A PROCESS YOU CANNOT PROVE YOU OWN
+
+**Walking the parent chain until you reach `claude.exe` proves nothing. There are 20+ of those on this
+machine.** A session did exactly that tonight and killed another session's runs.
+
+**The test is your OWN `claude.exe` PID, not the existence of one.** Get the PID of the `claude.exe` that
+is your own parent, walk the candidate process's chain, and require that the `claude.exe` it reaches is
+*that same PID*. Anything else belongs to another session.
+
+**`ps -W` prints no command-line arguments, so it can NEVER find a run by script name.** If you are
+matching on `integration.mjs` or `mutate-checks.mjs` in `ps -W` output you are matching nothing, and a
+filter that matches nothing looks exactly like a filter that matched safely — the same failure shape as a
+CSS selector that hits no elements, and as an assertion below an unconditional `return`. Use
+`Get-CimInstance Win32_Process` (which has `CommandLine` and `ParentProcessId`) or do not filter by
+script at all.
+
+If you cannot establish ownership, **do not kill it.** A run you did not start is someone's two-hour
+measurement. Say what you see and ask.
+
+### 7. WHILE A MUTATION RUN IS LIVE, THE TREE IS NOT EVIDENCE
+
+The mutation driver **edits source in place**, builds, runs the suite, then restores. For the whole of
+that window the working tree legitimately contains code nobody wrote, and every tool that reads it is
+reporting on a deliberate lie.
+
+Measured, on myself: mid-merge the anchor check reported a mutant's `from` string missing, and I read it
+as the merge having reverted a repair. It had not — my own background mutation run had that exact
+mutation applied at that moment, so the anchor genuinely did not match its own mutated source. **A
+`git add -A` there would have committed a mutated source file**, and the commit would have looked
+ordinary.
+
+So, while any mutation run is live:
+- **Do not stage or commit.** Not `git add -A`, not `git commit -a`.
+- **Do not treat `git status`, a grep, or an anchor check as truth.** A clean status is not proof either;
+  the driver restores source but `dist/` can still hold the mutation, which is the sibling rule the
+  Playwright README records after a full suite read *119 passed, 6 failed* against correct source.
+- **Wait for the run to report, then re-read.** If you did not start the run, see rule 6 — it is not
+  yours to stop so that your tree becomes readable.
+
+This is the same family as rule 5: the dangerous state is the one that looks normal.
+
 ---
 
 ## Environment & Database
@@ -181,6 +222,20 @@ content-neutral and is not has just told you something, and the conflict list wi
   That version must satisfy `mj-app.json`'s `mjVersionRange` **and** match what `@memberjunction/*`
   actually resolved to — a DB behind the packages driving it produces "column does not exist" on core
   metadata.
+
+  > **⚠️ KNOWN MISMATCH, recorded deliberately rather than fixed (2026-08-24).** The package pins now say
+  > **`6.1.0-edge.3`** (52 of them, across 7 manifests) while `.env` still reads
+  > `MJ_CORE_VERSION=v6.1.0-edge.2`. The bump was needed because published `edge.2` does **not** contain
+  > `DeclareEmbeddedRecord` and sales cannot build against it from a registry; `edge.3` does.
+  >
+  > It is **inert for resolution today**: this tree resolves `@memberjunction/*` through symlinks to the
+  > local MJ checkout, so a range in a manifest moves nothing until someone installs from a registry.
+  > `mjVersionRange` (`>=6.0.0 <7.0.0`) is satisfied either way. What the `.env` value actually drives is
+  > the **database** level, so closing the gap means a migration — which is the right change at the
+  > wrong moment when another session is using the shared host.
+  >
+  > **Close it before the first registry install, not before.** Until then the rule above still holds and
+  > this is the documented exception to it.
 - **Always use the WORKSPACE CLI**, never a global `mj`: every script runs
   `node node_modules/@memberjunction/cli/bin/run.js`. A globally installed CLI ships its own
   published packages and cannot see this repo's private ones. (The global `mj` on this machine is
