@@ -216,3 +216,17 @@ git status --porcelain          # a modified source file you did not edit IS the
 git checkout -- <that file>
 npm run build:packages          # restoring the SOURCE is not enough; dist/ still holds it
 ```
+
+### Read the gate before committing, not beside it
+
+The spec typecheck gate caught a backtick inside a JavaScript template literal in a patch to
+`lib/deal-flow.ts` -- the gate working exactly as designed. It was still committed, because the commit
+was chained after the gate in one command rather than gated on it, and the broken version needed a
+follow-up. Run the gate, READ it, then commit.
+
+### And rebuild after restoring a stranded mutant -- `git status` clean is not enough
+
+This bit for real. Three killed runs were recovered with `git checkout --` on the source, and the tree
+read clean. `dist/` still held the mutation, so the next full suite reported **119 passed, 6 failed**
+against a tree whose source was correct -- five task checks and one close check, which looks exactly
+like a regression and is not. `npm run build:packages` restored 125/0. The rebuild is not optional.
