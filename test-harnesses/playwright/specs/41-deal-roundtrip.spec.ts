@@ -178,8 +178,28 @@ test.describe('deal workspace — the related-record-collection round trip', () 
             await setField(page, 'Execution date', EXECUTION_DATE);
             await setField(page, 'Expected close', EXPECTED_CLOSE);
 
+            /**
+             * THE FIRST SAVE, BEFORE ANY LINE.
+             *
+             * `Add line` is gated on `CanAddLine` = `!!Deal?.IsSaved`: the embedded order is provisioned
+             * inside `DealEntityServer.Save()` on the first save (S-US4), so before then there is no
+             * order for a line to belong to. The button says so in its own title, "Save the deal first",
+             * and this spec saved only AFTER the lines — so it clicked a disabled button for 30s and
+             * reported a broken control rather than a missing step.
+             *
+             * `saveDeal` already asserts the confirmation message, which is what matters here: a save
+             * that silently did not land leaves `Add line` disabled for exactly the same reason and
+             * would look identical at the next click.
+             */
+            await saveDeal(page, 'the first save, which provisions the order');
+
             await openPane(page, 'Product lines');
             const addLine = page.locator('.dw-addbtn', { hasText: 'Add line' }).first();
+            await expect(
+                addLine,
+                'Add line must be enabled once the deal is saved — disabled here means the first save '
+                    + 'did not land',
+            ).toBeEnabled({ timeout: 20_000 });
             await addLine.click();
             await page.waitForTimeout(400);
             await addLine.click();
