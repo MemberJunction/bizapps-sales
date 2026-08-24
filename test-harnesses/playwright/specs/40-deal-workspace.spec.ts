@@ -190,9 +190,36 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
       await shot(page, '40-03-party');
     });
 
+    /**
+     * ── THE FIRST SAVE, WHICH THIS SPEC USED TO SKIP ──────────────────────────────────────────────
+     *
+     * `Add line` is gated on `CanAddLine`, which is `!!Deal?.IsSaved`, because the embedded order is
+     * provisioned inside `DealEntityServer.Save()` on the first save (S-US4) -- there is no order to add
+     * a line to before then. The button says so in its own title: "Save the deal first".
+     *
+     * So this step is not scaffolding, it is the thing being tested one line earlier: a deal is composed,
+     * saved, and only then does it acquire the order that lines belong to. Skipping it made the spec fail
+     * on a disabled button, which reads as a broken control rather than a missing step.
+     *
+     * The message is asserted rather than the click alone, because a save that silently did not land
+     * leaves `Add line` disabled for exactly the same reason and would look identical here.
+     */
+    await test.step('save, so the deal acquires its embedded order', async () => {
+      const firstSave = page.locator('button', { hasText: /^\s*Save deal\s*$/ }).first();
+      await expect(firstSave, 'Save must be ENABLED once party info is complete').toBeEnabled({
+        timeout: 15_000,
+      });
+      await firstSave.click();
+      const msg = page.locator('.dw-msg');
+      await expect(msg, 'the save must report something').toBeVisible({ timeout: 20_000 });
+      await expect(msg, 'and it must not be an error').not.toHaveClass(/dw-msg--error/);
+      await shot(page, '40-03b-first-save');
+    });
+
     await test.step('product lines — two of them', async () => {
       await openPane(page, 'Product lines');
       const add = page.locator('.dw-addbtn', { hasText: 'Add line' }).first();
+      await expect(add, 'Add line must be enabled once the deal is saved').toBeEnabled({ timeout: 20_000 });
 
       await add.click();
       await page.waitForTimeout(500);
