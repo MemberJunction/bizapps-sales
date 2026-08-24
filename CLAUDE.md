@@ -188,6 +188,14 @@ script at all.
 If you cannot establish ownership, **do not kill it.** A run you did not start is someone's two-hour
 measurement. Say what you see and ask.
 
+**And know why the orphans are there at all: a Bash tool call that hits its ten-minute ceiling DETACHES
+the process, it does not kill it.** Six survived up to two hours on one evening, each holding or queuing
+on the suite applock, so every fresh attempt queued behind an earlier one *of the same session* — which
+reads as a hang with no visible cause. Two consequences worth holding together: a run that seems stuck is
+most likely waiting on your own orphan, and the documented "stranded mutation recovery" (`git checkout --`
+plus a rebuild) is **actively destructive against a live run**, because it compiles and tests unmutated
+code out from under it. Full procedure in `test-harnesses/playwright/README.md`.
+
 ### 7. WHILE A MUTATION RUN IS LIVE, THE TREE IS NOT EVIDENCE
 
 The mutation driver **edits source in place**, builds, runs the suite, then restores. For the whole of
