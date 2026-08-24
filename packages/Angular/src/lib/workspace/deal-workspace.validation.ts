@@ -218,6 +218,68 @@ export function DiscountRefusalIssues(
 }
 
 /**
+ * Whether a line removal must be REFUSED rather than staged.
+ *
+ * ── KI-20: THE REMOVAL CANNOT BE STAGED, SO IT IS DECLINED AT THE GESTURE ──────────────────────────────────────────────
+ *
+ * `Lines.Remove()` is correct here and always was: the collection records the removal so the row can be
+ * DELETED inside the same transaction as the inserts. Orders never performs that delete.
+ * `savePendingLines()` iterates `Lines.Items` and never reads `Lines.Removed`, so the deletion does not
+ * exist as a step. Separately, orders re-stamps line numbers by array index as the last writer before
+ * saving. Together those two facts mean the surviving line is renumbered onto the slot still occupied by
+ * the row that was never deleted, and the database refuses the whole statement.
+ *
+ * The consequence is what decides the shape of this fix: the rep loses the removal AND every other edit
+ * staged in the same save — quantity, discount, service period, the lot — and cannot save the deal at
+ * all while the removal sits in the collection. There is no way out except discarding the work.
+ *
+ * So the removal is declined BEFORE it is staged. Blocking at save would turn a database error into a
+ * sentence, which is an improvement to the wording and not to the outcome; declining the gesture keeps
+ * every other edit saveable and turns an unrecoverable state into a button that says no and why.
+ *
+ * ── AND ONLY FOR A LINE THAT HAS ACTUALLY BEEN SAVED ──────────────────────────────────────────────────────
+ *
+ * A line the rep has just added has no row in the database, so there is nothing to delete and nothing
+ * for the renumbering to collide with. Removing it is safe, and refusing it would invent a limitation
+ * the defect does not impose — punishing the rep for the app's problem in the one case that works.
+ * `IsSaved` is the whole test, which is why the decision lives here as a function the gate can assert
+ * rather than inline in a click handler where it cannot.
+ *
+ * The fix belongs in orders and stays there; `save-deal.SD6` is the tripwire that goes red the day it
+ * lands, and this refusal is what a rep meets in the meantime.
+ */
+export function ShouldRefuseLineRemoval(line: { IsSaved: boolean } | null | undefined): boolean {
+    return !!line?.IsSaved;
+}
+
+/**
+ * A declined line removal, as a NON-BLOCKING issue on the row the rep tried to remove.
+ *
+ * `warning`, not `error`, and that is the entire point rather than a detail. An error would set
+ * `IsValid: false` and disable Save, which is the outcome this fix exists to avoid: the rep would be
+ * unable to save the edits that are perfectly valid. The removal is the only thing refused, so the
+ * removal is the only thing reported, and the save proceeds without it.
+ *
+ * The message names no constraint, table or column. A rep reading it can act on it — the alternative
+ * is the raw violation text, which is what {@link UnlinkedLineIssues} was written to stop showing for
+ * the adjacent gesture. Asserted for content in the validation gate, not merely for presence.
+ */
+export function LineRemovalRefusedIssues(
+    refusals: readonly { RowIndex: number | null }[],
+): DealWorkspaceIssue[] {
+    return refusals.map((r) => ({
+        Section: 'lines' as DealWorkspaceSection,
+        // Null because the ROW is the subject, not any one of its fields.
+        Field: null,
+        RowIndex: r.RowIndex,
+        Severity: 'warning' as const,
+        Message:
+            'This line is already saved and cannot be removed yet — change its product or quantity '
+            + 'instead. A line you have just added can still be removed before saving.',
+    }));
+}
+
+/**
  * A line that has not been given a product yet, as a blocking issue on its own row.
  *
  * ── WHY VALIDATION AND NOT REMOVING THE PICKER'S "not linked" OPTION ────────────────────────────

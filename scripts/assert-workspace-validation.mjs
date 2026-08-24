@@ -32,6 +32,8 @@ import {
     MergeValidation,
     ProjectValidation,
     UnlinkedLineIssues,
+    ShouldRefuseLineRemoval,
+    LineRemovalRefusedIssues,
 } from '../packages/Angular/dist/lib/workspace/deal-workspace.validation.js';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
@@ -250,6 +252,60 @@ console.log('\n  a line with no product blocks the save, on its own row\n');
     ok('and the issue survives the merge', merged.Issues.length, 1);
     const clean = MergeValidation({ IsValid: true, Issues: [] }, [], UnlinkedLineIssues([{ ProductID: 'p' }]));
     ok('a linked line leaves it valid', clean.IsValid, true);
+}
+
+/**
+ * ──── KI-20: A DECLINED LINE REMOVAL ────
+ *
+ * Two claims that pull in opposite directions, so both are asserted.
+ *
+ * A saved line must REFUSE removal, because staging it costs the rep the entire save rather than just the
+ * removal. A line that was never saved must NOT refuse: it has no row to delete and nothing for orders'
+ * renumbering to collide with, so refusing it would invent a limitation the defect does not impose.
+ *
+ * THE DISTINCTION THAT MATTERS IS SHOWN VERSUS ACTUALLY REFUSED. A version that rendered this message and
+ * removed the line anyway would look identical on screen and lose the row silently. That is why the
+ * decision is its own pure function rather than a branch inside a click handler: ShouldRefuseLineRemoval
+ * is the half that has to be true, and it is asserted directly instead of inferred from a message.
+ */
+console.log(`\n  KI-20: a saved line refuses removal; an unsaved one does not\n`);
+{
+    ok('a SAVED line refuses removal', ShouldRefuseLineRemoval({ IsSaved: true }), true);
+    ok('an UNSAVED line does NOT — nothing to delete, nothing to collide',
+       ShouldRefuseLineRemoval({ IsSaved: false }), false);
+    // Absent state must not silently refuse -- that would block a legal removal on bad input.
+    ok('a null line does not refuse', ShouldRefuseLineRemoval(null), false);
+    ok('an undefined line does not refuse', ShouldRefuseLineRemoval(undefined), false);
+}
+
+{
+    const issues = LineRemovalRefusedIssues([{ RowIndex: 2 }]);
+    ok('one declined removal yields exactly one issue', issues.length, 1);
+    ok('attributed to the LINES pane', issues[0]?.Section, 'lines');
+    ok('and to the ROW, so the grid can mark it', issues[0]?.RowIndex, 2);
+    ok('with no single field blamed — the row is the subject', issues[0]?.Field, null);
+
+    // THE SEVERITY IS THE POINT. An error would disable Save and cost the rep every other edit, which is
+    // the outcome this refusal exists to avoid rather than reproduce.
+    ok('severity is WARNING, not error', issues[0]?.Severity, 'warning');
+
+    const msg = String(issues[0]?.Message ?? '');
+    ok('the message says what the rep CAN do instead', /change its product or quantity/i.test(msg), true);
+    ok('and that a newly added line can still be removed', /just added/i.test(msg), true);
+    ok(
+        'and it leaks no constraint, table or column name',
+        /UQ_|UNIQUE|constraint|OrderLine|LineNumber|OrderHeaderID|violation/i.test(msg),
+        false,
+    );
+}
+
+{
+    // And it must NOT block the save, asserted through the projection CanSave actually reads.
+    const merged = MergeValidation(
+        { IsValid: true, Issues: [] }, LineRemovalRefusedIssues([{ RowIndex: 0 }]), [],
+    );
+    ok('a declined removal leaves the deal SAVEABLE', merged.IsValid, true);
+    ok('while still reporting the reason', merged.Issues.length, 1);
 }
 
 console.log(

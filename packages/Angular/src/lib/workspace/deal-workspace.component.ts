@@ -89,6 +89,8 @@ import {
     EmptyValidation,
     DiscountRefusalIssues,
     UnlinkedLineIssues,
+    ShouldRefuseLineRemoval,
+    LineRemovalRefusedIssues,
     MergeValidation,
     ProjectValidation,
     type DealWorkspaceIssue,
@@ -896,13 +898,41 @@ export class DealWorkspaceComponent implements OnInit {
      * row that merely vanished from the array would survive in the database, and the screen would agree
      * with the user while the data did not.
      *
-     * ⚠️ **THAT LAST SENTENCE IS CURRENTLY WHAT HAPPENS — see KI-20.** The call below is correct and the
-     * collection records the removal correctly; orders' `OrderEntityServer.Save()` then drops it, so the
-     * row survives and the line reappears on reload. Nothing here can fix it and nothing here should try:
-     * deleting orders' rows from this component would put a second app in charge of that. The fix belongs
-     * in orders, `save-deal.SD6` is the tripwire, and `DECISIONS-NEEDED.md` DN-6 is the open decision.
+     * ⚠️ **KI-20, AND THE SYMPTOM HAS CHANGED SINCE THIS COMMENT FIRST DESCRIBED IT.** It used to be a
+     * silent drop: the save reported success and the row reappeared on reload. It is now a REFUSAL — the
+     * whole save is rejected on a unique-key violation, so the rep also loses every other edit staged
+     * alongside it and cannot save the deal at all while the removal sits in the collection.
+     *
+     * The cause is not the index being unfiltered. `savePendingLines()` iterates `Lines.Items` and never
+     * reads `Lines.Removed`, so the delete does not exist as a step at all; orders then re-stamps line
+     * numbers by array index as the last writer, which moves the survivor onto the slot the undeleted row
+     * still holds. The old symptom and the new one are one defect at two ages.
+     *
+     * Nothing here can fix that and nothing here should try: deleting orders' rows from this component
+     * would put a second app in charge of them. What this component CAN do is decline the gesture, so a
+     * saved line is never staged for removal and the rest of the save keeps working. That is what
+     * `RemoveLine` does below; the reasoning is in `ShouldRefuseLineRemoval`. The fix belongs in orders,
+     * `save-deal.SD6` is the tripwire that goes red the day it lands, and `DECISIONS-NEEDED.md` DN-6 is
+     * the open decision.
      */
     public RemoveLine(line: OrderLineEntity): void {
+        /**
+         * DECLINED AT THE GESTURE for a saved line, rather than staged and refused by the database.
+         *
+         * The decision itself is `ShouldRefuseLineRemoval` in the validation module, where the gate can
+         * assert it. Keeping it there rather than inline is what makes the load-bearing half of this fix
+         * testable: a version that showed the message and removed the line anyway would look identical
+         * on screen and lose the row.
+         */
+        if (ShouldRefuseLineRemoval(line)) {
+            this.RemovalRefusals.add(line);
+            this.Touch();
+            return;
+        }
+
+        // A line that was never saved has no row to delete, so removing it is safe — and any
+        // refusal recorded against it goes with it.
+        this.RemovalRefusals.delete(line);
         this.Deal?.OrderID_Object?.Lines.Remove(line);
         this.Touch();
     }
@@ -1617,6 +1647,15 @@ export class DealWorkspaceComponent implements OnInit {
     public readonly DiscountRefusals = new Map<OrderLineEntity, string>();
 
     /**
+     * Lines whose removal was DECLINED, so the row can carry the reason.
+     *
+     * Holds the entity rather than an index because the index moves: another removal, or a reorder,
+     * would silently re-point a stored position at a different line. The index is derived at
+     * validation time from the collection, the same way `DiscountRefusals` is mapped.
+     */
+    public readonly RemovalRefusals = new Set<OrderLineEntity>();
+
+    /**
      * The discount for display, in the PERCENT a rep types.
      *
      * `OrderLine.DiscountPct` stores a FRACTION -- `CK_OrderLine_DiscountPct` bounds it 0..1 -- where the
@@ -1726,10 +1765,25 @@ export class DealWorkspaceComponent implements OnInit {
          * picker's "not linked" option in place — it is the only thing that labels the state a new line
          * is already in. See `UnlinkedLineIssues` for why the option was kept rather than removed.
          */
-        this.Validation = MergeValidation(entity, advisories, [
-            ...DiscountRefusalIssues(refusals),
-            ...UnlinkedLineIssues(lines),
-        ]);
+        /**
+         * A DECLINED REMOVAL IS A WARNING, and travels in the warnings argument deliberately.
+         *
+         * Everything else here blocks, so the placement is the whole distinction: an error would disable
+         * Save and cost the rep the edits that are fine, which is the outcome KI-20 already inflicts and
+         * this refusal exists to prevent. See `LineRemovalRefusedIssues`.
+         */
+        const removalRefusals = [...this.RemovalRefusals]
+            .filter((line) => lines.includes(line))
+            .map((line) => ({ RowIndex: lines.indexOf(line) }));
+
+        this.Validation = MergeValidation(
+            entity,
+            [...advisories, ...LineRemovalRefusedIssues(removalRefusals)],
+            [
+                ...DiscountRefusalIssues(refusals),
+                ...UnlinkedLineIssues(lines),
+            ],
+        );
         this.cdr.detectChanges();
     }
 
