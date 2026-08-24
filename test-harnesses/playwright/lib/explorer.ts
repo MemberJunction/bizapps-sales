@@ -331,22 +331,50 @@ async function waitForSalesAppShell(page: Page): Promise<void> {
  * click onto a covered element does. Let Playwright wait for it to be actionable and it does the right
  * thing. Never force this one.
  */
+/**
+ * Has the app reached a screen a spec can actually work from?
+ *
+ * The two valid landings are the entity list and an entity grid (which carries an "All" breadcrumb).
+ * Anything else — still booting, or the dead-record error described in `openSalesApp` — is neither.
+ */
+async function hasUsableLanding(page: Page): Promise<boolean> {
+  const cards = await page.locator('.entity-item').count().catch(() => 0);
+  const crumbs = await page.locator('.breadcrumb-item').count().catch(() => 0);
+  return cards > 0 || crumbs > 0;
+}
+
 export async function openSalesApp(page: Page): Promise<void> {
   await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
   await waitForSalesAppShell(page);
 
   /**
-   * NO TAB SWEEP HERE ANY MORE, AND THAT IS A FIX RATHER THAN A TIDY-UP.
+   * ── RECOVER FROM A RESTORED RECORD THAT NO LONGER EXISTS ────────────────────────────────────────
    *
-   * This used to call `closeRestoredRecordTabs` on the way in, because the landing was believed to be
-   * hijacked by restored record tabs. It is not: the landing is decided by `selectedEntityName`, and
-   * `openAllEntities` handles it through the app's own "All" breadcrumb. The app's tab bar is not even
-   * rendered on this screen (`mj-tab-container.hide-tab-bar`, measured), so the sweep had nothing of its
-   * own to close and spent its time clicking whatever else answered to "Close ...".
+   * This one is real, and the harness creates it itself. A spec makes a `PW-VERIFY` deal, opens it —
+   * which makes the app remember it as an open record — and then the cleanup sweep DELETES the deal
+   * between runs. Next run the app faithfully restores a record that is gone and stops on an error:
    *
-   * Two specs still call it directly, for screens where tabs genuinely are open; it stays exported for
-   * them. It just no longer runs on every entry to the app.
+   *     Could not load MJ_BizApps_Sales: Deals record.
+   *     InnerLoad returned false for key ID=82A6EC47-...
+   *
+   * There is no entity list and no breadcrumb on that screen, so everything downstream fails with what
+   * looks like "the app did not load". It loaded fine; it is showing an error about our own deleted row.
+   *
+   * Closing the stale records and re-entering clears it (measured: sweep closes 2 in ~2s, the error is
+   * gone after re-entry). This runs ONLY when the app has not reached a usable landing — the sweep used
+   * to run on every entry, which is how it came to cost six minutes a call, and it has nothing to do on
+   * a healthy landing because the tab bar is not rendered there at all
+   * (`mj-tab-container.hide-tab-bar`, measured).
+   *
+   * The deeper fix belongs in the cleanup sweep, which should not delete rows the app still points at.
+   * That file is landed and owned elsewhere this round, so this recovers rather than prevents.
    */
+  if (!(await hasUsableLanding(page))) {
+    await closeRestoredRecordTabs(page);
+    await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
+    await waitForSalesAppShell(page);
+  }
+
   expect(page.url(), 'should be inside the generated Sales application').toContain('mjbizappssales');
 }
 
@@ -382,12 +410,56 @@ export async function openAllEntities(page: Page): Promise<void> {
     }
   };
 
+  const allCrumb = page.locator('.breadcrumb-item').filter({ hasText: /^\s*All\s*$/ }).first();
+
+  /**
+   * WAIT FOR THE LANDING TO SETTLE BEFORE DECIDING WHICH LANDING IT IS.
+   *
+   * There are two valid landings — the entity list, or an entity's grid with an "All" breadcrumb — and
+   * a third state that is neither: the app still booting. Checking `cards.count()` the moment this is
+   * called reads that third state as "a grid must be up", goes looking for a breadcrumb that has not
+   * rendered, and fails with `element(s) not found` on an app that was about to be fine. Measured: this
+   * is what took specs 20 and 30 down while 04 passed alone, because alone the app was already warm.
+   *
+   * So settle first, branch second. This is the same mistake the fixed 4000ms sleep made — acting on a
+   * page before it has finished becoming itself.
+   */
+  /**
+   * Recovery belongs here as well as in `openSalesApp`, because a spec can be stranded MID-RUN.
+   *
+   * `openSalesApp` clears a dead restored record on the way in, but specs like the demo tour re-enter
+   * the app many times, and a record can be deleted between two of those entries — by this spec, or by
+   * the sweep. Recovering only at first entry left `20` failing on its second tour step with "the app
+   * never settled", which reads as an app fault and is not one.
+   *
+   * So: wait; if it never settles, clear the stale records and re-enter ONCE; then insist. One retry,
+   * not a loop — if the app cannot reach a landing twice, that is worth failing on.
+   */
+  const settled = async (): Promise<boolean> =>
+    (await cards.count()) > 0 || (await allCrumb.count()) > 0;
+
+  const reached = await expect
+    .poll(settled, { timeout: 45_000 })
+    .toBe(true)
+    .then(() => true)
+    .catch(() => false);
+
+  if (!reached) {
+    await closeRestoredRecordTabs(page);
+    await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
+    await expect
+      .poll(settled, {
+        timeout: 45_000,
+        message:
+          'the app never settled into either landing, even after clearing stale records and '
+          + 're-entering — no entity list and no "All" breadcrumb appeared',
+      })
+      .toBe(true);
+  }
+
   if ((await cards.count()) === 0) {
     // A leftover selection has put a grid on the landing. The breadcrumb is the way back — unforced,
     // and given time to become actionable. See the trap note above `openSalesApp`.
-    const allCrumb = page.locator('.breadcrumb-item').filter({ hasText: /^\s*All\s*$/ }).first();
-    await expect(allCrumb, 'a grid is on the landing, so the "All" breadcrumb must be there to go back')
-      .toBeVisible({ timeout: 20_000 });
     await allCrumb.click({ timeout: 20_000 });
     await page.waitForTimeout(2500);
   }

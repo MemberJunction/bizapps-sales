@@ -151,7 +151,21 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
   // =============================================================================================
   await test.step('read the Deal back', async () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(6000);
+
+    /**
+     * Wait for the RECORD to be back, not for six seconds.
+     *
+     * This slept 6000ms after the reload and then read `body.innerText()`. The deal name and the
+     * Pipeline FK were present by then; the Company FK was not, and the step failed claiming the FK does
+     * not resolve — an assertion about the generated base view, failed by the clock. Waiting for the
+     * deal's own name to render first removes timing from the question, so if `Company` is still absent
+     * afterwards that is a real finding about the view rather than a slow form.
+     */
+    await expect(
+      page.getByText(DEAL_NAME).first(),
+      'the reloaded record must render before its fields are read',
+    ).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(2500);
     await shot(page, '18-deal-reloaded');
 
     // VIEW MODE. Assert the values a rep actually sees, including the two FKs resolved to their
@@ -178,8 +192,17 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
       ).toBe(true);
     }
 
-    // The child relationships CodeGen wired up.
-    for (const tab of ['Deal Lines', 'Deal Team Members', 'Deal Stage Events', 'Deal Contact Roles']) {
+    /**
+     * The child relationships CodeGen wired up.
+     *
+     * `Deal Lines` is NOT in this list, and its absence is the point rather than an oversight. Andrew
+     * closed issues #36-#39 as not planned — "An embedded Order record will store products and prices
+     * associated with the deal" — which is `docs/DECISIONS.md` D-DL1 (:461) arrived at from the product
+     * side. The entity has no rows in `__mj.Entity`, so CodeGen never wired a surface for it and this
+     * assertion could only fail. A deal's lines live on the workspace's Product lines pane now, which
+     * `40`/`41` cover.
+     */
+    for (const tab of ['Deal Team Members', 'Deal Stage Events', 'Deal Contact Roles']) {
       expect(
         await fieldLabelVisible(page, tab),
         `related-entity surface "${tab}" must be reachable`,

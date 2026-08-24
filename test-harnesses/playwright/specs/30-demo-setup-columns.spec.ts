@@ -38,16 +38,19 @@ const SETUP: Array<{ entity: string; columns: string[] }> = [
     entity: 'Deal Team Members',
     columns: ['Deal', 'Deal Role', 'Employee', 'Person ID', 'Attribution Pct'],
   },
-  {
-    // `Line Type` was a free-text column and is now a FK to the DealLineType type table, so the
-    // offered column is `Deal Line Type`. The signed figures sit beside the EMPTY Resolved* columns
-    // on purpose: that contrast — three numbers a human transcribed, four the pricing engine has not
-    // filled in yet — is what "sales never computes money" looks like as data.
-    entity: 'Deal Lines',
-    columns: ['Deal', 'Product Name', 'Deal Line Type', 'Quantity',
-              'Annual Gross Fees', 'Discount Amount', 'Total', 'Requested Discount Pct',
-              'Resolved Unit Price', 'Resolved Extended Amount', 'Priced At'],
-  },
+  /**
+   * `Deal Lines` WAS SET UP HERE AND IS DELIBERATELY GONE.
+   *
+   * Andrew closed issues #36-#39 as not planned — "An embedded Order record will store products and
+   * prices associated with the deal" — which is `docs/DECISIONS.md` D-DL1 (:461) reached from the
+   * product side. The entity has no rows in `__mj.Entity`, so it is not listed in the app and this
+   * step could only ever fail.
+   *
+   * The demo point it carried is NOT lost, and that is worth being explicit about, because it was the
+   * sharpest one here: signed figures sitting beside EMPTY Resolved* columns is what "sales never
+   * computes money" looks like as data. That contrast now lives on the workspace's Product lines pane,
+   * where unit price and line total render READ-ONLY, and `20-demo-tour` tours it there.
+   */
   {
     // The exception payment schedule. Only DEAL-9001 has rows, which IS the point — no rows means
     // standard terms, so "did this deal negotiate payment terms?" is a row count.
