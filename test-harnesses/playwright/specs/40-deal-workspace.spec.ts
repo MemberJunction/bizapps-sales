@@ -112,17 +112,6 @@ async function selectFirstRealOption(
   throw new Error(`select "${label}" offered no real options — its lookup did not load`);
 }
 
-/** The REAL option labels of a select, skipping the em-dash placeholder. */
-async function realOptionLabels(select: import('@playwright/test').Locator): Promise<string[]> {
-  const labels: string[] = [];
-  for (const option of await select.locator('option').all()) {
-    const text = ((await option.textContent()) ?? '').trim();
-    if (text && !text.startsWith('—')) {
-      labels.push(text);
-    }
-  }
-  return labels;
-}
 
 test.describe('deal workspace — Phase 1 definition of done', () => {
   test('compose a complete deal through the custom form, and read it back', async ({ page }) => {
@@ -235,28 +224,26 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
         { name: `${RUN_TAG} Onboarding`, qty: '1', gross: '20000', disc: '0', total: '20000' },
       ];
       /**
-       * THE TWO ROWS TAKE DIFFERENT LINE TYPES, which an earlier version did not.
+       * ── DELETED: THE RECURRING-PATH ASSERTIONS ────────────────────────────────────────────────
        *
-       * It picked the FIRST real option for every row, so both lines came out One-Time and the
-       * recurring path — the one that produces MRR/ARR and a renewal — was never exercised through the
-       * UI at all. Row 0 now takes the LAST offered type and row 1 the FIRST, which guarantees they
-       * differ whatever the seeded vocabulary happens to be.
+       * RETIRED BY `docs/DECISIONS.md` D-DL1 (:461). Three references to one control went with it: the
+       * "at least two types" precondition, the per-row type selection, and the "the two lines must
+       * carry DIFFERENT types" check below.
        *
-       * NOTE what is deliberately NOT asserted here: that a particular row is "Recurring". The meaning
-       * of a line type lives in its `IsRecurring` FLAG, not its label, and a UI test cannot see flags —
-       * so hardcoding the name would couple this spec to a renameable string while proving nothing
-       * about behaviour. The flag semantics are asserted server-side by integration check SD12, which
-       * joins to the type row and reads `IsRecurring` directly.
+       * D-DL1 settled that nothing routes by line kind. Recurrence is a property of the PRODUCT the rep
+       * already picks, so there is no sales behaviour left for a spec to assert — a sales spec claiming
+       * it would be asserting orders' concern from the wrong side of the boundary.
+       *
+       * The control does not exist either: `select.dw-cell-linetype` appears nowhere in the template,
+       * and the only line-level select is `.dw-cell-product`. That is why this failed as
+       * "must offer at least two types, Received: 0" — not a shrunken vocabulary, an absent control.
+       *
+       * AND THE OLD DOCBLOCK POINTED SOMEWHERE RETIRED, which is worth correcting rather than
+       * deleting silently: it deferred the flag semantics to integration check `SD12`. `SD12` is gone
+       * along with `SD4`, `SD5` and `SD16`, and `save-deal.checks.ts:20` records that their ids are
+       * deliberately not reused. So the pointer led nowhere, and there is no live check anywhere in the
+       * suite asserting product recurrence. That is the state D-DL1 chose, not a gap to be filled here.
        */
-      // Targeted by CLASS, not position: a line row now holds a product picker AND a line-type
-      // select, so `.first()` silently became the product one when that column was added.
-      const typeLabels = await realOptionLabels(rows.nth(0).locator('select.dw-cell-linetype'));
-      expect(
-        typeLabels.length,
-        'the line-type selector must offer at least two types, or the recurring path cannot be exercised',
-      ).toBeGreaterThanOrEqual(2);
-
-      const chosenTypes: string[] = [];
       for (let i = 0; i < values.length; i++) {
         const row = rows.nth(i);
         const inputs = row.locator('input');
@@ -266,17 +253,9 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
         await inputs.nth(3).fill(values[i].disc);          // Discount
         await inputs.nth(4).fill(values[i].total);         // Total
 
-        // Line type is a real type table now, so it is a select and not free text.
-        const label = i === 0 ? typeLabels[typeLabels.length - 1] : typeLabels[0];
-        await row.locator('select.dw-cell-linetype').selectOption({ label });
-        chosenTypes.push(label);
         await page.waitForTimeout(250);
       }
 
-      expect(
-        new Set(chosenTypes).size,
-        'the two lines must carry DIFFERENT types, so both branches are covered',
-      ).toBe(2);
       await shot(page, '40-04-lines');
     });
 

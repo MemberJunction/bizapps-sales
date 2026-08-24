@@ -64,18 +64,46 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
 
     await SaveDeal(page);
 
+    /**
+     * ── WAITS FOR THE ORDER, NOT JUST FOR THE ROW ───────────────────────────────────────────────
+     *
+     * This returned on the first row it saw. The deal row and its embedded order are written by the
+     * same `DealEntityServer.Save()`, but this poll reads them from OUTSIDE that transaction, so there
+     * is a window where the deal is visible and `OrderID` is still null. The helper took that row, and
+     * the assertion written to catch exactly this was unreachable below — two defects stacked so that
+     * the second hid the first.
+     *
+     * Restoring the assertion alone would have made it fire on the RACE rather than on a real failure,
+     * which is a worse outcome than the silence: an intermittent red that blames provisioning.
+     *
+     * So the loop waits for both, and the two outcomes are distinguished. `sawRow` is kept precisely so
+     * a deal that exists without ever acquiring an order reports THAT, rather than "the deal must exist
+     * in the database" — which would be false, confusing, and point at the wrong half.
+     */
+    let sawRow = false;
     const row = await (async () => {
         for (let i = 0; i < 30; i += 1) {
             const found = await QueryOne<{ ID: string; OrderID: string | null }>(
                 `SELECT ID, OrderID FROM __mj_BizAppsSales.Deal WHERE Name = '${name}'`,
             );
-            if (found) return found;
+            if (found) sawRow = true;
+            if (found?.OrderID) return found;
             await page.waitForTimeout(1_000);
         }
         return undefined;
     })();
 
-    expect(row, `the deal "${name}" must exist in the database after saving`).toBeTruthy();
+    expect(
+        sawRow,
+        `the deal "${name}" must exist in the database after saving — no row appeared in 30s, so the ` +
+            'save itself never landed',
+    ).toBe(true);
+    expect(
+        row,
+        `the deal "${name}" was written but never acquired an embedded order in 30s. Provisioning ` +
+            'happens inside DealEntityServer.Save(), so a null OrderID here means that half did not run ' +
+            '— this is NOT a timing artefact, the poll waited for it.',
+    ).toBeTruthy();
 
     /**
      * ── NO RELOAD HERE ANY MORE. DN-17 IS FIXED AT THE ENTITY ───────────────────────────────────
@@ -104,12 +132,17 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
      *
      * The lesson is narrow and worth keeping: an assertion after an unconditional return is not a weak
      * assertion, it is an absent one, and it fails in the reassuring direction.
+     *
+     * ── AND THE RESTORED ASSERTION HAS SINCE BEEN REMOVED AGAIN, DELIBERATELY ────────────────────
+     *
+     * The guarantee moved UP into the poll, which now waits for `OrderID` rather than for any row. Once
+     * it does that, a check here for a truthy `OrderID` cannot fail — and a permanently-true assertion
+     * is the exact thing this suite spends its time eliminating. It would also read as coverage it does
+     * not provide.
+     *
+     * The claim it made is still made, twice, and by checks that CAN fail: `sawRow` distinguishes "no
+     * row at all" from "a row with no order", and the second names provisioning explicitly.
      */
-    expect(
-        row!.OrderID,
-        'and it must carry an embedded order — provisioning happens inside DealEntityServer.Save, so a ' +
-            'null here means the write path never ran',
-    ).toBeTruthy();
 
     return { Name: name, DealID: row!.ID, OrderID: String(row!.OrderID) };
 }

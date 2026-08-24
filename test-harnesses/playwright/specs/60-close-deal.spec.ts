@@ -33,7 +33,7 @@ import { expect, test } from '@playwright/test';
 
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, expectOnlyKnownErrors, shot } from '../lib/explorer';
-import { CloseDb, DealByName, OrdersForDealNamed, OrdersSchemaPresent, StageEventsFor } from '../lib/db';
+import { CloseDb, DealByName, StageEventsFor } from '../lib/db';
 
 const SALES_APP_ROUTE = '/app/sales';
 const RUN_TAG = `CL-${Date.now().toString(36).toUpperCase()}`;
@@ -88,8 +88,33 @@ async function createDealWithLine(page: Page, suffix: string): Promise<string> {
     // non-closing statuses now, so index 1 is the first of those — closing is the close action's job.
     await fieldSelect(page, 'Status').selectOption({ index: 1 });
 
+    /**
+     * ── THE FIRST SAVE, BEFORE ANY LINE ──────────────────────────────────────────────────────────
+     *
+     * `Add line` is gated on `CanAddLine` = `!!Deal?.IsSaved`: the embedded order is provisioned inside
+     * `DealEntityServer.Save()` on the first save (S-US4), so before then there is no order for a line
+     * to belong to. The button says exactly that in its title, "Save the deal first".
+     *
+     * This spec had one save, AFTER the lines, so it clicked a disabled button until Playwright gave
+     * up — a 30s timeout reported as a broken control rather than a missing step. Two saves is not
+     * redundancy: the first buys the order, the second commits the lines.
+     *
+     * The MESSAGE is asserted, not just the click, because a save that silently did not land leaves
+     * `Add line` disabled for the same reason and would look identical at the next line.
+     */
+    await page.getByRole('button', { name: /^Save deal/i }).locator('visible=true').first().click();
+    await expect(
+        page.locator('.dw-msg'),
+        'the first save must land — the order is provisioned by it, and without one no line can be added',
+    ).toContainText(/created|saved/i, { timeout: 30_000 });
+
     await page.locator('.dw-panes__tab', { hasText: 'Product lines' }).first().click();
-    await page.getByRole('button', { name: /Add line/i }).first().click();
+    const addLine = page.getByRole('button', { name: /Add line/i }).first();
+    await expect(
+        addLine,
+        'Add line must be enabled once the deal is saved — if this is disabled the first save did not land',
+    ).toBeEnabled({ timeout: 20_000 });
+    await addLine.click();
 
     /**
      * The picker: choose whatever the FIRST real product is rather than naming a SKU, so this spec
@@ -106,8 +131,37 @@ async function createDealWithLine(page: Page, suffix: string): Promise<string> {
      */
     const productSelect = page.locator('.dw-cell-product').locator('visible=true').first();
     await productSelect.selectOption({ index: 1 });
-    const typeSelect = page.locator('select').filter({ hasText: /One-Time/i }).locator('visible=true').first();
-    await typeSelect.selectOption({ label: 'One-Time' });
+
+    /**
+     * AND A QUANTITY, which this spec never set.
+     *
+     * `OrderLine.Quantity` is NOT NULL, so an added line with no quantity leaves Save disabled with the
+     * title "Quantity cannot be null" — and the failure surfaces 30s later as a click timeout on Save,
+     * pointing at the button rather than at the empty cell that disabled it.
+     *
+     * It was previously masked: the line-type `selectOption` timed out first, so the run never reached
+     * the save. Removing that retired control did not create this, it revealed it.
+     *
+     * Scoped to the row that holds the product picker, because `.dw-num input` also matches the discount
+     * cell — quantity is the FIRST number input in the line row, and picking the wrong one would set a
+     * discount and leave quantity null, which fails identically.
+     */
+    const lineRow = page.locator('tr', { has: page.locator('.dw-cell-product') }).first();
+    await lineRow.locator('td.dw-num input[type="number"]').first().fill('2');
+    /**
+     * NO LINE-TYPE SELECTION ANY MORE, because there is no such control.
+     *
+     * This chose "One-Time" from a per-line type select. `DealLineType` was retired with `DealLine`, and
+     * the line row now offers product, quantity, unit price, line total and discount — no type. The
+     * locator therefore matched nothing and `selectOption` timed out after 30s, which reads as a broken
+     * dropdown rather than an absent one.
+     *
+     * Removed rather than retargeted: the type was FIXTURE SCAFFOLDING here — this spec is about closing
+     * a deal, and it needed a saveable line, not a line of a particular type. Where a spec asserts the
+     * retired vocabulary as its SUBJECT rather than its setup, deleting the assertion would be deleting
+     * the test, and that is a decision rather than a repair. See 40-deal-workspace's recurring-path
+     * assertion and 20-demo-tour's Deal Lines step.
+     */
 
     await page.getByRole('button', { name: /^Save deal/i }).locator('visible=true').first().click();
     await expect(page.locator('.dw-msg')).toContainText(/created|saved/i, { timeout: 30_000 });
@@ -152,14 +206,31 @@ test.describe('closing a deal through the Explorer', () => {
             'closing must APPEND a stage event — without it the close has no provenance',
         ).toBeGreaterThan(0);
 
-        if (await OrdersSchemaPresent()) {
-            const orders = await OrdersForDealNamed(name);
-            expect(
-                orders.length,
-                'closing a won deal with a one-time line must create an ORDER in bizapps-orders',
-            ).toBe(1);
-            expect(orders[0].OrderNumber, 'the order must be numbered by orders').toBeTruthy();
-        }
+        /**
+         * ── DELETED: "closing a won deal must create an ORDER in bizapps-orders" ─────────────────
+         *
+         * RETIRED BY `docs/DECISIONS.md` D-OS1. Close-won does not create an order: the order is
+         * provisioned with the deal, inside `DealEntityServer.Save()` on the first save (S-US4), which
+         * is why this spec now has to save before it can add a line at all. A close moves the order's
+         * STATUS when the stage it enters declares one, and does nothing to it when the stage declares
+         * nothing.
+         *
+         * NOT RE-AIMED ONTO "the order is left untouched", which was the obvious next move.
+         * `close-won-order.CO3` already made that move and rejected it, and its docblock says why: once
+         * a stage names what the order should become, "untouched" stops being the requirement and starts
+         * being an accident of which stage the fixture happened to seed. The DEAL-9003 close run earlier
+         * this week is the proof — the order held still because Proposal and Signed BOTH declare
+         * `Quoted`, not because the close left it alone. An assertion that passes for that reason is
+         * measuring the seed.
+         *
+         * The live requirement is asserted by CO3 instead, server-side, which sets the stage's
+         * `OrderStatusOnEntry` inside its own transaction so the answer cannot depend on the seed. That
+         * is the right place for it: it is a write-path guarantee, not something a browser adds
+         * confidence to.
+         *
+         * What this spec still asserts about the close is above and unchanged — a WON status, the lock,
+         * and an appended stage event for provenance. Those are the UI-reachable half.
+         */
 
         // The user must be TOLD what happened downstream, not have to read the stage event.
         await expect(testId(page, 'close-routing')).toBeVisible();
