@@ -89,7 +89,22 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
      * `79-embedded-order-refresh.spec.ts` is the guard, and `ReopenFromRoster` stays available because
      * reopening from the roster is a path worth driving in its own right.
      */
-    return { Name: name, DealID: row!.ID, OrderID: String(row!.OrderID) };
+    /**
+     * ── THIS ASSERTION WAS UNREACHABLE, AND THAT IS WHY CAUSE 2 LOOKED LIKE STALE SPECS ──────────
+     *
+     * A `return` sat directly above it, so the check never ran. When `OrderID` came back null the
+     * helper returned `String(null)` -- the literal string "null" -- as a perfectly ordinary-looking
+     * order id. Every caller then passed "null" onward: `AddLines` queried an order that cannot exist,
+     * added nothing, and reported 0, which surfaces in a spec as "two lines are needed" or as a click
+     * timeout on a picker that was never populated.
+     *
+     * So the failures blamed the wrong thing twice over. The dead assertion existed precisely to say
+     * "the write path never ran", and because it was dead the diagnosis became "the spec forgot to
+     * save" -- which was wrong, since `ComposeDeal` does fill every field and does save.
+     *
+     * The lesson is narrow and worth keeping: an assertion after an unconditional return is not a weak
+     * assertion, it is an absent one, and it fails in the reassuring direction.
+     */
     expect(
         row!.OrderID,
         'and it must carry an embedded order — provisioning happens inside DealEntityServer.Save, so a ' +
