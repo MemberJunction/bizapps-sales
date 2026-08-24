@@ -305,6 +305,63 @@ const optionalLoads = [];
  * Folder names are NOT assumed (`EngineBase` vs `engine-base` vs `Entities`) — the name in
  * package.json is the only thing checked, so this keeps working when a sibling reorganises.
  */
+async function resolveFromConsumer(name) {
+    const { createRequire } = await import('node:module');
+    /**
+     * ANCHORED AT THE PACKAGES THAT DECLARE IT, STARTING WITH `packages/IntegrationTests`.
+     *
+     * This probe used to `import(name)` from the REPO ROOT. That works under a hoisted node_modules and
+     * fails under a strict one, because the root declares only sales' own two packages — it is not a
+     * consumer of orders or common and has no business knowing about them. Under a clean registry
+     * install every downstream package resolved as `absent`, the suite ran 13 checks of 127, and printed
+     * a green tick.
+     *
+     * Declaring them at the root would fix the symptom by making a lie true: the root would carry
+     * dependencies nothing there imports, and they would drift the day a package stopped importing them.
+     * IntegrationTests owns these checks, so its resolution is the one that should matter — but it
+     * declares only two of the nine probed names, so the other consumers follow it. `orders-entities`
+     * lives in CoreEntitiesServer, Angular and Entities; anchoring solely at IntegrationTests would
+     * resolve two and call the rest absent.
+     */
+    for (const consumer of ['IntegrationTests', 'CoreEntitiesServer', 'Entities', 'Angular', 'Server', 'Actions']) {
+        try {
+            const require = createRequire(join(REPO_ROOT, 'packages', consumer, 'package.json'));
+            return require.resolve(name);
+        } catch {
+            // try the next consumer
+        }
+    }
+    return null;
+}
+
+/**
+ * Every `@mj-biz-apps/*` package some sales package DECLARES, read from the manifests at run time.
+ *
+ * This is the line between "not installed on this host" and "resolution is broken". Accounting,
+ * contracts and `orders-core-entities-server` are declared NOWHERE in sales — they are optional
+ * downstream apps and this runner is documented to run whichever of their bundles a host supports.
+ * `common-entities`, `orders-entities` and `tasks-entities` ARE declared, so sales does not build
+ * without them and they must always resolve. Computed, not listed, so it cannot drift.
+ */
+function declaredDownstream() {
+    const out = new Set();
+    const manifests = ['package.json', ...['Actions', 'Angular', 'CoreEntitiesServer', 'Entities',
+        'IntegrationTests', 'Server'].map((d) => join('packages', d, 'package.json'))];
+    for (const rel of manifests) {
+        try {
+            const m = JSON.parse(readFileSync(join(REPO_ROOT, rel), 'utf8'));
+            for (const block of [m.dependencies, m.devDependencies]) {
+                for (const name of Object.keys(block ?? {})) {
+                    if (name.startsWith('@mj-biz-apps/') && !name.startsWith('@mj-biz-apps/sales')) out.add(name);
+                }
+            }
+        } catch {
+            // an unreadable manifest contributes nothing rather than failing the run
+        }
+    }
+    return out;
+}
+
 async function resolveSiblingPackage(name) {
     const { readdirSync, existsSync, readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
@@ -346,7 +403,9 @@ for (const [pkg, anchor] of (process.env.MJ_SKIP_DOWNSTREAM === '1' ? [] : ORDER
     try {
         mod = await import(pkg);
     } catch {
-        const entry = await resolveSiblingPackage(pkg);
+        // The CONSUMER's resolution first: a registry install puts these under the package that
+        // declares them, never under the root this file runs from.
+        const entry = (await resolveFromConsumer(pkg)) ?? (await resolveSiblingPackage(pkg));
         if (!entry) {
             optionalLoads.push(`${pkg}: absent`);
             continue;
@@ -367,6 +426,54 @@ for (const [pkg, anchor] of (process.env.MJ_SKIP_DOWNSTREAM === '1' ? [] : ORDER
     optionalLoads.push(`${pkg}: loaded`);
 }
 console.log(`  downstream packages -> ${optionalLoads.join(' | ')}`);
+
+/**
+ * ── AN UNRESOLVABLE *DECLARED* PACKAGE IS A FAILURE, NOT A LOG LINE ────────────────────
+ *
+ * `selected === 0` is the wrong threshold and it let the worst outcome through. With every downstream
+ * package unresolvable the suite still selected THIRTEEN checks — the bundles needing no sibling — so
+ * the zero-guard never fired and the run printed a GREEN TICK over 114 checks that never executed.
+ * Measured against published packages. A green tick for work that did not happen is the failure this
+ * harness exists to prevent, and it is worse than a red: nobody investigates a pass.
+ *
+ * SCOPED TO DECLARED PACKAGES, and the scope is the substance. "Any absence fails" would be wrong in
+ * the other direction: accounting and contracts are declared nowhere, are optional per host, and this
+ * runner is documented to run whichever of their bundles a host supports. What cannot legitimately be
+ * absent is a package sales DECLARES, because sales does not build without it — so its absence means
+ * resolution broke, which is the measured bug.
+ *
+ * `MJ_SKIP_DOWNSTREAM=1` is already the deliberate opt-out for bisecting, so no new switch is needed.
+ */
+const declaredPkgs = declaredDownstream();
+const unavailable = optionalLoads.filter((l) => {
+    if (!l.endsWith(': absent') && !l.includes(': FAILED')) return false;
+    return declaredPkgs.has(l.slice(0, l.lastIndexOf(': ')));
+});
+if (unavailable.length > 0 && process.env.MJ_SKIP_DOWNSTREAM !== '1') {
+    console.error(
+        [
+            '',
+            `✖ ${unavailable.length} DECLARED DOWNSTREAM PACKAGE(S) COULD NOT BE LOADED. The bundles that`,
+            '  need them will not register, so this run would report a PASS for checks that never ran.',
+            '',
+            ...unavailable.map((l) => `    ${l}`),
+            '',
+            '  These are packages sales DECLARES, so they cannot legitimately be missing. Optional apps',
+            '  (accounting, contracts) are not counted here.',
+            '',
+            '  A failure rather than a warning because the COUNT guard cannot catch it: with every',
+            '  downstream package missing the suite still selects the bundles that need none and exits 0',
+            '  having run a fraction of the checks. Measured: 13 of 127.',
+            '',
+            '  If they ARE installed this is a RESOLUTION problem, not an install problem. They resolve',
+            '  from the packages that declare them, starting with packages/IntegrationTests.',
+            '',
+            '  To run deliberately without them:  MJ_SKIP_DOWNSTREAM=1 npm run test:integration',
+            '',
+        ].join(String.fromCharCode(10)),
+    );
+    process.exit(2);
+}
 
 const { IntegrationCheckRegistry } = await import('@memberjunction/testing-integration');
 await import('@mj-biz-apps/sales-integration-tests'); // side effect: registers the bundles

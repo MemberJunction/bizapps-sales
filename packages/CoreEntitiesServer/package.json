@@ -31,10 +31,10 @@
     "@mj-biz-apps/tasks-entities": "^1.2.3"
   },
   "peerDependencies": {
-    "@memberjunction/core": "^6.1.0-edge.2",
-    "@memberjunction/core-entities": "^6.1.0-edge.2",
-    "@memberjunction/global": "^6.1.0-edge.2",
-    "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.2"
+    "@memberjunction/core": "^6.1.0-edge.3",
+    "@memberjunction/core-entities": "^6.1.0-edge.3",
+    "@memberjunction/global": "^6.1.0-edge.3",
+    "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.3"
   },
   "repository": {
     "type": "git",
