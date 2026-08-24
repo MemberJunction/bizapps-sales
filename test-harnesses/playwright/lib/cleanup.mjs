@@ -284,9 +284,55 @@ DELETE cr FROM __mj_BizAppsSales.DealContactRole cr JOIN @deals d ON cr.DealID =
 
 DELETE d FROM __mj_BizAppsSales.Deal d JOIN @deals x ON x.ID = d.ID;
 
+/*
+ * Pipeline IDs are captured BEFORE the delete, the same way @deals is, because the record-log cleanup
+ * below needs to know what was removed and the rows are gone by then.
+ */
+DECLARE @pipes TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+INSERT INTO @pipes (ID)
+  SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
+
 DELETE ps FROM __mj_BizAppsSales.PipelineStage ps
   JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE EXISTS (SELECT 1 FROM @inner WHERE p.Name LIKE P);
 DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
+
+/*
+ * ── THE RECORD LOG, WHICH IS WHY THIS TABLE KEPT GETTING CLEARED BY HAND ─────────────────────────
+ *
+ * __mj.UserRecordLog is how Explorer knows which records you last had open, and it is what the app
+ * uses to restore them. Deleting a deal without deleting its log row leaves a reference to a record
+ * that no longer exists, and the app then does exactly the right thing with it: tries to load it,
+ * fails, and writes a console error.
+ *
+ *     Error in BaseEntity.Load(MJ_BizApps_Sales: Deals, Key: ID=23549B45-...)
+ *
+ * That is not a product defect and it is not cosmetic. It broke 10-deal-crud at its console keystone,
+ * which is a genuine assertion doing its job, and it had accumulated 15 orphans across one evening —
+ * one deal and one pipeline per run, every run. The table has now been cleared by hand three times.
+ *
+ * IT STOPS BEING OURS THE MOMENT SOMEONE ELSE LOGS IN. The log is per-user, so a tester who opens a
+ * deal this sweep later deletes gets console errors in their own session, on a correct application,
+ * with nothing in the UI to explain it. Cleaning up after ourselves is the whole fix.
+ *
+ * DELIBERATELY EVERY DEAD REFERENCE, not only the ones this run deleted.
+ *
+ * The first version scoped it to the IDs this sweep removed, which is tighter and does not solve
+ * the problem: a run that finished before this fix, a crashed run, or a human deleting a deal by
+ * hand all leave references this sweep would walk straight past. Measured right after shipping the
+ * narrow version — the next run still failed on two orphans left by the run before it, so the table
+ * would have gone on needing to be cleared by hand, which is the thing being fixed.
+ *
+ * Deleting a log row whose record NO LONGER EXISTS is safe by construction: the reference is
+ * already dead, it cannot be restored, and its only remaining effect is a console error. Scoped to
+ * the two Sales entities this sweep is responsible for, so it never reaches another app's data.
+ */
+DECLARE @logCleared INT;
+DELETE l FROM __mj.UserRecordLog l
+  JOIN __mj.Entity e ON e.ID = l.EntityID
+ WHERE e.Name IN ('MJ_BizApps_Sales: Deals', 'MJ_BizApps_Sales: Pipelines')
+   AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d     WHERE CONVERT(varchar(36), d.ID) = l.RecordID)
+   AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline p WHERE CONVERT(varchar(36), p.ID) = l.RecordID);
+SET @logCleared = @@ROWCOUNT;
 
 /*
  * Tabs blanked, layout reset, nothing else touched -- and ONLY for a workspace that actually names one of
@@ -313,6 +359,7 @@ DELETE ol FROM __mj_BizAppsOrders.OrderLine ol JOIN @orders o ON ol.OrderHeaderI
 DELETE oh FROM __mj_BizAppsOrders.OrderHeader oh JOIN @orders o ON oh.ID = o.ID;
 
 SELECT 'workspace_tabs_cleared=' + CAST(@wsCleared AS varchar);
+SELECT 'record_log_cleared=' + CAST(@logCleared AS varchar);
 /*
  * THESE ASK THE SAME QUESTION THE DELETE ASKED, and that is the whole point of changing them.
  *

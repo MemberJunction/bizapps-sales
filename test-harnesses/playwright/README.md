@@ -80,6 +80,43 @@ Findings as of 2026-08-04: **Auth0 allows only ports 4200 and 4201.** **Azure al
 port** (it has a documented localhost exception for public/SPA clients), which is why MSAL works on the
 plan's real 4341 with no IdP change at all.
 
+## THE HIDDEN-TAB RULE — scope every locator to what is VISIBLE
+
+**MJ's shell keeps every open tab's form in the DOM and merely HIDES the inactive ones.** A spec that has
+opened two records is holding two record views at once, and only the front one can be interacted with.
+
+So an unscoped `.first()` is not "the obvious one" — it is a lottery weighted towards the OLDEST tab,
+because that is the one earliest in document order.
+
+**The rule: any locator that could match a form field, a record control, or a grid row must be scoped to
+the visible copy.** Either form works:
+
+```ts
+page.locator('button[title="Delete this Record"]:visible').first()   // CSS pseudo-class
+page.getByText(DEAL_NAME).filter({ visible: true }).first()          // filter, for getByText/getByRole
+```
+
+This is not a style preference. It has cost real time four separate ways, and every one of them looked
+like a product defect:
+
+- **`fieldLabelVisible`** matched the DEAL form's hidden `Name` input while a "New Deals Record" tab was
+  still open, and asserted against the wrong form's value.
+- **`deleteRecordViaRecordView`** resolved `button[title="Delete this Record"]` **36 times, every one
+  `hidden`**, and failed with *"the record view must expose Delete this Record"* — about a record view
+  that exposes it perfectly well. **The delete step never executed once**, so deletion through the UI went
+  unexercised by this suite for its entire life.
+- **`40-deal-workspace`'s row locator** resolved to a hidden ROSTER row instead of the entity-browser
+  grid, timing-dependent on whether the roster had loaded that deal — the worst kind of failure to read.
+- **A reload wait** written *while fixing the delete locator* made the identical mistake one step later:
+  a bare `getByText(DEAL_NAME).first()` matched a hidden tab's copy and waited 30s for something that
+  could never become visible.
+
+That last one is the reason this is a README rule and not a comment on two locators. Knowing about the
+trap is not enough to avoid it; the habit has to be "scope it" every time.
+
+**The tell:** a failure whose call log says the locator *resolved* — often many times — and reports
+`hidden` or `element(s) not found` for something you can plainly see on screen. That is this, not the app.
+
 ## Navigation — there is no hand-built UI yet, and none is needed
 
 This app ships no custom application or navigation until S3, but **CodeGen auto-creates one MJ

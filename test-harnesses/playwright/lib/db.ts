@@ -167,10 +167,22 @@ export async function OrderLinesForDeal(dealName: string): Promise<
 /**
  * Orders whose description names this deal.
  *
- * `CloseDealOperation.buildOrderInput` sets the order header's `Description` to the DEAL NAME, which is
- * the only link from an order back to its deal today — there is no `Deal.OrderID` column (that is a
- * separate architecture decision). Matching on it is therefore the honest available join, and the run
- * tag in every spec's deal name keeps it unambiguous across re-runs.
+ * `CloseDealOperation.buildOrderInput` sets the order header's `Description` to the DEAL NAME, and the
+ * run tag in every spec's deal name keeps that unambiguous across re-runs.
+ *
+ * ── CORRECTION: `Deal.OrderID` EXISTS, and this docblock said it did not ─────────────────────────
+ *
+ * It claimed "there is no `Deal.OrderID` column (that is a separate architecture decision)". There is
+ * one — nullable, verified against the live schema, and `save-deal.checks.ts` reads `deal.OrderID`
+ * directly. The column arrived with the embedded-order work and this comment was never updated.
+ *
+ * The distinction MATTERS, and reading the stale comment sent a read-back down the wrong path once:
+ * `Description` is set at CLOSE time, so an order provisioned with the deal on first save leaves it
+ * NULL — measured, most orders on this host have a null description. Joining on the name therefore
+ * finds nothing for an unclosed deal.
+ *
+ * So: use `OrderLinesForDeal` (below), which joins through `Deal.OrderID`, for anything about a deal's
+ * own order. This helper stays for the CLOSED case, where the description is the thing that was set.
  */
 export async function OrdersForDealNamed(dealName: string): Promise<
     { ID: string; OrderNumber: string | null; Status: string; TotalGross: number | null }[]

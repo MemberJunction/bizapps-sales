@@ -161,10 +161,26 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
      * deal's own name to render first removes timing from the question, so if `Company` is still absent
      * afterwards that is a real finding about the view rather than a slow form.
      */
-    await expect(
-      page.getByText(DEAL_NAME).first(),
-      'the reloaded record must render before its fields are read',
-    ).toBeVisible({ timeout: 30_000 });
+    /**
+     * WAIT FOR EXACTLY WHAT THE ASSERTIONS BELOW READ, which is the page's TEXT.
+     *
+     * Two earlier attempts at this wait were wrong in two different ways. A bare
+     * `getByText(DEAL_NAME).first()` matches the HIDDEN copy on a background tab — MJ keeps every open
+     * tab's form in the DOM, see the hidden-tab rule in README.md — and waits the full timeout for
+     * something that can never become visible. Scoping it with `.filter({ visible: true })` fixes that
+     * and is still not right, because "a visible text node exists" and "the string is present in
+     * `body.innerText()`" are different conditions: the name renders in more than one place and which
+     * paints first varies with how the reload settles.
+     *
+     * The assertions immediately below read `body.innerText()`. So this waits on `body.innerText()`.
+     * A wait that watches a different thing from the assertion is a race with extra steps.
+     */
+    await expect
+      .poll(async () => (await page.locator('body').innerText().catch(() => '')).includes(DEAL_NAME), {
+        timeout: 30_000,
+        message: 'the reloaded record must render before its fields are read',
+      })
+      .toBe(true);
     await page.waitForTimeout(2500);
     await shot(page, '18-deal-reloaded');
 
