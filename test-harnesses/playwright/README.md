@@ -203,8 +203,8 @@ Things the harness surfaced that are worth knowing, and are not bugs in this app
 ## A killed mutation run leaves the mutant behind — `git status` before trusting a clean tree
 
 `test-harnesses/mutate-checks.mjs` copies a source file aside, edits it, builds, runs the suite, and
-restores from the copy in a `finally`. Kill the process between the edit and the restore — a tool
-timeout, a Ctrl-C, a session ending — and **the mutation stays in the working tree and in `dist/`**.
+restores from the copy in a `finally`. Kill the process between the edit and the restore — a Ctrl-C, a
+session ending — and **the mutation stays in the working tree and in `dist/`**.
 
 It has happened three times. Each looked like a puzzling test failure rather than a stranded edit,
 because `git diff` on a file nobody remembers touching is not where anyone looks first.
@@ -216,6 +216,18 @@ git status --porcelain          # a modified source file you did not edit IS the
 git checkout -- <that file>
 npm run build:packages          # restoring the SOURCE is not enough; dist/ still holds it
 ```
+
+> ### ⚠️ BUT FIRST CHECK IT IS NOT STILL RUNNING — a tool timeout DETACHES, it does not kill
+>
+> **This is the correction that matters most on this page.** An agent Bash call that hits its
+> ten-minute ceiling reports a timeout and *leaves the process running*. The recovery above then
+> becomes actively destructive: `git checkout --` plus a rebuild overwrites a **live** experiment's
+> mutated source and rebuilds its `dist/` out from under it, so the run compiles and tests
+> **unmutated** code and reports a confident, wrong result.
+>
+> That is how a false `MISS` was published: six runs up to two hours old were still alive, each
+> holding or queuing on the suite application lock, so every fresh attempt queued behind an earlier
+> one **from the same session**. The full procedure is below. Run it before touching the tree.
 
 ### Read the gate before committing, not beside it
 
@@ -245,3 +257,78 @@ immediately.
 node test-harnesses/mutate-checks.mjs M-XX 2>&1 | tee /tmp/run.txt   # survives a kill
 node test-harnesses/mutate-checks.mjs M-XX > /tmp/run.txt 2>&1       # loses everything on a kill
 ```
+
+## Orphaned runs: the procedure
+
+Three facts, each of which cost real time on 2026-08-24. The first is the one nobody had written down.
+
+### 1. The ten-minute tool ceiling DETACHES the process; it does not kill it
+
+An agent Bash call that times out reports a timeout and returns. **The command keeps running.** Six
+mutation runs survived this way, the oldest close to two hours, each holding or queuing on the suite
+application lock — so every new attempt queued behind an earlier attempt *from the same session*,
+which looked exactly like a busy neighbour.
+
+Consequences worth stating plainly:
+
+- A "killed" run is still writing to your worktree and still holding locks.
+- Recovering a "stranded" mutation while its run is alive **corrupts a live experiment** and produces
+  a confident wrong result — see the box above.
+- Waits get progressively worse across an evening, because orphans accumulate.
+
+### 2. `ps -W` prints no command-line arguments, so it cannot find a run by script name
+
+```bash
+ps -W | grep mutate-checks      # matches NOTHING, even while the run is executing
+```
+
+`ps -W` emits PID, PPID and an executable path. `mutate-checks.mjs` is an *argument* to `node`, so it
+never appears. Any liveness check written this way has been silently blind — and reporting
+`live procs: 0` while six were running is what sent a whole evening's diagnosis to the wrong cause.
+
+Use the process table that carries arguments:
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+  Where-Object { $_.CommandLine -match 'mutate-checks|integration\.mjs' } |
+  ForEach-Object { "{0}  {1}" -f $_.ProcessId, $_.CommandLine }
+```
+
+### 3. NEVER kill a process you cannot prove you own
+
+There are **20+ `claude.exe` processes** on this machine. Walking a parent chain until it reaches *a*
+`claude.exe` proves nothing whatsoever. A session killed another session's suite runs this way.
+
+The test is to compare that `claude.exe` PID against **your own session's**:
+
+```powershell
+# your own session: the claude.exe ancestor of THIS shell
+$mine = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
+
+# for a candidate process, walk up until claude.exe and compare
+$cur = Get-CimInstance Win32_Process -Filter "ProcessId=$candidate"
+while ($cur) {
+  $par = Get-CimInstance Win32_Process -Filter "ProcessId=$($cur.ParentProcessId)"
+  if (-not $par) { break }
+  if ($par.Name -eq 'claude.exe') {
+    if ($par.ProcessId -eq $mine) { 'MINE — safe to kill' } else { 'ANOTHER SESSION — leave it' }
+    break
+  }
+  $cur = $par
+}
+```
+
+If ownership is not provable, **leave it alone and say so in your session status file**. A run you
+cannot attribute is someone's work in progress; killing it destroys results that may have taken hours,
+and the person who lost them has no way to know why.
+
+### The order to do this in
+
+1. **List** candidates with `Get-CimInstance`, never `ps -W`.
+2. **Prove ownership** of each against your own `claude.exe` PID.
+3. **Kill only what is provably yours.**
+4. **Then** recover the tree: `git status --porcelain`, `git checkout -- <file>`,
+   `npm run build:packages`.
+5. Verify: no stray mutation in `dist/`, and the suite application lock released.
+6. **Record anything you killed that you could not attribute** in your session status file, so the
+   session that lost it learns why rather than re-diagnosing it.
