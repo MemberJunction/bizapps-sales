@@ -415,6 +415,20 @@ const MUTATIONS = [
           note: 'every policy raises the contract task, including the ones that create no contract' },
 
         /**
+         * -- UNPROVEN, AND SAYING SO IS THE POINT ------------------------------------------------
+         *
+         * The six mutants below (M-WT2R, M-WT7S, M-WT5F, M-WT6T, M-WT8O, M-WT12C) are AUTHORED but
+         * NOT MEASURED. Their anchors were read from source and M-WT2R's is confirmed to apply -- a
+         * killed run left its `if (true) {` in the working tree, which is proof the replacement
+         * matched. What has not happened is a completed run, so nothing here claims they fell
+         * anything.
+         *
+         * An unproven mutant that quietly SKIPS is the failure mode this driver exists to prevent, so
+         * it is labelled rather than left to look like the proven ones above it. Run them before
+         * quoting them, and re-check the anchors first: this was written against a tree that was
+         * about to take a merge moving the Explorer spec map.
+         */
+        /**
          * M-WT2R -- aimed at WT2.
          *
          * WT2 asserts an assignment EXISTS with the role it was given. Making route() decline for every
