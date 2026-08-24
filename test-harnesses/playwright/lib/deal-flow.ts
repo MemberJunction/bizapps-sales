@@ -326,10 +326,10 @@ export async function PurgeDeal(dealID: string, orderID: string | null): Promise
                      ISNULL((SELECT CAST(ContractID AS NVARCHAR(50))
                                FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'), '${dealID}')
                  );
-        -- EVERY child of Task, not just the two that had bitten. `70-lifecycle` died here a second
+        -- EVERY child of Task, not just the two that had bitten. 70-lifecycle died here a second
         -- time on FK_TaskActivity_Task: the close writes a TaskActivity row per task, and this list
         -- knew about TaskLink and TaskAssignment only. Enumerated in full rather than extended by one
-        -- again -- the same list `cleanup.mjs` carries, for the same reason.
+        -- again -- the same list cleanup.mjs carries, for the same reason.
         DELETE td FROM __mj_BizAppsTasks.TaskDecision td JOIN @tasks t ON td.TaskID = t.ID;
         DELETE tac FROM __mj_BizAppsTasks.TaskActivity tac JOIN @tasks t ON tac.TaskID = t.ID;
         DELETE tc FROM __mj_BizAppsTasks.TaskComment tc JOIN @tasks t ON tc.TaskID = t.ID;
