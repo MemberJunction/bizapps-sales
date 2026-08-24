@@ -118,9 +118,10 @@ const MUTATIONS = [
       from: '        if (policy.CreateContract === true) {', to: '        if (false) {' },
     { id: 'M-CD2', file: CDO, expect: ['CD2', 'CO1'],
       from: '        if (policy.CreateContract === true) {', to: '        if (true) {' },
-    { id: 'M-CD4', file: CDO, expect: ['CD4'],
-      from: '        event.AmountAtTransition = deal.Amount;\n        event.ProbabilityAtTransition = deal.Probability;\n        event.Notes = this.routingNote(routing, input.Notes);',
-      to: '        event.AmountAtTransition = null;\n        event.ProbabilityAtTransition = deal.Probability;\n        event.Notes = this.routingNote(routing, input.Notes);' },
+    { id: 'M-CD4', file: DES, expect: ['CD4'],
+      from: '        event.AmountAtTransition = prior.Amount;',
+      to: '        event.AmountAtTransition = null;',
+      note: 'the stage event stamps no amount -- the CD4 defect, re-aimed after the stamping moved to DealEntityServer' },
     { id: 'M-CD5', file: DES, expect: ['CD5', 'CD13', 'CD14'],
       from: '        if (!(await this.statusLocksDeal(persistedStatusID))) {\n            return null;\n        }',
       to: '        if (true) {\n            return null;\n        }' },
@@ -151,8 +152,9 @@ const MUTATIONS = [
 
     // The stage → order-status writer (D-OS1).
     { id: 'M-OS1', file: DES, expect: ['CO3', 'CO5'],
-      from: '        const stageOrder = await this.planStageOrderStatus();',
-      to: '        const stageOrder: StageOrderPlan | null = null;\n        void this.planStageOrderStatus;' },
+      from: '        const stageOrder = this._lockedAtSave ? null : await this.planStageOrderStatus();',
+      to: '        const stageOrder: StageOrderPlan | null = null;\n        void this.planStageOrderStatus;',
+      note: 'the provisioned order never consults the stage, so it takes Draft whatever the stage declares' },
     { id: 'M-OS2', file: DES, expect: ['CO3'],
       from: '        const target = (result.Results ?? [])[0]?.OrderStatusOnEntry;\n        if (!target) {',
       to: "        const target = (result.Results ?? [])[0]?.OrderStatusOnEntry ?? 'Draft';\n        if (false) {" },
@@ -166,9 +168,9 @@ const MUTATIONS = [
       to: '        if (false) {\n            return;\n        }',
       note: 'a hand-typed amount is overwritten — the rule that must not drift' },
     { id: 'M-AM3', file: DES, expect: ['SD23'],
-      from: '        if (total === null || !Number.isFinite(total)) {\n            return;   // no priced lines, or no usable answer — either way, nothing to cache',
-      to: '        if (false) {\n            return;',
-      note: '"nothing priced" becomes a computed amount of nothing — the SD23 defect' },
+      from: '        if (total === null || !Number.isFinite(total)) {',
+      to: '        if (false) {',
+      note: '"nothing priced" becomes a computed amount of nothing -- the SD23 defect' },
 
     { id: 'M-OS3', file: DES, expect: ['CO5'],
       from: '        if (!verdict.Allowed) {\n            this._orderStatusWarnings.push(',
@@ -203,8 +205,8 @@ const MUTATIONS = [
     // Ungating the task step makes a LOST deal raise an order-review task: finance works a review for a
     // deal nobody won, finds nothing to review, and no error was ever raised.
     { id: 'M-WT1', file: CDO, expect: ['WT11'],
-      from: 'const taskIssues: SalesCloseIssue[] = [];\n            if (target.IsWon) {',
-      to: 'const taskIssues: SalesCloseIssue[] = [];\n            if (true) {',
+      from: '            if (target.IsWon) {\n                const cfg = ReadCloseWonTaskConfig(policy);',
+      to: '            if (true) {\n                const cfg = ReadCloseWonTaskConfig(policy);',
       note: 'a lost close raises the won deal\'s tasks' },
 
     // ── ID PREFIXES FOLLOW THE TARGET BUNDLE, and this comment exists because I broke that ──────────
@@ -231,14 +233,14 @@ const MUTATIONS = [
     // probability has it overwritten and the stage event then stamps the wrong departure value. Expecting
     // BD6 here was my mistake; the driver reported BD2 and the driver was right.
     { id: 'M-BD2', file: DES, expect: ['BD2'],
-      from: '        const probabilityIsTheirs = creating',
-      to: '        const probabilityIsTheirs = false && creating',
-      note: 'creation asks Dirty again — the defect BD2 found the first time' },
+      from: '        if (!this.IsSaved) {\n            return current !== null && current !== undefined && current !== \'\';\n        }',
+      to: '        if (false) {\n            return current !== null && current !== undefined && current !== \'\';\n        }',
+      note: 'creation asks Dirty again -- the defect BD2 found the first time, now living in callerSuppliedValue' },
 
     // OVERWRITE INSTEAD OF FILL, which is the version a reasonable person writes first: the stage always
     // wins and a probability somebody typed is discarded. BD6 is the only check that forbids it.
     { id: 'M-BD3', file: DES, expect: ['BD6'],
-      from: '        if (!probabilityIsTheirs) {',
+      from: '        if (!this.callerSuppliedValue(\'Probability\', this.Probability)) {',
       to: '        if (true) {',
       note: 'the stage default always overwrites a stated probability' },
 
@@ -400,9 +402,9 @@ const MUTATIONS = [
     // therefore proves the check is not VACUOUS rather than isolating one guard: it stops the close
     // setting the status at all, which naturally fells everything that asserts a close outcome.
     { id: 'M-ST7', file: CDO, expect: ['CD17'],
-      from: 'deal.DealStatusTypeID = target.ID;\n        if (input.ClosingStageID) {',
-      to: 'deal.DealStatusTypeID = deal.DealStatusTypeID;\n        if (input.ClosingStageID) {',
-      note: 'the close stops setting the status. BROAD BY DESIGN -- every check that asserts a close outcome falls with it; CD17 is in the list, which is the point' },
+      from: '        const now = new Date();\n        deal.DealStatusTypeID = target.ID;',
+      to: '        const now = new Date();\n        deal.DealStatusTypeID = deal.DealStatusTypeID;',
+      note: 'the close stops setting the status. BROAD BY DESIGN -- every check asserting a close outcome falls with it' },
 
     // The task NAME. Reverting it to the id reproduces a finance queue rendered as rows of hex -- the
     // defect exactly, and the reason WT15 asserts from both ends rather than just looking for the name.
@@ -524,6 +526,35 @@ const MUTATIONS = [
       from: '            if (batch.HighWatermark && result.Failed === 0) {',
       to: '            if (batch.HighWatermark) {',
       note: 'the watermark advances past items whose write failed, so they are lost silently' },
+
+        /**
+         * -- AIMED AT AC22'S CONSUMER, BECAUSE AC22 INJECTS ITS COLLABORATOR ------------------------
+         *
+         * AC22 was the only check in the suite no mutation could fell, which made it read like the
+         * strongest vacuous-pass candidate in the campaign. It is the opposite: six assertions, and it
+         * pins the distinction the branch exists for -- `Failed: 2`, not `Irrelevant: 2`, because a
+         * failed lookup means the items were never JUDGED, which is a different fact from being judged
+         * irrelevant.
+         *
+         * It was unreachable because it substitutes its collaborator: it subclasses `RelevanceFilter`
+         * inline and overrides `Apply` outright, so every mutation of the real filter is invisible to
+         * it. Its docblock says so deliberately -- it is the one check that injects rather than drives,
+         * to reach a branch no arrangement of real data can produce.
+         *
+         * So this aims at the CONSUMER of that signal instead. `result.Failed += allowed.length` is the
+         * line that holds the watermark: `Success` is `Failed === 0`, and the watermark only moves on a
+         * successful run. Booking the batch as Irrelevant instead makes a transient database blip look
+         * exactly like a mailbox of personal mail -- the original defect, restored in one token.
+         *
+         * THE IRONY IS WORTH RECORDING: AC22 exists because a mutation found this gap, and it had since
+         * become unreachable by the same tool. A check that cannot be falsified is indistinguishable
+         * from one that asserts nothing, however good it is -- so the fix is a mutation that can reach
+         * it, not a rewrite of a check that was right all along.
+         */
+        { id: 'M-AC11', file: AIS, expect: ['AC22'],
+          from: '                result.Failed += allowed.length;',
+          to: '                result.Irrelevant += allowed.length;',
+          note: 'a failed lookup is booked as an irrelevant batch -- what used to discard real mail' },
 
     // And that the run SAYS it failed. Without this the scheduled job reports success over a sync that
     // wrote nothing, which is the state the source seam exists to keep distinguishable.
