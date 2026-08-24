@@ -117,6 +117,72 @@ should be re-judged only after those clear.
 `70-activity-timeline` t1 expects `.dat__error` to have count 1 and gets 0 — a refusal that did not
 surface. Its sibling t2 passes. Could be product or spec; not determined.
 
+## SETTLED 2026-08-24 — causes 2 and 3, both by observation
+
+### Cause 2: the specs are stale. The product is fine.
+
+Driven by hand through the UI (`probe-cause2.mjs`, a probe and not a spec — it asserts nothing and
+lives outside `specs/`):
+
+```
+panes (badge = blocking issues): Party info 5 | Product lines | ...
+blocking issues (7 rendered): Name cannot be null · Pipeline ID cannot be null ·
+                              Company ID cannot be null · A deal needs a name. ·
+                              Choose a pipeline. It determines the stages and the selling company. ·
+                              No customer chosen yet
+filled name + 8 selects  ->  panes: Party info (badge gone)
+Save enabled: true
+after save: "Deal created."
+after save: Add line present, ENABLED, title "Add a product line"
+```
+
+`CanAddLine` is `!!Deal?.IsSaved` and it behaves exactly as written: disabled with "Save the deal
+first" before, enabled with "Add a product line" after. **The save path is healthy.** The eight
+failures are spec-side — they reach for `Add line` before a save has landed.
+
+The likely reason they ever passed: a new deal now raises **five** blocking issues, and a spec that
+fills fewer than the form demands never enables Save, so it never gets past the disabled button. Each
+of the eight needs a complete Party-info fill and a confirmed save before it adds a line. That is
+mechanical work, not a redesign.
+
+Two probe bugs of my own are recorded in the file because they mislead in exactly the same way a
+stale spec does: switching panes before filling made `fill` time out on a control that had gone
+invisible, and reading "is this select already answered?" from `inputValue()` skipped every control on
+the form, because Angular renders `[ngValue]="null"` as the literal string `"0: null"`, which is
+truthy.
+
+### Cause 3: not the entity browser, and not the Favorites toggle. The same orphaned record.
+
+Ruled the harness out first, as instructed, and it is neither of the two candidates:
+
+- **Favorites toggle:** the precondition holds — the user has zero favourites and so does every user
+  on this host — but no toggle renders at all. `All Entities`, `My Favorites`, `Favorites` and
+  `Entities` each return `count=0`.
+- **Collapsed nav panel:** all four `DataExplorer.State` rows carry `navigationPanelCollapsed: true`,
+  which produces the same symptom by a different key. Also not it.
+
+What actually happens is that `/app/mjbizappssales` **redirects to a record route**:
+
+```
+url: .../app/mjbizappssales/record/MJ_BizApps_Sales:%20Pipelines/ID|14FDE6FC-E12F-4212-93D8-FF66BD4A83BB
+screen: "Could not load MJ_BizApps_Sales: Pipelines record.
+         InnerLoad returned false for key ID=14FDE6FC-..."
+```
+
+The app restores the last-open record, that record is the **same deleted pipeline** as the console-error
+thread, and it therefore never reaches the entity list — so "Deals" is never listed. `Pipelines` does
+render (count=1), because it is in the breadcrumb of the dead record page.
+
+**So three of my four causes are one cause.** The orphaned reference accounts for the 3 "must be listed"
+failures, the 3 probe skips that depend on that route, and the 5 console-error failures: **8 failures and
+3 skips from one dead pipeline ID.** Nothing product-side has been filed, and nothing should be.
+
+It also explains why clearing `__mj.Workspace` moved nothing: the restore is not driven from there.
+`__mj.UserRecordLog` still holds the ID, and clearing all three homes — `UserRecordLog`, `Workspace` and
+the `UserSetting` rows that name it — is the experiment that should close it. **I could not run it: the
+`DELETE` against MJ core tables was refused by the sandbox, and I did not work around it.** It needs
+either an approval or another session's hand.
+
 ## Baseline
 
 | | Before | After two runs |
