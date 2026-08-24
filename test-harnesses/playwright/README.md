@@ -117,6 +117,30 @@ trap is not enough to avoid it; the habit has to be "scope it" every time.
 **The tell:** a failure whose call log says the locator *resolved* — often many times — and reports
 `hidden` or `element(s) not found` for something you can plainly see on screen. That is this, not the app.
 
+## Editing these files — run the edit in the FOREGROUND
+
+**A scripted edit run inside a backgrounded command can fail invisibly.** If its anchor does not match,
+the assertion fires, nothing is written, and the failure message goes to a log nobody reads — while the
+run you launched in the same command carries on against the OLD file and reports a result you will
+attribute to the new one.
+
+That happened here twice in one round, compounding: an LF anchor was matched against a CRLF file so it
+matched zero times, the edit silently did nothing, and the SECOND edit then anchored on the first one's
+expected output and failed for the same invisible reason. Two runs were reported as testing a fix that
+was never applied, and one of them passed by luck.
+
+**The rule: anything whose success you would report goes in the foreground, and you check it landed.**
+Print the anchor count, and confirm with `git status` before drawing a conclusion from a run.
+
+Two specifics worth knowing when writing one:
+
+- **These files are CRLF.** Normalise before matching (`s.replace('
+', '
+')`) and restore on write,
+  or every multi-line anchor silently matches nothing.
+- **`lib/cleanup.mjs` holds its SQL in a JS template literal**, so a backtick anywhere in it — including
+  inside a comment, like `` `__mj.UserRecordLog` `` — terminates the string. `node --check` catches it.
+
 ## Navigation — there is no hand-built UI yet, and none is needed
 
 This app ships no custom application or navigation until S3, but **CodeGen auto-creates one MJ

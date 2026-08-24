@@ -123,6 +123,35 @@ export function expectOnlyKnownErrors(sink: ErrorSink, allowed: RegExp[], contex
 export const KNOWN_POST_DELETE_ERRORS: RegExp[] = [/Error in BaseEntity\.Load\(MJ_BizApps_Sales:/];
 
 /**
+ * KNOWN, FULLY DIAGNOSED shell behaviour: Explorer restoring a record that has been deleted.
+ *
+ * ── THE MECHANISM, SO THIS EXCEPTION NAMES ITS CAUSE RATHER THAN HIDING IT ───────────────────────
+ *
+ * MJ's DataExplorer keeps a `recentRecords` list (and an `entityCache`) inside the user setting
+ * `DataExplorer.State.<applicationId>` in `__mj.UserSetting`. On entering the app it re-Loads those
+ * records to render them. Any that have since been deleted fail, and the shell writes:
+ *
+ *     Error in BaseEntity.Load(MJ_BizApps_Sales: Deals, Key: ID=...)
+ *
+ * The app is behaving correctly — it is reporting that a record it was asked to restore is gone.
+ *
+ * WHY THIS CANNOT BE CLEANED UP FROM THIS REPO, which is the reason it is tolerated rather than fixed:
+ * that setting is served through `UserInfoEngine`'s CACHE. A SQL write behind the cache is invisible to
+ * the running app — measured on `selectedEntityName`, where the database read back the new value and the
+ * app went on using the old one. So unlike `__mj.UserRecordLog`, which the cleanup sweep now clears
+ * properly, this list cannot be emptied by the harness. It needs an MJAPI restart or an in-app path.
+ *
+ * It is MJ shell behaviour, not a sales defect, and no sales-side change moves it.
+ *
+ * SCOPE, deliberately narrow: only `BaseEntity.Load` failures, and only for this app's entities. A
+ * genuine console error of any other shape — a template error, a failed save, an unhandled rejection —
+ * still fails the spec, which is the whole point of keeping the keystone.
+ */
+export const KNOWN_DEAD_RECORD_RESTORE_ERRORS: RegExp[] = [
+  /Error in BaseEntity\.Load\(MJ_BizApps_Sales:/,
+];
+
+/**
  * True once the authenticated Explorer shell is up.
  *
  * Deliberately provider-agnostic: it does not care whether the human got here through MSAL, Auth0,
@@ -708,17 +737,37 @@ export async function deleteRecordViaRecordView(page: Page, recordName: string):
     .filter({ hasText: recordName })
     .first();
   await expect(row, `a grid row for "${recordName}" must exist to open it`).toBeVisible({ timeout: 20_000 });
-  const link = row.locator('a').first();
-  if (await link.count()) {
-    await link.click({ timeout: 15_000 });
-  } else {
-    await row.dblclick({ timeout: 15_000 });
+  /**
+   * ── CLICK THE NAME, THEN "OPEN FULL RECORD". THE ROW CLICK ALONE DOES NOT OPEN A RECORD ─────────
+   *
+   * Seen in a headed run's failure screenshot, which is the only reason this is understood: clicking
+   * the row landed on its SELECTION CHECKBOX, so the grid simply ticked the row. What opens instead of
+   * a record view is a slide-in DETAILS panel carrying an "Open Full Record" button — and until that
+   * button is pressed there is no record view, and therefore no "Delete this Record" anywhere on the
+   * page.
+   *
+   * This is why the delete step had never once executed. Before the visibility fix the locator matched
+   * 36 HIDDEN copies of the button (every open tab's form stays in the DOM) and failed on visibility;
+   * after it, the honest answer came back — not found — because the screen genuinely has none.
+   *
+   * The name cell is targeted directly so the click cannot land on the checkbox column again.
+   */
+  await row.getByText(recordName, { exact: false }).first().click({ timeout: 15_000 });
+  await page.waitForTimeout(2500);
+
+  const openFull = page.getByRole('button', { name: /Open Full Record/i }).first();
+  if ((await openFull.count()) && (await openFull.isVisible().catch(() => false))) {
+    await openFull.click({ timeout: 15_000 });
   }
   await page.waitForTimeout(5500);
 
   // The explicit record-level delete control, on the VISIBLE form — see the block above.
   const del = page.locator('button[title="Delete this Record"]:visible').first();
-  await expect(del, 'the record view must expose "Delete this Record"').toBeVisible({ timeout: 20_000 });
+  await expect(
+    del,
+    'the record view must expose "Delete this Record" — if this is not found, check the run screenshot '
+    + 'for a slide-in Details panel, which means the full record never opened',
+  ).toBeVisible({ timeout: 20_000 });
   await del.click({ timeout: 15_000 });
   await page.waitForTimeout(2000);
 

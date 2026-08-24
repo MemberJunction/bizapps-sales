@@ -430,5 +430,32 @@ This is the same root cause as the dead-record recovery in `openSalesApp`, and t
 in the cleanup sweep: **remove the `UserRecordLog` rows for the records it deletes.** That file is landed
 and out of scope tonight, so the orphans are recorded rather than cleared.
 
-**Deletion through the UI therefore remains unexercised by this suite** — the only one of the four gaps
-still open, and now open for a reason that is documented rather than mysterious.
+### RESOLVED — spec 10 passes end to end, delete included
+
+**The delete step has now executed, and `10-deal-crud` passes in full for the first time.**
+
+Two things had to happen. The console keystone was tolerating nothing, so it stopped the run before
+delete; the ONE fully-diagnosed shape is now allowlisted by
+`KNOWN_DEAD_RECORD_RESTORE_ERRORS` — Explorer re-Loading records from `recentRecords` in
+`DataExplorer.State`, which lives behind `UserInfoEngine`'s cache and cannot be cleared from this repo.
+The allowlist names its mechanism, `expectOnlyKnownErrors` PRINTS what it tolerated, and every other
+console error still fails the spec.
+
+Then the actual defect, which only a headed run could show. **The row click was landing on the selection
+CHECKBOX, not opening the record.** What opens is a slide-in *Details* panel carrying an
+**"Open Full Record"** button, and until that is pressed there is no record view — and so no
+"Delete this Record" anywhere on the page.
+
+That closes the loop on the whole history of this step: before the visibility fix the locator matched
+**36 hidden** copies of the button and failed on visibility; after it, the honest answer came back —
+*not found* — because the screen genuinely has none. The `:visible` fix did not break anything; it turned
+a misleading failure into a truthful one.
+
+**The proof is in the sweep, not the tick.** On the previous run the teardown reported
+`will_delete: PW-VERIFY Deal` — the sweep cleaning up what the UI had failed to remove. On this run
+there is **no `will_delete` line at all**: the sweep found nothing, because the UI delete had already
+done it. The database agrees — 0 `PW-VERIFY` deals, 0 pipelines, and the seeded 7 untouched.
+
+So the row in the table above — *"does NOT assert: cascade"* — stops being academic. Deletion is now
+exercised, and what it does not check (what became of the deal's team members, stage events and contact
+roles) is a real, nameable gap rather than a note about a step that never ran.
