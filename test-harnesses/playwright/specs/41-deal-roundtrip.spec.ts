@@ -307,7 +307,7 @@ test.describe('deal workspace — the related-record-collection round trip', () 
         });
 
         await test.step('the console stayed clean', async () => {
-            expectOnlyKnownErrors(sink, KNOWN_POST_DELETE_ERRORS);
+            expectOnlyKnownErrors(sink, KNOWN_POST_DELETE_ERRORS, 'deal round-trip run');
         });
     });
 });

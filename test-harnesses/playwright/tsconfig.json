@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "TYPECHECK-ONLY CONFIG FOR THE EXPLORER HARNESS. It emits nothing and is never built.",
+    "",
+    "WHY IT EXISTS: Playwright STRIPS TypeScript types rather than checking them. A spec compiles-and-runs",
+    "with a call to a function that was never imported, a missing argument, or a wrong type -- right up",
+    "until the line actually executes, at which point it is a ReferenceError inside a test rather than a",
+    "compile error in CI. Twenty-one spec files had never been typechecked once. Three real defects were",
+    "sitting in committed code when this was first run.",
+    "",
+    "WHAT IT READS -- DO NOT 'FIX' THIS INTO READING dist/: `include` names .ts SOURCES under specs/ and",
+    "lib/ and nothing else, and `noEmit` is true. This harness has no build output, and pointing a checker",
+    "at build output is precisely how a stale artefact gets certified as green -- this repo has been bitten",
+    "from both directions already (a mutation surviving in dist/ after its source was restored, and a",
+    "junctioned node_modules silently resolving an import to a DIFFERENT package's pre-change dist).",
+    "A gate that reads generated output tests the generator, not the code someone just wrote.",
+    "",
+    "`strict` is on deliberately. The three defects found on the first run were a missing import and two",
+    "missing arguments -- all caught by ordinary checking, none needing an exotic flag.",
+    "",
+    "`skipLibCheck` is on for the same reason every other tsconfig here sets it: the target is THIS",
+    "harness's code, not @playwright/test's shipped declarations."
+  ],
+  "compilerOptions": {
+    "module": "es2022",
+    "target": "es2022",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": false,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["specs/**/*.ts", "lib/**/*.ts", "*.ts"],
+  "exclude": ["node_modules", "playwright-report", "test-results", ".auth"]
+}
