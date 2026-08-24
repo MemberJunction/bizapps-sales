@@ -2,8 +2,17 @@
  * PROBE — does the landing survive a leftover entity selection?
  *
  * Poisons `DataExplorer.State.*` exactly as a previous spec would, then drives the normal entry path.
- * Before the fix this is the condition under which `openAllEntities` fell through to its blind chevron
- * click; after it, the reset should make the landing identical either way.
+ *
+ * This is the condition under which `openAllEntities` used to fall through to a blind chevron click and
+ * land the app on an arbitrary screen — the whole reason specs passed alone and failed in the suite. It
+ * is invisible until something has leaked state, which is why it is asserted here rather than left to
+ * be rediscovered.
+ *
+ * NOTE WHAT THIS DOES **NOT** DO: it never puts the setting back. The app must recover through its own
+ * "All" breadcrumb with the poisoned value still in the database — and the assertions below check
+ * exactly that, because clearing the row by SQL does not work (`UserInfoEngine` serves it from cache,
+ * so the app never sees the write). A version of this test that reset the row would pass while proving
+ * nothing.
  */
 import { expect, test } from '@playwright/test';
 import { Db } from '../lib/db';
@@ -34,8 +43,11 @@ test('a leftover entity selection does not decide the landing', async ({ page })
   console.log(`  poisoned selection = ${await readSelection()}`);
 
   await openSalesApp(page);
-  console.log(`  after reset+open   = ${await readSelection()}`);
   await openAllEntities(page);
+
+  // Still poisoned: the recovery is through the UI, not by writing the setting back.
+  expect(await readSelection(), 'the harness must NOT have altered the persisted setting')
+    .toBe('MJ_BizApps_Sales: Loss Reasons');
 
   const cards = await page.locator('.entity-item').count();
   console.log(`  entity cards       = ${cards}`);
