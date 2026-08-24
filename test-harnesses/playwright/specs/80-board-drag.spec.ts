@@ -1,9 +1,13 @@
 /**
  * DRAGGING A CARD BETWEEN STAGES — and proving the three writes a drag owes.
  *
- * ⚠️ **WRITTEN BUT NEVER RUN.** Explorer and `MJ_V6_Host` were in use by another session. Unrun-but-ready
- * is the honest state; the post-merge pass should do the failure demonstration at the bottom of this file
- * FIRST, then the green run.
+ * **STATUS: RUN AND GREEN.** Three consecutive passes when the rework landed — 13.0s, 15.4s, 12.8s. The
+ * header said "WRITTEN BUT NEVER RUN" for two rounds after that stopped being true, which is its own small
+ * lesson: a status written into a file ages badly, because nothing forces it to agree with a run. It is
+ * corrected here rather than deleted so the next person can see how long a stale claim survived.
+ *
+ * The failure demonstration at the bottom of this file has NOT been re-worked since the rework, so the
+ * mutations there are the part still owed.
  *
  * ── THE GAP THIS EXISTS TO CLOSE ────────────────────────────────────────────────────────────────
  *
