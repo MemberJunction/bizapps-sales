@@ -91,9 +91,20 @@ async function createDealWithLine(page: Page, suffix: string): Promise<string> {
     await page.locator('.dw-panes__tab', { hasText: 'Product lines' }).first().click();
     await page.getByRole('button', { name: /Add line/i }).first().click();
 
-    // The picker: choose whatever the FIRST real product is rather than naming a SKU, so this spec
-    // cannot rot when the catalogue changes.
-    const productSelect = page.locator('select').filter({ hasText: /not linked/i }).locator('visible=true').first();
+    /**
+     * The picker: choose whatever the FIRST real product is rather than naming a SKU, so this spec
+     * cannot rot when the catalogue changes.
+     *
+     * BY CLASS, NOT BY PLACEHOLDER TEXT. This filtered on `hasText: /not linked/i` and the placeholder
+     * was relabelled to "— choose a product —" when a line with no product became a blocking validation
+     * error. The locator then matched NOTHING, and a locator that matches nothing fails at the next
+     * action rather than saying it went stale -- so the spec would have reported a broken picker.
+     *
+     * `.dw-cell-product` is the class the component gives that select and nothing else uses it. Text is
+     * the wrong hook here twice over: it is user-facing copy, so it changes for good reasons, and it is
+     * the one part of a control most likely to be reworded.
+     */
+    const productSelect = page.locator('.dw-cell-product').locator('visible=true').first();
     await productSelect.selectOption({ index: 1 });
     const typeSelect = page.locator('select').filter({ hasText: /One-Time/i }).locator('visible=true').first();
     await typeSelect.selectOption({ label: 'One-Time' });
