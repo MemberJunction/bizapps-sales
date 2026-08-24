@@ -9,19 +9,46 @@ check stayed green — so the check may be vacuous. **Some of them were not meas
 hand, verified present in `dist/`, gave **119 passed / 6 failed** — WT1, WT2, WT3, WT9, WT10, CD23 —
 which is also the exact six-check signature seen earlier when that same mutation was stranded in
 `dist/`. Two independent observations. The driver had run the mutant against **unmutated compiled
-code**: the suite loads `dist/`, the mutation is applied to `src/`, and nothing asserted the edit
-survived the build in between.
+code**.
 
 WT2 would have been filed as unproven on the strength of that.
 
 **A false MISS is worse than a skip.** A skip announces itself; a MISS looks like a finding.
+
+### ⚠️ CORRECTION (2026-08-24) — the mechanism first recorded here was WRONG
+
+The first version of this banner, and the message of commit `b27f30d`, said the cause was *a build
+that did not carry the mutation into `dist/`*. **That is not what happened, and a wrong mechanism
+recorded as fact is exactly what the stamping rule exists to prevent.**
+
+The real cause:
+
+> **A Bash tool call that hits its ten-minute ceiling DETACHES the process. It does not kill it.**
+
+Six mutation runs, up to two hours old, were still alive — each holding or queuing on the suite
+application lock, so every fresh attempt queued behind an earlier one of *the same session's*. The
+liveness check used to look for them (`ps -W | grep mutate-checks`) can never match, because `ps -W`
+prints no command-line arguments; the runs were invisible while plainly running.
+
+What was repeatedly "recovered" as a stranded mutation was therefore **a live run's working state,
+mid-experiment**. Each `git checkout --` plus rebuild overwrote a running experiment's mutated source
+and rebuilt its `dist/` out from under it — so that run compiled and tested *unmutated* code and
+reported `125/0`.
+
+That fits the observed 125/0 against the hand-measured 119/6 exactly. The build-cache theory never
+did: the build was verified to carry the mutation correctly whenever it was checked by hand.
+
+**What survives the correction unchanged:** the conclusion that every `MISS` is suspect, the scoping
+below, and the dist-change guard itself — which catches the orphan case too, since a source
+overwritten by a concurrent process yields a `dist/` identical to the pre-mutation one. Only the
+*reason* was wrong.
 
 ### What is affected, and what is not
 
 | | |
 |---|---|
 | `OK` results | **Unaffected.** A mutant that felled its declared target demonstrably reached the running code — the kill is the proof. |
-| `MISS` results | **Suspect.** Cannot be distinguished from "the build did not carry it" without a re-run. |
+| `MISS` results | **Suspect.** Cannot be distinguished from "the run measured unmutated code" without a re-run. |
 | `SKIPPED` results | **Unaffected.** An anchor that did not match never ran, and says so. |
 
 **Named misses now carrying this caveat:** `M-SD20` (round: bucket-b analysis), `M-AP2` (round 6),
@@ -38,6 +65,18 @@ the run. That reasoning stands on its own. The *measurement* it cites does not, 
 `mutate-checks.mjs` now fingerprints the compiled file before mutating and again after building, and
 refuses the run as `dist-unchanged` if they match — so this class of false MISS is now a loud failure
 rather than a result. Proven with a type-only mutation that compiles to identical JS.
+
+**Why a hash diff and not a search for the mutated text.** A literal search breaks on anything the
+compiler rewrites: `const stageOrder: StageOrderPlan | null = null;` emits as
+`const stageOrder = null;`, so a substring check would report a perfectly good mutation missing and
+turn a false MISS into a false ERROR. Comparing the compiled file **before and after** asks the
+question that actually matters — did the edit reach the artefact the suite loads — without knowing
+anything about TypeScript.
+
+**It covers the orphan case as well as the build case**, which is why it stays despite the corrected
+mechanism: if a concurrent process restores the source before the build, `dist/` comes out identical
+to the pre-mutation artefact and the run is refused rather than reported. See
+`test-harnesses/playwright/README.md` for the orphan procedure itself.
 
 ---
 
