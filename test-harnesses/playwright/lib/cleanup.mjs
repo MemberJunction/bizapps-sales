@@ -105,6 +105,32 @@ INSERT INTO @orders (ID)
   SELECT DISTINCT OrderID FROM __mj_BizAppsSales.Deal
    WHERE (EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P)) AND OrderID IS NOT NULL;
 
+/*
+ * THE EXPLORER TABS THAT POINT AT WHAT WE ARE ABOUT TO DELETE.
+ *
+ * Captured HERE, with @orders, for the same reason: once the rows are gone their names are gone, and the
+ * only thing left tying a stale tab to this harness is an ID nothing can attribute any more.
+ *
+ * Measured, and it cost most of one measurement run. Deleting a harness Pipeline leaves the row gone and
+ * __mj.Workspace.Configuration still holding a restored TAB naming it. Explorer rebuilds those tabs on
+ * every page load, the load fails, and the shell emits
+ *
+ *   Error in BaseEntity.Load(MJ_BizApps_Sales: Pipelines, Key: ID=the-deleted-id)
+ *
+ * on EVERY navigation, for the rest of that host's life. Five specs assert a clean console and all five
+ * failed on it -- 70-lifecycle, 73-lock-across-tabs, 75-dashboard, 79-embedded-order-refresh and
+ * 80-board-drag's first test -- not one of them for a reason of its own. One orphaned tab, five red
+ * specs, and a product behaving correctly throughout.
+ *
+ * closeRestoredRecordTabs() cannot prevent it: it closes tabs through the UI, and the error is emitted
+ * during restore, before any of it is reachable. Only two specs call it in any case.
+ */
+DECLARE @doomed TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+INSERT INTO @doomed (ID)
+  SELECT ID FROM __mj_BizAppsSales.Deal     WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P)
+  UNION
+  SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
+
 DELETE ps FROM __mj_BizAppsSales.DealPaymentSchedule ps
   JOIN __mj_BizAppsSales.Deal d ON ps.DealID = d.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE d.Name LIKE P);
 DELETE tm FROM __mj_BizAppsSales.DealTeamMember tm
@@ -120,6 +146,21 @@ DELETE ps FROM __mj_BizAppsSales.PipelineStage ps
   JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE p.Name LIKE P);
 DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
 
+/*
+ * Tabs blanked, layout reset, nothing else touched -- and ONLY for a workspace that actually names one of
+ * the rows this sweep is removing. Deliberately not "clear every workspace": on a shared dev host that
+ * would throw away a human's real layout. A tab pointing at a record we just deleted is debris by
+ * definition; a tab pointing at a live record is somebody's work.
+ */
+UPDATE w
+   SET Configuration = N'{"version":1,"layout":{"root":{"type":"row","content":[]}},"tabs":[]}'
+  FROM __mj.Workspace w
+ WHERE EXISTS (
+         SELECT 1 FROM @doomed x
+          WHERE CAST(w.Configuration AS NVARCHAR(MAX)) LIKE N'%' + CAST(x.ID AS NVARCHAR(40)) + N'%'
+       );
+DECLARE @wsCleared INT = @@ROWCOUNT;
+
 -- The embedded orders, now that no deal references them. Line children first.
 -- OrderHeaderID, not OrderID: orders names the FK for the table it points at. Worth stating because
 -- the deal side calls the same relationship OrderID, and assuming symmetry is what broke this first.
@@ -129,6 +170,7 @@ DELETE pc FROM __mj_BizAppsOrders.OrderLinePriceComponent pc
 DELETE ol FROM __mj_BizAppsOrders.OrderLine ol JOIN @orders o ON ol.OrderHeaderID = o.ID;
 DELETE oh FROM __mj_BizAppsOrders.OrderHeader oh JOIN @orders o ON oh.ID = o.ID;
 
+SELECT 'workspace_tabs_cleared=' + CAST(@wsCleared AS varchar);
 SELECT 'remaining_deals=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
 SELECT 'remaining_pipelines=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
 SELECT 'remaining_orders=' + CAST(COUNT(*) AS varchar)
