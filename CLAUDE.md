@@ -142,6 +142,33 @@ Ten type tables carry the **behaviour flags** the engine branches on. The engine
 ### 4. NEVER EDIT GENERATED CODE
 `packages/*/src/generated/`, `packages/Angular/src/lib/generated/` — CodeGen overwrites it.
 
+### 5. ON A MERGE FROM A FAR-BEHIND BRANCH, BUILD BEFORE YOU TRUST A CLEAN AUTO-MERGE
+
+**The conflicts are the safe part. The damage hides in the hunks git merged cleanly.**
+
+A conflict is git telling you it needs a human. It stops, you read both sides, you decide. The
+dangerous hunk is the one it resolved silently — because "no conflict" means "no textual overlap", which
+is not the same claim as "the result is correct."
+
+Two measured instances, both on merges from branches that were thousands of lines behind:
+
+- **`sales-section.component.ts` appended a second, byte-identical `const E_ACCOUNT`.** Both sides added
+  the *same* declaration at *different offsets*, so git saw two unrelated additions and kept both. A
+  duplicate block-scoped `const` does not compile. Six files conflicted in that merge and every one of
+  them resolved correctly; the only breakage came from the file that merged clean.
+- **`sales-section.component.ts` kept a consumer and dropped its producer** (`open` / `openValue`) — the
+  same file, a different merge, and the same shape: each side's edit was individually sensible and the
+  combination was not.
+
+**The practice: `npm run build` immediately after a stale merge, BEFORE the suite.** Not after — the
+build is what catches this class, in seconds, and the suite is a slower instrument that can pass while a
+duplicate declaration or an orphaned reference sits in a file no check imports. A cache hit is not a
+compile: if turbo reports `FULL TURBO` on a merge that changed source, force it.
+
+Corollary for review: after a stale merge, read the diff against your own pre-merge tip
+(`git diff <pre-merge-sha> --stat`) rather than the merge's conflict list. A merge that *should* be
+content-neutral and is not has just told you something, and the conflict list will not mention it.
+
 ---
 
 ## Environment & Database
