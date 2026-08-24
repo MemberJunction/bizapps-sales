@@ -417,7 +417,11 @@ const MUTATIONS = [
         /**
          * -- UNPROVEN, AND SAYING SO IS THE POINT ------------------------------------------------
          *
-         * The six mutants below (M-WT2R, M-WT7S, M-WT5F, M-WT6T, M-WT8O, M-WT12C) are AUTHORED but
+         * CORRECTED: this block once claimed six mutants below. Only THREE existed -- M-WT6T, M-WT8O
+         * and M-WT12C were named in a run command but never authored, and the driver's silent id filter
+         * hid it. All six exist now, and the driver errors on an unknown id rather than skipping it.
+         *
+         * The mutants below were AUTHORED but
          * NOT MEASURED. Their anchors were read from source and M-WT2R's is confirmed to apply -- a
          * killed run left its `if (true) {` in the working tree, which is proof the replacement
          * matched. What has not happened is a completed run, so nothing here claims they fell
@@ -464,6 +468,39 @@ const MUTATIONS = [
           from: '                let target: CloseWonTaskTarget = { EntityName: E_DEAL, RecordID: input.DealID };',
           to: '                let target: CloseWonTaskTarget = { EntityName: E_DEAL, RecordID: \'\' };',
           note: 'the deal fallback carries no record id, so a contract task with no contract links nothing' },
+
+        /**
+         * M-WT6T -- aimed at WT6.
+         *
+         * WT6 asserts the refusal is REPORTED and the order review still lands. Skipping the branch drops
+         * the reason.
+         */
+        { id: 'M-WT6T', file: CWT, expect: ['WT6'],
+          from: '            if (contractTypeID) {',
+          to: '            if (false) {',
+          note: 'a missing contract task type is skipped silently instead of refused with a reason' },
+
+        /**
+         * M-WT8O -- aimed at WT8.
+         *
+         * WT8 is "raises NO order-review task, AND SAYS WHY". The task is still not raised (line 309
+         * guards that independently), so this isolates the explanation.
+         */
+        { id: 'M-WT8O', file: CWT, expect: ['WT8'],
+          from: '        if (!input.OrderID) {',
+          to: '        if (false) {',
+          note: 'a deal with no order stops saying why it raised no order-review task' },
+
+        /**
+         * M-WT12C -- aimed at WT12.
+         *
+         * WT12 is "Code where the column exists, Name only where it does not". Collapsing the ternary
+         * removes the first half.
+         */
+        { id: 'M-WT12C', file: CWT, expect: ['WT12'],
+          from: '     return info?.Fields?.some((f) => f.Name === \'Code\') === true ? \'Code\' : \'Name\';',
+          to: '     return \'Name\';',
+          note: 'the lookup always uses Name, even where a Code column exists' },
 
         /**
          * -- DN-20: THE TWO DIRECTIONS OF THE BOOKED-ORDER REFUSAL --------------------------------
@@ -748,6 +785,27 @@ const MUTATIONS = [
 ];
 
 const wanted = new Set(process.argv.slice(2).filter((a) => !a.startsWith('--')));
+
+/**
+ * AN UNKNOWN ID IS A FAILURE, NOT A SKIP.
+ *
+ * `wanted` was filtered against MUTATIONS with a bare `continue`, so asking for a mutant that does not
+ * exist ran nothing and said nothing. That is how three ids -- M-WT6T, M-WT8O, M-WT12C -- were listed in
+ * a run command, never authored, and then reported as "authored but unproven": the run produced no line
+ * for them and their absence looked exactly like the timeout that killed the rest of the batch.
+ *
+ * A tool that silently does less than it was asked is the same failure shape as a gate that scans
+ * nothing and reports clean.
+ */
+if (wanted.size) {
+    const known = new Set(MUTATIONS.map((m) => m.id));
+    const unknown = [...wanted].filter((id) => !known.has(id));
+    if (unknown.length) {
+        console.error(`\n✖ no such mutant: ${unknown.join(', ')}`);
+        console.error('  Run with --list to see the ids that exist. Nothing was run.\n');
+        process.exit(2);
+    }
+}
 if (process.argv.includes('--list')) {
     for (const m of MUTATIONS) console.log(`${m.id.padEnd(8)} ${m.file.padEnd(56)} expect ${m.expect.join(',')}`);
     process.exit(0);
@@ -755,6 +813,42 @@ if (process.argv.includes('--list')) {
 
 const FAIL_RE = /^ {2,}✖ ([A-Z]+\d+):/gmu;
 const TALLY_RE = /(\d+) passed,\s+(\d+) failed,\s+(\d+) skipped/;
+
+/**
+ * Who holds the suite lock right now, or null if it is free.
+ *
+ * READ-ONLY, and deliberately not an acquire-then-release: taking the lock to find out whether it is
+ * taken would make this driver the contender it is trying to report on, and would race with the suite it
+ * is about to spawn. `sys.dm_tran_locks` answers the question without touching it.
+ *
+ * Failure to connect returns null -- "cannot tell" prints nothing rather than a wrong reassurance, and
+ * the suite is about to report the real state anyway.
+ */
+async function lockHolderSpid() {
+    try {
+        const sql = (await import('mssql')).default;
+        await import('dotenv/config');
+        const pool = await new sql.ConnectionPool({
+            server: process.env.DB_HOST ?? 'localhost',
+            port: Number(process.env.DB_PORT ?? 1433),
+            database: process.env.DB_DATABASE,
+            user: process.env.DB_USERNAME,
+            password: process.env.DB_PASSWORD,
+            options: { trustServerCertificate: true, encrypt: true },
+            requestTimeout: 15_000,
+        }).connect();
+        const r = await pool.request().query(
+            `SELECT TOP 1 request_session_id AS spid FROM sys.dm_tran_locks
+              WHERE resource_type = 'APPLICATION'
+                AND resource_description LIKE '%integration-suite%'
+                AND request_status = 'GRANT'`,
+        );
+        await pool.close();
+        return r.recordset.length ? r.recordset[0].spid : null;
+    } catch {
+        return null;
+    }
+}
 
 const safety = mkdtempSync(join(tmpdir(), 'mj-mutate-'));
 const results = [];
@@ -833,6 +927,34 @@ for (const m of MUTATIONS) {
             }
         };
 
+        /**
+         * ── SAY IT OUT LOUD WHEN THE RUN IS QUEUED, BECAUSE THE SUITE'S OWN MESSAGE IS SWALLOWED ──
+         *
+         * `integration.mjs` takes an application lock and, when another run holds it, prints
+         * "WAITING up to Ns for it to finish — this is not a hang". That message exists precisely so a
+         * queued run is not mistaken for a wedged one.
+         *
+         * It never reaches a human from here. The suite is spawned with `stdio: 'pipe'` so its output can
+         * be PARSED -- the ✖ lines the tally is read from arrive on stderr -- which means every word it
+         * prints lands in a buffer until the run ends. A run queued behind another session therefore
+         * shows absolutely nothing for up to fifteen minutes.
+         *
+         * That cost a night: three runs hit a ten-minute tool timeout having printed zero bytes, and the
+         * diagnosis went to host contention -- measured and disproved (2.5 min per mutant, no deadlocks,
+         * lock free) -- before the real answer turned out to be the lock working correctly with its
+         * explanation trapped one layer up, inside its own consumer.
+         *
+         * So the driver asks the question itself, BEFORE spawning, and prints the answer where a person
+         * can see it. Stdout stays piped, so parsing is untouched.
+         */
+        const heldBy = await lockHolderSpid();
+        if (heldBy !== null) {
+            console.log(
+                `${m.id.padEnd(7)} ⏳ another suite run holds the lock (spid ${heldBy}). This run will `
+                + 'QUEUE behind it, not hang — the suite waits up to 15 min by default.',
+            );
+        }
+
         let out = '';
         let contended = 0;
         for (let attempt = 1; attempt <= 3; attempt++) {
@@ -847,10 +969,22 @@ for (const m of MUTATIONS) {
 
         const failed = [...new Set([...out.matchAll(FAIL_RE)].map((x) => x[1]))].sort();
         const tally = out.match(TALLY_RE);
-        const hit = m.expect.every((id) => failed.includes(id));
+        /**
+         * NO TALLY MEANS THE SUITE NEVER FINISHED, SO THERE IS NOTHING TO CONCLUDE.
+         *
+         * Without this the line read `MISS failed=- (NO TALLY)` -- which looks exactly like a mutant that
+         * ran cleanly and killed nothing, the single most interesting result this driver produces. It is
+         * the opposite: no measurement happened at all. A killed run, a crashed provider or a suite that
+         * died in startup all land here.
+         *
+         * Reported as INCOMPLETE and excluded from `hit`, so it can never be counted as a mutant that
+         * failed to kill its target.
+         */
+        const incomplete = !tally;
+        const hit = !incomplete && m.expect.every((id) => failed.includes(id));
         results.push({ ...m, failed, tally: tally?.[0], contended, stillContended });
         console.log(
-            `${m.id.padEnd(7)} ${(hit ? 'OK' : 'MISS').padEnd(4)} failed=${(failed.join(',') || '-').padEnd(24)} ` +
+            `${m.id.padEnd(7)} ${(incomplete ? 'INCOMPLETE' : hit ? 'OK' : 'MISS').padEnd(10)} failed=${(failed.join(',') || '-').padEnd(24)} ` +
             `expect=${m.expect.join(',').padEnd(12)} (${tally?.[0] ?? 'NO TALLY'}, ${Math.round((Date.now() - started) / 1000)}s)` +
             (stillContended ? '  ⚠ CONTENDED — result unreliable' : contended ? `  (re-ran ${contended}x after deadlock)` : ''),
         );
