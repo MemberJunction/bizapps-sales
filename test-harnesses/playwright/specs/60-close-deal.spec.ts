@@ -33,7 +33,7 @@ import { expect, test } from '@playwright/test';
 
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, expectOnlyKnownErrors, shot } from '../lib/explorer';
-import { CloseDb, DealByName, OrdersForDealNamed, OrdersSchemaPresent, StageEventsFor } from '../lib/db';
+import { CloseDb, DealByName, StageEventsFor } from '../lib/db';
 
 const SALES_APP_ROUTE = '/app/sales';
 const RUN_TAG = `CL-${Date.now().toString(36).toUpperCase()}`;
@@ -206,14 +206,31 @@ test.describe('closing a deal through the Explorer', () => {
             'closing must APPEND a stage event — without it the close has no provenance',
         ).toBeGreaterThan(0);
 
-        if (await OrdersSchemaPresent()) {
-            const orders = await OrdersForDealNamed(name);
-            expect(
-                orders.length,
-                'closing a won deal with a one-time line must create an ORDER in bizapps-orders',
-            ).toBe(1);
-            expect(orders[0].OrderNumber, 'the order must be numbered by orders').toBeTruthy();
-        }
+        /**
+         * ── DELETED: "closing a won deal must create an ORDER in bizapps-orders" ─────────────────
+         *
+         * RETIRED BY `docs/DECISIONS.md` D-OS1. Close-won does not create an order: the order is
+         * provisioned with the deal, inside `DealEntityServer.Save()` on the first save (S-US4), which
+         * is why this spec now has to save before it can add a line at all. A close moves the order's
+         * STATUS when the stage it enters declares one, and does nothing to it when the stage declares
+         * nothing.
+         *
+         * NOT RE-AIMED ONTO "the order is left untouched", which was the obvious next move.
+         * `close-won-order.CO3` already made that move and rejected it, and its docblock says why: once
+         * a stage names what the order should become, "untouched" stops being the requirement and starts
+         * being an accident of which stage the fixture happened to seed. The DEAL-9003 close run earlier
+         * this week is the proof — the order held still because Proposal and Signed BOTH declare
+         * `Quoted`, not because the close left it alone. An assertion that passes for that reason is
+         * measuring the seed.
+         *
+         * The live requirement is asserted by CO3 instead, server-side, which sets the stage's
+         * `OrderStatusOnEntry` inside its own transaction so the answer cannot depend on the seed. That
+         * is the right place for it: it is a write-path guarantee, not something a browser adds
+         * confidence to.
+         *
+         * What this spec still asserts about the close is above and unchanged — a WON status, the lock,
+         * and an appended stage event for provenance. Those are the UI-reachable half.
+         */
 
         // The user must be TOLD what happened downstream, not have to read the stage event.
         await expect(testId(page, 'close-routing')).toBeVisible();
