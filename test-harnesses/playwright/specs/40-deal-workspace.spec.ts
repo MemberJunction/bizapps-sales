@@ -205,6 +205,19 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
       await shot(page, '40-03b-first-save');
     });
 
+    /**
+     * DECLARED AT TEST SCOPE, not inside the step that fills it.
+     *
+     * The read-back step below is a separate closure, so a const declared inside the lines step is
+     * not visible there. tsc caught it as "Cannot find name 'chosenProducts'" while the run went
+     * GREEN -- because the read-back sits behind an `if (section is visible)` guard that did not
+     * fire, so the ReferenceError was never reached.
+     *
+     * That is the ComposeDeal shape again: an assertion that cannot execute, passing quietly. Worth
+     * the note because the harness has no compile gate, so only a hand-run tsc finds these.
+     */
+    const chosenProducts: string[] = [];
+
     await test.step('product lines — two of them', async () => {
       await openPane(page, 'Product lines');
       const add = page.locator('.dw-addbtn', { hasText: 'Add line' }).first();
@@ -218,10 +231,26 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
       const rows = page.locator('.dw-table tbody tr');
       await expect(rows, 'two line rows must exist').toHaveCount(2, { timeout: 10_000 });
 
-      // Fill both rows. The figures are TRANSCRIBED — nothing here expects the UI to compute Total.
+      /**
+       * ── REWRITTEN AGAINST THE ORDER-LINE GRID ─────────────────────────────────────────────────
+       *
+       * This transcribed a product NAME, annual gross fees, a discount amount and a total into five
+       * positional inputs. That was the `DealLine` grid, and Andrew formally descoped `DealLine` this
+       * morning — issues #36–#39 closed as not planned, with the note "An embedded Order record will
+       * store products and prices associated with the deal" — which is the same conclusion
+       * `docs/DECISIONS.md` D-DL1 (:461) reached from the invariant side.
+       *
+       * An `OrderLine` row is: a PRODUCT PICKER, a quantity, a read-only unit price, a read-only line
+       * total, and a discount percent. So there is no name to type and no total to transcribe — the
+       * two figures a rep supplies are quantity and discount, and the money comes back from the engine
+       * (rule 1: sales never computes it).
+       *
+       * The failure this replaces was `Cannot type text into input[type=number]`: the first input is
+       * now Quantity, so the old loop typed a product name into a number field.
+       */
       const values = [
-        { name: `${RUN_TAG} Platform seats`, qty: '100', gross: '120000', disc: '12000', total: '108000' },
-        { name: `${RUN_TAG} Onboarding`, qty: '1', gross: '20000', disc: '0', total: '20000' },
+        { qty: '100', discountPct: '10' },
+        { qty: '1', discountPct: '0' },
       ];
       /**
        * ── DELETED: THE RECURRING-PATH ASSERTIONS ────────────────────────────────────────────────
@@ -244,17 +273,31 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
        * deliberately not reused. So the pointer led nowhere, and there is no live check anywhere in the
        * suite asserting product recurrence. That is the state D-DL1 chose, not a gap to be filled here.
        */
+      /**
+       * DIFFERENT PRODUCTS PER ROW, so the read-back later proves two distinct children rather than one
+       * written twice. Chosen by INDEX, not by SKU, so the spec does not rot when the catalogue changes
+       * — the same reasoning 60 uses.
+       */
       for (let i = 0; i < values.length; i++) {
         const row = rows.nth(i);
-        const inputs = row.locator('input');
-        await inputs.nth(0).fill(values[i].name);          // Product / service
-        await inputs.nth(1).fill(values[i].qty);           // Qty
-        await inputs.nth(2).fill(values[i].gross);         // Annual gross fees
-        await inputs.nth(3).fill(values[i].disc);          // Discount
-        await inputs.nth(4).fill(values[i].total);         // Total
+
+        const picker = row.locator('select.dw-cell-product');
+        await picker.selectOption({ index: i + 1 });       // index 0 is the "choose a product" placeholder
+        chosenProducts.push((await picker.locator('option:checked').innerText()).trim());
+
+        // Quantity is the FIRST number input; discount percent is the second. Unit price and line total
+        // sit between them and are read-only cells, not inputs, so they are not in this collection.
+        const numbers = row.locator('td.dw-num input[type="number"]');
+        await numbers.nth(0).fill(values[i].qty);
+        await numbers.nth(1).fill(values[i].discountPct);
 
         await page.waitForTimeout(250);
       }
+
+      expect(
+        new Set(chosenProducts).size,
+        'the two rows must reference DIFFERENT products, or the read-back cannot tell one child from two',
+      ).toBe(2);
 
       await shot(page, '40-04-lines');
     });
@@ -416,9 +459,18 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
         await linesSection.click({ timeout: 10_000 }).catch(() => undefined);
         await page.waitForTimeout(4000);
         const expanded = await page.locator('body').innerText();
-        // Both lines, by the tag this run stamped on them — proof the one transactional save wrote the
-        // header AND the children, read back through a surface that did not write them.
-        expect(expanded, 'the deal lines must read back on the record').toContain(`${RUN_TAG} Platform seats`);
+        /**
+         * BY PRODUCT, because a line has no name of its own any more.
+         *
+         * This asserted the RUN_TAG stamped into a typed line name. An `OrderLine` references a
+         * product and carries no free text, so the identity that reads back is the product's. The
+         * claim is unchanged — one transactional save wrote the header AND the children, read back
+         * through a surface that did not write them — only the thing being recognised has moved.
+         */
+        expect(
+          expanded,
+          'the order lines must read back on the record, identified by the product each references',
+        ).toContain(chosenProducts[0]);
         await shot(page, '40-11-readback-lines');
       } else {
         // Reported rather than failed: the section affordance is generated UI whose shape is MJ's, and
