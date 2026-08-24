@@ -248,6 +248,86 @@ are the strongest candidates for the next mutants to be written.
 
 ---
 
+## Bucket (b), the remaining 28: a named target for each — `8c60610`
+
+The seven save-deal checks were accounted for earlier. These are the other 28: every check with no
+mutant and, until now, no analysis. For each, the sales-owned branch a mutant could aim at — or the
+plain statement that there isn't one.
+
+**Line numbers below were read from the source, not remembered.** Where only a file and function are
+named, that is because the branch is a whole function rather than one line, and it is said that way
+rather than dressed up with a number.
+
+### close-won-tasks — 8 checks, 7 targets
+
+`packages/CoreEntitiesServer/src/CloseWonTaskService.ts`
+
+| Check | Target |
+|---|---|
+| WT2 | `route()` and its caller's `if (!assignmentID)` at `:555` — routing produces an assignment or reports it did not |
+| WT3 | `if (await this.policyRaisesContractTask(...))` at `:332` — the branch that decides a contract task is raised at all |
+| WT5 | `if (input.ContractID)` at `:354` and `if (contractsAvailable)` at `:355` — the fallback to the deal when no contract exists |
+| WT6 | `if (contractTypeID)` at `:339` — the refusal path when the contract task type is missing |
+| WT7 | `route()` returning null, reached from `:555` — created but unrouted, and saying so |
+| WT8 | `if (!input.OrderID)` at `:299`, and the `input.OrderID && orderReviewTypeID` guard at `:309` |
+| WT12 | `ResolveTaskTypeColumn` at `:230` — `…some((f) => f.Name === 'Code') === true ? 'Code' : 'Name'`, and its use at `:433` |
+| **WT9** | **No branch.** *"task writes JOIN the transaction of the caller"* asserts that this service opens NO transaction of its own — it uses the `provider` it is handed. There is no line to mutate, because the behaviour is an absence. Giving it one would mean ADDING a transaction boundary, which is writing a defect rather than mutating code. |
+
+### activities — 10 checks, 8 targets
+
+| Check | Target |
+|---|---|
+| AC1 | `ActivityWriterService.ts:273` — `{ Role: 'Regarding', EntityName: E_DEAL, RecordID: input.DealID }`, the link that is always written |
+| AC2 | `ActivityWriterService.resolveTypeByCode()` at `:394`, called from `:162` — resolution by CODE, which is what survives a rename |
+| AC4 | `ActivityWriterService.ts:284`–`:287` — the `Participant` links, and the branch that makes an unknown party an identity link instead of a stub `Person` |
+| AC5 | `ActivityReader.ts:155` `OrderBy: 'StartedAt DESC'` for newest-first, and the deal-anchor exclusion at `:227` |
+| AC9 | `ActivityIngestService.ts:255` — `if (batch.HighWatermark && result.Failed === 0)`, the advance itself |
+| AC10 | `DealMatcher`, injected at `ActivityIngestService.ts:97` — the "known contact, no open deal" path is its result being empty |
+| AC12 | `ActivityIngestService.ts:607` — the address comparison that lower-cases both sides (D-19) |
+| AC16 | `ActivitySyncJob.ts:83` — `let activitySourceFactory: ActivitySourceFactory = …`, the one line a swap changes |
+| AC17 | The same `:83` default — that it writes nothing is a property of the default value |
+| **AC15** | **No branch.** *"the seeded ScheduledJob points at the seeded Action, hourly, Skip/RunOnce"* asserts METADATA ROWS under `metadata/`, not code. A mutant would have to edit a seed file, which is a different tool than a source mutation. |
+
+### forecast — 6 checks, 5 targets
+
+`packages/CoreEntitiesServer/src/forecast/ForecastSnapshotJob.ts`
+
+| Check | Target |
+|---|---|
+| FS1 | `:42` — the default factory `() => null`, plus the no-source path that still returns success |
+| FS2 | The per-row write loop ending `if (await snapshot.Save())` at `:182` — one snapshot per measure row, amounts and period stored verbatim |
+| FS4 | `if (existing.has(key))` at `:149`, and the composition of `key` — the guard is per grain, so the grain must be IN the key |
+| FS5 | Wherever `SnapshotJSON` is assigned in the same loop — which source produced the numbers, and whether it was live |
+| FS10 | `SetForecastSourceFactory` at `:45`, `forecastSourceFactory = factory` at `:47` |
+| FS13 | The same `:42` default — that it is still the empty fixture |
+| **FS9** | **No branch.** Like AC15, it asserts seeded metadata: the daily job points at the seeded forecast Action. |
+
+### close-won-order and close-won-contract — 3 checks, 3 targets
+
+| Check | Target |
+|---|---|
+| CO2 | `CloseDealOperation.ts:830` — `if (routing.length === 0)`, the clean close that routes nothing |
+| CO4 | `CloseDealOperation.ts:433`–`:434` — `OrderID` read AFTER the save because provisioning happens inside it; a second order is what breaks if that ordering moves |
+| CT1 | `LiveContractsSeam.ts:196` `if (!(await contract.Save()))` and `:204` reading `ContractNumber` — contracts mints the number, sales does not |
+
+### What the 28 add up to
+
+| | Count |
+|---|---|
+| Have a named sales-owned branch a mutant could aim at | **25** |
+| **No branch — the behaviour is an absence or lives in metadata** | **3** — WT9, AC15, FS9 |
+
+**So the real ceiling is lower than 123, and now it is countable.** Adding the earlier seven save-deal
+checks, **10 of the 123 cannot be reached by mutating sales source at all**: WT9, AC15, FS9, and the
+seven analysed above (SD6 belongs to orders, SD7 to CodeGen output, SD20 to a client-only path, and
+SD1/SD13/SD14/SD19 to framework cascade and orders' stamping).
+
+That is not a gap to close with more mutants. It is the honest boundary of what this tool can prove,
+and three of those ten — AC15, FS9, and the seeded-job half of the others — would be better served by a
+metadata gate than by a mutation.
+
+---
+
 ## Round 1–3 (2026-08-20) — the original campaign
 
 *Pre-dates the stamping rule: attributable to the date above, NOT to a commit. Treat its figures as historical.*
