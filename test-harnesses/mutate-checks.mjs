@@ -61,6 +61,9 @@ const LCS = 'packages/CoreEntitiesServer/src/LiveContractsSeam.ts';
  * worth remembering -- a title is not a test, and neither is a commit message.
  */
 const AIS = 'packages/CoreEntitiesServer/src/activities/ActivityIngestService.ts';
+const AR = 'packages/CoreEntitiesServer/src/activities/ActivityReader.ts';
+const DM = 'packages/CoreEntitiesServer/src/activities/DealMatcher.ts';
+const ASJ = 'packages/CoreEntitiesServer/src/activities/ActivitySyncJob.ts';
 const AWS = 'packages/CoreEntitiesServer/src/activities/ActivityWriterService.ts';
 const RF = 'packages/CoreEntitiesServer/src/activities/RelevanceFilter.ts';
 const MGC = 'packages/CoreEntitiesServer/src/activities/MSGraphCalendarSource.ts';
@@ -400,6 +403,54 @@ const MUTATIONS = [
     // a close, and CD17 stays green -- because the closing status also arrives dirty, so
     // callerSuppliedValue answers "theirs" anyway. Two independent mechanisms protect it. This mutant
     // therefore proves the check is not VACUOUS rather than isolating one guard: it stops the close
+        /**
+         * M-WT3P -- aimed at WT3.
+         *
+         * WT3 is "a policy that creates NO contract raises ONLY the order-review task". Forcing the branch
+         * true raises a second task the policy never asked for.
+         */
+        { id: 'M-WT3P', file: CWT, expect: ['WT3'],
+          from: '        if (await this.policyRaisesContractTask(input.PipelineID, contextUser, result)) {',
+          to: '        if (true) {',
+          note: 'every policy raises the contract task, including the ones that create no contract' },
+
+        /**
+         * M-WT2R -- aimed at WT2.
+         *
+         * WT2 asserts an assignment EXISTS with the role it was given. Making route() decline for every
+         * task removes the assignment while leaving the task, which is exactly the half WT2 owns. WT7
+         * still passes, because an unrouted task is what WT7 wants.
+         */
+        { id: 'M-WT2R', file: CWT, expect: ['WT2'],
+          from: '        if (!input.Assignee?.RecordID || !input.Assignee?.EntityName) {',
+          to: '        if (true) {',
+          note: 'routing always declines, so the task is raised with no assignment at all' },
+
+        /**
+         * M-WT7S -- aimed at WT7.
+         *
+         * WT7 is "created but UNROUTED and SAYS SO". The task and the missing assignment are unchanged;
+         * only the report is removed, so this isolates the half WT7 actually owns rather than re-testing
+         * WT2.
+         */
+        { id: 'M-WT7S', file: CWT, expect: ['WT7'],
+          from: '            result.Issues.push(\n                `The ${kind} task was created but NOT routed: no finance assignee is configured on the `\n                    + \'pipeline\\\'\\\'s CloseWonPolicy (CloseWonTasks.AssigneeRecordID).\',\n            );',
+          to: '',
+          note: 'the unrouted task no longer SAYS it is unrouted -- it just quietly has no assignee' },
+
+        /**
+         * M-WT5F -- aimed at WT5.
+         *
+         * WT5 is "with no contract yet, the contract task falls back to the DEAL rather than going
+         * missing". The fallback is the DEFAULT value of `target`, not the branch that overrides it -- an
+         * earlier attempt disabled the override instead and forced the fallback ALWAYS, which fells WT4
+         * and WT14 and leaves WT5 green. Emptying the default is what makes the task go missing.
+         */
+        { id: 'M-WT5F', file: CWT, expect: ['WT5'],
+          from: '                let target: CloseWonTaskTarget = { EntityName: E_DEAL, RecordID: input.DealID };',
+          to: '                let target: CloseWonTaskTarget = { EntityName: E_DEAL, RecordID: \'\' };',
+          note: 'the deal fallback carries no record id, so a contract task with no contract links nothing' },
+
         /**
          * -- DN-20: THE TWO DIRECTIONS OF THE BOOKED-ORDER REFUSAL --------------------------------
          *
