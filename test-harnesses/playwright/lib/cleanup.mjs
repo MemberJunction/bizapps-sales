@@ -99,22 +99,117 @@ SET NOCOUNT ON;
 DECLARE @pfx TABLE (P NVARCHAR(50) PRIMARY KEY);
 INSERT INTO @pfx (P) VALUES ${PREFIXES.map((x) => `(N'${x}%')`).join(', ')};
 
--- Captured BEFORE the deal rows go: Deal.OrderID is the only link to the provisioned order.
+-- The same six prefixes as an UNANCHORED pattern, for rows that quote a deal's name INSIDE their own.
+DECLARE @inner TABLE (P NVARCHAR(50) PRIMARY KEY);
+INSERT INTO @inner (P) VALUES ${PREFIXES.map((x) => `(N'%${x}%')`).join(', ')};
+
+/* ── EVERYTHING IS CAPTURED BEFORE ANYTHING IS DELETED ──────────────────────────────────────────
+ *
+ * Deals, pipelines and orders are findable by prefix. Tasks, contracts and activities are NOT: they
+ * carry no prefix of their own and are reachable only THROUGH the deal that raised them. Sweeping in
+ * source order therefore deleted the deal first and then had nothing left to follow, which is why every
+ * Explorer run leaked two tasks and two contracts.
+ *
+ * So the order is inverted: collect ids while the links still exist, then delete children before
+ * parents. Every DELETE below is keyed to an id captured here, never to a live join.
+ */
+DECLARE @deals TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+INSERT INTO @deals (ID)
+  SELECT ID FROM __mj_BizAppsSales.Deal WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
+
+-- Deal.OrderID is the only link to the provisioned order, and it dies with the deal row.
 DECLARE @orders TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
 INSERT INTO @orders (ID)
-  SELECT DISTINCT OrderID FROM __mj_BizAppsSales.Deal
-   WHERE (EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P)) AND OrderID IS NOT NULL;
+  SELECT DISTINCT d.OrderID FROM __mj_BizAppsSales.Deal d
+    JOIN @deals x ON x.ID = d.ID WHERE d.OrderID IS NOT NULL;
 
-DELETE ps FROM __mj_BizAppsSales.DealPaymentSchedule ps
-  JOIN __mj_BizAppsSales.Deal d ON ps.DealID = d.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE d.Name LIKE P);
-DELETE tm FROM __mj_BizAppsSales.DealTeamMember tm
-  JOIN __mj_BizAppsSales.Deal d ON tm.DealID = d.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE d.Name LIKE P);
-DELETE se FROM __mj_BizAppsSales.DealStageEvent se
-  JOIN __mj_BizAppsSales.Deal d ON se.DealID = d.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE d.Name LIKE P);
-DELETE cr FROM __mj_BizAppsSales.DealContactRole cr
-  JOIN __mj_BizAppsSales.Deal d ON cr.DealID = d.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE d.Name LIKE P);
+DECLARE @dealEntity UNIQUEIDENTIFIER =
+  (SELECT TOP 1 ID FROM __mj.Entity WHERE Name = 'MJ_BizApps_Sales: Deals');
 
-DELETE FROM __mj_BizAppsSales.Deal WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
+/* CONTRACTS — two routes, and the second is not optional.
+ *
+ *   1. Contract.CreatingRecordID names the deal that raised it. That is the principled route and it
+ *      works for anything a completed run created.
+ *   2. Residue from runs that swept BEFORE this fix: their deal is already gone, so route 1 finds
+ *      nothing and the row is unreachable forever. A contract whose CreatingEntityID is the Deal entity
+ *      and whose CreatingRecordID matches no surviving deal is, on this host, exactly that residue --
+ *      the only thing that deletes deals here is this sweep.
+ */
+DECLARE @contracts TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+INSERT INTO @contracts (ID)
+  SELECT DISTINCT c.ID FROM __mj_BizAppsContracts.Contract c
+    JOIN @deals d ON d.ID = c.CreatingRecordID
+  UNION
+  SELECT c.ID FROM __mj_BizAppsContracts.Contract c
+   WHERE c.CreatingEntityID = @dealEntity
+     AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d WHERE d.ID = c.CreatingRecordID);
+
+/* TASKS — three routes.
+ *
+ *   1. TaskLink pointing at a harness deal, its order, or a contract captured above.
+ *   2. The task NAME. CloseWonTaskService names a task after the deal it came from -- "Review order for
+ *      PW-LIFE-xxxx lifecycle" -- which is the whole point of WT15, and it means the harness prefix
+ *      travels INSIDE the name. This is what makes an already-orphaned task reachable at all: the four
+ *      leaked rows on this host had NO TaskLink whatsoever, so route 1 could never have found them.
+ *   3. Nothing else. A task with neither a link nor a name mentioning a harness deal is not ours.
+ *
+ * Route 2 matches the prefix anywhere in the string rather than anchored, which is wider than the deal
+ * sweep. Acceptable because these six prefixes are declared in this file as harness-only and this runs
+ * against a development host -- but it IS wider, and that is said here rather than discovered later.
+ */
+DECLARE @tasks TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+INSERT INTO @tasks (ID)
+  SELECT DISTINCT tl.TaskID FROM __mj_BizAppsTasks.TaskLink tl
+   WHERE TRY_CONVERT(UNIQUEIDENTIFIER, tl.RecordID) IN (
+           SELECT ID FROM @deals UNION SELECT ID FROM @orders UNION SELECT ID FROM @contracts)
+  UNION
+  SELECT t.ID FROM __mj_BizAppsTasks.Task t
+   WHERE EXISTS (SELECT 1 FROM @inner WHERE t.Name LIKE P);
+
+/* ACTIVITIES — ActivityLink carries the Regarding link to the deal, and dies with it. */
+DECLARE @acts TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+INSERT INTO @acts (ID)
+  SELECT DISTINCT al.ActivityID FROM __mj_BizAppsCommon.ActivityLink al
+   WHERE TRY_CONVERT(UNIQUEIDENTIFIER, al.RecordID) IN (SELECT ID FROM @deals);
+
+/* ── DELETE: CHILDREN BEFORE PARENTS, ALWAYS ────────────────────────────────────────────────────
+ *
+ * A delete that reports rows and changes nothing is the failure mode here: an earlier attempt reported
+ * four rows and left all four, because TaskActivity has to go before Task and the count printed was of
+ * rows the statement MATCHED, not rows it removed. Every parent below has its children deleted first,
+ * and the remaining_* counts at the bottom are read from the table afterwards rather than from @@ROWCOUNT.
+ */
+DELETE td FROM __mj_BizAppsTasks.TaskDecision td JOIN @tasks t ON td.TaskID = t.ID;
+DELETE ta FROM __mj_BizAppsTasks.TaskActivity ta JOIN @tasks t ON ta.TaskID = t.ID;
+DELETE tc FROM __mj_BizAppsTasks.TaskComment tc JOIN @tasks t ON tc.TaskID = t.ID;
+DELETE tn FROM __mj_BizAppsTasks.TaskNotificationLog tn JOIN @tasks t ON tn.TaskID = t.ID;
+DELETE tg FROM __mj_BizAppsTasks.TaskTagLink tg JOIN @tasks t ON tg.TaskID = t.ID;
+DELETE tl FROM __mj_BizAppsTasks.TaskLink tl JOIN @tasks t ON tl.TaskID = t.ID;
+-- Both ends of the dependency, or a surviving row on either side blocks the parent.
+DELETE dp FROM __mj_BizAppsTasks.TaskDependency dp JOIN @tasks t ON dp.TaskID = t.ID;
+DELETE dp FROM __mj_BizAppsTasks.TaskDependency dp JOIN @tasks t ON dp.DependsOnTaskID = t.ID;
+DELETE ta FROM __mj_BizAppsTasks.TaskAssignment ta JOIN @tasks t ON ta.TaskID = t.ID;
+-- Task.ParentID is a self-reference: break it before deleting, or the parent blocks its own child.
+UPDATE t SET ParentID = NULL FROM __mj_BizAppsTasks.Task t JOIN @tasks x ON x.ID = t.ID WHERE t.ParentID IS NOT NULL;
+DELETE t FROM __mj_BizAppsTasks.Task t JOIN @tasks x ON x.ID = t.ID;
+
+DELETE af FROM __mj_BizAppsCommon.ActivityFile af JOIN @acts a ON af.ActivityID = a.ID;
+DELETE al FROM __mj_BizAppsCommon.ActivityLink al JOIN @acts a ON al.ActivityID = a.ID;
+UPDATE a SET ParentActivityID = NULL FROM __mj_BizAppsCommon.Activity a JOIN @acts x ON x.ID = a.ID WHERE a.ParentActivityID IS NOT NULL;
+DELETE a FROM __mj_BizAppsCommon.Activity a JOIN @acts x ON x.ID = a.ID;
+
+DELETE m FROM __mj_BizAppsContracts.ContractTemplateModification m JOIN @contracts c ON m.ContractID = c.ID;
+-- Contracts point at each other two ways; both must be broken before the rows go.
+UPDATE c SET ParentContractID = NULL FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID WHERE c.ParentContractID IS NOT NULL;
+UPDATE c SET SupersededByContractID = NULL FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID WHERE c.SupersededByContractID IS NOT NULL;
+DELETE c FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID;
+
+DELETE ps FROM __mj_BizAppsSales.DealPaymentSchedule ps JOIN @deals d ON ps.DealID = d.ID;
+DELETE tm FROM __mj_BizAppsSales.DealTeamMember tm JOIN @deals d ON tm.DealID = d.ID;
+DELETE se FROM __mj_BizAppsSales.DealStageEvent se JOIN @deals d ON se.DealID = d.ID;
+DELETE cr FROM __mj_BizAppsSales.DealContactRole cr JOIN @deals d ON cr.DealID = d.ID;
+
+DELETE d FROM __mj_BizAppsSales.Deal d JOIN @deals x ON x.ID = d.ID;
 
 DELETE ps FROM __mj_BizAppsSales.PipelineStage ps
   JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE EXISTS (SELECT 1 FROM @pfx WHERE p.Name LIKE P);
@@ -133,6 +228,12 @@ SELECT 'remaining_deals=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Dea
 SELECT 'remaining_pipelines=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @pfx WHERE Name LIKE P);
 SELECT 'remaining_orders=' + CAST(COUNT(*) AS varchar)
   FROM __mj_BizAppsOrders.OrderHeader oh JOIN @orders o ON oh.ID = o.ID;
+SELECT 'remaining_tasks=' + CAST(COUNT(*) AS varchar)
+  FROM __mj_BizAppsTasks.Task t JOIN @tasks x ON x.ID = t.ID;
+SELECT 'remaining_contracts=' + CAST(COUNT(*) AS varchar)
+  FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID;
+SELECT 'remaining_activities=' + CAST(COUNT(*) AS varchar)
+  FROM __mj_BizAppsCommon.Activity a JOIN @acts x ON x.ID = a.ID;
 `;
 
 export function cleanup() {
