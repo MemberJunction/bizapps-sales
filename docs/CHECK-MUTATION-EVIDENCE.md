@@ -1,5 +1,46 @@
 # Mutation evidence — which integration checks have been proven able to FAIL, and which have not
 
+## ⚠️ EVERY `MISS` IN THIS FILE IS SUSPECT UNTIL RE-RUN (2026-08-24)
+
+A `MISS` is the strongest claim this ledger makes: a mutation broke the code a check names, and the
+check stayed green — so the check may be vacuous. **Some of them were not measurements at all.**
+
+`M-WT2R` was reported `MISS failed=-` at 125 passed / 0 failed. The identical mutation applied by
+hand, verified present in `dist/`, gave **119 passed / 6 failed** — WT1, WT2, WT3, WT9, WT10, CD23 —
+which is also the exact six-check signature seen earlier when that same mutation was stranded in
+`dist/`. Two independent observations. The driver had run the mutant against **unmutated compiled
+code**: the suite loads `dist/`, the mutation is applied to `src/`, and nothing asserted the edit
+survived the build in between.
+
+WT2 would have been filed as unproven on the strength of that.
+
+**A false MISS is worse than a skip.** A skip announces itself; a MISS looks like a finding.
+
+### What is affected, and what is not
+
+| | |
+|---|---|
+| `OK` results | **Unaffected.** A mutant that felled its declared target demonstrably reached the running code — the kill is the proof. |
+| `MISS` results | **Suspect.** Cannot be distinguished from "the build did not carry it" without a re-run. |
+| `SKIPPED` results | **Unaffected.** An anchor that did not match never ran, and says so. |
+
+**Named misses now carrying this caveat:** `M-SD20` (round: bucket-b analysis), `M-AP2` (round 6),
+`M-AC4` (round 7), and `M-WT2R`/`M-WT6T` from the WT batch. Each remains recorded — the reasoning in
+those sections may still be right — but **none may be quoted as evidence of a vacuous check until
+re-run under the guard.**
+
+`M-SD20` deserves a specific note: its section argues the integration suite is server-side and
+structurally cannot exercise a client-path guard, which is an argument from the code rather than from
+the run. That reasoning stands on its own. The *measurement* it cites does not, yet.
+
+### The guard that closes it
+
+`mutate-checks.mjs` now fingerprints the compiled file before mutating and again after building, and
+refuses the run as `dist-unchanged` if they match — so this class of false MISS is now a loud failure
+rather than a result. Proven with a type-only mutation that compiles to identical JS.
+
+---
+
 ## EVERY FIGURE IN THIS FILE IS STAMPED WITH THE COMMIT IT DESCRIBES
 
 A number here describes ONE tree. The tree has moved out from under a measurement three separate times
@@ -308,6 +349,11 @@ the peer was never exposed — the DN-17 defect, where adding a line straight af
 it to a SECOND `OrderHeader` that nothing referenced: invisible to the rep, uncounted by `Deal.Amount`,
 an orphan left in orders. Disabling that guard restores the defect exactly.
 
+> ⚠️ **This MISS predates the dist-change guard and has not been re-run.** See the banner at the top:
+> a mutation that never reached `dist/` produces exactly this line. The ARGUMENT below — that a
+> server-side suite cannot exercise a client-only path — is independent of the run and still stands.
+> The measurement is not yet evidence.
+
 **Result: `M-SD20 MISS failed=- expect=SD20` — 123 passed, 0 failed.** The whole suite stayed green with
 the guard disabled.
 
@@ -541,6 +587,10 @@ than carried across from the by-hand campaign, because the merge moved code unde
 | `M-FS5` | the month boundary read in the host's timezone | FS7 |
 
 ### `M-AC4` is a standing miss, in the shape `M-AP2` already uses
+
+> ⚠️ **Predates the dist-change guard; not re-run.** Both `M-AC4` and `M-AP2` are MISSes recorded
+> before anything asserted the mutation reached the compiled output. Re-run both before quoting
+> either as evidence.
 
 It reverts `RelevanceFilter.lookup`'s failure report from `failed: true` to `failed: false`, so a
 `ContactMethod` read that blipped is filed as *"nothing was relevant"* — and the watermark advances over a
