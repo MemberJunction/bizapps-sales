@@ -405,8 +405,25 @@ async function createDeal(page: import('@playwright/test').Page, name: string, p
 
 /** The labels the product picker currently offers, minus the "not linked" placeholder. */
 async function productOptions(page: import('@playwright/test').Page): Promise<string[]> {
+    /**
+     * THE LINES PANE FIRST, AND THIS WAS MY OWN TRAP WALKED INTO TWICE.
+     *
+     * `.dw-addbtn` is rendered only on Product lines; the workspace opens on Party info. Calling
+     * `isEnabled()` on a locator that does not exist does not return false — it WAITS, for the full
+     * 30s timeout, and then fails as `locator.isEnabled: Timeout`. That reads as a hung button rather
+     * than a wrong pane, which is exactly the confusion this cost when probing Cause 2 by hand.
+     *
+     * So: switch pane, then ask `count()` before `isEnabled()`. `count()` answers immediately for an
+     * absent element; `isEnabled()` never does.
+     */
+    const linesTab = page.locator('.dw-panes__tab').filter({ hasText: /line/i }).first();
+    if (await linesTab.count()) {
+        await linesTab.click();
+        await page.waitForTimeout(1_000);
+    }
+
     const addBtn = page.locator('.dw-addbtn');
-    if (await addBtn.isEnabled()) {
+    if (await addBtn.count() && await addBtn.isEnabled()) {
         // A picker only exists once there is a line to hold it.
         const existing = await page.locator('.dw-cell-product').count();
         if (existing === 0) {
