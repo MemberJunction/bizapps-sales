@@ -167,7 +167,30 @@ async function acquireApplock(timeoutMs) {
  * A PAUSE THAT DOES NOT EXPLAIN ITSELF READS AS A HANG, and someone will Ctrl-C it and conclude the
  * suite is broken. That is the failure this message exists to prevent.
  */
-const probe = await acquireApplock(0);
+/**
+ * ── A PARENT MAY ALREADY HOLD THE LOCK ON THIS RUN'S BEHALF ─────────────────────────────────────
+ *
+ * `mutate-checks.mjs` runs this suite up to three times for one mutant when a deadlock forces a
+ * retry. Each run used to acquire the lock for itself, so every attempt QUEUED AFRESH behind whatever
+ * else was on the host -- a measured 46.6s on a quiet evening. Three attempts plus two builds then
+ * exceeded the ten-minute ceiling the driver runs under, and a retry that exists to survive deadlocks
+ * had turned into a multiplier on an unrelated wait.
+ *
+ * So the driver acquires ONCE, around the whole attempt sequence, and sets this variable. The
+ * queue is paid once per mutant instead of once per attempt, and a deadlock retry re-runs
+ * immediately.
+ *
+ * THE CONTRACT IS NARROW AND WORTH STATING: this only skips ACQUIRING. It does not weaken the
+ * serialisation, because the parent is holding the same lock for the same resource for longer than
+ * this process lives. Setting it by hand, with nothing actually holding the lock, disables the
+ * protection entirely -- which is why it names a parent rather than reading like a "skip lock" flag.
+ */
+const PARENT_HOLDS_LOCK = process.env.MJ_INTEGRATION_LOCK_HELD_BY_PARENT === '1';
+
+const probe = PARENT_HOLDS_LOCK ? 0 : await acquireApplock(0);
+if (PARENT_HOLDS_LOCK) {
+    console.log('  (suite lock held by the parent process — not re-acquiring)');
+}
 if (probe < 0) {
     console.log(
         `
@@ -211,6 +234,7 @@ if (probe < 0) {
  */
 async function releaseRunLock() {
     try {
+        // Nothing to release if the parent holds it; closing the pool is still correct and harmless.
         await lockPool.close();
     } catch {
         /* the session is gone, which already released the lock */

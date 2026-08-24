@@ -874,38 +874,80 @@ const FAIL_RE = /^ {2,}✖ ([A-Z]+\d+):/gmu;
 const TALLY_RE = /(\d+) passed,\s+(\d+) failed,\s+(\d+) skipped/;
 
 /**
- * Who holds the suite lock right now, or null if it is free.
+ * Holds the suite lock for one mutant's WHOLE attempt sequence.
  *
- * READ-ONLY, and deliberately not an acquire-then-release: taking the lock to find out whether it is
- * taken would make this driver the contender it is trying to report on, and would race with the suite it
- * is about to spawn. `sys.dm_tran_locks` answers the question without touching it.
+ * ── WHY THE DRIVER HOLDS IT RATHER THAN EACH SUITE RUN ─────────────────────────────────────────
  *
- * Failure to connect returns null -- "cannot tell" prints nothing rather than a wrong reassurance, and
- * the suite is about to report the real state anyway.
+ * The retry exists to survive a DEADLOCK: another writer on the host kills one of the suite's
+ * transactions, the result is meaningless, and the run is discarded and repeated. That is correct.
+ *
+ * What it also did was re-QUEUE. Each attempt acquired the lock for itself, so a mutant that
+ * deadlocked twice paid the queue three times -- measured at 46.6s on a quiet evening, and the reason
+ * four consecutive attempts at this batch died on a ten-minute ceiling having printed nothing.
+ *
+ * A deadlock and a queue are opposite conditions and were being handled identically. A deadlock means
+ * RETRY. A queue means WAIT -- and waiting a second time for something you were already waiting for is
+ * just paying twice.
+ *
+ * So: acquire once here, tell the child not to acquire, run the attempts, release. The wait is paid
+ * once per mutant AND it is visible, because this process owns it and can print while it blocks --
+ * which the previous `⏳` probe could not do, sampling only at spawn time while the queue happened
+ * inside the run afterwards.
+ *
+ * Released in a `finally` per mutant rather than held across the campaign: a driver that squats on the
+ * lock for an hour is a worse neighbour than one that queues.
  */
-async function lockHolderSpid() {
+async function withSuiteLock(label, fn) {
+    let sql;
+    let pool = null;
     try {
-        const sql = (await import('mssql')).default;
+        sql = (await import('mssql')).default;
         await import('dotenv/config');
-        const pool = await new sql.ConnectionPool({
+        pool = await new sql.ConnectionPool({
             server: process.env.DB_HOST ?? 'localhost',
             port: Number(process.env.DB_PORT ?? 1433),
             database: process.env.DB_DATABASE,
             user: process.env.DB_USERNAME,
             password: process.env.DB_PASSWORD,
             options: { trustServerCertificate: true, encrypt: true },
-            requestTimeout: 15_000,
+            pool: { max: 1, min: 1 },
+            requestTimeout: 20 * 60_000,
         }).connect();
-        const r = await pool.request().query(
-            `SELECT TOP 1 request_session_id AS spid FROM sys.dm_tran_locks
-              WHERE resource_type = 'APPLICATION'
-                AND resource_description LIKE '%integration-suite%'
-                AND request_status = 'GRANT'`,
-        );
-        await pool.close();
-        return r.recordset.length ? r.recordset[0].spid : null;
     } catch {
-        return null;
+        /**
+         * NO CONNECTION MEANS NO CLAIM. Fall through and let the child acquire the lock itself, exactly
+         * as it did before. Degrading to the slower-but-correct path beats running unserialised.
+         */
+        if (pool) { try { await pool.close(); } catch { /* already gone */ } }
+        return await fn(false);
+    }
+
+    const ask = async (timeoutMs) => {
+        const r = pool.request();
+        r.input('Resource', sql.NVarChar(255), 'bizapps-sales:integration-suite');
+        r.input('LockMode', sql.NVarChar(32), 'Exclusive');
+        r.input('LockOwner', sql.NVarChar(32), 'Session');
+        r.input('LockTimeout', sql.Int, timeoutMs);
+        return (await r.execute('sp_getapplock')).returnValue;
+    };
+
+    try {
+        let rc = await ask(0);
+        if (rc < 0) {
+            console.log(`${label.padEnd(7)} ⏳ queued on the suite lock — waiting once for this mutant, `
+                + 'not once per attempt.');
+            const t0 = Date.now();
+            rc = await ask(15 * 60_000);
+            if (rc < 0) {
+                console.log(`${label.padEnd(7)} ✖ could not acquire the suite lock in 15 min — `
+                    + 'falling back to per-attempt locking.');
+                return await fn(false);
+            }
+            console.log(`${label.padEnd(7)} ✔ lock acquired after ${((Date.now() - t0) / 1000).toFixed(1)}s.`);
+        }
+        return await fn(true);
+    } finally {
+        try { await pool.close(); } catch { /* the session is gone, which released it */ }
     }
 }
 
@@ -974,11 +1016,11 @@ for (const m of MUTATIONS) {
          * number that is wrong.
          */
         const CONTENTION_RE = /was deadlocked on lock resources|deadlock victim/i;
-        const runSuiteOnce = () => {
+        const runSuiteOnce = (extraEnv = {}) => {
             try {
                 return execSync('node test-harnesses/integration.mjs', {
                     cwd: REPO, stdio: 'pipe', encoding: 'utf8',
-                    env: { ...process.env, RUN_MUTATION_TESTS: '1' },
+                    env: { ...process.env, RUN_MUTATION_TESTS: '1', ...extraEnv },
                 });
             } catch (err) {
                 // a failing suite exits non-zero, which is the POINT
@@ -1006,24 +1048,26 @@ for (const m of MUTATIONS) {
          * So the driver asks the question itself, BEFORE spawning, and prints the answer where a person
          * can see it. Stdout stays piped, so parsing is untouched.
          */
-        const heldBy = await lockHolderSpid();
-        if (heldBy !== null) {
-            console.log(
-                `${m.id.padEnd(7)} ⏳ another suite run holds the lock (spid ${heldBy}). This run will `
-                + 'QUEUE behind it, not hang — the suite waits up to 15 min by default.',
-            );
-        }
-
+        /**
+         * The lock is taken HERE, around every attempt, rather than by each attempt. See
+         * `withSuiteLock`: a deadlock means retry, a queue means wait, and the two were being paid for
+         * identically. The spawn-time probe this replaces could only sample BEFORE the run; the queue
+         * happens inside it, which is why four batches died on a ten-minute ceiling printing nothing.
+         */
         let out = '';
         let contended = 0;
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            out = runSuiteOnce();
-            if (!CONTENTION_RE.test(out)) break;
-            contended++;
-            if (attempt < 3) {
-                console.log(`${m.id.padEnd(7)} ⚠ deadlock during the run — discarding and re-running (${attempt + 1}/3)`);
+        await withSuiteLock(m.id, async (held) => {
+            const childEnv = held ? { MJ_INTEGRATION_LOCK_HELD_BY_PARENT: '1' } : {};
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                out = runSuiteOnce(childEnv);
+                if (!CONTENTION_RE.test(out)) break;
+                contended++;
+                if (attempt < 3) {
+                    console.log(`${m.id.padEnd(7)} ⚠ deadlock during the run — discarding and re-running `
+                        + `(${attempt + 1}/3). No re-queue: the lock is already held.`);
+                }
             }
-        }
+        });
         const stillContended = CONTENTION_RE.test(out);
 
         const failed = [...new Set([...out.matchAll(FAIL_RE)].map((x) => x[1]))].sort();
