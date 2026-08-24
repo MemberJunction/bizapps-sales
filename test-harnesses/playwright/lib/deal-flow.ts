@@ -326,8 +326,22 @@ export async function PurgeDeal(dealID: string, orderID: string | null): Promise
                      ISNULL((SELECT CAST(ContractID AS NVARCHAR(50))
                                FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'), '${dealID}')
                  );
+        -- EVERY child of Task, not just the two that had bitten. `70-lifecycle` died here a second
+        -- time on FK_TaskActivity_Task: the close writes a TaskActivity row per task, and this list
+        -- knew about TaskLink and TaskAssignment only. Enumerated in full rather than extended by one
+        -- again -- the same list `cleanup.mjs` carries, for the same reason.
+        DELETE td FROM __mj_BizAppsTasks.TaskDecision td JOIN @tasks t ON td.TaskID = t.ID;
+        DELETE tac FROM __mj_BizAppsTasks.TaskActivity tac JOIN @tasks t ON tac.TaskID = t.ID;
+        DELETE tc FROM __mj_BizAppsTasks.TaskComment tc JOIN @tasks t ON tc.TaskID = t.ID;
+        DELETE tn FROM __mj_BizAppsTasks.TaskNotificationLog tn JOIN @tasks t ON tn.TaskID = t.ID;
+        DELETE tg FROM __mj_BizAppsTasks.TaskTagLink tg JOIN @tasks t ON tg.TaskID = t.ID;
+        DELETE dp FROM __mj_BizAppsTasks.TaskDependency dp JOIN @tasks t ON dp.TaskID = t.ID;
+        DELETE dp FROM __mj_BizAppsTasks.TaskDependency dp JOIN @tasks t ON dp.DependsOnTaskID = t.ID;
         DELETE tl FROM __mj_BizAppsTasks.TaskLink tl JOIN @tasks t ON tl.TaskID = t.ID;
         DELETE ta FROM __mj_BizAppsTasks.TaskAssignment ta JOIN @tasks t ON ta.TaskID = t.ID;
+        -- Task.ParentID is a self-reference: break it before the rows go.
+        UPDATE tk SET ParentID = NULL FROM __mj_BizAppsTasks.Task tk JOIN @tasks t ON tk.ID = t.ID
+         WHERE tk.ParentID IS NOT NULL;
         DELETE tk FROM __mj_BizAppsTasks.Task tk JOIN @tasks t ON tk.ID = t.ID;`);
 
     // The contract the close created, found by its provenance pair rather than by name.
