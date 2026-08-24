@@ -24,8 +24,9 @@ its commit is not evidence.
 | Declared kills — mutation aimed at it, it fell | 70 | 70 *(carried, not re-measured)* |
 | Collateral credited under the path rule | 11 | 11 *(carried)* |
 | Newly demonstrated by round 9 (measured at `b9e73d4`) | — | **+3** — AC22, SD23, SD28 |
-| **Demonstrated able to fail** | **81 of 121** | **84 of 123** |
-| Not demonstrated | 40 | **39** |
+| Newly demonstrated by round 10 (measured at `9724489`) | — | **+4** — WT1, WT4, WT15, WT16 |
+| **Demonstrated able to fail** | **81 of 121** | **88 of 123** |
+| Not demonstrated | 40 | **35** |
 
 **`84` IS A CROSS-TREE UNION, NOT A MEASUREMENT.** 81 of it was measured at `6d3add4` and is carried
 forward unverified; 3 were measured at `b9e73d4` in round 9. No single run has ever produced 84. It is
@@ -222,29 +223,88 @@ silently-skipping mutant proves nothing at all. But the headline moves by 3, not
 
 ---
 
-## The 39 not demonstrated, sorted — `b9e73d4`
+## The 35 not demonstrated, sorted — `9724489`
 
-Counting an unreachable check as "not demonstrated" understates the suite, so the number is split.
+Counting an unreachable check as "not demonstrated" understates the suite, so the number is split. The
+old bucket (a) conflated two states that mean OPPOSITE things and is now split in two.
 
 | Bucket | Count | Checks |
 |---|---|---|
-| **(a)** a mutant DECLARES it, but it did not fall | **4** | WT1, WT4, WT15, WT16 |
+| **(a1)** a mutant RAN and did not kill its declared target | **0** | — |
+| **(a2)** a mutant declares it but has never been RUN | **0** | — |
 | **(b)** no mutant was ever written for it | **35** | AC1, AC2, AC4, AC5, AC9, AC10, AC12, AC15, AC16, AC17, CO2, CO4, CT1, FS1, FS2, FS4, FS5, FS9, FS10, FS13, SD1, SD6, SD7, SD13, SD14, SD19, SD20, WT2, WT3, WT5, WT6, WT7, WT8, WT9, WT12 |
-| **(c)** unfellable by source mutation — injects its own collaborator | **0** | *(AC22 was the only member of this bucket in the whole suite, and round 9 emptied it)* |
+| **(c)** unfellable by source mutation — injects its own collaborator | **0** | *(AC22 was the only member in all 123; round 9 emptied it)* |
 
-**Bucket (a) is the one to read first.** A mutant exists and aims at these, and they did not fall — that
-is either a mis-aimed mutation or a check that cannot detect the thing it names. `WT1` and `WT4` are
-covered by `M-WT1O`/`M-WT4L`, which arrived after the `6d3add4` campaign and have not been run here.
+**WHY (a1) AND (a2) MUST NOT BE ONE BUCKET.** They are the two most different states in this file:
 
-**Bucket (c) was scanned for, not assumed.** Every one of the 123 checks was searched for a
-subclass-and-override of a production collaborator. **AC22 was the only hit in the suite.** The pattern
-is rare because it is a last resort, which is why a single mutation aimed at the consumer emptied the
-bucket.
+- **(a1) is the alarming case.** A mutant ran, broke the code its check names, and the check stayed
+  green. That is either a mis-aimed mutation or a vacuous check — and finding vacuous checks is the
+  entire reason this harness exists.
+- **(a2) is merely unmeasured.** Nothing is known either way. It is a gap in the ledger, not a defect.
 
-**Seven names in bucket (b) deserve their footnote:** SD1, SD6, SD7, SD13, SD14, SD19, SD20 DID fall
-during the campaign — under `M-PP1`/`M-PP3`, inside their own fixture setup. They are listed as having
-no mutant because no mutant declares them, and the setup kills were rejected under the path rule. They
-are the strongest candidates for the next mutants to be written.
+An earlier version of this table listed WT1, WT4, WT15 and WT16 as *"a mutant declares it, it did not
+fall"* — bucket (a1) language for what were all (a2) cases. That classification was derived from the
+`6d3add4` campaign, where `M-TN1`, `M-TL1`, `M-WT1O` and `M-WT4L` **did not yet exist**. Reading a
+missing mutant as a failed one buries the exact signal the harness is built to surface.
+
+### Round 10 (2026-08-23) — `9724489` — all four ran, all four fell
+
+Measured on `feature/bucket-b` at `9724489`. **A single-mutant run is evidence on the same terms as a
+campaign run** — the rule is provenance, not which harness produced it, so these carry their SHA and
+count.
+
+| Mutant | Target | `failed=` | Collateral on the failing check's path? |
+|---|---|---|---|
+| `M-TN1` | WT15 | WT15 | clean single kill |
+| `M-TL1` | WT16 | WT16 | clean single kill |
+| `M-WT1O` | WT1 | WT1, WT10, WT13 | **Yes.** The mutation points the review task at the deal instead of the order; WT13 is *"linked to the order the close created"* and WT10 drives the same task creation end to end. |
+| `M-WT4L` | WT4 | WT4, WT14 | **Yes.** WT14 is *"the contract-processing task links the CONTRACT, not the deal"* — the mutation strips exactly that link. |
+
+Both `M-TN1` and `M-TL1` reproduce the result another session measured individually, independently.
+
+---
+
+## Bucket (b): the seven save-deal checks, analysed — `9724489`
+
+SD1, SD6, SD7, SD13, SD14, SD19 and SD20 fell during the `6d3add4` campaign under `M-PP1`/`M-PP3` and
+were rejected under the path rule: those mutate `ProductFilterFor`, which these checks reach only
+through `sellableProducts()` in their own fixture setup, so they died before touching the behaviour they
+name. That makes replacing them a DESIGN problem — the mutant has to reach the behaviour the check is
+about, not the scaffolding that gets it there.
+
+**The finding is that most of them assert behaviour sales does not own.** None of these checks is
+vacuous; each asserts something real and valuable. They are simply not reachable by mutating sales
+source, which is a different statement from "weak".
+
+| Check | What it asserts | Reachable by mutating sales? |
+|---|---|---|
+| `SD6` | *removing an order line is silently DROPPED* — a KI-20 tripwire | **No.** Its own message names the owner: *"orders has fixed `savePendingLines()`"*. The behaviour, and the eventual fix, live in bizapps-orders. Sales has nothing to mutate, and the check asserts the ABSENCE of a fix there. |
+| `SD7` | *children are sequenced from collection position, contiguously from 1* | **No.** Sequencing is declared in CodeGen output — `Sequence: { Field: 'DisplayOrder', From: 1 }` in `packages/Entities/src/generated/entity_subclasses.ts` — and executed by the MJ framework. Mutating generated code is both forbidden and pointless, since CodeGen restores it. |
+| `SD20` | *reopening a deal brings its order lines back* | **Measured: no.** See below — a mutant was written, run, and MISSED. |
+| `SD1`, `SD13`, `SD14`, `SD19` | one-save cascade, omission-is-not-deletion, two-level round trip, orders owns everything but product and quantity | **Analysed, not measured.** Each asserts framework cascade (`SaveEntityGraph`), MJ collection load semantics, or orders' stamping of `UnitPrice`/`CompanyID`. No sales-owned branch was found whose mutation would reach them. Stated as analysis, not as a measured result. |
+
+### The measured one: `M-SD20` was written, run, and MISSED — and that is the finding
+
+`DealEntity.Save()` overrides `super.Save()` to re-hydrate the embedded order when the FK was written but
+the peer was never exposed — the DN-17 defect, where adding a line straight after creating a deal wrote
+it to a SECOND `OrderHeader` that nothing referenced: invisible to the rep, uncounted by `Deal.Amount`,
+an orphan left in orders. Disabling that guard restores the defect exactly.
+
+**Result: `M-SD20 MISS failed=- expect=SD20` — 123 passed, 0 failed.** The whole suite stayed green with
+the guard disabled.
+
+That is not a bad anchor. The guard's own docblock explains it:
+
+> `DealEntityServer` calls this through `super.Save()` and reaches the guard with its peer exposed by
+> `provisionEmbeddedOrder()`, so the server path is a no-op **by construction** rather than by luck.
+
+**The integration suite is server-side, so it cannot exercise this guard at all.** The DN-17 fix — a real
+defect, found through Angular's dev hooks on a real create — has NO integration coverage, and no mutant
+can give it any. Covering it needs a client-path test through the Explorer harness, where a plain
+`BaseEntity.Save()` produces the single-node mutation the bug hides behind.
+
+The mutant was REMOVED rather than left in place. A permanently-missing mutant trains readers to skim
+past the MISS list, which is where the real findings appear.
 
 ---
 
