@@ -1,38 +1,72 @@
 # Mutation evidence — which integration checks have been proven able to FAIL, and which have not
 
-**Rewritten from scratch on 2026-08-21 against the merged tree** (dashboard-queries,
-forecast-query-source and pipeline-board-rebased all in). Every figure below is counted from the current
-sources or from a recorded run. Nothing is carried across from either predecessor version of this file,
-because both were arithmetically stale the moment they merged:
+## EVERY FIGURE IN THIS FILE IS STAMPED WITH THE COMMIT IT DESCRIBES
 
-- the previous target asserted `activities` 18/0 and `forecast` 13/0 — the first falsified by this merge,
-  which brings activities to 22;
-- the forecast branch's copy said `board-move` was not covered, which its own sibling's `M-ST1` falsifies
-  by killing BD1, BD2 and BD4;
-- and **both called their round "Round 4", on the same date.** Rounds are numbered chronologically here,
-  and the collision is called out where it lands.
+A number here describes ONE tree. The tree has moved out from under a measurement three separate times
+now, and each time the figure survived the move and went on being quoted — so an unstamped number in
+this file should be treated as unsourced rather than merely old.
 
----
-
-## The numbers, counted rather than remembered
+The rule is therefore: **no figure without the SHA it was measured against.** A round that cannot name
+its commit is not evidence.
 
 | | |
 |---|---|
-| Checks registered across 9 bundles | **121** |
-| Mutants defined in `test-harnesses/mutate-checks.mjs` | **75** |
-| Checks a mutant is DECLARED to kill (`expect` lists) | **75** |
-| Of those, mutants that have a RECORDED run in this file | see the round sections |
-| Checks additionally proven by measured collateral kills | **3** (BD1, BD4 — see `M-ST1`; AC22 — see round 7) |
-| **Checks proven able to fail (declared and fell)** | **75 of 121** |
-| Additionally felled as COLLATERAL — a weaker claim | 2 (BD1, BD4) |
+| Latest full campaign | **`6d3add4`** — 2026-08-21 22:00 → 2026-08-22 00:06 |
+| Tree these counts describe | **`b9e73d4`** — the consolidated line |
+| Checks registered across 9 bundles | **123** at `b9e73d4` (was 121 at `6d3add4`) |
+| Mutants defined | **80** at `b9e73d4` (was 75 at `6d3add4`) |
 
-**The merged figure was verified at 118 by two independent routes**: the per-key arithmetic in
-`scripts/expected-check-counts.json`, and grepping registered `Id:` values straight out of
-`packages/IntegrationTests/src/checks/*.checks.ts` — same total, same per-bundle split, no duplicate ids.
-Round 6 then added CD20–CD22 for the three server-side fixes, giving **121**. The suite ran 121, 0 failed,
-0 skipped.
+### The headline, restated against 123
 
-### Per bundle
+| | at `6d3add4` | at `b9e73d4` |
+|---|---|---|
+| Checks in the suite | 121 | **123** |
+| Declared kills — mutation aimed at it, it fell | 70 | 70 *(carried, not re-measured)* |
+| Collateral credited under the path rule | 11 | 11 *(carried)* |
+| Newly demonstrated by round 9 (measured at `b9e73d4`) | — | **+3** — AC22, SD23, SD28 |
+| **Demonstrated able to fail** | **81 of 121** | **84 of 123** |
+| Not demonstrated | 40 | **39** |
+
+**`84` IS A CROSS-TREE UNION, NOT A MEASUREMENT.** 81 of it was measured at `6d3add4` and is carried
+forward unverified; 3 were measured at `b9e73d4` in round 9. No single run has ever produced 84. It is
+the best current estimate and is written as such — collapsing it into one unqualified number is exactly
+the drift the stamping rule exists to stop.
+
+**The two extra checks are CARRIED, not re-measured.** `close-won-tasks` went 14 → 16 between the two
+trees. Nothing in this file claims they were tested.
+
+**The two extra checks are not proven and are not assumed to be.** `close-won-tasks` went 14 → 16
+between the two trees. Carrying 81 forward across a tree change is exactly the drift this file now
+stamps against, so it is written as *carried, not re-measured* — the campaign that would settle it is
+deliberately deferred to the tree we ship, once.
+
+### Why the campaign figure is 81 and not 88
+
+The driver's summary reported 70 declared kills and 18 further checks that fell only ever as collateral.
+Adding those gives 88. **Seven of the 18 do not survive the path rule and are not counted:**
+
+`SD1`, `SD6`, `SD7`, `SD13`, `SD14`, `SD19`, `SD20` all fell under `M-PP1`/`M-PP3`, which mutate
+`ProductFilterFor`. That function has exactly two consumers — the Angular product picker, and the
+checks' own setup helper `sellableProducts()` at `save-deal.checks.ts:248`, which asserts
+*"setup: the host needs at least N sellable product(s)"*. Those checks died IN SETUP, before reaching
+the behaviour they name. Crediting them would claim `SD1` can detect a regression in
+one-save-writes-the-graph, which the campaign did not show.
+
+`SD17` survives the same cull because `M-SD11` (SequenceService) also felled it, and `SD17` is about
+deal numbering — genuinely on its path.
+
+The eleven credited: `BD1`, `BD3`, `BD4`, `BD6`, `CD3`, `CD12`, `CD17`, `CD19`, `SD17`, `WT10`, `WT11`.
+
+### The driver's own summary did NOT disagree
+
+Worth recording because it nearly went in as a correction. An independent tally gave 33 collateral
+against the driver's 18. They count different things: the driver counts checks that fell but were
+**never a declared kill anywhere**; the independent pass counted **per-mutant** collateral, which
+includes checks another mutant declares. Under its own definition the driver's 18 is exact, and the two
+agree on 68 ran, 70 declared kills, 44 mutants isolating exactly one check. **No correction was needed
+— the path rule is what moved the number, not an arithmetic error.**
+
+### Per bundle, at `6d3add4`
 
 | Bundle | Checks | Proven | Not proven |
 |---|---|---|---|
@@ -45,6 +79,13 @@ Round 6 then added CD20–CD22 for the three server-side fixes, giving **121**. 
 | `close-won-tasks` | 14 | 3 | **11** |
 | `activities` | 22 | 12 | 10 |
 | `forecast` | 13 | 6 | 7 |
+
+*(This table describes `6d3add4`. `close-won-tasks` is 16 at `b9e73d4`; the split has not been
+re-measured.)*
+
+
+---
+
 
 ---
 
@@ -101,7 +142,115 @@ until then, treat the per-bundle table as a claim about the code each mutation w
 
 ---
 
+## Round 9 (2026-08-23) — `b9e73d4` — AC22 made reachable, and seven drifted anchors repaired
+
+**Every figure in this section was measured against `b9e73d4`.** Branch `feature/mutant-repair`.
+
+### AC22 was never vacuous — it was UNREACHABLE
+
+The `6d3add4` campaign felled AC22 with nothing, which made it read as the strongest vacuous-pass
+candidate in the suite. It is the opposite. AC22 carries six assertions and pins the distinction the
+branch exists for: `Failed: 2`, not `Irrelevant: 2`, because a failed lookup means the items were never
+JUDGED, which is a different fact from being judged irrelevant.
+
+No mutation reached it because **AC22 injects its own collaborator** — it subclasses `RelevanceFilter`
+inline and overrides `Apply` outright, so every mutation of the real filter is invisible to it. Its own
+docblock says this is deliberate: it is the one check that injects rather than drives, to reach a branch
+no arrangement of real data can produce.
+
+`M-AC11` therefore aims at the CONSUMER of that signal instead —
+`ActivityIngestService.RunSync`'s `LookupFailed` branch, where `result.Failed += allowed.length` is the
+line that holds the watermark (`Success` is `Failed === 0`, and the watermark only moves on a successful
+run). Booking the batch as Irrelevant makes a transient database blip look exactly like a mailbox of
+personal mail — the original defect, restored in one token.
+
+| Mutant | Fells | Result |
+|---|---|---|
+| `M-AC11` | AC22 | **122 passed, 1 failed** — isolates it exactly |
+
+**The irony is the point:** AC22 exists because a mutation found this gap, and it had since become
+unreachable by the same tool. A check that cannot be falsified is indistinguishable from one that
+asserts nothing, however good it is.
+
+### The seven drifted anchors — all repaired, none retired
+
+Every one had MOVED rather than vanished, so none needed retiring.
+
+| Mutant | Why it drifted | Re-anchored to |
+|---|---|---|
+| `M-CD4` | the stamping moved file entirely, `deal.Amount` → `prior.Amount` | `DealEntityServer.ts:588` |
+| `M-OS1` | the line gained a `_lockedAtSave` guard | `stageOrder = this._lockedAtSave ? null : …` |
+| `M-AM3` | trailing comment reworded | `if (total === null \|\| !Number.isFinite(total)) {` |
+| `M-WT1` | its two anchor lines are no longer adjacent | `if (target.IsWon) {` + `ReadCloseWonTaskConfig` |
+| `M-BD2` | `probabilityIsTheirs` replaced by `callerSuppliedValue` | the `!this.IsSaved` create branch |
+| `M-BD3` | same refactor | `if (!this.callerSuppliedValue('Probability', …))` |
+| `M-ST7` | anchor line now appears twice (close + reopen) | disambiguated by `const now = new Date();` |
+
+`M-BD2`/`M-BD3` looked like the unrecoverable pair — `probabilityIsTheirs` is gone from the repo
+entirely — but the concept moved into `callerSuppliedValue`, which still draws the same
+create-versus-update distinction BD2 caught the first time.
+
+### Per-mutant results, `failed=` read rather than summed
+
+| Mutant | Target | `failed=` | Collateral on the failing check's path? |
+|---|---|---|---|
+| `M-CD4` | CD4 | BD2, CD20, CD4 | **Yes.** BD2 asserts *the event stamps the amount … on the way out*; CD20 asserts *whose number the amount was*. The mutation nulls `event.AmountAtTransition` — squarely both. |
+| `M-OS1` | CO3, CO5 | CO3, CO5, SD25 | **Yes.** SD25 is *a provisioned order takes the status its STAGE declares*; the mutation removes the stage-order plan outright. |
+| `M-AM3` | SD23 | SD23, SD28 | **Yes.** SD28 is *an order with NO LINES is not "priced at zero"*; the mutation deletes the no-usable-total guard that protects exactly that. |
+| `M-WT1` | WT11 | WT11 | Clean single kill. |
+| `M-BD2` | BD2 | BD2, SD31, SD33 | **Yes.** `callerSuppliedValue` gates the SD31 OwnerEmployeeID refusal (`:1590`) and the SD33 status default (`:1008`). Breaking its create branch reaches both by construction. |
+| `M-BD3` | BD6 | BD2, BD6 | **Yes.** Same probability-defaults code BD2 is about. |
+| `M-ST7` | CD17 | CD4, CD5, CD13, CD14, CD17, CD18, CD20 | **Yes, and broad by design** — the mutation stops the close setting the status, so every check asserting a close outcome falls. Its note said so before the run. |
+
+**No setup-only kills in this batch.** Unlike `M-PP1`/`M-PP3`, whose seven save-deal casualties died
+inside `sellableProducts()` in their own fixture, every collateral above executes the mutated line as
+part of the behaviour the check names.
+
+### What actually changed status — 3 checks, not 18
+
+Read the `failed=` column rather than summing it, and most of this batch is REDUNDANT coverage: 15 of
+the 18 checks these mutants fell were already credited at `6d3add4` by other mutants.
+
+- **Newly demonstrated: `AC22` (M-AC11), `SD23` (M-AM3), `SD28` (M-AM3 collateral).**
+- **`CD4` was NOT restored from unproven.** An earlier report in this session said CD4 was unproven
+  while `M-CD4` was skipping. That was wrong: `M-ST1` declares CD4 and felled it at `6d3add4`
+  (`expect=CD4,CD15,BD2`). Re-anchoring `M-CD4` restores the TARGETED mutation for CD4 rather than
+  leaving it to `M-ST1`'s broad one — better evidence, not a status change.
+
+The re-anchoring is still worth having: a targeted mutation is stronger evidence than a broad one, and a
+silently-skipping mutant proves nothing at all. But the headline moves by 3, not by 18.
+
+---
+
+## The 39 not demonstrated, sorted — `b9e73d4`
+
+Counting an unreachable check as "not demonstrated" understates the suite, so the number is split.
+
+| Bucket | Count | Checks |
+|---|---|---|
+| **(a)** a mutant DECLARES it, but it did not fall | **4** | WT1, WT4, WT15, WT16 |
+| **(b)** no mutant was ever written for it | **35** | AC1, AC2, AC4, AC5, AC9, AC10, AC12, AC15, AC16, AC17, CO2, CO4, CT1, FS1, FS2, FS4, FS5, FS9, FS10, FS13, SD1, SD6, SD7, SD13, SD14, SD19, SD20, WT2, WT3, WT5, WT6, WT7, WT8, WT9, WT12 |
+| **(c)** unfellable by source mutation — injects its own collaborator | **0** | *(AC22 was the only member of this bucket in the whole suite, and round 9 emptied it)* |
+
+**Bucket (a) is the one to read first.** A mutant exists and aims at these, and they did not fall — that
+is either a mis-aimed mutation or a check that cannot detect the thing it names. `WT1` and `WT4` are
+covered by `M-WT1O`/`M-WT4L`, which arrived after the `6d3add4` campaign and have not been run here.
+
+**Bucket (c) was scanned for, not assumed.** Every one of the 123 checks was searched for a
+subclass-and-override of a production collaborator. **AC22 was the only hit in the suite.** The pattern
+is rare because it is a last resort, which is why a single mutation aimed at the consumer emptied the
+bucket.
+
+**Seven names in bucket (b) deserve their footnote:** SD1, SD6, SD7, SD13, SD14, SD19, SD20 DID fall
+during the campaign — under `M-PP1`/`M-PP3`, inside their own fixture setup. They are listed as having
+no mutant because no mutant declares them, and the setup kills were rejected under the path rule. They
+are the strongest candidates for the next mutants to be written.
+
+---
+
 ## Round 1–3 (2026-08-20) — the original campaign
+
+*Pre-dates the stamping rule: attributable to the date above, NOT to a commit. Treat its figures as historical.*
 
 26 mutations, extended the same day with `M-OS1`–`M-OS3` for the stage → order-status writer. Against
 `MJ_V6_Host` with bizapps-orders and bizapps-accounting linked and bizapps-contracts absent. Three rounds
@@ -125,6 +274,8 @@ were needed, and the reason there were three is the point: round 1's misses were
 ---
 
 ## Round 4 (2026-08-21) — four writers on one trigger, and MJ's create semantics
+
+*Pre-dates the stamping rule: attributable to the date above, NOT to a commit. Treat its figures as historical.*
 
 Five mutations against `DealEntityServer.ts`, each reverting one decision of the mechanism that replaced
 four separate writers on the `PipelineStageID` trigger.
@@ -157,6 +308,8 @@ says so. It is a proxy, labelled as one, exactly like `M-TK1`.
 ---
 
 ## Round 5 (2026-08-21) — the stage declares the status, and the reopen restores the stage
+
+*Pre-dates the stamping rule: attributable to the date above, NOT to a commit. Treat its figures as historical.*
 
 | Mutant | What it reverts | Checks it fells |
 |---|---|---|
@@ -204,6 +357,8 @@ whose job is to break things on purpose must not be able to leave them broken.
 ---
 
 ## Round 7 (2026-08-21) — the activities and forecast mutants, landed and run
+
+*Pre-dates the stamping rule: attributable to the date above, NOT to a commit. Treat its figures as historical.*
 
 **15 mutants, 14 killed, 1 standing miss.** `M-AC1`–`M-AC10` and `M-FS1`–`M-FS5`, named for the check
 family they target as `M-CD*`/`M-CT*` are. Every anchor was re-verified against this merged tree rather
