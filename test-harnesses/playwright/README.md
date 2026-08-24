@@ -230,3 +230,18 @@ This bit for real. Three killed runs were recovered with `git checkout --` on th
 read clean. `dist/` still held the mutation, so the next full suite reported **119 passed, 6 failed**
 against a tree whose source was correct -- five task checks and one close check, which looks exactly
 like a regression and is not. `npm run build:packages` restored 125/0. The rebuild is not optional.
+
+### Diagnose a killed run with `tee`, never `>`
+
+Node block-buffers stdout when it is redirected to a file. Kill the process -- a tool timeout, a
+Ctrl-C -- and **everything it printed is lost**, so the log reads as zero bytes.
+
+Four killed mutation runs produced empty files, which was read as "the driver hangs before printing"
+and sent the diagnosis to host contention. It was measured and disproved before the truth emerged:
+the runs were printing fine and the buffer was discarded. Piping through `tee` showed the output
+immediately.
+
+```bash
+node test-harnesses/mutate-checks.mjs M-XX 2>&1 | tee /tmp/run.txt   # survives a kill
+node test-harnesses/mutate-checks.mjs M-XX > /tmp/run.txt 2>&1       # loses everything on a kill
+```

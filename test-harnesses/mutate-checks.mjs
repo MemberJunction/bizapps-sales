@@ -27,10 +27,33 @@
  *   node test-harnesses/mutate-checks.mjs M-OS1 M-CD4     # only these
  *   node test-harnesses/mutate-checks.mjs --list          # the table, no runs
  *
+ * ── AIM AT WHAT THE CHECK ASSERTS, NOT AT WHAT PRODUCES IT ─────────────────────────────────────
+ *
+ * This has now mis-aimed twice, the same way both times, and both times the mutant felled plenty
+ * while never reaching its declared target:
+ *
+ *   M-WT5F  aimed at WT5 ("with no contract yet, the task falls back to the DEAL"). It disabled the
+ *           branch that OVERRIDES the fallback, which forces the fallback ALWAYS -- so WT5 stayed
+ *           green and WT4 and WT14 fell instead. The fallback is the DEFAULT VALUE of `target`, not
+ *           the branch that replaces it.
+ *   M-WT6T  aimed at WT6 ("a missing contract task type is REFUSED WITH A REASON, and the order
+ *           review still lands"). It skipped the branch that CREATES the contract task, so the task
+ *           vanished wholesale and five checks that assert its existence fell -- while the refusal
+ *           path WT6 is about was never reached at all.
+ *
+ * THE PATTERN: breaking the code that PRODUCES a thing is not the same as breaking the code that
+ * REPORTS on it, GUARDS it, or CHOOSES it. A check that asserts "X is refused with a reason" is not
+ * felled by removing X -- it is felled by removing the reason. A check that asserts a FALLBACK is not
+ * felled by forcing the fallback.
+ *
+ * Read the check's own sentence and mutate the clause it turns on. If the mutant fells five checks
+ * and not its target, that is the shape, not bad luck.
+ *
  * Each mutation runs the WHOLE suite, not one bundle, so a mutation that breaks something unintended
  * shows up instead of hiding. Budget roughly 70 seconds each.
  */
 import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { copyFileSync, readFileSync, writeFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -954,6 +977,44 @@ async function withSuiteLock(label, fn) {
 const safety = mkdtempSync(join(tmpdir(), 'mj-mutate-'));
 const results = [];
 
+/**
+ * ── THE COMPILED OUTPUT MUST ACTUALLY CHANGE, OR THE RUN MEASURED NOTHING ───────────────────────
+ *
+ * A mutant is applied to a .ts SOURCE and measured by a suite that loads compiled .js. If the build
+ * between them does not carry the edit through, the suite runs the ORIGINAL code and every check
+ * passes -- and the driver reports `MISS failed=-`, which is the strongest claim it makes: this
+ * mutation killed nothing, so the check that names the behaviour may be vacuous.
+ *
+ * IT HAPPENED. `M-WT2R` was reported MISS at 125/0. The identical mutation applied by hand, verified
+ * present in dist/, gave 119 passed / 6 failed -- WT1, WT2, WT3, WT9, WT10, CD23 -- which is also the
+ * exact six-check signature seen earlier when that same mutation was stranded in dist/. Two
+ * independent observations, and WT2 would have been filed as unproven on the strength of the first.
+ *
+ * A FALSE MISS IS WORSE THAN A SKIP. A skip announces itself. A MISS looks like a finding.
+ *
+ * ── WHY A HASH DIFF AND NOT A SUBSTRING SEARCH ─────────────────────────────────────────────────
+ *
+ * The obvious guard -- look for the mutated text in dist/ -- fails on anything the compiler rewrites.
+ * `const stageOrder: StageOrderPlan | null = null;` emits as `const stageOrder = null;`, so a literal
+ * search would report a perfectly good mutation missing and turn a false MISS into a false ERROR.
+ *
+ * Comparing the compiled file BEFORE and AFTER the build asks the question that actually matters --
+ * did the edit reach the artefact the suite loads -- without knowing anything about TypeScript.
+ *
+ * A mutation that is genuinely a no-op in emitted JS (a type-only change) trips this too. That is
+ * correct: such a mutation cannot be measured by a runtime suite, and saying so is the point.
+ */
+function distPathFor(srcRel) {
+    if (!srcRel.includes('/src/') || !srcRel.endsWith('.ts')) return null;
+    return join(REPO, srcRel.replace('/src/', '/dist/').replace(/\.ts$/, '.js'));
+}
+
+function distFingerprint(srcRel) {
+    const p = distPathFor(srcRel);
+    if (!p || !existsSync(p)) return null;
+    return createHash('sha256').update(readFileSync(p)).digest('hex');
+}
+
 /** Restores from the byte-for-byte copy and PROVES it. Never `git checkout`. */
 function restore(abs, backup) {
     copyFileSync(backup, abs);
@@ -982,6 +1043,9 @@ for (const m of MUTATIONS) {
     const backup = join(safety, `${m.id}-${basename(m.file)}`);
     copyFileSync(abs, backup);
 
+    // Taken BEFORE the edit, so the comparison after the build is against the untouched artefact.
+    const distBefore = distFingerprint(m.file);
+
     const mutated = norm.replace(m.from, m.to);
     writeFileSync(abs, eol === '\r\n' ? mutated.split('\n').join('\r\n') : mutated);
 
@@ -994,6 +1058,21 @@ for (const m of MUTATIONS) {
             const lines = text.split('\n').filter((l) => /error/i.test(l)).slice(0, 2);
             console.log(`${m.id.padEnd(7)} BUILD FAILED — ${lines.map((l) => l.trim().slice(0, 100)).join(' | ')}`);
             results.push({ ...m, skipped: 'build' });
+            continue;
+        }
+
+        /**
+         * THE EDIT MUST HAVE REACHED dist/. Anything else is not a measurement, and must not be
+         * allowed to look like one -- see the note on `distFingerprint`.
+         */
+        const distAfter = distFingerprint(m.file);
+        if (distBefore !== null && distAfter !== null && distBefore === distAfter) {
+            console.log(
+                `${m.id.padEnd(7)} ✖ BUILD DID NOT CARRY THE MUTATION — ${distPathFor(m.file)} is byte-identical `
+                + 'before and after. The suite would have run the ORIGINAL code and reported a false MISS. '
+                + 'Nothing was measured.',
+            );
+            results.push({ ...m, skipped: 'dist-unchanged' });
             continue;
         }
 
