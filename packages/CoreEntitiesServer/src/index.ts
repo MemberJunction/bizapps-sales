@@ -25,16 +25,24 @@
  * The form-shaped rules live on `DealEntity` in `sales-entities`, which `DealEntityServer` extends, so
  * they run on both tiers.
  *
- * WHAT IS STILL TO COME, and deliberately not stubbed:
- *   - The CLOSE LOCK (L-17, master plan §7.3), in `DealEntityServer` — once a deal enters a status
- *     where `DealStatusType.LocksDeal = 1`, the header (except Description / NextStep), its lines and
- *     its team become immutable, and reopening goes through `Sales.ReopenDeal` with a recorded reason.
- *     The schema is already shaped for it; the enforcement lands with S4.
- *   - `DealStageEvent` appends on stage transition, stamping `AmountAtTransition` and
- *     `ProbabilityAtTransition` — S4. Read the note on `DealEntityServer.Save()` first: it has to land
- *     inside the graph's transaction, and the mechanism for that changed in MJ `47ff71d68b`.
- *   - `DealLineEntityServer` — accepts the four `Resolved*` columns only from an `Orders.PreviewOrder`
- *     response (§6) — S2. Until it exists, nothing enforces that at the entity level.
+ * WHAT WAS "STILL TO COME" HERE AND IS NOT ANY MORE. All three items this list carried have been
+ * settled, two by shipping and one by deletion, and the list had gone on describing them as pending:
+ *   - The CLOSE LOCK (L-17, master plan §7.3) is IN `DealEntityServer` — `checkCloseLock()`, and it
+ *     covers the child COLLECTIONS as well as the header (`docs/DECISIONS.md` D-CF6), which the original
+ *     lock could not have done because the collections did not exist when it was written. `close-deal`'s
+ *     CD-series pins it, and `Sales.ReopenDeal` is the only sanctioned exit — now with five refusals,
+ *     the fifth being a booked order (DN-20, CD24).
+ *   - `DealStageEvent` APPENDS on transition, stamping `AmountAtTransition` and
+ *     `ProbabilityAtTransition`, through the single writer `appendStageEvent`. It does land inside the
+ *     graph's transaction, which is what the note on `Save()` is about.
+ *   - `DealLineEntityServer` WILL NEVER EXIST. `DealLine` was retired with its table — see
+ *     `deal-entity.ts:405` — so there are no `Resolved*` columns on a deal line to accept from a
+ *     `PreviewOrder` response, and nothing is missing at the entity level. Sales still never computes
+ *     money; the rule simply lives on the order rather than on a deal line.
+ *
+ * Kept as a record rather than deleted, because a "still to come" list that quietly loses an entry reads
+ * the same as one that never had it, and two of these were load-bearing rules. The drift gate does not
+ * scan this file, which is how the list stayed wrong through the work that settled it.
  */
 export * from './DealEntityServer.js';
 export * from './CloseDealOperation.js';
