@@ -239,7 +239,29 @@ export async function closeRestoredRecordTabs(page: Page): Promise<number> {
     const closer = page.getByRole('button', { name: /^Close\s+.+/i }).first();
     if (!(await closer.count().catch(() => 0))) break;
     if (!(await closer.isVisible().catch(() => false))) break;
-    await closer.click().catch(() => undefined);
+
+    /**
+     * ── THE TIMEOUT IS THE WHOLE POINT OF THIS LINE, AND ITS ABSENCE COST SIX MINUTES A CALL ─────
+     *
+     * This was a bare `click().catch(() => undefined)`. A click on a control that is present and
+     * visible but NOT ACTIONABLE — covered by an overlay, or mid-animation — does not fail fast: it
+     * retries for Playwright's default 30 SECONDS before throwing, and the `.catch` then swallowed
+     * that silently. Twelve iterations of that is six minutes of a spec's budget spent clicking
+     * nothing, reported as no error at all.
+     *
+     * Measured: this is what made `10` and `30` take 6.9 and 6.4 minutes, and what timed out
+     * `04-landing-state-tripwire` at 240s inside `openSalesApp` — the spec that had passed alone
+     * minutes earlier. A silent catch around an unbounded wait is invisible until it is fatal.
+     *
+     * So the click is bounded, and a closer that will not act ENDS the loop rather than handing the
+     * same 2s to eleven more. If it cannot be clicked, there is nothing here to close.
+     */
+    const acted = await closer
+      .click({ timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!acted) break;
+
     await page.waitForTimeout(400);
     closed++;
   }
@@ -260,8 +282,11 @@ export async function closeRestoredRecordTabs(page: Page): Promise<number> {
  * `entity "Deals" must be listed in the app`, which points at the app rather than at the clock.
  *
  * In-suite the app is warm from earlier specs, so 4s was enough and the same specs got past the list.
- * That is the whole of the standalone-versus-in-suite divergence in 10, 20 and 30 — one fixed sleep
- * sitting where a condition belonged.
+ * That is a LARGE PART of the standalone-versus-in-suite divergence in 10, 20 and 30 — one fixed sleep
+ * sitting where a condition belonged — but it is NOT the whole of it. The rest is the landing state
+ * documented above `openSalesApp`: which screen the app lands on is decided by a persisted field, and
+ * in-suite that field is left set by whichever spec ran before. Timing and leftover state were two
+ * causes wearing one symptom, which is why fixing either one alone still left these specs flaky.
  *
  * A fixed sleep is always either too short somewhere or wasted everywhere; this waits for the thing
  * itself and returns as soon as it appears, so the warm case does not pay for the cold one.
@@ -281,27 +306,62 @@ async function waitForSalesAppShell(page: Page): Promise<void> {
     .toBe(true);
 }
 
+/**
+ * ── WHERE THE LANDING IS DECIDED, AND WHY THE HARNESS CANNOT SET IT ─────────────────────────────
+ *
+ * The generated app's landing is MJ's **DataExplorer dashboard**, and which screen it shows comes down
+ * to one persisted field: `selectedEntityName`, in the user setting `DataExplorer.State.<applicationId>`
+ * in `__mj.UserSetting`. Null means the entity LIST; set means that entity's GRID, with no
+ * `.entity-item` anywhere on the page. Anything that opens an entity writes it — the previous spec, the
+ * previous run, a human clicking around before the suite starts. THAT is why the same commit failed on
+ * `Deals` one run and `Pipeline Stages` the next, and why a spec passed alone and failed in the suite.
+ *
+ * The obvious fix does not work, and it is worth writing down so nobody spends the evening on it again.
+ * Clearing that field by SQL before navigating makes the DATABASE read null — measured, it does — and
+ * the app still lands on the grid, because the setting is served through `UserInfoEngine`'s cache
+ * rather than re-read per page load. A write behind the cache is invisible to the app.
+ *
+ * So the harness asks the app instead, through the app's own affordance: the **"All" breadcrumb**, which
+ * returns to the entity list and stays inside the application (measured: `.entity-item` goes 0 -> 20,
+ * URL unchanged at /app/mjbizappssales).
+ *
+ * ONE TRAP, MEASURED THE HARD WAY: that breadcrumb is not always immediately actionable, and clicking it
+ * with `{ force: true }` navigates to `/app/home/Home` and leaves the Sales app entirely. An earlier
+ * version of this file recorded that as "the All breadcrumb leaves the app" — it does not; forcing a
+ * click onto a covered element does. Let Playwright wait for it to be actionable and it does the right
+ * thing. Never force this one.
+ */
 export async function openSalesApp(page: Page): Promise<void> {
   await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
   await waitForSalesAppShell(page);
-  // Restored tabs hijack the landing — see closeRestoredRecordTabs. Clear them, then re-enter the app.
-  if (await closeRestoredRecordTabs(page)) {
-    await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
-    await waitForSalesAppShell(page);
-  }
+
+  /**
+   * NO TAB SWEEP HERE ANY MORE, AND THAT IS A FIX RATHER THAN A TIDY-UP.
+   *
+   * This used to call `closeRestoredRecordTabs` on the way in, because the landing was believed to be
+   * hijacked by restored record tabs. It is not: the landing is decided by `selectedEntityName`, and
+   * `openAllEntities` handles it through the app's own "All" breadcrumb. The app's tab bar is not even
+   * rendered on this screen (`mj-tab-container.hide-tab-bar`, measured), so the sweep had nothing of its
+   * own to close and spent its time clicking whatever else answered to "Close ...".
+   *
+   * Two specs still call it directly, for screens where tabs genuinely are open; it stays exported for
+   * them. It just no longer runs on every entry to the app.
+   */
   expect(page.url(), 'should be inside the generated Sales application').toContain('mjbizappssales');
 }
 
 /**
- * Open the app's entity picker.
+ * Make sure the app is showing its entity list, and that the list is showing ALL entities.
  *
- * RECON CORRECTION: the generated app does NOT show an "All Entities" nav item once it has opened an
- * entity — it auto-opens one (alphabetically) and collapses its left rail to icons. The way back to
- * the full list is the **"All" breadcrumb** at the top. The earlier "All Entities" label came from the
- * app's initial landing state, not from a stable rail, which is exactly the kind of thing that makes
- * hardcoded selectors rot.
+ * The landing depends on leftover state (see the block above `openSalesApp`), so this no longer assumes
+ * either screen. If the list is already up it just fixes the toggle; if a grid is up it clicks the app's
+ * own "All" breadcrumb to come back. What it does NOT do any more is hunt: the previous version tried
+ * three text matches and then clicked `.k-icon, [class*="chevron"], [class*="expand"]` — an arbitrary
+ * control chosen by DOM order, which is what put the app on a different screen from one run to the next.
  */
 export async function openAllEntities(page: Page): Promise<void> {
+  const cards = page.locator('.entity-item');
+
   /**
    * THE PANEL REMEMBERS ITS TOGGLE, AND THAT IS A TRAP — for tests and for a live demo alike.
    *
@@ -317,41 +377,31 @@ export async function openAllEntities(page: Page): Promise<void> {
   const forceAllEntities = async (): Promise<void> => {
     const allToggle = page.getByText(/^\s*All Entities\s*$/i).first();
     if ((await allToggle.count()) && (await allToggle.isVisible().catch(() => false))) {
-      await allToggle.click().catch(() => undefined);
-      await page.waitForTimeout(2000);
+      await allToggle.click({ timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(1500);
     }
   };
 
-  // ALREADY ON THE PANEL? Just make sure the right toggle is active. The app's landing screen VARIES —
-  // sometimes a grid (the default entity), sometimes this panel — depending on what was last visited, and
-  // an earlier version hunted for an "All" breadcrumb that does not exist on the panel.
-  const onPanel = page.getByText(/All Entities/i).first();
-  if ((await onPanel.count()) && (await onPanel.isVisible().catch(() => false))) {
-    await forceAllEntities();
-    return;
+  if ((await cards.count()) === 0) {
+    // A leftover selection has put a grid on the landing. The breadcrumb is the way back — unforced,
+    // and given time to become actionable. See the trap note above `openSalesApp`.
+    const allCrumb = page.locator('.breadcrumb-item').filter({ hasText: /^\s*All\s*$/ }).first();
+    await expect(allCrumb, 'a grid is on the landing, so the "All" breadcrumb must be there to go back')
+      .toBeVisible({ timeout: 20_000 });
+    await allCrumb.click({ timeout: 20_000 });
+    await page.waitForTimeout(2500);
   }
 
-  const breadcrumb = page.getByText(/^\s*All\s*$/).first();
-  if ((await breadcrumb.count()) && (await breadcrumb.isVisible().catch(() => false))) {
-    await breadcrumb.click();
-    await page.waitForTimeout(3500);
-    await forceAllEntities();
-    return;
-  }
-
-  // Fallback: expand the collapsed rail, then take its entities item.
-  const chevron = page.locator('.k-icon, [class*="chevron"], [class*="expand"]').first();
-  if (await chevron.count()) {
-    await chevron.click().catch(() => undefined);
-    await page.waitForTimeout(1500);
-  }
-  const link = page.getByText(/All Entities|Entities/i).first();
-  await expect(link, 'an entity-list entry point must be reachable in the generated app').toBeVisible({
-    timeout: 20_000,
-  });
-  await link.click();
-  await page.waitForTimeout(3500);
   await forceAllEntities();
+
+  // `.entity-item` is the panel's own card class — one per entity in the application, 20 on this host.
+  await expect
+    .poll(async () => cards.count(), {
+      timeout: 30_000,
+      message:
+        'the app never rendered its entity list, from either the landing or the "All" breadcrumb',
+    })
+    .toBeGreaterThan(0);
 }
 
 /**
@@ -359,11 +409,21 @@ export async function openAllEntities(page: Page): Promise<void> {
  * shows, e.g. "Deals" for `MJ_BizApps_Sales: Deals`).
  */
 export async function openEntity(page: Page, displayName: string): Promise<void> {
-  const target = page.getByText(new RegExp(`^\\s*${displayName}\\s*$`, 'i')).first();
-  await expect(target, `entity "${displayName}" must be listed`).toBeVisible({ timeout: 20_000 });
+  // `.entity-item-name` is the card's own label element. A bare text match also hits the breadcrumb and
+  // the recent-items list, which are not the card and do not open the grid when clicked.
+  const target = page
+    .locator('.entity-item')
+    .filter({ has: page.locator('.entity-item-name', { hasText: new RegExp(`^\\s*${displayName}\\s*$`, 'i') }) })
+    .first();
+  await expect(target, `entity "${displayName}" must be listed in the app`).toBeVisible({ timeout: 20_000 });
   await target.scrollIntoViewIfNeeded().catch(() => undefined);
   await target.click();
-  await page.waitForTimeout(5000);
+
+  // The grid announces itself in the breadcrumb bar; wait for that rather than for a number of seconds.
+  await expect(
+    page.locator('.breadcrumb-label').filter({ hasText: new RegExp(displayName, 'i') }).first(),
+    `the breadcrumb should become "${displayName}" once its grid is open`,
+  ).toBeVisible({ timeout: 25_000 });
 }
 
 /** Rows currently rendered in whatever grid the page is showing. */
