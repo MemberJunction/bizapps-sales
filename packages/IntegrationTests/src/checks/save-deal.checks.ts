@@ -1888,6 +1888,144 @@ export const SaveDealChecks: NamedCheck[] = [
                 await saveOk(edit, 'an ordinary edit after the move into a closing stage');
             }),
     },
+    {
+        Id: 'save-deal.SD36',
+        Name: 'SD36: a create that never touches Status lands the first OPEN status, not NULL',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── A DEAL WITH NO STATUS IS INVISIBLE, NOT MERELY UNTIDY ────────────────────────────
+                 *
+                 * `DealStatusTypeID` is nullable with no column default, and nothing in the write path
+                 * required it. A deal saved without touching Status landed NULL, and every measure that
+                 * reads the status through `JOIN DealStatusType` silently did not count it — a tile that
+                 * UNDER-REPORTS rather than one that errors, which is the harder kind to notice.
+                 *
+                 * Asserted as the resolved vocabulary row rather than a hardcoded name, because the whole
+                 * point is that the opening status is DATA. The expected value is computed the same way
+                 * the server computes it, so a tenant that renames or re-ranks its statuses moves both
+                 * together and this check keeps meaning the same thing.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const expected = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.DealStatusType
+                      WHERE IsActive = 1 AND IsOpen = 1 AND LocksDeal = 0 ORDER BY DisplayRank ASC`,
+                );
+                Assert(!!expected?.ID, 'setup: the host needs an active, open, non-locking status');
+
+                /**
+                 * ── CREATED IN A CLOSING STAGE, AND THAT IS THE ONLY HONEST FIXTURE ────────────────────
+                 *
+                 * The first version of this check created in the FIXTURE stage and was VACUOUS: `M-DS1`
+                 * disabled the new default and SD36 stayed green, because the fixture stage declares an
+                 * open status and `applyStageDefaults` had already filled it. The check was measuring
+                 * code that predates the fix.
+                 *
+                 * A stage whose status LOCKS is the case only this default can serve: `planStageDefaults`
+                 * deliberately contributes nothing there (it would close the deal), so the status is still
+                 * null when the fallback runs. That makes the mutant land — and it asserts the safety
+                 * property at the same time: a deal born in a winning stage comes out OPEN, not Won.
+                 */
+                const closingStage = await QueryOneRow<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 s.ID
+                       FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.PipelineID}' AND s.IsActive = 1 AND t.LocksDeal = 1
+                      ORDER BY s.DisplayOrder`,
+                );
+                Assert(
+                    !!closingStage.ID,
+                    'the fixture pipeline needs a stage declaring a LOCKING status, or the stage default '
+                        + 'would cover this case and the check would prove nothing',
+                );
+
+                const created = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD36 no status supplied';
+                    // The gap exactly: a rep who never opened the Status select...
+                    d.DealStatusTypeID = null;
+                    // ...in the one stage whose own status cannot be borrowed.
+                    d.PipelineStageID = String(closingStage.ID);
+                });
+                await saveOk(created, 'a create with no status, in a closing stage');
+
+                const row = await TxOne<{ DealStatusTypeID: string | null }>(
+                    ctx, `SELECT DealStatusTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                Assert(
+                    !!row.DealStatusTypeID,
+                    'the deal must not be saved with a NULL status — every status JOIN drops such a row, '
+                        + 'so it exists and no measure counts it',
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID).toLowerCase(),
+                    String(expected.ID).toLowerCase(),
+                    'and it must be the first ACTIVE, OPEN, NON-LOCKING status by rank. This deal sits in '
+                        + 'a WINNING stage and must still be OPEN: a stage-derived default would have booked '
+                        + 'it on creation, and a board drag would book revenue',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD37',
+        Name: 'SD37: the status default is creation-only and never overrides a caller',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── THE TWO DIRECTIONS SD36 CANNOT SEE ────────────────────────────────────────────
+                 *
+                 * SD36 would still pass if the default fired unconditionally — overwriting a status the
+                 * rep chose, and re-filling one deliberately cleared on a later save. Both are worse than
+                 * the gap: the first silently discards a decision, the second makes a field impossible to
+                 * empty. So each is asserted in its own direction.
+                 *
+                 * The second half is what makes this creation-only rather than merely create-first: on an
+                 * update the deal is `IsSaved`, so the default is not even considered, and clearing the
+                 * status has to STICK. That is also what keeps this writer out of `applyStageDefaults`'
+                 * way, which owns the status on a stage move.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const other = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.DealStatusType
+                      WHERE IsActive = 1 AND LocksDeal = 0 AND IsOpen = 0 ORDER BY DisplayRank ASC`,
+                );
+
+                // ── DIRECTION 1: a supplied status survives the create untouched.
+                const supplied = other?.ID ?? f.OpenStatusID;
+                const created = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD37 caller supplied a status';
+                    d.DealStatusTypeID = supplied;
+                });
+                await saveOk(created, 'a create WITH a status');
+                const kept = await TxOne<{ DealStatusTypeID: string | null }>(
+                    ctx, `SELECT DealStatusTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                AssertEqual(
+                    String(kept.DealStatusTypeID).toLowerCase(),
+                    String(supplied).toLowerCase(),
+                    'a status the caller supplied must survive the create — the default fills what was '
+                        + 'left empty, it does not have an opinion',
+                );
+
+                // ── DIRECTION 2: on an UPDATE the default must not fire at all.
+                const edit = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await edit.Load(created.ID), 'the deal reloads');
+                edit.DealStatusTypeID = null;
+                await saveOk(edit, 'an update that clears the status');
+                const cleared = await TxOne<{ DealStatusTypeID: string | null }>(
+                    ctx, `SELECT DealStatusTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                Assert(
+                    cleared.DealStatusTypeID === null,
+                    'an update that clears the status must STICK — a default that fires here is not a '
+                        + `creation default, it is a field that cannot be emptied. Got ${cleared.DealStatusTypeID}`,
+                );
+            }),
+    },
 ];
 
 for (const check of SaveDealChecks) {

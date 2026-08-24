@@ -344,9 +344,12 @@ export class DealEntityServer extends DealEntity {
         const saved = this.IsSaved || this.DealNumber
             ? await this.saveWithinScope(options, {
                   stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
+                  needsStatusDefault: false,
               })
             : await this.saveWithinScope(options, {
                   stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
+                  // CREATION ONLY. This arm is the create arm; an update never reaches it.
+                  needsStatusDefault: !this.DealStatusTypeID,
               });
 
         // A declaration governs ONE save. Left standing, it would suppress the stage defaults on the next
@@ -474,6 +477,7 @@ export class DealEntityServer extends DealEntity {
             stageDefaults: StageDefaultsPlan | null;
             amountMayHaveMoved: boolean;
             assignNumber: boolean;
+            needsStatusDefault: boolean;
         },
     ): Promise<boolean> {
         if (
@@ -481,7 +485,10 @@ export class DealEntityServer extends DealEntity {
             !work.stageOrder &&
             !work.stageMove &&
             !work.stageDefaults &&
-            !work.amountMayHaveMoved
+            !work.amountMayHaveMoved &&
+            // Without this term a create that supplied its own DealNumber and touched no stage would take
+            // the fast path and land NULL again -- the exact gap this closes, through the one door left open.
+            !work.needsStatusDefault
         ) {
             return super.Save(options);
         }
@@ -511,6 +518,18 @@ export class DealEntityServer extends DealEntity {
              */
             if (work.stageDefaults) {
                 this.applyStageDefaults(work.stageDefaults);
+            }
+            /**
+             * AFTER the stage defaults, and the order is load-bearing rather than tidy.
+             *
+             * `applyStageDefaults` decides whether to take the stage's status by asking
+             * `callerSuppliedValue`, and on a CREATE that question is only "is there a value". Setting a
+             * fallback first would therefore look exactly like a rep's own choice and suppress the
+             * stage's legitimate opening status for good. Running last means this fills only what the
+             * stage could not: a deal with no stage, or one whose stage declares a status that locks.
+             */
+            if (work.needsStatusDefault && !this.DealStatusTypeID) {
+                this.DealStatusTypeID = await this.defaultOpeningStatusID();
             }
             if (work.stageOrder) {
                 await this.applyStageOrderStatus(work.stageOrder);
@@ -1011,6 +1030,62 @@ export class DealEntityServer extends DealEntity {
                 this.DealStatusTypeID = plan.DealStatusTypeID;
             }
         }
+    }
+
+    /**
+     * The status a BRAND-NEW deal starts in when nothing else supplied one.
+     *
+     * ── WHY A DEAL WITH NO STATUS IS WORSE THAN A DEAL WITH A WRONG ONE ──────────────────────────────
+     *
+     * `Deal.DealStatusTypeID` is nullable with no column default, and until now nothing in the write path
+     * required it. A deal saved without touching Status landed NULL, and every measure that reads the
+     * status through `JOIN DealStatusType` silently did not count it — a tile that under-reports rather
+     * than one that errors. It also cost a misdiagnosis: `71-lost-and-reopen` failed with
+     * `Cannot read properties of undefined (reading 'IsLost')`, which reads as a bad field and was the
+     * JOIN dropping the row.
+     *
+     * ── NEVER DERIVED FROM THE STAGE, AND THE NUMBERS SAY WHY ────────────────────────────────────
+     *
+     * The obvious-looking fix — take the stage's status — closes deals by side effect. Measured on this
+     * host: `Booked` → Won, `Signed` → Won and `Lost` → Lost all carry `LocksDeal = 1`. A deal created
+     * in one of those stages would be born closed and locked, and a board drag would book revenue. That
+     * is why {@link planStageDefaults} gates its own stage-derived status on `LocksDeal`, and why this
+     * fallback asks the VOCABULARY what an opening status is instead of asking the stage.
+     *
+     * ── THE THIRD CONDITION IS NOT REDUNDANT ────────────────────────────────────────────────────
+     *
+     * `IsActive = 1 AND IsOpen = 1 AND LocksDeal = 0`. Today every `IsOpen = 1` row also has
+     * `LocksDeal = 0`, so the third term selects nothing extra — but that is a property of the seeded
+     * data, not an invariant the schema enforces. Nothing stops a tenant declaring an open status that
+     * also locks, and since the entire hazard here is closing a deal by side effect, the guard says so
+     * rather than relying on the coincidence holding.
+     *
+     * `DisplayRank` makes the choice deterministic when a tenant defines several opening statuses.
+     *
+     * ── AND IT LEAVES NULL RATHER THAN REFUSING ──────────────────────────────────────────────────
+     *
+     * If no active, open, non-locking status exists the vocabulary is misconfigured — but refusing the
+     * save would block ALL deal creation on that tenant, which is a worse failure than the gap being
+     * closed. Returning null preserves exactly today's behaviour for that case and nothing more.
+     */
+    private async defaultOpeningStatusID(): Promise<string | null> {
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await view.RunView<{ ID: string }>(
+            {
+                EntityName: DEAL_STATUS_ENTITY,
+                ExtraFilter: 'IsActive = 1 AND IsOpen = 1 AND LocksDeal = 0',
+                OrderBy: 'DisplayRank ASC',
+                ResultType: 'simple',
+                Fields: ['ID'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            // Unreadable vocabulary is treated as "no default", for the same reason the stage gate fails
+            // closed: a missing status costs a rollup one row, a guessed one corrupts the pipeline.
+            return null;
+        }
+        return (result.Results ?? [])[0]?.ID ?? null;
     }
 
     private async planStageOrderStatus(): Promise<StageOrderPlan | null> {

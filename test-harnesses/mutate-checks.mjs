@@ -61,6 +61,9 @@ const LCS = 'packages/CoreEntitiesServer/src/LiveContractsSeam.ts';
  * worth remembering -- a title is not a test, and neither is a commit message.
  */
 const AIS = 'packages/CoreEntitiesServer/src/activities/ActivityIngestService.ts';
+const AR = 'packages/CoreEntitiesServer/src/activities/ActivityReader.ts';
+const DM = 'packages/CoreEntitiesServer/src/activities/DealMatcher.ts';
+const ASJ = 'packages/CoreEntitiesServer/src/activities/ActivitySyncJob.ts';
 const AWS = 'packages/CoreEntitiesServer/src/activities/ActivityWriterService.ts';
 const RF = 'packages/CoreEntitiesServer/src/activities/RelevanceFilter.ts';
 const MGC = 'packages/CoreEntitiesServer/src/activities/MSGraphCalendarSource.ts';
@@ -395,11 +398,79 @@ const MUTATIONS = [
       to: "ExtraFilter: target.IsWon ? 'IsLost = 1' : 'IsWon = 1',",
       note: 'a won close lands in the stage that declares LOST' },
 
-    // CD17 CANNOT BE FELLED BY A SINGLE EDIT TO THE STATUS WRITER, and that is a finding rather than a
-    // gap. Measured: M-ST3 removes the declared-transition suppression so the defaults writer DOES run on
-    // a close, and CD17 stays green -- because the closing status also arrives dirty, so
-    // callerSuppliedValue answers "theirs" anyway. Two independent mechanisms protect it. This mutant
-    // therefore proves the check is not VACUOUS rather than isolating one guard: it stops the close
+        /**
+         * M-WT3P -- aimed at WT3.
+         *
+         * WT3 is "a policy that creates NO contract raises ONLY the order-review task". Forcing the branch
+         * true raises a second task the policy never asked for.
+         */
+        { id: 'M-WT3P', file: CWT, expect: ['WT3'],
+          from: '        if (await this.policyRaisesContractTask(input.PipelineID, contextUser, result)) {',
+          to: '        if (true) {',
+          note: 'every policy raises the contract task, including the ones that create no contract' },
+
+        /**
+         * -- UNPROVEN, AND SAYING SO IS THE POINT ------------------------------------------------
+         *
+         * FIVE mutants below (M-WT2R, M-WT5F, M-WT6T, M-WT8O, M-WT12C) are AUTHORED but NOT MEASURED.
+         * Their anchors were read from source and M-WT2R's is confirmed to apply -- a killed run left
+         * its `if (true) {` in the working tree, which is proof the replacement matched. What has not
+         * happened is a completed run, so nothing here claims they fell anything.
+         *
+         * M-WT7S IS NO LONGER AMONG THEM, and how it left is the useful part. Its anchor carried a
+         * DOUBLED escaped apostrophe -- `pipeline''s CloseWonPolicy` where the source has
+         * `pipeline's` -- so it matched nothing and could never have run. The driver would have
+         * reported a SKIP, which reads as anchor drift against a moved tree rather than as a typo, and
+         * it was sitting in a list described as anchor-checked. One character. Corrected, and it then
+         * isolated WT7 exactly on the first run (124 passed, 1 failed), so WT7 is PROVEN and the mutant
+         * has moved above with the measured ones.
+         *
+         * The lesson is the driver's own: "anchor-checked" has to mean a matcher was RUN against the
+         * file, not that a human read the line. An anchor that matches nothing is indistinguishable
+         * from one whose target moved, and both look like someone else's problem.
+         *
+         * An unproven mutant that quietly SKIPS is the failure mode this driver exists to prevent, so
+         * it is labelled rather than left to look like the proven ones above it. Run them before
+         * quoting them, and re-check the anchors first: this was written against a tree that was
+         * about to take a merge moving the Explorer spec map.
+         */
+        /**
+         * M-WT2R -- aimed at WT2.
+         *
+         * WT2 asserts an assignment EXISTS with the role it was given. Making route() decline for every
+         * task removes the assignment while leaving the task, which is exactly the half WT2 owns. WT7
+         * still passes, because an unrouted task is what WT7 wants.
+         */
+        { id: 'M-WT2R', file: CWT, expect: ['WT2'],
+          from: '        if (!input.Assignee?.RecordID || !input.Assignee?.EntityName) {',
+          to: '        if (true) {',
+          note: 'routing always declines, so the task is raised with no assignment at all' },
+
+        /**
+         * M-WT7S -- aimed at WT7.
+         *
+         * WT7 is "created but UNROUTED and SAYS SO". The task and the missing assignment are unchanged;
+         * only the report is removed, so this isolates the half WT7 actually owns rather than re-testing
+         * WT2.
+         */
+        { id: 'M-WT7S', file: CWT, expect: ['WT7'],
+          from: '            result.Issues.push(\n                `The ${kind} task was created but NOT routed: no finance assignee is configured on the `\n                    + \'pipeline\\\'s CloseWonPolicy (CloseWonTasks.AssigneeRecordID).\',\n            );',
+          to: '',
+          note: 'the unrouted task no longer SAYS it is unrouted -- it just quietly has no assignee' },
+
+        /**
+         * M-WT5F -- aimed at WT5.
+         *
+         * WT5 is "with no contract yet, the contract task falls back to the DEAL rather than going
+         * missing". The fallback is the DEFAULT value of `target`, not the branch that overrides it -- an
+         * earlier attempt disabled the override instead and forced the fallback ALWAYS, which fells WT4
+         * and WT14 and leaves WT5 green. Emptying the default is what makes the task go missing.
+         */
+        { id: 'M-WT5F', file: CWT, expect: ['WT5'],
+          from: '                let target: CloseWonTaskTarget = { EntityName: E_DEAL, RecordID: input.DealID };',
+          to: '                let target: CloseWonTaskTarget = { EntityName: E_DEAL, RecordID: \'\' };',
+          note: 'the deal fallback carries no record id, so a contract task with no contract links nothing' },
+
         /**
          * -- DN-20: THE TWO DIRECTIONS OF THE BOOKED-ORDER REFUSAL --------------------------------
          *
@@ -430,7 +501,43 @@ const MUTATIONS = [
           to: '            if (orderStatus) {',
           note: 'the refusal widens to any status, so a confirmed-then-VOIDED order is refused a reopen it should get' },
 
+    // The NULL-status default, and the three ways it can go wrong. SD36 wants it to FIRE; SD37 wants it
+    // to stay out of the way in two directions, and neither of SD37's halves is visible to SD36.
 
+    // 1. It stops firing -- back to the gap: a deal saved with no status, invisible to every rollup that
+    //    joins DealStatusType. The failure nobody sees, because the tile just reads low.
+    { id: 'M-DS1', file: DES, expect: ['SD36'],
+      from: '            if (work.needsStatusDefault && !this.DealStatusTypeID) {',
+      to: '            if (false && work.needsStatusDefault && !this.DealStatusTypeID) {',
+      note: 'the opening status is never filled in, so a create with no status lands NULL again' },
+
+    // 2. It overrides the caller. Drops the `!this.DealStatusTypeID` term, so a status the rep chose is
+    //    replaced by the default -- a decision discarded silently, which is worse than the gap.
+    { id: 'M-DS2', file: DES, expect: ['SD37'],
+      from: '            if (work.needsStatusDefault && !this.DealStatusTypeID) {',
+      to: '            if (work.needsStatusDefault || true) {',
+      note: 'the default overwrites a status the caller supplied, and on update too' },
+
+    // 3. THE CONDITION THAT LOOKS REDUNDANT. Drop `LocksDeal = 0` and the query still returns the right
+    //    row on this host, because every IsOpen row happens to be non-locking -- so SD36 stays GREEN and
+    //    this mutant is expected to MISS. That miss is the finding: the third term is protection against
+    //    a vocabulary nobody has seeded yet, and no check can prove it until someone seeds an
+    //    open-and-locking status. Recorded rather than dropped, so the next reader knows it was measured
+    //    and why it cannot fall.
+    { id: 'M-DS3', file: DES, expect: [],
+      from: "                ExtraFilter: 'IsActive = 1 AND IsOpen = 1 AND LocksDeal = 0',",
+      to: "                ExtraFilter: 'IsActive = 1 AND IsOpen = 1',",
+      note: 'the locking guard is dropped -- EXPECTED TO MISS on seeded data; it guards vocabulary that does not exist yet' },
+
+    // NOTE: the WT block that used to be spliced into the middle of this comment now sits ABOVE it.
+    // It was inserted between "it stops the close" and "setting the status at all", so this
+    // paragraph read as two broken fragments and M-ST7 was severed from the reasoning that explains
+    // why it is deliberately broad. Moved, not rewritten -- the mutants are unchanged.
+    // CD17 CANNOT BE FELLED BY A SINGLE EDIT TO THE STATUS WRITER, and that is a finding rather than a
+    // gap. Measured: M-ST3 removes the declared-transition suppression so the defaults writer DOES run on
+    // a close, and CD17 stays green -- because the closing status also arrives dirty, so
+    // callerSuppliedValue answers "theirs" anyway. Two independent mechanisms protect it. This mutant
+    // therefore proves the check is not VACUOUS rather than isolating one guard: it stops the close
     // setting the status at all, which naturally fells everything that asserts a close outcome.
     { id: 'M-ST7', file: CDO, expect: ['CD17'],
       from: '        const now = new Date();\n        deal.DealStatusTypeID = target.ID;',

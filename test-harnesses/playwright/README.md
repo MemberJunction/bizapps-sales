@@ -199,3 +199,20 @@ Things the harness surfaced that are worth knowing, and are not bugs in this app
    lookup. Correct for S1, and a real UX item for S3 to address.
 8. **`MRR`/`ARR` render as "Mrr"/"Arr".** CodeGen's PascalCase word-splitting does not know they are
    acronyms. Cosmetic; fixable with a `DisplayName` in entity-field metadata.
+
+## A killed mutation run leaves the mutant behind — `git status` before trusting a clean tree
+
+`test-harnesses/mutate-checks.mjs` copies a source file aside, edits it, builds, runs the suite, and
+restores from the copy in a `finally`. Kill the process between the edit and the restore — a tool
+timeout, a Ctrl-C, a session ending — and **the mutation stays in the working tree and in `dist/`**.
+
+It has happened three times. Each looked like a puzzling test failure rather than a stranded edit,
+because `git diff` on a file nobody remembers touching is not where anyone looks first.
+
+So, after any interrupted run:
+
+```bash
+git status --porcelain          # a modified source file you did not edit IS the mutant
+git checkout -- <that file>
+npm run build:packages          # restoring the SOURCE is not enough; dist/ still holds it
+```
