@@ -115,6 +115,16 @@ jobs:
       - name: Query comment-drift gate (a documented column that is not returned)
         run: python scripts/assert-no-comment-drift.py
 
+      # PLAYWRIGHT STRIPS TYPES RATHER THAN CHECKING THEM, so a spec that calls a function it never
+      # imported ships and fails at RUNTIME, inside a test, frames from the reporting assertion. All 21
+      # specs had never been compiled once; the first run found three real defects in committed code --
+      # a ReferenceError at 90-workspace-tab-state:386 and two missing arguments. Reads SOURCES, never
+      # build output: this harness has none, and a checker pointed at generated output tests the
+      # generator. Runs here even though the specs themselves need a live DB and a human login, because
+      # compiling them needs neither.
+      - name: Spec typecheck gate (Playwright compiles specs without checking them)
+        run: npm run test:spec-gate
+
       # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
       # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a
       # permanent red X asserting nothing. Guarded rather than omitted, so the first real test file
@@ -144,4 +154,4 @@ jobs:
       - name: State plainly what this gate does not cover
         if: always()
         run: |
-          echo "::notice title=Explorer UI CRUD is not run here::test-harnesses/playwright needs a live database, running servers and a one-time human login. Run 'pnpm run test:explorer' locally before merging — see the comment block at the top of this workflow for why it is not automated."
+          echo "::notice title=Explorer UI CRUD is not run here::test-harnesses/playwright needs a live database, running servers and a one-time human login. Run 'pnpm run test:explorer' locally before merging. Their TYPES are checked here by the spec typecheck gate; nothing RUNS them here — see the comment block at the top of this workflow for why it is not automated."

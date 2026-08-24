@@ -25,12 +25,13 @@
     "test:coverage-gate": "node scripts/assert-check-count.mjs",
     "test:vocabulary-gate": "node scripts/assert-no-vocabulary-comparisons.mjs",
     "test:money-gate": "node scripts/assert-no-money-arithmetic.mjs",
-    "verify": "npm run test:vocabulary-gate && npm run test:money-gate && npm run test:discount-gate && npm run test:validation-gate && npm run test:drift-gate && npm run build",
+    "verify": "npm run test:vocabulary-gate && npm run test:money-gate && npm run test:discount-gate && npm run test:validation-gate && npm run test:drift-gate && npm run test:spec-gate && npm run build",
     "test:explorer:auth": "playwright test --config test-harnesses/playwright/playwright.config.ts --project auth-setup",
     "test:explorer": "playwright test --config test-harnesses/playwright/playwright.config.ts --project crud",
     "test:explorer:report": "playwright show-report test-harnesses/playwright/playwright-report",
     "test:discount-gate": "node scripts/assert-discount-conversion.mjs",
     "test:validation-gate": "node scripts/assert-workspace-validation.mjs",
+    "test:spec-gate": "node scripts/assert-specs-typecheck.mjs",
     "test:drift-gate": "python scripts/assert-no-comment-drift.py"
   },
   "repository": {
