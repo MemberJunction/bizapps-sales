@@ -679,9 +679,34 @@ export async function gridRecordCount(page: Page): Promise<number> {
  * chip afterwards, so the row leaving the grid is the correct UI-level assertion — not the absence of
  * the row from the database.
  */
+/**
+ * ── `:visible` IS LOAD-BEARING HERE, AND WITHOUT IT DELETION NEVER RAN ONCE ──────────────────────
+ *
+ * Measured, headed: `button[title="Delete this Record"]` resolved **36 times** and every one of them
+ * reported `hidden`, so `.first()` picked a control nobody could click and the step failed with
+ * `the record view must expose "Delete this Record"` — about a record view that exposes it perfectly
+ * well.
+ *
+ * MJ's shell keeps every open tab's form in the DOM and merely HIDES the inactive ones. By the time
+ * `10-deal-crud` reaches its delete step it has opened a Pipeline form and a Deal form, so the page is
+ * holding several record views at once and only the front one is visible. An unscoped `.first()` is
+ * then a lottery weighted towards the oldest tab.
+ *
+ * This file already documents exactly this trap for `fieldLabelVisible` — "`visible=true` IS
+ * LOAD-BEARING, and leaving it off produced one of the more confusing failures this harness has had" —
+ * and `40-deal-workspace` fixed the same thing on its row locator with `tr:visible`. The delete helper
+ * never got the same treatment, and the consequence is worth stating plainly: **the delete step has
+ * never executed, so deletion through the UI has never been exercised by this suite at all.** Every
+ * "does not assert cascade" note about it was academic.
+ *
+ * The row locator gets the same filter for the same reason: a hidden roster row can match the name.
+ */
 export async function deleteRecordViaRecordView(page: Page, recordName: string): Promise<void> {
   // Open the record from the grid.
-  const row = page.locator('tr, .ag-row, [role="row"]').filter({ hasText: recordName }).first();
+  const row = page
+    .locator('tr:visible, .ag-row:visible, [role="row"]:visible')
+    .filter({ hasText: recordName })
+    .first();
   await expect(row, `a grid row for "${recordName}" must exist to open it`).toBeVisible({ timeout: 20_000 });
   const link = row.locator('a').first();
   if (await link.count()) {
@@ -691,8 +716,8 @@ export async function deleteRecordViaRecordView(page: Page, recordName: string):
   }
   await page.waitForTimeout(5500);
 
-  // The explicit record-level delete control.
-  const del = page.locator('button[title="Delete this Record"]').first();
+  // The explicit record-level delete control, on the VISIBLE form — see the block above.
+  const del = page.locator('button[title="Delete this Record"]:visible').first();
   await expect(del, 'the record view must expose "Delete this Record"').toBeVisible({ timeout: 20_000 });
   await del.click({ timeout: 15_000 });
   await page.waitForTimeout(2000);

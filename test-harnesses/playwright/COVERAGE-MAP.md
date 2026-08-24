@@ -334,3 +334,101 @@ a probability matches any `20` anywhere on the page, including a date or a row c
    knows the workspace route; `lib/explorer.ts` knows the browser. Nothing owns *crossing between them*.
 3. **Make `40` step 11 unconditional.** The child read-back is the strongest claim in the file and it
    sits behind an `if` that logs and passes when the affordance is missing.
+
+---
+
+# Round 2 — closing the gaps this map found
+
+Same five-column shape. The point of this section is to show things **leaving** the "does NOT assert"
+column, and what it cost to move them.
+
+Every assertion below was proven able to FAIL before its green was trusted — by temporarily inverting it
+and watching it fire on real data. The received values are recorded, because they are the evidence that
+the assertion reads something real rather than passing on a technicality.
+
+## Gap 1 — read a price (spec 40, and its server-side twin)
+
+| Drives | Why | Asserts | Was previously | Result |
+|---|---|---|---|---|
+| After the save, opens Product lines and reads the two read-only cells | Rule 1 is a round trip: sales states intent, **the engine answers**. Only the asking was ever checked | `the unit price cell never carried a real figure — a dash or 0.00 here means the pricing engine did not price the line`; `the line total must be a real figure too`; and on a multi-quantity line, the two must be **different answers** | nothing — `20` checked the cells were read-only, `40` filled the inputs on either side of them | **PASS.** `engine priced line 1: unit=229 total=20610` — 229 × 100 × 0.9, matching the qty-100 line at 10% off |
+
+**Proven failable:** threshold raised to `> 1e9` → fired with `Received: 229`.
+
+**The server-side twin was worse than weak — it was vacuous.** `save-deal.SD19` asserted
+`row.UnitPrice !== null`, and `__mj_BizAppsOrders.OrderLine.UnitPrice` is **NOT NULL in the schema**
+(verified live). The database guaranteed it before any code ran; the check could not fail. It now asserts
+`Number(row.UnitPrice) > 0` — the strongest claim sales can make without knowing a price. Proven failable
+the same way: `> 1e9` → `✖ 0 passed, 1 failed`; restored → `✔ 1 passed`.
+
+**Why not assert a figure:** that would mean this repo knowing a price, which is the accretion Rule 1
+exists to stop. `> 0` says a real number came back without saying which.
+
+## Gap 2 — spec 40's child read-back
+
+| Drives | Why | Asserts | Was previously | Result |
+|---|---|---|---|---|
+| Reads the embedded order's lines from the database after the save | the file's strongest claim: **one** transactional save wrote the header *and* its children | `BOTH lines must have reached the database from ONE save`; and each line carries a real engine price | inside `if (section visible) { assert } else { console.log }` | **PASS** |
+
+**Proven failable:** expected count set to 3 → fired with `Expected: 3, Received: 2`.
+
+**It could never have fired, not merely "sometimes didn't".** The guard looked for a section titled
+`Deal Lines` — an entity that no longer exists under D-DL1. Making it strict would have produced a
+permanent red for a UI that is correct, so the claim moved to the database: a genuinely different surface
+from the workspace that wrote it, held to the same standard as `60` and `80`.
+
+**Two things that fell out of doing it:**
+- My first version joined orders via `OrderHeader.Description`, which `CloseDealOperation` only sets **at
+  close**. Most orders on this host have a null description, so an unclosed deal would have found
+  nothing. Now joined through `Deal.OrderID`. `lib/db.ts`'s docblock claiming there is no such column is
+  stale — there is one.
+- The step originally sat downstream of the navigation defect this map documents, so it still never ran.
+  A database read needs no navigation, so it moved ahead of that point — the right dependency shape, not
+  a workaround.
+
+## Gap 3 — the stage event's stamps on the CLOSE path
+
+| Drives | Why | Asserts | Was previously | Result |
+|---|---|---|---|---|
+| Closes a deal, reads the appended event | Rule 3's payload. A count proves something was written; the stamps prove it is worth keeping | `the close event must stamp the amount the deal held on the way out — a null stamp is a row that answers no question later`; the probability is stamped and in range; `the close event must record the stage the deal moved INTO` | count > 0 only | **PASS** (all 5 tests green) |
+
+**Proven failable:** amount bar raised to `> 1e9` → fired with `Received: 458`.
+
+`StageEventsFor` did not select the stamps at all, so no browser spec *could* assert them. Provenance was
+proven on the drag path (`80`) and not on the close path — the one that records a booking.
+
+## Gap 5 — the false test name
+
+`a UI close creates an order, appends a stage event, and locks the deal` →
+**`a UI close appends a STAMPED stage event and locks the deal`**. The order assertion was removed under
+D-OS1; the title went on claiming it and ran green. A passing test with a false name is worse than a red
+one, because nobody goes looking.
+
+## Gap 4 — spec 10's delete step: **still not executed**
+
+The locator defect is fixed and the diagnosis confirmed from the headed run's call log:
+`button[title="Delete this Record"]` **resolved 36 times, every one `hidden`**. MJ keeps every open tab's
+form in the DOM and hides the inactive ones, so an unscoped `.first()` was a lottery weighted toward the
+oldest tab. Both locators in `deleteRecordViaRecordView` are now scoped with `:visible` — the same fix
+`40` already applies to its row locator and this file already documents for `fieldLabelVisible`.
+
+**I then made the identical mistake myself** in the reload wait added the round before — a bare
+`getByText(DEAL_NAME).first()` matching a hidden tab's copy — now `filter({ visible: true })`.
+
+**But delete still has not run,** because the spec now fails one step earlier on its console keystone:
+
+```
+console.error: Error in BaseEntity.Load(MJ_BizApps_Sales: Pipelines, Key: ID=3B3686AB-…)
+console.error: Error in BaseEntity.Load(MJ_BizApps_Sales: Deals, Key: ID=23549B45-…)
+```
+
+**Both IDs no longer exist in the database** (checked). These are records a previous run created and the
+cleanup sweep deleted, whose references survive in **`__mj.UserRecordLog`** — 9 orphaned Deal rows and 6
+orphaned Pipeline rows. The app faithfully restores them, fails to load them, and logs an error. The
+product is behaving correctly; the harness is deleting rows it still points at.
+
+This is the same root cause as the dead-record recovery in `openSalesApp`, and the proper fix is one line
+in the cleanup sweep: **remove the `UserRecordLog` rows for the records it deletes.** That file is landed
+and out of scope tonight, so the orphans are recorded rather than cleared.
+
+**Deletion through the UI therefore remains unexercised by this suite** — the only one of the four gaps
+still open, and now open for a reason that is documented rather than mysterious.

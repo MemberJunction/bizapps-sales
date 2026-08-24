@@ -179,7 +179,15 @@ test.afterAll(async () => {
 });
 
 test.describe('closing a deal through the Explorer', () => {
-    test('a UI close creates an order, appends a stage event, and locks the deal', async ({ page }) => {
+    /**
+     * RENAMED. This was titled "a UI close creates an order, appends a stage event, and locks the deal"
+     * long after the order assertion was deleted under `docs/DECISIONS.md` D-OS1 — the order is
+     * provisioned with the deal on first save, not at close. The body was correct and the deletion was
+     * documented in place; the TITLE went on claiming it. It ran green, and anyone reading the output
+     * would reasonably conclude an order had been verified. A passing test with a false name is worse
+     * than a red one, because nobody goes looking.
+     */
+    test('a UI close appends a STAMPED stage event and locks the deal', async ({ page }) => {
         const errors = captureConsoleErrors(page);
         const name = await createDealWithLine(page, 'won');
 
@@ -205,6 +213,50 @@ test.describe('closing a deal through the Explorer', () => {
             events.length,
             'closing must APPEND a stage event — without it the close has no provenance',
         ).toBeGreaterThan(0);
+
+        /**
+         * ── THE STAMPS, WHICH ARE THE REASON THE ROW IS KEPT ────────────────────────────────────
+         *
+         * Counting events proves something was written. It does not prove the something is worth
+         * having. `AmountAtTransition` and `ProbabilityAtTransition` are what make "what did we think
+         * the forecast was on the 1st" answerable after the amounts move — Rule 3's actual payload —
+         * and an event written with nulls in them satisfies a count and answers nothing.
+         *
+         * `80-board-drag` asserts both on the DRAG path. Nothing asserted them on the CLOSE path,
+         * which is the one that matters more: a drag is reversible, a close is the record of a booking.
+         * Provenance was proven on one path of two.
+         *
+         * The values are not compared to an expected figure — the deal's amount comes from the engine
+         * and this repo does not know it. What is asserted is that the stamps carry REAL values: the
+         * amount the deal actually held on the way out, and a probability in range.
+         */
+        const closeEvent = events[0];
+        expect(
+            closeEvent.AmountAtTransition,
+            'the close event must stamp the amount the deal held on the way out — a null stamp is a '
+            + 'row that answers no question later',
+        ).not.toBeNull();
+        expect(
+            Number(closeEvent.AmountAtTransition),
+            'and that amount must be a real figure, not zero',
+        ).toBeGreaterThan(0);
+
+        expect(
+            closeEvent.ProbabilityAtTransition,
+            'the close event must stamp the probability it held on the way out',
+        ).not.toBeNull();
+        const prob = Number(closeEvent.ProbabilityAtTransition);
+        expect(prob, 'and that probability must be in range').toBeGreaterThanOrEqual(0);
+        expect(prob, 'and that probability must be in range').toBeLessThanOrEqual(100);
+
+        /**
+         * WHERE IT CAME FROM, not just where it went. A close event that records no origin cannot
+         * reconstruct the path a deal took, which is the other half of provenance.
+         */
+        expect(
+            closeEvent.ToStageID,
+            'the close event must record the stage the deal moved INTO',
+        ).not.toBeNull();
 
         /**
          * ── DELETED: "closing a won deal must create an ORDER in bizapps-orders" ─────────────────
