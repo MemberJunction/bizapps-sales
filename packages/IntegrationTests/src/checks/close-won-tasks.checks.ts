@@ -1112,12 +1112,47 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                             + 'same work in front of finance twice',
                     );
 
-                    // And the primary is unchanged: the deal is a way in, not what the task is about.
-                    Assert(
-                        task.LinkedEntityName !== E_DEAL || !input.ContractID,
-                        `the ${task.Kind} task reports the DEAL as its primary link, which means the deal `
-                            + 'link replaced the real one rather than being added beside it',
-                    );
+                    /**
+                     * ── AND THE PRIMARY IS UNCHANGED — THIS GUARD USED TO BE A TAUTOLOGY ────────────
+                     *
+                     * It read:
+                     *
+                     *     task.LinkedEntityName !== E_DEAL || !input.ContractID
+                     *
+                     * `baseInput` never sets `ContractID`, so `!input.ContractID` is always true and the
+                     * whole expression is always true. It asserted nothing, for either task, on any run.
+                     *
+                     * De-tautologising it naively would have been WORSE than leaving it. With no
+                     * `ContractID` supplied the service deliberately leaves the contract task's primary as
+                     * the deal — the documented fallback `WT5` exists to protect — so a bare `!== E_DEAL`
+                     * across both tasks would fail on correct behaviour and read as a product regression.
+                     * The old message asserts the very state the service is supposed to produce here.
+                     *
+                     * So the claim is made per KIND, against what each primary genuinely must be in the
+                     * state this check creates:
+                     *
+                     *   OrderReview        -> the ORDER. It always has one, so a deal primary here really
+                     *                         does mean the deal link replaced the real one.
+                     *   ContractProcessing -> no contract was supplied, so the deal IS correct. Asserted
+                     *                         rather than waved through, which pins the fallback from a
+                     *                         second direction.
+                     */
+                    if (task.Kind === 'OrderReview') {
+                        AssertEqual(
+                            task.LinkedEntityName,
+                            E_ORDER,
+                            'the order-review task reports the DEAL as its primary link, which means the '
+                                + 'deal link replaced the real one rather than being added beside it',
+                        );
+                    } else {
+                        AssertEqual(
+                            task.LinkedEntityName,
+                            E_DEAL,
+                            `the ${task.Kind} task should fall back to the DEAL as its primary when no `
+                                + 'contract was supplied (WT5). A different primary means the fallback '
+                                + 'changed without this check or WT5 noticing',
+                        );
+                    }
                 }
             }),
     },

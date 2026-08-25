@@ -116,10 +116,16 @@ async function one<T extends Record<string, unknown>>(
     filter: string,
     fields: string[],
     what: string,
+    /**
+     * Optional, and every caller that takes "the first" of several rows should pass it. Without an
+     * ORDER BY, `Results[0]` is whatever the server returned — see `firstStageOf`, where that decided
+     * whether a whole assertion was reachable. Callers filtering to exactly one row do not need it.
+     */
+    orderBy?: string,
 ): Promise<T> {
     const rv = new RunView();
     const result = await rv.RunView<T>(
-        { EntityName: entity, ExtraFilter: filter, ResultType: 'simple', Fields: fields },
+        { EntityName: entity, ExtraFilter: filter, ResultType: 'simple', Fields: fields, OrderBy: orderBy },
         ctx.User,
     );
     Assert(result.Success, `fixture: reading ${entity} failed — ${result.ErrorMessage}`);
@@ -272,9 +278,37 @@ function policyCreatesContract(raw: string | null): boolean {
     }
 }
 
+/**
+ * The FIRST stage of a pipeline — and "first" now means something.
+ *
+ * ── IT SELECTED WITH NO ORDER BY AND TOOK Results[0] ───────────────────────────────────────────
+ *
+ * Which row that is, is whatever the server felt like returning. Every check that starts a deal from
+ * `ContractPolicyStageID` or `OrderOnlyPolicyStageID` therefore began somewhere non-deterministic, and
+ * a check whose outcome depends on WHICH stage it started in could pass and fail on the same code.
+ *
+ * That is not hypothetical here: `PipelineStage.OrderStatusOnEntry` is NULL on the low-numbered stages
+ * of both seeded pipelines and set on later ones, so an unordered pick decides whether the
+ * order-follows-stage behaviour is even reachable. `close-deal.CD18` guards that assertion with
+ * `if (restored.OrderStatusOnEntry)` and has consequently never executed it — the same hole the
+ * browser twin `80-board-drag` had at its own `if (target.OrderStatusOnEntry)`.
+ *
+ * ORDERING IS THE FIX HERE; THE GUARD IS NOT MINE TO CHANGE. This makes "first" reproducible so a
+ * check that depends on the starting stage behaves the same on every run. Turning CD18's silent skip
+ * into an assertion is a change to `close-deal.checks.ts`, which another session holds this round —
+ * flagged on the board rather than edited underneath them.
+ *
+ * `DisplayOrder` is the pipeline's own ordering column, and `ID` breaks a tie so the result is total
+ * rather than merely better.
+ */
 async function firstStageOf(ctx: IntegrationCheckContext, pipelineID: string): Promise<string> {
     const stage = await one<{ ID: string }>(
-        ctx, E_STAGE, `PipelineID = '${pipelineID}' AND IsActive = 1`, ['ID'], `stage on pipeline ${pipelineID}`,
+        ctx,
+        E_STAGE,
+        `PipelineID = '${pipelineID}' AND IsActive = 1`,
+        ['ID'],
+        `stage on pipeline ${pipelineID}`,
+        'DisplayOrder ASC, ID ASC',
     );
     return stage.ID;
 }
