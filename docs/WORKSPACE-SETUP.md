@@ -27,7 +27,7 @@ The real host was fine. Cost: a wrong diagnosis and a needless re-seed.
 
 | Database | Tree that owns its `.env` | Serves | Contents |
 |---|---|---|---|
-| **`MJ_V6_Host`** | `/c/v6/MJ` | **API 4143**, Explorer **4341** | The **demo/recording** stack. Orders installed (~50 tables), contracts **absent**. Seven `DEAL-900x` deals, all lines carrying real catalogue `ProductID`s. |
+| **`MJ_V6_Host`** | `/c/v6/MJ` | **API 4143**, Explorer **4341** | The **demo/recording** stack. Orders installed (~50 tables). Contracts **present as of 2026-08-25** — a contract was created here during close-won testing; this line previously said absent. Seven `DEAL-900x` deals, all lines carrying real catalogue `ProductID`s. |
 | **`MJ_V6_Repro`** | `/c/v6repro/*` (7 members) | nothing running by default | The **isolated schema/CodeGen** stack, and the **only** one with contracts (~10 tables) as well as orders. The only place the contract-gated bundles can prove anything. |
 | **`MJ_BizAppsSales_V6`** | `/c/v6/bizapps-sales` | API 4141 *(configured)* | **Sales-only** — no orders schema, no contracts. Which makes it the honest test of a standalone host: the default gate must be green here, and the downstream-gated bundles must refuse *loudly*. |
 | **`MJ_BizAppsSales`** | `/c/Dev/MJ/bizapps-sales` | API 4141 *(configured)* | The **original pre-workspace** dev database. Predates the product-picker work, so its demo lines carry names with no `ProductID`. Nothing current depends on it. |
@@ -70,6 +70,36 @@ console.log('connected to', process.env.DB_DATABASE);   // cheap, and it ends th
 
 ---
 
+## After removing a generated symbol, rebuild before you trust an error count
+
+**Especially a count of zero.** This has now misreported the state of this repo three times, each time
+in the reassuring direction, and each time the number looked like evidence.
+
+| Occasion | What the build said | What was true |
+|---|---|---|
+| `ng-ui-components` after the 324-commit MJ pull | `MJCard*` "has no exported member" | the source had them; the `dist` was pre-pull |
+| `base-forms` / `NewRecordValues` arity | four repos failing on a 2-arg call | MJ's source took 2 args; four repos read a stale `dist` |
+| Retiring `DealLine` | **0 errors across all six packages** | the generated class still existed, and consumers read `sales-entities`' old `.d.ts` |
+
+The third is the dangerous one. Deleting `DealLine` reported **zero** errors; regenerating raised it to
+**3**; rebuilding `sales-entities`' `dist` raised it to **67**. Had the first number been believed, the
+demolition would have looked nearly free and the real work would have surfaced somewhere much worse.
+
+So after removing or renaming anything a consumer imports:
+
+```bash
+# 1. regenerate, so the symbol actually leaves the source
+npm run mj:codegen:files
+# 2. rebuild the PRODUCING package, so its .d.ts stops advertising the old shape
+(cd packages/Entities && npx tsc -p tsconfig.json && npx tsc-alias -f)
+# 3. only now is a per-package count meaningful
+for d in packages/*/; do (cd "$d" && npx tsc -p tsconfig.json --noEmit); done
+```
+
+A per-package `--noEmit` sweep beats `turbo build`, which stops at the first failing package and so
+reports the first problem rather than all of them.
+
+---
 ## 0. What you need first
 
 - SQL Server reachable, and credentials that can `CREATE DATABASE`
@@ -85,10 +115,43 @@ whatever you like, but keep the six repos as direct children.
 ```bash
 mkdir C:\ws && cd C:\ws
 git clone --branch next https://github.com/MemberJunction/MJ.git
-for r in bizapps-common bizapps-tasks bizapps-accounting bizapps-orders bizapps-sales bizapps-contracts; do
+for r in bizapps-common bizapps-accounting bizapps-orders bizapps-contracts; do
   git clone --branch next https://github.com/MemberJunction/$r.git
 done
+
+# NOT next for these two — see the warning below.
+git clone --branch feature/embed-order-on-deal https://github.com/MemberJunction/bizapps-sales.git
+git clone --branch next https://github.com/MemberJunction/bizapps-tasks.git   # NOT closewon -- see below
 ```
+
+> #### ⚠ ONE OF THESE MUST NOT COME FROM `next`, and the other one MUST
+>
+> * **bizapps-sales** `next` is **242 commits behind** the current line. It predates the embedded-order
+>   redesign entirely — `DealLine` still exists there — so a workspace built from it cannot reproduce
+>   anything in this document and fails in ways that look like environment problems.
+> * **bizapps-tasks** must come from **`next`**, and the line that used to sit here said the opposite.
+>   It read: *"one commit AHEAD of `next` on `feature/closewon-task-types`, and that commit is what
+>   close-won task creation needs."* One commit ahead was true. It was also **11 commits BEHIND**, and
+>   those eleven carry `V202608200800__v1.2.x_TaskType_Code_Statuses_Workflow_Hooks.sql`, which creates
+>   `TaskType.Code`. Sales' own `metadata/task-types` keys on `Code`, so cloning tasks the way this
+>   document used to say makes sales' metadata push fail outright:
+>
+>   ```
+>   Field "Code" does not exist on entity "MJ_BizApps_Tasks: Task Types"   x2
+>   ✗ Validation failed with 2 error(s)
+>   ```
+>
+>   Measured 2026-08-25 on a fresh install, then measured again after applying tasks@`next`: the column
+>   appears and `metadata	ask-types — 2 created` succeeds. The one commit `feature/closewon-task-types`
+>   is ahead by (`cddd76b`) changes a single file, adding those two task types to **tasks'** metadata --
+>   rows that `metadata/task-types/.task-types.json` here says tasks *"deliberately does not carry"*,
+>   because sales owns them under Amith's 2026-08-20 ruling. So the branch is not merely stale, its one
+>   contribution duplicates rows this app is responsible for.
+>
+> Branch names are recorded here rather than left as "use the current branch", because a tester has no
+> way to know which that is. But a recorded branch name goes stale silently, which is exactly what
+> happened above -- so check a claim like this against the migration that actually creates the column
+> you need, not against the note. `git log --all --oneline -S "<column>" -- migrations/` settles it.
 
 `bizapps-tasks` is **not optional**, even though nothing you test touches tasks directly: accounting has a
 hard foreign key into it, and orders has one into accounting. Leave it out and orders' migration fails on a
@@ -111,8 +174,23 @@ packages:
   - 'MJ/packages/*'          # plus every nested glob from MJ/pnpm-workspace.yaml
   - 'bizapps-common'
   - 'bizapps-common/packages/*'
-  # …and so on for tasks, accounting, orders, sales
+  - 'bizapps-tasks'
+  - 'bizapps-tasks/packages/*'
+  - 'bizapps-accounting'
+  - 'bizapps-accounting/packages/*'
+  - 'bizapps-orders'
+  - 'bizapps-orders/packages/*'
+  - 'bizapps-sales'
+  - 'bizapps-sales/packages/*'
+  - 'bizapps-contracts'          # ⚠ was MISSING here; step 6 cannot run without it
+  - 'bizapps-contracts/packages/*'
 ```
+
+**Every member is listed explicitly, and contracts is the reason.** This block used to end with
+*"…and so on for tasks, accounting, orders, sales"* — which omitted **contracts entirely**. A literal
+reading built a workspace that installs and builds fine and then cannot perform step 6, with a failure
+that points at contracts rather than at this list. Elisions are fine in prose and not in a block someone
+copies.
 
 ```json
 // C:\ws\package.json — TEMPORARY. devDependencies are LOAD-BEARING: without
@@ -195,7 +273,7 @@ in this order — it is the dependency order, and it is not negotiable:
 | 4 | accounting | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 2 |
 | 5 | orders | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 9 |
 | 6 | **contracts** | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 1 — **see the warning below** |
-| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 2 |
+| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | **4** — see below |
 
 > ⚠️ **Contracts migrates LAST, and does not currently install on a fresh database.** It FKs into
 > common, tasks, orders AND accounting — the full stack — so nothing else may follow it. More
@@ -204,20 +282,55 @@ in this order — it is the dependency order, and it is not negotiable:
 > wrong table, and three of the six broken references fail *silently* as a column-count mismatch that
 > breaks every insert. Always column-diff contracts' ten entities after installing.
 
+> ⚠️ **Sales applies FOUR migrations, not two.** The baseline pair (`B…Schema`, `V…Tables_and_Objects`)
+> was joined on 2026-08-21 by `V202608211200__…DealStageEvent_Amount_Provenance` and
+> `V202608211201__…Refresh_DealStageEvent_View`. This table said 2 until it was measured against a
+> genuinely empty database.
+>
+> That staleness has the same cause as a known issue worth reading: **an applied migration in this repo
+> can be silently rewritten.** `V202608042101` has been edited four times since it applied on 2026-08-13
+> at checksum 666373835, and those two Aug 21 migrations went on applying cleanly without Flyway ever
+> objecting to the changed checksum. So the file on disk and the file that built a long-lived database
+> are different artefacts, and nothing detects the divergence — which is exactly why `MJ_V6_Host` worked
+> while a fresh install did not.
+
 > **Sales' `mj:migrate` now passes `--schema` itself**, so `npm run mj:migrate` is safe. It did not until
 > this pass: the bare form wrote flyway history into `__mj` — where MJ core's newer migrations already sit
 > — and died with *"Detected resolved migration not applied to database"*, an error that names a migration
 > and tells you nothing about the schema. Fixed to match the other four apps.
 
 **No CodeGen run is needed.** Each app's baseline carries its generated half, so after step 6 the database
-already has all ~500 entities registered (22 sales, 49 orders, 23 accounting, 19 tasks, 10 common). If you
+already has all ~500 entities registered (20 sales, 49 orders, 23 accounting, 19 tasks, 10 common). If you
 find yourself about to run CodeGen to "register entities", stop — something else is wrong.
 
 ## 5. Seed, in this order
 
+> ### ⚠ THE ORDER IS LOAD-BEARING, AND THE FAILURE IT PREVENTS NAMES THE WRONG THING
+>
+> Push metadata FIRST, then seed. Both `metadata/pipelines/.sales-pipelines.json` and
+> `scripts/seed-demo-data.sh` set `Pipeline.CompanyID`, and they disagree: the metadata says
+> **Default Company** (correct on a fresh database, where nothing else exists), the seed splits the two
+> pipelines across **Blue Cypress** and **BC Education Group** so the demo can show that every rollup
+> slices by company.
+>
+> In this order the seed lands last and everything is right. **Push again after seeding and the
+> metadata wins**, both pipelines collapse onto a company that owns no products, and every product
+> picker in the app goes empty. What you see is `locator.selectOption` timeouts and *"the orders
+> catalogue did not load"* -- nine failures in one run, none of which mentions a company or a pipeline.
+> Measured 2026-08-25. See **KI-26** for the repair, which is to re-run `seed-demo-data.sh`.
+>
+> This matters because the push is also the remedy for other things -- a missing action, a stale remote
+> operation -- so there is a real reason to run it later in a host's life. When you do, re-seed after.
+
+
 ```bash
 # a. app metadata — type tables, remote operations, and (for sales) the form chrome
-cd C:\ws\bizapps-sales     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir metadata
+#
+#    --exclude queries IS REQUIRED ON A FRESH DATABASE. Without it the push dies with 18 UNIQUE-key
+#    violations on __mj.QueryParameter and rolls back whole, landing NONE of the 22 directories. It
+#    is deterministic and re-running does not converge. KNOWN-ISSUES KI-25 has the cause; the cost of
+#    excluding them is the 16 queries and therefore the dashboard.
+cd C:\ws\bizapps-sales     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir metadata --exclude queries
 cd C:\ws\bizapps-accounting && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <currencies, gl-account-roles, journal-entry-types>
 cd C:\ws\bizapps-orders     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <product/revrec/subscription types, remote-operations + categories, journal-entry-types, payment & charge types>
 
@@ -287,14 +400,67 @@ the smoke script resolve siblings by scanning neighbouring repos for a matching 
 new tooling, do the same, and **never swallow the failure** — a sibling that is present but fails to load
 must not read as "not installed".
 
+**A regenerated class manifest can want a package the host has not linked.** MJAPI's and MJExplorer's
+`prestart` run `mj codegen manifest`, which walks whatever is linked in the workspace *at that moment* and
+emits imports for it. Link a new app into `/c/v6` and the next `npm start` in MJ begins importing it — and
+if `MJ/packages/<app>/node_modules/@mj-biz-apps/<pkg>` is absent or half-populated, the API dies before it
+logs anything useful:
+
+```
+node:internal/modules/run_main:107
+[Object: null prototype] { Symbol(nodejs.util.inspect.custom): [Function ...] }
+```
+
+No message, no stack, nothing naming the cause. It is a **`TS2307` from ts-node** thrown as a non-Error, so
+`--trace-uncaught` adds nothing. To read it, import the entry point yourself and inspect what was thrown:
+
+```bash
+cd C:/v6/MJ/packages/MJAPI
+cat > probe.mjs <<'EOF'
+import util from 'node:util';
+try { await import('./src/index.ts'); }
+catch (e) { console.error(util.inspect(e, { depth: 3 })); }
+EOF
+node --experimental-specifier-resolution=node --import ./register.js -r dotenv/config ./probe.mjs
+```
+
+The manifest also **writes the missing dependency into MJ's `package.json`** and tells you to install at the
+repo root. On Windows, `ln -s` under Git Bash may COPY a directory instead of linking it, which produces a
+real directory with no `package.json` — resolvable-looking and unresolvable. Use a junction:
+
+```powershell
+New-Item -ItemType Junction -Path 'C:\v6\MJ\packages\MJAPI\node_modules\@mj-biz-apps\common-entities' `
+         -Target 'C:\v6\bizapps-common\packages\Entities'
+```
+
+Hit on 2026-08-20: `bizapps-common` appeared in the workspace, the manifest started importing
+`@mj-biz-apps/common-entities`, and both MJAPI and MJExplorer refused to start.
+
 **Do not call every exported `Load*`.** Orders exports `LoadPaymentProviderConfig`, which is a real
 configuration loader that throws when no provider is configured. It will take your run down before a single
 check executes. Call named anchors only.
 
-## 8. If you only need Sales
+## 8. Sales does NOT run standalone any more
 
-None of the above is required. Sales runs standalone against its own database — `DealLine.ProductID` is a
-soft reference with no foreign key into orders, the product picker hides itself when orders is absent, and
-the close-won handoff falls back to a stub that reports `Executed: false` with a reason rather than
-pretending. `save-deal` and `close-deal` (30 checks) pass on a Sales-only host; `product-picker` and
-`close-won-handoff` need orders and are held out of the default gate for exactly that reason.
+**This section used to say the opposite, and the change is deliberate.** It read: *"Sales runs standalone
+against its own database — `DealLine.ProductID` is a soft reference with no foreign key into orders …
+`save-deal` and `close-deal` (30 checks) pass on a Sales-only host."* All three claims are now false, and
+leaving them would send someone down a setup path that cannot work.
+
+`DealLine` is retired. A deal carries an **embedded `OrderHeader`**, provisioned inside
+`DealEntityServer.Save()` (S-US4), and the lines live on that order in orders' schema. So:
+
+* **A deal cannot be SAVED without bizapps-orders.** Not "features degrade" — the save reaches for
+  `MJ_BizApps_Orders: Order Headers` and there is nothing to resolve.
+* **`mj-app.json` declares `mj-bizapps-orders` a hard dependency**, so a host without it is misconfigured
+  rather than minimal.
+* **Every check bundle requires orders**, including `save-deal` and `close-deal`. See
+  `scripts/expected-check-counts.json`; `save-deal`'s `Setup` refuses such a host with an explanation rather
+  than letting sixteen checks fail one at a time. Because nothing is unconditional any more,
+  `assert-check-count.mjs` treats an EMPTY expectation as a failure — otherwise a host with nothing linked
+  would pass while running zero checks.
+
+What is still true: **no foreign key crosses the schema boundary for the PRODUCT reference** (D-SW3), and
+`Deal.OrderID` is a real FK to orders' `OrderHeader` — the one place sales does depend structurally.
+
+`close-won-contract` remains the only bundle needing bizapps-contracts.

@@ -19,7 +19,22 @@ export const HARNESS_DIR = path.resolve(HERE, '..');
 /** Repo root. */
 export const REPO_ROOT = path.resolve(HARNESS_DIR, '..', '..');
 
-export const API_PORT = Number(process.env.MJAPI_PORT ?? 4141);
+/**
+ * 4143, NOT 4141. This default was 4141 and cost every run an override.
+ *
+ * 4141 is sales' own `GRAPHQL_PORT`, which `docs/QA-GUIDE.md` explicitly tells you to ignore: sales
+ * retired its `apps/` importers and no longer ships an API, so nothing reads that value. The API a
+ * tester connects to is the HOST's, and `/c/v6/MJ/.env` serves it on 4143 -- which is also what
+ * QA-GUIDE's port table and MJExplorer's own `environment.ts` (`GRAPHQL_URI`) say.
+ *
+ * The old default therefore pointed at a port whose only definition is a vestigial line, and the
+ * preflight failed before the browser opened on every invocation that forgot `MJAPI_PORT=4143`.
+ * `docs/EXPLORER-SPEC-STATUS.md` recorded that as a standing papercut rather than fixing it.
+ *
+ * Still env-overridable, which is what the sales-only host needs: `MJ_BizAppsSales_V6` is configured
+ * on 4141, so point at it with `MJAPI_PORT=4141`.
+ */
+export const API_PORT = Number(process.env.MJAPI_PORT ?? 4143);
 export const EXPLORER_PORT = Number(process.env.MJEXPLORER_PORT ?? 4341);
 
 export const API_BASE_URL = process.env.MJAPI_URL ?? `http://localhost:${API_PORT}`;

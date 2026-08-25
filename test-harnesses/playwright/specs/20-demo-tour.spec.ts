@@ -26,6 +26,15 @@ import { captureConsoleErrors, expectNoConsoleErrors, openAllEntities, openSales
  * text while the real fault was navigation. Confirming the heading first means a mis-navigation reports
  * itself as a mis-navigation.
  */
+/**
+ * By ROLE and by prefix, copied from `50-sales-shell.spec.ts` rather than reinvented: the left nav also
+ * emits hidden `.mj-left-nav__switcher-label` spans carrying the same words, and a text locator matches
+ * those instead of the rail.
+ */
+function railItem(page: import('@playwright/test').Page, label: string) {
+  return page.locator('mj-left-nav').getByRole('button', { name: new RegExp(`^${label}`, 'i') }).first();
+}
+
 async function tour(
   page: import('@playwright/test').Page,
   entityLabel: string,
@@ -97,9 +106,75 @@ test('demo tour: every screen the demo shows, with its seeded data', async ({ pa
     await tour(page, 'Deal Team Members', 'demo-06-deal-team');
   });
 
-  // Intent only: Resolved* columns are empty because nothing has asked Orders.PreviewOrder.
-  await test.step('Deal Lines — intent, not prices', async () => {
-    await tour(page, 'Deal Lines', 'demo-07-deal-lines');
+  /**
+   * ── REWRITTEN: "Deal Lines" IS NOT A SCREEN ANY MORE ──────────────────────────────────────────
+   *
+   * This toured the `Deal Lines` entity grid. Andrew formally descoped DealLines — issues #36–#39
+   * closed as not planned, with "An embedded Order record will store products and prices associated
+   * with the deal" — which is `docs/DECISIONS.md` D-DL1 (:461) reached from the product side. The
+   * entity has zero rows in `__mj.Entity`, so the step could only ever fail: the tour asserts the item
+   * is listed, and it is not.
+   *
+   * A TOUR IS ABOUT SCREENS, so the replacement is the screen a rep's lines actually live on: the
+   * workspace's Product lines pane. That is a pane inside a record, not an entity in the browser, so
+   * it cannot go through `tour()` — it needs the roster and a real deal.
+   *
+   * The demo point survives the move and gets sharper. It was "intent, not prices: the Resolved*
+   * columns are empty because nothing has asked Orders.PreviewOrder". It is now visible in the grid's
+   * own shape: the rep supplies a PRODUCT and a QUANTITY, and unit price and line total come back
+   * read-only. Sales states intent; orders states price (rule 1), and the read-only cells are that
+   * rule rendered.
+   *
+   * DEAL-9001 by name rather than by row position — it is the only two-line deal in the set, so it is
+   * the one that shows a grid rather than a single row, and a positional pick would follow whatever
+   * the roster happens to sort first.
+   */
+  await test.step('Product lines — intent, not prices', async () => {
+    /**
+     * THE SALES APP, NOT THE ENTITY BROWSER. This step used `openSalesApp`, which despite its name
+     * navigates to `lib/explorer.ts`'s `SALES_APP_ROUTE` = `/app/mjbizappssales` -- MJ's DataExplorer.
+     * The "All deals" rail belongs to the CUSTOM app at `/app/sales`. The step entered one surface and
+     * then looked for the other's furniture, so `railItem('All deals')` timed out after 30s, every run.
+     *
+     * There are SIX constants named `SALES_APP_ROUTE` in this harness holding THREE different values:
+     * `/app/mjbizappssales` (lib/explorer.ts:245), `/app/sales/Deals` (lib/workspace.ts:26), and
+     * `/app/sales` declared locally in specs 41, 60, 70 and 80. Which one an importer gets depends on
+     * which module it reached for, and nothing warns. That is the actual defect; this navigation is
+     * spelled out literally so this step cannot pick up the wrong one.
+     *
+     * Mirrors 50-sales-shell, which clicks the same rail item and passes.
+     */
+    await page.goto(`${EXPLORER_BASE_URL}/app/sales`, { waitUntil: 'domcontentloaded' });
+    await expect(
+      page.locator('mjs-sales-section'),
+      'the sales section must render before its rail is usable',
+    ).toBeVisible({ timeout: 40_000 });
+    await railItem(page, 'All deals').click();
+
+    const row = page.locator('.wrap--list .wl tbody tr', { hasText: 'Northwind Health' }).first();
+    await expect(row, 'the roster must list the seeded Northwind deal').toBeVisible({ timeout: 20_000 });
+    await row.click();
+
+    const linesTab = page.locator('.dw-panes__tab').filter({ hasText: /line/i }).first();
+    await expect(linesTab, 'the workspace must offer a Product lines pane').toBeVisible({ timeout: 20_000 });
+    await linesTab.click();
+    await page.waitForTimeout(1500);
+
+    const lineRows = page.locator('tr', { has: page.locator('.dw-cell-product') });
+    await expect(lineRows, 'the seeded deal must show its product lines').not.toHaveCount(0, { timeout: 20_000 });
+
+    /**
+     * The read-only cells are the point of the screen, so they are asserted rather than photographed.
+     * `.dw-readonly` is what the template puts on unit price and line total; if a future change made
+     * either of them editable, this tour would be showing a screen that contradicts rule 1 and nobody
+     * would notice from a screenshot.
+     */
+    await expect(
+      lineRows.first().locator('td.dw-readonly'),
+      'unit price and line total must render READ-ONLY — sales states intent, orders states price',
+    ).toHaveCount(2, { timeout: 10_000 });
+
+    await shot(page, 'demo-07-product-lines');
   });
 
   // Immutable history with the amount stamped at each transition.

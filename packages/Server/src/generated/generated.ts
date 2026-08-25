@@ -7,7 +7,7 @@
 *   >>> THE NEXT TIME THIS FILE IS GENERATED
 *
 **********************************************************************************/
-import { Arg, Ctx, Int, Query, Resolver, Field, Float, ObjectType, FieldResolver, Root, InputType, Mutation,
+import { Arg, Ctx, Int, Query, Resolver, Field, Float, ObjectType, InputType, Mutation,
             PubSub, PubSubEngine, ResolverBase, RunViewByIDInput, RunViewByNameInput, RunDynamicViewInput,
             AppContext, KeyValuePairInput, DeleteOptionsInput, GraphQLTimestamp as Timestamp,
             GetReadOnlyProvider, GetReadWriteProvider, RestoreContextInput } from '@memberjunction/server';
@@ -17,7 +17,7 @@ import { MaxLength } from 'class-validator';
 import * as mj_core_schema_server_object_types from '@memberjunction/server'
 
 
-import { mjBizAppsSalesAccountTypeEntity, mjBizAppsSalesBuyingRoleTypeEntity, mjBizAppsSalesDealContactRoleEntity, mjBizAppsSalesDealLineTypeEntity, mjBizAppsSalesDealLineEntity, mjBizAppsSalesDealPaymentScheduleEntity, mjBizAppsSalesDealRoleEntity, mjBizAppsSalesDealSequenceEntity, mjBizAppsSalesDealStageEventEntity, mjBizAppsSalesDealStatusTypeEntity, mjBizAppsSalesDealTeamMemberEntity, mjBizAppsSalesDealTypeEntity, mjBizAppsSalesDealEntity, mjBizAppsSalesForecastCategoryTypeEntity, mjBizAppsSalesForecastSnapshotEntity, mjBizAppsSalesLeadSourceTypeEntity, mjBizAppsSalesLifecycleStageTypeEntity, mjBizAppsSalesLossReasonEntity, mjBizAppsSalesPipelineStageEntity, mjBizAppsSalesPipelineEntity, mjBizAppsSalesSalesAccountEntity, mjBizAppsSalesSalesContactEntity } from '@mj-biz-apps/sales-entities';
+import { mjBizAppsSalesAccountTypeEntity, mjBizAppsSalesBuyingRoleTypeEntity, mjBizAppsSalesDealContactRoleEntity, mjBizAppsSalesDealPaymentScheduleEntity, mjBizAppsSalesDealRoleEntity, mjBizAppsSalesDealSequenceEntity, mjBizAppsSalesDealStageEventEntity, mjBizAppsSalesDealStatusTypeEntity, mjBizAppsSalesDealTeamMemberEntity, mjBizAppsSalesDealTypeEntity, mjBizAppsSalesDealEntity, mjBizAppsSalesForecastCategoryTypeEntity, mjBizAppsSalesForecastSnapshotEntity, mjBizAppsSalesLeadSourceTypeEntity, mjBizAppsSalesLifecycleStageTypeEntity, mjBizAppsSalesLossReasonEntity, mjBizAppsSalesPipelineStageEntity, mjBizAppsSalesPipelineEntity, mjBizAppsSalesSalesAccountEntity, mjBizAppsSalesSalesContactEntity } from '@mj-biz-apps/sales-entities';
     
 
 //****************************************************************************
@@ -61,9 +61,6 @@ export class mjBizAppsSalesAccountType_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => [mjBizAppsSalesSalesAccount_])
-    mjBizAppsSalesSalesAccounts_AccountTypeIDArray: mjBizAppsSalesSalesAccount_[]; // Link to mjBizAppsSalesSalesAccounts
-    
 }
 
 //****************************************************************************
@@ -199,16 +196,6 @@ export class mjBizAppsSalesAccountTypeResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesSalesAccount_])
-    async mjBizAppsSalesSalesAccounts_AccountTypeIDArray(@Root() mjbizappssalesaccounttype_: mjBizAppsSalesAccountType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Sales Accounts', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwSalesAccounts')} WHERE ${provider.QuoteIdentifier('AccountTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Sales Accounts', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesaccounttype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Sales Accounts', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesAccountType_)
     async CreatemjBizAppsSalesAccountType(
         @Arg('input', () => CreatemjBizAppsSalesAccountTypeInput) input: CreatemjBizAppsSalesAccountTypeInput,
@@ -279,12 +266,6 @@ export class mjBizAppsSalesBuyingRoleType_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => [mjBizAppsSalesSalesContact_])
-    mjBizAppsSalesSalesContacts_BuyingRoleTypeIDArray: mjBizAppsSalesSalesContact_[]; // Link to mjBizAppsSalesSalesContacts
-    
-    @Field(() => [mjBizAppsSalesDealContactRole_])
-    mjBizAppsSalesDealContactRoles_BuyingRoleTypeIDArray: mjBizAppsSalesDealContactRole_[]; // Link to mjBizAppsSalesDealContactRoles
-    
 }
 
 //****************************************************************************
@@ -420,26 +401,6 @@ export class mjBizAppsSalesBuyingRoleTypeResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesSalesContact_])
-    async mjBizAppsSalesSalesContacts_BuyingRoleTypeIDArray(@Root() mjbizappssalesbuyingroletype_: mjBizAppsSalesBuyingRoleType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Sales Contacts', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwSalesContacts')} WHERE ${provider.QuoteIdentifier('BuyingRoleTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Sales Contacts', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesbuyingroletype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Sales Contacts', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDealContactRole_])
-    async mjBizAppsSalesDealContactRoles_BuyingRoleTypeIDArray(@Root() mjbizappssalesbuyingroletype_: mjBizAppsSalesBuyingRoleType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Contact Roles', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealContactRoles')} WHERE ${provider.QuoteIdentifier('BuyingRoleTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Contact Roles', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesbuyingroletype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Contact Roles', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesBuyingRoleType_)
     async CreatemjBizAppsSalesBuyingRoleType(
         @Arg('input', () => CreatemjBizAppsSalesBuyingRoleTypeInput) input: CreatemjBizAppsSalesBuyingRoleTypeInput,
@@ -652,534 +613,6 @@ export class mjBizAppsSalesDealContactRoleResolver extends ResolverBase {
         const provider = GetReadWriteProvider(providers);
         const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
         return this.DeleteRecord('MJ_BizApps_Sales: Deal Contact Roles', key, options, provider, userPayload, pubSub);
-    }
-    
-}
-
-//****************************************************************************
-// ENTITY CLASS for MJ_BizApps_Sales: Deal Line Types
-//****************************************************************************
-@ObjectType({ description: `Whether a deal line is a ONE-TIME charge or a RECURRING one. A type table rather than a string column because recurring lines are what produce MRR/ARR and a renewal while one-time lines produce neither — so the distinction is behaviour, and behaviour belongs in a flag. IsRecurring is what the engine reads, which is what lets a customer call the concept Subscription or Implementation with no code aware of the rename.` })
-export class mjBizAppsSalesDealLineType_ {
-    @Field() 
-    @MaxLength(36)
-    ID: string;
-        
-    @Field() 
-    @MaxLength(40)
-    Code: string;
-        
-    @Field() 
-    @MaxLength(200)
-    Name: string;
-        
-    @Field({nullable: true}) 
-    Description?: string;
-        
-    @Field(() => Boolean, {description: `The behaviour flag. 1 for lines that carry into MRR/ARR and become a renewable subscription; 0 for lines billed once. Branch on this, never on Name or Code.`}) 
-    IsRecurring: boolean;
-        
-    @Field(() => Int) 
-    DisplayRank: number;
-        
-    @Field(() => Boolean) 
-    IsActive: boolean;
-        
-    @Field() 
-    _mj__CreatedAt: Date;
-        
-    @Field() 
-    _mj__UpdatedAt: Date;
-        
-    @Field(() => [mjBizAppsSalesDealLine_])
-    mjBizAppsSalesDealLines_DealLineTypeIDArray: mjBizAppsSalesDealLine_[]; // Link to mjBizAppsSalesDealLines
-    
-}
-
-//****************************************************************************
-// INPUT TYPE for MJ_BizApps_Sales: Deal Line Types
-//****************************************************************************
-@InputType()
-export class CreatemjBizAppsSalesDealLineTypeInput {
-    @Field({ nullable: true })
-    ID?: string;
-
-    @Field({ nullable: true })
-    Code?: string;
-
-    @Field({ nullable: true })
-    Name?: string;
-
-    @Field({ nullable: true })
-    Description: string | null;
-
-    @Field(() => Boolean, { nullable: true })
-    IsRecurring?: boolean;
-
-    @Field(() => Int, { nullable: true })
-    DisplayRank?: number;
-
-    @Field(() => Boolean, { nullable: true })
-    IsActive?: boolean;
-
-    @Field(() => RestoreContextInput, { nullable: true })
-    RestoreContext___?: RestoreContextInput;
-}
-    
-
-//****************************************************************************
-// INPUT TYPE for MJ_BizApps_Sales: Deal Line Types
-//****************************************************************************
-@InputType()
-export class UpdatemjBizAppsSalesDealLineTypeInput {
-    @Field()
-    ID: string;
-
-    @Field({ nullable: true })
-    Code?: string;
-
-    @Field({ nullable: true })
-    Name?: string;
-
-    @Field({ nullable: true })
-    Description?: string | null;
-
-    @Field(() => Boolean, { nullable: true })
-    IsRecurring?: boolean;
-
-    @Field(() => Int, { nullable: true })
-    DisplayRank?: number;
-
-    @Field(() => Boolean, { nullable: true })
-    IsActive?: boolean;
-
-    @Field(() => [KeyValuePairInput], { nullable: true })
-    OldValues___?: KeyValuePairInput[];
-
-    @Field(() => RestoreContextInput, { nullable: true })
-    RestoreContext___?: RestoreContextInput;
-}
-    
-//****************************************************************************
-// RESOLVER for MJ_BizApps_Sales: Deal Line Types
-//****************************************************************************
-@ObjectType()
-export class RunmjBizAppsSalesDealLineTypeViewResult {
-    @Field(() => [mjBizAppsSalesDealLineType_])
-    Results: mjBizAppsSalesDealLineType_[];
-
-    @Field(() => String, {nullable: true})
-    UserViewRunID?: string;
-
-    @Field(() => Int, {nullable: true})
-    RowCount: number;
-
-    @Field(() => Int, {nullable: true})
-    TotalRowCount: number;
-
-    @Field(() => Int, {nullable: true})
-    ExecutionTime: number;
-
-    @Field({nullable: true})
-    ErrorMessage?: string;
-
-    @Field(() => Boolean, {nullable: false})
-    Success: boolean;
-}
-
-@Resolver(mjBizAppsSalesDealLineType_)
-export class mjBizAppsSalesDealLineTypeResolver extends ResolverBase {
-    @Query(() => RunmjBizAppsSalesDealLineTypeViewResult)
-    async RunmjBizAppsSalesDealLineTypeViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
-    }
-
-    @Query(() => RunmjBizAppsSalesDealLineTypeViewResult)
-    async RunmjBizAppsSalesDealLineTypeViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
-    }
-
-    @Query(() => RunmjBizAppsSalesDealLineTypeViewResult)
-    async RunmjBizAppsSalesDealLineTypeDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        input.EntityName = 'MJ_BizApps_Sales: Deal Line Types';
-        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
-    }
-    @Query(() => mjBizAppsSalesDealLineType_, { nullable: true })
-    async mjBizAppsSalesDealLineType(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsSalesDealLineType_ | null> {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Line Types', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealLineTypes')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Line Types', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Line Types', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-    
-    @FieldResolver(() => [mjBizAppsSalesDealLine_])
-    async mjBizAppsSalesDealLines_DealLineTypeIDArray(@Root() mjbizappssalesdeallinetype_: mjBizAppsSalesDealLineType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Lines', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealLines')} WHERE ${provider.QuoteIdentifier('DealLineTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Lines', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdeallinetype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Lines', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @Mutation(() => mjBizAppsSalesDealLineType_)
-    async CreatemjBizAppsSalesDealLineType(
-        @Arg('input', () => CreatemjBizAppsSalesDealLineTypeInput) input: CreatemjBizAppsSalesDealLineTypeInput,
-        @Ctx() { providers, userPayload }: AppContext,
-        @PubSub() pubSub: PubSubEngine
-    ) {
-        const provider = GetReadWriteProvider(providers);
-        return this.CreateRecord('MJ_BizApps_Sales: Deal Line Types', input, provider, userPayload, pubSub)
-    }
-        
-    @Mutation(() => mjBizAppsSalesDealLineType_)
-    async UpdatemjBizAppsSalesDealLineType(
-        @Arg('input', () => UpdatemjBizAppsSalesDealLineTypeInput) input: UpdatemjBizAppsSalesDealLineTypeInput,
-        @Ctx() { providers, userPayload }: AppContext,
-        @PubSub() pubSub: PubSubEngine
-    ) {
-        const provider = GetReadWriteProvider(providers);
-        return this.UpdateRecord('MJ_BizApps_Sales: Deal Line Types', input, provider, userPayload, pubSub);
-    }
-    
-    @Mutation(() => mjBizAppsSalesDealLineType_)
-    async DeletemjBizAppsSalesDealLineType(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        const provider = GetReadWriteProvider(providers);
-        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
-        return this.DeleteRecord('MJ_BizApps_Sales: Deal Line Types', key, options, provider, userPayload, pubSub);
-    }
-    
-}
-
-//****************************************************************************
-// ENTITY CLASS for MJ_BizApps_Sales: Deal Lines
-//****************************************************************************
-@ObjectType({ description: `A requested line on a deal. Stores INTENT (product, quantity, requested discount, override price, term); the Resolved* columns are WRITE-ONLY from an Orders.PreviewOrder response. Sales never multiplies quantity by price, applies a discount, computes tax, prorates a period, sums a total or rounds anything.` })
-export class mjBizAppsSalesDealLine_ {
-    @Field() 
-    @MaxLength(36)
-    ID: string;
-        
-    @Field() 
-    @MaxLength(36)
-    DealID: string;
-        
-    @Field({nullable: true, description: `SOFT reference (no FK) to a bizapps-orders Product. Soft because orders' migrations may not have run — which is exactly what lets this app stand up independently.`}) 
-    @MaxLength(36)
-    ProductID?: string;
-        
-    @Field({nullable: true, description: `The product/service name AS WRITTEN ON THE SIGNED DOCUMENT — transcription, not a denormalized cache of the catalog name, and never auto-synced from it. Needed twice over: ProductID points at the orders catalog, which is not installed yet, so without this a line is an unreadable GUID; and once orders IS present, renaming a catalog product must not retroactively reword what a customer signed.`}) 
-    @MaxLength(500)
-    ProductName?: string;
-        
-    @Field(() => Float) 
-    Quantity: number;
-        
-    @Field(() => Float, {nullable: true}) 
-    RequestedDiscountPct?: number;
-        
-    @Field(() => Float, {nullable: true, description: `A negotiated unit price. An INPUT to the pricing engine, never a replacement for it — the line still goes through Orders.PreviewOrder.`}) 
-    OverrideUnitPrice?: number;
-        
-    @Field(() => Int, {nullable: true}) 
-    TermMonths?: number;
-        
-    @Field({nullable: true}) 
-    ServicePeriodStart?: Date;
-        
-    @Field({nullable: true}) 
-    ServicePeriodEnd?: Date;
-        
-    @Field({nullable: true, description: `Whether this line is a one-time charge or a recurring one. A FK to DealLineType, replacing what was a free-text LineType column: recurring lines are what produce MRR/ARR and a renewal, and the moment code needs to tell them apart a string forces exactly the name comparison the vocabulary rule forbids. Branch on DealLineType.IsRecurring, never on the name.`}) 
-    @MaxLength(36)
-    DealLineTypeID?: string;
-        
-    @Field(() => Int) 
-    DisplayOrder: number;
-        
-    @Field({nullable: true}) 
-    Description?: string;
-        
-    @Field(() => Float, {nullable: true, description: `Annual gross fees for this line AS WRITTEN ON THE SIGNED DOCUMENT. An INPUT the AD transcribes, not a figure this app derives. Once orders is wired in, Orders.PreviewOrder's answer lands in the Resolved* columns and becomes the authority on what the deal is worth; this remains the record of what was signed.`}) 
-    AnnualGrossFees?: number;
-        
-    @Field(() => Float, {nullable: true, description: `The discount as a CURRENCY AMOUNT, as the order form expresses it. Coexists with RequestedDiscountPct deliberately — the template speaks in amounts, the pricing engine takes a percent — and there is no exactly-one-of constraint, because a deal can legitimately carry a negotiated percentage as engine input AND the figure printed on the signed page.`}) 
-    DiscountAmount?: number;
-        
-    @Field(() => Float, {nullable: true, description: `THE SIGNED FIGURE for this line, transcribed from the executed document. On the PDF it equals AnnualGrossFees minus DiscountAmount, but THAT SUBTRACTION IS THE CUSTOMER'S AND THE AD'S, NOT THIS APP'S: nothing here computes, defaults or back-fills it, which is how the no-arithmetic rule stays literally true. Deliberately unconstrained in sign — a credit or concession line is legitimately negative, and bounding it would mean asserting the arithmetic.`}) 
-    Total?: number;
-        
-    @Field(() => Float, {nullable: true, description: `WRITE-ONLY from this app's perspective: populated only from an Orders.PreviewOrder response, never computed locally, never hand-edited.`}) 
-    ResolvedUnitPrice?: number;
-        
-    @Field(() => Float, {nullable: true, description: `WRITE-ONLY, from Orders.PreviewOrder. Never quantity x price computed here.`}) 
-    ResolvedExtendedAmount?: number;
-        
-    @Field({nullable: true, description: `The explanation trail Orders.PreviewOrder returns (base, rules, adjustments, charges, tax), so a rep can answer "why is it this price" without a support ticket.`}) 
-    PriceComponentsJSON?: string;
-        
-    @Field({nullable: true}) 
-    PricedAt?: Date;
-        
-    @Field({nullable: true, description: `DENORMALIZED stamp of the product's owning company at price time, mirroring OrderLine.CompanyID. This is what lets a cross-company deal materialize into orders with correct per-line company ownership. Server-maintained; never hand-set.`}) 
-    @MaxLength(36)
-    CompanyID?: string;
-        
-    @Field() 
-    _mj__CreatedAt: Date;
-        
-    @Field() 
-    _mj__UpdatedAt: Date;
-        
-    @Field() 
-    @MaxLength(500)
-    Deal: string;
-        
-    @Field({nullable: true}) 
-    @MaxLength(200)
-    DealLineType?: string;
-        
-    @Field({nullable: true}) 
-    @MaxLength(50)
-    Company?: string;
-        
-}
-
-//****************************************************************************
-// INPUT TYPE for MJ_BizApps_Sales: Deal Lines
-//****************************************************************************
-@InputType()
-export class CreatemjBizAppsSalesDealLineInput {
-    @Field({ nullable: true })
-    ID?: string;
-
-    @Field({ nullable: true })
-    DealID?: string;
-
-    @Field({ nullable: true })
-    ProductID: string | null;
-
-    @Field({ nullable: true })
-    ProductName: string | null;
-
-    @Field(() => Float, { nullable: true })
-    Quantity?: number;
-
-    @Field(() => Float, { nullable: true })
-    RequestedDiscountPct: number | null;
-
-    @Field(() => Float, { nullable: true })
-    OverrideUnitPrice: number | null;
-
-    @Field(() => Int, { nullable: true })
-    TermMonths: number | null;
-
-    @Field({ nullable: true })
-    ServicePeriodStart: Date | null;
-
-    @Field({ nullable: true })
-    ServicePeriodEnd: Date | null;
-
-    @Field({ nullable: true })
-    DealLineTypeID: string | null;
-
-    @Field(() => Int, { nullable: true })
-    DisplayOrder?: number;
-
-    @Field({ nullable: true })
-    Description: string | null;
-
-    @Field(() => Float, { nullable: true })
-    AnnualGrossFees: number | null;
-
-    @Field(() => Float, { nullable: true })
-    DiscountAmount: number | null;
-
-    @Field(() => Float, { nullable: true })
-    Total: number | null;
-
-    @Field(() => Float, { nullable: true })
-    ResolvedUnitPrice: number | null;
-
-    @Field(() => Float, { nullable: true })
-    ResolvedExtendedAmount: number | null;
-
-    @Field({ nullable: true })
-    PriceComponentsJSON: string | null;
-
-    @Field({ nullable: true })
-    PricedAt: Date | null;
-
-    @Field({ nullable: true })
-    CompanyID: string | null;
-
-    @Field(() => RestoreContextInput, { nullable: true })
-    RestoreContext___?: RestoreContextInput;
-}
-    
-
-//****************************************************************************
-// INPUT TYPE for MJ_BizApps_Sales: Deal Lines
-//****************************************************************************
-@InputType()
-export class UpdatemjBizAppsSalesDealLineInput {
-    @Field()
-    ID: string;
-
-    @Field({ nullable: true })
-    DealID?: string;
-
-    @Field({ nullable: true })
-    ProductID?: string | null;
-
-    @Field({ nullable: true })
-    ProductName?: string | null;
-
-    @Field(() => Float, { nullable: true })
-    Quantity?: number;
-
-    @Field(() => Float, { nullable: true })
-    RequestedDiscountPct?: number | null;
-
-    @Field(() => Float, { nullable: true })
-    OverrideUnitPrice?: number | null;
-
-    @Field(() => Int, { nullable: true })
-    TermMonths?: number | null;
-
-    @Field({ nullable: true })
-    ServicePeriodStart?: Date | null;
-
-    @Field({ nullable: true })
-    ServicePeriodEnd?: Date | null;
-
-    @Field({ nullable: true })
-    DealLineTypeID?: string | null;
-
-    @Field(() => Int, { nullable: true })
-    DisplayOrder?: number;
-
-    @Field({ nullable: true })
-    Description?: string | null;
-
-    @Field(() => Float, { nullable: true })
-    AnnualGrossFees?: number | null;
-
-    @Field(() => Float, { nullable: true })
-    DiscountAmount?: number | null;
-
-    @Field(() => Float, { nullable: true })
-    Total?: number | null;
-
-    @Field(() => Float, { nullable: true })
-    ResolvedUnitPrice?: number | null;
-
-    @Field(() => Float, { nullable: true })
-    ResolvedExtendedAmount?: number | null;
-
-    @Field({ nullable: true })
-    PriceComponentsJSON?: string | null;
-
-    @Field({ nullable: true })
-    PricedAt?: Date | null;
-
-    @Field({ nullable: true })
-    CompanyID?: string | null;
-
-    @Field(() => [KeyValuePairInput], { nullable: true })
-    OldValues___?: KeyValuePairInput[];
-
-    @Field(() => RestoreContextInput, { nullable: true })
-    RestoreContext___?: RestoreContextInput;
-}
-    
-//****************************************************************************
-// RESOLVER for MJ_BizApps_Sales: Deal Lines
-//****************************************************************************
-@ObjectType()
-export class RunmjBizAppsSalesDealLineViewResult {
-    @Field(() => [mjBizAppsSalesDealLine_])
-    Results: mjBizAppsSalesDealLine_[];
-
-    @Field(() => String, {nullable: true})
-    UserViewRunID?: string;
-
-    @Field(() => Int, {nullable: true})
-    RowCount: number;
-
-    @Field(() => Int, {nullable: true})
-    TotalRowCount: number;
-
-    @Field(() => Int, {nullable: true})
-    ExecutionTime: number;
-
-    @Field({nullable: true})
-    ErrorMessage?: string;
-
-    @Field(() => Boolean, {nullable: false})
-    Success: boolean;
-}
-
-@Resolver(mjBizAppsSalesDealLine_)
-export class mjBizAppsSalesDealLineResolver extends ResolverBase {
-    @Query(() => RunmjBizAppsSalesDealLineViewResult)
-    async RunmjBizAppsSalesDealLineViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
-    }
-
-    @Query(() => RunmjBizAppsSalesDealLineViewResult)
-    async RunmjBizAppsSalesDealLineViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
-    }
-
-    @Query(() => RunmjBizAppsSalesDealLineViewResult)
-    async RunmjBizAppsSalesDealLineDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        input.EntityName = 'MJ_BizApps_Sales: Deal Lines';
-        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
-    }
-    @Query(() => mjBizAppsSalesDealLine_, { nullable: true })
-    async mjBizAppsSalesDealLine(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsSalesDealLine_ | null> {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Lines', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealLines')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Lines', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Lines', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-    
-    @Mutation(() => mjBizAppsSalesDealLine_)
-    async CreatemjBizAppsSalesDealLine(
-        @Arg('input', () => CreatemjBizAppsSalesDealLineInput) input: CreatemjBizAppsSalesDealLineInput,
-        @Ctx() { providers, userPayload }: AppContext,
-        @PubSub() pubSub: PubSubEngine
-    ) {
-        const provider = GetReadWriteProvider(providers);
-        return this.CreateRecord('MJ_BizApps_Sales: Deal Lines', input, provider, userPayload, pubSub)
-    }
-        
-    @Mutation(() => mjBizAppsSalesDealLine_)
-    async UpdatemjBizAppsSalesDealLine(
-        @Arg('input', () => UpdatemjBizAppsSalesDealLineInput) input: UpdatemjBizAppsSalesDealLineInput,
-        @Ctx() { providers, userPayload }: AppContext,
-        @PubSub() pubSub: PubSubEngine
-    ) {
-        const provider = GetReadWriteProvider(providers);
-        return this.UpdateRecord('MJ_BizApps_Sales: Deal Lines', input, provider, userPayload, pubSub);
-    }
-    
-    @Mutation(() => mjBizAppsSalesDealLine_)
-    async DeletemjBizAppsSalesDealLine(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        const provider = GetReadWriteProvider(providers);
-        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
-        return this.DeleteRecord('MJ_BizApps_Sales: Deal Lines', key, options, provider, userPayload, pubSub);
     }
     
 }
@@ -1410,9 +843,6 @@ export class mjBizAppsSalesDealRole_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => [mjBizAppsSalesDealTeamMember_])
-    mjBizAppsSalesDealTeamMembers_DealRoleIDArray: mjBizAppsSalesDealTeamMember_[]; // Link to mjBizAppsSalesDealTeamMembers
-    
 }
 
 //****************************************************************************
@@ -1554,16 +984,6 @@ export class mjBizAppsSalesDealRoleResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDealTeamMember_])
-    async mjBizAppsSalesDealTeamMembers_DealRoleIDArray(@Root() mjbizappssalesdealrole_: mjBizAppsSalesDealRole_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Team Members', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealTeamMembers')} WHERE ${provider.QuoteIdentifier('DealRoleID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Team Members', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealrole_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Team Members', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesDealRole_)
     async CreatemjBizAppsSalesDealRole(
         @Arg('input', () => CreatemjBizAppsSalesDealRoleInput) input: CreatemjBizAppsSalesDealRoleInput,
@@ -2039,18 +1459,6 @@ export class mjBizAppsSalesDealStatusType_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => [mjBizAppsSalesDealStageEvent_])
-    mjBizAppsSalesDealStageEvents_FromDealStatusTypeIDArray: mjBizAppsSalesDealStageEvent_[]; // Link to mjBizAppsSalesDealStageEvents
-    
-    @Field(() => [mjBizAppsSalesDealStageEvent_])
-    mjBizAppsSalesDealStageEvents_ToDealStatusTypeIDArray: mjBizAppsSalesDealStageEvent_[]; // Link to mjBizAppsSalesDealStageEvents
-    
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_DealStatusTypeIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
-    @Field(() => [mjBizAppsSalesPipelineStage_])
-    mjBizAppsSalesPipelineStages_DealStatusTypeIDArray: mjBizAppsSalesPipelineStage_[]; // Link to mjBizAppsSalesPipelineStages
-    
 }
 
 //****************************************************************************
@@ -2198,46 +1606,6 @@ export class mjBizAppsSalesDealStatusTypeResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDealStageEvent_])
-    async mjBizAppsSalesDealStageEvents_FromDealStatusTypeIDArray(@Root() mjbizappssalesdealstatustype_: mjBizAppsSalesDealStatusType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Stage Events', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealStageEvents')} WHERE ${provider.QuoteIdentifier('FromDealStatusTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Stage Events', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealstatustype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Stage Events', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDealStageEvent_])
-    async mjBizAppsSalesDealStageEvents_ToDealStatusTypeIDArray(@Root() mjbizappssalesdealstatustype_: mjBizAppsSalesDealStatusType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Stage Events', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealStageEvents')} WHERE ${provider.QuoteIdentifier('ToDealStatusTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Stage Events', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealstatustype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Stage Events', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_DealStatusTypeIDArray(@Root() mjbizappssalesdealstatustype_: mjBizAppsSalesDealStatusType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('DealStatusTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealstatustype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesPipelineStage_])
-    async mjBizAppsSalesPipelineStages_DealStatusTypeIDArray(@Root() mjbizappssalesdealstatustype_: mjBizAppsSalesDealStatusType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipeline Stages', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelineStages')} WHERE ${provider.QuoteIdentifier('DealStatusTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipeline Stages', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealstatustype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipeline Stages', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesDealStatusType_)
     async CreatemjBizAppsSalesDealStatusType(
         @Arg('input', () => CreatemjBizAppsSalesDealStatusTypeInput) input: CreatemjBizAppsSalesDealStatusTypeInput,
@@ -2545,12 +1913,6 @@ export class mjBizAppsSalesDealType_ {
     @MaxLength(200)
     DefaultPipeline?: string;
         
-    @Field(() => [mjBizAppsSalesPipeline_])
-    mjBizAppsSalesPipelines_DealTypeIDArray: mjBizAppsSalesPipeline_[]; // Link to mjBizAppsSalesPipelines
-    
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_DealTypeIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
 }
 
 //****************************************************************************
@@ -2686,26 +2048,6 @@ export class mjBizAppsSalesDealTypeResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesPipeline_])
-    async mjBizAppsSalesPipelines_DealTypeIDArray(@Root() mjbizappssalesdealtype_: mjBizAppsSalesDealType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipelines', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelines')} WHERE ${provider.QuoteIdentifier('DealTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipelines', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealtype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipelines', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_DealTypeIDArray(@Root() mjbizappssalesdealtype_: mjBizAppsSalesDealType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('DealTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdealtype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesDealType_)
     async CreatemjBizAppsSalesDealType(
         @Arg('input', () => CreatemjBizAppsSalesDealTypeInput) input: CreatemjBizAppsSalesDealTypeInput,
@@ -2898,6 +2240,13 @@ export class mjBizAppsSalesDeal_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field({nullable: true}) 
+    @MaxLength(36)
+    OrderID?: string;
+        
+    @Field(() => Boolean, {description: `Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance's review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.`}) 
+    StandardAgreementModified: boolean;
+        
     @Field() 
     @MaxLength(200)
     Pipeline: string;
@@ -2913,6 +2262,10 @@ export class mjBizAppsSalesDeal_ {
     @Field({nullable: true}) 
     @MaxLength(200)
     DealStatusType?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(255)
+    Account?: string;
         
     @Field() 
     @MaxLength(50)
@@ -2938,21 +2291,10 @@ export class mjBizAppsSalesDeal_ {
     @MaxLength(100)
     ClosedByUser?: string;
         
-    @Field(() => [mjBizAppsSalesDealContactRole_])
-    mjBizAppsSalesDealContactRoles_DealIDArray: mjBizAppsSalesDealContactRole_[]; // Link to mjBizAppsSalesDealContactRoles
-    
-    @Field(() => [mjBizAppsSalesDealLine_])
-    mjBizAppsSalesDealLines_DealIDArray: mjBizAppsSalesDealLine_[]; // Link to mjBizAppsSalesDealLines
-    
-    @Field(() => [mjBizAppsSalesDealStageEvent_])
-    mjBizAppsSalesDealStageEvents_DealIDArray: mjBizAppsSalesDealStageEvent_[]; // Link to mjBizAppsSalesDealStageEvents
-    
-    @Field(() => [mjBizAppsSalesDealTeamMember_])
-    mjBizAppsSalesDealTeamMembers_DealIDArray: mjBizAppsSalesDealTeamMember_[]; // Link to mjBizAppsSalesDealTeamMembers
-    
-    @Field(() => [mjBizAppsSalesDealPaymentSchedule_])
-    mjBizAppsSalesDealPaymentSchedules_DealIDArray: mjBizAppsSalesDealPaymentSchedule_[]; // Link to mjBizAppsSalesDealPaymentSchedules
-    
+    @Field({nullable: true}) 
+    @MaxLength(40)
+    Order?: string;
+        
 }
 
 //****************************************************************************
@@ -3088,6 +2430,12 @@ export class CreatemjBizAppsSalesDealInput {
 
     @Field({ nullable: true })
     ClosedByUserID: string | null;
+
+    @Field({ nullable: true })
+    OrderID: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    StandardAgreementModified?: boolean;
 
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
@@ -3228,6 +2576,12 @@ export class UpdatemjBizAppsSalesDealInput {
     @Field({ nullable: true })
     ClosedByUserID?: string | null;
 
+    @Field({ nullable: true })
+    OrderID?: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    StandardAgreementModified?: boolean;
+
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
 
@@ -3292,56 +2646,6 @@ export class mjBizAppsSalesDealResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDealContactRole_])
-    async mjBizAppsSalesDealContactRoles_DealIDArray(@Root() mjbizappssalesdeal_: mjBizAppsSalesDeal_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Contact Roles', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealContactRoles')} WHERE ${provider.QuoteIdentifier('DealID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Contact Roles', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdeal_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Contact Roles', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDealLine_])
-    async mjBizAppsSalesDealLines_DealIDArray(@Root() mjbizappssalesdeal_: mjBizAppsSalesDeal_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Lines', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealLines')} WHERE ${provider.QuoteIdentifier('DealID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Lines', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdeal_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Lines', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDealStageEvent_])
-    async mjBizAppsSalesDealStageEvents_DealIDArray(@Root() mjbizappssalesdeal_: mjBizAppsSalesDeal_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Stage Events', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealStageEvents')} WHERE ${provider.QuoteIdentifier('DealID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Stage Events', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdeal_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Stage Events', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDealTeamMember_])
-    async mjBizAppsSalesDealTeamMembers_DealIDArray(@Root() mjbizappssalesdeal_: mjBizAppsSalesDeal_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Team Members', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealTeamMembers')} WHERE ${provider.QuoteIdentifier('DealID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Team Members', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdeal_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Team Members', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDealPaymentSchedule_])
-    async mjBizAppsSalesDealPaymentSchedules_DealIDArray(@Root() mjbizappssalesdeal_: mjBizAppsSalesDeal_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Payment Schedules', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealPaymentSchedules')} WHERE ${provider.QuoteIdentifier('DealID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Payment Schedules', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesdeal_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Payment Schedules', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesDeal_)
     async CreatemjBizAppsSalesDeal(
         @Arg('input', () => CreatemjBizAppsSalesDealInput) input: CreatemjBizAppsSalesDealInput,
@@ -3412,15 +2716,6 @@ export class mjBizAppsSalesForecastCategoryType_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => [mjBizAppsSalesPipelineStage_])
-    mjBizAppsSalesPipelineStages_ForecastCategoryTypeIDArray: mjBizAppsSalesPipelineStage_[]; // Link to mjBizAppsSalesPipelineStages
-    
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_ForecastCategoryTypeIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
-    @Field(() => [mjBizAppsSalesPipeline_])
-    mjBizAppsSalesPipelines_DefaultForecastCategoryTypeIDArray: mjBizAppsSalesPipeline_[]; // Link to mjBizAppsSalesPipelines
-    
 }
 
 //****************************************************************************
@@ -3556,36 +2851,6 @@ export class mjBizAppsSalesForecastCategoryTypeResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesPipelineStage_])
-    async mjBizAppsSalesPipelineStages_ForecastCategoryTypeIDArray(@Root() mjbizappssalesforecastcategorytype_: mjBizAppsSalesForecastCategoryType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipeline Stages', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelineStages')} WHERE ${provider.QuoteIdentifier('ForecastCategoryTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipeline Stages', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesforecastcategorytype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipeline Stages', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_ForecastCategoryTypeIDArray(@Root() mjbizappssalesforecastcategorytype_: mjBizAppsSalesForecastCategoryType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('ForecastCategoryTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesforecastcategorytype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesPipeline_])
-    async mjBizAppsSalesPipelines_DefaultForecastCategoryTypeIDArray(@Root() mjbizappssalesforecastcategorytype_: mjBizAppsSalesForecastCategoryType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipelines', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelines')} WHERE ${provider.QuoteIdentifier('DefaultForecastCategoryTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipelines', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesforecastcategorytype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipelines', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesForecastCategoryType_)
     async CreatemjBizAppsSalesForecastCategoryType(
         @Arg('input', () => CreatemjBizAppsSalesForecastCategoryTypeInput) input: CreatemjBizAppsSalesForecastCategoryTypeInput,
@@ -3901,15 +3166,6 @@ export class mjBizAppsSalesLeadSourceType_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => [mjBizAppsSalesSalesContact_])
-    mjBizAppsSalesSalesContacts_LeadSourceTypeIDArray: mjBizAppsSalesSalesContact_[]; // Link to mjBizAppsSalesSalesContacts
-    
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_LeadSourceTypeIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
-    @Field(() => [mjBizAppsSalesSalesAccount_])
-    mjBizAppsSalesSalesAccounts_LeadSourceTypeIDArray: mjBizAppsSalesSalesAccount_[]; // Link to mjBizAppsSalesSalesAccounts
-    
 }
 
 //****************************************************************************
@@ -4045,36 +3301,6 @@ export class mjBizAppsSalesLeadSourceTypeResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesSalesContact_])
-    async mjBizAppsSalesSalesContacts_LeadSourceTypeIDArray(@Root() mjbizappssalesleadsourcetype_: mjBizAppsSalesLeadSourceType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Sales Contacts', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwSalesContacts')} WHERE ${provider.QuoteIdentifier('LeadSourceTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Sales Contacts', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesleadsourcetype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Sales Contacts', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_LeadSourceTypeIDArray(@Root() mjbizappssalesleadsourcetype_: mjBizAppsSalesLeadSourceType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('LeadSourceTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesleadsourcetype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesSalesAccount_])
-    async mjBizAppsSalesSalesAccounts_LeadSourceTypeIDArray(@Root() mjbizappssalesleadsourcetype_: mjBizAppsSalesLeadSourceType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Sales Accounts', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwSalesAccounts')} WHERE ${provider.QuoteIdentifier('LeadSourceTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Sales Accounts', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalesleadsourcetype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Sales Accounts', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesLeadSourceType_)
     async CreatemjBizAppsSalesLeadSourceType(
         @Arg('input', () => CreatemjBizAppsSalesLeadSourceTypeInput) input: CreatemjBizAppsSalesLeadSourceTypeInput,
@@ -4145,12 +3371,6 @@ export class mjBizAppsSalesLifecycleStageType_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => [mjBizAppsSalesSalesAccount_])
-    mjBizAppsSalesSalesAccounts_LifecycleStageTypeIDArray: mjBizAppsSalesSalesAccount_[]; // Link to mjBizAppsSalesSalesAccounts
-    
-    @Field(() => [mjBizAppsSalesSalesContact_])
-    mjBizAppsSalesSalesContacts_LifecycleStageTypeIDArray: mjBizAppsSalesSalesContact_[]; // Link to mjBizAppsSalesSalesContacts
-    
 }
 
 //****************************************************************************
@@ -4286,26 +3506,6 @@ export class mjBizAppsSalesLifecycleStageTypeResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesSalesAccount_])
-    async mjBizAppsSalesSalesAccounts_LifecycleStageTypeIDArray(@Root() mjbizappssaleslifecyclestagetype_: mjBizAppsSalesLifecycleStageType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Sales Accounts', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwSalesAccounts')} WHERE ${provider.QuoteIdentifier('LifecycleStageTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Sales Accounts', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssaleslifecyclestagetype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Sales Accounts', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesSalesContact_])
-    async mjBizAppsSalesSalesContacts_LifecycleStageTypeIDArray(@Root() mjbizappssaleslifecyclestagetype_: mjBizAppsSalesLifecycleStageType_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Sales Contacts', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwSalesContacts')} WHERE ${provider.QuoteIdentifier('LifecycleStageTypeID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Sales Contacts', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssaleslifecyclestagetype_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Sales Contacts', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesLifecycleStageType_)
     async CreatemjBizAppsSalesLifecycleStageType(
         @Arg('input', () => CreatemjBizAppsSalesLifecycleStageTypeInput) input: CreatemjBizAppsSalesLifecycleStageTypeInput,
@@ -4377,9 +3577,6 @@ export class mjBizAppsSalesLossReason_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_LossReasonIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
 }
 
 //****************************************************************************
@@ -4515,16 +3712,6 @@ export class mjBizAppsSalesLossReasonResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_LossReasonIDArray(@Root() mjbizappssaleslossreason_: mjBizAppsSalesLossReason_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('LossReasonID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssaleslossreason_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesLossReason_)
     async CreatemjBizAppsSalesLossReason(
         @Arg('input', () => CreatemjBizAppsSalesLossReasonInput) input: CreatemjBizAppsSalesLossReasonInput,
@@ -4613,6 +3800,10 @@ export class mjBizAppsSalesPipelineStage_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field({nullable: true}) 
+    @MaxLength(20)
+    OrderStatusOnEntry?: string;
+        
     @Field() 
     @MaxLength(200)
     Pipeline: string;
@@ -4625,15 +3816,6 @@ export class mjBizAppsSalesPipelineStage_ {
     @MaxLength(200)
     DealStatusType?: string;
         
-    @Field(() => [mjBizAppsSalesDealStageEvent_])
-    mjBizAppsSalesDealStageEvents_ToStageIDArray: mjBizAppsSalesDealStageEvent_[]; // Link to mjBizAppsSalesDealStageEvents
-    
-    @Field(() => [mjBizAppsSalesDealStageEvent_])
-    mjBizAppsSalesDealStageEvents_FromStageIDArray: mjBizAppsSalesDealStageEvent_[]; // Link to mjBizAppsSalesDealStageEvents
-    
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_PipelineStageIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
 }
 
 //****************************************************************************
@@ -4682,6 +3864,9 @@ export class CreatemjBizAppsSalesPipelineStageInput {
 
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
+
+    @Field({ nullable: true })
+    OrderStatusOnEntry: string | null;
 
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
@@ -4734,6 +3919,9 @@ export class UpdatemjBizAppsSalesPipelineStageInput {
 
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
+
+    @Field({ nullable: true })
+    OrderStatusOnEntry?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -4799,36 +3987,6 @@ export class mjBizAppsSalesPipelineStageResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDealStageEvent_])
-    async mjBizAppsSalesDealStageEvents_ToStageIDArray(@Root() mjbizappssalespipelinestage_: mjBizAppsSalesPipelineStage_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Stage Events', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealStageEvents')} WHERE ${provider.QuoteIdentifier('ToStageID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Stage Events', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalespipelinestage_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Stage Events', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDealStageEvent_])
-    async mjBizAppsSalesDealStageEvents_FromStageIDArray(@Root() mjbizappssalespipelinestage_: mjBizAppsSalesPipelineStage_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Stage Events', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealStageEvents')} WHERE ${provider.QuoteIdentifier('FromStageID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Stage Events', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalespipelinestage_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Stage Events', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_PipelineStageIDArray(@Root() mjbizappssalespipelinestage_: mjBizAppsSalesPipelineStage_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('PipelineStageID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalespipelinestage_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesPipelineStage_)
     async CreatemjBizAppsSalesPipelineStage(
         @Arg('input', () => CreatemjBizAppsSalesPipelineStageInput) input: CreatemjBizAppsSalesPipelineStageInput,
@@ -4923,18 +4081,6 @@ export class mjBizAppsSalesPipeline_ {
     @MaxLength(200)
     DefaultForecastCategoryType?: string;
         
-    @Field(() => [mjBizAppsSalesDealType_])
-    mjBizAppsSalesDealTypes_DefaultPipelineIDArray: mjBizAppsSalesDealType_[]; // Link to mjBizAppsSalesDealTypes
-    
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_PipelineIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
-    @Field(() => [mjBizAppsSalesForecastSnapshot_])
-    mjBizAppsSalesForecastSnapshots_PipelineIDArray: mjBizAppsSalesForecastSnapshot_[]; // Link to mjBizAppsSalesForecastSnapshots
-    
-    @Field(() => [mjBizAppsSalesPipelineStage_])
-    mjBizAppsSalesPipelineStages_PipelineIDArray: mjBizAppsSalesPipelineStage_[]; // Link to mjBizAppsSalesPipelineStages
-    
 }
 
 //****************************************************************************
@@ -5088,46 +4234,6 @@ export class mjBizAppsSalesPipelineResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDealType_])
-    async mjBizAppsSalesDealTypes_DefaultPipelineIDArray(@Root() mjbizappssalespipeline_: mjBizAppsSalesPipeline_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Types', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealTypes')} WHERE ${provider.QuoteIdentifier('DefaultPipelineID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Types', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalespipeline_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Types', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_PipelineIDArray(@Root() mjbizappssalespipeline_: mjBizAppsSalesPipeline_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('PipelineID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalespipeline_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesForecastSnapshot_])
-    async mjBizAppsSalesForecastSnapshots_PipelineIDArray(@Root() mjbizappssalespipeline_: mjBizAppsSalesPipeline_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Forecast Snapshots', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwForecastSnapshots')} WHERE ${provider.QuoteIdentifier('PipelineID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Forecast Snapshots', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalespipeline_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Forecast Snapshots', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesPipelineStage_])
-    async mjBizAppsSalesPipelineStages_PipelineIDArray(@Root() mjbizappssalespipeline_: mjBizAppsSalesPipeline_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipeline Stages', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelineStages')} WHERE ${provider.QuoteIdentifier('PipelineID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipeline Stages', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalespipeline_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipeline Stages', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesPipeline_)
     async CreatemjBizAppsSalesPipeline(
         @Arg('input', () => CreatemjBizAppsSalesPipelineInput) input: CreatemjBizAppsSalesPipelineInput,
@@ -5283,9 +4389,6 @@ export class mjBizAppsSalesSalesAccount_ {
     @MaxLength(200)
     LeadSourceType?: string;
         
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_AccountIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
 }
 
 //****************************************************************************
@@ -5523,16 +4626,6 @@ export class mjBizAppsSalesSalesAccountResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_AccountIDArray(@Root() mjbizappssalessalesaccount_: mjBizAppsSalesSalesAccount_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('AccountID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalessalesaccount_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesSalesAccount_)
     async CreatemjBizAppsSalesSalesAccount(
         @Arg('input', () => CreatemjBizAppsSalesSalesAccountInput) input: CreatemjBizAppsSalesSalesAccountInput,
@@ -5681,15 +4774,6 @@ export class mjBizAppsSalesSalesContact_ {
     @MaxLength(200)
     LeadSourceType?: string;
         
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_BillingContactIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
-    @Field(() => [mjBizAppsSalesDeal_])
-    mjBizAppsSalesDeals_PrimaryContactIDArray: mjBizAppsSalesDeal_[]; // Link to mjBizAppsSalesDeals
-    
-    @Field(() => [mjBizAppsSalesDealContactRole_])
-    mjBizAppsSalesDealContactRoles_SalesContactIDArray: mjBizAppsSalesDealContactRole_[]; // Link to mjBizAppsSalesDealContactRoles
-    
 }
 
 //****************************************************************************
@@ -5915,36 +4999,6 @@ export class mjBizAppsSalesSalesContactResolver extends ResolverBase {
         return result;
     }
     
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_BillingContactIDArray(@Root() mjbizappssalessalescontact_: mjBizAppsSalesSalesContact_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('BillingContactID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalessalescontact_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDeal_])
-    async mjBizAppsSalesDeals_PrimaryContactIDArray(@Root() mjbizappssalessalescontact_: mjBizAppsSalesSalesContact_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deals', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDeals')} WHERE ${provider.QuoteIdentifier('PrimaryContactID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deals', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalessalescontact_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deals', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
-    @FieldResolver(() => [mjBizAppsSalesDealContactRole_])
-    async mjBizAppsSalesDealContactRoles_SalesContactIDArray(@Root() mjbizappssalessalescontact_: mjBizAppsSalesSalesContact_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Contact Roles', userPayload);
-        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealContactRoles')} WHERE ${provider.QuoteIdentifier('SalesContactID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Contact Roles', userPayload, EntityPermissionType.Read, 'AND');
-        const rows = await provider.ExecuteSQL(sSQL, [mjbizappssalessalescontact_.ID], undefined, this.GetUserFromPayload(userPayload));
-        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Contact Roles', rows, this.GetUserFromPayload(userPayload));
-        return result;
-    }
-        
     @Mutation(() => mjBizAppsSalesSalesContact_)
     async CreatemjBizAppsSalesSalesContact(
         @Arg('input', () => CreatemjBizAppsSalesSalesContactInput) input: CreatemjBizAppsSalesSalesContactInput,

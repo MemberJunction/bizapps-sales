@@ -1,0 +1,300 @@
+/*
+  Board styles.
+
+  SEMANTIC TOKENS ONLY — the same `--mj-*` set the workspace uses, so the board inherits dark mode rather
+  than needing its own. No hardcoded colour appears in this file.
+*/
+
+.db {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-height: 0;
+}
+
+/* ── Pipeline switcher ─────────────────────────────────────────────────────── */
+
+.db-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.db-bar__label {
+    font-size: 0.8125rem;
+    color: var(--mj-text-muted);
+}
+
+.db-bar__pipes {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.db-bar__busy {
+    font-size: 0.8125rem;
+    color: var(--mj-text-secondary);
+}
+
+.db-pipe {
+    padding: 0.3rem 0.75rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 999px;
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-secondary);
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+.db-pipe:hover {
+    background: var(--mj-bg-surface-hover);
+}
+
+.db-pipe--on {
+    border-color: var(--mj-brand-primary);
+    color: var(--mj-brand-primary);
+    font-weight: 600;
+}
+
+.db-msg {
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--mj-status-warning-border);
+    border-radius: 4px;
+    color: var(--mj-status-warning);
+    font-size: 0.8125rem;
+}
+
+.db-empty {
+    color: var(--mj-text-muted);
+    font-size: 0.875rem;
+}
+
+/* ── Columns ───────────────────────────────────────────────────────────────── */
+
+/*
+  Horizontal scroll lives HERE rather than on the page: a board with eight stages must not make the whole
+  shell scroll sideways, which would drag the rail and the header out of view.
+*/
+.db-cols {
+    display: flex;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    align-items: flex-start;
+}
+
+.db-col {
+    flex: 0 0 15rem;
+    display: flex;
+    flex-direction: column;
+    background: var(--mj-bg-surface);
+    border: 1px solid var(--mj-border-default);
+    border-radius: 6px;
+    min-height: 8rem;
+}
+
+/* A closing column is visibly inert — it accepts no drops, and should not invite one. */
+.db-col--closing {
+    border-style: dashed;
+    opacity: 0.75;
+}
+
+.db-col__head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    padding: 0.5rem 0.625rem;
+    border-bottom: 1px solid var(--mj-border-default);
+}
+
+.db-col__name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--mj-text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.db-col__lock {
+    color: var(--mj-text-muted);
+    font-size: 0.6875rem;
+}
+
+.db-col__meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.db-col__count {
+    font-size: 0.75rem;
+    color: var(--mj-text-muted);
+}
+
+.db-col__total {
+    font-size: 0.75rem;
+    color: var(--mj-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* A total that nobody priced still reads as a figure -- this keeps it from reading as a FINAL one. */
+.db-col__total--stated {
+    font-style: italic;
+}
+
+.db-col__partial {
+    font-size: 0.6875rem;
+    color: var(--mj-status-warning);
+}
+
+.db-col__drop {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    padding: 0.5rem;
+    min-height: 4rem;
+}
+
+.db-col__empty {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--mj-text-muted);
+    text-align: center;
+    padding: 0.75rem 0.25rem;
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────────────── */
+
+.db-card {
+    background: var(--mj-bg-surface-card);
+    border: 1px solid var(--mj-border-default);
+    border-radius: 4px;
+    padding: 0.5rem 0.625rem;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.db-card:hover {
+    background: var(--mj-bg-surface-hover);
+}
+
+.db-card:focus-visible {
+    outline: 2px solid var(--mj-border-focus);
+    outline-offset: 1px;
+}
+
+.db-card__name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--mj-text-primary);
+    line-height: 1.25;
+}
+
+.db-card__customer {
+    font-size: 0.75rem;
+    color: var(--mj-text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.db-card__figures {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.db-card__amount {
+    font-size: 0.8125rem;
+    color: var(--mj-text-primary);
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+/*
+ * The two provenance markers are deliberately the SAME weight as each other.
+ *
+ * Making the stated one louder would read as an error, which it is not -- a stated amount is a
+ * legitimate answer, just a different kind of fact from a priced one. Making it quieter would put us
+ * back where we started, with the reader learning nothing unless they notice an absence.
+ */
+.db-card__stated,
+.db-card__noamount,
+.db-card__computed {
+    color: var(--mj-text-muted);
+    font-size: 0.6875rem;
+}
+
+.db-card__prob {
+    font-size: 0.75rem;
+    color: var(--mj-text-muted);
+}
+
+.db-card__foot {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.6875rem;
+    color: var(--mj-text-muted);
+}
+
+.db-card__owner,
+.db-card__close {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.db-card__ghost {
+    padding: 0.375rem 0.625rem;
+    background: var(--mj-bg-surface-card);
+    border: 1px solid var(--mj-brand-primary);
+    border-radius: 4px;
+    font-size: 0.8125rem;
+    color: var(--mj-text-primary);
+}
+
+/* ── Unstaged ──────────────────────────────────────────────────────────────── */
+
+.db-unstaged {
+    border-top: 1px solid var(--mj-border-default);
+    padding-top: 0.625rem;
+}
+
+.db-unstaged__head {
+    margin: 0 0 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--mj-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.db-unstaged__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+}
+
+.db-chip {
+    padding: 0.25rem 0.625rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 999px;
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-secondary);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.db-chip:hover {
+    background: var(--mj-bg-surface-hover);
+}

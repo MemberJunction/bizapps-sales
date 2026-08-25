@@ -93,7 +93,15 @@
                               }
                             </td>
                           <td class="muted">{{ d.PipelineStage || '—' }}</td>
-                          <td class="num">{{ Money(d.Amount) }}</td>
+                          <td class="num">
+                            {{ Money(d.Amount) }}
+                            <!-- The SAME marker the roster below carries. It was missing here, which
+                                 meant the one table a user lands on first was the one that did not say
+                                 where its figures came from. -->
+                            @if (d.Amount !== null && !d.AmountIsComputed) {
+                              <span class="flag" title="Entered by hand — not priced by the orders engine">stated</span>
+                            }
+                          </td>
                           <td class="muted">
                             {{ d.ExpectedCloseDate ? (d.ExpectedCloseDate | date: 'mediumDate' : 'UTC') : '—' }}
                             @if (IsSlipped(d)) { <span class="flag">past</span> }
@@ -192,6 +200,26 @@
                 </div>
               }
             </div>
+          }
+        </div>
+
+        <!-- ═════════════════════════ BOARD ═════════════════════════ -->
+        <!-- Rendered with @if rather than [hidden]: unlike the workspace it holds no unsaved state, so
+             there is nothing to lose by tearing it down, and a hidden board with a horizontal scroller
+             is a layout hazard on the pages that are showing. -->
+        <div class="wrap wrap--board" [hidden]="Page !== 'board'">
+          <div class="sechead"><h2>Board</h2></div>
+
+          @if (Loading) {
+            <mj-loading></mj-loading>
+          } @else if (Page === 'board') {
+            <mjs-deal-board
+              [Deals]="Deals"
+              [Pipelines]="Pipelines"
+              [Stages]="Stages"
+              [DealStatusTypes]="DealStatusTypes"
+              (DealOpened)="OpenDeal($event)"
+              (StageMoved)="Refresh()"></mjs-deal-board>
           }
         </div>
 

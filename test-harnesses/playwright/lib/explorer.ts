@@ -123,6 +123,35 @@ export function expectOnlyKnownErrors(sink: ErrorSink, allowed: RegExp[], contex
 export const KNOWN_POST_DELETE_ERRORS: RegExp[] = [/Error in BaseEntity\.Load\(MJ_BizApps_Sales:/];
 
 /**
+ * KNOWN, FULLY DIAGNOSED shell behaviour: Explorer restoring a record that has been deleted.
+ *
+ * ── THE MECHANISM, SO THIS EXCEPTION NAMES ITS CAUSE RATHER THAN HIDING IT ───────────────────────
+ *
+ * MJ's DataExplorer keeps a `recentRecords` list (and an `entityCache`) inside the user setting
+ * `DataExplorer.State.<applicationId>` in `__mj.UserSetting`. On entering the app it re-Loads those
+ * records to render them. Any that have since been deleted fail, and the shell writes:
+ *
+ *     Error in BaseEntity.Load(MJ_BizApps_Sales: Deals, Key: ID=...)
+ *
+ * The app is behaving correctly — it is reporting that a record it was asked to restore is gone.
+ *
+ * WHY THIS CANNOT BE CLEANED UP FROM THIS REPO, which is the reason it is tolerated rather than fixed:
+ * that setting is served through `UserInfoEngine`'s CACHE. A SQL write behind the cache is invisible to
+ * the running app — measured on `selectedEntityName`, where the database read back the new value and the
+ * app went on using the old one. So unlike `__mj.UserRecordLog`, which the cleanup sweep now clears
+ * properly, this list cannot be emptied by the harness. It needs an MJAPI restart or an in-app path.
+ *
+ * It is MJ shell behaviour, not a sales defect, and no sales-side change moves it.
+ *
+ * SCOPE, deliberately narrow: only `BaseEntity.Load` failures, and only for this app's entities. A
+ * genuine console error of any other shape — a template error, a failed save, an unhandled rejection —
+ * still fails the spec, which is the whole point of keeping the keystone.
+ */
+export const KNOWN_DEAD_RECORD_RESTORE_ERRORS: RegExp[] = [
+  /Error in BaseEntity\.Load\(MJ_BizApps_Sales:/,
+];
+
+/**
  * True once the authenticated Explorer shell is up.
  *
  * Deliberately provider-agnostic: it does not care whether the human got here through MSAL, Auth0,
@@ -239,7 +268,29 @@ export async function closeRestoredRecordTabs(page: Page): Promise<number> {
     const closer = page.getByRole('button', { name: /^Close\s+.+/i }).first();
     if (!(await closer.count().catch(() => 0))) break;
     if (!(await closer.isVisible().catch(() => false))) break;
-    await closer.click().catch(() => undefined);
+
+    /**
+     * ── THE TIMEOUT IS THE WHOLE POINT OF THIS LINE, AND ITS ABSENCE COST SIX MINUTES A CALL ─────
+     *
+     * This was a bare `click().catch(() => undefined)`. A click on a control that is present and
+     * visible but NOT ACTIONABLE — covered by an overlay, or mid-animation — does not fail fast: it
+     * retries for Playwright's default 30 SECONDS before throwing, and the `.catch` then swallowed
+     * that silently. Twelve iterations of that is six minutes of a spec's budget spent clicking
+     * nothing, reported as no error at all.
+     *
+     * Measured: this is what made `10` and `30` take 6.9 and 6.4 minutes, and what timed out
+     * `04-landing-state-tripwire` at 240s inside `openSalesApp` — the spec that had passed alone
+     * minutes earlier. A silent catch around an unbounded wait is invisible until it is fatal.
+     *
+     * So the click is bounded, and a closer that will not act ENDS the loop rather than handing the
+     * same 2s to eleven more. If it cannot be clicked, there is nothing here to close.
+     */
+    const acted = await closer
+      .click({ timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!acted) break;
+
     await page.waitForTimeout(400);
     closed++;
   }
@@ -248,27 +299,126 @@ export async function closeRestoredRecordTabs(page: Page): Promise<number> {
 }
 
 /** Navigate into the generated Sales application. */
+/**
+ * Waits for the app to have actually RENDERED, rather than for a number of seconds.
+ *
+ * ── THE ORDER-DEPENDENCE THIS FIXES, MEASURED ───────────────────────────────────────────────────
+ *
+ * `openSalesApp` slept a fixed 4000ms. On a COLD app that is not enough: measured on this host, at 4s
+ * the entity panel has not rendered at all — `Deals` matches ZERO nodes — and by 8s it is there and
+ * visible. `openAllEntities` then found no panel, fell through to its chevron fallback, clicked
+ * whatever that matched, and the entity was never listed. The spec reported
+ * `entity "Deals" must be listed in the app`, which points at the app rather than at the clock.
+ *
+ * In-suite the app is warm from earlier specs, so 4s was enough and the same specs got past the list.
+ * That is a LARGE PART of the standalone-versus-in-suite divergence in 10, 20 and 30 — one fixed sleep
+ * sitting where a condition belonged — but it is NOT the whole of it. The rest is the landing state
+ * documented above `openSalesApp`: which screen the app lands on is decided by a persisted field, and
+ * in-suite that field is left set by whichever spec ran before. Timing and leftover state were two
+ * causes wearing one symptom, which is why fixing either one alone still left these specs flaky.
+ *
+ * A fixed sleep is always either too short somewhere or wasted everywhere; this waits for the thing
+ * itself and returns as soon as it appears, so the warm case does not pay for the cold one.
+ */
+async function waitForSalesAppShell(page: Page): Promise<void> {
+  // Either the entity panel (the usual landing) or a grid heading — the landing screen VARIES with
+  // what was last visited, which is why this accepts both rather than demanding one.
+  const panel = page.getByText(/entities available|All Entities|My Favorites/i).first();
+  const grid = page.locator('h1, h2, .entity-title').first();
+  await expect
+    .poll(async () => (await panel.count()) > 0 || (await grid.count()) > 0, {
+      timeout: 30_000,
+      message:
+        'the generated Sales application never rendered its landing — neither the entity panel nor a '
+        + 'grid heading appeared within 30s',
+    })
+    .toBe(true);
+}
+
+/**
+ * ── WHERE THE LANDING IS DECIDED, AND WHY THE HARNESS CANNOT SET IT ─────────────────────────────
+ *
+ * The generated app's landing is MJ's **DataExplorer dashboard**, and which screen it shows comes down
+ * to one persisted field: `selectedEntityName`, in the user setting `DataExplorer.State.<applicationId>`
+ * in `__mj.UserSetting`. Null means the entity LIST; set means that entity's GRID, with no
+ * `.entity-item` anywhere on the page. Anything that opens an entity writes it — the previous spec, the
+ * previous run, a human clicking around before the suite starts. THAT is why the same commit failed on
+ * `Deals` one run and `Pipeline Stages` the next, and why a spec passed alone and failed in the suite.
+ *
+ * The obvious fix does not work, and it is worth writing down so nobody spends the evening on it again.
+ * Clearing that field by SQL before navigating makes the DATABASE read null — measured, it does — and
+ * the app still lands on the grid, because the setting is served through `UserInfoEngine`'s cache
+ * rather than re-read per page load. A write behind the cache is invisible to the app.
+ *
+ * So the harness asks the app instead, through the app's own affordance: the **"All" breadcrumb**, which
+ * returns to the entity list and stays inside the application (measured: `.entity-item` goes 0 -> 20,
+ * URL unchanged at /app/mjbizappssales).
+ *
+ * ONE TRAP, MEASURED THE HARD WAY: that breadcrumb is not always immediately actionable, and clicking it
+ * with `{ force: true }` navigates to `/app/home/Home` and leaves the Sales app entirely. An earlier
+ * version of this file recorded that as "the All breadcrumb leaves the app" — it does not; forcing a
+ * click onto a covered element does. Let Playwright wait for it to be actionable and it does the right
+ * thing. Never force this one.
+ */
+/**
+ * Has the app reached a screen a spec can actually work from?
+ *
+ * The two valid landings are the entity list and an entity grid (which carries an "All" breadcrumb).
+ * Anything else — still booting, or the dead-record error described in `openSalesApp` — is neither.
+ */
+async function hasUsableLanding(page: Page): Promise<boolean> {
+  const cards = await page.locator('.entity-item').count().catch(() => 0);
+  const crumbs = await page.locator('.breadcrumb-item').count().catch(() => 0);
+  return cards > 0 || crumbs > 0;
+}
+
 export async function openSalesApp(page: Page): Promise<void> {
   await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(4000);
-  // Restored tabs hijack the landing — see closeRestoredRecordTabs. Clear them, then re-enter the app.
-  if (await closeRestoredRecordTabs(page)) {
+  await waitForSalesAppShell(page);
+
+  /**
+   * ── RECOVER FROM A RESTORED RECORD THAT NO LONGER EXISTS ────────────────────────────────────────
+   *
+   * This one is real, and the harness creates it itself. A spec makes a `PW-VERIFY` deal, opens it —
+   * which makes the app remember it as an open record — and then the cleanup sweep DELETES the deal
+   * between runs. Next run the app faithfully restores a record that is gone and stops on an error:
+   *
+   *     Could not load MJ_BizApps_Sales: Deals record.
+   *     InnerLoad returned false for key ID=82A6EC47-...
+   *
+   * There is no entity list and no breadcrumb on that screen, so everything downstream fails with what
+   * looks like "the app did not load". It loaded fine; it is showing an error about our own deleted row.
+   *
+   * Closing the stale records and re-entering clears it (measured: sweep closes 2 in ~2s, the error is
+   * gone after re-entry). This runs ONLY when the app has not reached a usable landing — the sweep used
+   * to run on every entry, which is how it came to cost six minutes a call, and it has nothing to do on
+   * a healthy landing because the tab bar is not rendered there at all
+   * (`mj-tab-container.hide-tab-bar`, measured).
+   *
+   * The deeper fix belongs in the cleanup sweep, which should not delete rows the app still points at.
+   * That file is landed and owned elsewhere this round, so this recovers rather than prevents.
+   */
+  if (!(await hasUsableLanding(page))) {
+    await closeRestoredRecordTabs(page);
     await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(3000);
+    await waitForSalesAppShell(page);
   }
+
   expect(page.url(), 'should be inside the generated Sales application').toContain('mjbizappssales');
 }
 
 /**
- * Open the app's entity picker.
+ * Make sure the app is showing its entity list, and that the list is showing ALL entities.
  *
- * RECON CORRECTION: the generated app does NOT show an "All Entities" nav item once it has opened an
- * entity — it auto-opens one (alphabetically) and collapses its left rail to icons. The way back to
- * the full list is the **"All" breadcrumb** at the top. The earlier "All Entities" label came from the
- * app's initial landing state, not from a stable rail, which is exactly the kind of thing that makes
- * hardcoded selectors rot.
+ * The landing depends on leftover state (see the block above `openSalesApp`), so this no longer assumes
+ * either screen. If the list is already up it just fixes the toggle; if a grid is up it clicks the app's
+ * own "All" breadcrumb to come back. What it does NOT do any more is hunt: the previous version tried
+ * three text matches and then clicked `.k-icon, [class*="chevron"], [class*="expand"]` — an arbitrary
+ * control chosen by DOM order, which is what put the app on a different screen from one run to the next.
  */
 export async function openAllEntities(page: Page): Promise<void> {
+  const cards = page.locator('.entity-item');
+
   /**
    * THE PANEL REMEMBERS ITS TOGGLE, AND THAT IS A TRAP — for tests and for a live demo alike.
    *
@@ -284,41 +434,75 @@ export async function openAllEntities(page: Page): Promise<void> {
   const forceAllEntities = async (): Promise<void> => {
     const allToggle = page.getByText(/^\s*All Entities\s*$/i).first();
     if ((await allToggle.count()) && (await allToggle.isVisible().catch(() => false))) {
-      await allToggle.click().catch(() => undefined);
-      await page.waitForTimeout(2000);
+      await allToggle.click({ timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(1500);
     }
   };
 
-  // ALREADY ON THE PANEL? Just make sure the right toggle is active. The app's landing screen VARIES —
-  // sometimes a grid (the default entity), sometimes this panel — depending on what was last visited, and
-  // an earlier version hunted for an "All" breadcrumb that does not exist on the panel.
-  const onPanel = page.getByText(/All Entities/i).first();
-  if ((await onPanel.count()) && (await onPanel.isVisible().catch(() => false))) {
-    await forceAllEntities();
-    return;
+  const allCrumb = page.locator('.breadcrumb-item').filter({ hasText: /^\s*All\s*$/ }).first();
+
+  /**
+   * WAIT FOR THE LANDING TO SETTLE BEFORE DECIDING WHICH LANDING IT IS.
+   *
+   * There are two valid landings — the entity list, or an entity's grid with an "All" breadcrumb — and
+   * a third state that is neither: the app still booting. Checking `cards.count()` the moment this is
+   * called reads that third state as "a grid must be up", goes looking for a breadcrumb that has not
+   * rendered, and fails with `element(s) not found` on an app that was about to be fine. Measured: this
+   * is what took specs 20 and 30 down while 04 passed alone, because alone the app was already warm.
+   *
+   * So settle first, branch second. This is the same mistake the fixed 4000ms sleep made — acting on a
+   * page before it has finished becoming itself.
+   */
+  /**
+   * Recovery belongs here as well as in `openSalesApp`, because a spec can be stranded MID-RUN.
+   *
+   * `openSalesApp` clears a dead restored record on the way in, but specs like the demo tour re-enter
+   * the app many times, and a record can be deleted between two of those entries — by this spec, or by
+   * the sweep. Recovering only at first entry left `20` failing on its second tour step with "the app
+   * never settled", which reads as an app fault and is not one.
+   *
+   * So: wait; if it never settles, clear the stale records and re-enter ONCE; then insist. One retry,
+   * not a loop — if the app cannot reach a landing twice, that is worth failing on.
+   */
+  const settled = async (): Promise<boolean> =>
+    (await cards.count()) > 0 || (await allCrumb.count()) > 0;
+
+  const reached = await expect
+    .poll(settled, { timeout: 45_000 })
+    .toBe(true)
+    .then(() => true)
+    .catch(() => false);
+
+  if (!reached) {
+    await closeRestoredRecordTabs(page);
+    await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
+    await expect
+      .poll(settled, {
+        timeout: 45_000,
+        message:
+          'the app never settled into either landing, even after clearing stale records and '
+          + 're-entering — no entity list and no "All" breadcrumb appeared',
+      })
+      .toBe(true);
   }
 
-  const breadcrumb = page.getByText(/^\s*All\s*$/).first();
-  if ((await breadcrumb.count()) && (await breadcrumb.isVisible().catch(() => false))) {
-    await breadcrumb.click();
-    await page.waitForTimeout(3500);
-    await forceAllEntities();
-    return;
+  if ((await cards.count()) === 0) {
+    // A leftover selection has put a grid on the landing. The breadcrumb is the way back — unforced,
+    // and given time to become actionable. See the trap note above `openSalesApp`.
+    await allCrumb.click({ timeout: 20_000 });
+    await page.waitForTimeout(2500);
   }
 
-  // Fallback: expand the collapsed rail, then take its entities item.
-  const chevron = page.locator('.k-icon, [class*="chevron"], [class*="expand"]').first();
-  if (await chevron.count()) {
-    await chevron.click().catch(() => undefined);
-    await page.waitForTimeout(1500);
-  }
-  const link = page.getByText(/All Entities|Entities/i).first();
-  await expect(link, 'an entity-list entry point must be reachable in the generated app').toBeVisible({
-    timeout: 20_000,
-  });
-  await link.click();
-  await page.waitForTimeout(3500);
   await forceAllEntities();
+
+  // `.entity-item` is the panel's own card class — one per entity in the application, 20 on this host.
+  await expect
+    .poll(async () => cards.count(), {
+      timeout: 30_000,
+      message:
+        'the app never rendered its entity list, from either the landing or the "All" breadcrumb',
+    })
+    .toBeGreaterThan(0);
 }
 
 /**
@@ -326,11 +510,21 @@ export async function openAllEntities(page: Page): Promise<void> {
  * shows, e.g. "Deals" for `MJ_BizApps_Sales: Deals`).
  */
 export async function openEntity(page: Page, displayName: string): Promise<void> {
-  const target = page.getByText(new RegExp(`^\\s*${displayName}\\s*$`, 'i')).first();
-  await expect(target, `entity "${displayName}" must be listed`).toBeVisible({ timeout: 20_000 });
+  // `.entity-item-name` is the card's own label element. A bare text match also hits the breadcrumb and
+  // the recent-items list, which are not the card and do not open the grid when clicked.
+  const target = page
+    .locator('.entity-item')
+    .filter({ has: page.locator('.entity-item-name', { hasText: new RegExp(`^\\s*${displayName}\\s*$`, 'i') }) })
+    .first();
+  await expect(target, `entity "${displayName}" must be listed in the app`).toBeVisible({ timeout: 20_000 });
   await target.scrollIntoViewIfNeeded().catch(() => undefined);
   await target.click();
-  await page.waitForTimeout(5000);
+
+  // The grid announces itself in the breadcrumb bar; wait for that rather than for a number of seconds.
+  await expect(
+    page.locator('.breadcrumb-label').filter({ hasText: new RegExp(displayName, 'i') }).first(),
+    `the breadcrumb should become "${displayName}" once its grid is open`,
+  ).toBeVisible({ timeout: 25_000 });
 }
 
 /** Rows currently rendered in whatever grid the page is showing. */
@@ -514,21 +708,66 @@ export async function gridRecordCount(page: Page): Promise<number> {
  * chip afterwards, so the row leaving the grid is the correct UI-level assertion — not the absence of
  * the row from the database.
  */
+/**
+ * ── `:visible` IS LOAD-BEARING HERE, AND WITHOUT IT DELETION NEVER RAN ONCE ──────────────────────
+ *
+ * Measured, headed: `button[title="Delete this Record"]` resolved **36 times** and every one of them
+ * reported `hidden`, so `.first()` picked a control nobody could click and the step failed with
+ * `the record view must expose "Delete this Record"` — about a record view that exposes it perfectly
+ * well.
+ *
+ * MJ's shell keeps every open tab's form in the DOM and merely HIDES the inactive ones. By the time
+ * `10-deal-crud` reaches its delete step it has opened a Pipeline form and a Deal form, so the page is
+ * holding several record views at once and only the front one is visible. An unscoped `.first()` is
+ * then a lottery weighted towards the oldest tab.
+ *
+ * This file already documents exactly this trap for `fieldLabelVisible` — "`visible=true` IS
+ * LOAD-BEARING, and leaving it off produced one of the more confusing failures this harness has had" —
+ * and `40-deal-workspace` fixed the same thing on its row locator with `tr:visible`. The delete helper
+ * never got the same treatment, and the consequence is worth stating plainly: **the delete step has
+ * never executed, so deletion through the UI has never been exercised by this suite at all.** Every
+ * "does not assert cascade" note about it was academic.
+ *
+ * The row locator gets the same filter for the same reason: a hidden roster row can match the name.
+ */
 export async function deleteRecordViaRecordView(page: Page, recordName: string): Promise<void> {
   // Open the record from the grid.
-  const row = page.locator('tr, .ag-row, [role="row"]').filter({ hasText: recordName }).first();
+  const row = page
+    .locator('tr:visible, .ag-row:visible, [role="row"]:visible')
+    .filter({ hasText: recordName })
+    .first();
   await expect(row, `a grid row for "${recordName}" must exist to open it`).toBeVisible({ timeout: 20_000 });
-  const link = row.locator('a').first();
-  if (await link.count()) {
-    await link.click({ timeout: 15_000 });
-  } else {
-    await row.dblclick({ timeout: 15_000 });
+  /**
+   * ── CLICK THE NAME, THEN "OPEN FULL RECORD". THE ROW CLICK ALONE DOES NOT OPEN A RECORD ─────────
+   *
+   * Seen in a headed run's failure screenshot, which is the only reason this is understood: clicking
+   * the row landed on its SELECTION CHECKBOX, so the grid simply ticked the row. What opens instead of
+   * a record view is a slide-in DETAILS panel carrying an "Open Full Record" button — and until that
+   * button is pressed there is no record view, and therefore no "Delete this Record" anywhere on the
+   * page.
+   *
+   * This is why the delete step had never once executed. Before the visibility fix the locator matched
+   * 36 HIDDEN copies of the button (every open tab's form stays in the DOM) and failed on visibility;
+   * after it, the honest answer came back — not found — because the screen genuinely has none.
+   *
+   * The name cell is targeted directly so the click cannot land on the checkbox column again.
+   */
+  await row.getByText(recordName, { exact: false }).first().click({ timeout: 15_000 });
+  await page.waitForTimeout(2500);
+
+  const openFull = page.getByRole('button', { name: /Open Full Record/i }).first();
+  if ((await openFull.count()) && (await openFull.isVisible().catch(() => false))) {
+    await openFull.click({ timeout: 15_000 });
   }
   await page.waitForTimeout(5500);
 
-  // The explicit record-level delete control.
-  const del = page.locator('button[title="Delete this Record"]').first();
-  await expect(del, 'the record view must expose "Delete this Record"').toBeVisible({ timeout: 20_000 });
+  // The explicit record-level delete control, on the VISIBLE form — see the block above.
+  const del = page.locator('button[title="Delete this Record"]:visible').first();
+  await expect(
+    del,
+    'the record view must expose "Delete this Record" — if this is not found, check the run screenshot '
+    + 'for a slide-in Details panel, which means the full record never opened',
+  ).toBeVisible({ timeout: 20_000 });
   await del.click({ timeout: 15_000 });
   await page.waitForTimeout(2000);
 

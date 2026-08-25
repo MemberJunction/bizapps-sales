@@ -37,7 +37,21 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+_PRESET_DB_DATABASE="${DB_DATABASE:-}"
 set -a; . ./.env; set +a
+
+# AN EXPLICIT DB_DATABASE FROM THE ENVIRONMENT WINS OVER .env.
+#
+# `set -a; . ./.env` ASSIGNS, so it silently overwrites anything already exported -- which made
+# `DB_DATABASE=SomeOtherDb bash scripts/seed-dev-data.sh` seed the database named in .env instead. On a
+# machine where several sessions share one checkout that is a script which cannot be pointed at a
+# target: it always writes wherever .env happens to point, which during a fresh-install test was very
+# nearly the live demo host.
+#
+# A value exported by the caller is captured before the source and reinstated after. Unset means
+# unchanged behaviour, so the ordinary `bash scripts/seed-dev-data.sh` still reads .env exactly as before.
+# The same defect was fixed in rebuild-db.sh and append-codegen.sh; those four are all of them.
+[ -n "${_PRESET_DB_DATABASE:-}" ] && DB_DATABASE="$_PRESET_DB_DATABASE"
 
 DEV_EMAIL="${1:-${DEV_USER_EMAIL:-$(git config user.email || true)}}"
 if [[ -z "$DEV_EMAIL" ]]; then

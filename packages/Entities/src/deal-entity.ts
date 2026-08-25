@@ -47,6 +47,7 @@
  */
 import {
     BaseEntity,
+    EntitySaveOptions,
     IRunViewProvider,
     ValidationErrorInfo,
     ValidationErrorType,
@@ -54,9 +55,18 @@ import {
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 
+// THE PEER'S GENERATED CLASS, imported across the app boundary. This is the first hard import from
+// another BizApp in this repo, and it is deliberate: the standalone-Sales premise is retired (Amith —
+// sales has a hard dependency on orders), so the import-free seam no longer has to be preserved.
+// `mj-app.json` has always declared `mj-bizapps-orders`; this makes the code say so too.
+//
+// The TYPE is the generated class. The RUNTIME class is whatever `ClassFactory` resolves — the browser
+// gets orders' client subclass, the server gets `OrderEntityServer` — so the pricing and booking walk
+// still belong to orders. Sales never becomes the thing that computes money.
+import { mjBizAppsOrdersOrderHeaderEntity } from '@mj-biz-apps/orders-entities';
+
 import {
     mjBizAppsSalesDealEntity,
-    mjBizAppsSalesDealLineEntity,
     mjBizAppsSalesDealPaymentScheduleEntity,
 } from './generated/entity_subclasses';
 
@@ -67,29 +77,6 @@ export const DEAL_DEFAULT_PAYMENT_METHOD = 'ACH';
 interface DealRoleIDRow {
     ID: string;
 }
-
-/**
- * The pricing-provenance block on `DealLine` — WRITE-ONLY from an `Orders.PreviewOrder` response.
- *
- * These four columns hold the answer the pricing engine gave, its explanation, and the moment it gave
- * it. Nothing in this app may compute them, and nothing outside the sanctioned pricing path may set
- * them: a hand-edited `ResolvedUnitPrice` is a number that looks authoritative and carries a provenance
- * stamp saying it came from the engine, when it did not. That is worse than an obviously wrong number,
- * because every downstream reader has been told it can trust this one.
- *
- * @see DealLineEntity.Validate — the guard, and why it lives there rather than in field permissions.
- */
-/**
- * Exported so the Explorer Deal Line form can refuse these edits BEFORE the round-trip, using the same
- * list the entity server refuses them with. Same reasoning as `close-lock.ts`: two copies would drift,
- * and the drift would only surface as a save the user did not expect to fail.
- */
-export const PRICING_PROVENANCE_FIELDS = [
-    'ResolvedUnitPrice',
-    'ResolvedExtendedAmount',
-    'PriceComponentsJSON',
-    'PricedAt',
-] as const;
 
 /**
  * Records a blocking problem. Separated from {@link warn} because only a failure clears
@@ -131,6 +118,140 @@ function below(value: number | null, min: number): boolean {
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deals')
 export class DealEntity extends mjBizAppsSalesDealEntity {
+    /**
+     * THE DEAL'S ORDER, as a 1:1 embedded peer joined by `OrderID`.
+     *
+     * One order per deal, created in Draft at deal creation, and from then on the only place line items
+     * live — the deal holds none (S-US4). Loading a deal loads its order; saving a deal saves the order
+     * and its lines in the same transaction, because an `EmbeddedRecord` is a save-graph participant.
+     *
+     * ── WHY THIS IS HAND-DECLARED AND NOT GENERATED ──
+     *
+     * CodeGen can emit this from an `EntityField.EmbeddedRecord` metadata row, and that is the normal
+     * route. It does not work here yet. CodeGen resolves the peer's import package through
+     * `entityPackageName`, which carries two incompatible meanings on one key: with a plain string every
+     * non-core schema resolves to THIS package, so orders' import comes out as `sales-entities`; with a
+     * schema map, `getExternalEntitySchemas()` returns the map's keys and CodeGen then excludes those
+     * schemas from every artifact it emits — so adding sales' own schema to get its own imports right
+     * makes sales stop generating its own entities entirely. Measured, both ways: the map-with-orders
+     * variant kept all 22 entity classes but emitted `from 'mj_generatedentities'`; the map-with-both
+     * variant emitted 0 classes, 0 GraphQL types, and deleted the generated Angular forms.
+     *
+     * So the declaration lives here instead. `DeclareEmbeddedRecord` is `protected` on `BaseEntity`
+     * precisely so a subclass can call it, which is the same mechanism the generated code uses — this is
+     * a different author, not a different pattern. If MJ separates those two meanings later, this moves
+     * to a metadata row and the accessors below are deleted; nothing else changes.
+     *
+     * ── OnClear: 'refuse' ──
+     *
+     * The three modes are `orphan` (default — null the FK, leave the row), `delete`, and `refuse`.
+     *
+     * `orphan` is wrong: the order holds every line item, so a detached order is the record of what was
+     * being sold with nothing pointing at it. `delete` is worse once the order matters — finance reviews
+     * and advances this order after Closed Won, and a Confirmed order has journal entries behind it.
+     * `refuse` says the link is not the kind of thing you unset: nothing in S-US4/S-US5 describes a deal
+     * legitimately shedding its order, and `FK_Deal_OrderHeader` carries no cascade in either direction
+     * for the same reason.
+     */
+    private readonly __embeddedOrder = this.DeclareEmbeddedRecord<mjBizAppsOrdersOrderHeaderEntity>({
+        ForeignKeyField: 'OrderID',
+        RelatedEntity: 'MJ_BizApps_Orders: Order Headers',
+        OnClear: 'refuse',
+    });
+
+    /**
+     * The embedded order, or null when this deal has none yet.
+     *
+     * Named to match what CodeGen would emit for `OrderID` (`{Field}_Object`), so a later move to the
+     * generated declaration is a deletion here rather than a rename at every call site.
+     */
+    public get OrderID_Object(): mjBizAppsOrdersOrderHeaderEntity | null {
+        return this.__embeddedOrder.Value;
+    }
+
+    /**
+     * The embedded order, creating it in memory if this deal has none. Idempotent.
+     *
+     * This is the hook deal creation uses to mint the Draft order: `Ensure()` provisions the peer, orders'
+     * own `NewRecord()` defaults `Status` to `'Draft'` and stamps `OrderDate`, and the row is written when
+     * the deal is saved. Sales sets no price and no status — it asks for an order to exist.
+     */
+    public OrderID_EnsureObject(): mjBizAppsOrdersOrderHeaderEntity {
+        return this.__embeddedOrder.Ensure();
+    }
+
+    /**
+     * Hydrates the embedded peer from a persisted `OrderID`, and returns it.
+     *
+     * `Ensure()` deliberately cannot do this — its own comment says re-attachment "is an explicit FK set,
+     * not Ensure's job", and it is right, because restamping a leftover peer's key after a `Clear()` would
+     * silently re-attach an orphan. Resolving a peer the FK ALREADY names is the different, safe question,
+     * and this is where it gets asked. `LoadEager` is the same call `InnerLoad` makes when a deal is read
+     * from the database, so a deal hydrated here is indistinguishable from a deal that was loaded.
+     */
+    public async OrderID_LoadObject(): Promise<mjBizAppsOrdersOrderHeaderEntity | null> {
+        await this.__embeddedOrder.LoadEager();
+        return this.__embeddedOrder.Value;
+    }
+
+    /**
+     * ── AFTER A SAVE, THE INSTANCE REALLY IS AN EDIT OF A REAL RECORD — INCLUDING ITS ORDER ─────────
+     *
+     * DN-17. Adding a line straight after creating a deal wrote it to a SECOND `OrderHeader` that nothing
+     * referenced: invisible to the rep, uncounted by `Deal.Amount`, and an orphan left in orders.
+     *
+     * ── WHAT WAS ACTUALLY BROKEN, WHICH IS NARROWER THAN IT FIRST LOOKED ────────────────────────────
+     *
+     * Not the round trip. Measured through Angular's dev hooks on a real create: afterwards
+     * `deal.OrderID` holds `DA871180-…`, exactly matching the row on disk. The framework already keeps
+     * the promise `DealWorkspaceComponent.Save()` makes — "the same instance now carries the server's
+     * IDs" — for the FIELD.
+     *
+     * What it does not carry is the COMPANION. `EmbeddedRecord` gates `Value` on a private `exposed`
+     * flag, and the only things that set it are `Ensure()`, `LoadEager()` (from `InnerLoad`) and
+     * `Deserialize()` of a wire payload. A header-only create reaches none of them:
+     *
+     *   · `OnOwnerNewRecord` leaves a NULLABLE FK unexposed — correct, there is no order yet.
+     *   · The companion wire only travels on `MJ.SaveEntityGraph`, and `BaseEntity.Save()` routes there
+     *     only when `plan.NodeCount > 1`. A deal saved with no lines and no instalments is ONE node, so
+     *     the ordinary mutation runs and no companion payload comes back. (This is why the bug hides when
+     *     a rep happens to add a line before the first save — that save IS multi-node.)
+     *   · `LoadEager` runs from `InnerLoad`, and a create never loads.
+     *
+     * So `OrderID` pointed at a real order while `OrderID_Object` was null, and the next
+     * `OrderID_EnsureObject()` concluded there was no order and minted one. Both halves were behaving as
+     * designed; nothing owned the gap between them.
+     *
+     * ── WHY HERE, AND NOT IN THE WORKSPACE ─────────────────────────────────────────────────────────
+     *
+     * Fixing `DealWorkspaceComponent.Save()` would fix the one surface that happened to find it. The
+     * board, an Action running client-side, an importer and the next surface nobody has written all reach
+     * the same state through plain `entity.Save()`. The entity is where "my FK and my peer agree" belongs,
+     * so it is fixed once, for every caller.
+     *
+     * ── THE GUARD IS THE WHOLE DESIGN ──────────────────────────────────────────────────────────────
+     *
+     * `this.OrderID && !this.OrderID_Object` fires in exactly the broken case and nowhere else. A deal
+     * whose peer is already exposed — every server-side save, and every client save that went through the
+     * graph path — skips it, so this costs nothing and cannot clobber a peer holding unsaved edits. A deal
+     * with no order at all skips it too.
+     *
+     * `DealEntityServer` calls this through `super.Save()` and reaches the guard with its peer exposed by
+     * `provisionEmbeddedOrder()`, so the server path is a no-op by construction rather than by luck.
+     *
+     * The general fix belongs upstream: `DeclareEmbeddedRecord` has no load policy, so no declaration can
+     * say "resolve this peer from a persisted FK". Every app that embeds a record on a nullable FK will
+     * meet this. Recorded in `DECISIONS-NEEDED.md` DN-17 as an MJ change to propose, not worked around
+     * twice.
+     */
+    public override async Save(options?: EntitySaveOptions): Promise<boolean> {
+        const saved = await super.Save(options);
+        if (saved && this.OrderID && !this.OrderID_Object) {
+            await this.OrderID_LoadObject();
+        }
+        return saved;
+    }
+
     /**
      * @remarks
      * `super.Validate()` is what fans out to the child collections, so it must be called and its result
@@ -281,131 +402,14 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
 }
 
 /**
- * A deal line, with the rules a form can check.
+ * `DealLineEntity` was here. RETIRED with the table: the deal holds no line items, so there are no
+ * line rules for it to carry. Every invariant it enforced is accounted for in docs/DECISIONS.md
+ * D-DL1 — most relocated to orders' own CHECK constraints, two of them with changed semantics
+ * (negative quantities become legal; the discount is a FRACTION there, not a percentage).
  *
- * Reached through `Deal.Lines`, which builds its children with `GetEntityObject` — so this subclass is
- * resolved by the class factory and these rules apply to every line in the graph.
+ * The pricing-provenance guard went with it, and correctly: it existed because sales held columns
+ * carrying the engine's answer that sales was not allowed to author. It now holds none.
  */
-@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Lines')
-export class DealLineEntity extends mjBizAppsSalesDealLineEntity {
-    public override Validate(): ValidationResult {
-        const result = super.Validate();
-        const label = this.ProductName?.trim() || 'this line';
-
-        if (!this.ProductName || !this.ProductName.trim()) {
-            fail(result, 'ProductName', 'Every line needs a product or service name.', this.ProductName);
-        }
-        if (this.Quantity === null || this.Quantity === undefined || this.Quantity < 0) {
-            fail(result, 'Quantity', `Quantity on ${label} must be zero or more.`, this.Quantity);
-        }
-        if (outsideRange(this.RequestedDiscountPct, 0, 100)) {
-            fail(
-                result,
-                'RequestedDiscountPct',
-                `Requested discount on ${label} must be between 0 and 100%.`,
-                this.RequestedDiscountPct,
-            );
-        }
-        if (below(this.AnnualGrossFees, 0)) {
-            fail(result, 'AnnualGrossFees', `Annual gross fees on ${label} cannot be negative.`, this.AnnualGrossFees);
-        }
-        if (below(this.DiscountAmount, 0)) {
-            fail(
-                result,
-                'DiscountAmount',
-                `Discount on ${label} cannot be negative — a surcharge belongs on its own line.`,
-                this.DiscountAmount,
-            );
-        }
-        // Compared as DATES rather than as `yyyy-MM-dd` strings, which is what the retired draft did.
-        // The entity's own field type is what makes this correct for both a date-only and a full
-        // timestamp value, with no dependency on a normalizing boundary upstream.
-        if (this.ServicePeriodStart && this.ServicePeriodEnd && this.ServicePeriodEnd < this.ServicePeriodStart) {
-            fail(
-                result,
-                'ServicePeriodEnd',
-                `Service period on ${label} ends before it starts.`,
-                this.ServicePeriodEnd,
-            );
-        }
-
-        // DELIBERATELY NOT CHECKED: whether Total equals AnnualGrossFees - DiscountAmount. See the
-        // file header — all three are transcriptions, and asserting the relationship is computing money.
-
-        this.RefusePricingProvenanceEdits(result);
-
-        return result;
-    }
-
-    /**
-     * Refuses any caller-originated change to the four write-only pricing-provenance columns.
-     *
-     * ── WHY THIS EXISTS, AND WHY IT IS NEW ──────────────────────────────────────────────────────
-     *
-     * Until Related Record Collections landed, the only way a browser could write a deal line was the
-     * `Sales.SaveDeal` remote operation, which copied a LISTED set of fields — and the four below were
-     * deliberately absent from that list. Retiring the operation retired the list with it. Saving a line
-     * is now an ordinary entity save, and an ordinary entity save had nothing stopping it.
-     *
-     * THE HOLE WAS ALREADY WIDER THAN THAT, which is the part worth knowing: the generated Deal Lines
-     * form has always exposed these columns as editable inputs, so any Explorer user could type into
-     * them long before this change. Putting the rule on the ENTITY closes both doors at once, which
-     * neither a restored whitelist nor a UI change would do.
-     *
-     * ── WHY NOT FIELD PERMISSIONS ───────────────────────────────────────────────────────────────
-     *
-     * `AllowUpdateAPI = 0` looks like the obvious answer and is the wrong one: `EntityFieldInfo`
-     * excludes such fields from the `spCreate` / `spUpdate` parameter list entirely, so the S2 pricing
-     * bridge — the one caller that MUST write these — would be locked out too and would need raw SQL to
-     * do its job. Refusing at validation keeps the column writable by design and closed by rule.
-     *
-     * ── WHY THE TEST IS "NEW WITH A VALUE, **OR** DIRTY" ────────────────────────────────────────
-     *
-     * A dirty-check alone is NOT sufficient, and the reason is a genuine trap. `EntityField`'s setter
-     * treats the FIRST write to a never-set field as record setup and copies the incoming value into
-     * `_OldValue` as well as `_Value`:
-     *
-     *     if (this._NeverSet && (value !== null || this._OldValue !== null)) this._OldValue = value;
-     *
-     * So on a brand-new line, `line.ResolvedUnitPrice = 4200` leaves old and new equal and `Dirty`
-     * reports **false**. A guard built on `Dirty` alone would pass every forged value on a create — the
-     * exact case that matters most — while looking correct. This was caught by the check below failing,
-     * not by reading the code.
-     *
-     * The two conditions together are correct in all four quadrants:
-     *   · new + value set        → refused (the create case `Dirty` cannot see)
-     *   · new + untouched        → allowed (null, as it must be)
-     *   · loaded + changed       → refused (`Dirty` is reliable once a record has been loaded)
-     *   · loaded + unchanged     → allowed, so an already-priced line re-saves cleanly
-     *
-     * ── THE SEAM FOR S2 ─────────────────────────────────────────────────────────────────────────
-     *
-     * When the pricing bridge lands, `DealLineEntityServer` overrides this to permit the write when it
-     * originates from a verified `Orders.PreviewOrder` response — that server-only subclass is the
-     * sanctioned path, and it does not exist yet precisely because nothing may write these columns until
-     * it does. Until then the rule is absolute, which is the correct state rather than a gap.
-     */
-    protected RefusePricingProvenanceEdits(result: ValidationResult): void {
-        const isNew = !this.IsSaved;
-
-        for (const name of PRICING_PROVENANCE_FIELDS) {
-            const field = this.GetFieldByName(name);
-            if (!field) {
-                continue;
-            }
-            const hasValue = field.Value !== null && field.Value !== undefined;
-            if ((isNew && hasValue) || field.Dirty) {
-                fail(
-                    result,
-                    name,
-                    `${name} is written only from an Orders.PreviewOrder response — it cannot be set here. `
-                    + 'This app records what the pricing engine answered; it never computes or edits it.',
-                    field.Value,
-                );
-            }
-        }
-    }
-}
 
 /**
  * One negotiated instalment. No rows at all is the normal case — standard terms.
@@ -436,7 +440,7 @@ export class DealPaymentScheduleEntity extends mjBizAppsSalesDealPaymentSchedule
  * this file quietly stops applying. Touching the symbols is what keeps the import alive.
  */
 export function LoadSalesDealEntities(): void {
-    const anchors: unknown[] = [DealEntity, DealLineEntity, DealPaymentScheduleEntity];
+    const anchors: unknown[] = [DealEntity, DealPaymentScheduleEntity];
     if (anchors.length === 0) {
         throw new Error('LoadSalesDealEntities: registration anchors were tree-shaken away.');
     }

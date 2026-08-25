@@ -23,10 +23,10 @@
 -- THE TWO RULES THIS SCHEMA EXISTS TO MAKE STRUCTURAL (master plan §1)
 --
 -- 1. SALES NEVER COMPUTES MONEY. Every number comes back from `Orders.PreviewOrder`. That is why
---    DealLine carries `ResolvedUnitPrice` / `ResolvedExtendedAmount` / `PriceComponentsJSON` /
+--    The deal's EMBEDDED ORDER carries the priced figures on its OrderLine rows; the deal holds
 --    `PricedAt` as a WRITE-ONLY block populated from a PreviewOrder response, and why `Deal.Amount`
 --    is a CACHED answer carrying its own provenance (`AmountIsComputed`, `AmountComputedAt`,
---    `AmountSourceHash`). The hash fingerprints the DealLine set the amount was computed from, so
+--    `AmountSourceHash`). The hash fingerprints the order's line set the amount came from, so
 --    the UI can say "this figure is stale, reprice" instead of showing a number nobody can trace.
 --    Strip those three columns and `Amount` becomes a hand-edited field inside a month.
 --
@@ -37,7 +37,7 @@
 --
 --    CHECK constraints therefore survive in this file ONLY for structural invariants:
 --      * exactly-one-of foreign keys      (CK_DealTeamMember_EmployeeXorPerson)
---      * date ordering                    (CK_DealLine_ServicePeriodOrder, CK_ForecastSnapshot_PeriodOrder)
+--      * date ordering                    (CK_ForecastSnapshot_PeriodOrder)
 --      * non-negative / bounded numerics  (quantities, percentages, probabilities, scores)
 --    Every one of those stays true no matter what an organization calls its stages.
 --
@@ -52,10 +52,16 @@
 --   → __mj_BizAppsCommon.Organization   SalesAccount.ID   (the IsA link, §4.1)
 --   → __mj_BizAppsCommon.Person         SalesContact.ID   (the IsA link, §4.1),
 --                                       DealTeamMember.PersonID (D-6)
+--   → __mj_BizAppsOrders.OrderHeader    Deal.OrderID (the embedded order; FK_Deal_OrderHeader).
+--                                       Added 2026-08-19 by da0f69f. This one MOVED from the SOFT
+--                                       list below and it changed what the baseline needs installed
+--                                       first -- see the install-order note.
 --
 -- SOFT (plain UNIQUEIDENTIFIER, no FK) — because the target app's migrations may not have run.
--- This is DG-6, and it is the reason this baseline stands up with only bizapps-common present:
---   * DealLine.ProductID                → bizapps-orders catalog
+-- This is DG-6. It USED to be the reason this baseline stood up with only bizapps-common present;
+-- that stopped being true on 2026-08-19 when Deal.OrderID became a hard FK, and the line below was
+-- left in this list annotated "a REAL FK" -- a list of soft references whose first entry was hard.
+-- What remains genuinely soft:
 --   * Deal.ContractID / RenewsContractID → bizapps-contracts (§4.4, L-15 — the reference points
 --                                          DOWN the graph; there is deliberately no Contract.DealID,
 --                                          because it is ONE contract to MANY deals)
@@ -67,8 +73,13 @@
 --   * Deal.CampaignID                   → no FK. Not present in MJ core at the version this
 --                                          baseline was authored against; verify before promoting.
 --
--- INSTALL-ORDER DEPENDENCY: bizapps-common MUST be installed before this migration. §4.1's two
--- IsA tables fail without it — deliberately, as the dependency check.
+-- INSTALL-ORDER DEPENDENCY: bizapps-common AND bizapps-orders MUST both be installed before this
+-- migration. §4.1's two IsA tables fail without common — deliberately, as the dependency check —
+-- and CREATE TABLE Deal fails without orders, because FK_Deal_OrderHeader is inline and
+-- unconditional. Orders in turn needs tasks and accounting, so the full order is
+--     MJ core → common → tasks → accounting → orders → sales
+-- which is WORKSPACE-SETUP.md §4. scripts/rebuild-db.sh still installs only core and common and
+-- therefore cannot build a database this migration applies to; see KNOWN-ISSUES KI-24.
 --
 -- SQL Server is the source of truth; the PostgreSQL counterpart is produced via
 -- @memberjunction/sql-converter. Production is PostgreSQL, so this file stays converter-friendly:
@@ -362,36 +373,6 @@ CREATE TABLE __mj_BizAppsSales.AccountType (
 GO
 
 ---------------------------------------------------------------------------
--- 3.10 DealLineType — whether a line is a ONE-TIME charge or a RECURRING one.
---
---      THIS WAS A STRING COLUMN AND IS NOW A TYPE TABLE, on purpose. `DealLine`
---      previously carried `LineType NVARCHAR(40)`, which was fine only while
---      nothing read it. It is about to be read: recurring lines are what produce
---      MRR/ARR and a renewal, one-time lines produce neither, and the moment any
---      code needs to tell them apart a string forces exactly the comparison Rule 2
---      exists to forbid — `line.LineType === 'Recurring'`.
---
---      `IsRecurring` is the flag the engine branches on, so a customer can call
---      the concept "Subscription" or "Implementation" and no code is aware of the
---      rename. Same shape as every other type table here: Code is the stable
---      identifier, Name is the label, the BIT is the behaviour.
----------------------------------------------------------------------------
-CREATE TABLE __mj_BizAppsSales.DealLineType (
-    ID UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID(),
-    Code NVARCHAR(40) NOT NULL,
-    Name NVARCHAR(200) NOT NULL,
-    Description NVARCHAR(MAX) NULL,
-
-    -- The behaviour flag. Recurring lines are the ones that carry into MRR/ARR and
-    -- become a renewable subscription; one-time lines are billed once and done.
-    IsRecurring BIT NOT NULL DEFAULT 0,
-
-    DisplayRank INT NOT NULL DEFAULT 0,
-    IsActive BIT NOT NULL DEFAULT 1,
-
-    CONSTRAINT PK_DealLineType PRIMARY KEY CLUSTERED (ID),
-    CONSTRAINT UQ_DealLineType_Code UNIQUE (Code)
-);
 GO
 
 
@@ -598,6 +579,18 @@ CREATE TABLE __mj_BizAppsSales.PipelineStage (
     -- The status a deal takes on when it enters this stage. See the note above.
     DealStatusTypeID UNIQUEIDENTIFIER NULL,
 
+    -- The status the deal's EMBEDDED ORDER takes on when a deal enters this stage. NULL means this
+    -- stage says nothing about the order, which is the default and the common case.
+    --
+    -- It deliberately mirrors DealStatusTypeID directly above: a stage already declares what entering
+    -- it means for the deal's own status, and S-US5 asks the same question of the order. Ruled by
+    -- Andrew (docs/DECISIONS.md D-OS1); it replaces CloseWonPolicy.OrderState, which could only speak
+    -- at the moment of close and only about a won one.
+    --
+    -- A STRING RATHER THAN AN FK, because the vocabulary belongs to ORDERS. There is no sales type
+    -- table to point at, and inventing one would put this app in charge of another app's lifecycle.
+    OrderStatusOnEntry NVARCHAR(20) NULL,
+
     -- Days without activity before the board flags the deal as rotting.
     RottingDays INT NULL,
 
@@ -619,7 +612,26 @@ CREATE TABLE __mj_BizAppsSales.PipelineStage (
     CONSTRAINT CK_PipelineStage_Probability
         CHECK (Probability IS NULL OR (Probability >= 0 AND Probability <= 100)),
     CONSTRAINT CK_PipelineStage_RottingDays
-        CHECK (RottingDays IS NULL OR RottingDays >= 0)
+        CHECK (RottingDays IS NULL OR RottingDays >= 0),
+
+    -- ── THE FOUR STATUSES A SALES STAGE MAY ASK FOR, AND WHY A CHECK IS RIGHT HERE ──
+    --
+    -- Rule 2 says CHECK constraints are for structural invariants and NEVER for domain vocabulary.
+    -- This is not this app's vocabulary: `OrderHeader.Status` is orders' own CHECK-constrained column,
+    -- and the same reasoning already governs `ProductFilterFor`'s `Status = 'Active'` literal. What
+    -- the constraint enforces is a STRUCTURAL restriction on that foreign set — the subset a SALES
+    -- stage is allowed to name.
+    --
+    -- Posted and Fulfilled are absent on purpose (Andrew, D-OS1): they are finance and fulfilment
+    -- OUTCOMES, reached by orders' own advance, not something a salesperson moving a card decides. A
+    -- stage that could name them would let the board post to the ledger.
+    --
+    -- Orders' full set is Draft | Quoted | Confirmed | Posted | Fulfilled | Voided. If orders adds a
+    -- status, this constraint does not change automatically, and it should not: whether a sales stage
+    -- may ask for it is a new decision.
+    CONSTRAINT CK_PipelineStage_OrderStatusOnEntry
+        CHECK (OrderStatusOnEntry IS NULL
+               OR OrderStatusOnEntry IN ('Draft', 'Quoted', 'Confirmed', 'Voided'))
 );
 GO
 
@@ -750,6 +762,25 @@ CREATE TABLE __mj_BizAppsSales.Deal (
     -- on it, which is what keeps it inside Rule 2 rather than in violation of it.
     PaymentMethod NVARCHAR(50) NULL DEFAULT 'ACH',
 
+    -- DID THIS DEAL MOVE OFF THE STANDARD AGREEMENT — yes or no, as a fact the REP
+    -- asserts. S-US1 asks for it on the creation form; S-US2 copies it onto the
+    -- contract as HasModifications, which is what routes finance's review.
+    --
+    -- IT IS NOT DERIVABLE FROM ContractVariances BELOW, and that is the reason both
+    -- exist. The variances field is prose for a human reviewer; emptiness there means
+    -- "nothing written down", which is not the same claim as "nothing negotiated" — a
+    -- rep in a hurry leaves it blank either way. Contracts' own task list makes the
+    -- distinction load-bearing: a FALSE flag still gets the document read, precisely
+    -- because the rep may have forgotten it, and a TRUE one gets each deviation
+    -- captured as a ContractTemplateModification row. Inferring the flag from whether
+    -- someone typed a paragraph would turn a stated fact into a guess, and finance
+    -- would be reviewing the guess.
+    --
+    -- NOT NULL DEFAULT 0: S-US1 says it defaults to no. An unanswered three-state
+    -- would leak into contracts as a null HasModifications, where the column is
+    -- NOT NULL — so the honest default belongs here, at the point the rep is asked.
+    StandardAgreementModified BIT NOT NULL DEFAULT 0,
+
     -- The red-line summary: what this deal negotiated AWAY from standard terms, in the
     -- AD's own words. Free text on purpose — the input to a human legal review, not
     -- something any code should try to parse.
@@ -761,6 +792,20 @@ CREATE TABLE __mj_BizAppsSales.Deal (
 
     ClosedAt DATETIMEOFFSET NULL,
     ClosedByUserID UNIQUEIDENTIFIER NULL,
+
+    -- The deal's EMBEDDED ORDER (S-US4/S-US5). One order per deal, created in Draft at deal
+    -- creation, and from then on the only place line items live — the deal holds none.
+    --
+    -- NULLABLE, and that is required rather than lenient: a NOT NULL FK would demand an order
+    -- before a deal could be INSERTed, and the order is created through the deal. It is also what
+    -- lets a deal that predates the embed keep loading.
+    --
+    -- A REAL FK across the schema boundary. Sales' standalone premise is retired (Amith: sales has a
+    -- hard dependency on orders), `mj-app.json` already declares `mj-bizapps-orders`, and this table
+    -- already carries unconditional FKs into `__mj_BizAppsCommon` — so this follows the existing
+    -- shape rather than inventing one. A migration run against a database without orders' schema
+    -- fails here, loudly, which is the correct outcome for a dependency that is now hard.
+    OrderID UNIQUEIDENTIFIER NULL,
 
     CONSTRAINT PK_Deal PRIMARY KEY CLUSTERED (ID),
     -- NOTE: DealNumber's uniqueness is a FILTERED INDEX below, not a UNIQUE constraint here.
@@ -781,6 +826,12 @@ CREATE TABLE __mj_BizAppsSales.Deal (
         REFERENCES __mj_BizAppsSales.SalesContact (ID),
     CONSTRAINT FK_Deal_Company FOREIGN KEY (CompanyID)
         REFERENCES __mj.Company (ID),
+    -- Cross-schema, same database. NO cascade in either direction: the order is provenance once it
+    -- exists, so deleting a deal must not delete the order finance may be mid-review on, and
+    -- deleting the order out from under a live deal should be refused by the FK rather than silently
+    -- nulling the link. See DealEntity's embedded declaration, which sets OnClear: 'refuse' to match.
+    CONSTRAINT FK_Deal_OrderHeader FOREIGN KEY (OrderID)
+        REFERENCES __mj_BizAppsOrders.OrderHeader (ID),
     CONSTRAINT FK_Deal_OwnerEmployee FOREIGN KEY (OwnerEmployeeID)
         REFERENCES __mj.Employee (ID),
     CONSTRAINT FK_Deal_ForecastCategoryType FOREIGN KEY (ForecastCategoryTypeID)
@@ -805,127 +856,6 @@ CREATE TABLE __mj_BizAppsSales.Deal (
     CONSTRAINT CK_Deal_CancellationNoticeDaysOverride
         CHECK (CancellationNoticeDaysOverride IS NULL OR CancellationNoticeDaysOverride >= 0)
     -- NOTE: no CHECK ordering ExecutionDate against StartDate — see the column note.
-);
-GO
-
----------------------------------------------------------------------------
--- 6.2 DealLine
---
---     THE SHAPE OF THIS TABLE IS THE PRICING RULE MADE STRUCTURAL. The first
---     block is INTENT — what the rep is asking for. The second block is the
---     RESOLVED ANSWER, and it is WRITE-ONLY from this app's perspective:
---     populated only from an Orders.PreviewOrder response, never computed
---     locally, never hand-edited.
---
---     What sales must never do, restated because this is the table where it
---     would happen: multiply quantity by price · apply a discount percentage ·
---     compute tax · prorate a partial period · sum lines into a header total ·
---     round anything.
---
---     PriceComponentsJSON stores the explanation trail orders returns, so a rep
---     can answer "why is it this price" without a support ticket.
----------------------------------------------------------------------------
-CREATE TABLE __mj_BizAppsSales.DealLine (
-    ID UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID(),
-    DealID UNIQUEIDENTIFIER NOT NULL,
-
-    -- ===== INTENT — what the rep is asking for =====
-    -- SOFT reference to the bizapps-orders catalog (DG-6): orders' migrations may
-    -- not have run, which is precisely what lets this baseline stand alone.
-    ProductID UNIQUEIDENTIFIER NULL,
-    -- The product/service name AS WRITTEN ON THE DOCUMENT, and not a denormalized
-    -- cache of ProductID's name (D5). Two independent reasons it has to exist:
-    --   1. ProductID points at the orders catalog, which is NOT INSTALLED here and
-    --      will not be for several phases. Without this column a line is a bare GUID
-    --      referencing a table that is absent, and the form has no product field that
-    --      resolves to anything a human can read.
-    --   2. Even once orders IS present, the line item on a signed Order Form is part
-    --      of the executed agreement. Renaming a catalog product must not retroactively
-    --      reword what a customer signed.
-    -- So this is transcription, not duplication, and it is never auto-synced from the
-    -- catalog. ProductID stays for when orders arrives and pricing needs a real key.
-    ProductName NVARCHAR(500) NULL,
-    Quantity DECIMAL(19, 4) NOT NULL DEFAULT 1,
-    RequestedDiscountPct DECIMAL(5, 2) NULL,
-    -- An INPUT to the pricing engine, never a replacement for it. A negotiated
-    -- price still goes through PreviewOrder.
-    OverrideUnitPrice DECIMAL(19, 4) NULL,
-    TermMonths INT NULL,
-    ServicePeriodStart DATE NULL,
-    ServicePeriodEnd DATE NULL,
-    -- Was `LineType NVARCHAR(40)`; now a type table (D7). See DealLineType §3.10 —
-    -- `IsRecurring` is the flag, so nothing ever compares this to the string
-    -- 'Recurring'.
-    DealLineTypeID UNIQUEIDENTIFIER NULL,
-    DisplayOrder INT NOT NULL DEFAULT 0,
-    Description NVARCHAR(MAX) NULL,
-
-    -- ===== THE SIGNED FIGURES — TRANSCRIBED, NEVER DERIVED (D2, D3) =====
-    --
-    -- READ THIS BEFORE ADDING ANY ARITHMETIC. These three columns come straight off
-    -- the 2026 Order Form / SOW line grid, and on that PDF `Total` visibly equals
-    -- AnnualGrossFees − DiscountAmount. THAT SUBTRACTION IS THE CUSTOMER'S AND THE
-    -- AD'S, NOT THIS APP'S. All three are INPUTS: the AD transcribes what the executed
-    -- document says, because the figure a customer signed is a fact about the agreement
-    -- and has to be recoverable from the deal record verbatim.
-    --
-    -- Rule 1 therefore still holds literally — no file in this repo multiplies,
-    -- discounts, sums or rounds to arrive at any of them. `Total` is not a computed
-    -- column, has no default, and is never back-filled from its siblings. When orders
-    -- is wired in, PreviewOrder's answer lands in the RESOLVED block below and becomes
-    -- the authority for what the deal is worth; these stay as the record of what was
-    -- signed, and a disagreement between the two blocks is a fact worth surfacing
-    -- rather than something to reconcile by overwriting.
-    --
-    -- DiscountAmount coexists with RequestedDiscountPct above, deliberately (D3): the
-    -- template expresses a discount as an AMOUNT, the pricing engine takes a PERCENT.
-    -- There is NO exactly-one-of CHECK between them — a deal can legitimately carry a
-    -- negotiated percentage as engine input AND a currency figure as written on the
-    -- signed page, and forcing a choice would lose one of them.
-    AnnualGrossFees DECIMAL(19, 4) NULL,
-    DiscountAmount DECIMAL(19, 4) NULL,
-    Total DECIMAL(19, 4) NULL,
-
-    -- ===== RESOLVED — write-only, from Orders.PreviewOrder =====
-    ResolvedUnitPrice DECIMAL(19, 4) NULL,
-    ResolvedExtendedAmount DECIMAL(19, 4) NULL,
-    PriceComponentsJSON NVARCHAR(MAX) NULL,
-    PricedAt DATETIMEOFFSET NULL,
-
-    -- Denormalized stamp of the PRODUCT's company at price time (§10), mirroring
-    -- OrderLine.CompanyID in orders. This is what lets a cross-company deal
-    -- materialize into orders with correct per-line company ownership, so each
-    -- line books its own single-company journal entry with no extra work here.
-    -- Server-maintained; never hand-set.
-    CompanyID UNIQUEIDENTIFIER NULL,
-
-    CONSTRAINT PK_DealLine PRIMARY KEY CLUSTERED (ID),
-    CONSTRAINT FK_DealLine_Deal FOREIGN KEY (DealID)
-        REFERENCES __mj_BizAppsSales.Deal (ID),
-    CONSTRAINT FK_DealLine_DealLineType FOREIGN KEY (DealLineTypeID)
-        REFERENCES __mj_BizAppsSales.DealLineType (ID),
-    CONSTRAINT FK_DealLine_Company FOREIGN KEY (CompanyID)
-        REFERENCES __mj.Company (ID),
-
-    -- STRUCTURAL invariants: non-negative quantity, bounded percentage, date ordering.
-    CONSTRAINT CK_DealLine_Quantity CHECK (Quantity >= 0),
-    CONSTRAINT CK_DealLine_RequestedDiscountPct
-        CHECK (RequestedDiscountPct IS NULL OR (RequestedDiscountPct >= 0 AND RequestedDiscountPct <= 100)),
-    CONSTRAINT CK_DealLine_TermMonths CHECK (TermMonths IS NULL OR TermMonths >= 0),
-    CONSTRAINT CK_DealLine_ServicePeriodOrder
-        CHECK (ServicePeriodStart IS NULL OR ServicePeriodEnd IS NULL OR ServicePeriodEnd >= ServicePeriodStart),
-
-    -- Gross fees and a discount are both quoted as positive magnitudes; a "negative
-    -- discount" is a surcharge and belongs on its own line rather than as a sign flip.
-    CONSTRAINT CK_DealLine_AnnualGrossFees
-        CHECK (AnnualGrossFees IS NULL OR AnnualGrossFees >= 0),
-    CONSTRAINT CK_DealLine_DiscountAmount
-        CHECK (DiscountAmount IS NULL OR DiscountAmount >= 0)
-    -- `Total` is DELIBERATELY UNCONSTRAINED. It is transcribed from the signed
-    -- document, so this app must not assert the arithmetic it would take to bound it,
-    -- and a credit or concession line is legitimately negative. Constraining it here
-    -- would be this repo quietly taking a position on how Total relates to the two
-    -- columns above — which is exactly what D2 decided it must not do.
 );
 GO
 
@@ -964,6 +894,14 @@ CREATE TABLE __mj_BizAppsSales.DealStageEvent (
 
     -- The point-in-time stamps. See the header note.
     AmountAtTransition DECIMAL(19, 4) NULL,
+    -- WHOSE NUMBER WAS IT. 1 = the orders engine priced it, 0 = a person stated it, NULL = the
+    -- transition was recorded before this was tracked. Nullable on purpose: for rows written earlier the
+    -- answer is genuinely unknown, and a 0 would assert they were hand-typed. Finance reads close
+    -- amounts out of this table and could not classify them, because the flag it needs lives on
+    -- Deal.AmountIsComputed -- which describes the deal as it is NOW, so a repriced deal makes its own
+    -- close amount unclassifiable in retrospect. See the additive migration that also ALTERs the CRUD
+    -- procs; CodeGen could not be used to add it (see that file's header).
+    AmountAtTransitionIsComputed BIT NULL,
     ProbabilityAtTransition DECIMAL(5, 2) NULL,
 
     Notes NVARCHAR(MAX) NULL,
@@ -1036,7 +974,7 @@ GO
 --     that reconciliation is wanted it belongs downstream, in contracts or
 --     orders, where the authoritative total actually lives.
 --
---     Amount is UNSIGNED-UNCONSTRAINED for the same reason DealLine.Total is: a
+--     Amount is UNSIGNED-UNCONSTRAINED for the same reason an order line's total is: a
 --     refund or credit instalment is legitimately negative, and this table records
 --     what was agreed rather than asserting a shape for it.
 ---------------------------------------------------------------------------
@@ -1416,9 +1354,9 @@ GO
 
 -- Deal
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'A deal (opportunity). Amount is a CACHED answer from Orders.PreviewOrder carrying its own provenance, never a locally computed total — this app performs no pricing arithmetic of any kind. Closing a deal is a transaction that CREATES a contract and/or orders, not a notification that someone should.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The deal value. A CACHED ANSWER returned by Orders.PreviewOrder for this deal''s line set — NOT computed here. For a simple (header-only) deal it is hand-entered and AmountIsComputed is 0. Never sum DealLine rows into this column; sales does no arithmetic.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'Amount';
+EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The deal value. A CACHED ANSWER returned by Orders.PreviewOrder for this deal''s line set — NOT computed here. For a simple (header-only) deal it is hand-entered and AmountIsComputed is 0. Never sum the order''s lines into this column; sales does no arithmetic.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'Amount';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'1 when Amount came from Orders.PreviewOrder; 0 when a human typed it (a simple, header-only deal). Distinguishes a traceable figure from a stated one.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'AmountIsComputed';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Fingerprint of the DealLine set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say "this figure is stale, reprice" instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'AmountSourceHash';
+EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Fingerprint of the embedded order''s line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say "this figure is stale, reprice" instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'AmountSourceHash';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'DENORMALIZED, SERVER-MAINTAINED. The Employee holding the role where DealRole.IsOwnerRole = 1, written by DealEntityServer.Save() whenever team membership changes. DealTeamMember is the source of truth; this exists so "my deals" and per-rep boards need no join. NEVER SET THIS DIRECTLY — it will diverge.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'OwnerEmployeeID';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The SELLING company. Must match Pipeline.CompanyID; enforced by the entity server, since a CHECK cannot reach across the FK to compare them. FK to __mj.Company.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'CompanyID';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'SOFT reference (no FK) to a bizapps-contracts Contract. The link points DOWN the dependency graph; there is deliberately no Contract.DealID, because it is ONE contract to MANY deals — the original sale, every renewal, every expansion.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'ContractID';
@@ -1431,28 +1369,12 @@ EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Whether the result
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'An OVERRIDE, and NULL is meaningful: it means "use the standard annual increase", whose default (5%) lives on the contracts ContractType, not here. That is a different fact from "we negotiated a number that happens to equal today''s standard", and only the NULL survives a later change to policy. Copying the default in at write time would freeze this year''s terms into next year''s renewals silently.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'AnnualIncreasePctOverride';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'An OVERRIDE of the standard cancellation-notice period (default 90 days, owned by the contracts ContractType). NULL means "use the standard" — see AnnualIncreasePctOverride for why that distinction is load-bearing.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'CancellationNoticeDaysOverride';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'PLACEHOLDER LABEL (default ACH), and a string only for as long as nothing branches on it. Payment method becomes vocabulary the moment code cares — ACH and card differ in settlement timing and fees — but ORDERS owns that concept and will expose PaymentType. Pointing at orders'' vocabulary later beats standing up a competing copy here and reconciling two. No code may branch on this value.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'PaymentMethod';
+EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance''s review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'StandardAgreementModified';
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Free-text summary of what this deal negotiated AWAY from standard terms — the red-line list, in the AD''s own words. The input to a human legal review; nothing should attempt to parse it.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'Deal', @level2type=N'COLUMN', @level2name=N'ContractVariances';
 GO
 
--- DealLine
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'A requested line on a deal. Stores INTENT (product, quantity, requested discount, override price, term); the Resolved* columns are WRITE-ONLY from an Orders.PreviewOrder response. Sales never multiplies quantity by price, applies a discount, computes tax, prorates a period, sums a total or rounds anything.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'SOFT reference (no FK) to a bizapps-orders Product. Soft because orders'' migrations may not have run — which is exactly what lets this app stand up independently.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'ProductID';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'A negotiated unit price. An INPUT to the pricing engine, never a replacement for it — the line still goes through Orders.PreviewOrder.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'OverrideUnitPrice';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'WRITE-ONLY from this app''s perspective: populated only from an Orders.PreviewOrder response, never computed locally, never hand-edited.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'ResolvedUnitPrice';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'WRITE-ONLY, from Orders.PreviewOrder. Never quantity x price computed here.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'ResolvedExtendedAmount';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The explanation trail Orders.PreviewOrder returns (base, rules, adjustments, charges, tax), so a rep can answer "why is it this price" without a support ticket.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'PriceComponentsJSON';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'DENORMALIZED stamp of the product''s owning company at price time, mirroring OrderLine.CompanyID. This is what lets a cross-company deal materialize into orders with correct per-line company ownership. Server-maintained; never hand-set.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'CompanyID';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The product/service name AS WRITTEN ON THE SIGNED DOCUMENT — transcription, not a denormalized cache of the catalog name, and never auto-synced from it. Needed twice over: ProductID points at the orders catalog, which is not installed yet, so without this a line is an unreadable GUID; and once orders IS present, renaming a catalog product must not retroactively reword what a customer signed.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'ProductName';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Whether this line is a one-time charge or a recurring one. A FK to DealLineType, replacing what was a free-text LineType column: recurring lines are what produce MRR/ARR and a renewal, and the moment code needs to tell them apart a string forces exactly the name comparison the vocabulary rule forbids. Branch on DealLineType.IsRecurring, never on the name.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'DealLineTypeID';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Annual gross fees for this line AS WRITTEN ON THE SIGNED DOCUMENT. An INPUT the AD transcribes, not a figure this app derives. Once orders is wired in, Orders.PreviewOrder''s answer lands in the Resolved* columns and becomes the authority on what the deal is worth; this remains the record of what was signed.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'AnnualGrossFees';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The discount as a CURRENCY AMOUNT, as the order form expresses it. Coexists with RequestedDiscountPct deliberately — the template speaks in amounts, the pricing engine takes a percent — and there is no exactly-one-of constraint, because a deal can legitimately carry a negotiated percentage as engine input AND the figure printed on the signed page.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'DiscountAmount';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'THE SIGNED FIGURE for this line, transcribed from the executed document. On the PDF it equals AnnualGrossFees minus DiscountAmount, but THAT SUBTRACTION IS THE CUSTOMER''S AND THE AD''S, NOT THIS APP''S: nothing here computes, defaults or back-fills it, which is how the no-arithmetic rule stays literally true. Deliberately unconstrained in sign — a credit or concession line is legitimately negative, and bounding it would mean asserting the arithmetic.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLine', @level2type=N'COLUMN', @level2name=N'Total';
-GO
-
--- DealLineType
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'Whether a deal line is a ONE-TIME charge or a RECURRING one. A type table rather than a string column because recurring lines are what produce MRR/ARR and a renewal while one-time lines produce neither — so the distinction is behaviour, and behaviour belongs in a flag. IsRecurring is what the engine reads, which is what lets a customer call the concept Subscription or Implementation with no code aware of the rename.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLineType';
-EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The behaviour flag. 1 for lines that carry into MRR/ARR and become a renewable subscription; 0 for lines billed once. Branch on this, never on Name or Code.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealLineType', @level2type=N'COLUMN', @level2name=N'IsRecurring';
-GO
+-- DealLine / DealLineType — RETIRED. The deal holds no line items; its embedded order does, as
+-- OrderLine rows. See docs/DECISIONS.md D-DL1 for where every invariant went.
 
 -- DealPaymentSchedule
 EXEC sp_addextendedproperty @name=N'MS_Description', @value=N'The EXCEPTION payment schedule for a deal. THE ABSENCE OF ROWS IS THE COMMON CASE and that is the design: the standard term is 100% payable on execution, so a deal on standard terms carries no rows here and rows exist only where something else was negotiated. Storing the default on every deal would let a later change to "default" silently rewrite history, and would turn "did this deal negotiate payment terms?" into arithmetic instead of a row count. This app does NOT check that the schedule sums to the deal amount — that is computing money, and the authoritative total lives in orders.', @level0type=N'SCHEMA', @level0name=N'__mj_BizAppsSales', @level1type=N'TABLE', @level1name=N'DealPaymentSchedule';
@@ -1608,75 +1530,6 @@ INSERT INTO [${mjSchema}].[EntityPermission]
 INSERT INTO [${mjSchema}].[EntityPermission]
                                                    ([EntityID], [RoleID], [CanRead], [CanCreate], [CanUpdate], [CanDelete], [__mj_CreatedAt], [__mj_UpdatedAt]) VALUES
                                                    ('5f0a310e-94ee-47c2-9bbf-0f45fdc37e07', 'DFAFCCEC-6A37-EF11-86D4-000D3A4E707E', 1, 1, 1, 1, GETUTCDATE(), GETUTCDATE());
-
-/* SQL generated to create new entity MJ_BizApps_Sales: Deal Lines */
-
-      INSERT INTO [${mjSchema}].[Entity] (
-         [ID],
-         [Name],
-         [DisplayName],
-         [Description],
-         [NameSuffix],
-         [BaseTable],
-         [BaseView],
-         [SchemaName],
-         [IncludeInAPI],
-         [AllowUserSearchAPI],
-         [AllowCaching]
-         , [TrackRecordChanges]
-         , [AuditRecordAccess]
-         , [AuditViewRuns]
-         , [AllowAllRowsAPI]
-         , [AllowCreateAPI]
-         , [AllowUpdateAPI]
-         , [AllowDeleteAPI]
-         , [UserViewMaxRows]
-         , [__mj_CreatedAt]
-         , [__mj_UpdatedAt]
-      )
-      VALUES (
-         '70138c62-0f2f-4471-b98a-4ce98ac3bc64',
-         'MJ_BizApps_Sales: Deal Lines',
-         'Deal Lines',
-         'A requested line on a deal. Stores INTENT (product, quantity, requested discount, override price, term); the Resolved* columns are WRITE-ONLY from an Orders.PreviewOrder response. Sales never multiplies quantity by price, applies a discount, computes tax, prorates a period, sums a total or rounds anything.',
-         NULL,
-         'DealLine',
-         'vwDealLines',
-         '${flyway:defaultSchema}',
-         1,
-         1,
-         0
-         , 1
-         , 0
-         , 0
-         , 0
-         , 1
-         , 1
-         , 1
-         , 1000
-         , GETUTCDATE()
-         , GETUTCDATE()
-      );
-
-/* SQL generated to add new entity MJ_BizApps_Sales: Deal Lines to application ID: '60EE99AB-09D0-4A6C-98AB-5CD0F3E9738D' */
-INSERT INTO [${mjSchema}].[ApplicationEntity]
-                                       ([ApplicationID], [EntityID], [Sequence], [__mj_CreatedAt], [__mj_UpdatedAt]) VALUES
-                                       ('60EE99AB-09D0-4A6C-98AB-5CD0F3E9738D', '70138c62-0f2f-4471-b98a-4ce98ac3bc64', (SELECT COALESCE(MAX([Sequence]),0)+1 FROM [${mjSchema}].[ApplicationEntity] WHERE [ApplicationID] = '60EE99AB-09D0-4A6C-98AB-5CD0F3E9738D'), GETUTCDATE(), GETUTCDATE());
-
-/* SQL generated to add new permission for entity MJ_BizApps_Sales: Deal Lines for role UI */
-INSERT INTO [${mjSchema}].[EntityPermission]
-                                                   ([EntityID], [RoleID], [CanRead], [CanCreate], [CanUpdate], [CanDelete], [__mj_CreatedAt], [__mj_UpdatedAt]) VALUES
-                                                   ('70138c62-0f2f-4471-b98a-4ce98ac3bc64', 'E0AFCCEC-6A37-EF11-86D4-000D3A4E707E', 1, 0, 0, 0, GETUTCDATE(), GETUTCDATE());
-
-/* SQL generated to add new permission for entity MJ_BizApps_Sales: Deal Lines for role Developer */
-INSERT INTO [${mjSchema}].[EntityPermission]
-                                                   ([EntityID], [RoleID], [CanRead], [CanCreate], [CanUpdate], [CanDelete], [__mj_CreatedAt], [__mj_UpdatedAt]) VALUES
-                                                   ('70138c62-0f2f-4471-b98a-4ce98ac3bc64', 'DEAFCCEC-6A37-EF11-86D4-000D3A4E707E', 1, 1, 1, 1, GETUTCDATE(), GETUTCDATE());
-
-/* SQL generated to add new permission for entity MJ_BizApps_Sales: Deal Lines for role Integration */
-INSERT INTO [${mjSchema}].[EntityPermission]
-                                                   ([EntityID], [RoleID], [CanRead], [CanCreate], [CanUpdate], [CanDelete], [__mj_CreatedAt], [__mj_UpdatedAt]) VALUES
-                                                   ('70138c62-0f2f-4471-b98a-4ce98ac3bc64', 'DFAFCCEC-6A37-EF11-86D4-000D3A4E707E', 1, 1, 1, 1, GETUTCDATE(), GETUTCDATE());
 
 /* SQL generated to create new entity MJ_BizApps_Sales: Deal Roles */
 
@@ -2575,75 +2428,6 @@ INSERT INTO [${mjSchema}].[EntityPermission]
                                                    ([EntityID], [RoleID], [CanRead], [CanCreate], [CanUpdate], [CanDelete], [__mj_CreatedAt], [__mj_UpdatedAt]) VALUES
                                                    ('4697f309-cd43-42dd-a2b5-2747473e5b98', 'DFAFCCEC-6A37-EF11-86D4-000D3A4E707E', 1, 1, 1, 1, GETUTCDATE(), GETUTCDATE());
 
-/* SQL generated to create new entity MJ_BizApps_Sales: Deal Line Types */
-
-      INSERT INTO [${mjSchema}].[Entity] (
-         [ID],
-         [Name],
-         [DisplayName],
-         [Description],
-         [NameSuffix],
-         [BaseTable],
-         [BaseView],
-         [SchemaName],
-         [IncludeInAPI],
-         [AllowUserSearchAPI],
-         [AllowCaching]
-         , [TrackRecordChanges]
-         , [AuditRecordAccess]
-         , [AuditViewRuns]
-         , [AllowAllRowsAPI]
-         , [AllowCreateAPI]
-         , [AllowUpdateAPI]
-         , [AllowDeleteAPI]
-         , [UserViewMaxRows]
-         , [__mj_CreatedAt]
-         , [__mj_UpdatedAt]
-      )
-      VALUES (
-         'd6539bc7-eb9e-45ed-9a49-4a5d46b0675b',
-         'MJ_BizApps_Sales: Deal Line Types',
-         'Deal Line Types',
-         'Whether a deal line is a ONE-TIME charge or a RECURRING one. A type table rather than a string column because recurring lines are what produce MRR/ARR and a renewal while one-time lines produce neither — so the distinction is behaviour, and behaviour belongs in a flag. IsRecurring is what the engine reads, which is what lets a customer call the concept Subscription or Implementation with no code aware of the rename.',
-         NULL,
-         'DealLineType',
-         'vwDealLineTypes',
-         '${flyway:defaultSchema}',
-         1,
-         1,
-         0
-         , 1
-         , 0
-         , 0
-         , 0
-         , 1
-         , 1
-         , 1
-         , 1000
-         , GETUTCDATE()
-         , GETUTCDATE()
-      );
-
-/* SQL generated to add new entity MJ_BizApps_Sales: Deal Line Types to application ID: '60EE99AB-09D0-4A6C-98AB-5CD0F3E9738D' */
-INSERT INTO [${mjSchema}].[ApplicationEntity]
-                                       ([ApplicationID], [EntityID], [Sequence], [__mj_CreatedAt], [__mj_UpdatedAt]) VALUES
-                                       ('60EE99AB-09D0-4A6C-98AB-5CD0F3E9738D', 'd6539bc7-eb9e-45ed-9a49-4a5d46b0675b', (SELECT COALESCE(MAX([Sequence]),0)+1 FROM [${mjSchema}].[ApplicationEntity] WHERE [ApplicationID] = '60EE99AB-09D0-4A6C-98AB-5CD0F3E9738D'), GETUTCDATE(), GETUTCDATE());
-
-/* SQL generated to add new permission for entity MJ_BizApps_Sales: Deal Line Types for role UI */
-INSERT INTO [${mjSchema}].[EntityPermission]
-                                                   ([EntityID], [RoleID], [CanRead], [CanCreate], [CanUpdate], [CanDelete], [__mj_CreatedAt], [__mj_UpdatedAt]) VALUES
-                                                   ('d6539bc7-eb9e-45ed-9a49-4a5d46b0675b', 'E0AFCCEC-6A37-EF11-86D4-000D3A4E707E', 1, 0, 0, 0, GETUTCDATE(), GETUTCDATE());
-
-/* SQL generated to add new permission for entity MJ_BizApps_Sales: Deal Line Types for role Developer */
-INSERT INTO [${mjSchema}].[EntityPermission]
-                                                   ([EntityID], [RoleID], [CanRead], [CanCreate], [CanUpdate], [CanDelete], [__mj_CreatedAt], [__mj_UpdatedAt]) VALUES
-                                                   ('d6539bc7-eb9e-45ed-9a49-4a5d46b0675b', 'DEAFCCEC-6A37-EF11-86D4-000D3A4E707E', 1, 1, 1, 1, GETUTCDATE(), GETUTCDATE());
-
-/* SQL generated to add new permission for entity MJ_BizApps_Sales: Deal Line Types for role Integration */
-INSERT INTO [${mjSchema}].[EntityPermission]
-                                                   ([EntityID], [RoleID], [CanRead], [CanCreate], [CanUpdate], [CanDelete], [__mj_CreatedAt], [__mj_UpdatedAt]) VALUES
-                                                   ('d6539bc7-eb9e-45ed-9a49-4a5d46b0675b', 'DFAFCCEC-6A37-EF11-86D4-000D3A4E707E', 1, 1, 1, 1, GETUTCDATE(), GETUTCDATE());
-
 /* SQL generated to create new entity MJ_BizApps_Sales: Sales Accounts */
 
       INSERT INTO [${mjSchema}].[Entity] (
@@ -3315,70 +3099,6 @@ GO
 
 /* SQL text to add special date field __mj_UpdatedAt to entity ${flyway:defaultSchema}.SalesContact */
 ALTER TABLE [${flyway:defaultSchema}].[SalesContact] ADD CONSTRAINT [DF___mj_BizAppsSales_SalesContact___mj_UpdatedAt] DEFAULT GETUTCDATE() FOR [__mj_UpdatedAt];
-GO
-
-/* SQL text to add special date field __mj_CreatedAt to entity ${flyway:defaultSchema}.DealLineType */
-ALTER TABLE [${flyway:defaultSchema}].[DealLineType] ADD [__mj_CreatedAt] DATETIMEOFFSET NULL;
-GO
-
-/* SQL text to add special date field __mj_CreatedAt to entity ${flyway:defaultSchema}.DealLineType */
-UPDATE [${flyway:defaultSchema}].[DealLineType] SET [__mj_CreatedAt] = GETUTCDATE() WHERE [__mj_CreatedAt] IS NULL;
-GO
-
-/* SQL text to add special date field __mj_CreatedAt to entity ${flyway:defaultSchema}.DealLineType */
-ALTER TABLE [${flyway:defaultSchema}].[DealLineType] ALTER COLUMN [__mj_CreatedAt] DATETIMEOFFSET NOT NULL;
-GO
-
-/* SQL text to add special date field __mj_CreatedAt to entity ${flyway:defaultSchema}.DealLineType */
-ALTER TABLE [${flyway:defaultSchema}].[DealLineType] ADD CONSTRAINT [DF___mj_BizAppsSales_DealLineType___mj_CreatedAt] DEFAULT GETUTCDATE() FOR [__mj_CreatedAt];
-GO
-
-/* SQL text to add special date field __mj_UpdatedAt to entity ${flyway:defaultSchema}.DealLineType */
-ALTER TABLE [${flyway:defaultSchema}].[DealLineType] ADD [__mj_UpdatedAt] DATETIMEOFFSET NULL;
-GO
-
-/* SQL text to add special date field __mj_UpdatedAt to entity ${flyway:defaultSchema}.DealLineType */
-UPDATE [${flyway:defaultSchema}].[DealLineType] SET [__mj_UpdatedAt] = GETUTCDATE() WHERE [__mj_UpdatedAt] IS NULL;
-GO
-
-/* SQL text to add special date field __mj_UpdatedAt to entity ${flyway:defaultSchema}.DealLineType */
-ALTER TABLE [${flyway:defaultSchema}].[DealLineType] ALTER COLUMN [__mj_UpdatedAt] DATETIMEOFFSET NOT NULL;
-GO
-
-/* SQL text to add special date field __mj_UpdatedAt to entity ${flyway:defaultSchema}.DealLineType */
-ALTER TABLE [${flyway:defaultSchema}].[DealLineType] ADD CONSTRAINT [DF___mj_BizAppsSales_DealLineType___mj_UpdatedAt] DEFAULT GETUTCDATE() FOR [__mj_UpdatedAt];
-GO
-
-/* SQL text to add special date field __mj_CreatedAt to entity ${flyway:defaultSchema}.DealLine */
-ALTER TABLE [${flyway:defaultSchema}].[DealLine] ADD [__mj_CreatedAt] DATETIMEOFFSET NULL;
-GO
-
-/* SQL text to add special date field __mj_CreatedAt to entity ${flyway:defaultSchema}.DealLine */
-UPDATE [${flyway:defaultSchema}].[DealLine] SET [__mj_CreatedAt] = GETUTCDATE() WHERE [__mj_CreatedAt] IS NULL;
-GO
-
-/* SQL text to add special date field __mj_CreatedAt to entity ${flyway:defaultSchema}.DealLine */
-ALTER TABLE [${flyway:defaultSchema}].[DealLine] ALTER COLUMN [__mj_CreatedAt] DATETIMEOFFSET NOT NULL;
-GO
-
-/* SQL text to add special date field __mj_CreatedAt to entity ${flyway:defaultSchema}.DealLine */
-ALTER TABLE [${flyway:defaultSchema}].[DealLine] ADD CONSTRAINT [DF___mj_BizAppsSales_DealLine___mj_CreatedAt] DEFAULT GETUTCDATE() FOR [__mj_CreatedAt];
-GO
-
-/* SQL text to add special date field __mj_UpdatedAt to entity ${flyway:defaultSchema}.DealLine */
-ALTER TABLE [${flyway:defaultSchema}].[DealLine] ADD [__mj_UpdatedAt] DATETIMEOFFSET NULL;
-GO
-
-/* SQL text to add special date field __mj_UpdatedAt to entity ${flyway:defaultSchema}.DealLine */
-UPDATE [${flyway:defaultSchema}].[DealLine] SET [__mj_UpdatedAt] = GETUTCDATE() WHERE [__mj_UpdatedAt] IS NULL;
-GO
-
-/* SQL text to add special date field __mj_UpdatedAt to entity ${flyway:defaultSchema}.DealLine */
-ALTER TABLE [${flyway:defaultSchema}].[DealLine] ALTER COLUMN [__mj_UpdatedAt] DATETIMEOFFSET NOT NULL;
-GO
-
-/* SQL text to add special date field __mj_UpdatedAt to entity ${flyway:defaultSchema}.DealLine */
-ALTER TABLE [${flyway:defaultSchema}].[DealLine] ADD CONSTRAINT [DF___mj_BizAppsSales_DealLine___mj_UpdatedAt] DEFAULT GETUTCDATE() FOR [__mj_UpdatedAt];
 GO
 
 /* SQL text to add special date field __mj_CreatedAt to entity ${flyway:defaultSchema}.DealStageEvent */
@@ -9221,2022 +8941,6 @@ GO
             '4533ee5c-d5cf-4c4f-96f0-0afad5ef44ff',
             '530174B2-654E-4E14-BF28-3EF29AC9833D', -- Entity: MJ_BizApps_Sales: Sales Contacts
             (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '530174B2-654E-4E14-BF28-3EF29AC9833D') + 11,
-            '__mj_UpdatedAt',
-            'Updated At',
-            NULL,
-            'datetimeoffset',
-            10,
-            34,
-            7,
-            0,
-            'getutcdate()',
-            0,
-            0,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '1b8b22e1-6f4b-4a70-a7bf-341f8610ddd7' OR (EntityID = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B' AND Name = 'ID')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '1b8b22e1-6f4b-4a70-a7bf-341f8610ddd7',
-            'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B', -- Entity: MJ_BizApps_Sales: Deal Line Types
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B') + 1,
-            'ID',
-            'ID',
-            NULL,
-            'uniqueidentifier',
-            16,
-            0,
-            0,
-            0,
-            'newsequentialid()',
-            0,
-            0,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            1,
-            1,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '16c77654-b60c-4165-8133-52a0f73af9c4' OR (EntityID = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B' AND Name = 'Code')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '16c77654-b60c-4165-8133-52a0f73af9c4',
-            'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B', -- Entity: MJ_BizApps_Sales: Deal Line Types
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B') + 2,
-            'Code',
-            'Code',
-            NULL,
-            'nvarchar',
-            80,
-            0,
-            0,
-            0,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            1,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'e8c5fe8e-7087-46e5-b098-4abe0fde233a' OR (EntityID = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B' AND Name = 'Name')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'e8c5fe8e-7087-46e5-b098-4abe0fde233a',
-            'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B', -- Entity: MJ_BizApps_Sales: Deal Line Types
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B') + 3,
-            'Name',
-            'Name',
-            NULL,
-            'nvarchar',
-            400,
-            0,
-            0,
-            0,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            1,
-            1,
-            0,
-            1,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '1dd10beb-44d1-4f48-a5ea-57c19e6120c9' OR (EntityID = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B' AND Name = 'Description')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '1dd10beb-44d1-4f48-a5ea-57c19e6120c9',
-            'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B', -- Entity: MJ_BizApps_Sales: Deal Line Types
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B') + 4,
-            'Description',
-            'Description',
-            NULL,
-            'nvarchar',
-            -1,
-            0,
-            0,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '57e8eb0d-da36-4775-a2d2-4c8082fb6390' OR (EntityID = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B' AND Name = 'IsRecurring')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '57e8eb0d-da36-4775-a2d2-4c8082fb6390',
-            'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B', -- Entity: MJ_BizApps_Sales: Deal Line Types
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B') + 5,
-            'IsRecurring',
-            'Is Recurring',
-            'The behaviour flag. 1 for lines that carry into MRR/ARR and become a renewable subscription; 0 for lines billed once. Branch on this, never on Name or Code.',
-            'bit',
-            1,
-            1,
-            0,
-            0,
-            '(0)',
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'b3a0c6cf-54cf-466b-ab78-c59cea1491b5' OR (EntityID = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B' AND Name = 'DisplayRank')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'b3a0c6cf-54cf-466b-ab78-c59cea1491b5',
-            'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B', -- Entity: MJ_BizApps_Sales: Deal Line Types
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B') + 6,
-            'DisplayRank',
-            'Display Rank',
-            NULL,
-            'int',
-            4,
-            10,
-            0,
-            0,
-            '(0)',
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '6a93efeb-c1ec-43dd-a594-fc7ef27af136' OR (EntityID = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B' AND Name = 'IsActive')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '6a93efeb-c1ec-43dd-a594-fc7ef27af136',
-            'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B', -- Entity: MJ_BizApps_Sales: Deal Line Types
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B') + 7,
-            'IsActive',
-            'Is Active',
-            NULL,
-            'bit',
-            1,
-            1,
-            0,
-            0,
-            '(1)',
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'd3ef1a24-8809-4dfc-9998-3b7353149eec' OR (EntityID = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B' AND Name = '__mj_CreatedAt')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'd3ef1a24-8809-4dfc-9998-3b7353149eec',
-            'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B', -- Entity: MJ_BizApps_Sales: Deal Line Types
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B') + 8,
-            '__mj_CreatedAt',
-            'Created At',
-            NULL,
-            'datetimeoffset',
-            10,
-            34,
-            7,
-            0,
-            'getutcdate()',
-            0,
-            0,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '3a6977ae-1e46-4b4f-99c5-6f9af598129f' OR (EntityID = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B' AND Name = '__mj_UpdatedAt')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '3a6977ae-1e46-4b4f-99c5-6f9af598129f',
-            'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B', -- Entity: MJ_BizApps_Sales: Deal Line Types
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B') + 9,
-            '__mj_UpdatedAt',
-            'Updated At',
-            NULL,
-            'datetimeoffset',
-            10,
-            34,
-            7,
-            0,
-            'getutcdate()',
-            0,
-            0,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'b1bf5037-9344-4791-87fb-b442be1066ad' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'ID')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'b1bf5037-9344-4791-87fb-b442be1066ad',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 1,
-            'ID',
-            'ID',
-            NULL,
-            'uniqueidentifier',
-            16,
-            0,
-            0,
-            0,
-            'newsequentialid()',
-            0,
-            0,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            1,
-            1,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '56fa62b9-1b01-4139-878c-2b3082e8a6f3' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'DealID')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '56fa62b9-1b01-4139-878c-2b3082e8a6f3',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 2,
-            'DealID',
-            'Deal ID',
-            NULL,
-            'uniqueidentifier',
-            16,
-            0,
-            0,
-            0,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            '79148DE5-7F99-44AC-ACD4-5EE7BA93D354',
-            'ID',
-            0,
-            0,
-            1,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'b510dcc1-74b4-4e46-a2d2-b289ee6bd794' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'ProductID')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'b510dcc1-74b4-4e46-a2d2-b289ee6bd794',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 3,
-            'ProductID',
-            'Product ID',
-            'SOFT reference (no FK) to a bizapps-orders Product. Soft because orders'' migrations may not have run — which is exactly what lets this app stand up independently.',
-            'uniqueidentifier',
-            16,
-            0,
-            0,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '52503bfa-8a34-47ff-b351-a28588249519' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'ProductName')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '52503bfa-8a34-47ff-b351-a28588249519',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 4,
-            'ProductName',
-            'Product Name',
-            'The product/service name AS WRITTEN ON THE SIGNED DOCUMENT — transcription, not a denormalized cache of the catalog name, and never auto-synced from it. Needed twice over: ProductID points at the orders catalog, which is not installed yet, so without this a line is an unreadable GUID; and once orders IS present, renaming a catalog product must not retroactively reword what a customer signed.',
-            'nvarchar',
-            1000,
-            0,
-            0,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '7bad8ea6-d3da-4062-b255-fae8339c1127' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'Quantity')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '7bad8ea6-d3da-4062-b255-fae8339c1127',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 5,
-            'Quantity',
-            'Quantity',
-            NULL,
-            'decimal',
-            9,
-            19,
-            4,
-            0,
-            '(1)',
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'c3b7e4f2-5a83-48b8-85da-bcfa10bba014' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'RequestedDiscountPct')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'c3b7e4f2-5a83-48b8-85da-bcfa10bba014',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 6,
-            'RequestedDiscountPct',
-            'Requested Discount Pct',
-            NULL,
-            'decimal',
-            5,
-            5,
-            2,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'c94bd42f-db36-4bcb-9fe5-95c6fabd109e' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'OverrideUnitPrice')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'c94bd42f-db36-4bcb-9fe5-95c6fabd109e',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 7,
-            'OverrideUnitPrice',
-            'Override Unit Price',
-            'A negotiated unit price. An INPUT to the pricing engine, never a replacement for it — the line still goes through Orders.PreviewOrder.',
-            'decimal',
-            9,
-            19,
-            4,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '766661fb-161b-497f-86c4-0e74983ab97e' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'TermMonths')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '766661fb-161b-497f-86c4-0e74983ab97e',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 8,
-            'TermMonths',
-            'Term Months',
-            NULL,
-            'int',
-            4,
-            10,
-            0,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '22e2ae74-d296-4fb4-8b99-1f6d89fb8fca' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'ServicePeriodStart')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '22e2ae74-d296-4fb4-8b99-1f6d89fb8fca',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 9,
-            'ServicePeriodStart',
-            'Service Period Start',
-            NULL,
-            'date',
-            3,
-            10,
-            0,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '431170e1-c935-444a-956c-7d9d408c36e6' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'ServicePeriodEnd')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '431170e1-c935-444a-956c-7d9d408c36e6',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 10,
-            'ServicePeriodEnd',
-            'Service Period End',
-            NULL,
-            'date',
-            3,
-            10,
-            0,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '84769e1a-1558-4a18-ae4c-63d566cd6f98' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'DealLineTypeID')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '84769e1a-1558-4a18-ae4c-63d566cd6f98',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 11,
-            'DealLineTypeID',
-            'Deal Line Type ID',
-            'Whether this line is a one-time charge or a recurring one. A FK to DealLineType, replacing what was a free-text LineType column: recurring lines are what produce MRR/ARR and a renewal, and the moment code needs to tell them apart a string forces exactly the name comparison the vocabulary rule forbids. Branch on DealLineType.IsRecurring, never on the name.',
-            'uniqueidentifier',
-            16,
-            0,
-            0,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B',
-            'ID',
-            0,
-            0,
-            1,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'ed6d1c36-0fd3-4b2c-aa89-91d1522198e4' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'DisplayOrder')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'ed6d1c36-0fd3-4b2c-aa89-91d1522198e4',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 12,
-            'DisplayOrder',
-            'Display Order',
-            NULL,
-            'int',
-            4,
-            10,
-            0,
-            0,
-            '(0)',
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '1980194d-e18a-476d-ae1d-1be79e866fb5' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'Description')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '1980194d-e18a-476d-ae1d-1be79e866fb5',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 13,
-            'Description',
-            'Description',
-            NULL,
-            'nvarchar',
-            -1,
-            0,
-            0,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'c4bf9772-a735-4444-a06f-08cadc754d12' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'AnnualGrossFees')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'c4bf9772-a735-4444-a06f-08cadc754d12',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 14,
-            'AnnualGrossFees',
-            'Annual Gross Fees',
-            'Annual gross fees for this line AS WRITTEN ON THE SIGNED DOCUMENT. An INPUT the AD transcribes, not a figure this app derives. Once orders is wired in, Orders.PreviewOrder''s answer lands in the Resolved* columns and becomes the authority on what the deal is worth; this remains the record of what was signed.',
-            'decimal',
-            9,
-            19,
-            4,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '6bc9f963-9b20-479f-a581-456f4bac585b' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'DiscountAmount')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '6bc9f963-9b20-479f-a581-456f4bac585b',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 15,
-            'DiscountAmount',
-            'Discount Amount',
-            'The discount as a CURRENCY AMOUNT, as the order form expresses it. Coexists with RequestedDiscountPct deliberately — the template speaks in amounts, the pricing engine takes a percent — and there is no exactly-one-of constraint, because a deal can legitimately carry a negotiated percentage as engine input AND the figure printed on the signed page.',
-            'decimal',
-            9,
-            19,
-            4,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'adeb3f2a-dd74-4963-8860-eccb13a75f4b' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'Total')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'adeb3f2a-dd74-4963-8860-eccb13a75f4b',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 16,
-            'Total',
-            'Total',
-            'THE SIGNED FIGURE for this line, transcribed from the executed document. On the PDF it equals AnnualGrossFees minus DiscountAmount, but THAT SUBTRACTION IS THE CUSTOMER''S AND THE AD''S, NOT THIS APP''S: nothing here computes, defaults or back-fills it, which is how the no-arithmetic rule stays literally true. Deliberately unconstrained in sign — a credit or concession line is legitimately negative, and bounding it would mean asserting the arithmetic.',
-            'decimal',
-            9,
-            19,
-            4,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '03cbd5e3-d854-40d7-aea1-95c691c6f817' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'ResolvedUnitPrice')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '03cbd5e3-d854-40d7-aea1-95c691c6f817',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 17,
-            'ResolvedUnitPrice',
-            'Resolved Unit Price',
-            'WRITE-ONLY from this app''s perspective: populated only from an Orders.PreviewOrder response, never computed locally, never hand-edited.',
-            'decimal',
-            9,
-            19,
-            4,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '23721390-9946-4177-b3ab-4a276e99767f' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'ResolvedExtendedAmount')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '23721390-9946-4177-b3ab-4a276e99767f',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 18,
-            'ResolvedExtendedAmount',
-            'Resolved Extended Amount',
-            'WRITE-ONLY, from Orders.PreviewOrder. Never quantity x price computed here.',
-            'decimal',
-            9,
-            19,
-            4,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '8b3d9fc9-32de-47fc-ac8e-b71c82a49a2a' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'PriceComponentsJSON')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '8b3d9fc9-32de-47fc-ac8e-b71c82a49a2a',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 19,
-            'PriceComponentsJSON',
-            'Price Components JSON',
-            'The explanation trail Orders.PreviewOrder returns (base, rules, adjustments, charges, tax), so a rep can answer "why is it this price" without a support ticket.',
-            'nvarchar',
-            -1,
-            0,
-            0,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'cdcd4142-f829-49d1-9bc7-50f4d88526ec' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'PricedAt')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'cdcd4142-f829-49d1-9bc7-50f4d88526ec',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 20,
-            'PricedAt',
-            'Priced At',
-            NULL,
-            'datetimeoffset',
-            10,
-            34,
-            7,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '0e1d2bc5-b257-4837-94e2-2c35d3b27082' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'CompanyID')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '0e1d2bc5-b257-4837-94e2-2c35d3b27082',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 21,
-            'CompanyID',
-            'Company ID',
-            'DENORMALIZED stamp of the product''s owning company at price time, mirroring OrderLine.CompanyID. This is what lets a cross-company deal materialize into orders with correct per-line company ownership. Server-maintained; never hand-set.',
-            'uniqueidentifier',
-            16,
-            0,
-            0,
-            1,
-            NULL,
-            0,
-            1,
-            0,
-            0,
-            'D4238F34-2837-EF11-86D4-6045BDEE16E6',
-            'ID',
-            0,
-            0,
-            1,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '79115c67-b7c3-4949-8831-4c20fb3c4f43' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = '__mj_CreatedAt')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '79115c67-b7c3-4949-8831-4c20fb3c4f43',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 22,
-            '__mj_CreatedAt',
-            'Created At',
-            NULL,
-            'datetimeoffset',
-            10,
-            34,
-            7,
-            0,
-            'getutcdate()',
-            0,
-            0,
-            0,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '15ba1a04-0bb9-4367-ac25-991f47ac3a25' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = '__mj_UpdatedAt')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '15ba1a04-0bb9-4367-ac25-991f47ac3a25',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 23,
             '__mj_UpdatedAt',
             'Updated At',
             NULL,
@@ -22497,15 +20201,6 @@ EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sy
                     VALUES ('4d44239b-e245-41b0-b1a3-b07c26789757', '530174B2-654E-4E14-BF28-3EF29AC9833D', '862535EB-36DD-4434-8B4E-E256363E781F', 'SalesContactID', 'One To Many', 1, 1, 3, GETUTCDATE(), GETUTCDATE())
    END;
                     
-/* Create Entity Relationship: MJ_BizApps_Sales: Deal Line Types -> MJ_BizApps_Sales: Deal Lines (One To Many via DealLineTypeID) */
-   IF NOT EXISTS (
-      SELECT 1 FROM [${mjSchema}].[EntityRelationship] WHERE [ID] = '782edb0d-92b8-4380-9518-9cefa5e994ed'
-   )
-   BEGIN
-      INSERT INTO [${mjSchema}].[EntityRelationship] ([ID], [EntityID], [RelatedEntityID], [RelatedEntityJoinField], [Type], [BundleInAPI], [DisplayInForm], [Sequence], [__mj_CreatedAt], [__mj_UpdatedAt])
-                    VALUES ('782edb0d-92b8-4380-9518-9cefa5e994ed', 'D6539BC7-EB9E-45ED-9A49-4A5D46B0675B', '70138C62-0F2F-4471-B98A-4CE98AC3BC64', 'DealLineTypeID', 'One To Many', 1, 1, 1, GETUTCDATE(), GETUTCDATE())
-   END;
-                    
 /* Create Entity Relationship: MJ_BizApps_Sales: Deal Status Types -> MJ_BizApps_Sales: Deal Stage Events (One To Many via FromDealStatusTypeID) */
    IF NOT EXISTS (
       SELECT 1 FROM [${mjSchema}].[EntityRelationship] WHERE [ID] = 'fc68733a-40a5-43db-a451-b8081ca4be3a'
@@ -22552,15 +20247,6 @@ EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sy
                     VALUES ('457841a1-daf1-4d13-b921-a0dbe0658c3a', '79148DE5-7F99-44AC-ACD4-5EE7BA93D354', '862535EB-36DD-4434-8B4E-E256363E781F', 'DealID', 'One To Many', 1, 1, 1, GETUTCDATE(), GETUTCDATE())
    END;
                     
-/* Create Entity Relationship: MJ_BizApps_Sales: Deals -> MJ_BizApps_Sales: Deal Lines (One To Many via DealID) */
-   IF NOT EXISTS (
-      SELECT 1 FROM [${mjSchema}].[EntityRelationship] WHERE [ID] = '505d2f18-6900-4351-a9b3-83e55782e3cc'
-   )
-   BEGIN
-      INSERT INTO [${mjSchema}].[EntityRelationship] ([ID], [EntityID], [RelatedEntityID], [RelatedEntityJoinField], [Type], [BundleInAPI], [DisplayInForm], [Sequence], [__mj_CreatedAt], [__mj_UpdatedAt])
-                    VALUES ('505d2f18-6900-4351-a9b3-83e55782e3cc', '79148DE5-7F99-44AC-ACD4-5EE7BA93D354', '70138C62-0F2F-4471-B98A-4CE98AC3BC64', 'DealID', 'One To Many', 1, 1, 2, GETUTCDATE(), GETUTCDATE())
-   END;
-                    
 /* Create Entity Relationship: MJ_BizApps_Sales: Deals -> MJ_BizApps_Sales: Deal Stage Events (One To Many via DealID) */
    IF NOT EXISTS (
       SELECT 1 FROM [${mjSchema}].[EntityRelationship] WHERE [ID] = '2c6b6ffb-3761-4ae3-89ef-22845a60a69f'
@@ -22605,15 +20291,6 @@ EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sy
    BEGIN
       INSERT INTO [${mjSchema}].[EntityRelationship] ([ID], [EntityID], [RelatedEntityID], [RelatedEntityJoinField], [Type], [BundleInAPI], [DisplayInForm], [Sequence], [__mj_CreatedAt], [__mj_UpdatedAt])
                     VALUES ('eb328479-49b4-4012-953e-cdbdf51d04e3', 'D4238F34-2837-EF11-86D4-6045BDEE16E6', '79148DE5-7F99-44AC-ACD4-5EE7BA93D354', 'CompanyID', 'One To Many', 1, 1, 8, GETUTCDATE(), GETUTCDATE())
-   END;
-                    
-/* Create Entity Relationship: MJ: Companies -> MJ_BizApps_Sales: Deal Lines (One To Many via CompanyID) */
-   IF NOT EXISTS (
-      SELECT 1 FROM [${mjSchema}].[EntityRelationship] WHERE [ID] = 'b7588943-5171-4d92-b02d-e8c8c0ece0a2'
-   )
-   BEGIN
-      INSERT INTO [${mjSchema}].[EntityRelationship] ([ID], [EntityID], [RelatedEntityID], [RelatedEntityJoinField], [Type], [BundleInAPI], [DisplayInForm], [Sequence], [__mj_CreatedAt], [__mj_UpdatedAt])
-                    VALUES ('b7588943-5171-4d92-b02d-e8c8c0ece0a2', 'D4238F34-2837-EF11-86D4-6045BDEE16E6', '70138C62-0F2F-4471-B98A-4CE98AC3BC64', 'CompanyID', 'One To Many', 1, 1, 9, GETUTCDATE(), GETUTCDATE())
    END;
                     
 /* Create Entity Relationship: MJ: Companies -> MJ_BizApps_Sales: Pipelines (One To Many via CompanyID) */
@@ -22956,52 +20633,6 @@ CREATE INDEX IDX_AUTO_MJ_FKEY_DealContactRole_BuyingRoleTypeID ON [${flyway:defa
 
 /* SQL text to update entity field related entity name field map for entity field ID C1721890-7366-43D2-AF96-2DB77CCB5EBF */
 EXEC [${mjSchema}].[spUpdateEntityFieldRelatedEntityNameFieldMap] @EntityFieldID='C1721890-7366-43D2-AF96-2DB77CCB5EBF', @RelatedEntityNameFieldMap='Deal';
-
-/* Index for Foreign Keys for DealLineType */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Line Types
--- Item: Index for Foreign Keys
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------;
-
-/* Index for Foreign Keys for DealLine */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Lines
--- Item: Index for Foreign Keys
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
--- Index for foreign key DealID in table DealLine
-IF NOT EXISTS (
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = 'IDX_AUTO_MJ_FKEY_DealLine_DealID' 
-    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[DealLine]')
-)
-CREATE INDEX IDX_AUTO_MJ_FKEY_DealLine_DealID ON [${flyway:defaultSchema}].[DealLine] ([DealID]);
-
--- Index for foreign key DealLineTypeID in table DealLine
-IF NOT EXISTS (
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = 'IDX_AUTO_MJ_FKEY_DealLine_DealLineTypeID' 
-    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[DealLine]')
-)
-CREATE INDEX IDX_AUTO_MJ_FKEY_DealLine_DealLineTypeID ON [${flyway:defaultSchema}].[DealLine] ([DealLineTypeID]);
-
--- Index for foreign key CompanyID in table DealLine
-IF NOT EXISTS (
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = 'IDX_AUTO_MJ_FKEY_DealLine_CompanyID' 
-    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[DealLine]')
-)
-CREATE INDEX IDX_AUTO_MJ_FKEY_DealLine_CompanyID ON [${flyway:defaultSchema}].[DealLine] ([CompanyID]);
 
 /* SQL text to update entity field related entity name field map for entity field ID 56FA62B9-1B01-4139-878C-2B3082E8A6F3 */
 EXEC [${mjSchema}].[spUpdateEntityFieldRelatedEntityNameFieldMap] @EntityFieldID='56FA62B9-1B01-4139-878C-2B3082E8A6F3', @RelatedEntityNameFieldMap='Deal';
@@ -23472,224 +21103,6 @@ GO
 
 GRANT EXECUTE ON [${flyway:defaultSchema}].[spUpdateBuyingRoleType] TO [cdp_Developer], [cdp_Integration];
 
-/* Base View SQL for MJ_BizApps_Sales: Deal Line Types */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Line Types
--- Item: vwDealLineTypes
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
-
-------------------------------------------------------------
------ BASE VIEW FOR ENTITY:      MJ_BizApps_Sales: Deal Line Types
------               SCHEMA:      ${flyway:defaultSchema}
------               BASE TABLE:  DealLineType
------               PRIMARY KEY: ID
-------------------------------------------------------------
-IF OBJECT_ID('[${flyway:defaultSchema}].[vwDealLineTypes]', 'V') IS NOT NULL
-    DROP VIEW [${flyway:defaultSchema}].[vwDealLineTypes];
-GO
-
-CREATE VIEW [${flyway:defaultSchema}].[vwDealLineTypes]
-AS
-SELECT
-    d.*
-FROM
-    [${flyway:defaultSchema}].[DealLineType] AS d
-GO
-GRANT SELECT ON [${flyway:defaultSchema}].[vwDealLineTypes] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
-
-/* Base View Permissions SQL for MJ_BizApps_Sales: Deal Line Types */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Line Types
--- Item: Permissions for vwDealLineTypes
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
-
-GRANT SELECT ON [${flyway:defaultSchema}].[vwDealLineTypes] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
-
-/* spCreate SQL for MJ_BizApps_Sales: Deal Line Types */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Line Types
--- Item: spCreateDealLineType
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
-
-------------------------------------------------------------
------ CREATE PROCEDURE FOR DealLineType
-------------------------------------------------------------
-IF OBJECT_ID('[${flyway:defaultSchema}].[spCreateDealLineType]', 'P') IS NOT NULL
-    DROP PROCEDURE [${flyway:defaultSchema}].[spCreateDealLineType];
-GO
-
-CREATE PROCEDURE [${flyway:defaultSchema}].[spCreateDealLineType]
-    @ID uniqueidentifier = NULL,
-    @Code nvarchar(40),
-    @Name nvarchar(200),
-    @Description_Clear bit = 0,
-    @Description nvarchar(MAX) = NULL,
-    @IsRecurring bit = NULL,
-    @DisplayRank int = NULL,
-    @IsActive bit = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-    DECLARE @InsertedRow TABLE ([ID] UNIQUEIDENTIFIER)
-
-    IF @ID IS NOT NULL
-    BEGIN
-        -- User provided a value, use it
-        INSERT INTO [${flyway:defaultSchema}].[DealLineType]
-            (
-                [ID],
-                [Code],
-                [Name],
-                [Description],
-                [IsRecurring],
-                [DisplayRank],
-                [IsActive]
-            )
-        OUTPUT INSERTED.[ID] INTO @InsertedRow
-        VALUES
-            (
-                @ID,
-                @Code,
-                @Name,
-                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
-                ISNULL(@IsRecurring, 0),
-                ISNULL(@DisplayRank, 0),
-                ISNULL(@IsActive, 1)
-            )
-    END
-    ELSE
-    BEGIN
-        -- No value provided, let database use its default (e.g., NEWSEQUENTIALID())
-        INSERT INTO [${flyway:defaultSchema}].[DealLineType]
-            (
-                [Code],
-                [Name],
-                [Description],
-                [IsRecurring],
-                [DisplayRank],
-                [IsActive]
-            )
-        OUTPUT INSERTED.[ID] INTO @InsertedRow
-        VALUES
-            (
-                @Code,
-                @Name,
-                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
-                ISNULL(@IsRecurring, 0),
-                ISNULL(@DisplayRank, 0),
-                ISNULL(@IsActive, 1)
-            )
-    END
-    -- return the new record from the base view, which might have some calculated fields
-    SELECT * FROM [${flyway:defaultSchema}].[vwDealLineTypes] WHERE [ID] = (SELECT [ID] FROM @InsertedRow)
-END
-GO
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spCreateDealLineType] TO [cdp_Developer], [cdp_Integration];
-
-/* spCreate Permissions for MJ_BizApps_Sales: Deal Line Types */
-
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spCreateDealLineType] TO [cdp_Developer], [cdp_Integration];
-
-/* spUpdate SQL for MJ_BizApps_Sales: Deal Line Types */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Line Types
--- Item: spUpdateDealLineType
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
-
-------------------------------------------------------------
------ UPDATE PROCEDURE FOR DealLineType
-------------------------------------------------------------
-IF OBJECT_ID('[${flyway:defaultSchema}].[spUpdateDealLineType]', 'P') IS NOT NULL
-    DROP PROCEDURE [${flyway:defaultSchema}].[spUpdateDealLineType];
-GO
-
-CREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateDealLineType]
-    @ID uniqueidentifier,
-    @Code nvarchar(40) = NULL,
-    @Name nvarchar(200) = NULL,
-    @Description_Clear bit = 0,
-    @Description nvarchar(MAX) = NULL,
-    @IsRecurring bit = NULL,
-    @DisplayRank int = NULL,
-    @IsActive bit = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-    UPDATE
-        [${flyway:defaultSchema}].[DealLineType]
-    SET
-        [Code] = ISNULL(@Code, [Code]),
-        [Name] = ISNULL(@Name, [Name]),
-        [Description] = CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, [Description]) END,
-        [IsRecurring] = ISNULL(@IsRecurring, [IsRecurring]),
-        [DisplayRank] = ISNULL(@DisplayRank, [DisplayRank]),
-        [IsActive] = ISNULL(@IsActive, [IsActive])
-    WHERE
-        [ID] = @ID
-
-    -- Check if the update was successful
-    IF @@ROWCOUNT = 0
-        -- Nothing was updated, return no rows, but column structure from base view intact, semantically correct this way.
-        SELECT TOP 0 * FROM [${flyway:defaultSchema}].[vwDealLineTypes] WHERE 1=0
-    ELSE
-        -- Return the updated record so the caller can see the updated values and any calculated fields
-        SELECT
-                                        *
-                                    FROM
-                                        [${flyway:defaultSchema}].[vwDealLineTypes]
-                                    WHERE
-                                        [ID] = @ID
-                                    
-END
-GO
-
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spUpdateDealLineType] TO [cdp_Developer], [cdp_Integration]
-GO
-
-------------------------------------------------------------
------ TRIGGER FOR __mj_UpdatedAt field for the DealLineType table
-------------------------------------------------------------
-IF OBJECT_ID('[${flyway:defaultSchema}].[trgUpdateDealLineType]', 'TR') IS NOT NULL
-    DROP TRIGGER [${flyway:defaultSchema}].[trgUpdateDealLineType];
-GO
-CREATE TRIGGER [${flyway:defaultSchema}].trgUpdateDealLineType
-ON [${flyway:defaultSchema}].[DealLineType]
-AFTER UPDATE
-AS
-BEGIN
-    SET NOCOUNT ON;
-    UPDATE
-        [${flyway:defaultSchema}].[DealLineType]
-    SET
-        __mj_UpdatedAt = GETUTCDATE()
-    FROM
-        [${flyway:defaultSchema}].[DealLineType] AS _organicTable
-    INNER JOIN
-        INSERTED AS I ON
-        _organicTable.[ID] = I.[ID];
-END;
-GO
-
-/* spUpdate Permissions for MJ_BizApps_Sales: Deal Line Types */
-
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spUpdateDealLineType] TO [cdp_Developer], [cdp_Integration];
-
 /* spDelete SQL for MJ_BizApps_Sales: Account Types */
 -----------------------------------------------------------------
 -- SQL Code Generation
@@ -23774,53 +21187,10 @@ GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteBuyingRoleType] TO [cdp_Deve
 
 GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteBuyingRoleType] TO [cdp_Developer], [cdp_Integration];
 
-/* spDelete SQL for MJ_BizApps_Sales: Deal Line Types */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Line Types
--- Item: spDeleteDealLineType
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
-
-------------------------------------------------------------
------ DELETE PROCEDURE FOR DealLineType
-------------------------------------------------------------
-IF OBJECT_ID('[${flyway:defaultSchema}].[spDeleteDealLineType]', 'P') IS NOT NULL
-    DROP PROCEDURE [${flyway:defaultSchema}].[spDeleteDealLineType];
-GO
-
-CREATE PROCEDURE [${flyway:defaultSchema}].[spDeleteDealLineType]
-    @ID uniqueidentifier
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    DELETE FROM
-        [${flyway:defaultSchema}].[DealLineType]
-    WHERE
-        [ID] = @ID
-
-
-    -- Check if the delete was successful
-    IF @@ROWCOUNT = 0
-        SELECT NULL AS [ID] -- Return NULL for all primary key fields to indicate no record was deleted
-    ELSE
-        SELECT @ID AS [ID] -- Return the primary key values to indicate we successfully deleted the record
-END
-GO
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteDealLineType] TO [cdp_Developer], [cdp_Integration];
-
-/* spDelete Permissions for MJ_BizApps_Sales: Deal Line Types */
-
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteDealLineType] TO [cdp_Developer], [cdp_Integration];
-
 /* SQL text to update entity field related entity name field map for entity field ID A9C8C155-969C-4ED9-BA66-0B8FE92EC0DF */
 EXEC [${mjSchema}].[spUpdateEntityFieldRelatedEntityNameFieldMap] @EntityFieldID='A9C8C155-969C-4ED9-BA66-0B8FE92EC0DF', @RelatedEntityNameFieldMap='BuyingRoleType';
 
 /* SQL text to update entity field related entity name field map for entity field ID 84769E1A-1558-4A18-AE4C-63D566CD6F98 */
-EXEC [${mjSchema}].[spUpdateEntityFieldRelatedEntityNameFieldMap] @EntityFieldID='84769E1A-1558-4A18-AE4C-63D566CD6F98', @RelatedEntityNameFieldMap='DealLineType';
 
 /* Base View SQL for MJ_BizApps_Sales: Deal Contact Roles */
 -----------------------------------------------------------------
@@ -24091,411 +21461,6 @@ GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteDealContactRole] TO [cdp_Dev
 
 /* SQL text to update entity field related entity name field map for entity field ID 0E1D2BC5-B257-4837-94E2-2C35D3B27082 */
 EXEC [${mjSchema}].[spUpdateEntityFieldRelatedEntityNameFieldMap] @EntityFieldID='0E1D2BC5-B257-4837-94E2-2C35D3B27082', @RelatedEntityNameFieldMap='Company';
-
-/* Base View SQL for MJ_BizApps_Sales: Deal Lines */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Lines
--- Item: vwDealLines
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
-
-------------------------------------------------------------
------ BASE VIEW FOR ENTITY:      MJ_BizApps_Sales: Deal Lines
------               SCHEMA:      ${flyway:defaultSchema}
------               BASE TABLE:  DealLine
------               PRIMARY KEY: ID
-------------------------------------------------------------
-IF OBJECT_ID('[${flyway:defaultSchema}].[vwDealLines]', 'V') IS NOT NULL
-    DROP VIEW [${flyway:defaultSchema}].[vwDealLines];
-GO
-
-CREATE VIEW [${flyway:defaultSchema}].[vwDealLines]
-AS
-SELECT
-    d.*,
-    mjBizAppsSalesDeal_DealID.[Name] AS [Deal],
-    mjBizAppsSalesDealLineType_DealLineTypeID.[Name] AS [DealLineType],
-    MJCompany_CompanyID.[Name] AS [Company]
-FROM
-    [${flyway:defaultSchema}].[DealLine] AS d
-INNER JOIN
-    [${flyway:defaultSchema}].[Deal] AS mjBizAppsSalesDeal_DealID
-  ON
-    [d].[DealID] = mjBizAppsSalesDeal_DealID.[ID]
-LEFT OUTER JOIN
-    [${flyway:defaultSchema}].[DealLineType] AS mjBizAppsSalesDealLineType_DealLineTypeID
-  ON
-    [d].[DealLineTypeID] = mjBizAppsSalesDealLineType_DealLineTypeID.[ID]
-LEFT OUTER JOIN
-    [${mjSchema}].[Company] AS MJCompany_CompanyID
-  ON
-    [d].[CompanyID] = MJCompany_CompanyID.[ID]
-GO
-GRANT SELECT ON [${flyway:defaultSchema}].[vwDealLines] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
-
-/* Base View Permissions SQL for MJ_BizApps_Sales: Deal Lines */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Lines
--- Item: Permissions for vwDealLines
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
-
-GRANT SELECT ON [${flyway:defaultSchema}].[vwDealLines] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
-
-/* spCreate SQL for MJ_BizApps_Sales: Deal Lines */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Lines
--- Item: spCreateDealLine
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
-
-------------------------------------------------------------
------ CREATE PROCEDURE FOR DealLine
-------------------------------------------------------------
-IF OBJECT_ID('[${flyway:defaultSchema}].[spCreateDealLine]', 'P') IS NOT NULL
-    DROP PROCEDURE [${flyway:defaultSchema}].[spCreateDealLine];
-GO
-
-CREATE PROCEDURE [${flyway:defaultSchema}].[spCreateDealLine]
-    @ID uniqueidentifier = NULL,
-    @DealID uniqueidentifier,
-    @ProductID_Clear bit = 0,
-    @ProductID uniqueidentifier = NULL,
-    @ProductName_Clear bit = 0,
-    @ProductName nvarchar(500) = NULL,
-    @Quantity decimal(19, 4) = NULL,
-    @RequestedDiscountPct_Clear bit = 0,
-    @RequestedDiscountPct decimal(5, 2) = NULL,
-    @OverrideUnitPrice_Clear bit = 0,
-    @OverrideUnitPrice decimal(19, 4) = NULL,
-    @TermMonths_Clear bit = 0,
-    @TermMonths int = NULL,
-    @ServicePeriodStart_Clear bit = 0,
-    @ServicePeriodStart date = NULL,
-    @ServicePeriodEnd_Clear bit = 0,
-    @ServicePeriodEnd date = NULL,
-    @DealLineTypeID_Clear bit = 0,
-    @DealLineTypeID uniqueidentifier = NULL,
-    @DisplayOrder int = NULL,
-    @Description_Clear bit = 0,
-    @Description nvarchar(MAX) = NULL,
-    @AnnualGrossFees_Clear bit = 0,
-    @AnnualGrossFees decimal(19, 4) = NULL,
-    @DiscountAmount_Clear bit = 0,
-    @DiscountAmount decimal(19, 4) = NULL,
-    @Total_Clear bit = 0,
-    @Total decimal(19, 4) = NULL,
-    @ResolvedUnitPrice_Clear bit = 0,
-    @ResolvedUnitPrice decimal(19, 4) = NULL,
-    @ResolvedExtendedAmount_Clear bit = 0,
-    @ResolvedExtendedAmount decimal(19, 4) = NULL,
-    @PriceComponentsJSON_Clear bit = 0,
-    @PriceComponentsJSON nvarchar(MAX) = NULL,
-    @PricedAt_Clear bit = 0,
-    @PricedAt datetimeoffset = NULL,
-    @CompanyID_Clear bit = 0,
-    @CompanyID uniqueidentifier = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-    DECLARE @InsertedRow TABLE ([ID] UNIQUEIDENTIFIER)
-
-    IF @ID IS NOT NULL
-    BEGIN
-        -- User provided a value, use it
-        INSERT INTO [${flyway:defaultSchema}].[DealLine]
-            (
-                [ID],
-                [DealID],
-                [ProductID],
-                [ProductName],
-                [Quantity],
-                [RequestedDiscountPct],
-                [OverrideUnitPrice],
-                [TermMonths],
-                [ServicePeriodStart],
-                [ServicePeriodEnd],
-                [DealLineTypeID],
-                [DisplayOrder],
-                [Description],
-                [AnnualGrossFees],
-                [DiscountAmount],
-                [Total],
-                [ResolvedUnitPrice],
-                [ResolvedExtendedAmount],
-                [PriceComponentsJSON],
-                [PricedAt],
-                [CompanyID]
-            )
-        OUTPUT INSERTED.[ID] INTO @InsertedRow
-        VALUES
-            (
-                @ID,
-                @DealID,
-                CASE WHEN @ProductID_Clear = 1 THEN NULL ELSE ISNULL(@ProductID, NULL) END,
-                CASE WHEN @ProductName_Clear = 1 THEN NULL ELSE ISNULL(@ProductName, NULL) END,
-                ISNULL(@Quantity, 1),
-                CASE WHEN @RequestedDiscountPct_Clear = 1 THEN NULL ELSE ISNULL(@RequestedDiscountPct, NULL) END,
-                CASE WHEN @OverrideUnitPrice_Clear = 1 THEN NULL ELSE ISNULL(@OverrideUnitPrice, NULL) END,
-                CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, NULL) END,
-                CASE WHEN @ServicePeriodStart_Clear = 1 THEN NULL ELSE ISNULL(@ServicePeriodStart, NULL) END,
-                CASE WHEN @ServicePeriodEnd_Clear = 1 THEN NULL ELSE ISNULL(@ServicePeriodEnd, NULL) END,
-                CASE WHEN @DealLineTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealLineTypeID, NULL) END,
-                ISNULL(@DisplayOrder, 0),
-                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
-                CASE WHEN @AnnualGrossFees_Clear = 1 THEN NULL ELSE ISNULL(@AnnualGrossFees, NULL) END,
-                CASE WHEN @DiscountAmount_Clear = 1 THEN NULL ELSE ISNULL(@DiscountAmount, NULL) END,
-                CASE WHEN @Total_Clear = 1 THEN NULL ELSE ISNULL(@Total, NULL) END,
-                CASE WHEN @ResolvedUnitPrice_Clear = 1 THEN NULL ELSE ISNULL(@ResolvedUnitPrice, NULL) END,
-                CASE WHEN @ResolvedExtendedAmount_Clear = 1 THEN NULL ELSE ISNULL(@ResolvedExtendedAmount, NULL) END,
-                CASE WHEN @PriceComponentsJSON_Clear = 1 THEN NULL ELSE ISNULL(@PriceComponentsJSON, NULL) END,
-                CASE WHEN @PricedAt_Clear = 1 THEN NULL ELSE ISNULL(@PricedAt, NULL) END,
-                CASE WHEN @CompanyID_Clear = 1 THEN NULL ELSE ISNULL(@CompanyID, NULL) END
-            )
-    END
-    ELSE
-    BEGIN
-        -- No value provided, let database use its default (e.g., NEWSEQUENTIALID())
-        INSERT INTO [${flyway:defaultSchema}].[DealLine]
-            (
-                [DealID],
-                [ProductID],
-                [ProductName],
-                [Quantity],
-                [RequestedDiscountPct],
-                [OverrideUnitPrice],
-                [TermMonths],
-                [ServicePeriodStart],
-                [ServicePeriodEnd],
-                [DealLineTypeID],
-                [DisplayOrder],
-                [Description],
-                [AnnualGrossFees],
-                [DiscountAmount],
-                [Total],
-                [ResolvedUnitPrice],
-                [ResolvedExtendedAmount],
-                [PriceComponentsJSON],
-                [PricedAt],
-                [CompanyID]
-            )
-        OUTPUT INSERTED.[ID] INTO @InsertedRow
-        VALUES
-            (
-                @DealID,
-                CASE WHEN @ProductID_Clear = 1 THEN NULL ELSE ISNULL(@ProductID, NULL) END,
-                CASE WHEN @ProductName_Clear = 1 THEN NULL ELSE ISNULL(@ProductName, NULL) END,
-                ISNULL(@Quantity, 1),
-                CASE WHEN @RequestedDiscountPct_Clear = 1 THEN NULL ELSE ISNULL(@RequestedDiscountPct, NULL) END,
-                CASE WHEN @OverrideUnitPrice_Clear = 1 THEN NULL ELSE ISNULL(@OverrideUnitPrice, NULL) END,
-                CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, NULL) END,
-                CASE WHEN @ServicePeriodStart_Clear = 1 THEN NULL ELSE ISNULL(@ServicePeriodStart, NULL) END,
-                CASE WHEN @ServicePeriodEnd_Clear = 1 THEN NULL ELSE ISNULL(@ServicePeriodEnd, NULL) END,
-                CASE WHEN @DealLineTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealLineTypeID, NULL) END,
-                ISNULL(@DisplayOrder, 0),
-                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
-                CASE WHEN @AnnualGrossFees_Clear = 1 THEN NULL ELSE ISNULL(@AnnualGrossFees, NULL) END,
-                CASE WHEN @DiscountAmount_Clear = 1 THEN NULL ELSE ISNULL(@DiscountAmount, NULL) END,
-                CASE WHEN @Total_Clear = 1 THEN NULL ELSE ISNULL(@Total, NULL) END,
-                CASE WHEN @ResolvedUnitPrice_Clear = 1 THEN NULL ELSE ISNULL(@ResolvedUnitPrice, NULL) END,
-                CASE WHEN @ResolvedExtendedAmount_Clear = 1 THEN NULL ELSE ISNULL(@ResolvedExtendedAmount, NULL) END,
-                CASE WHEN @PriceComponentsJSON_Clear = 1 THEN NULL ELSE ISNULL(@PriceComponentsJSON, NULL) END,
-                CASE WHEN @PricedAt_Clear = 1 THEN NULL ELSE ISNULL(@PricedAt, NULL) END,
-                CASE WHEN @CompanyID_Clear = 1 THEN NULL ELSE ISNULL(@CompanyID, NULL) END
-            )
-    END
-    -- return the new record from the base view, which might have some calculated fields
-    SELECT * FROM [${flyway:defaultSchema}].[vwDealLines] WHERE [ID] = (SELECT [ID] FROM @InsertedRow)
-END
-GO
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spCreateDealLine] TO [cdp_Developer], [cdp_Integration];
-
-/* spCreate Permissions for MJ_BizApps_Sales: Deal Lines */
-
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spCreateDealLine] TO [cdp_Developer], [cdp_Integration];
-
-/* spUpdate SQL for MJ_BizApps_Sales: Deal Lines */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Lines
--- Item: spUpdateDealLine
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
-
-------------------------------------------------------------
------ UPDATE PROCEDURE FOR DealLine
-------------------------------------------------------------
-IF OBJECT_ID('[${flyway:defaultSchema}].[spUpdateDealLine]', 'P') IS NOT NULL
-    DROP PROCEDURE [${flyway:defaultSchema}].[spUpdateDealLine];
-GO
-
-CREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateDealLine]
-    @ID uniqueidentifier,
-    @DealID uniqueidentifier = NULL,
-    @ProductID_Clear bit = 0,
-    @ProductID uniqueidentifier = NULL,
-    @ProductName_Clear bit = 0,
-    @ProductName nvarchar(500) = NULL,
-    @Quantity decimal(19, 4) = NULL,
-    @RequestedDiscountPct_Clear bit = 0,
-    @RequestedDiscountPct decimal(5, 2) = NULL,
-    @OverrideUnitPrice_Clear bit = 0,
-    @OverrideUnitPrice decimal(19, 4) = NULL,
-    @TermMonths_Clear bit = 0,
-    @TermMonths int = NULL,
-    @ServicePeriodStart_Clear bit = 0,
-    @ServicePeriodStart date = NULL,
-    @ServicePeriodEnd_Clear bit = 0,
-    @ServicePeriodEnd date = NULL,
-    @DealLineTypeID_Clear bit = 0,
-    @DealLineTypeID uniqueidentifier = NULL,
-    @DisplayOrder int = NULL,
-    @Description_Clear bit = 0,
-    @Description nvarchar(MAX) = NULL,
-    @AnnualGrossFees_Clear bit = 0,
-    @AnnualGrossFees decimal(19, 4) = NULL,
-    @DiscountAmount_Clear bit = 0,
-    @DiscountAmount decimal(19, 4) = NULL,
-    @Total_Clear bit = 0,
-    @Total decimal(19, 4) = NULL,
-    @ResolvedUnitPrice_Clear bit = 0,
-    @ResolvedUnitPrice decimal(19, 4) = NULL,
-    @ResolvedExtendedAmount_Clear bit = 0,
-    @ResolvedExtendedAmount decimal(19, 4) = NULL,
-    @PriceComponentsJSON_Clear bit = 0,
-    @PriceComponentsJSON nvarchar(MAX) = NULL,
-    @PricedAt_Clear bit = 0,
-    @PricedAt datetimeoffset = NULL,
-    @CompanyID_Clear bit = 0,
-    @CompanyID uniqueidentifier = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-    UPDATE
-        [${flyway:defaultSchema}].[DealLine]
-    SET
-        [DealID] = ISNULL(@DealID, [DealID]),
-        [ProductID] = CASE WHEN @ProductID_Clear = 1 THEN NULL ELSE ISNULL(@ProductID, [ProductID]) END,
-        [ProductName] = CASE WHEN @ProductName_Clear = 1 THEN NULL ELSE ISNULL(@ProductName, [ProductName]) END,
-        [Quantity] = ISNULL(@Quantity, [Quantity]),
-        [RequestedDiscountPct] = CASE WHEN @RequestedDiscountPct_Clear = 1 THEN NULL ELSE ISNULL(@RequestedDiscountPct, [RequestedDiscountPct]) END,
-        [OverrideUnitPrice] = CASE WHEN @OverrideUnitPrice_Clear = 1 THEN NULL ELSE ISNULL(@OverrideUnitPrice, [OverrideUnitPrice]) END,
-        [TermMonths] = CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, [TermMonths]) END,
-        [ServicePeriodStart] = CASE WHEN @ServicePeriodStart_Clear = 1 THEN NULL ELSE ISNULL(@ServicePeriodStart, [ServicePeriodStart]) END,
-        [ServicePeriodEnd] = CASE WHEN @ServicePeriodEnd_Clear = 1 THEN NULL ELSE ISNULL(@ServicePeriodEnd, [ServicePeriodEnd]) END,
-        [DealLineTypeID] = CASE WHEN @DealLineTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealLineTypeID, [DealLineTypeID]) END,
-        [DisplayOrder] = ISNULL(@DisplayOrder, [DisplayOrder]),
-        [Description] = CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, [Description]) END,
-        [AnnualGrossFees] = CASE WHEN @AnnualGrossFees_Clear = 1 THEN NULL ELSE ISNULL(@AnnualGrossFees, [AnnualGrossFees]) END,
-        [DiscountAmount] = CASE WHEN @DiscountAmount_Clear = 1 THEN NULL ELSE ISNULL(@DiscountAmount, [DiscountAmount]) END,
-        [Total] = CASE WHEN @Total_Clear = 1 THEN NULL ELSE ISNULL(@Total, [Total]) END,
-        [ResolvedUnitPrice] = CASE WHEN @ResolvedUnitPrice_Clear = 1 THEN NULL ELSE ISNULL(@ResolvedUnitPrice, [ResolvedUnitPrice]) END,
-        [ResolvedExtendedAmount] = CASE WHEN @ResolvedExtendedAmount_Clear = 1 THEN NULL ELSE ISNULL(@ResolvedExtendedAmount, [ResolvedExtendedAmount]) END,
-        [PriceComponentsJSON] = CASE WHEN @PriceComponentsJSON_Clear = 1 THEN NULL ELSE ISNULL(@PriceComponentsJSON, [PriceComponentsJSON]) END,
-        [PricedAt] = CASE WHEN @PricedAt_Clear = 1 THEN NULL ELSE ISNULL(@PricedAt, [PricedAt]) END,
-        [CompanyID] = CASE WHEN @CompanyID_Clear = 1 THEN NULL ELSE ISNULL(@CompanyID, [CompanyID]) END
-    WHERE
-        [ID] = @ID
-
-    -- Check if the update was successful
-    IF @@ROWCOUNT = 0
-        -- Nothing was updated, return no rows, but column structure from base view intact, semantically correct this way.
-        SELECT TOP 0 * FROM [${flyway:defaultSchema}].[vwDealLines] WHERE 1=0
-    ELSE
-        -- Return the updated record so the caller can see the updated values and any calculated fields
-        SELECT
-                                        *
-                                    FROM
-                                        [${flyway:defaultSchema}].[vwDealLines]
-                                    WHERE
-                                        [ID] = @ID
-                                    
-END
-GO
-
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spUpdateDealLine] TO [cdp_Developer], [cdp_Integration]
-GO
-
-------------------------------------------------------------
------ TRIGGER FOR __mj_UpdatedAt field for the DealLine table
-------------------------------------------------------------
-IF OBJECT_ID('[${flyway:defaultSchema}].[trgUpdateDealLine]', 'TR') IS NOT NULL
-    DROP TRIGGER [${flyway:defaultSchema}].[trgUpdateDealLine];
-GO
-CREATE TRIGGER [${flyway:defaultSchema}].trgUpdateDealLine
-ON [${flyway:defaultSchema}].[DealLine]
-AFTER UPDATE
-AS
-BEGIN
-    SET NOCOUNT ON;
-    UPDATE
-        [${flyway:defaultSchema}].[DealLine]
-    SET
-        __mj_UpdatedAt = GETUTCDATE()
-    FROM
-        [${flyway:defaultSchema}].[DealLine] AS _organicTable
-    INNER JOIN
-        INSERTED AS I ON
-        _organicTable.[ID] = I.[ID];
-END;
-GO
-
-/* spUpdate Permissions for MJ_BizApps_Sales: Deal Lines */
-
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spUpdateDealLine] TO [cdp_Developer], [cdp_Integration];
-
-/* spDelete SQL for MJ_BizApps_Sales: Deal Lines */
------------------------------------------------------------------
--- SQL Code Generation
--- Entity: MJ_BizApps_Sales: Deal Lines
--- Item: spDeleteDealLine
---
--- This was generated by the MemberJunction CodeGen tool.
--- This file should NOT be edited by hand.
------------------------------------------------------------------
-
-------------------------------------------------------------
------ DELETE PROCEDURE FOR DealLine
-------------------------------------------------------------
-IF OBJECT_ID('[${flyway:defaultSchema}].[spDeleteDealLine]', 'P') IS NOT NULL
-    DROP PROCEDURE [${flyway:defaultSchema}].[spDeleteDealLine];
-GO
-
-CREATE PROCEDURE [${flyway:defaultSchema}].[spDeleteDealLine]
-    @ID uniqueidentifier
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    DELETE FROM
-        [${flyway:defaultSchema}].[DealLine]
-    WHERE
-        [ID] = @ID
-
-
-    -- Check if the delete was successful
-    IF @@ROWCOUNT = 0
-        SELECT NULL AS [ID] -- Return NULL for all primary key fields to indicate no record was deleted
-    ELSE
-        SELECT @ID AS [ID] -- Return the primary key values to indicate we successfully deleted the record
-END
-GO
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteDealLine] TO [cdp_Developer], [cdp_Integration];
-
-/* spDelete Permissions for MJ_BizApps_Sales: Deal Lines */
-
-GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteDealLine] TO [cdp_Developer], [cdp_Integration];
 
 /* Index for Foreign Keys for DealPaymentSchedule */
 -----------------------------------------------------------------
@@ -33228,195 +30193,6 @@ EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,stag
          )
       END;
 
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '908cf35f-df2b-4600-a7cc-3eb1c5649770' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'Deal')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '908cf35f-df2b-4600-a7cc-3eb1c5649770',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 24,
-            'Deal',
-            'Deal',
-            NULL,
-            'nvarchar',
-            1000,
-            0,
-            0,
-            0,
-            NULL,
-            0,
-            0,
-            1,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'd942f5ed-eb6e-4b8d-96cd-cbdd29f776c9' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'DealLineType')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'd942f5ed-eb6e-4b8d-96cd-cbdd29f776c9',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 25,
-            'DealLineType',
-            'Deal Line Type',
-            NULL,
-            'nvarchar',
-            400,
-            0,
-            0,
-            1,
-            NULL,
-            0,
-            0,
-            1,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'b7d12bd9-458b-4fc3-9789-4d289fc2bf7e' OR (EntityID = '70138C62-0F2F-4471-B98A-4CE98AC3BC64' AND Name = 'Company')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            'b7d12bd9-458b-4fc3-9789-4d289fc2bf7e',
-            '70138C62-0F2F-4471-B98A-4CE98AC3BC64', -- Entity: MJ_BizApps_Sales: Deal Lines
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '70138C62-0F2F-4471-B98A-4CE98AC3BC64') + 26,
-            'Company',
-            'Company',
-            NULL,
-            'nvarchar',
-            100,
-            0,
-            0,
-            1,
-            NULL,
-            0,
-            0,
-            1,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-
       IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'f38d396c-5c36-40c2-aacd-1f80394fe048' OR (EntityID = '5AC3D14E-A9BA-4667-AF73-5928DAE446BF' AND Name = 'Deal')) BEGIN
          INSERT INTO [${mjSchema}].[EntityField]
          (
@@ -35237,5 +32013,3924 @@ UPDATE [${mjSchema}].[Entity] SET [__mj_UpdatedAt]=GETUTCDATE() WHERE ID='530174
 
 /* SQL text to set default column width where needed */
 EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts';
+
+
+
+/* SQL text to update existing entities from schema */
+EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts';
+
+/* SQL text to update existing entity fields from schema */
+EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts';
+
+/* SQL text to set default column width where needed */
+EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts';
+
+/* SQL text to sync schema info from database schemas */
+EXEC [${mjSchema}].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts';
+
+/* SQL text to update entity field related entity name field map for entity field ID 67A21862-5E5A-4597-AF82-32CB0C4CF1C4 */
+EXEC [${mjSchema}].[spUpdateEntityFieldRelatedEntityNameFieldMap] @EntityFieldID='67A21862-5E5A-4597-AF82-32CB0C4CF1C4', @RelatedEntityNameFieldMap='Account';
+
+/* Base View SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: vwDeals
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- BASE VIEW FOR ENTITY:      MJ_BizApps_Sales: Deals
+-----               SCHEMA:      ${flyway:defaultSchema}
+-----               BASE TABLE:  Deal
+-----               PRIMARY KEY: ID
+------------------------------------------------------------
+IF OBJECT_ID('[${flyway:defaultSchema}].[vwDeals]', 'V') IS NOT NULL
+    DROP VIEW [${flyway:defaultSchema}].[vwDeals];
+GO
+
+CREATE VIEW [${flyway:defaultSchema}].[vwDeals]
+AS
+SELECT
+    d.*,
+    mjBizAppsSalesPipeline_PipelineID.[Name] AS [Pipeline],
+    mjBizAppsSalesPipelineStage_PipelineStageID.[Name] AS [PipelineStage],
+    mjBizAppsSalesDealType_DealTypeID.[Name] AS [DealType],
+    mjBizAppsSalesDealStatusType_DealStatusTypeID.[Name] AS [DealStatusType],
+    mjBizAppsSalesSalesAccount_AccountID.[Name] AS [Account],
+    MJCompany_CompanyID.[Name] AS [Company],
+    MJEmployee_OwnerEmployeeID.[FirstLast] AS [OwnerEmployee],
+    mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID.[Name] AS [ForecastCategoryType],
+    mjBizAppsSalesLossReason_LossReasonID.[Name] AS [LossReason],
+    mjBizAppsSalesLeadSourceType_LeadSourceTypeID.[Name] AS [LeadSourceType],
+    MJUser_ClosedByUserID.[Name] AS [ClosedByUser]
+FROM
+    [${flyway:defaultSchema}].[Deal] AS d
+INNER JOIN
+    [${flyway:defaultSchema}].[Pipeline] AS mjBizAppsSalesPipeline_PipelineID
+  ON
+    [d].[PipelineID] = mjBizAppsSalesPipeline_PipelineID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[PipelineStage] AS mjBizAppsSalesPipelineStage_PipelineStageID
+  ON
+    [d].[PipelineStageID] = mjBizAppsSalesPipelineStage_PipelineStageID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[DealType] AS mjBizAppsSalesDealType_DealTypeID
+  ON
+    [d].[DealTypeID] = mjBizAppsSalesDealType_DealTypeID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[DealStatusType] AS mjBizAppsSalesDealStatusType_DealStatusTypeID
+  ON
+    [d].[DealStatusTypeID] = mjBizAppsSalesDealStatusType_DealStatusTypeID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[vwSalesAccounts] AS mjBizAppsSalesSalesAccount_AccountID
+  ON
+    [d].[AccountID] = mjBizAppsSalesSalesAccount_AccountID.[ID]
+INNER JOIN
+    [${mjSchema}].[Company] AS MJCompany_CompanyID
+  ON
+    [d].[CompanyID] = MJCompany_CompanyID.[ID]
+LEFT OUTER JOIN
+    [${mjSchema}].[vwEmployees] AS MJEmployee_OwnerEmployeeID
+  ON
+    [d].[OwnerEmployeeID] = MJEmployee_OwnerEmployeeID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[ForecastCategoryType] AS mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID
+  ON
+    [d].[ForecastCategoryTypeID] = mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[LossReason] AS mjBizAppsSalesLossReason_LossReasonID
+  ON
+    [d].[LossReasonID] = mjBizAppsSalesLossReason_LossReasonID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[LeadSourceType] AS mjBizAppsSalesLeadSourceType_LeadSourceTypeID
+  ON
+    [d].[LeadSourceTypeID] = mjBizAppsSalesLeadSourceType_LeadSourceTypeID.[ID]
+LEFT OUTER JOIN
+    [${mjSchema}].[User] AS MJUser_ClosedByUserID
+  ON
+    [d].[ClosedByUserID] = MJUser_ClosedByUserID.[ID]
+GO
+GRANT SELECT ON [${flyway:defaultSchema}].[vwDeals] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
+
+/* Base View Permissions SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: Permissions for vwDeals
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+GRANT SELECT ON [${flyway:defaultSchema}].[vwDeals] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
+
+/* spCreate SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spCreateDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- CREATE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[${flyway:defaultSchema}].[spCreateDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [${flyway:defaultSchema}].[spCreateDeal];
+GO
+
+CREATE PROCEDURE [${flyway:defaultSchema}].[spCreateDeal]
+    @ID uniqueidentifier = NULL,
+    @DealNumber_Clear bit = 0,
+    @DealNumber nvarchar(50) = NULL,
+    @Name nvarchar(500),
+    @PipelineID uniqueidentifier,
+    @PipelineStageID_Clear bit = 0,
+    @PipelineStageID uniqueidentifier = NULL,
+    @DealTypeID_Clear bit = 0,
+    @DealTypeID uniqueidentifier = NULL,
+    @DealStatusTypeID_Clear bit = 0,
+    @DealStatusTypeID uniqueidentifier = NULL,
+    @AccountID_Clear bit = 0,
+    @AccountID uniqueidentifier = NULL,
+    @PrimaryContactID_Clear bit = 0,
+    @PrimaryContactID uniqueidentifier = NULL,
+    @BillingContactID_Clear bit = 0,
+    @BillingContactID uniqueidentifier = NULL,
+    @CompanyID uniqueidentifier,
+    @OwnerEmployeeID_Clear bit = 0,
+    @OwnerEmployeeID uniqueidentifier = NULL,
+    @Amount_Clear bit = 0,
+    @Amount decimal(19, 4) = NULL,
+    @AmountIsComputed bit = NULL,
+    @AmountComputedAt_Clear bit = 0,
+    @AmountComputedAt datetimeoffset = NULL,
+    @AmountSourceHash_Clear bit = 0,
+    @AmountSourceHash nvarchar(128) = NULL,
+    @CurrencyID_Clear bit = 0,
+    @CurrencyID uniqueidentifier = NULL,
+    @MRR_Clear bit = 0,
+    @MRR decimal(19, 4) = NULL,
+    @ARR_Clear bit = 0,
+    @ARR decimal(19, 4) = NULL,
+    @TermMonths_Clear bit = 0,
+    @TermMonths int = NULL,
+    @EstimatedProjectWeeks_Clear bit = 0,
+    @EstimatedProjectWeeks int = NULL,
+    @ExecutionDate_Clear bit = 0,
+    @ExecutionDate date = NULL,
+    @StartDate_Clear bit = 0,
+    @StartDate date = NULL,
+    @ExpectedCloseDate_Clear bit = 0,
+    @ExpectedCloseDate date = NULL,
+    @ActualCloseDate_Clear bit = 0,
+    @ActualCloseDate date = NULL,
+    @Probability_Clear bit = 0,
+    @Probability decimal(5, 2) = NULL,
+    @ForecastCategoryTypeID_Clear bit = 0,
+    @ForecastCategoryTypeID uniqueidentifier = NULL,
+    @LossReasonID_Clear bit = 0,
+    @LossReasonID uniqueidentifier = NULL,
+    @LossNotes_Clear bit = 0,
+    @LossNotes nvarchar(MAX) = NULL,
+    @LeadSourceTypeID_Clear bit = 0,
+    @LeadSourceTypeID uniqueidentifier = NULL,
+    @CampaignID_Clear bit = 0,
+    @CampaignID uniqueidentifier = NULL,
+    @ContractID_Clear bit = 0,
+    @ContractID uniqueidentifier = NULL,
+    @RenewsContractID_Clear bit = 0,
+    @RenewsContractID uniqueidentifier = NULL,
+    @AutoRenew bit = NULL,
+    @AnnualIncreasePctOverride_Clear bit = 0,
+    @AnnualIncreasePctOverride decimal(5, 2) = NULL,
+    @CancellationNoticeDaysOverride_Clear bit = 0,
+    @CancellationNoticeDaysOverride int = NULL,
+    @PaymentMethod_Clear bit = 0,
+    @PaymentMethod nvarchar(50) = NULL,
+    @ContractVariances_Clear bit = 0,
+    @ContractVariances nvarchar(MAX) = NULL,
+    @Description_Clear bit = 0,
+    @Description nvarchar(MAX) = NULL,
+    @NextStep_Clear bit = 0,
+    @NextStep nvarchar(1000) = NULL,
+    @NextStepDate_Clear bit = 0,
+    @NextStepDate date = NULL,
+    @ClosedAt_Clear bit = 0,
+    @ClosedAt datetimeoffset = NULL,
+    @ClosedByUserID_Clear bit = 0,
+    @ClosedByUserID uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @InsertedRow TABLE ([ID] UNIQUEIDENTIFIER)
+
+    IF @ID IS NOT NULL
+    BEGIN
+        -- User provided a value, use it
+        INSERT INTO [${flyway:defaultSchema}].[Deal]
+            (
+                [ID],
+                [DealNumber],
+                [Name],
+                [PipelineID],
+                [PipelineStageID],
+                [DealTypeID],
+                [DealStatusTypeID],
+                [AccountID],
+                [PrimaryContactID],
+                [BillingContactID],
+                [CompanyID],
+                [OwnerEmployeeID],
+                [Amount],
+                [AmountIsComputed],
+                [AmountComputedAt],
+                [AmountSourceHash],
+                [CurrencyID],
+                [MRR],
+                [ARR],
+                [TermMonths],
+                [EstimatedProjectWeeks],
+                [ExecutionDate],
+                [StartDate],
+                [ExpectedCloseDate],
+                [ActualCloseDate],
+                [Probability],
+                [ForecastCategoryTypeID],
+                [LossReasonID],
+                [LossNotes],
+                [LeadSourceTypeID],
+                [CampaignID],
+                [ContractID],
+                [RenewsContractID],
+                [AutoRenew],
+                [AnnualIncreasePctOverride],
+                [CancellationNoticeDaysOverride],
+                [PaymentMethod],
+                [ContractVariances],
+                [Description],
+                [NextStep],
+                [NextStepDate],
+                [ClosedAt],
+                [ClosedByUserID]
+            )
+        OUTPUT INSERTED.[ID] INTO @InsertedRow
+        VALUES
+            (
+                @ID,
+                CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, NULL) END,
+                @Name,
+                @PipelineID,
+                CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, NULL) END,
+                CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, NULL) END,
+                CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, NULL) END,
+                CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, NULL) END,
+                CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, NULL) END,
+                CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, NULL) END,
+                @CompanyID,
+                CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, NULL) END,
+                CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, NULL) END,
+                ISNULL(@AmountIsComputed, 0),
+                CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, NULL) END,
+                CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, NULL) END,
+                CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, NULL) END,
+                CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, NULL) END,
+                CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, NULL) END,
+                CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, NULL) END,
+                CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, NULL) END,
+                CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, NULL) END,
+                CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, NULL) END,
+                CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, NULL) END,
+                CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, NULL) END,
+                CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, NULL) END,
+                CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, NULL) END,
+                CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, NULL) END,
+                CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, NULL) END,
+                CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, NULL) END,
+                CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, NULL) END,
+                CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, NULL) END,
+                CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, NULL) END,
+                ISNULL(@AutoRenew, 0),
+                CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, NULL) END,
+                CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, NULL) END,
+                CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, 'ACH') END,
+                CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, NULL) END,
+                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
+                CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, NULL) END,
+                CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, NULL) END,
+                CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, NULL) END,
+                CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, NULL) END
+            )
+    END
+    ELSE
+    BEGIN
+        -- No value provided, let database use its default (e.g., NEWSEQUENTIALID())
+        INSERT INTO [${flyway:defaultSchema}].[Deal]
+            (
+                [DealNumber],
+                [Name],
+                [PipelineID],
+                [PipelineStageID],
+                [DealTypeID],
+                [DealStatusTypeID],
+                [AccountID],
+                [PrimaryContactID],
+                [BillingContactID],
+                [CompanyID],
+                [OwnerEmployeeID],
+                [Amount],
+                [AmountIsComputed],
+                [AmountComputedAt],
+                [AmountSourceHash],
+                [CurrencyID],
+                [MRR],
+                [ARR],
+                [TermMonths],
+                [EstimatedProjectWeeks],
+                [ExecutionDate],
+                [StartDate],
+                [ExpectedCloseDate],
+                [ActualCloseDate],
+                [Probability],
+                [ForecastCategoryTypeID],
+                [LossReasonID],
+                [LossNotes],
+                [LeadSourceTypeID],
+                [CampaignID],
+                [ContractID],
+                [RenewsContractID],
+                [AutoRenew],
+                [AnnualIncreasePctOverride],
+                [CancellationNoticeDaysOverride],
+                [PaymentMethod],
+                [ContractVariances],
+                [Description],
+                [NextStep],
+                [NextStepDate],
+                [ClosedAt],
+                [ClosedByUserID]
+            )
+        OUTPUT INSERTED.[ID] INTO @InsertedRow
+        VALUES
+            (
+                CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, NULL) END,
+                @Name,
+                @PipelineID,
+                CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, NULL) END,
+                CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, NULL) END,
+                CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, NULL) END,
+                CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, NULL) END,
+                CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, NULL) END,
+                CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, NULL) END,
+                @CompanyID,
+                CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, NULL) END,
+                CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, NULL) END,
+                ISNULL(@AmountIsComputed, 0),
+                CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, NULL) END,
+                CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, NULL) END,
+                CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, NULL) END,
+                CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, NULL) END,
+                CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, NULL) END,
+                CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, NULL) END,
+                CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, NULL) END,
+                CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, NULL) END,
+                CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, NULL) END,
+                CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, NULL) END,
+                CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, NULL) END,
+                CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, NULL) END,
+                CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, NULL) END,
+                CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, NULL) END,
+                CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, NULL) END,
+                CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, NULL) END,
+                CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, NULL) END,
+                CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, NULL) END,
+                CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, NULL) END,
+                ISNULL(@AutoRenew, 0),
+                CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, NULL) END,
+                CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, NULL) END,
+                CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, 'ACH') END,
+                CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, NULL) END,
+                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
+                CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, NULL) END,
+                CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, NULL) END,
+                CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, NULL) END,
+                CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, NULL) END
+            )
+    END
+    -- return the new record from the base view, which might have some calculated fields
+    SELECT * FROM [${flyway:defaultSchema}].[vwDeals] WHERE [ID] = (SELECT [ID] FROM @InsertedRow)
+END
+GO
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spCreateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spCreate Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spCreateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spUpdate SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spUpdateDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- UPDATE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[${flyway:defaultSchema}].[spUpdateDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [${flyway:defaultSchema}].[spUpdateDeal];
+GO
+
+CREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateDeal]
+    @ID uniqueidentifier,
+    @DealNumber_Clear bit = 0,
+    @DealNumber nvarchar(50) = NULL,
+    @Name nvarchar(500) = NULL,
+    @PipelineID uniqueidentifier = NULL,
+    @PipelineStageID_Clear bit = 0,
+    @PipelineStageID uniqueidentifier = NULL,
+    @DealTypeID_Clear bit = 0,
+    @DealTypeID uniqueidentifier = NULL,
+    @DealStatusTypeID_Clear bit = 0,
+    @DealStatusTypeID uniqueidentifier = NULL,
+    @AccountID_Clear bit = 0,
+    @AccountID uniqueidentifier = NULL,
+    @PrimaryContactID_Clear bit = 0,
+    @PrimaryContactID uniqueidentifier = NULL,
+    @BillingContactID_Clear bit = 0,
+    @BillingContactID uniqueidentifier = NULL,
+    @CompanyID uniqueidentifier = NULL,
+    @OwnerEmployeeID_Clear bit = 0,
+    @OwnerEmployeeID uniqueidentifier = NULL,
+    @Amount_Clear bit = 0,
+    @Amount decimal(19, 4) = NULL,
+    @AmountIsComputed bit = NULL,
+    @AmountComputedAt_Clear bit = 0,
+    @AmountComputedAt datetimeoffset = NULL,
+    @AmountSourceHash_Clear bit = 0,
+    @AmountSourceHash nvarchar(128) = NULL,
+    @CurrencyID_Clear bit = 0,
+    @CurrencyID uniqueidentifier = NULL,
+    @MRR_Clear bit = 0,
+    @MRR decimal(19, 4) = NULL,
+    @ARR_Clear bit = 0,
+    @ARR decimal(19, 4) = NULL,
+    @TermMonths_Clear bit = 0,
+    @TermMonths int = NULL,
+    @EstimatedProjectWeeks_Clear bit = 0,
+    @EstimatedProjectWeeks int = NULL,
+    @ExecutionDate_Clear bit = 0,
+    @ExecutionDate date = NULL,
+    @StartDate_Clear bit = 0,
+    @StartDate date = NULL,
+    @ExpectedCloseDate_Clear bit = 0,
+    @ExpectedCloseDate date = NULL,
+    @ActualCloseDate_Clear bit = 0,
+    @ActualCloseDate date = NULL,
+    @Probability_Clear bit = 0,
+    @Probability decimal(5, 2) = NULL,
+    @ForecastCategoryTypeID_Clear bit = 0,
+    @ForecastCategoryTypeID uniqueidentifier = NULL,
+    @LossReasonID_Clear bit = 0,
+    @LossReasonID uniqueidentifier = NULL,
+    @LossNotes_Clear bit = 0,
+    @LossNotes nvarchar(MAX) = NULL,
+    @LeadSourceTypeID_Clear bit = 0,
+    @LeadSourceTypeID uniqueidentifier = NULL,
+    @CampaignID_Clear bit = 0,
+    @CampaignID uniqueidentifier = NULL,
+    @ContractID_Clear bit = 0,
+    @ContractID uniqueidentifier = NULL,
+    @RenewsContractID_Clear bit = 0,
+    @RenewsContractID uniqueidentifier = NULL,
+    @AutoRenew bit = NULL,
+    @AnnualIncreasePctOverride_Clear bit = 0,
+    @AnnualIncreasePctOverride decimal(5, 2) = NULL,
+    @CancellationNoticeDaysOverride_Clear bit = 0,
+    @CancellationNoticeDaysOverride int = NULL,
+    @PaymentMethod_Clear bit = 0,
+    @PaymentMethod nvarchar(50) = NULL,
+    @ContractVariances_Clear bit = 0,
+    @ContractVariances nvarchar(MAX) = NULL,
+    @Description_Clear bit = 0,
+    @Description nvarchar(MAX) = NULL,
+    @NextStep_Clear bit = 0,
+    @NextStep nvarchar(1000) = NULL,
+    @NextStepDate_Clear bit = 0,
+    @NextStepDate date = NULL,
+    @ClosedAt_Clear bit = 0,
+    @ClosedAt datetimeoffset = NULL,
+    @ClosedByUserID_Clear bit = 0,
+    @ClosedByUserID uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE
+        [${flyway:defaultSchema}].[Deal]
+    SET
+        [DealNumber] = CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, [DealNumber]) END,
+        [Name] = ISNULL(@Name, [Name]),
+        [PipelineID] = ISNULL(@PipelineID, [PipelineID]),
+        [PipelineStageID] = CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, [PipelineStageID]) END,
+        [DealTypeID] = CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, [DealTypeID]) END,
+        [DealStatusTypeID] = CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, [DealStatusTypeID]) END,
+        [AccountID] = CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, [AccountID]) END,
+        [PrimaryContactID] = CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, [PrimaryContactID]) END,
+        [BillingContactID] = CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, [BillingContactID]) END,
+        [CompanyID] = ISNULL(@CompanyID, [CompanyID]),
+        [OwnerEmployeeID] = CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, [OwnerEmployeeID]) END,
+        [Amount] = CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, [Amount]) END,
+        [AmountIsComputed] = ISNULL(@AmountIsComputed, [AmountIsComputed]),
+        [AmountComputedAt] = CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, [AmountComputedAt]) END,
+        [AmountSourceHash] = CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, [AmountSourceHash]) END,
+        [CurrencyID] = CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, [CurrencyID]) END,
+        [MRR] = CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, [MRR]) END,
+        [ARR] = CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, [ARR]) END,
+        [TermMonths] = CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, [TermMonths]) END,
+        [EstimatedProjectWeeks] = CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, [EstimatedProjectWeeks]) END,
+        [ExecutionDate] = CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, [ExecutionDate]) END,
+        [StartDate] = CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, [StartDate]) END,
+        [ExpectedCloseDate] = CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, [ExpectedCloseDate]) END,
+        [ActualCloseDate] = CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, [ActualCloseDate]) END,
+        [Probability] = CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, [Probability]) END,
+        [ForecastCategoryTypeID] = CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, [ForecastCategoryTypeID]) END,
+        [LossReasonID] = CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, [LossReasonID]) END,
+        [LossNotes] = CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, [LossNotes]) END,
+        [LeadSourceTypeID] = CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, [LeadSourceTypeID]) END,
+        [CampaignID] = CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, [CampaignID]) END,
+        [ContractID] = CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, [ContractID]) END,
+        [RenewsContractID] = CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, [RenewsContractID]) END,
+        [AutoRenew] = ISNULL(@AutoRenew, [AutoRenew]),
+        [AnnualIncreasePctOverride] = CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, [AnnualIncreasePctOverride]) END,
+        [CancellationNoticeDaysOverride] = CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, [CancellationNoticeDaysOverride]) END,
+        [PaymentMethod] = CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, [PaymentMethod]) END,
+        [ContractVariances] = CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, [ContractVariances]) END,
+        [Description] = CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, [Description]) END,
+        [NextStep] = CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, [NextStep]) END,
+        [NextStepDate] = CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, [NextStepDate]) END,
+        [ClosedAt] = CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, [ClosedAt]) END,
+        [ClosedByUserID] = CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, [ClosedByUserID]) END
+    WHERE
+        [ID] = @ID
+
+    -- Check if the update was successful
+    IF @@ROWCOUNT = 0
+        -- Nothing was updated, return no rows, but column structure from base view intact, semantically correct this way.
+        SELECT TOP 0 * FROM [${flyway:defaultSchema}].[vwDeals] WHERE 1=0
+    ELSE
+        -- Return the updated record so the caller can see the updated values and any calculated fields
+        SELECT
+                                        *
+                                    FROM
+                                        [${flyway:defaultSchema}].[vwDeals]
+                                    WHERE
+                                        [ID] = @ID
+                                    
+END
+GO
+
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spUpdateDeal] TO [cdp_Developer], [cdp_Integration]
+GO
+
+------------------------------------------------------------
+----- TRIGGER FOR __mj_UpdatedAt field for the Deal table
+------------------------------------------------------------
+IF OBJECT_ID('[${flyway:defaultSchema}].[trgUpdateDeal]', 'TR') IS NOT NULL
+    DROP TRIGGER [${flyway:defaultSchema}].[trgUpdateDeal];
+GO
+CREATE TRIGGER [${flyway:defaultSchema}].trgUpdateDeal
+ON [${flyway:defaultSchema}].[Deal]
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE
+        [${flyway:defaultSchema}].[Deal]
+    SET
+        __mj_UpdatedAt = GETUTCDATE()
+    FROM
+        [${flyway:defaultSchema}].[Deal] AS _organicTable
+    INNER JOIN
+        INSERTED AS I ON
+        _organicTable.[ID] = I.[ID];
+END;
+GO
+
+/* spUpdate Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spUpdateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spDelete SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spDeleteDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- DELETE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[${flyway:defaultSchema}].[spDeleteDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [${flyway:defaultSchema}].[spDeleteDeal];
+GO
+
+CREATE PROCEDURE [${flyway:defaultSchema}].[spDeleteDeal]
+    @ID uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DELETE FROM
+        [${flyway:defaultSchema}].[Deal]
+    WHERE
+        [ID] = @ID
+
+
+    -- Check if the delete was successful
+    IF @@ROWCOUNT = 0
+        SELECT NULL AS [ID] -- Return NULL for all primary key fields to indicate no record was deleted
+    ELSE
+        SELECT @ID AS [ID] -- Return the primary key values to indicate we successfully deleted the record
+END
+GO
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spDelete Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteDeal] TO [cdp_Developer], [cdp_Integration];
+
+
+/* SQL text to update existing entities from schema */
+EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts';
+
+/* SQL text to insert 1 new entity field(s) */
+
+      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '94114b63-4a39-4a2c-b774-16651dcc7944' OR (EntityID = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354' AND Name = 'Account')) BEGIN
+         INSERT INTO [${mjSchema}].[EntityField]
+         (
+            [ID],
+            [EntityID],
+            [Sequence],
+            [Name],
+            [DisplayName],
+            [Description],
+            [Type],
+            [Length],
+            [Precision],
+            [Scale],
+            [AllowsNull],
+            [DefaultValue],
+            [AutoIncrement],
+            [AllowUpdateAPI],
+            [IsVirtual],
+            [IsComputed],
+            [RelatedEntityID],
+            [RelatedEntityFieldName],
+            [IsNameField],
+            [IncludeInUserSearchAPI],
+            [IncludeRelatedEntityNameFieldInBaseView],
+            [DefaultInView],
+            [IsPrimaryKey],
+            [IsUnique],
+            [RelatedEntityDisplayType],
+            [__mj_CreatedAt],
+            [__mj_UpdatedAt]
+         )
+         VALUES
+         (
+            '94114b63-4a39-4a2c-b774-16651dcc7944',
+            '79148DE5-7F99-44AC-ACD4-5EE7BA93D354', -- Entity: MJ_BizApps_Sales: Deals
+            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354') + 50,
+            'Account',
+            'Account',
+            NULL,
+            'nvarchar',
+            510,
+            0,
+            0,
+            1,
+            NULL,
+            0,
+            0,
+            1,
+            0,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            'Search',
+            GETUTCDATE(),
+            GETUTCDATE()
+         )
+      END;
+
+/* SQL text to update existing entity fields from schema */
+EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts';
+
+/* SQL text to set default column width where needed */
+EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts';
+
+/* SQL text to sync schema info from database schemas */
+EXEC [${mjSchema}].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts';
+
+/* Index for Foreign Keys for Deal */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: Index for Foreign Keys
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+-- Index for foreign key PipelineID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_PipelineID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_PipelineID ON [${flyway:defaultSchema}].[Deal] ([PipelineID]);
+
+-- Index for foreign key PipelineStageID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_PipelineStageID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_PipelineStageID ON [${flyway:defaultSchema}].[Deal] ([PipelineStageID]);
+
+-- Index for foreign key DealTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_DealTypeID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_DealTypeID ON [${flyway:defaultSchema}].[Deal] ([DealTypeID]);
+
+-- Index for foreign key DealStatusTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_DealStatusTypeID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_DealStatusTypeID ON [${flyway:defaultSchema}].[Deal] ([DealStatusTypeID]);
+
+-- Index for foreign key AccountID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_AccountID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_AccountID ON [${flyway:defaultSchema}].[Deal] ([AccountID]);
+
+-- Index for foreign key PrimaryContactID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_PrimaryContactID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_PrimaryContactID ON [${flyway:defaultSchema}].[Deal] ([PrimaryContactID]);
+
+-- Index for foreign key BillingContactID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_BillingContactID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_BillingContactID ON [${flyway:defaultSchema}].[Deal] ([BillingContactID]);
+
+-- Index for foreign key CompanyID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_CompanyID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_CompanyID ON [${flyway:defaultSchema}].[Deal] ([CompanyID]);
+
+-- Index for foreign key OwnerEmployeeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_OwnerEmployeeID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_OwnerEmployeeID ON [${flyway:defaultSchema}].[Deal] ([OwnerEmployeeID]);
+
+-- Index for foreign key ForecastCategoryTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_ForecastCategoryTypeID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_ForecastCategoryTypeID ON [${flyway:defaultSchema}].[Deal] ([ForecastCategoryTypeID]);
+
+-- Index for foreign key LossReasonID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_LossReasonID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_LossReasonID ON [${flyway:defaultSchema}].[Deal] ([LossReasonID]);
+
+-- Index for foreign key LeadSourceTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_LeadSourceTypeID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_LeadSourceTypeID ON [${flyway:defaultSchema}].[Deal] ([LeadSourceTypeID]);
+
+-- Index for foreign key ClosedByUserID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_ClosedByUserID' 
+    AND object_id = OBJECT_ID('[${flyway:defaultSchema}].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_ClosedByUserID ON [${flyway:defaultSchema}].[Deal] ([ClosedByUserID]);
+
+/* Base View SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: vwDeals
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- BASE VIEW FOR ENTITY:      MJ_BizApps_Sales: Deals
+-----               SCHEMA:      ${flyway:defaultSchema}
+-----               BASE TABLE:  Deal
+-----               PRIMARY KEY: ID
+------------------------------------------------------------
+IF OBJECT_ID('[${flyway:defaultSchema}].[vwDeals]', 'V') IS NOT NULL
+    DROP VIEW [${flyway:defaultSchema}].[vwDeals];
+GO
+
+CREATE VIEW [${flyway:defaultSchema}].[vwDeals]
+AS
+SELECT
+    d.*,
+    mjBizAppsSalesPipeline_PipelineID.[Name] AS [Pipeline],
+    mjBizAppsSalesPipelineStage_PipelineStageID.[Name] AS [PipelineStage],
+    mjBizAppsSalesDealType_DealTypeID.[Name] AS [DealType],
+    mjBizAppsSalesDealStatusType_DealStatusTypeID.[Name] AS [DealStatusType],
+    mjBizAppsSalesSalesAccount_AccountID.[Name] AS [Account],
+    MJCompany_CompanyID.[Name] AS [Company],
+    MJEmployee_OwnerEmployeeID.[FirstLast] AS [OwnerEmployee],
+    mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID.[Name] AS [ForecastCategoryType],
+    mjBizAppsSalesLossReason_LossReasonID.[Name] AS [LossReason],
+    mjBizAppsSalesLeadSourceType_LeadSourceTypeID.[Name] AS [LeadSourceType],
+    MJUser_ClosedByUserID.[Name] AS [ClosedByUser]
+FROM
+    [${flyway:defaultSchema}].[Deal] AS d
+INNER JOIN
+    [${flyway:defaultSchema}].[Pipeline] AS mjBizAppsSalesPipeline_PipelineID
+  ON
+    [d].[PipelineID] = mjBizAppsSalesPipeline_PipelineID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[PipelineStage] AS mjBizAppsSalesPipelineStage_PipelineStageID
+  ON
+    [d].[PipelineStageID] = mjBizAppsSalesPipelineStage_PipelineStageID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[DealType] AS mjBizAppsSalesDealType_DealTypeID
+  ON
+    [d].[DealTypeID] = mjBizAppsSalesDealType_DealTypeID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[DealStatusType] AS mjBizAppsSalesDealStatusType_DealStatusTypeID
+  ON
+    [d].[DealStatusTypeID] = mjBizAppsSalesDealStatusType_DealStatusTypeID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[vwSalesAccounts] AS mjBizAppsSalesSalesAccount_AccountID
+  ON
+    [d].[AccountID] = mjBizAppsSalesSalesAccount_AccountID.[ID]
+INNER JOIN
+    [${mjSchema}].[Company] AS MJCompany_CompanyID
+  ON
+    [d].[CompanyID] = MJCompany_CompanyID.[ID]
+LEFT OUTER JOIN
+    [${mjSchema}].[vwEmployees] AS MJEmployee_OwnerEmployeeID
+  ON
+    [d].[OwnerEmployeeID] = MJEmployee_OwnerEmployeeID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[ForecastCategoryType] AS mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID
+  ON
+    [d].[ForecastCategoryTypeID] = mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[LossReason] AS mjBizAppsSalesLossReason_LossReasonID
+  ON
+    [d].[LossReasonID] = mjBizAppsSalesLossReason_LossReasonID.[ID]
+LEFT OUTER JOIN
+    [${flyway:defaultSchema}].[LeadSourceType] AS mjBizAppsSalesLeadSourceType_LeadSourceTypeID
+  ON
+    [d].[LeadSourceTypeID] = mjBizAppsSalesLeadSourceType_LeadSourceTypeID.[ID]
+LEFT OUTER JOIN
+    [${mjSchema}].[User] AS MJUser_ClosedByUserID
+  ON
+    [d].[ClosedByUserID] = MJUser_ClosedByUserID.[ID]
+GO
+GRANT SELECT ON [${flyway:defaultSchema}].[vwDeals] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
+
+/* Base View Permissions SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: Permissions for vwDeals
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+GRANT SELECT ON [${flyway:defaultSchema}].[vwDeals] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
+
+/* spCreate SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spCreateDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- CREATE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[${flyway:defaultSchema}].[spCreateDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [${flyway:defaultSchema}].[spCreateDeal];
+GO
+
+CREATE PROCEDURE [${flyway:defaultSchema}].[spCreateDeal]
+    @ID uniqueidentifier = NULL,
+    @DealNumber_Clear bit = 0,
+    @DealNumber nvarchar(50) = NULL,
+    @Name nvarchar(500),
+    @PipelineID uniqueidentifier,
+    @PipelineStageID_Clear bit = 0,
+    @PipelineStageID uniqueidentifier = NULL,
+    @DealTypeID_Clear bit = 0,
+    @DealTypeID uniqueidentifier = NULL,
+    @DealStatusTypeID_Clear bit = 0,
+    @DealStatusTypeID uniqueidentifier = NULL,
+    @AccountID_Clear bit = 0,
+    @AccountID uniqueidentifier = NULL,
+    @PrimaryContactID_Clear bit = 0,
+    @PrimaryContactID uniqueidentifier = NULL,
+    @BillingContactID_Clear bit = 0,
+    @BillingContactID uniqueidentifier = NULL,
+    @CompanyID uniqueidentifier,
+    @OwnerEmployeeID_Clear bit = 0,
+    @OwnerEmployeeID uniqueidentifier = NULL,
+    @Amount_Clear bit = 0,
+    @Amount decimal(19, 4) = NULL,
+    @AmountIsComputed bit = NULL,
+    @AmountComputedAt_Clear bit = 0,
+    @AmountComputedAt datetimeoffset = NULL,
+    @AmountSourceHash_Clear bit = 0,
+    @AmountSourceHash nvarchar(128) = NULL,
+    @CurrencyID_Clear bit = 0,
+    @CurrencyID uniqueidentifier = NULL,
+    @MRR_Clear bit = 0,
+    @MRR decimal(19, 4) = NULL,
+    @ARR_Clear bit = 0,
+    @ARR decimal(19, 4) = NULL,
+    @TermMonths_Clear bit = 0,
+    @TermMonths int = NULL,
+    @EstimatedProjectWeeks_Clear bit = 0,
+    @EstimatedProjectWeeks int = NULL,
+    @ExecutionDate_Clear bit = 0,
+    @ExecutionDate date = NULL,
+    @StartDate_Clear bit = 0,
+    @StartDate date = NULL,
+    @ExpectedCloseDate_Clear bit = 0,
+    @ExpectedCloseDate date = NULL,
+    @ActualCloseDate_Clear bit = 0,
+    @ActualCloseDate date = NULL,
+    @Probability_Clear bit = 0,
+    @Probability decimal(5, 2) = NULL,
+    @ForecastCategoryTypeID_Clear bit = 0,
+    @ForecastCategoryTypeID uniqueidentifier = NULL,
+    @LossReasonID_Clear bit = 0,
+    @LossReasonID uniqueidentifier = NULL,
+    @LossNotes_Clear bit = 0,
+    @LossNotes nvarchar(MAX) = NULL,
+    @LeadSourceTypeID_Clear bit = 0,
+    @LeadSourceTypeID uniqueidentifier = NULL,
+    @CampaignID_Clear bit = 0,
+    @CampaignID uniqueidentifier = NULL,
+    @ContractID_Clear bit = 0,
+    @ContractID uniqueidentifier = NULL,
+    @RenewsContractID_Clear bit = 0,
+    @RenewsContractID uniqueidentifier = NULL,
+    @AutoRenew bit = NULL,
+    @AnnualIncreasePctOverride_Clear bit = 0,
+    @AnnualIncreasePctOverride decimal(5, 2) = NULL,
+    @CancellationNoticeDaysOverride_Clear bit = 0,
+    @CancellationNoticeDaysOverride int = NULL,
+    @PaymentMethod_Clear bit = 0,
+    @PaymentMethod nvarchar(50) = NULL,
+    @ContractVariances_Clear bit = 0,
+    @ContractVariances nvarchar(MAX) = NULL,
+    @Description_Clear bit = 0,
+    @Description nvarchar(MAX) = NULL,
+    @NextStep_Clear bit = 0,
+    @NextStep nvarchar(1000) = NULL,
+    @NextStepDate_Clear bit = 0,
+    @NextStepDate date = NULL,
+    @ClosedAt_Clear bit = 0,
+    @ClosedAt datetimeoffset = NULL,
+    @ClosedByUserID_Clear bit = 0,
+    @ClosedByUserID uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @InsertedRow TABLE ([ID] UNIQUEIDENTIFIER)
+
+    IF @ID IS NOT NULL
+    BEGIN
+        -- User provided a value, use it
+        INSERT INTO [${flyway:defaultSchema}].[Deal]
+            (
+                [ID],
+                [DealNumber],
+                [Name],
+                [PipelineID],
+                [PipelineStageID],
+                [DealTypeID],
+                [DealStatusTypeID],
+                [AccountID],
+                [PrimaryContactID],
+                [BillingContactID],
+                [CompanyID],
+                [OwnerEmployeeID],
+                [Amount],
+                [AmountIsComputed],
+                [AmountComputedAt],
+                [AmountSourceHash],
+                [CurrencyID],
+                [MRR],
+                [ARR],
+                [TermMonths],
+                [EstimatedProjectWeeks],
+                [ExecutionDate],
+                [StartDate],
+                [ExpectedCloseDate],
+                [ActualCloseDate],
+                [Probability],
+                [ForecastCategoryTypeID],
+                [LossReasonID],
+                [LossNotes],
+                [LeadSourceTypeID],
+                [CampaignID],
+                [ContractID],
+                [RenewsContractID],
+                [AutoRenew],
+                [AnnualIncreasePctOverride],
+                [CancellationNoticeDaysOverride],
+                [PaymentMethod],
+                [ContractVariances],
+                [Description],
+                [NextStep],
+                [NextStepDate],
+                [ClosedAt],
+                [ClosedByUserID]
+            )
+        OUTPUT INSERTED.[ID] INTO @InsertedRow
+        VALUES
+            (
+                @ID,
+                CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, NULL) END,
+                @Name,
+                @PipelineID,
+                CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, NULL) END,
+                CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, NULL) END,
+                CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, NULL) END,
+                CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, NULL) END,
+                CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, NULL) END,
+                CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, NULL) END,
+                @CompanyID,
+                CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, NULL) END,
+                CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, NULL) END,
+                ISNULL(@AmountIsComputed, 0),
+                CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, NULL) END,
+                CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, NULL) END,
+                CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, NULL) END,
+                CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, NULL) END,
+                CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, NULL) END,
+                CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, NULL) END,
+                CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, NULL) END,
+                CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, NULL) END,
+                CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, NULL) END,
+                CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, NULL) END,
+                CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, NULL) END,
+                CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, NULL) END,
+                CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, NULL) END,
+                CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, NULL) END,
+                CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, NULL) END,
+                CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, NULL) END,
+                CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, NULL) END,
+                CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, NULL) END,
+                CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, NULL) END,
+                ISNULL(@AutoRenew, 0),
+                CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, NULL) END,
+                CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, NULL) END,
+                CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, 'ACH') END,
+                CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, NULL) END,
+                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
+                CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, NULL) END,
+                CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, NULL) END,
+                CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, NULL) END,
+                CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, NULL) END
+            )
+    END
+    ELSE
+    BEGIN
+        -- No value provided, let database use its default (e.g., NEWSEQUENTIALID())
+        INSERT INTO [${flyway:defaultSchema}].[Deal]
+            (
+                [DealNumber],
+                [Name],
+                [PipelineID],
+                [PipelineStageID],
+                [DealTypeID],
+                [DealStatusTypeID],
+                [AccountID],
+                [PrimaryContactID],
+                [BillingContactID],
+                [CompanyID],
+                [OwnerEmployeeID],
+                [Amount],
+                [AmountIsComputed],
+                [AmountComputedAt],
+                [AmountSourceHash],
+                [CurrencyID],
+                [MRR],
+                [ARR],
+                [TermMonths],
+                [EstimatedProjectWeeks],
+                [ExecutionDate],
+                [StartDate],
+                [ExpectedCloseDate],
+                [ActualCloseDate],
+                [Probability],
+                [ForecastCategoryTypeID],
+                [LossReasonID],
+                [LossNotes],
+                [LeadSourceTypeID],
+                [CampaignID],
+                [ContractID],
+                [RenewsContractID],
+                [AutoRenew],
+                [AnnualIncreasePctOverride],
+                [CancellationNoticeDaysOverride],
+                [PaymentMethod],
+                [ContractVariances],
+                [Description],
+                [NextStep],
+                [NextStepDate],
+                [ClosedAt],
+                [ClosedByUserID]
+            )
+        OUTPUT INSERTED.[ID] INTO @InsertedRow
+        VALUES
+            (
+                CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, NULL) END,
+                @Name,
+                @PipelineID,
+                CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, NULL) END,
+                CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, NULL) END,
+                CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, NULL) END,
+                CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, NULL) END,
+                CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, NULL) END,
+                CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, NULL) END,
+                @CompanyID,
+                CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, NULL) END,
+                CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, NULL) END,
+                ISNULL(@AmountIsComputed, 0),
+                CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, NULL) END,
+                CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, NULL) END,
+                CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, NULL) END,
+                CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, NULL) END,
+                CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, NULL) END,
+                CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, NULL) END,
+                CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, NULL) END,
+                CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, NULL) END,
+                CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, NULL) END,
+                CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, NULL) END,
+                CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, NULL) END,
+                CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, NULL) END,
+                CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, NULL) END,
+                CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, NULL) END,
+                CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, NULL) END,
+                CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, NULL) END,
+                CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, NULL) END,
+                CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, NULL) END,
+                CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, NULL) END,
+                ISNULL(@AutoRenew, 0),
+                CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, NULL) END,
+                CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, NULL) END,
+                CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, 'ACH') END,
+                CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, NULL) END,
+                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
+                CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, NULL) END,
+                CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, NULL) END,
+                CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, NULL) END,
+                CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, NULL) END
+            )
+    END
+    -- return the new record from the base view, which might have some calculated fields
+    SELECT * FROM [${flyway:defaultSchema}].[vwDeals] WHERE [ID] = (SELECT [ID] FROM @InsertedRow)
+END
+GO
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spCreateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spCreate Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spCreateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spUpdate SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spUpdateDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- UPDATE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[${flyway:defaultSchema}].[spUpdateDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [${flyway:defaultSchema}].[spUpdateDeal];
+GO
+
+CREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateDeal]
+    @ID uniqueidentifier,
+    @DealNumber_Clear bit = 0,
+    @DealNumber nvarchar(50) = NULL,
+    @Name nvarchar(500) = NULL,
+    @PipelineID uniqueidentifier = NULL,
+    @PipelineStageID_Clear bit = 0,
+    @PipelineStageID uniqueidentifier = NULL,
+    @DealTypeID_Clear bit = 0,
+    @DealTypeID uniqueidentifier = NULL,
+    @DealStatusTypeID_Clear bit = 0,
+    @DealStatusTypeID uniqueidentifier = NULL,
+    @AccountID_Clear bit = 0,
+    @AccountID uniqueidentifier = NULL,
+    @PrimaryContactID_Clear bit = 0,
+    @PrimaryContactID uniqueidentifier = NULL,
+    @BillingContactID_Clear bit = 0,
+    @BillingContactID uniqueidentifier = NULL,
+    @CompanyID uniqueidentifier = NULL,
+    @OwnerEmployeeID_Clear bit = 0,
+    @OwnerEmployeeID uniqueidentifier = NULL,
+    @Amount_Clear bit = 0,
+    @Amount decimal(19, 4) = NULL,
+    @AmountIsComputed bit = NULL,
+    @AmountComputedAt_Clear bit = 0,
+    @AmountComputedAt datetimeoffset = NULL,
+    @AmountSourceHash_Clear bit = 0,
+    @AmountSourceHash nvarchar(128) = NULL,
+    @CurrencyID_Clear bit = 0,
+    @CurrencyID uniqueidentifier = NULL,
+    @MRR_Clear bit = 0,
+    @MRR decimal(19, 4) = NULL,
+    @ARR_Clear bit = 0,
+    @ARR decimal(19, 4) = NULL,
+    @TermMonths_Clear bit = 0,
+    @TermMonths int = NULL,
+    @EstimatedProjectWeeks_Clear bit = 0,
+    @EstimatedProjectWeeks int = NULL,
+    @ExecutionDate_Clear bit = 0,
+    @ExecutionDate date = NULL,
+    @StartDate_Clear bit = 0,
+    @StartDate date = NULL,
+    @ExpectedCloseDate_Clear bit = 0,
+    @ExpectedCloseDate date = NULL,
+    @ActualCloseDate_Clear bit = 0,
+    @ActualCloseDate date = NULL,
+    @Probability_Clear bit = 0,
+    @Probability decimal(5, 2) = NULL,
+    @ForecastCategoryTypeID_Clear bit = 0,
+    @ForecastCategoryTypeID uniqueidentifier = NULL,
+    @LossReasonID_Clear bit = 0,
+    @LossReasonID uniqueidentifier = NULL,
+    @LossNotes_Clear bit = 0,
+    @LossNotes nvarchar(MAX) = NULL,
+    @LeadSourceTypeID_Clear bit = 0,
+    @LeadSourceTypeID uniqueidentifier = NULL,
+    @CampaignID_Clear bit = 0,
+    @CampaignID uniqueidentifier = NULL,
+    @ContractID_Clear bit = 0,
+    @ContractID uniqueidentifier = NULL,
+    @RenewsContractID_Clear bit = 0,
+    @RenewsContractID uniqueidentifier = NULL,
+    @AutoRenew bit = NULL,
+    @AnnualIncreasePctOverride_Clear bit = 0,
+    @AnnualIncreasePctOverride decimal(5, 2) = NULL,
+    @CancellationNoticeDaysOverride_Clear bit = 0,
+    @CancellationNoticeDaysOverride int = NULL,
+    @PaymentMethod_Clear bit = 0,
+    @PaymentMethod nvarchar(50) = NULL,
+    @ContractVariances_Clear bit = 0,
+    @ContractVariances nvarchar(MAX) = NULL,
+    @Description_Clear bit = 0,
+    @Description nvarchar(MAX) = NULL,
+    @NextStep_Clear bit = 0,
+    @NextStep nvarchar(1000) = NULL,
+    @NextStepDate_Clear bit = 0,
+    @NextStepDate date = NULL,
+    @ClosedAt_Clear bit = 0,
+    @ClosedAt datetimeoffset = NULL,
+    @ClosedByUserID_Clear bit = 0,
+    @ClosedByUserID uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE
+        [${flyway:defaultSchema}].[Deal]
+    SET
+        [DealNumber] = CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, [DealNumber]) END,
+        [Name] = ISNULL(@Name, [Name]),
+        [PipelineID] = ISNULL(@PipelineID, [PipelineID]),
+        [PipelineStageID] = CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, [PipelineStageID]) END,
+        [DealTypeID] = CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, [DealTypeID]) END,
+        [DealStatusTypeID] = CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, [DealStatusTypeID]) END,
+        [AccountID] = CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, [AccountID]) END,
+        [PrimaryContactID] = CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, [PrimaryContactID]) END,
+        [BillingContactID] = CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, [BillingContactID]) END,
+        [CompanyID] = ISNULL(@CompanyID, [CompanyID]),
+        [OwnerEmployeeID] = CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, [OwnerEmployeeID]) END,
+        [Amount] = CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, [Amount]) END,
+        [AmountIsComputed] = ISNULL(@AmountIsComputed, [AmountIsComputed]),
+        [AmountComputedAt] = CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, [AmountComputedAt]) END,
+        [AmountSourceHash] = CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, [AmountSourceHash]) END,
+        [CurrencyID] = CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, [CurrencyID]) END,
+        [MRR] = CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, [MRR]) END,
+        [ARR] = CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, [ARR]) END,
+        [TermMonths] = CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, [TermMonths]) END,
+        [EstimatedProjectWeeks] = CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, [EstimatedProjectWeeks]) END,
+        [ExecutionDate] = CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, [ExecutionDate]) END,
+        [StartDate] = CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, [StartDate]) END,
+        [ExpectedCloseDate] = CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, [ExpectedCloseDate]) END,
+        [ActualCloseDate] = CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, [ActualCloseDate]) END,
+        [Probability] = CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, [Probability]) END,
+        [ForecastCategoryTypeID] = CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, [ForecastCategoryTypeID]) END,
+        [LossReasonID] = CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, [LossReasonID]) END,
+        [LossNotes] = CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, [LossNotes]) END,
+        [LeadSourceTypeID] = CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, [LeadSourceTypeID]) END,
+        [CampaignID] = CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, [CampaignID]) END,
+        [ContractID] = CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, [ContractID]) END,
+        [RenewsContractID] = CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, [RenewsContractID]) END,
+        [AutoRenew] = ISNULL(@AutoRenew, [AutoRenew]),
+        [AnnualIncreasePctOverride] = CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, [AnnualIncreasePctOverride]) END,
+        [CancellationNoticeDaysOverride] = CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, [CancellationNoticeDaysOverride]) END,
+        [PaymentMethod] = CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, [PaymentMethod]) END,
+        [ContractVariances] = CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, [ContractVariances]) END,
+        [Description] = CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, [Description]) END,
+        [NextStep] = CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, [NextStep]) END,
+        [NextStepDate] = CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, [NextStepDate]) END,
+        [ClosedAt] = CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, [ClosedAt]) END,
+        [ClosedByUserID] = CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, [ClosedByUserID]) END
+    WHERE
+        [ID] = @ID
+
+    -- Check if the update was successful
+    IF @@ROWCOUNT = 0
+        -- Nothing was updated, return no rows, but column structure from base view intact, semantically correct this way.
+        SELECT TOP 0 * FROM [${flyway:defaultSchema}].[vwDeals] WHERE 1=0
+    ELSE
+        -- Return the updated record so the caller can see the updated values and any calculated fields
+        SELECT
+                                        *
+                                    FROM
+                                        [${flyway:defaultSchema}].[vwDeals]
+                                    WHERE
+                                        [ID] = @ID
+                                    
+END
+GO
+
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spUpdateDeal] TO [cdp_Developer], [cdp_Integration]
+GO
+
+------------------------------------------------------------
+----- TRIGGER FOR __mj_UpdatedAt field for the Deal table
+------------------------------------------------------------
+IF OBJECT_ID('[${flyway:defaultSchema}].[trgUpdateDeal]', 'TR') IS NOT NULL
+    DROP TRIGGER [${flyway:defaultSchema}].[trgUpdateDeal];
+GO
+CREATE TRIGGER [${flyway:defaultSchema}].trgUpdateDeal
+ON [${flyway:defaultSchema}].[Deal]
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE
+        [${flyway:defaultSchema}].[Deal]
+    SET
+        __mj_UpdatedAt = GETUTCDATE()
+    FROM
+        [${flyway:defaultSchema}].[Deal] AS _organicTable
+    INNER JOIN
+        INSERTED AS I ON
+        _organicTable.[ID] = I.[ID];
+END;
+GO
+
+/* spUpdate Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spUpdateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spDelete SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spDeleteDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- DELETE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[${flyway:defaultSchema}].[spDeleteDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [${flyway:defaultSchema}].[spDeleteDeal];
+GO
+
+CREATE PROCEDURE [${flyway:defaultSchema}].[spDeleteDeal]
+    @ID uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DELETE FROM
+        [${flyway:defaultSchema}].[Deal]
+    WHERE
+        [ID] = @ID
+
+
+    -- Check if the delete was successful
+    IF @@ROWCOUNT = 0
+        SELECT NULL AS [ID] -- Return NULL for all primary key fields to indicate no record was deleted
+    ELSE
+        SELECT @ID AS [ID] -- Return the primary key values to indicate we successfully deleted the record
+END
+GO
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spDelete Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* SQL text to delete unneeded entity fields (1 scoped entities) */
+EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts', @EntityIDs='79148DE5-7F99-44AC-ACD4-5EE7BA93D354';
+
+/* SQL text to update existing entity fields from schema (1 scoped entities) */
+EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts', @EntityIDs='79148DE5-7F99-44AC-ACD4-5EE7BA93D354';
+
+/* SQL text to set default column width where needed */
+EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_BizAppsAccounting,${mjSchema}_BizAppsOrders,${mjSchema}_BizAppsContracts';
+
+
+/* SQL text to update existing entities from schema */
+EXEC [__mj].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts';
+
+/* SQL text to insert 1 new entity field(s) */
+
+      IF NOT EXISTS (SELECT 1 FROM [__mj].[EntityField] WHERE ID = '34bb232d-184c-4233-8e37-92af616eedc7' OR (EntityID = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354' AND Name = 'OrderID')) BEGIN
+         INSERT INTO [__mj].[EntityField]
+         (
+            [ID],
+            [EntityID],
+            [Sequence],
+            [Name],
+            [DisplayName],
+            [Description],
+            [Type],
+            [Length],
+            [Precision],
+            [Scale],
+            [AllowsNull],
+            [DefaultValue],
+            [AutoIncrement],
+            [AllowUpdateAPI],
+            [IsVirtual],
+            [IsComputed],
+            [RelatedEntityID],
+            [RelatedEntityFieldName],
+            [IsNameField],
+            [IncludeInUserSearchAPI],
+            [IncludeRelatedEntityNameFieldInBaseView],
+            [DefaultInView],
+            [IsPrimaryKey],
+            [IsUnique],
+            [RelatedEntityDisplayType],
+            [__mj_CreatedAt],
+            [__mj_UpdatedAt]
+         )
+         VALUES
+         (
+            '34bb232d-184c-4233-8e37-92af616eedc7',
+            '79148DE5-7F99-44AC-ACD4-5EE7BA93D354', -- Entity: MJ_BizApps_Sales: Deals
+            (SELECT COALESCE(MAX([Sequence]), 0) FROM [__mj].[EntityField] WHERE [EntityID] = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354') + 46,
+            'OrderID',
+            'Order ID',
+            NULL,
+            'uniqueidentifier',
+            16,
+            0,
+            0,
+            1,
+            NULL,
+            0,
+            1,
+            0,
+            0,
+            'FC529BC8-FF09-44A9-B454-26EAFDAC791B',
+            'ID',
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            'Search',
+            GETUTCDATE(),
+            GETUTCDATE()
+         )
+      END;
+
+/* SQL text to update existing entity fields from schema */
+EXEC [__mj].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts';
+
+/* SQL text to set default column width where needed */
+EXEC [__mj].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts';
+
+
+/* Create Entity Relationship: MJ_BizApps_Orders: Order Headers -> MJ_BizApps_Sales: Deals (One To Many via OrderID) */
+   IF NOT EXISTS (
+      SELECT 1 FROM [__mj].[EntityRelationship] WHERE [ID] = '001aa8f6-c30b-4824-a3ca-9978f4ea9297'
+   )
+   BEGIN
+      INSERT INTO [__mj].[EntityRelationship] ([ID], [EntityID], [RelatedEntityID], [RelatedEntityJoinField], [Type], [BundleInAPI], [DisplayInForm], [Sequence], [__mj_CreatedAt], [__mj_UpdatedAt])
+                    VALUES ('001aa8f6-c30b-4824-a3ca-9978f4ea9297', 'FC529BC8-FF09-44A9-B454-26EAFDAC791B', '79148DE5-7F99-44AC-ACD4-5EE7BA93D354', 'OrderID', 'One To Many', 1, 1, 10, GETUTCDATE(), GETUTCDATE())
+   END;
+
+/* SQL text to sync schema info from database schemas */
+EXEC [__mj].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts';
+
+/* Index for Foreign Keys for Deal */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: Index for Foreign Keys
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+-- Index for foreign key PipelineID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_PipelineID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_PipelineID ON [__mj_BizAppsSales].[Deal] ([PipelineID]);
+
+-- Index for foreign key PipelineStageID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_PipelineStageID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_PipelineStageID ON [__mj_BizAppsSales].[Deal] ([PipelineStageID]);
+
+-- Index for foreign key DealTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_DealTypeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_DealTypeID ON [__mj_BizAppsSales].[Deal] ([DealTypeID]);
+
+-- Index for foreign key DealStatusTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_DealStatusTypeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_DealStatusTypeID ON [__mj_BizAppsSales].[Deal] ([DealStatusTypeID]);
+
+-- Index for foreign key AccountID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_AccountID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_AccountID ON [__mj_BizAppsSales].[Deal] ([AccountID]);
+
+-- Index for foreign key PrimaryContactID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_PrimaryContactID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_PrimaryContactID ON [__mj_BizAppsSales].[Deal] ([PrimaryContactID]);
+
+-- Index for foreign key BillingContactID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_BillingContactID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_BillingContactID ON [__mj_BizAppsSales].[Deal] ([BillingContactID]);
+
+-- Index for foreign key CompanyID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_CompanyID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_CompanyID ON [__mj_BizAppsSales].[Deal] ([CompanyID]);
+
+-- Index for foreign key OwnerEmployeeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_OwnerEmployeeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_OwnerEmployeeID ON [__mj_BizAppsSales].[Deal] ([OwnerEmployeeID]);
+
+-- Index for foreign key ForecastCategoryTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_ForecastCategoryTypeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_ForecastCategoryTypeID ON [__mj_BizAppsSales].[Deal] ([ForecastCategoryTypeID]);
+
+-- Index for foreign key LossReasonID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_LossReasonID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_LossReasonID ON [__mj_BizAppsSales].[Deal] ([LossReasonID]);
+
+-- Index for foreign key LeadSourceTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_LeadSourceTypeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_LeadSourceTypeID ON [__mj_BizAppsSales].[Deal] ([LeadSourceTypeID]);
+
+-- Index for foreign key ClosedByUserID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_ClosedByUserID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_ClosedByUserID ON [__mj_BizAppsSales].[Deal] ([ClosedByUserID]);
+
+-- Index for foreign key OrderID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_OrderID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_OrderID ON [__mj_BizAppsSales].[Deal] ([OrderID]);
+
+/* SQL text to update entity field related entity name field map for entity field ID 67A21862-5E5A-4597-AF82-32CB0C4CF1C4 */
+EXEC [__mj].[spUpdateEntityFieldRelatedEntityNameFieldMap] @EntityFieldID='67A21862-5E5A-4597-AF82-32CB0C4CF1C4', @RelatedEntityNameFieldMap='Account';
+
+/* SQL text to update entity field related entity name field map for entity field ID 34BB232D-184C-4233-8E37-92AF616EEDC7 */
+EXEC [__mj].[spUpdateEntityFieldRelatedEntityNameFieldMap] @EntityFieldID='34BB232D-184C-4233-8E37-92AF616EEDC7', @RelatedEntityNameFieldMap='Order';
+
+/* Base View SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: vwDeals
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- BASE VIEW FOR ENTITY:      MJ_BizApps_Sales: Deals
+-----               SCHEMA:      __mj_BizAppsSales
+-----               BASE TABLE:  Deal
+-----               PRIMARY KEY: ID
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[vwDeals]', 'V') IS NOT NULL
+    DROP VIEW [__mj_BizAppsSales].[vwDeals];
+GO
+
+CREATE VIEW [__mj_BizAppsSales].[vwDeals]
+AS
+SELECT
+    d.*,
+    mjBizAppsSalesPipeline_PipelineID.[Name] AS [Pipeline],
+    mjBizAppsSalesPipelineStage_PipelineStageID.[Name] AS [PipelineStage],
+    mjBizAppsSalesDealType_DealTypeID.[Name] AS [DealType],
+    mjBizAppsSalesDealStatusType_DealStatusTypeID.[Name] AS [DealStatusType],
+    mjBizAppsSalesSalesAccount_AccountID.[Name] AS [Account],
+    MJCompany_CompanyID.[Name] AS [Company],
+    MJEmployee_OwnerEmployeeID.[FirstLast] AS [OwnerEmployee],
+    mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID.[Name] AS [ForecastCategoryType],
+    mjBizAppsSalesLossReason_LossReasonID.[Name] AS [LossReason],
+    mjBizAppsSalesLeadSourceType_LeadSourceTypeID.[Name] AS [LeadSourceType],
+    MJUser_ClosedByUserID.[Name] AS [ClosedByUser],
+    mjBizAppsOrdersOrderHeader_OrderID.[OrderNumber] AS [Order]
+FROM
+    [__mj_BizAppsSales].[Deal] AS d
+INNER JOIN
+    [__mj_BizAppsSales].[Pipeline] AS mjBizAppsSalesPipeline_PipelineID
+  ON
+    [d].[PipelineID] = mjBizAppsSalesPipeline_PipelineID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[PipelineStage] AS mjBizAppsSalesPipelineStage_PipelineStageID
+  ON
+    [d].[PipelineStageID] = mjBizAppsSalesPipelineStage_PipelineStageID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[DealType] AS mjBizAppsSalesDealType_DealTypeID
+  ON
+    [d].[DealTypeID] = mjBizAppsSalesDealType_DealTypeID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[DealStatusType] AS mjBizAppsSalesDealStatusType_DealStatusTypeID
+  ON
+    [d].[DealStatusTypeID] = mjBizAppsSalesDealStatusType_DealStatusTypeID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[vwSalesAccounts] AS mjBizAppsSalesSalesAccount_AccountID
+  ON
+    [d].[AccountID] = mjBizAppsSalesSalesAccount_AccountID.[ID]
+INNER JOIN
+    [__mj].[Company] AS MJCompany_CompanyID
+  ON
+    [d].[CompanyID] = MJCompany_CompanyID.[ID]
+LEFT OUTER JOIN
+    [__mj].[vwEmployees] AS MJEmployee_OwnerEmployeeID
+  ON
+    [d].[OwnerEmployeeID] = MJEmployee_OwnerEmployeeID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[ForecastCategoryType] AS mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID
+  ON
+    [d].[ForecastCategoryTypeID] = mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[LossReason] AS mjBizAppsSalesLossReason_LossReasonID
+  ON
+    [d].[LossReasonID] = mjBizAppsSalesLossReason_LossReasonID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[LeadSourceType] AS mjBizAppsSalesLeadSourceType_LeadSourceTypeID
+  ON
+    [d].[LeadSourceTypeID] = mjBizAppsSalesLeadSourceType_LeadSourceTypeID.[ID]
+LEFT OUTER JOIN
+    [__mj].[User] AS MJUser_ClosedByUserID
+  ON
+    [d].[ClosedByUserID] = MJUser_ClosedByUserID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsOrders].[OrderHeader] AS mjBizAppsOrdersOrderHeader_OrderID
+  ON
+    [d].[OrderID] = mjBizAppsOrdersOrderHeader_OrderID.[ID]
+GO
+GRANT SELECT ON [__mj_BizAppsSales].[vwDeals] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
+
+/* Base View Permissions SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: Permissions for vwDeals
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+GRANT SELECT ON [__mj_BizAppsSales].[vwDeals] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
+
+/* spCreate SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spCreateDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- CREATE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[spCreateDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [__mj_BizAppsSales].[spCreateDeal];
+GO
+
+CREATE PROCEDURE [__mj_BizAppsSales].[spCreateDeal]
+    @ID uniqueidentifier = NULL,
+    @DealNumber_Clear bit = 0,
+    @DealNumber nvarchar(50) = NULL,
+    @Name nvarchar(500),
+    @PipelineID uniqueidentifier,
+    @PipelineStageID_Clear bit = 0,
+    @PipelineStageID uniqueidentifier = NULL,
+    @DealTypeID_Clear bit = 0,
+    @DealTypeID uniqueidentifier = NULL,
+    @DealStatusTypeID_Clear bit = 0,
+    @DealStatusTypeID uniqueidentifier = NULL,
+    @AccountID_Clear bit = 0,
+    @AccountID uniqueidentifier = NULL,
+    @PrimaryContactID_Clear bit = 0,
+    @PrimaryContactID uniqueidentifier = NULL,
+    @BillingContactID_Clear bit = 0,
+    @BillingContactID uniqueidentifier = NULL,
+    @CompanyID uniqueidentifier,
+    @OwnerEmployeeID_Clear bit = 0,
+    @OwnerEmployeeID uniqueidentifier = NULL,
+    @Amount_Clear bit = 0,
+    @Amount decimal(19, 4) = NULL,
+    @AmountIsComputed bit = NULL,
+    @AmountComputedAt_Clear bit = 0,
+    @AmountComputedAt datetimeoffset = NULL,
+    @AmountSourceHash_Clear bit = 0,
+    @AmountSourceHash nvarchar(128) = NULL,
+    @CurrencyID_Clear bit = 0,
+    @CurrencyID uniqueidentifier = NULL,
+    @MRR_Clear bit = 0,
+    @MRR decimal(19, 4) = NULL,
+    @ARR_Clear bit = 0,
+    @ARR decimal(19, 4) = NULL,
+    @TermMonths_Clear bit = 0,
+    @TermMonths int = NULL,
+    @EstimatedProjectWeeks_Clear bit = 0,
+    @EstimatedProjectWeeks int = NULL,
+    @ExecutionDate_Clear bit = 0,
+    @ExecutionDate date = NULL,
+    @StartDate_Clear bit = 0,
+    @StartDate date = NULL,
+    @ExpectedCloseDate_Clear bit = 0,
+    @ExpectedCloseDate date = NULL,
+    @ActualCloseDate_Clear bit = 0,
+    @ActualCloseDate date = NULL,
+    @Probability_Clear bit = 0,
+    @Probability decimal(5, 2) = NULL,
+    @ForecastCategoryTypeID_Clear bit = 0,
+    @ForecastCategoryTypeID uniqueidentifier = NULL,
+    @LossReasonID_Clear bit = 0,
+    @LossReasonID uniqueidentifier = NULL,
+    @LossNotes_Clear bit = 0,
+    @LossNotes nvarchar(MAX) = NULL,
+    @LeadSourceTypeID_Clear bit = 0,
+    @LeadSourceTypeID uniqueidentifier = NULL,
+    @CampaignID_Clear bit = 0,
+    @CampaignID uniqueidentifier = NULL,
+    @ContractID_Clear bit = 0,
+    @ContractID uniqueidentifier = NULL,
+    @RenewsContractID_Clear bit = 0,
+    @RenewsContractID uniqueidentifier = NULL,
+    @AutoRenew bit = NULL,
+    @AnnualIncreasePctOverride_Clear bit = 0,
+    @AnnualIncreasePctOverride decimal(5, 2) = NULL,
+    @CancellationNoticeDaysOverride_Clear bit = 0,
+    @CancellationNoticeDaysOverride int = NULL,
+    @PaymentMethod_Clear bit = 0,
+    @PaymentMethod nvarchar(50) = NULL,
+    @ContractVariances_Clear bit = 0,
+    @ContractVariances nvarchar(MAX) = NULL,
+    @Description_Clear bit = 0,
+    @Description nvarchar(MAX) = NULL,
+    @NextStep_Clear bit = 0,
+    @NextStep nvarchar(1000) = NULL,
+    @NextStepDate_Clear bit = 0,
+    @NextStepDate date = NULL,
+    @ClosedAt_Clear bit = 0,
+    @ClosedAt datetimeoffset = NULL,
+    @ClosedByUserID_Clear bit = 0,
+    @ClosedByUserID uniqueidentifier = NULL,
+    @OrderID_Clear bit = 0,
+    @OrderID uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @InsertedRow TABLE ([ID] UNIQUEIDENTIFIER)
+
+    IF @ID IS NOT NULL
+    BEGIN
+        -- User provided a value, use it
+        INSERT INTO [__mj_BizAppsSales].[Deal]
+            (
+                [ID],
+                [DealNumber],
+                [Name],
+                [PipelineID],
+                [PipelineStageID],
+                [DealTypeID],
+                [DealStatusTypeID],
+                [AccountID],
+                [PrimaryContactID],
+                [BillingContactID],
+                [CompanyID],
+                [OwnerEmployeeID],
+                [Amount],
+                [AmountIsComputed],
+                [AmountComputedAt],
+                [AmountSourceHash],
+                [CurrencyID],
+                [MRR],
+                [ARR],
+                [TermMonths],
+                [EstimatedProjectWeeks],
+                [ExecutionDate],
+                [StartDate],
+                [ExpectedCloseDate],
+                [ActualCloseDate],
+                [Probability],
+                [ForecastCategoryTypeID],
+                [LossReasonID],
+                [LossNotes],
+                [LeadSourceTypeID],
+                [CampaignID],
+                [ContractID],
+                [RenewsContractID],
+                [AutoRenew],
+                [AnnualIncreasePctOverride],
+                [CancellationNoticeDaysOverride],
+                [PaymentMethod],
+                [ContractVariances],
+                [Description],
+                [NextStep],
+                [NextStepDate],
+                [ClosedAt],
+                [ClosedByUserID],
+                [OrderID]
+            )
+        OUTPUT INSERTED.[ID] INTO @InsertedRow
+        VALUES
+            (
+                @ID,
+                CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, NULL) END,
+                @Name,
+                @PipelineID,
+                CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, NULL) END,
+                CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, NULL) END,
+                CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, NULL) END,
+                CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, NULL) END,
+                CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, NULL) END,
+                CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, NULL) END,
+                @CompanyID,
+                CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, NULL) END,
+                CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, NULL) END,
+                ISNULL(@AmountIsComputed, 0),
+                CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, NULL) END,
+                CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, NULL) END,
+                CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, NULL) END,
+                CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, NULL) END,
+                CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, NULL) END,
+                CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, NULL) END,
+                CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, NULL) END,
+                CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, NULL) END,
+                CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, NULL) END,
+                CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, NULL) END,
+                CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, NULL) END,
+                CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, NULL) END,
+                CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, NULL) END,
+                CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, NULL) END,
+                CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, NULL) END,
+                CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, NULL) END,
+                CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, NULL) END,
+                CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, NULL) END,
+                CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, NULL) END,
+                ISNULL(@AutoRenew, 0),
+                CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, NULL) END,
+                CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, NULL) END,
+                CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, 'ACH') END,
+                CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, NULL) END,
+                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
+                CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, NULL) END,
+                CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, NULL) END,
+                CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, NULL) END,
+                CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, NULL) END,
+                CASE WHEN @OrderID_Clear = 1 THEN NULL ELSE ISNULL(@OrderID, NULL) END
+            )
+    END
+    ELSE
+    BEGIN
+        -- No value provided, let database use its default (e.g., NEWSEQUENTIALID())
+        INSERT INTO [__mj_BizAppsSales].[Deal]
+            (
+                [DealNumber],
+                [Name],
+                [PipelineID],
+                [PipelineStageID],
+                [DealTypeID],
+                [DealStatusTypeID],
+                [AccountID],
+                [PrimaryContactID],
+                [BillingContactID],
+                [CompanyID],
+                [OwnerEmployeeID],
+                [Amount],
+                [AmountIsComputed],
+                [AmountComputedAt],
+                [AmountSourceHash],
+                [CurrencyID],
+                [MRR],
+                [ARR],
+                [TermMonths],
+                [EstimatedProjectWeeks],
+                [ExecutionDate],
+                [StartDate],
+                [ExpectedCloseDate],
+                [ActualCloseDate],
+                [Probability],
+                [ForecastCategoryTypeID],
+                [LossReasonID],
+                [LossNotes],
+                [LeadSourceTypeID],
+                [CampaignID],
+                [ContractID],
+                [RenewsContractID],
+                [AutoRenew],
+                [AnnualIncreasePctOverride],
+                [CancellationNoticeDaysOverride],
+                [PaymentMethod],
+                [ContractVariances],
+                [Description],
+                [NextStep],
+                [NextStepDate],
+                [ClosedAt],
+                [ClosedByUserID],
+                [OrderID]
+            )
+        OUTPUT INSERTED.[ID] INTO @InsertedRow
+        VALUES
+            (
+                CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, NULL) END,
+                @Name,
+                @PipelineID,
+                CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, NULL) END,
+                CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, NULL) END,
+                CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, NULL) END,
+                CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, NULL) END,
+                CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, NULL) END,
+                CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, NULL) END,
+                @CompanyID,
+                CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, NULL) END,
+                CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, NULL) END,
+                ISNULL(@AmountIsComputed, 0),
+                CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, NULL) END,
+                CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, NULL) END,
+                CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, NULL) END,
+                CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, NULL) END,
+                CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, NULL) END,
+                CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, NULL) END,
+                CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, NULL) END,
+                CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, NULL) END,
+                CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, NULL) END,
+                CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, NULL) END,
+                CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, NULL) END,
+                CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, NULL) END,
+                CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, NULL) END,
+                CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, NULL) END,
+                CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, NULL) END,
+                CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, NULL) END,
+                CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, NULL) END,
+                CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, NULL) END,
+                CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, NULL) END,
+                ISNULL(@AutoRenew, 0),
+                CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, NULL) END,
+                CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, NULL) END,
+                CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, 'ACH') END,
+                CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, NULL) END,
+                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
+                CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, NULL) END,
+                CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, NULL) END,
+                CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, NULL) END,
+                CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, NULL) END,
+                CASE WHEN @OrderID_Clear = 1 THEN NULL ELSE ISNULL(@OrderID, NULL) END
+            )
+    END
+    -- return the new record from the base view, which might have some calculated fields
+    SELECT * FROM [__mj_BizAppsSales].[vwDeals] WHERE [ID] = (SELECT [ID] FROM @InsertedRow)
+END
+GO
+GRANT EXECUTE ON [__mj_BizAppsSales].[spCreateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spCreate Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spCreateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spUpdate SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spUpdateDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- UPDATE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[spUpdateDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [__mj_BizAppsSales].[spUpdateDeal];
+GO
+
+CREATE PROCEDURE [__mj_BizAppsSales].[spUpdateDeal]
+    @ID uniqueidentifier,
+    @DealNumber_Clear bit = 0,
+    @DealNumber nvarchar(50) = NULL,
+    @Name nvarchar(500) = NULL,
+    @PipelineID uniqueidentifier = NULL,
+    @PipelineStageID_Clear bit = 0,
+    @PipelineStageID uniqueidentifier = NULL,
+    @DealTypeID_Clear bit = 0,
+    @DealTypeID uniqueidentifier = NULL,
+    @DealStatusTypeID_Clear bit = 0,
+    @DealStatusTypeID uniqueidentifier = NULL,
+    @AccountID_Clear bit = 0,
+    @AccountID uniqueidentifier = NULL,
+    @PrimaryContactID_Clear bit = 0,
+    @PrimaryContactID uniqueidentifier = NULL,
+    @BillingContactID_Clear bit = 0,
+    @BillingContactID uniqueidentifier = NULL,
+    @CompanyID uniqueidentifier = NULL,
+    @OwnerEmployeeID_Clear bit = 0,
+    @OwnerEmployeeID uniqueidentifier = NULL,
+    @Amount_Clear bit = 0,
+    @Amount decimal(19, 4) = NULL,
+    @AmountIsComputed bit = NULL,
+    @AmountComputedAt_Clear bit = 0,
+    @AmountComputedAt datetimeoffset = NULL,
+    @AmountSourceHash_Clear bit = 0,
+    @AmountSourceHash nvarchar(128) = NULL,
+    @CurrencyID_Clear bit = 0,
+    @CurrencyID uniqueidentifier = NULL,
+    @MRR_Clear bit = 0,
+    @MRR decimal(19, 4) = NULL,
+    @ARR_Clear bit = 0,
+    @ARR decimal(19, 4) = NULL,
+    @TermMonths_Clear bit = 0,
+    @TermMonths int = NULL,
+    @EstimatedProjectWeeks_Clear bit = 0,
+    @EstimatedProjectWeeks int = NULL,
+    @ExecutionDate_Clear bit = 0,
+    @ExecutionDate date = NULL,
+    @StartDate_Clear bit = 0,
+    @StartDate date = NULL,
+    @ExpectedCloseDate_Clear bit = 0,
+    @ExpectedCloseDate date = NULL,
+    @ActualCloseDate_Clear bit = 0,
+    @ActualCloseDate date = NULL,
+    @Probability_Clear bit = 0,
+    @Probability decimal(5, 2) = NULL,
+    @ForecastCategoryTypeID_Clear bit = 0,
+    @ForecastCategoryTypeID uniqueidentifier = NULL,
+    @LossReasonID_Clear bit = 0,
+    @LossReasonID uniqueidentifier = NULL,
+    @LossNotes_Clear bit = 0,
+    @LossNotes nvarchar(MAX) = NULL,
+    @LeadSourceTypeID_Clear bit = 0,
+    @LeadSourceTypeID uniqueidentifier = NULL,
+    @CampaignID_Clear bit = 0,
+    @CampaignID uniqueidentifier = NULL,
+    @ContractID_Clear bit = 0,
+    @ContractID uniqueidentifier = NULL,
+    @RenewsContractID_Clear bit = 0,
+    @RenewsContractID uniqueidentifier = NULL,
+    @AutoRenew bit = NULL,
+    @AnnualIncreasePctOverride_Clear bit = 0,
+    @AnnualIncreasePctOverride decimal(5, 2) = NULL,
+    @CancellationNoticeDaysOverride_Clear bit = 0,
+    @CancellationNoticeDaysOverride int = NULL,
+    @PaymentMethod_Clear bit = 0,
+    @PaymentMethod nvarchar(50) = NULL,
+    @ContractVariances_Clear bit = 0,
+    @ContractVariances nvarchar(MAX) = NULL,
+    @Description_Clear bit = 0,
+    @Description nvarchar(MAX) = NULL,
+    @NextStep_Clear bit = 0,
+    @NextStep nvarchar(1000) = NULL,
+    @NextStepDate_Clear bit = 0,
+    @NextStepDate date = NULL,
+    @ClosedAt_Clear bit = 0,
+    @ClosedAt datetimeoffset = NULL,
+    @ClosedByUserID_Clear bit = 0,
+    @ClosedByUserID uniqueidentifier = NULL,
+    @OrderID_Clear bit = 0,
+    @OrderID uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE
+        [__mj_BizAppsSales].[Deal]
+    SET
+        [DealNumber] = CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, [DealNumber]) END,
+        [Name] = ISNULL(@Name, [Name]),
+        [PipelineID] = ISNULL(@PipelineID, [PipelineID]),
+        [PipelineStageID] = CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, [PipelineStageID]) END,
+        [DealTypeID] = CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, [DealTypeID]) END,
+        [DealStatusTypeID] = CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, [DealStatusTypeID]) END,
+        [AccountID] = CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, [AccountID]) END,
+        [PrimaryContactID] = CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, [PrimaryContactID]) END,
+        [BillingContactID] = CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, [BillingContactID]) END,
+        [CompanyID] = ISNULL(@CompanyID, [CompanyID]),
+        [OwnerEmployeeID] = CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, [OwnerEmployeeID]) END,
+        [Amount] = CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, [Amount]) END,
+        [AmountIsComputed] = ISNULL(@AmountIsComputed, [AmountIsComputed]),
+        [AmountComputedAt] = CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, [AmountComputedAt]) END,
+        [AmountSourceHash] = CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, [AmountSourceHash]) END,
+        [CurrencyID] = CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, [CurrencyID]) END,
+        [MRR] = CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, [MRR]) END,
+        [ARR] = CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, [ARR]) END,
+        [TermMonths] = CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, [TermMonths]) END,
+        [EstimatedProjectWeeks] = CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, [EstimatedProjectWeeks]) END,
+        [ExecutionDate] = CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, [ExecutionDate]) END,
+        [StartDate] = CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, [StartDate]) END,
+        [ExpectedCloseDate] = CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, [ExpectedCloseDate]) END,
+        [ActualCloseDate] = CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, [ActualCloseDate]) END,
+        [Probability] = CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, [Probability]) END,
+        [ForecastCategoryTypeID] = CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, [ForecastCategoryTypeID]) END,
+        [LossReasonID] = CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, [LossReasonID]) END,
+        [LossNotes] = CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, [LossNotes]) END,
+        [LeadSourceTypeID] = CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, [LeadSourceTypeID]) END,
+        [CampaignID] = CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, [CampaignID]) END,
+        [ContractID] = CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, [ContractID]) END,
+        [RenewsContractID] = CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, [RenewsContractID]) END,
+        [AutoRenew] = ISNULL(@AutoRenew, [AutoRenew]),
+        [AnnualIncreasePctOverride] = CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, [AnnualIncreasePctOverride]) END,
+        [CancellationNoticeDaysOverride] = CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, [CancellationNoticeDaysOverride]) END,
+        [PaymentMethod] = CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, [PaymentMethod]) END,
+        [ContractVariances] = CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, [ContractVariances]) END,
+        [Description] = CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, [Description]) END,
+        [NextStep] = CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, [NextStep]) END,
+        [NextStepDate] = CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, [NextStepDate]) END,
+        [ClosedAt] = CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, [ClosedAt]) END,
+        [ClosedByUserID] = CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, [ClosedByUserID]) END,
+        [OrderID] = CASE WHEN @OrderID_Clear = 1 THEN NULL ELSE ISNULL(@OrderID, [OrderID]) END
+    WHERE
+        [ID] = @ID
+
+    -- Check if the update was successful
+    IF @@ROWCOUNT = 0
+        -- Nothing was updated, return no rows, but column structure from base view intact, semantically correct this way.
+        SELECT TOP 0 * FROM [__mj_BizAppsSales].[vwDeals] WHERE 1=0
+    ELSE
+        -- Return the updated record so the caller can see the updated values and any calculated fields
+        SELECT
+                                        *
+                                    FROM
+                                        [__mj_BizAppsSales].[vwDeals]
+                                    WHERE
+                                        [ID] = @ID
+                                    
+END
+GO
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spUpdateDeal] TO [cdp_Developer], [cdp_Integration]
+GO
+
+------------------------------------------------------------
+----- TRIGGER FOR __mj_UpdatedAt field for the Deal table
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[trgUpdateDeal]', 'TR') IS NOT NULL
+    DROP TRIGGER [__mj_BizAppsSales].[trgUpdateDeal];
+GO
+CREATE TRIGGER [__mj_BizAppsSales].trgUpdateDeal
+ON [__mj_BizAppsSales].[Deal]
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE
+        [__mj_BizAppsSales].[Deal]
+    SET
+        __mj_UpdatedAt = GETUTCDATE()
+    FROM
+        [__mj_BizAppsSales].[Deal] AS _organicTable
+    INNER JOIN
+        INSERTED AS I ON
+        _organicTable.[ID] = I.[ID];
+END;
+GO
+
+/* spUpdate Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spUpdateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spDelete SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spDeleteDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- DELETE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[spDeleteDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [__mj_BizAppsSales].[spDeleteDeal];
+GO
+
+CREATE PROCEDURE [__mj_BizAppsSales].[spDeleteDeal]
+    @ID uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DELETE FROM
+        [__mj_BizAppsSales].[Deal]
+    WHERE
+        [ID] = @ID
+
+
+    -- Check if the delete was successful
+    IF @@ROWCOUNT = 0
+        SELECT NULL AS [ID] -- Return NULL for all primary key fields to indicate no record was deleted
+    ELSE
+        SELECT @ID AS [ID] -- Return the primary key values to indicate we successfully deleted the record
+END
+GO
+GRANT EXECUTE ON [__mj_BizAppsSales].[spDeleteDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spDelete Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spDeleteDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* SQL text to delete unneeded entity fields (1 scoped entities) */
+EXEC [__mj].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts', @EntityIDs='79148DE5-7F99-44AC-ACD4-5EE7BA93D354';
+
+/* SQL text to insert 2 new entity field(s) */
+
+      IF NOT EXISTS (SELECT 1 FROM [__mj].[EntityField] WHERE ID = 'a6b0178f-e4f3-4794-a5f9-42a6fef73cad' OR (EntityID = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354' AND Name = 'Account')) BEGIN
+         INSERT INTO [__mj].[EntityField]
+         (
+            [ID],
+            [EntityID],
+            [Sequence],
+            [Name],
+            [DisplayName],
+            [Description],
+            [Type],
+            [Length],
+            [Precision],
+            [Scale],
+            [AllowsNull],
+            [DefaultValue],
+            [AutoIncrement],
+            [AllowUpdateAPI],
+            [IsVirtual],
+            [IsComputed],
+            [RelatedEntityID],
+            [RelatedEntityFieldName],
+            [IsNameField],
+            [IncludeInUserSearchAPI],
+            [IncludeRelatedEntityNameFieldInBaseView],
+            [DefaultInView],
+            [IsPrimaryKey],
+            [IsUnique],
+            [RelatedEntityDisplayType],
+            [__mj_CreatedAt],
+            [__mj_UpdatedAt]
+         )
+         VALUES
+         (
+            'a6b0178f-e4f3-4794-a5f9-42a6fef73cad',
+            '79148DE5-7F99-44AC-ACD4-5EE7BA93D354', -- Entity: MJ_BizApps_Sales: Deals
+            (SELECT COALESCE(MAX([Sequence]), 0) FROM [__mj].[EntityField] WHERE [EntityID] = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354') + 51,
+            'Account',
+            'Account',
+            NULL,
+            'nvarchar',
+            510,
+            0,
+            0,
+            1,
+            NULL,
+            0,
+            0,
+            1,
+            0,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            'Search',
+            GETUTCDATE(),
+            GETUTCDATE()
+         )
+      END;
+
+      IF NOT EXISTS (SELECT 1 FROM [__mj].[EntityField] WHERE ID = '481a8a45-87ef-4e66-ac28-7ec170b77311' OR (EntityID = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354' AND Name = 'Order')) BEGIN
+         INSERT INTO [__mj].[EntityField]
+         (
+            [ID],
+            [EntityID],
+            [Sequence],
+            [Name],
+            [DisplayName],
+            [Description],
+            [Type],
+            [Length],
+            [Precision],
+            [Scale],
+            [AllowsNull],
+            [DefaultValue],
+            [AutoIncrement],
+            [AllowUpdateAPI],
+            [IsVirtual],
+            [IsComputed],
+            [RelatedEntityID],
+            [RelatedEntityFieldName],
+            [IsNameField],
+            [IncludeInUserSearchAPI],
+            [IncludeRelatedEntityNameFieldInBaseView],
+            [DefaultInView],
+            [IsPrimaryKey],
+            [IsUnique],
+            [RelatedEntityDisplayType],
+            [__mj_CreatedAt],
+            [__mj_UpdatedAt]
+         )
+         VALUES
+         (
+            '481a8a45-87ef-4e66-ac28-7ec170b77311',
+            '79148DE5-7F99-44AC-ACD4-5EE7BA93D354', -- Entity: MJ_BizApps_Sales: Deals
+            (SELECT COALESCE(MAX([Sequence]), 0) FROM [__mj].[EntityField] WHERE [EntityID] = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354') + 58,
+            'Order',
+            'Order',
+            NULL,
+            'nvarchar',
+            80,
+            0,
+            0,
+            1,
+            NULL,
+            0,
+            0,
+            1,
+            0,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            'Search',
+            GETUTCDATE(),
+            GETUTCDATE()
+         )
+      END;
+
+/* SQL text to update existing entity fields from schema (1 scoped entities) */
+EXEC [__mj].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts', @EntityIDs='79148DE5-7F99-44AC-ACD4-5EE7BA93D354';
+
+/* SQL text to set default column width where needed */
+EXEC [__mj].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts';
+
+
+/* SQL text to update existing entities from schema */
+EXEC [__mj].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts';
+
+/* SQL text to update existing entity fields from schema */
+EXEC [__mj].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts';
+
+/* SQL text to set default column width where needed */
+EXEC [__mj].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts';
+
+/* SQL text to sync schema info from database schemas */
+EXEC [__mj].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts';
+
+
+/* SQL text to update existing entities from schema */
+EXEC [__mj].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT';
+
+/* SQL text to insert 1 new entity field(s) */
+
+      IF NOT EXISTS (SELECT 1 FROM [__mj].[EntityField] WHERE ID = '005d9cb1-80eb-45ba-b003-83c130881bb3' OR (EntityID = 'D9B2404D-CA19-4339-8E87-CE62B1C30647' AND Name = 'OrderStatusOnEntry')) BEGIN
+         INSERT INTO [__mj].[EntityField]
+         (
+            [ID],
+            [EntityID],
+            [Sequence],
+            [Name],
+            [DisplayName],
+            [Description],
+            [Type],
+            [Length],
+            [Precision],
+            [Scale],
+            [AllowsNull],
+            [DefaultValue],
+            [AutoIncrement],
+            [AllowUpdateAPI],
+            [IsVirtual],
+            [IsComputed],
+            [RelatedEntityID],
+            [RelatedEntityFieldName],
+            [IsNameField],
+            [IncludeInUserSearchAPI],
+            [IncludeRelatedEntityNameFieldInBaseView],
+            [DefaultInView],
+            [IsPrimaryKey],
+            [IsUnique],
+            [RelatedEntityDisplayType],
+            [__mj_CreatedAt],
+            [__mj_UpdatedAt]
+         )
+         VALUES
+         (
+            '005d9cb1-80eb-45ba-b003-83c130881bb3',
+            'D9B2404D-CA19-4339-8E87-CE62B1C30647', -- Entity: MJ_BizApps_Sales: Pipeline Stages
+            (SELECT COALESCE(MAX([Sequence]), 0) FROM [__mj].[EntityField] WHERE [EntityID] = 'D9B2404D-CA19-4339-8E87-CE62B1C30647') + 17,
+            'OrderStatusOnEntry',
+            'Order Status On Entry',
+            NULL,
+            'nvarchar',
+            40,
+            0,
+            0,
+            1,
+            NULL,
+            0,
+            1,
+            0,
+            0,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            'Search',
+            GETUTCDATE(),
+            GETUTCDATE()
+         )
+      END;
+
+/* SQL text to update existing entity fields from schema */
+EXEC [__mj].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT';
+
+/* SQL text to set default column width where needed */
+EXEC [__mj].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT';
+
+/* SQL text to insert entity field value with ID e36b0b84-421e-4467-81b1-87cf6469d6be */
+INSERT INTO [__mj].[EntityFieldValue]
+                                       ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
+                                    VALUES
+                                       ('e36b0b84-421e-4467-81b1-87cf6469d6be', '005D9CB1-80EB-45BA-B003-83C130881BB3', 1, 'Confirmed', 'Confirmed', GETUTCDATE(), GETUTCDATE());
+
+/* SQL text to insert entity field value with ID 6e4b51a5-0fea-4e22-be05-bc1589e3ac41 */
+INSERT INTO [__mj].[EntityFieldValue]
+                                       ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
+                                    VALUES
+                                       ('6e4b51a5-0fea-4e22-be05-bc1589e3ac41', '005D9CB1-80EB-45BA-B003-83C130881BB3', 2, 'Draft', 'Draft', GETUTCDATE(), GETUTCDATE());
+
+/* SQL text to insert entity field value with ID 4e5e1052-acba-4df7-bad8-d9a77f1da72d */
+INSERT INTO [__mj].[EntityFieldValue]
+                                       ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
+                                    VALUES
+                                       ('4e5e1052-acba-4df7-bad8-d9a77f1da72d', '005D9CB1-80EB-45BA-B003-83C130881BB3', 3, 'Quoted', 'Quoted', GETUTCDATE(), GETUTCDATE());
+
+/* SQL text to insert entity field value with ID 10d95271-fb6a-4433-89ac-ada9762bf476 */
+INSERT INTO [__mj].[EntityFieldValue]
+                                       ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
+                                    VALUES
+                                       ('10d95271-fb6a-4433-89ac-ada9762bf476', '005D9CB1-80EB-45BA-B003-83C130881BB3', 4, 'Voided', 'Voided', GETUTCDATE(), GETUTCDATE());
+
+/* SQL text to update ValueListType for entity field ID 005D9CB1-80EB-45BA-B003-83C130881BB3 */
+UPDATE [__mj].[EntityField] SET ValueListType='List' WHERE ID='005D9CB1-80EB-45BA-B003-83C130881BB3';
+
+/* SQL text to sync schema info from database schemas */
+EXEC [__mj].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT';
+
+/* Index for Foreign Keys for PipelineStage */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Pipeline Stages
+-- Item: Index for Foreign Keys
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+-- Index for foreign key PipelineID in table PipelineStage
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_PipelineStage_PipelineID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[PipelineStage]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_PipelineStage_PipelineID ON [__mj_BizAppsSales].[PipelineStage] ([PipelineID]);
+
+-- Index for foreign key ForecastCategoryTypeID in table PipelineStage
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_PipelineStage_ForecastCategoryTypeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[PipelineStage]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_PipelineStage_ForecastCategoryTypeID ON [__mj_BizAppsSales].[PipelineStage] ([ForecastCategoryTypeID]);
+
+-- Index for foreign key DealStatusTypeID in table PipelineStage
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_PipelineStage_DealStatusTypeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[PipelineStage]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_PipelineStage_DealStatusTypeID ON [__mj_BizAppsSales].[PipelineStage] ([DealStatusTypeID]);
+
+/* Base View SQL for MJ_BizApps_Sales: Pipeline Stages */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Pipeline Stages
+-- Item: vwPipelineStages
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- BASE VIEW FOR ENTITY:      MJ_BizApps_Sales: Pipeline Stages
+-----               SCHEMA:      __mj_BizAppsSales
+-----               BASE TABLE:  PipelineStage
+-----               PRIMARY KEY: ID
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[vwPipelineStages]', 'V') IS NOT NULL
+    DROP VIEW [__mj_BizAppsSales].[vwPipelineStages];
+GO
+
+CREATE VIEW [__mj_BizAppsSales].[vwPipelineStages]
+AS
+SELECT
+    p.*,
+    mjBizAppsSalesPipeline_PipelineID.[Name] AS [Pipeline],
+    mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID.[Name] AS [ForecastCategoryType],
+    mjBizAppsSalesDealStatusType_DealStatusTypeID.[Name] AS [DealStatusType]
+FROM
+    [__mj_BizAppsSales].[PipelineStage] AS p
+INNER JOIN
+    [__mj_BizAppsSales].[Pipeline] AS mjBizAppsSalesPipeline_PipelineID
+  ON
+    [p].[PipelineID] = mjBizAppsSalesPipeline_PipelineID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[ForecastCategoryType] AS mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID
+  ON
+    [p].[ForecastCategoryTypeID] = mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[DealStatusType] AS mjBizAppsSalesDealStatusType_DealStatusTypeID
+  ON
+    [p].[DealStatusTypeID] = mjBizAppsSalesDealStatusType_DealStatusTypeID.[ID]
+GO
+GRANT SELECT ON [__mj_BizAppsSales].[vwPipelineStages] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
+
+/* Base View Permissions SQL for MJ_BizApps_Sales: Pipeline Stages */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Pipeline Stages
+-- Item: Permissions for vwPipelineStages
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+GRANT SELECT ON [__mj_BizAppsSales].[vwPipelineStages] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
+
+/* spCreate SQL for MJ_BizApps_Sales: Pipeline Stages */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Pipeline Stages
+-- Item: spCreatePipelineStage
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- CREATE PROCEDURE FOR PipelineStage
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[spCreatePipelineStage]', 'P') IS NOT NULL
+    DROP PROCEDURE [__mj_BizAppsSales].[spCreatePipelineStage];
+GO
+
+CREATE PROCEDURE [__mj_BizAppsSales].[spCreatePipelineStage]
+    @ID uniqueidentifier = NULL,
+    @PipelineID uniqueidentifier,
+    @Name nvarchar(200),
+    @Code nvarchar(40),
+    @DisplayOrder int = NULL,
+    @Probability_Clear bit = 0,
+    @Probability decimal(5, 2) = NULL,
+    @ForecastCategoryTypeID_Clear bit = 0,
+    @ForecastCategoryTypeID uniqueidentifier = NULL,
+    @DealStatusTypeID_Clear bit = 0,
+    @DealStatusTypeID uniqueidentifier = NULL,
+    @RottingDays_Clear bit = 0,
+    @RottingDays int = NULL,
+    @EntryCriteria_Clear bit = 0,
+    @EntryCriteria nvarchar(MAX) = NULL,
+    @ExitCriteria_Clear bit = 0,
+    @ExitCriteria nvarchar(MAX) = NULL,
+    @RequiredFields_Clear bit = 0,
+    @RequiredFields nvarchar(MAX) = NULL,
+    @GuidanceMarkdown_Clear bit = 0,
+    @GuidanceMarkdown nvarchar(MAX) = NULL,
+    @IsActive bit = NULL,
+    @OrderStatusOnEntry_Clear bit = 0,
+    @OrderStatusOnEntry nvarchar(20) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @InsertedRow TABLE ([ID] UNIQUEIDENTIFIER)
+
+    IF @ID IS NOT NULL
+    BEGIN
+        -- User provided a value, use it
+        INSERT INTO [__mj_BizAppsSales].[PipelineStage]
+            (
+                [ID],
+                [PipelineID],
+                [Name],
+                [Code],
+                [DisplayOrder],
+                [Probability],
+                [ForecastCategoryTypeID],
+                [DealStatusTypeID],
+                [RottingDays],
+                [EntryCriteria],
+                [ExitCriteria],
+                [RequiredFields],
+                [GuidanceMarkdown],
+                [IsActive],
+                [OrderStatusOnEntry]
+            )
+        OUTPUT INSERTED.[ID] INTO @InsertedRow
+        VALUES
+            (
+                @ID,
+                @PipelineID,
+                @Name,
+                @Code,
+                ISNULL(@DisplayOrder, 0),
+                CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, NULL) END,
+                CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, NULL) END,
+                CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, NULL) END,
+                CASE WHEN @RottingDays_Clear = 1 THEN NULL ELSE ISNULL(@RottingDays, NULL) END,
+                CASE WHEN @EntryCriteria_Clear = 1 THEN NULL ELSE ISNULL(@EntryCriteria, NULL) END,
+                CASE WHEN @ExitCriteria_Clear = 1 THEN NULL ELSE ISNULL(@ExitCriteria, NULL) END,
+                CASE WHEN @RequiredFields_Clear = 1 THEN NULL ELSE ISNULL(@RequiredFields, NULL) END,
+                CASE WHEN @GuidanceMarkdown_Clear = 1 THEN NULL ELSE ISNULL(@GuidanceMarkdown, NULL) END,
+                ISNULL(@IsActive, 1),
+                CASE WHEN @OrderStatusOnEntry_Clear = 1 THEN NULL ELSE ISNULL(@OrderStatusOnEntry, NULL) END
+            )
+    END
+    ELSE
+    BEGIN
+        -- No value provided, let database use its default (e.g., NEWSEQUENTIALID())
+        INSERT INTO [__mj_BizAppsSales].[PipelineStage]
+            (
+                [PipelineID],
+                [Name],
+                [Code],
+                [DisplayOrder],
+                [Probability],
+                [ForecastCategoryTypeID],
+                [DealStatusTypeID],
+                [RottingDays],
+                [EntryCriteria],
+                [ExitCriteria],
+                [RequiredFields],
+                [GuidanceMarkdown],
+                [IsActive],
+                [OrderStatusOnEntry]
+            )
+        OUTPUT INSERTED.[ID] INTO @InsertedRow
+        VALUES
+            (
+                @PipelineID,
+                @Name,
+                @Code,
+                ISNULL(@DisplayOrder, 0),
+                CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, NULL) END,
+                CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, NULL) END,
+                CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, NULL) END,
+                CASE WHEN @RottingDays_Clear = 1 THEN NULL ELSE ISNULL(@RottingDays, NULL) END,
+                CASE WHEN @EntryCriteria_Clear = 1 THEN NULL ELSE ISNULL(@EntryCriteria, NULL) END,
+                CASE WHEN @ExitCriteria_Clear = 1 THEN NULL ELSE ISNULL(@ExitCriteria, NULL) END,
+                CASE WHEN @RequiredFields_Clear = 1 THEN NULL ELSE ISNULL(@RequiredFields, NULL) END,
+                CASE WHEN @GuidanceMarkdown_Clear = 1 THEN NULL ELSE ISNULL(@GuidanceMarkdown, NULL) END,
+                ISNULL(@IsActive, 1),
+                CASE WHEN @OrderStatusOnEntry_Clear = 1 THEN NULL ELSE ISNULL(@OrderStatusOnEntry, NULL) END
+            )
+    END
+    -- return the new record from the base view, which might have some calculated fields
+    SELECT * FROM [__mj_BizAppsSales].[vwPipelineStages] WHERE [ID] = (SELECT [ID] FROM @InsertedRow)
+END
+GO
+GRANT EXECUTE ON [__mj_BizAppsSales].[spCreatePipelineStage] TO [cdp_Developer], [cdp_Integration];
+
+/* spCreate Permissions for MJ_BizApps_Sales: Pipeline Stages */
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spCreatePipelineStage] TO [cdp_Developer], [cdp_Integration];
+
+/* spUpdate SQL for MJ_BizApps_Sales: Pipeline Stages */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Pipeline Stages
+-- Item: spUpdatePipelineStage
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- UPDATE PROCEDURE FOR PipelineStage
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[spUpdatePipelineStage]', 'P') IS NOT NULL
+    DROP PROCEDURE [__mj_BizAppsSales].[spUpdatePipelineStage];
+GO
+
+CREATE PROCEDURE [__mj_BizAppsSales].[spUpdatePipelineStage]
+    @ID uniqueidentifier,
+    @PipelineID uniqueidentifier = NULL,
+    @Name nvarchar(200) = NULL,
+    @Code nvarchar(40) = NULL,
+    @DisplayOrder int = NULL,
+    @Probability_Clear bit = 0,
+    @Probability decimal(5, 2) = NULL,
+    @ForecastCategoryTypeID_Clear bit = 0,
+    @ForecastCategoryTypeID uniqueidentifier = NULL,
+    @DealStatusTypeID_Clear bit = 0,
+    @DealStatusTypeID uniqueidentifier = NULL,
+    @RottingDays_Clear bit = 0,
+    @RottingDays int = NULL,
+    @EntryCriteria_Clear bit = 0,
+    @EntryCriteria nvarchar(MAX) = NULL,
+    @ExitCriteria_Clear bit = 0,
+    @ExitCriteria nvarchar(MAX) = NULL,
+    @RequiredFields_Clear bit = 0,
+    @RequiredFields nvarchar(MAX) = NULL,
+    @GuidanceMarkdown_Clear bit = 0,
+    @GuidanceMarkdown nvarchar(MAX) = NULL,
+    @IsActive bit = NULL,
+    @OrderStatusOnEntry_Clear bit = 0,
+    @OrderStatusOnEntry nvarchar(20) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE
+        [__mj_BizAppsSales].[PipelineStage]
+    SET
+        [PipelineID] = ISNULL(@PipelineID, [PipelineID]),
+        [Name] = ISNULL(@Name, [Name]),
+        [Code] = ISNULL(@Code, [Code]),
+        [DisplayOrder] = ISNULL(@DisplayOrder, [DisplayOrder]),
+        [Probability] = CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, [Probability]) END,
+        [ForecastCategoryTypeID] = CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, [ForecastCategoryTypeID]) END,
+        [DealStatusTypeID] = CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, [DealStatusTypeID]) END,
+        [RottingDays] = CASE WHEN @RottingDays_Clear = 1 THEN NULL ELSE ISNULL(@RottingDays, [RottingDays]) END,
+        [EntryCriteria] = CASE WHEN @EntryCriteria_Clear = 1 THEN NULL ELSE ISNULL(@EntryCriteria, [EntryCriteria]) END,
+        [ExitCriteria] = CASE WHEN @ExitCriteria_Clear = 1 THEN NULL ELSE ISNULL(@ExitCriteria, [ExitCriteria]) END,
+        [RequiredFields] = CASE WHEN @RequiredFields_Clear = 1 THEN NULL ELSE ISNULL(@RequiredFields, [RequiredFields]) END,
+        [GuidanceMarkdown] = CASE WHEN @GuidanceMarkdown_Clear = 1 THEN NULL ELSE ISNULL(@GuidanceMarkdown, [GuidanceMarkdown]) END,
+        [IsActive] = ISNULL(@IsActive, [IsActive]),
+        [OrderStatusOnEntry] = CASE WHEN @OrderStatusOnEntry_Clear = 1 THEN NULL ELSE ISNULL(@OrderStatusOnEntry, [OrderStatusOnEntry]) END
+    WHERE
+        [ID] = @ID
+
+    -- Check if the update was successful
+    IF @@ROWCOUNT = 0
+        -- Nothing was updated, return no rows, but column structure from base view intact, semantically correct this way.
+        SELECT TOP 0 * FROM [__mj_BizAppsSales].[vwPipelineStages] WHERE 1=0
+    ELSE
+        -- Return the updated record so the caller can see the updated values and any calculated fields
+        SELECT
+                                        *
+                                    FROM
+                                        [__mj_BizAppsSales].[vwPipelineStages]
+                                    WHERE
+                                        [ID] = @ID
+                                    
+END
+GO
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spUpdatePipelineStage] TO [cdp_Developer], [cdp_Integration]
+GO
+
+------------------------------------------------------------
+----- TRIGGER FOR __mj_UpdatedAt field for the PipelineStage table
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[trgUpdatePipelineStage]', 'TR') IS NOT NULL
+    DROP TRIGGER [__mj_BizAppsSales].[trgUpdatePipelineStage];
+GO
+CREATE TRIGGER [__mj_BizAppsSales].trgUpdatePipelineStage
+ON [__mj_BizAppsSales].[PipelineStage]
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE
+        [__mj_BizAppsSales].[PipelineStage]
+    SET
+        __mj_UpdatedAt = GETUTCDATE()
+    FROM
+        [__mj_BizAppsSales].[PipelineStage] AS _organicTable
+    INNER JOIN
+        INSERTED AS I ON
+        _organicTable.[ID] = I.[ID];
+END;
+GO
+
+/* spUpdate Permissions for MJ_BizApps_Sales: Pipeline Stages */
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spUpdatePipelineStage] TO [cdp_Developer], [cdp_Integration];
+
+/* spDelete SQL for MJ_BizApps_Sales: Pipeline Stages */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Pipeline Stages
+-- Item: spDeletePipelineStage
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- DELETE PROCEDURE FOR PipelineStage
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[spDeletePipelineStage]', 'P') IS NOT NULL
+    DROP PROCEDURE [__mj_BizAppsSales].[spDeletePipelineStage];
+GO
+
+CREATE PROCEDURE [__mj_BizAppsSales].[spDeletePipelineStage]
+    @ID uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DELETE FROM
+        [__mj_BizAppsSales].[PipelineStage]
+    WHERE
+        [ID] = @ID
+
+
+    -- Check if the delete was successful
+    IF @@ROWCOUNT = 0
+        SELECT NULL AS [ID] -- Return NULL for all primary key fields to indicate no record was deleted
+    ELSE
+        SELECT @ID AS [ID] -- Return the primary key values to indicate we successfully deleted the record
+END
+GO
+GRANT EXECUTE ON [__mj_BizAppsSales].[spDeletePipelineStage] TO [cdp_Developer], [cdp_Integration];
+
+/* spDelete Permissions for MJ_BizApps_Sales: Pipeline Stages */
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spDeletePipelineStage] TO [cdp_Developer], [cdp_Integration];
+
+/* SQL text to delete unneeded entity fields (1 scoped entities) */
+EXEC [__mj].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT', @EntityIDs='D9B2404D-CA19-4339-8E87-CE62B1C30647';
+
+/* SQL text to update existing entity fields from schema (1 scoped entities) */
+EXEC [__mj].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT', @EntityIDs='D9B2404D-CA19-4339-8E87-CE62B1C30647';
+
+/* SQL text to set default column width where needed */
+EXEC [__mj].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT';
+
+
+/* SQL text to update existing entities from schema */
+EXEC [__mj].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT';
+
+/* SQL text to insert 1 new entity field(s) */
+
+      IF NOT EXISTS (SELECT 1 FROM [__mj].[EntityField] WHERE ID = '50ca5be5-b2cf-4e8b-b17c-1ce658ec34c1' OR (EntityID = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354' AND Name = 'StandardAgreementModified')) BEGIN
+         INSERT INTO [__mj].[EntityField]
+         (
+            [ID],
+            [EntityID],
+            [Sequence],
+            [Name],
+            [DisplayName],
+            [Description],
+            [Type],
+            [Length],
+            [Precision],
+            [Scale],
+            [AllowsNull],
+            [DefaultValue],
+            [AutoIncrement],
+            [AllowUpdateAPI],
+            [IsVirtual],
+            [IsComputed],
+            [RelatedEntityID],
+            [RelatedEntityFieldName],
+            [IsNameField],
+            [IncludeInUserSearchAPI],
+            [IncludeRelatedEntityNameFieldInBaseView],
+            [DefaultInView],
+            [IsPrimaryKey],
+            [IsUnique],
+            [RelatedEntityDisplayType],
+            [__mj_CreatedAt],
+            [__mj_UpdatedAt]
+         )
+         VALUES
+         (
+            '50ca5be5-b2cf-4e8b-b17c-1ce658ec34c1',
+            '79148DE5-7F99-44AC-ACD4-5EE7BA93D354', -- Entity: MJ_BizApps_Sales: Deals
+            (SELECT COALESCE(MAX([Sequence]), 0) FROM [__mj].[EntityField] WHERE [EntityID] = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354') + 47,
+            'StandardAgreementModified',
+            'Standard Agreement Modified',
+            'Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance''s review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.',
+            'bit',
+            1,
+            1,
+            0,
+            0,
+            '(0)',
+            0,
+            1,
+            0,
+            0,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            'Search',
+            GETUTCDATE(),
+            GETUTCDATE()
+         )
+      END;
+
+/* SQL text to update existing entity fields from schema */
+EXEC [__mj].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT';
+
+/* SQL text to set default column width where needed */
+EXEC [__mj].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT';
+
+/* SQL text to sync schema info from database schemas */
+EXEC [__mj].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT';
+
+/* Index for Foreign Keys for Deal */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: Index for Foreign Keys
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+-- Index for foreign key PipelineID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_PipelineID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_PipelineID ON [__mj_BizAppsSales].[Deal] ([PipelineID]);
+
+-- Index for foreign key PipelineStageID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_PipelineStageID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_PipelineStageID ON [__mj_BizAppsSales].[Deal] ([PipelineStageID]);
+
+-- Index for foreign key DealTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_DealTypeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_DealTypeID ON [__mj_BizAppsSales].[Deal] ([DealTypeID]);
+
+-- Index for foreign key DealStatusTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_DealStatusTypeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_DealStatusTypeID ON [__mj_BizAppsSales].[Deal] ([DealStatusTypeID]);
+
+-- Index for foreign key AccountID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_AccountID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_AccountID ON [__mj_BizAppsSales].[Deal] ([AccountID]);
+
+-- Index for foreign key PrimaryContactID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_PrimaryContactID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_PrimaryContactID ON [__mj_BizAppsSales].[Deal] ([PrimaryContactID]);
+
+-- Index for foreign key BillingContactID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_BillingContactID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_BillingContactID ON [__mj_BizAppsSales].[Deal] ([BillingContactID]);
+
+-- Index for foreign key CompanyID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_CompanyID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_CompanyID ON [__mj_BizAppsSales].[Deal] ([CompanyID]);
+
+-- Index for foreign key OwnerEmployeeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_OwnerEmployeeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_OwnerEmployeeID ON [__mj_BizAppsSales].[Deal] ([OwnerEmployeeID]);
+
+-- Index for foreign key ForecastCategoryTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_ForecastCategoryTypeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_ForecastCategoryTypeID ON [__mj_BizAppsSales].[Deal] ([ForecastCategoryTypeID]);
+
+-- Index for foreign key LossReasonID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_LossReasonID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_LossReasonID ON [__mj_BizAppsSales].[Deal] ([LossReasonID]);
+
+-- Index for foreign key LeadSourceTypeID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_LeadSourceTypeID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_LeadSourceTypeID ON [__mj_BizAppsSales].[Deal] ([LeadSourceTypeID]);
+
+-- Index for foreign key ClosedByUserID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_ClosedByUserID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_ClosedByUserID ON [__mj_BizAppsSales].[Deal] ([ClosedByUserID]);
+
+-- Index for foreign key OrderID in table Deal
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IDX_AUTO_MJ_FKEY_Deal_OrderID' 
+    AND object_id = OBJECT_ID('[__mj_BizAppsSales].[Deal]')
+)
+CREATE INDEX IDX_AUTO_MJ_FKEY_Deal_OrderID ON [__mj_BizAppsSales].[Deal] ([OrderID]);
+
+/* Base View SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: vwDeals
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- BASE VIEW FOR ENTITY:      MJ_BizApps_Sales: Deals
+-----               SCHEMA:      __mj_BizAppsSales
+-----               BASE TABLE:  Deal
+-----               PRIMARY KEY: ID
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[vwDeals]', 'V') IS NOT NULL
+    DROP VIEW [__mj_BizAppsSales].[vwDeals];
+GO
+
+CREATE VIEW [__mj_BizAppsSales].[vwDeals]
+AS
+SELECT
+    d.*,
+    mjBizAppsSalesPipeline_PipelineID.[Name] AS [Pipeline],
+    mjBizAppsSalesPipelineStage_PipelineStageID.[Name] AS [PipelineStage],
+    mjBizAppsSalesDealType_DealTypeID.[Name] AS [DealType],
+    mjBizAppsSalesDealStatusType_DealStatusTypeID.[Name] AS [DealStatusType],
+    mjBizAppsSalesSalesAccount_AccountID.[Name] AS [Account],
+    MJCompany_CompanyID.[Name] AS [Company],
+    MJEmployee_OwnerEmployeeID.[FirstLast] AS [OwnerEmployee],
+    mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID.[Name] AS [ForecastCategoryType],
+    mjBizAppsSalesLossReason_LossReasonID.[Name] AS [LossReason],
+    mjBizAppsSalesLeadSourceType_LeadSourceTypeID.[Name] AS [LeadSourceType],
+    MJUser_ClosedByUserID.[Name] AS [ClosedByUser],
+    mjBizAppsOrdersOrderHeader_OrderID.[OrderNumber] AS [Order]
+FROM
+    [__mj_BizAppsSales].[Deal] AS d
+INNER JOIN
+    [__mj_BizAppsSales].[Pipeline] AS mjBizAppsSalesPipeline_PipelineID
+  ON
+    [d].[PipelineID] = mjBizAppsSalesPipeline_PipelineID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[PipelineStage] AS mjBizAppsSalesPipelineStage_PipelineStageID
+  ON
+    [d].[PipelineStageID] = mjBizAppsSalesPipelineStage_PipelineStageID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[DealType] AS mjBizAppsSalesDealType_DealTypeID
+  ON
+    [d].[DealTypeID] = mjBizAppsSalesDealType_DealTypeID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[DealStatusType] AS mjBizAppsSalesDealStatusType_DealStatusTypeID
+  ON
+    [d].[DealStatusTypeID] = mjBizAppsSalesDealStatusType_DealStatusTypeID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[vwSalesAccounts] AS mjBizAppsSalesSalesAccount_AccountID
+  ON
+    [d].[AccountID] = mjBizAppsSalesSalesAccount_AccountID.[ID]
+INNER JOIN
+    [__mj].[Company] AS MJCompany_CompanyID
+  ON
+    [d].[CompanyID] = MJCompany_CompanyID.[ID]
+LEFT OUTER JOIN
+    [__mj].[vwEmployees] AS MJEmployee_OwnerEmployeeID
+  ON
+    [d].[OwnerEmployeeID] = MJEmployee_OwnerEmployeeID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[ForecastCategoryType] AS mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID
+  ON
+    [d].[ForecastCategoryTypeID] = mjBizAppsSalesForecastCategoryType_ForecastCategoryTypeID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[LossReason] AS mjBizAppsSalesLossReason_LossReasonID
+  ON
+    [d].[LossReasonID] = mjBizAppsSalesLossReason_LossReasonID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsSales].[LeadSourceType] AS mjBizAppsSalesLeadSourceType_LeadSourceTypeID
+  ON
+    [d].[LeadSourceTypeID] = mjBizAppsSalesLeadSourceType_LeadSourceTypeID.[ID]
+LEFT OUTER JOIN
+    [__mj].[User] AS MJUser_ClosedByUserID
+  ON
+    [d].[ClosedByUserID] = MJUser_ClosedByUserID.[ID]
+LEFT OUTER JOIN
+    [__mj_BizAppsOrders].[OrderHeader] AS mjBizAppsOrdersOrderHeader_OrderID
+  ON
+    [d].[OrderID] = mjBizAppsOrdersOrderHeader_OrderID.[ID]
+GO
+GRANT SELECT ON [__mj_BizAppsSales].[vwDeals] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
+
+/* Base View Permissions SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: Permissions for vwDeals
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+GRANT SELECT ON [__mj_BizAppsSales].[vwDeals] TO [cdp_UI], [cdp_Developer], [cdp_Integration];
+
+/* spCreate SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spCreateDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- CREATE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[spCreateDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [__mj_BizAppsSales].[spCreateDeal];
+GO
+
+CREATE PROCEDURE [__mj_BizAppsSales].[spCreateDeal]
+    @ID uniqueidentifier = NULL,
+    @DealNumber_Clear bit = 0,
+    @DealNumber nvarchar(50) = NULL,
+    @Name nvarchar(500),
+    @PipelineID uniqueidentifier,
+    @PipelineStageID_Clear bit = 0,
+    @PipelineStageID uniqueidentifier = NULL,
+    @DealTypeID_Clear bit = 0,
+    @DealTypeID uniqueidentifier = NULL,
+    @DealStatusTypeID_Clear bit = 0,
+    @DealStatusTypeID uniqueidentifier = NULL,
+    @AccountID_Clear bit = 0,
+    @AccountID uniqueidentifier = NULL,
+    @PrimaryContactID_Clear bit = 0,
+    @PrimaryContactID uniqueidentifier = NULL,
+    @BillingContactID_Clear bit = 0,
+    @BillingContactID uniqueidentifier = NULL,
+    @CompanyID uniqueidentifier,
+    @OwnerEmployeeID_Clear bit = 0,
+    @OwnerEmployeeID uniqueidentifier = NULL,
+    @Amount_Clear bit = 0,
+    @Amount decimal(19, 4) = NULL,
+    @AmountIsComputed bit = NULL,
+    @AmountComputedAt_Clear bit = 0,
+    @AmountComputedAt datetimeoffset = NULL,
+    @AmountSourceHash_Clear bit = 0,
+    @AmountSourceHash nvarchar(128) = NULL,
+    @CurrencyID_Clear bit = 0,
+    @CurrencyID uniqueidentifier = NULL,
+    @MRR_Clear bit = 0,
+    @MRR decimal(19, 4) = NULL,
+    @ARR_Clear bit = 0,
+    @ARR decimal(19, 4) = NULL,
+    @TermMonths_Clear bit = 0,
+    @TermMonths int = NULL,
+    @EstimatedProjectWeeks_Clear bit = 0,
+    @EstimatedProjectWeeks int = NULL,
+    @ExecutionDate_Clear bit = 0,
+    @ExecutionDate date = NULL,
+    @StartDate_Clear bit = 0,
+    @StartDate date = NULL,
+    @ExpectedCloseDate_Clear bit = 0,
+    @ExpectedCloseDate date = NULL,
+    @ActualCloseDate_Clear bit = 0,
+    @ActualCloseDate date = NULL,
+    @Probability_Clear bit = 0,
+    @Probability decimal(5, 2) = NULL,
+    @ForecastCategoryTypeID_Clear bit = 0,
+    @ForecastCategoryTypeID uniqueidentifier = NULL,
+    @LossReasonID_Clear bit = 0,
+    @LossReasonID uniqueidentifier = NULL,
+    @LossNotes_Clear bit = 0,
+    @LossNotes nvarchar(MAX) = NULL,
+    @LeadSourceTypeID_Clear bit = 0,
+    @LeadSourceTypeID uniqueidentifier = NULL,
+    @CampaignID_Clear bit = 0,
+    @CampaignID uniqueidentifier = NULL,
+    @ContractID_Clear bit = 0,
+    @ContractID uniqueidentifier = NULL,
+    @RenewsContractID_Clear bit = 0,
+    @RenewsContractID uniqueidentifier = NULL,
+    @AutoRenew bit = NULL,
+    @AnnualIncreasePctOverride_Clear bit = 0,
+    @AnnualIncreasePctOverride decimal(5, 2) = NULL,
+    @CancellationNoticeDaysOverride_Clear bit = 0,
+    @CancellationNoticeDaysOverride int = NULL,
+    @PaymentMethod_Clear bit = 0,
+    @PaymentMethod nvarchar(50) = NULL,
+    @ContractVariances_Clear bit = 0,
+    @ContractVariances nvarchar(MAX) = NULL,
+    @Description_Clear bit = 0,
+    @Description nvarchar(MAX) = NULL,
+    @NextStep_Clear bit = 0,
+    @NextStep nvarchar(1000) = NULL,
+    @NextStepDate_Clear bit = 0,
+    @NextStepDate date = NULL,
+    @ClosedAt_Clear bit = 0,
+    @ClosedAt datetimeoffset = NULL,
+    @ClosedByUserID_Clear bit = 0,
+    @ClosedByUserID uniqueidentifier = NULL,
+    @OrderID_Clear bit = 0,
+    @OrderID uniqueidentifier = NULL,
+    @StandardAgreementModified bit = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @InsertedRow TABLE ([ID] UNIQUEIDENTIFIER)
+
+    IF @ID IS NOT NULL
+    BEGIN
+        -- User provided a value, use it
+        INSERT INTO [__mj_BizAppsSales].[Deal]
+            (
+                [ID],
+                [DealNumber],
+                [Name],
+                [PipelineID],
+                [PipelineStageID],
+                [DealTypeID],
+                [DealStatusTypeID],
+                [AccountID],
+                [PrimaryContactID],
+                [BillingContactID],
+                [CompanyID],
+                [OwnerEmployeeID],
+                [Amount],
+                [AmountIsComputed],
+                [AmountComputedAt],
+                [AmountSourceHash],
+                [CurrencyID],
+                [MRR],
+                [ARR],
+                [TermMonths],
+                [EstimatedProjectWeeks],
+                [ExecutionDate],
+                [StartDate],
+                [ExpectedCloseDate],
+                [ActualCloseDate],
+                [Probability],
+                [ForecastCategoryTypeID],
+                [LossReasonID],
+                [LossNotes],
+                [LeadSourceTypeID],
+                [CampaignID],
+                [ContractID],
+                [RenewsContractID],
+                [AutoRenew],
+                [AnnualIncreasePctOverride],
+                [CancellationNoticeDaysOverride],
+                [PaymentMethod],
+                [ContractVariances],
+                [Description],
+                [NextStep],
+                [NextStepDate],
+                [ClosedAt],
+                [ClosedByUserID],
+                [OrderID],
+                [StandardAgreementModified]
+            )
+        OUTPUT INSERTED.[ID] INTO @InsertedRow
+        VALUES
+            (
+                @ID,
+                CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, NULL) END,
+                @Name,
+                @PipelineID,
+                CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, NULL) END,
+                CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, NULL) END,
+                CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, NULL) END,
+                CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, NULL) END,
+                CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, NULL) END,
+                CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, NULL) END,
+                @CompanyID,
+                CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, NULL) END,
+                CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, NULL) END,
+                ISNULL(@AmountIsComputed, 0),
+                CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, NULL) END,
+                CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, NULL) END,
+                CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, NULL) END,
+                CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, NULL) END,
+                CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, NULL) END,
+                CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, NULL) END,
+                CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, NULL) END,
+                CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, NULL) END,
+                CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, NULL) END,
+                CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, NULL) END,
+                CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, NULL) END,
+                CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, NULL) END,
+                CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, NULL) END,
+                CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, NULL) END,
+                CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, NULL) END,
+                CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, NULL) END,
+                CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, NULL) END,
+                CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, NULL) END,
+                CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, NULL) END,
+                ISNULL(@AutoRenew, 0),
+                CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, NULL) END,
+                CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, NULL) END,
+                CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, 'ACH') END,
+                CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, NULL) END,
+                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
+                CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, NULL) END,
+                CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, NULL) END,
+                CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, NULL) END,
+                CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, NULL) END,
+                CASE WHEN @OrderID_Clear = 1 THEN NULL ELSE ISNULL(@OrderID, NULL) END,
+                ISNULL(@StandardAgreementModified, 0)
+            )
+    END
+    ELSE
+    BEGIN
+        -- No value provided, let database use its default (e.g., NEWSEQUENTIALID())
+        INSERT INTO [__mj_BizAppsSales].[Deal]
+            (
+                [DealNumber],
+                [Name],
+                [PipelineID],
+                [PipelineStageID],
+                [DealTypeID],
+                [DealStatusTypeID],
+                [AccountID],
+                [PrimaryContactID],
+                [BillingContactID],
+                [CompanyID],
+                [OwnerEmployeeID],
+                [Amount],
+                [AmountIsComputed],
+                [AmountComputedAt],
+                [AmountSourceHash],
+                [CurrencyID],
+                [MRR],
+                [ARR],
+                [TermMonths],
+                [EstimatedProjectWeeks],
+                [ExecutionDate],
+                [StartDate],
+                [ExpectedCloseDate],
+                [ActualCloseDate],
+                [Probability],
+                [ForecastCategoryTypeID],
+                [LossReasonID],
+                [LossNotes],
+                [LeadSourceTypeID],
+                [CampaignID],
+                [ContractID],
+                [RenewsContractID],
+                [AutoRenew],
+                [AnnualIncreasePctOverride],
+                [CancellationNoticeDaysOverride],
+                [PaymentMethod],
+                [ContractVariances],
+                [Description],
+                [NextStep],
+                [NextStepDate],
+                [ClosedAt],
+                [ClosedByUserID],
+                [OrderID],
+                [StandardAgreementModified]
+            )
+        OUTPUT INSERTED.[ID] INTO @InsertedRow
+        VALUES
+            (
+                CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, NULL) END,
+                @Name,
+                @PipelineID,
+                CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, NULL) END,
+                CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, NULL) END,
+                CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, NULL) END,
+                CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, NULL) END,
+                CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, NULL) END,
+                CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, NULL) END,
+                @CompanyID,
+                CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, NULL) END,
+                CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, NULL) END,
+                ISNULL(@AmountIsComputed, 0),
+                CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, NULL) END,
+                CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, NULL) END,
+                CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, NULL) END,
+                CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, NULL) END,
+                CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, NULL) END,
+                CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, NULL) END,
+                CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, NULL) END,
+                CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, NULL) END,
+                CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, NULL) END,
+                CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, NULL) END,
+                CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, NULL) END,
+                CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, NULL) END,
+                CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, NULL) END,
+                CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, NULL) END,
+                CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, NULL) END,
+                CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, NULL) END,
+                CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, NULL) END,
+                CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, NULL) END,
+                CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, NULL) END,
+                ISNULL(@AutoRenew, 0),
+                CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, NULL) END,
+                CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, NULL) END,
+                CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, 'ACH') END,
+                CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, NULL) END,
+                CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, NULL) END,
+                CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, NULL) END,
+                CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, NULL) END,
+                CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, NULL) END,
+                CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, NULL) END,
+                CASE WHEN @OrderID_Clear = 1 THEN NULL ELSE ISNULL(@OrderID, NULL) END,
+                ISNULL(@StandardAgreementModified, 0)
+            )
+    END
+    -- return the new record from the base view, which might have some calculated fields
+    SELECT * FROM [__mj_BizAppsSales].[vwDeals] WHERE [ID] = (SELECT [ID] FROM @InsertedRow)
+END
+GO
+GRANT EXECUTE ON [__mj_BizAppsSales].[spCreateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spCreate Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spCreateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spUpdate SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spUpdateDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- UPDATE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[spUpdateDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [__mj_BizAppsSales].[spUpdateDeal];
+GO
+
+CREATE PROCEDURE [__mj_BizAppsSales].[spUpdateDeal]
+    @ID uniqueidentifier,
+    @DealNumber_Clear bit = 0,
+    @DealNumber nvarchar(50) = NULL,
+    @Name nvarchar(500) = NULL,
+    @PipelineID uniqueidentifier = NULL,
+    @PipelineStageID_Clear bit = 0,
+    @PipelineStageID uniqueidentifier = NULL,
+    @DealTypeID_Clear bit = 0,
+    @DealTypeID uniqueidentifier = NULL,
+    @DealStatusTypeID_Clear bit = 0,
+    @DealStatusTypeID uniqueidentifier = NULL,
+    @AccountID_Clear bit = 0,
+    @AccountID uniqueidentifier = NULL,
+    @PrimaryContactID_Clear bit = 0,
+    @PrimaryContactID uniqueidentifier = NULL,
+    @BillingContactID_Clear bit = 0,
+    @BillingContactID uniqueidentifier = NULL,
+    @CompanyID uniqueidentifier = NULL,
+    @OwnerEmployeeID_Clear bit = 0,
+    @OwnerEmployeeID uniqueidentifier = NULL,
+    @Amount_Clear bit = 0,
+    @Amount decimal(19, 4) = NULL,
+    @AmountIsComputed bit = NULL,
+    @AmountComputedAt_Clear bit = 0,
+    @AmountComputedAt datetimeoffset = NULL,
+    @AmountSourceHash_Clear bit = 0,
+    @AmountSourceHash nvarchar(128) = NULL,
+    @CurrencyID_Clear bit = 0,
+    @CurrencyID uniqueidentifier = NULL,
+    @MRR_Clear bit = 0,
+    @MRR decimal(19, 4) = NULL,
+    @ARR_Clear bit = 0,
+    @ARR decimal(19, 4) = NULL,
+    @TermMonths_Clear bit = 0,
+    @TermMonths int = NULL,
+    @EstimatedProjectWeeks_Clear bit = 0,
+    @EstimatedProjectWeeks int = NULL,
+    @ExecutionDate_Clear bit = 0,
+    @ExecutionDate date = NULL,
+    @StartDate_Clear bit = 0,
+    @StartDate date = NULL,
+    @ExpectedCloseDate_Clear bit = 0,
+    @ExpectedCloseDate date = NULL,
+    @ActualCloseDate_Clear bit = 0,
+    @ActualCloseDate date = NULL,
+    @Probability_Clear bit = 0,
+    @Probability decimal(5, 2) = NULL,
+    @ForecastCategoryTypeID_Clear bit = 0,
+    @ForecastCategoryTypeID uniqueidentifier = NULL,
+    @LossReasonID_Clear bit = 0,
+    @LossReasonID uniqueidentifier = NULL,
+    @LossNotes_Clear bit = 0,
+    @LossNotes nvarchar(MAX) = NULL,
+    @LeadSourceTypeID_Clear bit = 0,
+    @LeadSourceTypeID uniqueidentifier = NULL,
+    @CampaignID_Clear bit = 0,
+    @CampaignID uniqueidentifier = NULL,
+    @ContractID_Clear bit = 0,
+    @ContractID uniqueidentifier = NULL,
+    @RenewsContractID_Clear bit = 0,
+    @RenewsContractID uniqueidentifier = NULL,
+    @AutoRenew bit = NULL,
+    @AnnualIncreasePctOverride_Clear bit = 0,
+    @AnnualIncreasePctOverride decimal(5, 2) = NULL,
+    @CancellationNoticeDaysOverride_Clear bit = 0,
+    @CancellationNoticeDaysOverride int = NULL,
+    @PaymentMethod_Clear bit = 0,
+    @PaymentMethod nvarchar(50) = NULL,
+    @ContractVariances_Clear bit = 0,
+    @ContractVariances nvarchar(MAX) = NULL,
+    @Description_Clear bit = 0,
+    @Description nvarchar(MAX) = NULL,
+    @NextStep_Clear bit = 0,
+    @NextStep nvarchar(1000) = NULL,
+    @NextStepDate_Clear bit = 0,
+    @NextStepDate date = NULL,
+    @ClosedAt_Clear bit = 0,
+    @ClosedAt datetimeoffset = NULL,
+    @ClosedByUserID_Clear bit = 0,
+    @ClosedByUserID uniqueidentifier = NULL,
+    @OrderID_Clear bit = 0,
+    @OrderID uniqueidentifier = NULL,
+    @StandardAgreementModified bit = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE
+        [__mj_BizAppsSales].[Deal]
+    SET
+        [DealNumber] = CASE WHEN @DealNumber_Clear = 1 THEN NULL ELSE ISNULL(@DealNumber, [DealNumber]) END,
+        [Name] = ISNULL(@Name, [Name]),
+        [PipelineID] = ISNULL(@PipelineID, [PipelineID]),
+        [PipelineStageID] = CASE WHEN @PipelineStageID_Clear = 1 THEN NULL ELSE ISNULL(@PipelineStageID, [PipelineStageID]) END,
+        [DealTypeID] = CASE WHEN @DealTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealTypeID, [DealTypeID]) END,
+        [DealStatusTypeID] = CASE WHEN @DealStatusTypeID_Clear = 1 THEN NULL ELSE ISNULL(@DealStatusTypeID, [DealStatusTypeID]) END,
+        [AccountID] = CASE WHEN @AccountID_Clear = 1 THEN NULL ELSE ISNULL(@AccountID, [AccountID]) END,
+        [PrimaryContactID] = CASE WHEN @PrimaryContactID_Clear = 1 THEN NULL ELSE ISNULL(@PrimaryContactID, [PrimaryContactID]) END,
+        [BillingContactID] = CASE WHEN @BillingContactID_Clear = 1 THEN NULL ELSE ISNULL(@BillingContactID, [BillingContactID]) END,
+        [CompanyID] = ISNULL(@CompanyID, [CompanyID]),
+        [OwnerEmployeeID] = CASE WHEN @OwnerEmployeeID_Clear = 1 THEN NULL ELSE ISNULL(@OwnerEmployeeID, [OwnerEmployeeID]) END,
+        [Amount] = CASE WHEN @Amount_Clear = 1 THEN NULL ELSE ISNULL(@Amount, [Amount]) END,
+        [AmountIsComputed] = ISNULL(@AmountIsComputed, [AmountIsComputed]),
+        [AmountComputedAt] = CASE WHEN @AmountComputedAt_Clear = 1 THEN NULL ELSE ISNULL(@AmountComputedAt, [AmountComputedAt]) END,
+        [AmountSourceHash] = CASE WHEN @AmountSourceHash_Clear = 1 THEN NULL ELSE ISNULL(@AmountSourceHash, [AmountSourceHash]) END,
+        [CurrencyID] = CASE WHEN @CurrencyID_Clear = 1 THEN NULL ELSE ISNULL(@CurrencyID, [CurrencyID]) END,
+        [MRR] = CASE WHEN @MRR_Clear = 1 THEN NULL ELSE ISNULL(@MRR, [MRR]) END,
+        [ARR] = CASE WHEN @ARR_Clear = 1 THEN NULL ELSE ISNULL(@ARR, [ARR]) END,
+        [TermMonths] = CASE WHEN @TermMonths_Clear = 1 THEN NULL ELSE ISNULL(@TermMonths, [TermMonths]) END,
+        [EstimatedProjectWeeks] = CASE WHEN @EstimatedProjectWeeks_Clear = 1 THEN NULL ELSE ISNULL(@EstimatedProjectWeeks, [EstimatedProjectWeeks]) END,
+        [ExecutionDate] = CASE WHEN @ExecutionDate_Clear = 1 THEN NULL ELSE ISNULL(@ExecutionDate, [ExecutionDate]) END,
+        [StartDate] = CASE WHEN @StartDate_Clear = 1 THEN NULL ELSE ISNULL(@StartDate, [StartDate]) END,
+        [ExpectedCloseDate] = CASE WHEN @ExpectedCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ExpectedCloseDate, [ExpectedCloseDate]) END,
+        [ActualCloseDate] = CASE WHEN @ActualCloseDate_Clear = 1 THEN NULL ELSE ISNULL(@ActualCloseDate, [ActualCloseDate]) END,
+        [Probability] = CASE WHEN @Probability_Clear = 1 THEN NULL ELSE ISNULL(@Probability, [Probability]) END,
+        [ForecastCategoryTypeID] = CASE WHEN @ForecastCategoryTypeID_Clear = 1 THEN NULL ELSE ISNULL(@ForecastCategoryTypeID, [ForecastCategoryTypeID]) END,
+        [LossReasonID] = CASE WHEN @LossReasonID_Clear = 1 THEN NULL ELSE ISNULL(@LossReasonID, [LossReasonID]) END,
+        [LossNotes] = CASE WHEN @LossNotes_Clear = 1 THEN NULL ELSE ISNULL(@LossNotes, [LossNotes]) END,
+        [LeadSourceTypeID] = CASE WHEN @LeadSourceTypeID_Clear = 1 THEN NULL ELSE ISNULL(@LeadSourceTypeID, [LeadSourceTypeID]) END,
+        [CampaignID] = CASE WHEN @CampaignID_Clear = 1 THEN NULL ELSE ISNULL(@CampaignID, [CampaignID]) END,
+        [ContractID] = CASE WHEN @ContractID_Clear = 1 THEN NULL ELSE ISNULL(@ContractID, [ContractID]) END,
+        [RenewsContractID] = CASE WHEN @RenewsContractID_Clear = 1 THEN NULL ELSE ISNULL(@RenewsContractID, [RenewsContractID]) END,
+        [AutoRenew] = ISNULL(@AutoRenew, [AutoRenew]),
+        [AnnualIncreasePctOverride] = CASE WHEN @AnnualIncreasePctOverride_Clear = 1 THEN NULL ELSE ISNULL(@AnnualIncreasePctOverride, [AnnualIncreasePctOverride]) END,
+        [CancellationNoticeDaysOverride] = CASE WHEN @CancellationNoticeDaysOverride_Clear = 1 THEN NULL ELSE ISNULL(@CancellationNoticeDaysOverride, [CancellationNoticeDaysOverride]) END,
+        [PaymentMethod] = CASE WHEN @PaymentMethod_Clear = 1 THEN NULL ELSE ISNULL(@PaymentMethod, [PaymentMethod]) END,
+        [ContractVariances] = CASE WHEN @ContractVariances_Clear = 1 THEN NULL ELSE ISNULL(@ContractVariances, [ContractVariances]) END,
+        [Description] = CASE WHEN @Description_Clear = 1 THEN NULL ELSE ISNULL(@Description, [Description]) END,
+        [NextStep] = CASE WHEN @NextStep_Clear = 1 THEN NULL ELSE ISNULL(@NextStep, [NextStep]) END,
+        [NextStepDate] = CASE WHEN @NextStepDate_Clear = 1 THEN NULL ELSE ISNULL(@NextStepDate, [NextStepDate]) END,
+        [ClosedAt] = CASE WHEN @ClosedAt_Clear = 1 THEN NULL ELSE ISNULL(@ClosedAt, [ClosedAt]) END,
+        [ClosedByUserID] = CASE WHEN @ClosedByUserID_Clear = 1 THEN NULL ELSE ISNULL(@ClosedByUserID, [ClosedByUserID]) END,
+        [OrderID] = CASE WHEN @OrderID_Clear = 1 THEN NULL ELSE ISNULL(@OrderID, [OrderID]) END,
+        [StandardAgreementModified] = ISNULL(@StandardAgreementModified, [StandardAgreementModified])
+    WHERE
+        [ID] = @ID
+
+    -- Check if the update was successful
+    IF @@ROWCOUNT = 0
+        -- Nothing was updated, return no rows, but column structure from base view intact, semantically correct this way.
+        SELECT TOP 0 * FROM [__mj_BizAppsSales].[vwDeals] WHERE 1=0
+    ELSE
+        -- Return the updated record so the caller can see the updated values and any calculated fields
+        SELECT
+                                        *
+                                    FROM
+                                        [__mj_BizAppsSales].[vwDeals]
+                                    WHERE
+                                        [ID] = @ID
+                                    
+END
+GO
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spUpdateDeal] TO [cdp_Developer], [cdp_Integration]
+GO
+
+------------------------------------------------------------
+----- TRIGGER FOR __mj_UpdatedAt field for the Deal table
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[trgUpdateDeal]', 'TR') IS NOT NULL
+    DROP TRIGGER [__mj_BizAppsSales].[trgUpdateDeal];
+GO
+CREATE TRIGGER [__mj_BizAppsSales].trgUpdateDeal
+ON [__mj_BizAppsSales].[Deal]
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE
+        [__mj_BizAppsSales].[Deal]
+    SET
+        __mj_UpdatedAt = GETUTCDATE()
+    FROM
+        [__mj_BizAppsSales].[Deal] AS _organicTable
+    INNER JOIN
+        INSERTED AS I ON
+        _organicTable.[ID] = I.[ID];
+END;
+GO
+
+/* spUpdate Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spUpdateDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spDelete SQL for MJ_BizApps_Sales: Deals */
+-----------------------------------------------------------------
+-- SQL Code Generation
+-- Entity: MJ_BizApps_Sales: Deals
+-- Item: spDeleteDeal
+--
+-- This was generated by the MemberJunction CodeGen tool.
+-- This file should NOT be edited by hand.
+-----------------------------------------------------------------
+
+------------------------------------------------------------
+----- DELETE PROCEDURE FOR Deal
+------------------------------------------------------------
+IF OBJECT_ID('[__mj_BizAppsSales].[spDeleteDeal]', 'P') IS NOT NULL
+    DROP PROCEDURE [__mj_BizAppsSales].[spDeleteDeal];
+GO
+
+CREATE PROCEDURE [__mj_BizAppsSales].[spDeleteDeal]
+    @ID uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DELETE FROM
+        [__mj_BizAppsSales].[Deal]
+    WHERE
+        [ID] = @ID
+
+
+    -- Check if the delete was successful
+    IF @@ROWCOUNT = 0
+        SELECT NULL AS [ID] -- Return NULL for all primary key fields to indicate no record was deleted
+    ELSE
+        SELECT @ID AS [ID] -- Return the primary key values to indicate we successfully deleted the record
+END
+GO
+GRANT EXECUTE ON [__mj_BizAppsSales].[spDeleteDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* spDelete Permissions for MJ_BizApps_Sales: Deals */
+
+GRANT EXECUTE ON [__mj_BizAppsSales].[spDeleteDeal] TO [cdp_Developer], [cdp_Integration];
+
+/* SQL text to delete unneeded entity fields (1 scoped entities) */
+EXEC [__mj].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT', @EntityIDs='79148DE5-7F99-44AC-ACD4-5EE7BA93D354';
+
+/* SQL text to update existing entity fields from schema (1 scoped entities) */
+EXEC [__mj].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT', @EntityIDs='79148DE5-7F99-44AC-ACD4-5EE7BA93D354';
+
+/* SQL text to set default column width where needed */
+EXEC [__mj].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,__mj,__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsAccounting,__mj_BizAppsOrders,__mj_BizAppsContracts,__mj_BizAppsIssues,__mj_BizAppsCommittees,__mj_BizAppsSecureMessaging,__mj_UDT';
 
 

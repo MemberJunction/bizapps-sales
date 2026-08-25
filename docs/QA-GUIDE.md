@@ -22,21 +22,32 @@ covers only what a tester needs afterwards.
 | Node | **≥ 18** | `package.json` engines |
 | pnpm | **10.33.0** | `packageManager`; always install from the **workspace root**, never inside a member |
 | SQL Server | 2019+ | Local dev target is SQL Server |
-| MJ core | **`6.1.0-edge.2`** | Must satisfy `mj-app.json`'s `mjVersionRange`: `>=6.0.0 <7.0.0` |
+| MJ core | **`6.1.0-edge.3`** | Must satisfy `mj-app.json`'s `mjVersionRange`: `>=6.1.0-edge.2 <7.0.0`, AND match the packages, which pin `^6.1.0-edge.3` in all seven manifests. The range carries a prerelease comparator ON THE 6.1.0 TUPLE deliberately -- see below |
 | bizapps-common | workspace member | Required — Sales' accounts and contacts are IS-A children of common's Organization and Person |
-| bizapps-orders | workspace member | Optional. Required for the product picker and for close-won to create an order |
-| bizapps-contracts | workspace member | Optional, and **not currently installable on a fresh database** — see §6.2 |
+| bizapps-orders | workspace member | **REQUIRED.** A deal cannot be SAVED without it — the save provisions an embedded `OrderHeader` in orders' schema. `mj-app.json` declares it a hard dependency |
+| bizapps-contracts | workspace member | Optional for CRUD; **required for close-won to create a contract.** A contract has been created on `MJ_V6_Host`, so it is installable there |
 
 ### What each sibling unlocks
 
-Sales runs standalone. Linking a sibling switches features from inert to live:
+> #### ⚠ SALES DOES NOT RUN STANDALONE. This section used to say it did.
+>
+> It read *"Sales runs standalone… Neither state is a bug."* **That is false and following it produces a
+> host on which nothing works.** `DealLine` is retired; a deal now carries an **embedded `OrderHeader`**
+> provisioned inside `DealEntityServer.Save()`, and the lines live on that order in ORDERS' schema.
+>
+> * **A deal cannot be SAVED without bizapps-orders** — not "features degrade": the save reaches for
+>   `MJ_BizApps_Orders: Order Headers` and there is nothing to resolve.
+> * **Every check bundle requires orders**, `save-deal` and `close-deal` included.
+> * `WORKSPACE-SETUP.md` §8 retracted this months ago and this guide was never updated. If the two
+>   ever disagree again, §8 is the one that has been maintained.
+
+Linking a sibling beyond orders switches features from inert to live:
 
 | Without | With |
 |---|---|
-| Product picker shows nothing | Picker lists that company's active catalog products |
-| Close-won routes nothing downstream, records why | Close-won creates a real, priced order (and a contract, if contracts is linked) |
+| Close-won routes no CONTRACT downstream, and records why | Close-won creates a contract as well as the order |
 
-Neither state is a bug. Sales checks what is installed and degrades deliberately.
+Orders is not in that table on purpose: without it there is no deal to have features about.
 
 ### The workspace CLI rule
 
@@ -70,7 +81,7 @@ CODEGEN_DB_PASSWORD=<password>
 
 # ── MJ core ─────────────────────────────────────────────────────────────────
 MJ_CORE_SCHEMA=__mj
-MJ_CORE_VERSION=v6.1.0-edge.2
+MJ_CORE_VERSION=v6.1.0-edge.3
 ```
 
 `MJ_CORE_VERSION` pins the MJ core the migrations expect. It must match what `@memberjunction/*`
@@ -91,6 +102,24 @@ nothing in sales uses an encrypted field. Ignore it.
 |---|---|
 | Host MJAPI (GraphQL) | **4143** |
 | Host MJExplorer | **4341** |
+
+> #### Why `mjVersionRange` looks odd
+>
+> It reads `>=6.1.0-edge.2 <7.0.0` rather than the tidier `>=6.0.0 <7.0.0`, and the difference is not
+> cosmetic. **Semver excludes a prerelease from a range unless some comparator shares its exact
+> `major.minor.patch` tuple.** `6.1.0-edge.3` has tuple `6.1.0`, so comparators at `6.0.0` and `7.0.0`
+> cannot admit it:
+>
+> ```
+> satisfies('6.1.0-edge.3', '>=6.0.0 <7.0.0')                      -> false
+> satisfies('6.1.0-edge.3', '>=6.0.0 <7.0.0', {includePrerelease}) -> true
+> satisfies('6.1.0-edge.3', '>=6.1.0-edge.2 <7.0.0')               -> true
+> ```
+>
+> The old range therefore REJECTED the core we run, and `>=6.0.0-0 <7.0.0` does not fix it either --
+> the prerelease comparator has to sit on the 6.1.0 tuple. Raised by Madhav; measured here rather than
+> taken on faith. `bizapps-common`, `bizapps-tasks` and `bizapps-contracts` already use this exact
+> form, so this brings sales into line rather than inventing something.
 
 **MJExplorer must serve on 4341.** The MSAL redirect URI is pre-registered in Entra for that origin; on
 any other port the login round-trip fails. If 4341 is busy, stop whatever holds it rather than changing
@@ -114,7 +143,12 @@ scripts/seed-demo-data.sh     # pipelines, stages, vocabulary, accounts, contact
 creating one, and the UI is unexercisable without deals. What you get:
 
 - **2 pipelines** — B2B (deals carry product lines) and D2C (`RequiresDealLines = 0`; header-only deals
-  whose amount is typed directly)
+  whose amount is typed directly).
+  **`RequiresDealLines` no longer means what its name says.** `DealLine` is retired (D-DL1); the column
+  survived the table. It now means "this pipeline's deals leave the EMBEDDED ORDER empty" — a D2C deal
+  still provisions an `OrderHeader`, it just carries no lines, and its `Amount` is typed rather than
+  returned by orders. That is explained nowhere else except inside `scripts/seed-demo-data.sh`, which is
+  not where a tester looks. **A D2C deal showing no product lines is correct, not a bug.**
 - **9 pipeline stages**, 3 sales accounts, 4 sales contacts
 - **7 deals** — one won, one lost with a loss reason, five open — across both pipelines and two selling
   companies, with product lines, a payment schedule, deal team members, a buying committee, stage
@@ -128,17 +162,30 @@ pipeline. Line-dependent surfaces correctly show nothing for the others.
 ## 4. Automated checks (run these before manual testing)
 
 ```bash
-pnpm run verify                                   # vocabulary gate + build (6/6)
-RUN_MUTATION_TESTS=1 pnpm run test:integration    # live-DB checks
+pnpm run verify                                   # SEVEN static gates, then the build (6/6)
+pnpm run test:integration                         # live-DB checks — runs ALL of them
 pnpm run test:coverage-gate                       # asserts the run actually covered what it claims
 ```
 
-**`RUN_MUTATION_TESTS=1` is mandatory.** Every check is `RequiresMutation`; without the flag the driver
-skips all of them and reports success. A run that reports mostly-skipped is not a pass.
+**The prefix is gone, and that is the fix rather than a simplification.** This used to read
+`RUN_MUTATION_TESTS=1 pnpm run test:integration`. Every check is `RequiresMutation`, so without that flag
+the runner skipped nearly all of them — and `RUN_MUTATION_TESTS=1 ...` is **sh syntax**. In PowerShell
+or `cmd`, which is what most people here are actually typing into, the prefix does not set anything.
+
+`test:integration` now passes `--mutations` itself, so **the documented command runs the whole suite on
+every shell.** If you need a deliberately narrow run, that is now the thing you opt into:
+`MJ_ALLOW_SKIPPED=1 node test-harnesses/integration.mjs`.
+
+> #### ⚠ If you see `7 passed, 0 failed, 125 skipped`, the suite did NOT pass
+>
+> That output used to come with a green tick and exit 0, which reads as "everything is fine" and is the
+> opposite of what happened: 125 checks never ran. It now exits non-zero and says so. **A run that
+> reports mostly-skipped is not a pass** — and it no longer pretends to be.
 
 **Run the coverage gate after the suite, and trust it over the tally.** It reads the log the suite
 writes and fails if fewer checks ran than this host should have run — the failure a green
-"0 failed" hides. It is also the check that catches a forgotten `RUN_MUTATION_TESTS=1`.
+"0 failed" hides. It is the second line of defence: the runner now refuses a skipped run itself, and the
+gate is what catches a run that was complete but covered the wrong bundles.
 
 | Bundle | Checks | Requires |
 |---|---|---|
@@ -156,7 +203,7 @@ gate expects exactly that. So the count you see *is* the coverage this host can 
 Run one on its own only when narrowing something down:
 
 ```bash
-RUN_MUTATION_TESTS=1 pnpm run test:integration close-won-d2c
+pnpm run test:integration close-won-d2c
 ```
 
 Invoked that way on a host whose app is absent, a conditional bundle **fails loudly with a named
@@ -269,8 +316,11 @@ Which downstream a won deal produces is driven by the **pipeline's policy**, nev
    `/app/mjbizappssales`. They are absent rather than stubbed.
 4. **No team-editing surface.** A deal's owner is set from Party info; adding and removing other team
    members is not yet exposed in the workspace.
-5. **No Activity timeline.** The Activity spine does not exist in bizapps-common or MJ core yet, so the
-   close flow deliberately does not write one.
+5. **The Activity spine EXISTS — this entry used to say it did not.** bizapps-common ships six Activity
+   tables and Sales has a 23-check `activities` bundle covering ingest, relevance, dedupe, watermarks and
+   sync-connection failure handling. Live Outlook mail has been ingested against `MJ_V6_Host` and linked
+   to a seeded deal. What is still true is narrower: **the CLOSE FLOW does not write an activity**, and
+   there is no timeline SURFACE in the deal workspace yet. Ingest is real; the UI for it is not.
 6. **Contract renewal is wired but unproven end-to-end.** The renewal seam is implemented; no renewal
    flow has been exercised against a live contract.
 7. **Sales never computes money.** No total is derived, no discount applied, no tax, no proration. Every

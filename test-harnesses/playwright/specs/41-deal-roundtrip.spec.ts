@@ -33,19 +33,57 @@
 import { expect, test } from '@playwright/test';
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, expectOnlyKnownErrors, KNOWN_POST_DELETE_ERRORS, shot } from '../lib/explorer';
+import { CloseDb, QueryAll } from '../lib/db';
+import { PurgeDeal } from '../lib/deal-flow';
 
 const SALES_APP_ROUTE = '/app/sales';
 
 const RUN_TAG = `RT-${Date.now().toString(36).toUpperCase()}`;
 const DEAL_NAME = `Round trip ${RUN_TAG}`;
 
+/**
+ * CLEANUP, WHICH THIS SPEC DID NOT HAVE AT ALL.
+ *
+ * The docblock at the top of this file lists four DELETE statements under "clean up with", and that was
+ * the whole of it -- instructions for a human, in a comment, in a suite nobody runs by hand. So every
+ * run left `Round trip RT-...` behind, and 60-close-deal left four more of its own the same way.
+ *
+ * That is what broke three OTHER specs. 70-lifecycle, 71 and 78 open by calling AssertBaseline(), which
+ * asserts the WHOLE host is back to its seven seeded deals. Residue from specs that ran earlier failed
+ * that precondition, so all three reported a problem with the host rather than with the spec that left
+ * the rows. Measured: expected 7, received 11.
+ *
+ * The global sweep in lib/cleanup.mjs does know about `RT-`, which is why the host looks clean BETWEEN
+ * runs and the residue is invisible except from inside one. PurgeByPrefix cannot be used here -- it
+ * refuses any prefix that does not start with `PW-` -- so this resolves the rows by name and hands them
+ * to PurgeDeal, which removes children first.
+ *
+ * The stale SQL in that docblock also still names DealLine, retired in 0d3d1ed. A human following it
+ * today would get an error on the second statement and stop.
+ */
+test.afterAll(async () => {
+    const deals = await QueryAll<{ ID: string; OrderID: string | null }>(
+        `SELECT ID, OrderID FROM __mj_BizAppsSales.Deal WHERE Name = '${DEAL_NAME}'`,
+    );
+    for (const d of deals) {
+        await PurgeDeal(d.ID, d.OrderID ? String(d.OrderID) : null);
+    }
+    await CloseDb();
+});
+
 /** The dates under test. Chosen distinct so a mix-up between fields is visible rather than plausible. */
 const EXECUTION_DATE = '2026-09-15';
 const EXPECTED_CLOSE = '2026-11-20';
 const INSTALMENT_DATE = '2026-10-01';
 
-const LINE_KEEP = `${RUN_TAG} Platform seats`;
-const LINE_DOOMED = `${RUN_TAG} Onboarding`;
+/**
+ * The two products this run picks, captured as it picks them.
+ *
+ * These were fixed strings typed into a line's name field. An OrderLine has no name -- its identity
+ * is the product it references -- so they cannot be decided in advance: the catalogue decides, and
+ * the spec records what it chose. Index 0 is the line kept, index 1 the line removed.
+ */
+const lineProducts: string[] = [];
 
 type Page = import('@playwright/test').Page;
 
@@ -104,7 +142,8 @@ async function lineNames(page: Page): Promise<string[]> {
     const rows = page.locator('.dw-table tbody tr');
     const names: string[] = [];
     for (let i = 0; i < (await rows.count()); i++) {
-        names.push((await rows.nth(i).locator('input').first().inputValue()).trim());
+        // The PRODUCT, not a typed name: an OrderLine carries no free text of its own.
+        names.push((await rows.nth(i).locator('select.dw-cell-product option:checked').innerText()).trim());
     }
     return names;
 }
@@ -178,8 +217,28 @@ test.describe('deal workspace — the related-record-collection round trip', () 
             await setField(page, 'Execution date', EXECUTION_DATE);
             await setField(page, 'Expected close', EXPECTED_CLOSE);
 
+            /**
+             * THE FIRST SAVE, BEFORE ANY LINE.
+             *
+             * `Add line` is gated on `CanAddLine` = `!!Deal?.IsSaved`: the embedded order is provisioned
+             * inside `DealEntityServer.Save()` on the first save (S-US4), so before then there is no
+             * order for a line to belong to. The button says so in its own title, "Save the deal first",
+             * and this spec saved only AFTER the lines — so it clicked a disabled button for 30s and
+             * reported a broken control rather than a missing step.
+             *
+             * `saveDeal` already asserts the confirmation message, which is what matters here: a save
+             * that silently did not land leaves `Add line` disabled for exactly the same reason and
+             * would look identical at the next click.
+             */
+            await saveDeal(page, 'the first save, which provisions the order');
+
             await openPane(page, 'Product lines');
             const addLine = page.locator('.dw-addbtn', { hasText: 'Add line' }).first();
+            await expect(
+                addLine,
+                'Add line must be enabled once the deal is saved — disabled here means the first save '
+                    + 'did not land',
+            ).toBeEnabled({ timeout: 20_000 });
             await addLine.click();
             await page.waitForTimeout(400);
             await addLine.click();
@@ -187,10 +246,27 @@ test.describe('deal workspace — the related-record-collection round trip', () 
 
             const rows = page.locator('.dw-table tbody tr');
             await expect(rows, 'two line rows must exist').toHaveCount(2, { timeout: 10_000 });
-            for (const [i, name] of [LINE_KEEP, LINE_DOOMED].entries()) {
-                const inputs = rows.nth(i).locator('input');
-                await inputs.nth(0).fill(name);
-                await inputs.nth(1).fill(i === 0 ? '100' : '1');
+            /**
+             * ── REWRITTEN AGAINST THE ORDER-LINE GRID ────────────────────────────────────────────
+             *
+             * This typed a line NAME into the first input and a quantity into the second. That was the
+             * DealLine grid; Andrew descoped DealLine this morning (issues #36–#39 closed as not
+             * planned — "An embedded Order record will store products and prices associated with the
+             * deal"), which is D-DL1 (:461) reached from the product side.
+             *
+             * An OrderLine row is product picker, quantity, read-only unit price, read-only line total,
+             * discount percent — so the first input is a NUMBER and the old loop failed with "Cannot
+             * type text into input[type=number]".
+             *
+             * A line's identity is now the product it references, so lineProducts[0] / lineProducts[1] become the
+             * two product LABELS this run picked, captured here and asserted downstream.
+             */
+            for (const i of [0, 1]) {
+                const picker = rows.nth(i).locator('select.dw-cell-product');
+                await picker.selectOption({ index: i + 1 });   // 0 is the "choose a product" placeholder
+                lineProducts.push((await picker.locator('option:checked').innerText()).trim());
+                await rows.nth(i).locator('td.dw-num input[type="number"]').first()
+                    .fill(i === 0 ? '100' : '1');
                 await page.waitForTimeout(200);
             }
 
@@ -221,8 +297,8 @@ test.describe('deal workspace — the related-record-collection round trip', () 
                 .toHaveCount(2, { timeout: 20_000 });
 
             const names = await lineNames(page);
-            expect(names, 'the kept line must read back with its name').toContain(LINE_KEEP);
-            expect(names, 'the second line must read back with its name').toContain(LINE_DOOMED);
+            expect(names, 'the kept line must read back with its name').toContain(lineProducts[0]);
+            expect(names, 'the second line must read back with its name').toContain(lineProducts[1]);
             await shot(page, '41-03-reopened-lines');
         });
 
@@ -260,54 +336,97 @@ test.describe('deal workspace — the related-record-collection round trip', () 
         });
 
         // ── 3. Explicit removal ─────────────────────────────────────────────────
-        await test.step('removing a line and saving DELETES it', async () => {
+        await test.step('removing an UNSAVED line and saving never writes it', async () => {
+            /**
+             * ── RETARGETED ONTO AN UNSAVED LINE, BECAUSE A SAVED ONE CANNOT BE REMOVED ───────────
+             *
+             * This removed one of the two lines the previous steps had already saved. KI-20's interim
+             * (35a0f4d) declines a SAVED line's removal at the gesture, so the row stayed and the grid
+             * showed 2 where this expected 1. The interim is right and this spec's premise expired with
+             * it — `78-line-removal-tripwire` now asserts that refusal positively.
+             *
+             * An unsaved line is the only removable kind while the interim stands, so the removal moves
+             * there. What 41 exists to prove is unchanged and still proved: that the delete affordance
+             * calls `Remove()` on the collection rather than splicing `Items`.
+             *
+             * THE RE-READ IS STILL WHAT TELLS THEM APART, which is why this is not weaker than the old
+             * version. A splice would take the row off the screen exactly as `Remove()` does — but the
+             * collection would still be holding it, the save would write it, and the re-open in the next
+             * step would show THREE lines. Only the round trip can distinguish "removed" from "hidden".
+             *
+             * Handing removal entirely to 78 would have lost this: 78 covers the REFUSAL, which is a
+             * different claim from the collection semantics.
+             */
             await openPane(page, 'Product lines');
-            // Located by INPUT VALUE, not by `hasText` — see `lineNames` for why a text filter cannot
-            // see a product name at all.
-            const before = await lineNames(page);
-            const doomedRow = before.indexOf(LINE_DOOMED);
-            expect(doomedRow, 'the line to remove must be present').toBeGreaterThanOrEqual(0);
+            await expect(page.locator('.dw-table tbody tr'), 'the two saved lines are the starting point')
+                .toHaveCount(2, { timeout: 20_000 });
 
-            // Targeted by TITLE, not by position. A line row now carries TWO icon buttons — open-detail
-            // and remove — so `.dw-iconbtn.first()` silently became "open the slide-in", the removal never
+            const addLine = page.locator('.dw-addbtn', { hasText: 'Add line' }).first();
+            await addLine.click();
+            await page.waitForTimeout(400);
+
+            const rows = page.locator('.dw-table tbody tr');
+            await expect(rows, 'a third, UNSAVED line is added to be removed').toHaveCount(3, { timeout: 10_000 });
+
+            /**
+             * The new row is given a product and a quantity before it is removed, deliberately.
+             *
+             * An unlinked line blocks the save ("Choose a product for this line"), and a null quantity
+             * blocks it too — so an incomplete row that is then removed would prove nothing about the
+             * removal, because the save it survives would have been blocked anyway. Filling it first
+             * means the save afterwards is one the row could have travelled on.
+             */
+            const fresh = rows.nth(2);
+            await fresh.locator('select.dw-cell-product').selectOption({ index: 1 });
+            await fresh.locator('td.dw-num input[type="number"]').first().fill('7');
+            await page.waitForTimeout(300);
+
+            // Targeted by TITLE, not by position. A line row carries TWO icon buttons — open-detail and
+            // remove — so `.dw-iconbtn.first()` silently became "open the slide-in", the removal never
             // happened, and the failure surfaced one assertion later as a wrong row count. A positional
             // selector says "wherever it happens to be"; this says which control.
-            await page.locator('.dw-table tbody tr').nth(doomedRow)
-                .locator('.dw-iconbtn[title="Remove this line"]').click();
+            await fresh.locator('.dw-iconbtn[title="Remove this line"]').click();
             await page.waitForTimeout(600);
 
-            await expect(page.locator('.dw-table tbody tr'), 'the grid must show one line after the removal')
-                .toHaveCount(1, { timeout: 10_000 });
+            await expect(rows, 'the grid must drop back to the two saved lines').toHaveCount(2, { timeout: 10_000 });
 
-            await saveDeal(page, 'the save after removing a line');
+            await saveDeal(page, 'the save after removing an unsaved line');
             await shot(page, '41-05-removed');
         });
 
-        await test.step('and the removal SURVIVES a re-open', async () => {
+        await test.step('and the removed line was NEVER WRITTEN', async () => {
             /**
-             * The point of the whole step. Removal is explicit now: the collection deletes only what was
-             * passed to `Remove()`. If a delete affordance were ever wired to a splice on `Items` instead,
-             * the row would disappear from the screen exactly as it does above — and reappear here,
-             * because it was never deleted. Only the re-read can tell the two apart.
+             * The point of the whole step, and the reason the count is the assertion.
+             *
+             * Removal is explicit: the collection deletes only what was passed to `Remove()`. Wire the
+             * delete affordance to a splice on `Items` instead and the row leaves the screen exactly as
+             * it does above — but the collection still holds it, the save writes it, and THREE lines come
+             * back here. Only the re-read separates "removed" from "hidden", and the row count is what
+             * carries that, because the third line may legitimately reference the same product as one of
+             * the survivors on a two-product catalogue.
              */
             await reopenFromRoster(page);
             await openPane(page, 'Product lines');
 
             const rows = page.locator('.dw-table tbody tr');
-            await expect(rows, 'exactly one line must remain after the re-read').toHaveCount(1, { timeout: 20_000 });
+            await expect(
+                rows,
+                'exactly the two saved lines must come back — a third means the removal only hid the row',
+            ).toHaveCount(2, { timeout: 20_000 });
 
             const names = await lineNames(page);
-            expect(names, 'the kept line survived').toContain(LINE_KEEP);
-            expect(names, 'the removed line must be GONE from the database, not just from the screen')
-                .not.toContain(LINE_DOOMED);
+            expect(names, 'the first saved line survived').toContain(lineProducts[0]);
+            expect(names, 'the second saved line survived').toContain(lineProducts[1]);
 
-            await expect(page.locator('.dw-table tbody tr').first().locator('input').nth(1), 'and it kept its quantity')
-                .toHaveValue('100');
+            await expect(
+                rows.first().locator('td.dw-num input[type="number"]').first(),
+                'and the kept line held its quantity through the round trip',
+            ).toHaveValue('100');
             await shot(page, '41-06-removal-survived');
         });
 
         await test.step('the console stayed clean', async () => {
-            expectOnlyKnownErrors(sink, KNOWN_POST_DELETE_ERRORS);
+            expectOnlyKnownErrors(sink, KNOWN_POST_DELETE_ERRORS, 'deal round-trip');
         });
     });
 });

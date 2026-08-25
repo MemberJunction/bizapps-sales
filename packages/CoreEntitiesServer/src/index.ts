@@ -25,16 +25,24 @@
  * The form-shaped rules live on `DealEntity` in `sales-entities`, which `DealEntityServer` extends, so
  * they run on both tiers.
  *
- * WHAT IS STILL TO COME, and deliberately not stubbed:
- *   - The CLOSE LOCK (L-17, master plan §7.3), in `DealEntityServer` — once a deal enters a status
- *     where `DealStatusType.LocksDeal = 1`, the header (except Description / NextStep), its lines and
- *     its team become immutable, and reopening goes through `Sales.ReopenDeal` with a recorded reason.
- *     The schema is already shaped for it; the enforcement lands with S4.
- *   - `DealStageEvent` appends on stage transition, stamping `AmountAtTransition` and
- *     `ProbabilityAtTransition` — S4. Read the note on `DealEntityServer.Save()` first: it has to land
- *     inside the graph's transaction, and the mechanism for that changed in MJ `47ff71d68b`.
- *   - `DealLineEntityServer` — accepts the four `Resolved*` columns only from an `Orders.PreviewOrder`
- *     response (§6) — S2. Until it exists, nothing enforces that at the entity level.
+ * WHAT WAS "STILL TO COME" HERE AND IS NOT ANY MORE. All three items this list carried have been
+ * settled, two by shipping and one by deletion, and the list had gone on describing them as pending:
+ *   - The CLOSE LOCK (L-17, master plan §7.3) is IN `DealEntityServer` — `checkCloseLock()`, and it
+ *     covers the child COLLECTIONS as well as the header (`docs/DECISIONS.md` D-CF6), which the original
+ *     lock could not have done because the collections did not exist when it was written. `close-deal`'s
+ *     CD-series pins it, and `Sales.ReopenDeal` is the only sanctioned exit — now with five refusals,
+ *     the fifth being a booked order (DN-20, CD24).
+ *   - `DealStageEvent` APPENDS on transition, stamping `AmountAtTransition` and
+ *     `ProbabilityAtTransition`, through the single writer `appendStageEvent`. It does land inside the
+ *     graph's transaction, which is what the note on `Save()` is about.
+ *   - `DealLineEntityServer` WILL NEVER EXIST. `DealLine` was retired with its table — see
+ *     `deal-entity.ts:405` — so there are no `Resolved*` columns on a deal line to accept from a
+ *     `PreviewOrder` response, and nothing is missing at the entity level. Sales still never computes
+ *     money; the rule simply lives on the order rather than on a deal line.
+ *
+ * Kept as a record rather than deleted, because a "still to come" list that quietly loses an entry reads
+ * the same as one that never had it, and two of these were load-bearing rules. The drift gate does not
+ * scan this file, which is how the list stayed wrong through the work that settled it.
  */
 export * from './DealEntityServer.js';
 export * from './CloseDealOperation.js';
@@ -43,10 +51,64 @@ export * from './CloseDealOperation.js';
  * The REAL orders handoff. Selected automatically when orders' entities are registered; see
  * `resolveSeam` in CloseDealOperation. Exported so a test can install it deliberately.
  */
-export * from './LiveOrdersSeam.js';
+export * from './orders-availability.js';
 
 /** The REAL contracts handoff — selected automatically when contracts' entities are registered. */
 export * from './LiveContractsSeam.js';
+
+/**
+ * The finance tasks a won deal raises (S-US2 #34, S-US3 #35).
+ *
+ * WIRED INTO THE CLOSE as of the closewon-tasks merge -- the comment here said "not called from the
+ * close yet, exported so the wiring, when it lands, is an import rather than a move". It landed.
+ * `CloseDealOperation` calls this, and its non-fatal warnings share the close's `Issues` array with the
+ * order-status writer, tasks first (see the ordering note there).
+ */
+export * from './CloseWonTaskService.js';
+
+/**
+ * ACTIVITIES AND THE OUTLOOK INGEST (S-US9 #119, S-US10 #120).
+ *
+ * Exported as a block because they are one feature: the writer is what the workspace pane and the
+ * ingest both call, and `IActivitySource` is the seam that makes the ingest testable without a mailbox.
+ * The Graph source is exported too, deliberately -- it is complete, and hiding it would make it look
+ * unwritten rather than ungated.
+ */
+/**
+ * THE VOCABULARY MOVED TO `sales-entities`, and is re-exported here so no consumer changed.
+ *
+ * It had to move for the deal-activity pane to reach it: an Angular package must not import a SERVER
+ * package, and the pane needs the `ActivityTypeCode` values for its own type list. The module is pure
+ * union types and string constants -- no provider, no entity, nothing server-only -- so `Entities` is
+ * where it always belonged.
+ *
+ * Re-exported rather than repointed at every call site because `sales-core-entities-server` is the
+ * public surface the checks and the operations import from, and moving a file should not be a breaking
+ * change for them.
+ */
+export * from '@mj-biz-apps/sales-entities';
+export * from './activities/ActivityWriterService.js';
+export * from './activities/ActivityReader.js';
+export * from './activities/ActivitySource.js';
+export * from './activities/FixtureActivitySource.js';
+export * from './activities/GraphMessageMapper.js';
+export * from './activities/ImportedGraphActivitySource.js';
+export * from './activities/MSGraphActivitySource.js';
+export * from './activities/MSGraphCalendarSource.js';
+export * from './activities/RelevanceFilter.js';
+export * from './activities/DealMatcher.js';
+export * from './activities/ActivityIngestService.js';
+export * from './activities/ActivitySyncJob.js';
+
+/**
+ * FORECAST SNAPSHOTS (#40). The same three parts as the activity sync -- a seam, a factory whose default
+ * reads nothing, and an entry point a scheduled Action calls -- because sales has no other precedent for
+ * a scheduled job and a second one matching the first is worth more than any variation.
+ */
+export * from './forecast/ForecastSource.js';
+export * from './forecast/FixtureForecastSource.js';
+export * from './forecast/QueryForecastSource.js';
+export * from './forecast/ForecastSnapshotJob.js';
 
 import { DealEntityServer } from './DealEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';

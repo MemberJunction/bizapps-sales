@@ -39,9 +39,11 @@ import type { ValidationResult } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
 
-const E_DEAL_LINE = 'MJ_BizApps_Sales: Deal Lines';
+// The lines whose freshness the stale-amount notice checks are ORDER lines now (S-US4), reached
+// through the deal's embedded order rather than by DealID -- see the filter below.
+const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
 
-/** See `deal-line-form.component.ts` for why the priority is explicit rather than import-order. */
+/** See `deal-stage-event-form.component.ts` for why the priority is explicit rather than import-order. */
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Sales: Deals', 2)
 @Component({
     standalone: false,
@@ -93,6 +95,12 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return;
         }
 
+        // No order means no lines, so nothing can have gone stale.
+        const orderID = this.record.Get('OrderID');
+        if (!orderID) {
+            return;
+        }
+
         const rv = new RunView();
         /**
          * `__mj_UpdatedAt` is typed as `string | Date` because BOTH arrive.
@@ -103,8 +111,11 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
          * value is used as one. `new Date()` accepts either, so the comparison below is safe on both.
          */
         const result = await rv.RunView<{ __mj_UpdatedAt: string | Date }>({
-            EntityName: E_DEAL_LINE,
-            ExtraFilter: `DealID = '${String(this.record.Get('ID')).replace(/'/g, "''")}'`,
+            EntityName: E_ORDER_LINE,
+            // BY OrderHeaderID, NOT DealID. An order line carries no DealID -- the deal reaches its lines
+            // through OrderID. Filtering on the deal's own key would have matched nothing and the notice
+            // would simply never appear again: a warning that silently stops warning.
+            ExtraFilter: `OrderHeaderID = '${String(orderID).replace(/'/g, "''")}'`,
             OrderBy: '__mj_UpdatedAt DESC',
             ResultType: 'simple',
             Fields: ['__mj_UpdatedAt'],

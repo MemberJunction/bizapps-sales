@@ -35,28 +35,8 @@
  * ORDERS — the shape `LiveOrdersSeam` sends into orders' entity graph
  * ──────────────────────────────────────────────────────────────────────────── */
 
-/**
- * One line as ORDERS requires it.
- *
- * ⚠️ `ProductID` IS REQUIRED BY ORDERS, and this is the single hardest blocker on the D2C path: sales'
- * `DealLine.ProductID` is a nullable soft reference to the orders catalog, and it is NULL in every row
- * we have — the workspace captures `ProductName` as transcription precisely because that catalog is
- * not installed. A deal therefore cannot currently produce a valid order line, and that is a DATA
- * problem (populate `DealLine.ProductID` from a real catalog), not a build problem.
- */
-export interface OrdersOrderLineSeamInput {
-    ClientKey?: string;
-    ProductID: string;
-    Quantity: number;
-    /** An INPUT to the pricing engine, never a replacement for it. Omitted entirely when unset. */
-    UnitPrice?: number;
-    DiscountPct?: number;
-    ServicePeriodStart?: string | null;
-    ServicePeriodEnd?: string | null;
-    Description?: string | null;
-}
-
 /** The order header sales can state. Everything financial is absent by design. */
+
 export interface OrdersOrderHeaderSeamInput {
     CompanyID: string;
     /** The buying organization — sales' `Deal.AccountID` is an IsA child of common's Organization. */
@@ -66,49 +46,6 @@ export interface OrdersOrderHeaderSeamInput {
     Description?: string | null;
 }
 
-/**
- * What sales hands orders when a won deal produces an order.
- *
- * ── WHY THIS IS NOT A `CreateOrderInState` PAYLOAD ANY MORE ─────────────────────────────────────
- *
- * This seam originally mirrored `Orders.CreateOrderInState`, transcribed from
- * `origin/mjdev/orders-flow`. **That operation does not exist on orders' `next`** — that branch never
- * merged, and orders ships no create-order operation of any name. Eleven operations are registered
- * (`Price Order`, `Preview Price`, `Advance Order State`, …) and none of them creates an order.
- *
- * Orders' own canonical creation path is the **entity graph** — `OrderEntityServer.Save()`, which is
- * what `order-builder.ts` drives. So sales creates the order the same way orders does: get the entity,
- * set the payer and the lines, save, and let orders' server code mint the order number, price the
- * lines through its engine and raise the initial payment. Creating it any other way would be the
- * divergent choice, not this one.
- *
- * `TargetStatus` is gone with the operation: the status is stated on the header (`Status`), because
- * that is where the entity graph takes it.
- */
-export interface OrdersOrderHandoffInput {
-    Header: OrdersOrderHeaderSeamInput;
-    Lines: OrdersOrderLineSeamInput[];
-    /** `Draft` | `Confirmed` — supplied by `CloseWonPolicy.OrderState`. Set on the header. */
-    Status: string;
-    /** Orders' own vocabulary for what kind of order this is. Sales always books a `Sale`. */
-    OrderType: string;
-    OrderDate?: string | null;
-    Reason?: string | null;
-}
-
-/**
- * What the money preview returns.
- *
- * `Amount` is ORDERS' number, carried back verbatim. Sales stores it as a cached answer with
- * provenance and never derives anything from it — no rounding, no summing, no re-deriving a line from
- * a total. See the money-boundary rule in the file header.
- */
-export interface OrdersPreviewResult {
-    Success: boolean;
-    Amount?: number | null;
-    CurrencyID?: string | null;
-    Message?: string | null;
-}
 
 /* ────────────────────────────────────────────────────────────────────────────
  * CONTRACTS — the interface sales expects; served by `Contracts.SaveContract` when installed
@@ -129,11 +66,44 @@ export interface OrdersPreviewResult {
 export interface ContractsCreateFromDealSeamInput {
     DealID: string;
     CompanyID: string;
-    /** A CODE, resolved by contracts. Sales does not know contract types. */
+    /**
+     * Which contract type to create, resolved by contracts. Sales does not know contract types and
+     * must not bake their UUIDs, which is why this is a string and not an ID.
+     *
+     * -- THE NAME SAYS `Code`, AND TODAY IT IS MATCHED ON `Name`. READ THIS BEFORE RENAMING IT. --
+     *
+     * `ContractType` has no `Code` column as of contracts `origin/next` @ d2f64e3; it is identified by
+     * `Name` (unique) plus a fixed seeded UUID. So `LiveContractsSeam` probes the metadata and matches
+     * on whichever identifier contracts actually offers, and says which one it used in the message it
+     * returns -- the answer is never ambiguous at the call site.
+     *
+     * The name is therefore aspirational rather than wrong: a `Code` is what this SHOULD carry, it is
+     * what the seam already prefers the moment the column appears, and asking for that column is an
+     * open request to contracts (D-12) for exactly the reason bizapps-tasks added `TaskType.Code` --
+     * a display name that can be renamed is not an identifier.
+     *
+     * Renaming this key is a bigger change than it looks: it is part of the published
+     * `Sales.CloseDeal` remote-operation contract and appears in generated code. Not worth doing to
+     * describe a state that is meant to be temporary.
+     *
+     * WHATEVER VALUE GOES HERE MUST NAME A TYPE THAT STANDS ALONE. A type whose
+     * `ParentStatusRequirement` is `'Required'` -- Change Order -- is refused by contracts' own
+     * validation when nothing names its parent, and a close-won has no parent contract to give it.
+     */
     ContractTypeCode?: string | null;
     TermMonths?: number | null;
     /** The AD's red-line summary, verbatim. Input to a human review; nothing parses it. */
     ContractVariances?: string | null;
+    /**
+     * Did this deal move off the standard agreement? Becomes the contract's `HasModifications`.
+     *
+     * A SEPARATE FACT FROM `ContractVariances`, not a summary of it. The variances field being empty
+     * means nothing was written down, which is not the same claim as nothing having been negotiated —
+     * and contracts' review task branches on the difference: a true flag means capture each deviation
+     * as a `ContractTemplateModification`, a false one still means read the document, because the rep
+     * may have forgotten to raise it. Deriving one from the other would hand finance a guess.
+     */
+    StandardAgreementModified?: boolean;
     AutoRenew?: boolean;
     AnnualIncreasePctOverride?: number | null;
     CancellationNoticeDaysOverride?: number | null;
@@ -153,8 +123,6 @@ export interface ContractsCreateFromDealSeamInput {
      * computes it; it is only ever passed through when a deal actually negotiated one.
      */
     CommittedAmount?: number | null;
-    /** Recurring lines, when the policy routes them to the contract. */
-    Lines?: OrdersOrderLineSeamInput[];
 }
 
 /** Renewal path: used INSTEAD of CreateFromDeal when `DealType.RequiresRenewalSource` is set (§7.2). */
@@ -194,11 +162,20 @@ export interface OrdersSeamResult {
  * implementation be registered later without the operation changing at all.
  */
 export interface IDownstreamSeam {
-    /** True when this implementation actually reaches the sibling app. */
-    readonly IsLive: boolean;
-    /** Prices a draft WITHOUT creating anything. The only place an order amount may come from. */
-    PreviewOrderMoney(input: OrdersOrderHandoffInput): Promise<OrdersPreviewResult>;
-    CreateOrder(input: OrdersOrderHandoffInput): Promise<OrdersSeamResult>;
+    /**
+     * THE ORDER METHODS ARE GONE. `PreviewOrderMoney` and `CreateOrder` described a route close-won no
+     * longer takes: the order is embedded on the deal from creation, so there is nothing to create and
+     * nothing to price at close. They were exported, typechecked and documented, and called by nobody.
+     *
+     * `readonly IsLive: boolean` went with them. Nothing read it. Note that `IActivitySource.IsLive`
+     * and `IForecastSource.IsLive` are DIFFERENT flags on different interfaces and are load-bearing —
+     * the ingest refuses to write `Source: 'Integration'` from a fixture source — so do not read this
+     * removal as a verdict on those.
+     *
+     * RENEWAL STAYS. `RenewContractTerm` currently reports an unexecuted plan, because the contracts
+     * rebuild removed `ContractTerm` and `Contracts.RenewTerm` with it. It is kept rather than pruned
+     * because a renewal User Story is coming and the route is the shape it will land in.
+     */
     CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult>;
     RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult>;
 }
@@ -212,30 +189,8 @@ export interface IDownstreamSeam {
  * UI can mistake a planned contract for a created one.
  */
 export class StubDownstreamSeam implements IDownstreamSeam {
-    public readonly IsLive = false;
-
     /** Everything the close flow tried to send, in call order — for the run report and for tests. */
     public readonly Attempts: Array<{ Target: string; Payload: unknown }> = [];
-
-    public async PreviewOrderMoney(input: OrdersOrderHandoffInput): Promise<OrdersPreviewResult> {
-        this.Attempts.push({ Target: 'OrderPreview', Payload: input });
-        return {
-            Success: false,
-            Message:
-                'Orders.PriceOrder is not reachable: bizapps-orders is not present in this deployment. ' +
-                'See CLOSE-FLOW-DECISIONS.md D-CF3.',
-        };
-    }
-
-    public async CreateOrder(input: OrdersOrderHandoffInput): Promise<OrdersSeamResult> {
-        this.Attempts.push({ Target: 'Order', Payload: input });
-        return {
-            Success: false,
-            Message:
-                'The order handoff is not wired: bizapps-orders is not present in this deployment, so ' +
-                'its Order Headers entity cannot be resolved. See CLOSE-FLOW-DECISIONS.md D-CF3.',
-        };
-    }
 
     public async CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {
         this.Attempts.push({ Target: 'Contract', Payload: input });
@@ -257,3 +212,18 @@ export class StubDownstreamSeam implements IDownstreamSeam {
         };
     }
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * `OrdersOrderHandoffInput` and `OrdersOrderLineSeamInput` USED TO BE HERE.
+ *
+ * They described the payload for creating an order from a won deal. That route is gone: the order is
+ * embedded on the deal from creation, so `LiveOrdersSeam.CreateOrder` and `PreviewOrderMoney` were
+ * deleted and nothing constructs these any more. The last thing keeping them alive was a type-only
+ * import in `CloseDealOperation.ts`, which is removed in the same commit as this.
+ *
+ * ⚠ IF ANYTHING LIKE THEM COMES BACK, `DiscountPct` NEEDS UNITS IN ITS NAME OR ITS TYPE. These carried a
+ * bare `DiscountPct?: number` while orders stores a FRACTION and the caller sent a rep-entered
+ * PERCENTAGE. The two methods that passed it straight through would have recorded a 50% discount for a
+ * half-percent one — under 1% it slipped past `CK_OrderLine_DiscountPct` and saved cleanly.
+ * `scripts/assert-discount-conversion.mjs` is what a revival has to satisfy.
+ * ──────────────────────────────────────────────────────────────────────────── */

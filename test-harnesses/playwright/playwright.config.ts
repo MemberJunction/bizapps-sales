@@ -102,12 +102,21 @@ export default defineConfig({
       // The full create→read→update→delete walk for TWO entities, each step waiting on a dev-mode
       // Angular re-render, genuinely takes several minutes. 180s was not a hung test — it was an
       // honest 200-second one, which is a different problem with a different fix.
-      timeout: 480_000,
+      timeout: process.env.PW_SLOWMO ? 1_800_000 : 480_000,
       use: {
         ...devices['Desktop Chrome'],
         // Headed by default: this harness's job tonight is to be WATCHED proving the UI works.
         // Set PW_HEADLESS=1 for unattended regression runs.
         headless: process.env.PW_HEADLESS === '1',
+        /**
+         * `PW_SLOWMO=<ms>` puts a pause between browser gestures so a human can FOLLOW the run.
+         *
+         * Not a timing fix and not for CI: it exists so a watcher can see which control the suite
+         * touches and in what order. Default 0 leaves unattended runs exactly as they were. It
+         * multiplies wall-clock by roughly the number of gestures, so the project timeout is relaxed
+         * when it is set.
+         */
+        launchOptions: { slowMo: Number(process.env.PW_SLOWMO ?? 0) },
         storageState: STORAGE_STATE_PATH,
       },
     },

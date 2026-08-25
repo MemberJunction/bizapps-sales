@@ -7,7 +7,5 @@
   "access": "public",
   "baseBranch": "next",
   "updateInternalDependencies": "patch",
-  "ignore": [
-    "@mj-biz-apps/sales-integration-tests"
-  ]
+  "ignore": []
 }

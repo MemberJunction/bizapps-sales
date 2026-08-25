@@ -7,17 +7,38 @@
  *
  *     testing: { checkModules: ['@mj-biz-apps/sales-integration-tests'] }
  *
- * BUNDLES
- *   save-deal   SD1–SD16   Saving a deal and its children: four tables in one transaction, numbering,
- *                          the explicit-removal semantics of the child collections, and the no-pricing
- *                          guarantee — against a live database with nothing mocked
- *   close-deal  CD1–CD13   Sales.CloseDeal / Sales.ReopenDeal / the close lock: routing follows the
- *                          POLICY rather than any name, and a closed deal refuses a raw save — including
- *                          one made only against its CHILD COLLECTIONS (CD13)
+ * BUNDLES. The authoritative count for each is `scripts/expected-check-counts.json`, which the coverage
+ * gate and the runner both read; the ranges here are a map, not a second source of truth.
+ *   save-deal            Saving a deal, its EMBEDDED ORDER, that order's lines and its own children:
+ *                        four tables across two schemas in one transaction, numbering, the
+ *                        explicit-removal semantics of the collections, and the no-pricing guarantee
+ *   close-deal           Sales.CloseDeal / Sales.ReopenDeal / the close lock: routing follows the POLICY
+ *                        rather than any name, and a closed deal refuses a raw save — including one made
+ *                        only against its CHILD COLLECTIONS (CD13)
+ *   product-picker       The rule deciding which of orders' products a line may reference
+ *   close-won-order      The order beside a close: no second order (CO4), and — since D-OS1 — the STAGE
+ *                        is what names the order's status, so CO3 proves the order follows a stage that
+ *                        names one and ignores a stage that does not, and CO5 proves a REFUSED status
+ *                        never blocks the stage change (S-US5/S-US7/S-US8)
+ *   close-won-contract   ONE tripwire (CT0), not a route. CT1-CT4 were retired on 2026-08-20: they named
+ *                        ContractTerm and ContractLine, deleted in contracts' clean-sheet rebuild, and a
+ *                        Contract.Status column that no longer exists -- while being SKIPPED on every
+ *                        host, so four claimed and zero delivered. CT0 asserts contracts is ABSENT and
+ *                        goes red the day that changes, naming what has to be written
+ *   board-move           A stage move appends EXACTLY ONE DealStageEvent, stamped with the values the
+ *                        deal held on the way OUT — the provenance a board drag owes (D-BD2). Its writer
+ *                        shares one transaction with the stage-order writer and the deal counter; see
+ *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters
  *
- * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` — this suite exists to
- * write to the database. Without that variable the suite runs ZERO checks and PASSES, which is the
- * vacuous pass this repo's definition of done calls out. Treat "0 checks" as a failure wearing a pass.
+ * ⚠️ EVERY BUNDLE REQUIRES bizapps-orders EXCEPT `close-won-contract`, whose single check needs nothing
+ * at all — it is asserting an absence. save-deal and close-deal require it too. A deal cannot be
+ * saved without it: `DealEntityServer.Save()` provisions the deal's embedded order (S-US4). `mj-app.json`
+ * declares orders a hard dependency, so a host without it is misconfigured rather than minimal.
+ *
+ * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` except
+ * `close-won-contract.CT0`, which reads metadata and writes nothing — so without that variable the
+ * suite runs ONE check out of forty-four and reports success. That is the vacuous pass this repo's
+ * definition of done calls out, and `assert-check-count.mjs` is what turns it into a failure.
  *
  * They are safe to run repeatedly because each one rolls its transaction back; see `fixture.ts`.
  *
@@ -33,7 +54,9 @@
  * (§7.3, L-17). One remains, and it needs code that does not exist yet, so it is listed rather than
  * stubbed to keep the gap visible:
  *   1. `Deal.Amount` for a lined deal equals the `Orders.PreviewOrder` result for the same draft (§6).
- *      Needs the pricing bridge — S2, blocked on orders' C0 seam.
+ *      Needs the pricing bridge. The shape of that bridge changed with the rework — the lines now live on
+ *      an order orders already owns and prices, so `save-deal.SD19` covers the per-line half (sales sends
+ *      product and quantity; the price comes back). What is still unasserted is the HEADER roll-up.
  *
  * One check is also deliberately WEAKER than it will eventually be: `close-deal.CD7` asserts that a
  * stubbed downstream reports `Executed: false` with a reason and invents no ID. When orders links, CD7
@@ -56,14 +79,20 @@ LoadBizAppsSalesServer();
 import './checks/save-deal.checks.js';
 import './checks/close-deal.checks.js';
 import './checks/product-picker.checks.js';
-import './checks/close-won-handoff.checks.js';
+import './checks/close-won-order.checks.js';
 import './checks/close-won-contract.checks.js';
-import './checks/close-won-d2c.checks.js';
+import './checks/board-move.checks.js';
+import './checks/close-won-tasks.checks.js';
+import './checks/activities.checks.js';
+import './checks/forecast.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
 export { ProductPickerChecks } from './checks/product-picker.checks.js';
-export { CloseWonHandoffChecks } from './checks/close-won-handoff.checks.js';
+export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
 export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
-export { CloseWonD2CChecks } from './checks/close-won-d2c.checks.js';
+export { BoardMoveChecks } from './checks/board-move.checks.js';
+export { CloseWonTasksChecks } from './checks/close-won-tasks.checks.js';
+export { ActivitiesChecks } from './checks/activities.checks.js';
+export { ForecastChecks } from './checks/forecast.checks.js';
 export * from './fixture.js';

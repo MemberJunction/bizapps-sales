@@ -16,7 +16,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { Injectable } from '@angular/core';
-import { EntitySaveOptions, Metadata, RunView, RunViewParams } from '@memberjunction/core';
+import { EntitySaveOptions, LogError, Metadata, RunQuery, RunView, RunViewParams } from '@memberjunction/core';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 
 import {
@@ -25,7 +25,6 @@ import {
     type DealStatusLookup,
     type LossReasonLookup,
     type DealWorkspaceLookups,
-    type LineTypeLookup,
     type PipelineLookup,
     type StageLookup,
 } from './deal-workspace.types';
@@ -41,7 +40,6 @@ const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
 const E_DEAL_TYPE = 'MJ_BizApps_Sales: Deal Types';
 const E_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 const E_FORECAST_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
-const E_LINE_TYPE = 'MJ_BizApps_Sales: Deal Line Types';
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 const E_EMPLOYEE = 'MJ: Employees';
@@ -56,6 +54,25 @@ const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
  * roster reads accounts once and joins in memory — which is also why this lives here rather than in the
  * component, so the workaround exists in exactly one place.
  */
+/**
+ * The four dashboard headline figures, already reduced.
+ *
+ * Returned by the `Sales: Dashboard Summary` query rather than computed in the browser. Master plan
+ * §9.5 requires read models to be MJ Queries so Skip, the query builder and report snapshots can all
+ * reach them; a measure that only exists inside a component getter is reachable by nothing else.
+ */
+export interface DealDashboardSummary {
+    OpenAmount: number;
+    OpenCount: number;
+    TotalCount: number;
+    PastExpectedCloseCount: number;
+    WonCount: number;
+    /** How much of the open figure the orders engine priced, and how much a person typed. */
+    OpenPricedAmount: number;
+    OpenStatedAmount: number;
+    OpenNoAmountCount: number;
+}
+
 export interface DealRosterRow {
     ID: string;
     DealNumber: string | null;
@@ -75,6 +92,28 @@ export interface DealRosterRow {
     ForecastCategoryType: string | null;
     /** Kept so anything downstream can branch on the STATUS FLAGS rather than the status name. */
     DealStatusTypeID: string | null;
+    /** Grouping keys for the board. Names render; IDs group. */
+    PipelineID: string | null;
+    PipelineStageID: string | null;
+    /**
+     * STATUS FLAGS, APPLIED SERVER-SIDE, so no consumer has to resolve them from a second fetch.
+     *
+     * `Sales: Deal Roster` returns these per row. Before, the section loaded every DealStatusType
+     * separately and looked each row's status up by ID to read a flag -- correct, but it made every
+     * consumer of a roster row responsible for carrying a lookup table alongside it.
+     */
+    IsOpen: boolean;
+    IsWon: boolean;
+    IsLost: boolean;
+    IsClosed: boolean;
+    /** Open, and its expected close date has gone by. Computed against the SERVER's UTC date. */
+    IsPastExpectedClose: boolean;
+    /**
+     * The currency `Amount` is denominated in. NULL means UNKNOWN, not "the display default" -- it is
+     * unpopulated on every deal today. A consumer must not total a set containing more than one
+     * distinct value; the board refuses to.
+     */
+    CurrencyID: string | null;
 }
 
 /** Raw roster shape before the account name is joined in. */
@@ -84,6 +123,7 @@ interface DealRosterQueryRow {
     ExpectedCloseDate: string | Date | null; Pipeline: string | null; PipelineStage: string | null;
     DealType: string | null; DealStatusType: string | null; OwnerEmployee: string | null;
     ForecastCategoryType: string | null; DealStatusTypeID: string | null;
+    PipelineID: string | null; PipelineStageID: string | null;
 }
 
 /** What a save attempt reports back. Structured, so the caller can badge tabs and mark fields. */
@@ -99,10 +139,9 @@ export interface DealSaveOutcome {
 
 /** Row shapes as they come back from RunView with `ResultType: 'simple'`. */
 interface PipelineRow { ID: string; Name: string; CompanyID: string; Company: string | null }
-interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null }
+interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null }
 interface NamedRow { ID: string; Name: string }
-interface LineTypeRow extends NamedRow { IsRecurring: boolean }
-interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean }
+interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean; LocksDeal: boolean }
 interface LossReasonRow extends NamedRow { RequiresNotes: boolean }
 interface ContactRow { ID: string; FirstName: string | null; LastName: string | null; Email: string | null }
 interface EmployeeRow { ID: string; FirstLast: string | null }
@@ -113,7 +152,8 @@ interface EmployeeRow { ID: string; FirstLast: string | null }
  * "everything declared". A collection added to the entity later should not start being fetched by a
  * surface that does not render it.
  */
-const WORKSPACE_COLLECTIONS = ['Lines', 'PaymentSchedule', 'Team'] as const;
+// 'Lines' is NOT here: the deal holds none. Its order's lines arrive with the embedded order.
+const WORKSPACE_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
 
 @Injectable({ providedIn: 'root' })
 export class DealWorkspaceService {
@@ -160,14 +200,13 @@ export class DealWorkspaceService {
         const rv = new RunView();
         const params: RunViewParams[] = [
             { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'CompanyID', 'Company'] },
-            { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID'] },
+            { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'] },
             { EntityName: E_DEAL_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
             // The FLAGS come back with the status, because the dashboard counts open/won deals and the
             // only permitted way to decide either is to read the flag. Comparing a status name is what
             // the vocabulary gate forbids, and it also breaks the moment somebody renames "Won".
-            { EntityName: E_STATUS_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsOpen', 'IsClosed', 'IsWon', 'IsLost'] },
+            { EntityName: E_STATUS_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsOpen', 'IsClosed', 'IsWon', 'IsLost', 'LocksDeal'] },
             { EntityName: E_FORECAST_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
-            { EntityName: E_LINE_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsRecurring'] },
             // KI-8: a Deal row cannot resolve its own account or contact name, because both FKs point at
             // IsA CHILDREN whose Name lives on the parent and CodeGen generates no lookup join through
             // that edge. So they are loaded here and resolved client-side. This is the reason the
@@ -181,6 +220,30 @@ export class DealWorkspaceService {
         ];
 
         const results = await rv.RunViews(params);
+
+        /**
+         * `RunViews` answers POSITIONALLY, and hand-typed indexes drift the moment a query is added or
+         * removed. This file has already been bitten by it: a picker that read as EMPTY because every
+         * index after an insertion point was off by one -- which looks like "no rows", not like a bug.
+         * Deleting the Deal Line Types query above would have shifted four more.
+         *
+         * So the order is declared ONCE and every reader asks by NAME. Adding a query means adding its
+         * name here beside the param; nothing else moves.
+         */
+        const ORDER = [
+            'Pipelines', 'Stages', 'DealTypes', 'DealStatusTypes', 'ForecastCategoryTypes',
+            'Accounts', 'Contacts', 'Employees', 'LossReasons',
+        ] as const;
+        const at = (key: (typeof ORDER)[number]): number => ORDER.indexOf(key);
+        if (results && results.length !== ORDER.length) {
+            // Each block below already degrades on its own, so this is not fatal -- but a mismatch means
+            // ORDER and `params` have drifted apart, and every picker past the drift is reading the
+            // wrong query. Say so rather than let it be discovered as an empty dropdown.
+            LogError(
+                `DealWorkspaceService.LoadLookups: ${results.length} result(s) for ${ORDER.length} ` +
+                'named lookups -- ORDER and the params array have drifted.',
+            );
+        }
         const lookups = EmptyLookups();
 
         // RunViews does not throw; an unsuccessful view yields an empty list rather than an exception,
@@ -191,38 +254,37 @@ export class DealWorkspaceService {
             return r?.Success ? ((r.Results ?? []) as T[]) : [];
         };
 
-        lookups.Pipelines = rows<PipelineRow>(0).map<PipelineLookup>((p) => ({
+        lookups.Pipelines = rows<PipelineRow>(at('Pipelines')).map<PipelineLookup>((p) => ({
             ID: p.ID, Name: p.Name, CompanyID: p.CompanyID, CompanyName: p.Company ?? null,
         }));
-        lookups.Stages = rows<StageRow>(1).map<StageLookup>((s) => ({
+        lookups.Stages = rows<StageRow>(at('Stages')).map<StageLookup>((s) => ({
             ID: s.ID, Name: s.Name, PipelineID: s.PipelineID, DisplayOrder: s.DisplayOrder,
             Probability: s.Probability, ForecastCategoryTypeID: s.ForecastCategoryTypeID,
+            DealStatusTypeID: s.DealStatusTypeID ?? null,
         }));
-        lookups.DealTypes = rows<NamedRow>(2).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
-        lookups.DealStatusTypes = rows<StatusRow>(3).map<DealStatusLookup>((r) => ({
+        lookups.DealTypes = rows<NamedRow>(at('DealTypes')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        lookups.DealStatusTypes = rows<StatusRow>(at('DealStatusTypes')).map<DealStatusLookup>((r) => ({
             ID: r.ID,
             Name: r.Name,
             IsOpen: r.IsOpen === true,
             IsClosed: r.IsClosed === true,
             IsWon: r.IsWon === true,
             IsLost: r.IsLost === true,
+            LocksDeal: r.LocksDeal === true,
         }));
-        lookups.ForecastCategoryTypes = rows<NamedRow>(4).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        lookups.ForecastCategoryTypes = rows<NamedRow>(at('ForecastCategoryTypes')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
         // Index 9 — the loss reasons queried above. The close panel cannot demand a reason it has no
         // list to offer, and an empty dropdown fails as a TIMEOUT rather than as a missing list, which
         // is a slow way to find out.
-        lookups.LossReasons = rows<LossReasonRow>(9).map<LossReasonLookup>((r) => ({
+        lookups.LossReasons = rows<LossReasonRow>(at('LossReasons')).map<LossReasonLookup>((r) => ({
             ID: r.ID, Name: r.Name, RequiresNotes: r.RequiresNotes === true,
         }));
-        lookups.LineTypes = rows<LineTypeRow>(5).map<LineTypeLookup>((r) => ({
-            ID: r.ID, Name: r.Name, IsRecurring: r.IsRecurring === true,
-        }));
-        lookups.Accounts = rows<NamedRow>(6).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
-        lookups.Contacts = rows<ContactRow>(7).map<DealLookup>((c) => ({
+        lookups.Accounts = rows<NamedRow>(at('Accounts')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        lookups.Contacts = rows<ContactRow>(at('Contacts')).map<DealLookup>((c) => ({
             ID: c.ID,
             Name: [c.FirstName, c.LastName].filter(Boolean).join(' ').trim() || c.Email || '(unnamed contact)',
         }));
-        lookups.Employees = rows<EmployeeRow>(8).map<DealLookup>((e) => ({
+        lookups.Employees = rows<EmployeeRow>(at('Employees')).map<DealLookup>((e) => ({
             ID: e.ID, Name: e.FirstLast ?? '(unnamed employee)',
         }));
 
@@ -239,35 +301,89 @@ export class DealWorkspaceService {
      * Returns an empty array on failure rather than throwing, because a roster that cannot load should
      * render as an empty list with a message, not take the whole section down.
      */
+    /**
+     * The deal roster, from the `Sales: Deal Roster` MJ Query.
+     *
+     * -- WHAT THIS REPLACED, AND WHY IT IS NOT JUST A RELOCATION --
+     *
+     * It was two RunViews: every deal, plus every account, joined in the browser with a Map to fill
+     * in a customer name. The query does that join in SQL, so the second read and the client-side
+     * join both go away -- and with them a whole class of drift, because the roster the dashboard
+     * shows and the roster the §9 aggregates are built on are now literally the same definition.
+     *
+     * It also carries the STATUS FLAGS and IsPastExpectedClose per row, which is what lets the section
+     * drop its separate status fetch for flag resolution and its hand-built UTC date comparison.
+     *
+     * Master plan §9.5 is the rule this satisfies: read models are MJ Queries, so Skip, the query
+     * builder and report snapshots reach the same definitions the UI does.
+     *
+     * COLUMN NAMES ARE MAPPED, NOT PASSED THROUGH. The query names things for a report reader
+     * (DealName, AccountName, StageName); DealRosterRow names them for a component (Name,
+     * CustomerName, PipelineStage). Mapping here keeps both audiences served and means renaming a
+     * column on either side is a one-file change.
+     */
     public async LoadRoster(): Promise<DealRosterRow[]> {
-        const rv = new RunView();
-        const results = await rv.RunViews([
-            {
-                EntityName: E_DEAL,
-                OrderBy: 'ExpectedCloseDate ASC, Name ASC',
-                ResultType: 'simple',
-                Fields: [
-                    'ID', 'DealNumber', 'Name', 'AccountID', 'Amount', 'AmountIsComputed', 'Probability',
-                    'ExpectedCloseDate', 'Pipeline', 'PipelineStage', 'DealType', 'DealStatusType',
-                    'OwnerEmployee', 'ForecastCategoryType', 'DealStatusTypeID',
-                ],
-            },
-            { EntityName: E_ACCOUNT, ResultType: 'simple', Fields: ['ID', 'Name'] },
-        ]);
-
-        if (!results?.[0]?.Success) {
+        const result = await new RunQuery().RunQuery({
+            QueryName: 'Sales: Deal Roster',
+            CategoryPath: 'Sales',
+        });
+        if (!result?.Success) {
+            LogError(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
             return [];
         }
-        const accounts = new Map<string, string>(
-            (results[1]?.Success ? ((results[1].Results ?? []) as NamedRow[]) : []).map((a) => [a.ID, a.Name]),
-        );
 
-        return ((results[0].Results ?? []) as DealRosterQueryRow[]).map<DealRosterRow>((d) => ({
-            ...d,
-            AmountIsComputed: d.AmountIsComputed === true,
-            // "—" rather than a blank cell: an unattached deal is a state, and an empty cell reads as a
-            // rendering fault.
-            CustomerName: (d.AccountID ? accounts.get(d.AccountID) : null) ?? '—',
+        const bool = (v: unknown): boolean => v === true || v === 1 || v === '1';
+        /**
+         * COERCE THE NUMERICS. They were CAST -- `as number | null` -- which tells TypeScript to trust
+         * and enforces nothing at runtime.
+         *
+         * Measured on this provider today, `Amount` and `Probability` do come back as `number`, so the
+         * cast is currently accurate. It is still the wrong construct: `bool()` above exists because
+         * this codebase has already met a SQL scalar arriving as `1` rather than `true`, the dashboard
+         * loader wraps every numeric in its own `num()`, and the browser reaches these rows over
+         * GraphQL rather than in-process -- a different transport that nothing here has verified.
+         *
+         * The failure mode if that assumption ever breaks is not a type error. `deal-board` reduces
+         * these with `+`, so a string turns addition into concatenation: two cards become
+         * "027480.000015000.0000", the currency pipe cannot parse it, and the board render dies with
+         * InvalidPipeArgumentError. Coercing costs nothing and removes the whole class.
+         */
+        const num = (v: unknown): number | null => {
+            if (v === null || v === undefined || v === '') {
+                return null;
+            }
+            const n = Number(v);
+            // NaN would propagate silently through every sum and total. A value that is not a number
+            // is reported as absent, which every consumer already handles.
+            return Number.isFinite(n) ? n : null;
+        };
+        return ((result.Results ?? []) as Record<string, unknown>[]).map<DealRosterRow>((d) => ({
+            ID: String(d['DealID'] ?? ''),
+            DealNumber: (d['DealNumber'] as string | null) ?? null,
+            Name: String(d['DealName'] ?? ''),
+            AccountID: (d['AccountID'] as string | null) ?? null,
+            // Still an em dash rather than a blank: an unattached deal is a STATE, and an empty cell
+            // reads as a rendering fault.
+            CustomerName: (d['AccountName'] as string | null) ?? '—',
+            Amount: num(d['Amount']),
+            AmountIsComputed: bool(d['AmountIsComputed']),
+            Probability: num(d['Probability']),
+            ExpectedCloseDate: (d['ExpectedCloseDate'] as string | Date | null) ?? null,
+            Pipeline: (d['PipelineName'] as string | null) ?? null,
+            PipelineStage: (d['StageName'] as string | null) ?? null,
+            DealType: (d['DealTypeName'] as string | null) ?? null,
+            DealStatusType: (d['StatusName'] as string | null) ?? null,
+            OwnerEmployee: (d['OwnerName'] as string | null) ?? null,
+            ForecastCategoryType: (d['ForecastCategoryName'] as string | null) ?? null,
+            DealStatusTypeID: (d['DealStatusTypeID'] as string | null) ?? null,
+            PipelineID: (d['PipelineID'] as string | null) ?? null,
+            PipelineStageID: (d['PipelineStageID'] as string | null) ?? null,
+            CurrencyID: (d['CurrencyID'] as string | null) ?? null,
+            IsOpen: bool(d['IsOpen']),
+            IsWon: bool(d['IsWon']),
+            IsLost: bool(d['IsLost']),
+            IsClosed: bool(d['IsClosed']),
+            IsPastExpectedClose: bool(d['IsPastExpectedClose']),
         }));
     }
 
@@ -326,10 +442,12 @@ export class DealWorkspaceService {
     }
 
     /**
-     * Reads an existing deal and its children — header, lines, schedule and roster together.
+     * Reads an existing deal and everything the workspace shows — header, schedule, roster, and the
+     * lines, which belong to the deal's embedded order rather than to the deal.
      *
      * THIS IS THE ONLY PLACE THE COLLECTIONS ARE LOADED, and that is a data-loss guard rather than a
-     * tidiness preference. All three are declared `Load: 'explicit'`, so nothing populates them lazily;
+     * tidiness preference. Every one of them is declared `Load: 'explicit'`, so nothing populates them
+     * lazily;
      * a second load arriving mid-edit is what would replace the user's unsaved rows with whatever is in
      * the database. `LoadRelatedRecords` is itself guarded — it skips a collection that is already loaded
      * or holds staged work — and it batches all three into ONE `RunViews` rather than three round trips.
@@ -349,9 +467,56 @@ export class DealWorkspaceService {
 
         // A collection only reports IsLoaded once its rows actually arrived, so this catches the silent
         // failure above. An empty deal and an unreadable one must never look the same.
-        if (!deal.Lines.IsLoaded || !deal.PaymentSchedule.IsLoaded || !deal.Team.IsLoaded) {
+        if (!deal.PaymentSchedule.IsLoaded || !deal.Team.IsLoaded) {
             return null;
         }
+
+        /**
+         * THE LINES LIVE ON THE ORDER, so they need a load of their own.
+         *
+         * `WORKSPACE_COLLECTIONS` covers the deal's OWN collections; the embedded order is a separate
+         * entity instance and its `Lines` is declared `Load: 'explicit'` just like the deal's are. Nothing
+         * populates it lazily, so without this a saved deal with lines opens showing NONE -- and reads as
+         * a deal nobody has quoted yet.
+         *
+         * ── THREE OUTCOMES, AND THEY MUST STAY DISTINGUISHABLE ──
+         *
+         * The whole point of the `IsLoaded` check above is that a failed read must not look like an empty
+         * one. That guarantee has to extend here, and there is a third case now:
+         *
+         *   1. no `OrderID` at all      -- legitimate. A deal saved before the embed landed, or one whose
+         *                                  order could not be provisioned. There are no lines to fail to
+         *                                  read, so this is NOT an error: the deal opens, empty.
+         *   2. `OrderID` set, order absent -- a FAILURE. The FK names a row and the peer did not arrive,
+         *                                  which means the read broke or the order was deleted out from
+         *                                  under the deal. Returning the deal here would show zero lines
+         *                                  for an order that has them.
+         *   3. order present, lines unread -- a FAILURE, for the same reason the collections above are
+         *                                  checked: `LoadRelatedRecords` logs and leaves the collection
+         *                                  empty rather than throwing.
+         *
+         * Only (1) returns a deal with no lines. (2) and (3) return null, which is what the caller already
+         * treats as "could not read this deal" rather than rendering it.
+         */
+        if (deal.OrderID) {
+            const order = deal.OrderID_Object;
+            if (!order) {
+                LogError(
+                    `DealWorkspaceService.LoadDeal: deal ${dealID} points at order ${deal.OrderID} but the ` +
+                    'embedded record did not resolve. Refusing to render it as a deal with no lines.',
+                );
+                return null;
+            }
+            await order.LoadRelatedRecords('Lines');
+            if (!order.Lines.IsLoaded) {
+                LogError(
+                    `DealWorkspaceService.LoadDeal: could not read the lines of order ${deal.OrderID} for ` +
+                    `deal ${dealID}. An unreadable line set must not present as an empty one.`,
+                );
+                return null;
+            }
+        }
+
         return deal;
     }
 
@@ -419,5 +584,53 @@ export class DealWorkspaceService {
                 ErrorMessage: err instanceof Error ? err.message : String(err),
             };
         }
+    }
+
+    /**
+     * The dashboard's four figures, from the `Sales: Dashboard Summary` MJ Query.
+     *
+     * -- WHY A QUERY AND NOT A GETTER --
+     *
+     * These were computed in `sales-section.component.ts` by reducing over the loaded roster. The
+     * answers were right; the mechanism was the problem. Master plan §9.5: read models belong in MJ
+     * Queries rather than hand-rolled Angular aggregation, so Skip, the query builder and report
+     * snapshots all get them for free. A measure living in a component getter is reachable by exactly
+     * one caller, and silently diverges the moment a second surface needs the same number.
+     *
+     * It also stops the tiles depending on the roster being fully loaded to be correct: the old
+     * TotalCount was `this.Deals.length`, so any future paging or filtering of the roster would have
+     * quietly changed a headline figure that is supposed to describe the whole book.
+     *
+     * Proven equivalent BEFORE the switch: `test-harnesses/compare-dashboard-measures.mjs` runs both
+     * implementations over the same data and fails on any disagreement. All eight comparisons agreed,
+     * including the closing-soon ORDER and the slipped set by deal identity rather than by count.
+     */
+    public async LoadDashboardSummary(): Promise<DealDashboardSummary | null> {
+        const result = await new RunQuery().RunQuery({
+            QueryName: 'Sales: Dashboard Summary',
+            CategoryPath: 'Sales',
+        });
+        if (!result?.Success) {
+            LogError(`Sales: Dashboard Summary failed - ${result?.ErrorMessage ?? 'unknown error'}`);
+            return null;
+        }
+        const row = (result.Results ?? [])[0] as Record<string, unknown> | undefined;
+        if (!row) {
+            return null;
+        }
+        // The query aggregates, so it returns a row even over an empty table. A null from here means
+        // the query did not RUN, which is a different thing from a database with no deals -- and the
+        // caller renders those two states differently.
+        const num = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
+        return {
+            OpenAmount: num(row['OpenAmount']),
+            OpenCount: num(row['OpenCount']),
+            TotalCount: num(row['TotalCount']),
+            PastExpectedCloseCount: num(row['PastExpectedCloseCount']),
+            WonCount: num(row['WonCount']),
+            OpenPricedAmount: num(row['OpenPricedAmount']),
+            OpenStatedAmount: num(row['OpenStatedAmount']),
+            OpenNoAmountCount: num(row['OpenNoAmountCount']),
+        };
     }
 }

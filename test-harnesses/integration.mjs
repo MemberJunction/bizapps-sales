@@ -68,7 +68,13 @@ function flushLog() {
 const args = process.argv.slice(2);
 const only = args.filter((a) => !a.startsWith('-'));
 
-const RUN_MUTATIONS = process.env.RUN_MUTATION_TESTS === '1';
+/**
+ * `--mutations` is equivalent to `RUN_MUTATION_TESTS=1`, and exists so `package.json` can turn the
+ * suite on WITHOUT an env-var prefix, which is not portable across cmd, PowerShell and sh. The
+ * documented command must run the checks; making that depend on the caller remembering a prefix is
+ * what produced a green tick over 125 checks nobody ran.
+ */
+const RUN_MUTATIONS = process.env.RUN_MUTATION_TESTS === '1' || process.argv.includes('--mutations');
 
 const { DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD } = process.env;
 if (!DB_DATABASE) {
@@ -93,6 +99,153 @@ const pool = await new sql.ConnectionPool({
      */
     requestTimeout: 60_000,
 }).connect();
+
+/**
+ * ── THE SUITE SERIALISES ITSELF. Concurrent runs used to corrupt each other's results. ──────────
+ *
+ * Three sessions share one host, and the checks are not read-only: each one writes a deal, its lines,
+ * its instalments and a team row inside a transaction, then rolls back. Two of those overlapping take
+ * locks on the same tables in whatever order they happen to reach them, and SQL Server resolves the
+ * cycle by killing one -- so a run loses a check to `Transaction ... was deadlocked ... chosen as the
+ * deadlock victim`, surfaced to the reporter as a bland `create failed: unknown error`.
+ *
+ * WHAT MADE IT EXPENSIVE is that the victim is chosen by the server, so the FAILING CHECK CHANGES from
+ * run to run. That does not read like contention -- it reads like a flaky suite, or worse, like the
+ * change under test. It was diagnosed twice independently, and confirmed by running the pristine base
+ * commit and watching it fail identically with a different victim. Results were quietly unreliable for
+ * days before anyone proved why.
+ *
+ * The fix is to make concurrency SAFE rather than asking people to take turns, since "don't run the
+ * suite while I'm running the suite" is a convention that holds right up until someone is in a hurry.
+ * An exclusive application lock means a second run WAITS and then produces a real result, instead of
+ * racing and producing a plausible-looking wrong one.
+ *
+ * Why an applock and not a table or a lock file: it is held by the SQL SESSION, so it cannot outlive
+ * the process that took it. A killed run, a crashed run, a Ctrl-C -- the connection drops and the lock
+ * is released by the server. A lock file would need cleanup logic that is itself a source of stale-lock
+ * bugs, and would not survive a machine with two checkouts pointed at one database, which is exactly
+ * this situation.
+ *
+ * THE LOCK GETS ITS OWN CONNECTION, at `max: 1`. `@LockOwner = 'Session'` binds the lock to the
+ * session that took it, and a pooled request can be handed any connection in the pool -- so acquiring
+ * on the shared `pool` could take the lock on one session and release it from another, which fails.
+ * A dedicated single-connection pool makes "the session" unambiguous for the whole run.
+ */
+const LOCK_RESOURCE = 'bizapps-sales:integration-suite';
+const LOCK_TIMEOUT_MS = Number(process.env.MJ_INTEGRATION_LOCK_TIMEOUT_MS ?? 15 * 60_000);
+
+const lockPool = await new sql.ConnectionPool({
+    server: DB_HOST ?? 'localhost',
+    port: Number(DB_PORT ?? 1433),
+    database: DB_DATABASE,
+    user: DB_USERNAME,
+    password: DB_PASSWORD,
+    options: { trustServerCertificate: true, encrypt: true },
+    pool: { max: 1, min: 1 },
+    requestTimeout: LOCK_TIMEOUT_MS + 30_000, // the request must outlive the lock wait, or mssql times out first
+}).connect();
+
+/**
+ * `sp_getapplock` returns >= 0 on success (0 granted immediately, 1 granted after waiting) and a
+ * negative value on failure: -1 timeout, -2 cancelled, -3 deadlock victim, -999 parameter or other
+ * error. It is a RETURN VALUE, not a result set, so it needs an output parameter to read.
+ */
+async function acquireApplock(timeoutMs) {
+    const request = lockPool.request();
+    // Names must match the proc's own parameter names exactly -- `.execute()` binds by name, so a
+    // `timeout` input silently becomes `@timeout` and never reaches `@LockTimeout`.
+    request.input('Resource', sql.NVarChar(255), LOCK_RESOURCE);
+    request.input('LockMode', sql.NVarChar(32), 'Exclusive');
+    request.input('LockOwner', sql.NVarChar(32), 'Session');
+    request.input('LockTimeout', sql.Int, timeoutMs);
+    const result = await request.execute('sp_getapplock');
+    return result.returnValue;
+}
+
+/**
+ * A ZERO-TIMEOUT PROBE FIRST, purely so the waiting message is honest.
+ *
+ * Printing "waiting" unconditionally would be a lie on the common path, and printing it only after the
+ * blocking call returns would print it after the wait was already over. Probing with timeout 0 tells us
+ * whether the lock is actually contended BEFORE committing to a blocking wait, so the message appears
+ * at the moment the wait starts -- which is the only moment it is useful.
+ *
+ * A PAUSE THAT DOES NOT EXPLAIN ITSELF READS AS A HANG, and someone will Ctrl-C it and conclude the
+ * suite is broken. That is the failure this message exists to prevent.
+ */
+/**
+ * ── A PARENT MAY ALREADY HOLD THE LOCK ON THIS RUN'S BEHALF ─────────────────────────────────────
+ *
+ * `mutate-checks.mjs` runs this suite up to three times for one mutant when a deadlock forces a
+ * retry. Each run used to acquire the lock for itself, so every attempt QUEUED AFRESH behind whatever
+ * else was on the host -- a measured 46.6s on a quiet evening. Three attempts plus two builds then
+ * exceeded the ten-minute ceiling the driver runs under, and a retry that exists to survive deadlocks
+ * had turned into a multiplier on an unrelated wait.
+ *
+ * So the driver acquires ONCE, around the whole attempt sequence, and sets this variable. The
+ * queue is paid once per mutant instead of once per attempt, and a deadlock retry re-runs
+ * immediately.
+ *
+ * THE CONTRACT IS NARROW AND WORTH STATING: this only skips ACQUIRING. It does not weaken the
+ * serialisation, because the parent is holding the same lock for the same resource for longer than
+ * this process lives. Setting it by hand, with nothing actually holding the lock, disables the
+ * protection entirely -- which is why it names a parent rather than reading like a "skip lock" flag.
+ */
+const PARENT_HOLDS_LOCK = process.env.MJ_INTEGRATION_LOCK_HELD_BY_PARENT === '1';
+
+const probe = PARENT_HOLDS_LOCK ? 0 : await acquireApplock(0);
+if (PARENT_HOLDS_LOCK) {
+    console.log('  (suite lock held by the parent process — not re-acquiring)');
+}
+if (probe < 0) {
+    console.log(
+        `
+  ⏳ another integration run holds the suite lock on ${DB_DATABASE}.` +
+            `
+     WAITING up to ${Math.round(LOCK_TIMEOUT_MS / 1000)}s for it to finish — this is not a hang.` +
+            `
+     Runs serialise on purpose: overlapping them deadlocks and silently corrupts results.
+`,
+    );
+    const waitStart = Date.now();
+    const granted = await acquireApplock(LOCK_TIMEOUT_MS);
+    /**
+     * AN UNACQUIRED LOCK IS A FAILURE, NOT A REASON TO CARRY ON. Proceeding anyway would reintroduce
+     * exactly the contention this exists to prevent, while now also claiming the lock protected it.
+     * Exit 2 -- the same code this runner uses for "the environment is wrong", distinct from 1 for
+     * "checks failed" -- because nothing was measured either way.
+     */
+    if (granted < 0) {
+        console.error(
+            `
+✖ could not acquire the suite lock '${LOCK_RESOURCE}' within ` +
+                `${Math.round(LOCK_TIMEOUT_MS / 1000)}s (sp_getapplock returned ${granted}).` +
+                `
+  Another run is still holding it, or is wedged. Nothing was measured.` +
+                `
+  Raise MJ_INTEGRATION_LOCK_TIMEOUT_MS if the other run is legitimately this slow.
+`,
+        );
+        await lockPool.close();
+        await pool.close();
+        process.exit(2);
+    }
+    console.log(`  ✔ suite lock acquired after ${((Date.now() - waitStart) / 1000).toFixed(1)}s — starting.
+`);
+}
+
+/**
+ * Released explicitly on the ordinary exits for tidiness, but correctness does not depend on it: the
+ * lock is session-scoped, so closing the pool -- or dying without closing anything -- frees it.
+ */
+async function releaseRunLock() {
+    try {
+        // Nothing to release if the parent holds it; closing the pool is still correct and harmless.
+        await lockPool.close();
+    } catch {
+        /* the session is gone, which already released the lock */
+    }
+}
 
 const { setupSQLServerClient, SQLServerProviderConfigData } = await import(
     '@memberjunction/sqlserver-dataprovider'
@@ -146,6 +299,12 @@ const ORDERS_PACKAGES = [
     // Without it every booking fails with `No GL account is linked for role 'Accounts Receivable'`
     // even when the links are sitting in the table — the resolver is reading an empty cache, not an
     // empty database, and the message cannot tell you which.
+    // COMMON FIRST OF ALL, because the `activities` bundle writes through common's generated entity
+    // subclasses. Without them `GetEntityObject` resolves a bare `BaseEntity`, which has no `Title` or
+    // `ActivityTypeID` setter -- so every assignment silently becomes an own property, the save writes a
+    // row of defaults, and the checks fail on an assertion about a field they appeared to set. That
+    // failure names the field, not the missing import, which is why it is worth the comment.
+    ['@mj-biz-apps/common-entities', 'LoadGeneratedEntities'],
     ['@mj-biz-apps/accounting-entities', 'LoadGeneratedEntities'],
     ['@mj-biz-apps/accounting-engine-base', null],
     ['@mj-biz-apps/accounting-core-entities-server', null],
@@ -159,6 +318,9 @@ const ORDERS_PACKAGES = [
     // unnoticed.
     ['@mj-biz-apps/contracts-entities', 'LoadGeneratedEntities'],
     ['@mj-biz-apps/contracts-core-entities-server', null],
+    // TASKS, for close-won-tasks. Its entities have to be REGISTERED, not merely migrated: the checks
+    // resolve Tasks/Task Links/Task Assignments by name and the service saves through them.
+    ['@mj-biz-apps/tasks-entities', 'LoadGeneratedEntities'],
 ];
 const optionalLoads = [];
 
@@ -173,6 +335,63 @@ const optionalLoads = [];
  * Folder names are NOT assumed (`EngineBase` vs `engine-base` vs `Entities`) — the name in
  * package.json is the only thing checked, so this keeps working when a sibling reorganises.
  */
+async function resolveFromConsumer(name) {
+    const { createRequire } = await import('node:module');
+    /**
+     * ANCHORED AT THE PACKAGES THAT DECLARE IT, STARTING WITH `packages/IntegrationTests`.
+     *
+     * This probe used to `import(name)` from the REPO ROOT. That works under a hoisted node_modules and
+     * fails under a strict one, because the root declares only sales' own two packages — it is not a
+     * consumer of orders or common and has no business knowing about them. Under a clean registry
+     * install every downstream package resolved as `absent`, the suite ran 13 checks of 127, and printed
+     * a green tick.
+     *
+     * Declaring them at the root would fix the symptom by making a lie true: the root would carry
+     * dependencies nothing there imports, and they would drift the day a package stopped importing them.
+     * IntegrationTests owns these checks, so its resolution is the one that should matter — but it
+     * declares only two of the nine probed names, so the other consumers follow it. `orders-entities`
+     * lives in CoreEntitiesServer, Angular and Entities; anchoring solely at IntegrationTests would
+     * resolve two and call the rest absent.
+     */
+    for (const consumer of ['IntegrationTests', 'CoreEntitiesServer', 'Entities', 'Angular', 'Server', 'Actions']) {
+        try {
+            const require = createRequire(join(REPO_ROOT, 'packages', consumer, 'package.json'));
+            return require.resolve(name);
+        } catch {
+            // try the next consumer
+        }
+    }
+    return null;
+}
+
+/**
+ * Every `@mj-biz-apps/*` package some sales package DECLARES, read from the manifests at run time.
+ *
+ * This is the line between "not installed on this host" and "resolution is broken". Accounting,
+ * contracts and `orders-core-entities-server` are declared NOWHERE in sales — they are optional
+ * downstream apps and this runner is documented to run whichever of their bundles a host supports.
+ * `common-entities`, `orders-entities` and `tasks-entities` ARE declared, so sales does not build
+ * without them and they must always resolve. Computed, not listed, so it cannot drift.
+ */
+function declaredDownstream() {
+    const out = new Set();
+    const manifests = ['package.json', ...['Actions', 'Angular', 'CoreEntitiesServer', 'Entities',
+        'IntegrationTests', 'Server'].map((d) => join('packages', d, 'package.json'))];
+    for (const rel of manifests) {
+        try {
+            const m = JSON.parse(readFileSync(join(REPO_ROOT, rel), 'utf8'));
+            for (const block of [m.dependencies, m.devDependencies]) {
+                for (const name of Object.keys(block ?? {})) {
+                    if (name.startsWith('@mj-biz-apps/') && !name.startsWith('@mj-biz-apps/sales')) out.add(name);
+                }
+            }
+        } catch {
+            // an unreadable manifest contributes nothing rather than failing the run
+        }
+    }
+    return out;
+}
+
 async function resolveSiblingPackage(name) {
     const { readdirSync, existsSync, readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
@@ -214,7 +433,9 @@ for (const [pkg, anchor] of (process.env.MJ_SKIP_DOWNSTREAM === '1' ? [] : ORDER
     try {
         mod = await import(pkg);
     } catch {
-        const entry = await resolveSiblingPackage(pkg);
+        // The CONSUMER's resolution first: a registry install puts these under the package that
+        // declares them, never under the root this file runs from.
+        const entry = (await resolveFromConsumer(pkg)) ?? (await resolveSiblingPackage(pkg));
         if (!entry) {
             optionalLoads.push(`${pkg}: absent`);
             continue;
@@ -235,6 +456,54 @@ for (const [pkg, anchor] of (process.env.MJ_SKIP_DOWNSTREAM === '1' ? [] : ORDER
     optionalLoads.push(`${pkg}: loaded`);
 }
 console.log(`  downstream packages -> ${optionalLoads.join(' | ')}`);
+
+/**
+ * ── AN UNRESOLVABLE *DECLARED* PACKAGE IS A FAILURE, NOT A LOG LINE ────────────────────
+ *
+ * `selected === 0` is the wrong threshold and it let the worst outcome through. With every downstream
+ * package unresolvable the suite still selected THIRTEEN checks — the bundles needing no sibling — so
+ * the zero-guard never fired and the run printed a GREEN TICK over 114 checks that never executed.
+ * Measured against published packages. A green tick for work that did not happen is the failure this
+ * harness exists to prevent, and it is worse than a red: nobody investigates a pass.
+ *
+ * SCOPED TO DECLARED PACKAGES, and the scope is the substance. "Any absence fails" would be wrong in
+ * the other direction: accounting and contracts are declared nowhere, are optional per host, and this
+ * runner is documented to run whichever of their bundles a host supports. What cannot legitimately be
+ * absent is a package sales DECLARES, because sales does not build without it — so its absence means
+ * resolution broke, which is the measured bug.
+ *
+ * `MJ_SKIP_DOWNSTREAM=1` is already the deliberate opt-out for bisecting, so no new switch is needed.
+ */
+const declaredPkgs = declaredDownstream();
+const unavailable = optionalLoads.filter((l) => {
+    if (!l.endsWith(': absent') && !l.includes(': FAILED')) return false;
+    return declaredPkgs.has(l.slice(0, l.lastIndexOf(': ')));
+});
+if (unavailable.length > 0 && process.env.MJ_SKIP_DOWNSTREAM !== '1') {
+    console.error(
+        [
+            '',
+            `✖ ${unavailable.length} DECLARED DOWNSTREAM PACKAGE(S) COULD NOT BE LOADED. The bundles that`,
+            '  need them will not register, so this run would report a PASS for checks that never ran.',
+            '',
+            ...unavailable.map((l) => `    ${l}`),
+            '',
+            '  These are packages sales DECLARES, so they cannot legitimately be missing. Optional apps',
+            '  (accounting, contracts) are not counted here.',
+            '',
+            '  A failure rather than a warning because the COUNT guard cannot catch it: with every',
+            '  downstream package missing the suite still selects the bundles that need none and exits 0',
+            '  having run a fraction of the checks. Measured: 13 of 127.',
+            '',
+            '  If they ARE installed this is a RESOLUTION problem, not an install problem. They resolve',
+            '  from the packages that declare them, starting with packages/IntegrationTests.',
+            '',
+            '  To run deliberately without them:  MJ_SKIP_DOWNSTREAM=1 npm run test:integration',
+            '',
+        ].join(String.fromCharCode(10)),
+    );
+    process.exit(2);
+}
 
 const { IntegrationCheckRegistry } = await import('@memberjunction/testing-integration');
 await import('@mj-biz-apps/sales-integration-tests'); // side effect: registers the bundles
@@ -281,6 +550,33 @@ const linkedApps = new Set(
         .filter(([, pkg]) => optionalLoads.includes(`${pkg}: loaded`))
         .map(([app]) => app),
 );
+/**
+ * -- THE RUN'S OWN DURATION, REPORTED, BECAUSE IT IS THE DISCRIMINATOR ------------------------------
+ *
+ * This host produces intermittent failures whose IDENTITY changes between runs, and two sessions
+ * independently found that the bad runs are SLOW: 170-187s against a normal ~120s. Duration is therefore
+ * the one signal separating "a real failure" from "this run was fighting for the machine" -- and it was
+ * not printed, so every report of a red had to be argued from a memory of how long it felt.
+ *
+ * Measured on a quiet host on 2026-08-21: six full runs at 90-102s, five of them 121/0 and one losing a
+ * single activities check. Conditions varied deliberately -- quiet, immediately after a Playwright run,
+ * and under a concurrent full build -- and none reproduced the multi-check failures seen earlier that day.
+ * That is consistent with load, and this line is what makes the correlation checkable next time instead of
+ * remembered.
+ *
+ * ── DO NOT READ AN INTERMEDIATE VALUE AS DIAGNOSTIC YET ────────────────────────────────────────────
+ *
+ * The floor itself moves. Runs called quiet by the same person on the same machine read 90-91s earlier in
+ * the day and 63s that evening -- roughly 30% -- so there is no established baseline to measure a middling
+ * number against. Only two things are currently defensible: over ~150s WITH a failure has correlated with
+ * the multi-check red, and 60-102s has correlated with clean. Anything between is unclassified, and calling
+ * a 130s run "slow" would be inventing a threshold rather than reporting one.
+ *
+ * The honest use of this number today is comparative -- same session, same conditions, one run against the
+ * next -- not absolute.
+ */
+const RUN_STARTED_AT = Date.now();
+
 const ALL_BUNDLES = Object.entries(MANIFEST.bundles)
     .filter(([, spec]) => spec.requires === null || linkedApps.has(spec.requires))
     .map(([bundle]) => bundle);
@@ -371,7 +667,56 @@ if (failures.length && process.env.IT_VERBOSE) {
     for (const f of failures) console.log(`\n--- ${f.Id} ---\n${f.stack}`);
 }
 
-console.log(`\n${fail === 0 && selected > 0 ? '✅' : '❌'} ${pass} passed, ${fail} failed, ${skipped} skipped`);
+const RUN_SECONDS = Math.round((Date.now() - RUN_STARTED_AT) / 1000);
+console.log(`\n${fail === 0 && selected > 0 && skipped === 0 ? '✅' : '❌'} ${pass} passed, ${fail} failed, ${skipped} skipped` + ` -- ${RUN_SECONDS}s`);
+
+/**
+ * A red on a SLOW run is not evidence on its own. Said here, next to the failure, rather than in a
+ * document nobody opens with a red in front of them.
+ */
+if (fail > 0 && RUN_SECONDS > 150) {
+    console.log(
+        `\n  WARNING: this run took ${RUN_SECONDS}s. Runs over ~150s on this host have produced failures`
+        + `\n  whose identity changes between runs, so REPEAT before acting on the red, and say which runs`
+        + `\n  you are reporting. A quiet host completes in 90-120s.`,
+    );
+}
+
+/**
+ * ── A SKIPPED CHECK IS A CHECK THAT DID NOT RUN, WHATEVER THE TALLY SAYS ──────────
+ *
+ * `selected === 0` was the wrong threshold for the SECOND time. The bare documented command printed
+ * `✅ 7 passed, 0 failed, 125 skipped` in one second and exited 0, because seven is not zero — a
+ * green tick over 125 checks nobody ran, on the exact command `docs/QA-GUIDE.md` tells a tester to
+ * use. It reads as "the suite is fine"; it took a maintainer an hour to conclude the suite was broken.
+ *
+ * KEYED ON THE CAUSE, NOT ON A FRACTION. `skipped` has exactly one source in this runner —
+ * `RequiresMutation && !RUN_MUTATIONS` at the filter above — so "any skip without an opt-out" is
+ * precise and needs no threshold anybody would have to justify. Bundles excluded for a missing
+ * sibling reduce the candidate set; they do not count as skips, so they are unaffected.
+ *
+ * The opt-out is explicit and the same shape as `MJ_SKIP_DOWNSTREAM`: a deliberate narrow run stays
+ * green, an accidental one goes red.
+ */
+if (skipped > 0 && process.env.MJ_ALLOW_SKIPPED !== '1') {
+    console.error(
+        [
+            '',
+            `✖ ${skipped} OF ${skipped + selected} CHECKS DID NOT RUN, so this result proves far less than it`,
+            '  appears to. They are RequiresMutation and RUN_MUTATION_TESTS is not set.',
+            '',
+            `  ${pass} passed / ${fail} failed is a tally over ${selected} check(s), not over the suite.`,
+            '',
+            '  Run the whole suite:      npm run test:integration',
+            '  Deliberately narrow run:  MJ_ALLOW_SKIPPED=1 node test-harnesses/integration.mjs',
+            '',
+        ].join(String.fromCharCode(10)),
+    );
+    flushLog();
+    await releaseRunLock();
+    await pool.close();
+    process.exit(2);
+}
 
 // ── The vacuous-pass guard ─────────────────────────────────────────────────────────────────────
 if (selected === 0) {
@@ -382,10 +727,12 @@ if (selected === 0) {
             '  Re-run as:  RUN_MUTATION_TESTS=1 npm run test:integration\n',
     );
     flushLog();
+    await releaseRunLock();
     await pool.close();
     process.exit(2);
 }
 
 flushLog();
+await releaseRunLock();
 await pool.close();
 process.exit(fail === 0 ? 0 : 1);

@@ -51,11 +51,23 @@ export default async function globalSetup(): Promise<void> {
   const problems: string[] = [];
 
   if (!(await reachable(API_BASE_URL))) {
-    problems.push(`MJAPI is not reachable at ${API_BASE_URL}\n      fix:  npm run start:api`);
+    // NOT `npm run start:api` -- that script does not exist in this repo and never has. Sales retired
+    // its own API, so both servers belong to the MJ host you link into. Naming a script that isn't
+    // here sends the reader to fix the wrong thing; the usual cause is the port, not a dead server.
+    problems.push(
+      `MJAPI is not reachable at ${API_BASE_URL}\n` +
+        `      check:  the HOST serves MJAPI on 4143 (docs/QA-GUIDE.md). Sales' own GRAPHQL_PORT=4141\n` +
+        `              is vestigial. Override with MJAPI_PORT=<port> if yours differs.\n` +
+        `      start:  from the MJ checkout, not from this repo`,
+    );
   }
   if (!(await reachable(EXPLORER_BASE_URL))) {
+    // Explorer is Angular. The old hint said "wait for Vite" -- wrong toolchain, wrong repo.
     problems.push(
-      `MJExplorer is not reachable at ${EXPLORER_BASE_URL}\n      fix:  npm run start:explorer   (wait for Vite to finish compiling)`,
+      `MJExplorer is not reachable at ${EXPLORER_BASE_URL}\n` +
+        `      check:  it must serve on 4341 -- the Entra redirect URI is registered for that origin,\n` +
+        `              so another port fails the login round-trip rather than this check.\n` +
+        `      start:  ng serve from the MJ host's MJExplorer, not from this repo`,
     );
   }
 

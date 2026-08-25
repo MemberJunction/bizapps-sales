@@ -34,12 +34,14 @@ export interface StageLookup extends DealLookup {
     DisplayOrder: number;
     Probability: number | null;
     ForecastCategoryTypeID: string | null;
+    /**
+     * The status this stage lands a deal in. Stages carry NO IsWon/IsClosed of their own -- they point at
+     * a `DealStatusType` that does, which is what makes "Closed Won" a label a pipeline may rename.
+     * Needed by any surface that must know whether arriving here would LOCK the deal.
+     */
+    DealStatusTypeID: string | null;
 }
 
-/** A line type plus the one flag anything downstream actually branches on. */
-export interface LineTypeLookup extends DealLookup {
-    IsRecurring: boolean;
-}
 
 /**
  * A deal status plus its BEHAVIOUR FLAGS.
@@ -54,6 +56,8 @@ export interface DealStatusLookup extends DealLookup {
     IsClosed: boolean;
     IsWon: boolean;
     IsLost: boolean;
+    /** Entering this status freezes the deal, its lines and its team. Enforced server-side. */
+    LocksDeal: boolean;
 }
 
 /**
@@ -75,7 +79,6 @@ export interface DealWorkspaceLookups {
     DealStatusTypes: DealStatusLookup[];
     LossReasons: LossReasonLookup[];
     ForecastCategoryTypes: DealLookup[];
-    LineTypes: LineTypeLookup[];
     Accounts: DealLookup[];
     Contacts: DealLookup[];
     Employees: DealLookup[];
@@ -89,7 +92,6 @@ export function EmptyLookups(): DealWorkspaceLookups {
         DealStatusTypes: [],
         LossReasons: [],
         ForecastCategoryTypes: [],
-        LineTypes: [],
         Accounts: [],
         Contacts: [],
         Employees: [],

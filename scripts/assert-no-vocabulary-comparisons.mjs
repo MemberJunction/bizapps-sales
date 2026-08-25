@@ -50,12 +50,23 @@ import { join, relative, sep } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
-/** Server-side source only. The UI may legitimately show a name; it may not BRANCH on one. */
+/**
+ * EVERY package that carries hand-written source — not just the server ones.
+ *
+ * This listed four of six. `packages/Angular/src` and `packages/Entities/src` were absent, so rule
+ * two held where the gate looked and was simply unverified everywhere else — and the UI is exactly
+ * where "show the name" slides into "branch on the name", because both look like rendering.
+ *
+ * The old comment said the UI may show a name but may not BRANCH on one. That is the right rule,
+ * and it was being enforced on the half of the codebase least likely to break it.
+ */
 const SEARCH_ROOTS = [
     'packages/Server/src',
     'packages/CoreEntitiesServer/src',
     'packages/Actions/src',
     'packages/IntegrationTests/src',
+    'packages/Angular/src',
+    'packages/Entities/src',
 ];
 
 /** Never generated code, never build output, never tests' own fixture vocabulary. */
@@ -144,16 +155,30 @@ function* walk(dir) {
             if (!SKIP_DIR.has(name)) yield* walk(full);
         } else if (/\.(ts|mts|cts)$/.test(name) && !/\.d\.ts$/.test(name)) {
             yield full;
+        } else if (/\.html$/.test(name)) {
+            /**
+            * ANGULAR TEMPLATES, which were invisible to this gate at any root.
+            *
+            * `@if (row.DealStatusType === 'Closed Won')` in a template is the same violation as
+            * in a component, so adding the Angular root while walking only `.ts` would still
+            * have missed it. A template IS source; splitting a component across two files is an
+            * Angular implementation detail, not a statement about what counts as code.
+            */
+            yield full;
         }
     }
 }
 
 const violations = [];
 let scanned = 0;
+/** Per-root tally, so a root that silently matches nothing is detectable. */
+const perRoot = new Map();
 
 for (const searchRoot of SEARCH_ROOTS) {
+    let rootCount = 0;
     for (const file of walk(join(ROOT, searchRoot))) {
         scanned++;
+        rootCount++;
         const lines = readFileSync(file, 'utf8').split(/\r?\n/);
         lines.forEach((line, i) => {
             const code = line.trim();
@@ -172,6 +197,53 @@ for (const searchRoot of SEARCH_ROOTS) {
             }
         });
     }
+    perRoot.set(searchRoot, rootCount);
+}
+
+
+/**
+ * ── AN EMPTY SCAN IS NOT A PASS, AND NEITHER IS A PARTIAL ONE ──────────────────────────────────
+ *
+ * This gate is a HARD CI gate: it is what makes "enforced by a grep" true rather than aspirational.
+ * Until this block existed it could report `clean` having read nothing at all. `walk()` swallows a
+ * missing directory with a bare `catch { return; }` — correct in itself, a package that has not been
+ * scaffolded is not a violation — and the success path below tested only `violations.length`. So a
+ * package rename, a move of `src/`, or a sparse checkout skipped every root and CI went green on a
+ * gate measuring nothing. The file contained no `process.exit(2)` anywhere.
+ *
+ * TWO GUARDS, BECAUSE THERE ARE TWO WAYS TO MEASURE LESS THAN YOU CLAIM:
+ *
+ *   1. Nothing scanned at all. The loud case, and the one the sibling money gate already caught.
+ *   2. A root that contributed ZERO files while others contributed plenty. The quiet case: delete one
+ *      of six roots and the scan silently loses about a sixth of the codebase, while the summary line
+ *      still says `clean` and the number beside it still looks reassuringly large.
+ *
+ * The second is why a per-root count exists rather than just a total. A root is DECLARED here, so a
+ * root that yields nothing is a fact about the declaration, not about the code — either the path moved
+ * and this list is stale, or the package is gone and the list should say so. Both are edits somebody
+ * should make deliberately and a reviewer should see. Neither is something a gate may decide to
+ * tolerate on its own.
+ *
+ * Exit 2, not 1: "checks failed" and "the checker did not run" are different outcomes and CI should be
+ * able to tell them apart. Same convention as the money gate, the drift gate, the spec gate and the
+ * integration runner.
+ */
+if (scanned === 0) {
+    console.error(`\nvocabulary-grep: ERROR — no source files found under any of:`);
+    for (const r of SEARCH_ROOTS) console.error(`    ${r}`);
+    console.error('\nA gate that measures nothing must not report success. Nothing was checked.\n');
+    process.exit(2);
+}
+
+const emptyRoots = SEARCH_ROOTS.filter((r) => (perRoot.get(r) ?? 0) === 0);
+if (emptyRoots.length > 0) {
+    console.error(`\nvocabulary-grep: ERROR — ${emptyRoots.length} of ${SEARCH_ROOTS.length} declared root(s) matched no files:`);
+    for (const r of emptyRoots) console.error(`    ${r}`);
+    console.error(`\nThe other roots scanned ${scanned} file(s), so this would have printed "clean" while`);
+    console.error('silently covering less of the codebase than it claims. Either the path moved and this');
+    console.error("list is stale, or the package is gone and this list should say so — both are edits to");
+    console.error('make on purpose, in SEARCH_ROOTS, where a reviewer can see them.\n');
+    process.exit(2);
 }
 
 if (violations.length === 0) {

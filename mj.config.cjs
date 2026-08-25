@@ -140,6 +140,11 @@ module.exports = {
     '__mj_BizAppsAccounting',
     '__mj_BizAppsOrders',
     '__mj_BizAppsContracts',
+    // Parity with orders' list. Absent on this host today, so naming them is inert — but a schema
+    // that arrives later would otherwise be silently picked up by SALES' CodeGen and its entities
+    // written into this repo. Naming an absent schema costs nothing; discovering the omission after
+    // an install does not. __mj_UDT is MJ's user-defined-type schema and is never an app's to emit.
+    '__mj_BizAppsIssues', '__mj_BizAppsCommittees', '__mj_BizAppsSecureMessaging', '__mj_UDT',
   ],
 
   /**

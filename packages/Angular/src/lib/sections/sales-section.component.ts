@@ -72,9 +72,14 @@ import {
     type SalesNavBadges,
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
+import { DealBoardComponent, DEFAULT_DISPLAY_CURRENCY } from '../board/deal-board.component';
 import { DealWorkspaceComponent } from '../workspace/deal-workspace.component';
-import { DealWorkspaceService, type DealRosterRow } from '../workspace/deal-workspace.service';
-import type { DealStatusLookup } from '../workspace/deal-workspace.types';
+import {
+    DealWorkspaceService,
+    type DealDashboardSummary,
+    type DealRosterRow,
+} from '../workspace/deal-workspace.service';
+import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
 
 /**
  * The account entity, for opening a customer as its own Explorer tab.
@@ -130,6 +135,7 @@ function UtcDatePart(value: string | Date): string {
         MJLeftNavContentComponent,
         MJButtonDirective,
         DealWorkspaceComponent,
+        DealBoardComponent,
     ],
     changeDetection: ChangeDetectionStrategy.OnPush,
     templateUrl: './sales-section.component.html',
@@ -160,8 +166,25 @@ export class MJSSalesSectionComponent implements OnInit {
     /** Set when the roster could not be read, or a row could not be opened. Shown verbatim. */
     public Message = '';
 
-    /** Status flags, so nothing here has to compare a status NAME. */
-    private statuses: DealStatusLookup[] = [];
+
+    /**
+     * The four tile figures, from `Sales: Dashboard Summary`.
+     *
+     * NULL means the QUERY DID NOT RUN, which the template renders differently from a database with
+     * no deals: the query aggregates, so it returns a row of zeroes over an empty table. Collapsing
+     * those two states would show a confident set of zeroes when the truth is that nothing was read.
+     */
+    private summary: DealDashboardSummary | null = null;
+
+    /**
+     * Pipelines, stages and statuses the BOARD renders from.
+     *
+     * Public because they are `@Input()`s on the board; held here rather than fetched by the board so the
+     * two pages read one roster and one lookup set, and cannot disagree about what exists.
+     */
+    public Pipelines: PipelineLookup[] = [];
+    public Stages: StageLookup[] = [];
+    public DealStatusTypes: DealStatusLookup[] = [];
 
     public async ngOnInit(): Promise<void> {
         this.Page = DefaultPageFor(this.Section);
@@ -206,14 +229,19 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Loading = true;
         this.cdr.detectChanges();
 
-        const [roster, lookups] = await Promise.all([
+        const [roster, lookups, summary] = await Promise.all([
             this.service.LoadRoster(),
-            // Only needed for the status FLAGS the KPIs branch on. The workspace loads its own copy;
-            // one extra read on section mount is cheaper than threading state between the two.
+            // Still needed: the BOARD renders from these, and StatusTone reads them for the roster
+            // pill. The KPI tiles no longer do -- their flags are applied server-side by the query.
             this.service.LoadLookups(),
+            // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
+            this.service.LoadDashboardSummary(),
         ]);
         this.Deals = roster;
-        this.statuses = lookups.DealStatusTypes;
+        this.summary = summary;
+        this.Pipelines = lookups.Pipelines;
+        this.Stages = lookups.Stages;
+        this.DealStatusTypes = lookups.DealStatusTypes;
         this.Loading = false;
         if (!roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
@@ -285,33 +313,70 @@ export class MJSSalesSectionComponent implements OnInit {
      * renaming "Won" to "Signed".
      */
     public get Kpis(): SalesKpi[] {
-        const open = this.Deals.filter((d) => this.hasFlag(d, 'IsOpen'));
-        const won = this.Deals.filter((d) => this.hasFlag(d, 'IsWon'));
-        const slipped = this.SlippedDeals;
+        const s = this.summary;
+        if (!s) {
+            // The query did not run. Say so rather than rendering four zeroes, which would read as a
+            // quiet, confident 'you have no pipeline'.
+            return [
+                { Label: 'Open pipeline', Value: '—', Footnote: 'figures unavailable', Tone: 'warn' },
+                { Label: 'Open deals', Value: '—', Footnote: 'figures unavailable' },
+                { Label: 'Past expected close', Value: '—', Footnote: 'figures unavailable' },
+                { Label: 'Won', Value: '—', Footnote: 'figures unavailable' },
+            ];
+        }
 
-        // A rollup of figures that are already answers — NOT pricing arithmetic. See the file header.
-        const openValue = open.reduce((sum, d) => sum + (d.Amount ?? 0), 0);
+        /**
+         * HOW MUCH OF THAT TOTAL NOBODY PRICED.
+         *
+         * The tile is the most-read number on the page and it was the least qualified: a sum of stored
+         * `Deal.Amount` values presented as one authoritative figure, with the provenance flag sitting
+         * unread on every row that fed it. On the data in the host database every deal carries
+         * `AmountIsComputed = 0`, so the tile was reporting entirely hand-typed money as pipeline value.
+         * The footnote now says so.
+         */
+        /**
+         * ── EXPRESSED FROM THE SUMMARY, NOT FROM A LOCAL THAT NO LONGER EXISTS ──────────────────────
+         *
+         * The board branch computed this by filtering an `open` array and dividing by `open.length`.
+         * Neither survives the merge: the dashboard branch replaced that whole block with one summary
+         * QUERY, so `open` and `openValue` are gone and this code would not have compiled. Auto-merge
+         * kept the consumer and dropped the producer — the failure mode worth naming, because the file
+         * still looked plausible.
+         *
+         * It resolves better than it started. `DealDashboardSummary` already carries
+         * `OpenPricedAmount` / `OpenStatedAmount` / `OpenNoAmountCount`, computed in SQL over every open
+         * deal rather than over whatever the roster page happened to load — so the footnote is now exact
+         * where the hand-filtered version was limited to the rows on screen. It also reports MONEY rather
+         * than a deal count, which is the question a reader of a money tile is actually asking.
+         */
+        const statedNote = s.OpenStatedAmount === 0
+            ? ''
+            : s.OpenPricedAmount === 0
+                ? ' · all stated, none priced'
+                : ` · ${this.money(s.OpenStatedAmount)} stated`;
 
         return [
             {
                 Label: 'Open pipeline',
-                Value: this.money(openValue),
-                Footnote: `across ${open.length} open ${open.length === 1 ? 'deal' : 'deals'}`,
+                Value: this.money(s.OpenAmount),
+                // Dashboard's summary figures, with the board branch's provenance suffix. Both halves
+                // are kept: the currency-correct total, and the caveat about who produced it.
+                Footnote: `across ${s.OpenCount} open ${s.OpenCount === 1 ? 'deal' : 'deals'}${statedNote}`,
             },
             {
                 Label: 'Open deals',
-                Value: String(open.length),
-                Footnote: `of ${this.Deals.length} total`,
+                Value: String(s.OpenCount),
+                Footnote: `of ${s.TotalCount} total`,
             },
             {
                 Label: 'Past expected close',
-                Value: String(slipped.length),
+                Value: String(s.PastExpectedCloseCount),
                 Footnote: 'still open, close date gone',
-                Tone: slipped.length ? 'warn' : undefined,
+                Tone: s.PastExpectedCloseCount ? 'warn' : undefined,
             },
             {
                 Label: 'Won',
-                Value: String(won.length),
+                Value: String(s.WonCount),
                 Footnote: 'closed won to date',
             },
         ];
@@ -320,47 +385,80 @@ export class MJSSalesSectionComponent implements OnInit {
     /**
      * Open deals whose expected close date has already passed.
      *
-     * Compared in UTC against a date-only string, because `ExpectedCloseDate` is a DATE and everything
-     * stored is UTC — using local-time getters here would move the boundary by a day for anyone west of
-     * Greenwich.
+     * READS THE FLAG THE ROSTER QUERY ALREADY APPLIED. `Sales: Deal Roster` computes
+     * `IsPastExpectedClose` against `CAST(SYSUTCDATETIME() AS DATE)`, so the comparison happens on the
+     * server against the server's clock.
+     *
+     * That is a real improvement over what this replaced, not just a relocation. The old version built
+     * a UTC date string here with `getUTC*` getters specifically to avoid the boundary moving a day
+     * for anyone west of Greenwich -- a correct workaround for a problem the browser should never have
+     * been asked to solve. Now the client's clock is not involved at all.
+     *
+     * The COUNT on the tile comes from the summary query rather than from this list, so the badge and
+     * the tile cannot disagree about how many there are while the roster is still loading.
      */
     public get SlippedDeals(): DealRosterRow[] {
-        const today = new Date();
-        const todayUtc = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
-        return this.Deals.filter(
-            (d) => this.hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate && UtcDatePart(d.ExpectedCloseDate) < todayUtc,
-        );
+        return this.Deals.filter((d) => d.IsPastExpectedClose === true);
     }
-
     public get Badges(): SalesNavBadges {
-        return { Slipped: this.SlippedDeals.length };
+        // The summary's count when it ran, the list's length otherwise -- so the badge still says
+        // something true if the query failed but the roster loaded.
+        return { Slipped: this.summary?.PastExpectedCloseCount ?? this.SlippedDeals.length };
     }
 
-    /** The handful of deals worth showing on a dashboard — soonest expected close first. */
+    /**
+     * The handful of deals worth showing on a dashboard — soonest expected close first.
+     *
+     * IT SORTS, rather than trusting the roster query's `ORDER BY` to still be
+     * `ExpectedCloseDate ASC` when someone changes it for a different reason. Correct output either way
+     * today; the difference is that the comment above is now enforced by the code beneath it instead of
+     * by a clause two files away. `slice()` first, so the copy is small and `sort()` never mutates the
+     * shared `Deals` array — an in-place sort here would silently reorder the board.
+     *
+     * The dates are DATE strings in UTC (`YYYY-MM-DD`), so lexical comparison IS chronological. No
+     * `new Date()` involved, which is what keeps this free of the local-midnight drift `SlippedDeals`
+     * has to work around.
+     */
     public get ClosingSoon(): DealRosterRow[] {
-        return this.Deals.filter((d) => this.hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate).slice(0, 8);
+        return this.Deals.filter((d) => d.IsOpen && !!d.ExpectedCloseDate)
+            .slice()
+            .sort((a, b) => UtcDatePart(a.ExpectedCloseDate!).localeCompare(UtcDatePart(b.ExpectedCloseDate!)))
+            .slice(0, 8);
     }
 
     // ── Display helpers ────────────────────────────────────────────────────────
 
-    /** True when a deal's status carries the given behaviour flag. */
-    private hasFlag(row: DealRosterRow, flag: 'IsOpen' | 'IsWon' | 'IsLost' | 'IsClosed'): boolean {
-        if (!row.DealStatusTypeID) {
-            return false;
-        }
-        const status = this.statuses.find((s) => s.ID === row.DealStatusTypeID);
-        return status ? status[flag] === true : false;
-    }
 
     /**
      * A whole-currency figure. Formatting only — it neither derives nor rounds a stored value; the
      * number displayed is whatever came back, shown without decimals.
      */
-    private money(value: number): string {
-        return value.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+    private money(value: number | string | null | undefined): string {
+        /**
+         * COERCE BEFORE FORMATTING, because `toLocaleString` fails SILENTLY on a string.
+         *
+         * `String.prototype.toLocaleString` exists and ignores the options object entirely, so a value
+         * arriving as "27480.0000" renders as `27480.0000` -- no symbol, no separators, no error, and
+         * nothing in the output saying formatting did not happen. It looks like a styling bug rather
+         * than a type one, which is why it would survive review.
+         *
+         * Measured: this provider returns numbers today. The coercion is here because the cast that
+         * guaranteed it was an assertion, and because the browser reaches these figures over a
+         * transport this has not been tested against.
+         */
+        const n = Number(value);
+        if (!Number.isFinite(n)) {
+            // Never render NaN as money. An em dash is the same "no figure" the roster already uses.
+            return '—';
+        }
+        return n.toLocaleString(undefined, {
+            style: 'currency',
+            currency: DEFAULT_DISPLAY_CURRENCY,
+            maximumFractionDigits: 0,
+        });
     }
 
-    public Money(value: number | null): string {
+    public Money(value: number | string | null): string {
         return value === null || value === undefined ? '—' : this.money(value);
     }
 
@@ -369,13 +467,13 @@ export class MJSSalesSectionComponent implements OnInit {
      * Returns a class name; the CSS decides what it looks like.
      */
     public StatusTone(row: DealRosterRow): string {
-        if (this.hasFlag(row, 'IsWon')) {
+        if (row.IsWon) {
             return 'ok';
         }
-        if (this.hasFlag(row, 'IsLost')) {
+        if (row.IsLost) {
             return 'err';
         }
-        if (this.hasFlag(row, 'IsOpen')) {
+        if (row.IsOpen) {
             return 'open';
         }
         return 'muted';

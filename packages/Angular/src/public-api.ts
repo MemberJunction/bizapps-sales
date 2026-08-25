@@ -45,7 +45,6 @@ import { MJSSalesSectionComponent, SalesDealsSectionResource } from './lib/secti
  */
 import './lib/custom/custom-forms.module';
 import { DealFormComponentExtended } from './lib/custom/deal-form.component';
-import { DealLineFormComponentExtended } from './lib/custom/deal-line-form.component';
 import { DealStageEventFormComponentExtended } from './lib/custom/deal-stage-event-form.component';
 
 // Re-export for consumers
@@ -66,11 +65,15 @@ export * from './lib/nav/sales-nav.model';
 // component the section mounts; it has no resource shim of its own any more — the section owns the tab.
 export { SalesCustomFormsModule } from './lib/custom/custom-forms.module';
 export { DealFormComponentExtended } from './lib/custom/deal-form.component';
-export { DealLineFormComponentExtended } from './lib/custom/deal-line-form.component';
 export { DealStageEventFormComponentExtended } from './lib/custom/deal-stage-event-form.component';
 export { DirtyServerOwnedFields, RefuseServerOwnedEdits } from './lib/custom/server-owned-fields';
 
 export { DealWorkspaceComponent } from './lib/workspace/deal-workspace.component';
+
+// The board. Exported for reuse and no more: it needs no resource shim and no anchor, because the section
+// imports it directly as a standalone component rather than resolving it through the ClassFactory.
+export { DealBoardComponent } from './lib/board/deal-board.component';
+export type { BoardColumn } from './lib/board/deal-board.component';
 export { DealWorkspaceService } from './lib/workspace/deal-workspace.service';
 export type { DealSaveOutcome, DealRosterRow } from './lib/workspace/deal-workspace.service';
 export * from './lib/workspace/deal-workspace.types';
@@ -97,10 +100,12 @@ export function LoadBizAppsSalesClient(): void {
     // nothing references, the priority-2 registration never fires, and the GENERATED form silently wins.
     // The symptom would be a Deal form that lets you edit a locked deal — a missing guard, not an error.
     void DealFormComponentExtended;
-    void DealLineFormComponentExtended;
     void DealStageEventFormComponentExtended;
 
     void CLASS_REGISTRATIONS;
     void MJSSalesSectionComponent;
     void SalesDealsSectionResource;
 }
+
+/** S-US9 — the deal activity timeline. Standalone, so a host can drop it anywhere. */
+export * from './lib/activities/deal-activity-timeline.component';

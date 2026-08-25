@@ -1,0 +1,67 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Win Rate by Count and Value",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "What is our win rate — both by number of deals and by value?",
+      "Description": "Win rate reported BOTH ways (master plan §9.3 measure 5), because they diverge exactly when it matters: winning nine small deals and losing one large one is a 90% rate by count and can be under 50% by value. Reporting either alone hides a pipeline problem for a quarter.",
+      "SQL": "@file:SQL/win-rate.sql",
+      "TechnicalDescription": "Grain: Deal. Denominator is closed deals only (IsClosed), since an open deal has not been decided and including it drags every rate toward zero as the pipeline grows. Won and lost read IsWon / IsLost separately rather than treating \"not won\" as lost, so a closed status that is neither shows as the gap between ClosedCount and Won+Lost. NULLIF guards both divisions — no closed deals returns NULL, which is a different fact from a rate of zero.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {
+      "MJ: Query Parameters": [
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "CompanyID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
+            "SampleValue": "C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PipelineID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "One pipeline. Omit for all pipelines.",
+            "SampleValue": "90111111-0000-4000-A000-000000000001",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodStart",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive start of the window. Omit for no lower bound.",
+            "SampleValue": "2026-01-01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodEnd",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive end of the window. Omit for no upper bound.",
+            "SampleValue": "2026-12-31",
+            "DetectionMethod": "Manual"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-000000000004"
+    }
+  }
+]

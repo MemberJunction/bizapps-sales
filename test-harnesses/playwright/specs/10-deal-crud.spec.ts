@@ -26,8 +26,8 @@ import {
   gridRecordCount,
   enterEditMode,
   drain,
-  expectNoConsoleErrors,
   expectOnlyKnownErrors,
+  KNOWN_DEAD_RECORD_RESTORE_ERRORS,
   KNOWN_POST_DELETE_ERRORS,
   fieldLabelVisible,
   isRequiredEmpty,
@@ -151,7 +151,37 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
   // =============================================================================================
   await test.step('read the Deal back', async () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(6000);
+
+    /**
+     * Wait for the RECORD to be back, not for six seconds.
+     *
+     * This slept 6000ms after the reload and then read `body.innerText()`. The deal name and the
+     * Pipeline FK were present by then; the Company FK was not, and the step failed claiming the FK does
+     * not resolve — an assertion about the generated base view, failed by the clock. Waiting for the
+     * deal's own name to render first removes timing from the question, so if `Company` is still absent
+     * afterwards that is a real finding about the view rather than a slow form.
+     */
+    /**
+     * WAIT FOR EXACTLY WHAT THE ASSERTIONS BELOW READ, which is the page's TEXT.
+     *
+     * Two earlier attempts at this wait were wrong in two different ways. A bare
+     * `getByText(DEAL_NAME).first()` matches the HIDDEN copy on a background tab — MJ keeps every open
+     * tab's form in the DOM, see the hidden-tab rule in README.md — and waits the full timeout for
+     * something that can never become visible. Scoping it with `.filter({ visible: true })` fixes that
+     * and is still not right, because "a visible text node exists" and "the string is present in
+     * `body.innerText()`" are different conditions: the name renders in more than one place and which
+     * paints first varies with how the reload settles.
+     *
+     * The assertions immediately below read `body.innerText()`. So this waits on `body.innerText()`.
+     * A wait that watches a different thing from the assertion is a race with extra steps.
+     */
+    await expect
+      .poll(async () => (await page.locator('body').innerText().catch(() => '')).includes(DEAL_NAME), {
+        timeout: 30_000,
+        message: 'the reloaded record must render before its fields are read',
+      })
+      .toBe(true);
+    await page.waitForTimeout(2500);
     await shot(page, '18-deal-reloaded');
 
     // VIEW MODE. Assert the values a rep actually sees, including the two FKs resolved to their
@@ -178,8 +208,17 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
       ).toBe(true);
     }
 
-    // The child relationships CodeGen wired up.
-    for (const tab of ['Deal Lines', 'Deal Team Members', 'Deal Stage Events', 'Deal Contact Roles']) {
+    /**
+     * The child relationships CodeGen wired up.
+     *
+     * `Deal Lines` is NOT in this list, and its absence is the point rather than an oversight. Andrew
+     * closed issues #36-#39 as not planned — "An embedded Order record will store products and prices
+     * associated with the deal" — which is `docs/DECISIONS.md` D-DL1 (:461) arrived at from the product
+     * side. The entity has no rows in `__mj.Entity`, so CodeGen never wired a surface for it and this
+     * assertion could only fail. A deal's lines live on the workspace's Product lines pane now, which
+     * `40`/`41` cover.
+     */
+    for (const tab of ['Deal Team Members', 'Deal Stage Events', 'Deal Contact Roles']) {
       expect(
         await fieldLabelVisible(page, tab),
         `related-entity surface "${tab}" must be reachable`,
@@ -199,17 +238,59 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
     await shot(page, '19-deal-updated');
 
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(6000);
-    const afterUpdate = await page.locator('body').innerText();
-    expect(afterUpdate, 'updated Amount must persist across a reload').toContain('185000');
-    expect(afterUpdate, 'updated Probability must persist').toContain('45');
-    expect(afterUpdate, 'updated Term Months must persist').toContain('24');
-    expect(afterUpdate, 'the OLD amount must be gone').not.toContain('120000');
+
+    /**
+     * RETRYING ASSERTIONS, NOT A FIXED SLEEP AND A SINGLE READ.
+     *
+     * This was `waitForTimeout(6000)` followed by one `innerText()`. When the reload took longer than
+     * six seconds the read returned
+     *
+     *     Loading workspace...
+     *     MemberJunction - v6.1.0-edge.2
+     *
+     * and the failure said "updated Amount must persist across a reload" -- which reads as a lost
+     * write. Nothing had been lost; the page had not finished rendering. A message that names the
+     * wrong cause is worse than a slow test, because the next person goes looking at the save path.
+     *
+     * `toContainText` polls, so a slow render costs seconds instead of a false accusation, and a value
+     * that genuinely did not persist still fails.
+     */
+    const body = page.locator('body');
+    await expect(body, 'updated Amount must persist across a reload').toContainText('185000', {
+        timeout: 30_000,
+    });
+    await expect(body, 'updated Probability must persist').toContainText('45', { timeout: 10_000 });
+    await expect(body, 'updated Term Months must persist').toContainText('24', { timeout: 10_000 });
+
+    /**
+     * THE ABSENCE CHECK GOES LAST, DELIBERATELY. A retrying `not.toContainText` passes trivially
+     * against a page that has not rendered yet -- an empty body contains nothing, including the old
+     * amount. It is only meaningful once the three assertions above have proved the form is showing
+     * the updated deal.
+     */
+    await expect(body, 'the OLD amount must be gone').not.toContainText('120000', { timeout: 10_000 });
     await shot(page, '20-deal-update-verified');
 
     // KEYSTONE, part 1 — asserted here rather than only at the end so that create/read/update are held
     // to a ZERO-error standard, uncontaminated by the known post-delete noise below.
-    expectNoConsoleErrors(sink, 'creating, reading and updating a Deal through the UI');
+    /**
+     * The keystone stays; ONE shape is tolerated, and it names its cause.
+     *
+     * Explorer restores records from `recentRecords` in `DataExplorer.State` on entering the app, and any
+     * that a previous run deleted fail to load. Instrumenting the steps put these errors in the FIRST
+     * step, at app entry — not at either reload — which is what identified the source. The list lives
+     * behind `UserInfoEngine`'s cache, so unlike `__mj.UserRecordLog` (which the cleanup sweep now
+     * clears) the harness cannot empty it. See `KNOWN_DEAD_RECORD_RESTORE_ERRORS` for the full mechanism.
+     *
+     * This is not the keystone being softened to get a green. Every other console error still fails the
+     * spec, and the tolerated ones are PRINTED by `expectOnlyKnownErrors`, so they stay visible rather
+     * than silently swallowed.
+     */
+    expectOnlyKnownErrors(
+      sink,
+      KNOWN_DEAD_RECORD_RESTORE_ERRORS,
+      'creating, reading and updating a Deal through the UI',
+    );
     drain(sink);
   });
 

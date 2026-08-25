@@ -1,0 +1,80 @@
+[
+  {
+    "_comments": [
+      "THE B2B MOTION — six stages, master plan §4.2.",
+      "",
+      "The winning stage is called 'Signed', not 'Closed Won', and that is the point rather than",
+      "flavour: the app knows it is a win because the stage points at a DealStatusType carrying",
+      "IsWon = 1. Nothing compares the name. Rename it to 'Papered' in a deployment and every rollup,",
+      "every policy branch and every check keeps working.",
+      "",
+      "RequiresDealLines = 1: this motion sells catalogue products, so its deals carry order lines and",
+      "Deal.Amount is a CACHE of the order total rather than a typed figure.",
+      "",
+      "IsDefault = 1 so a fresh install has an obvious place to put the first deal.",
+      "",
+      "CloseWonPolicy carries no OrderState key. It was retired (D-OS1) in favour of",
+      "PipelineStage.OrderStatusOnEntry, which can speak on every stage change rather than only at the",
+      "moment of a won close. OneTimeLinesTo is still here and is DEAD -- close-won creates no order",
+      "now, so nothing routes lines. See DECISIONS-NEEDED.md DN-11.",
+      "",
+      "ContractTypeCode is 'Order Form', which is a type contracts actually ships. It said 'Standard'",
+      "first and nothing on any host is called that -- v2's ContractType carries no Code column, so the",
+      "seam resolves on NAME, and an unresolvable name means close-won plans a contract it can never",
+      "create. Found by close-won-contract.CT1 the moment contracts became readable."
+    ],
+    "fields": {
+      "Name": "B2B",
+      "Code": "B2B",
+      "Description": "The main motion: catalogue products, a proposal, a negotiation and a signed agreement. The winning stage is called Signed — the app reads the status type's IsWon flag, never the stage name.",
+      "CompanyID": "@lookup:MJ: Companies.Name=Default Company",
+      "DealTypeID": "@lookup:MJ_BizApps_Sales: Deal Types.Code=NEW",
+      "DefaultForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",
+      "RequiresDealLines": true,
+      "CloseWonPolicy": "{\"CreateContract\":true,\"ContractTypeCode\":\"Order Form\",\"TermMonths\":12,\"SubscriptionLinesTo\":\"Contract\",\"OneTimeLinesTo\":\"Order\",\"RequireApprovalTaskTypeCode\":null,\"CloseWonTasks\":{\"AssigneeEntityName\": \"MJ_BizApps_Common: People\", \"AssigneeRecordID\": \"C0111111-0000-4000-A000-000000000004\", \"DueInDays\": 5}}",
+      "IsDefault": true,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "90111111-0000-4000-A000-000000000001"
+    },
+    "sync": {
+      "lastModified": "2026-08-20T22:29:55.999Z",
+      "checksum": "14a57bd28d77f5727a8a4fffcb5a8f279477433c3216d44f0827bab4fff3a816"
+    }
+  },
+  {
+    "_comments": [
+      "THE D2C MOTION — three stages, and a different shape rather than a shorter one.",
+      "",
+      "RequiresDealLines = 0: these deals never carry catalogue lines, so the amount is a figure a",
+      "human states and AmountIsComputed stays 0. That is the L-2 SIMPLE deal, and it is why",
+      "DealEntityServer's amount cache must never overwrite a typed number (save-deal.SD22).",
+      "",
+      "Its policy creates no contract, which is what makes the pair worth shipping together: the same",
+      "close action down two pipelines produces two different outcomes, decided by the POLICY and not",
+      "by the status."
+    ],
+    "fields": {
+      "Name": "D2C",
+      "Code": "D2C",
+      "Description": "A direct motion with no catalogue lines and no agreement: the amount is stated by a human, and closing it routes nothing downstream.",
+      "CompanyID": "@lookup:MJ: Companies.Name=Default Company",
+      "DealTypeID": "@lookup:MJ_BizApps_Sales: Deal Types.Code=NEW",
+      "DefaultForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",
+      "RequiresDealLines": false,
+      "CloseWonPolicy": "{\"CreateContract\":false,\"OneTimeLinesTo\":\"Order\",\"CloseWonTasks\":{\"AssigneeEntityName\": \"MJ_BizApps_Common: People\", \"AssigneeRecordID\": \"C0111111-0000-4000-A000-000000000004\", \"DueInDays\": 5}}",
+      "IsDefault": false,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "90111111-0000-4000-A000-000000000002"
+    },
+    "sync": {
+      "lastModified": "2026-08-20T22:29:56.060Z",
+      "checksum": "5f04fe92c413de73ce048b3e7bfacaa1bdb77cf24c9f64c1ce53acce2441a934"
+    }
+  }
+]

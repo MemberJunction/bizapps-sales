@@ -1,0 +1,78 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Forecast History",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "What did we think the forecast was on a past date, and how has it moved since?",
+      "Description": "Point-in-time forecast from ForecastSnapshot (master plan §9.4). A DIFFERENT QUESTION from \"Sales: Forecast by Category\", not a variant of it: reconstructing a past forecast from Deal is impossible, not merely inaccurate, because amounts change, dates move and deals get recategorised without the current row carrying what it used to say. CommitChangeSincePrior is the column a forecast review actually reads — not the level, but the movement.",
+      "SQL": "@file:SQL/forecast-history.sql",
+      "TechnicalDescription": "Grain: ForecastSnapshot, written by the Sales.CaptureForecastSnapshot Action on the Sales - Forecast Snapshot (daily) ScheduledJob. (scripts/capture-forecast-snapshot.sql is a manual tool, deliberately unseeded -- see its header.) Two independent date concepts: CapturedAt is when the picture was taken (\"as we saw it on the 1st\"), PeriodStart/PeriodEnd describe which period it was ABOUT — filtered separately because conflating them answers neither question. Column names are *Amount-suffixed, diverging from §9.5's bare Commit/BestCase/Pipeline/Closed; the shipped names are authoritative per docs/DECISIONS.md D6, since COMMIT is reserved in T-SQL and Postgres and production is Postgres.",
+      "Status": "Approved",
+      "QualityRank": 9,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {
+      "MJ: Query Parameters": [
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "CompanyID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
+            "SampleValue": "C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PipelineID",
+            "Type": "string",
+            "IsRequired": false,
+            "Description": "One pipeline. Omit for all pipelines.",
+            "SampleValue": "90111111-0000-4000-A000-000000000001",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodStart",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive start of the window. Omit for no lower bound.",
+            "SampleValue": "2026-01-01",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "PeriodEnd",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Inclusive end of the window. Omit for no upper bound.",
+            "SampleValue": "2026-12-31",
+            "DetectionMethod": "Manual"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "Name": "CapturedOnOrBefore",
+            "Type": "date",
+            "IsRequired": false,
+            "Description": "Show the forecast as it stood on or before this timestamp. This is the \"as we saw it then\" filter, distinct from the period filters.",
+            "SampleValue": "2026-08-01",
+            "DetectionMethod": "Manual"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-00000000000C"
+    }
+  }
+]

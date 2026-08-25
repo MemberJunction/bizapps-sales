@@ -2,29 +2,6 @@
   {
     "fields": {
       "RelatedRecordCollection": {
-        "Name": "Lines",
-        "Source": "database",
-        "Load": "explicit",
-        "OnRemove": "delete",
-        "OrderBy": "DisplayOrder ASC",
-        "Sequence": {
-          "Field": "DisplayOrder",
-          "From": 1
-        },
-        "ClearAfterSave": false
-      }
-    },
-    "primaryKey": {
-      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deals&RelatedEntity=MJ_BizApps_Sales: Deal Lines"
-    },
-    "sync": {
-      "lastModified": "2026-08-14T19:49:37.967Z",
-      "checksum": "f095a2f2d28b8d529db165f74b7baaa4f30725b3a9ee1be4ddc6006d11ded135"
-    }
-  },
-  {
-    "fields": {
-      "RelatedRecordCollection": {
         "Name": "PaymentSchedule",
         "Source": "database",
         "Load": "explicit",

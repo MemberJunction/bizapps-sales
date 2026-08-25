@@ -1,4 +1,4 @@
-import { BaseEntity, EntitySaveOptions, EntityDeleteOptions, CompositeKey, ValidationResult, ValidationErrorInfo, ValidationErrorType, Metadata, ProviderType, DatabaseProviderBase } from "@memberjunction/core";
+import { BaseEntity, EntitySaveOptions, EntityDeleteOptions, CompositeKey, ValidationResult, ValidationErrorInfo, ValidationErrorType, Metadata, ProviderType, DatabaseProviderBase, RunView } from "@memberjunction/core";
 import { RegisterClass } from "@memberjunction/global";
 import { z } from "zod";
 
@@ -180,188 +180,6 @@ export const mjBizAppsSalesDealContactRoleSchema = z.object({
 });
 
 export type mjBizAppsSalesDealContactRoleEntityType = z.infer<typeof mjBizAppsSalesDealContactRoleSchema>;
-
-/**
- * zod schema definition for the entity MJ_BizApps_Sales: Deal Line Types
- */
-export const mjBizAppsSalesDealLineTypeSchema = z.object({
-    ID: z.string().describe(`
-        * * Field Name: ID
-        * * Display Name: ID
-        * * SQL Data Type: uniqueidentifier
-        * * Default Value: newsequentialid()`),
-    Code: z.string().describe(`
-        * * Field Name: Code
-        * * Display Name: Code
-        * * SQL Data Type: nvarchar(40)`),
-    Name: z.string().describe(`
-        * * Field Name: Name
-        * * Display Name: Name
-        * * SQL Data Type: nvarchar(200)`),
-    Description: z.string().nullable().describe(`
-        * * Field Name: Description
-        * * Display Name: Description
-        * * SQL Data Type: nvarchar(MAX)`),
-    IsRecurring: z.boolean().describe(`
-        * * Field Name: IsRecurring
-        * * Display Name: Is Recurring
-        * * SQL Data Type: bit
-        * * Default Value: 0
-        * * Description: The behaviour flag. 1 for lines that carry into MRR/ARR and become a renewable subscription; 0 for lines billed once. Branch on this, never on Name or Code.`),
-    DisplayRank: z.number().describe(`
-        * * Field Name: DisplayRank
-        * * Display Name: Display Rank
-        * * SQL Data Type: int
-        * * Default Value: 0`),
-    IsActive: z.boolean().describe(`
-        * * Field Name: IsActive
-        * * Display Name: Is Active
-        * * SQL Data Type: bit
-        * * Default Value: 1`),
-    __mj_CreatedAt: z.date().describe(`
-        * * Field Name: __mj_CreatedAt
-        * * Display Name: Created At
-        * * SQL Data Type: datetimeoffset
-        * * Default Value: getutcdate()`),
-    __mj_UpdatedAt: z.date().describe(`
-        * * Field Name: __mj_UpdatedAt
-        * * Display Name: Updated At
-        * * SQL Data Type: datetimeoffset
-        * * Default Value: getutcdate()`),
-});
-
-export type mjBizAppsSalesDealLineTypeEntityType = z.infer<typeof mjBizAppsSalesDealLineTypeSchema>;
-
-/**
- * zod schema definition for the entity MJ_BizApps_Sales: Deal Lines
- */
-export const mjBizAppsSalesDealLineSchema = z.object({
-    ID: z.string().describe(`
-        * * Field Name: ID
-        * * Display Name: ID
-        * * SQL Data Type: uniqueidentifier
-        * * Default Value: newsequentialid()`),
-    DealID: z.string().describe(`
-        * * Field Name: DealID
-        * * Display Name: Deal ID
-        * * SQL Data Type: uniqueidentifier
-        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deals (vwDeals.ID)`),
-    ProductID: z.string().nullable().describe(`
-        * * Field Name: ProductID
-        * * Display Name: Product ID
-        * * SQL Data Type: uniqueidentifier
-        * * Description: SOFT reference (no FK) to a bizapps-orders Product. Soft because orders' migrations may not have run — which is exactly what lets this app stand up independently.`),
-    ProductName: z.string().nullable().describe(`
-        * * Field Name: ProductName
-        * * Display Name: Product Name
-        * * SQL Data Type: nvarchar(500)
-        * * Description: The product/service name AS WRITTEN ON THE SIGNED DOCUMENT — transcription, not a denormalized cache of the catalog name, and never auto-synced from it. Needed twice over: ProductID points at the orders catalog, which is not installed yet, so without this a line is an unreadable GUID; and once orders IS present, renaming a catalog product must not retroactively reword what a customer signed.`),
-    Quantity: z.number().describe(`
-        * * Field Name: Quantity
-        * * Display Name: Quantity
-        * * SQL Data Type: decimal(19, 4)
-        * * Default Value: 1`),
-    RequestedDiscountPct: z.number().nullable().describe(`
-        * * Field Name: RequestedDiscountPct
-        * * Display Name: Requested Discount Pct
-        * * SQL Data Type: decimal(5, 2)`),
-    OverrideUnitPrice: z.number().nullable().describe(`
-        * * Field Name: OverrideUnitPrice
-        * * Display Name: Override Unit Price
-        * * SQL Data Type: decimal(19, 4)
-        * * Description: A negotiated unit price. An INPUT to the pricing engine, never a replacement for it — the line still goes through Orders.PreviewOrder.`),
-    TermMonths: z.number().nullable().describe(`
-        * * Field Name: TermMonths
-        * * Display Name: Term Months
-        * * SQL Data Type: int`),
-    ServicePeriodStart: z.date().nullable().describe(`
-        * * Field Name: ServicePeriodStart
-        * * Display Name: Service Period Start
-        * * SQL Data Type: date`),
-    ServicePeriodEnd: z.date().nullable().describe(`
-        * * Field Name: ServicePeriodEnd
-        * * Display Name: Service Period End
-        * * SQL Data Type: date`),
-    DealLineTypeID: z.string().nullable().describe(`
-        * * Field Name: DealLineTypeID
-        * * Display Name: Deal Line Type ID
-        * * SQL Data Type: uniqueidentifier
-        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Line Types (vwDealLineTypes.ID)
-        * * Description: Whether this line is a one-time charge or a recurring one. A FK to DealLineType, replacing what was a free-text LineType column: recurring lines are what produce MRR/ARR and a renewal, and the moment code needs to tell them apart a string forces exactly the name comparison the vocabulary rule forbids. Branch on DealLineType.IsRecurring, never on the name.`),
-    DisplayOrder: z.number().describe(`
-        * * Field Name: DisplayOrder
-        * * Display Name: Display Order
-        * * SQL Data Type: int
-        * * Default Value: 0`),
-    Description: z.string().nullable().describe(`
-        * * Field Name: Description
-        * * Display Name: Description
-        * * SQL Data Type: nvarchar(MAX)`),
-    AnnualGrossFees: z.number().nullable().describe(`
-        * * Field Name: AnnualGrossFees
-        * * Display Name: Annual Gross Fees
-        * * SQL Data Type: decimal(19, 4)
-        * * Description: Annual gross fees for this line AS WRITTEN ON THE SIGNED DOCUMENT. An INPUT the AD transcribes, not a figure this app derives. Once orders is wired in, Orders.PreviewOrder's answer lands in the Resolved* columns and becomes the authority on what the deal is worth; this remains the record of what was signed.`),
-    DiscountAmount: z.number().nullable().describe(`
-        * * Field Name: DiscountAmount
-        * * Display Name: Discount Amount
-        * * SQL Data Type: decimal(19, 4)
-        * * Description: The discount as a CURRENCY AMOUNT, as the order form expresses it. Coexists with RequestedDiscountPct deliberately — the template speaks in amounts, the pricing engine takes a percent — and there is no exactly-one-of constraint, because a deal can legitimately carry a negotiated percentage as engine input AND the figure printed on the signed page.`),
-    Total: z.number().nullable().describe(`
-        * * Field Name: Total
-        * * Display Name: Total
-        * * SQL Data Type: decimal(19, 4)
-        * * Description: THE SIGNED FIGURE for this line, transcribed from the executed document. On the PDF it equals AnnualGrossFees minus DiscountAmount, but THAT SUBTRACTION IS THE CUSTOMER'S AND THE AD'S, NOT THIS APP'S: nothing here computes, defaults or back-fills it, which is how the no-arithmetic rule stays literally true. Deliberately unconstrained in sign — a credit or concession line is legitimately negative, and bounding it would mean asserting the arithmetic.`),
-    ResolvedUnitPrice: z.number().nullable().describe(`
-        * * Field Name: ResolvedUnitPrice
-        * * Display Name: Resolved Unit Price
-        * * SQL Data Type: decimal(19, 4)
-        * * Description: WRITE-ONLY from this app's perspective: populated only from an Orders.PreviewOrder response, never computed locally, never hand-edited.`),
-    ResolvedExtendedAmount: z.number().nullable().describe(`
-        * * Field Name: ResolvedExtendedAmount
-        * * Display Name: Resolved Extended Amount
-        * * SQL Data Type: decimal(19, 4)
-        * * Description: WRITE-ONLY, from Orders.PreviewOrder. Never quantity x price computed here.`),
-    PriceComponentsJSON: z.string().nullable().describe(`
-        * * Field Name: PriceComponentsJSON
-        * * Display Name: Price Components JSON
-        * * SQL Data Type: nvarchar(MAX)
-        * * Description: The explanation trail Orders.PreviewOrder returns (base, rules, adjustments, charges, tax), so a rep can answer "why is it this price" without a support ticket.`),
-    PricedAt: z.date().nullable().describe(`
-        * * Field Name: PricedAt
-        * * Display Name: Priced At
-        * * SQL Data Type: datetimeoffset`),
-    CompanyID: z.string().nullable().describe(`
-        * * Field Name: CompanyID
-        * * Display Name: Company ID
-        * * SQL Data Type: uniqueidentifier
-        * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
-        * * Description: DENORMALIZED stamp of the product's owning company at price time, mirroring OrderLine.CompanyID. This is what lets a cross-company deal materialize into orders with correct per-line company ownership. Server-maintained; never hand-set.`),
-    __mj_CreatedAt: z.date().describe(`
-        * * Field Name: __mj_CreatedAt
-        * * Display Name: Created At
-        * * SQL Data Type: datetimeoffset
-        * * Default Value: getutcdate()`),
-    __mj_UpdatedAt: z.date().describe(`
-        * * Field Name: __mj_UpdatedAt
-        * * Display Name: Updated At
-        * * SQL Data Type: datetimeoffset
-        * * Default Value: getutcdate()`),
-    Deal: z.string().describe(`
-        * * Field Name: Deal
-        * * Display Name: Deal
-        * * SQL Data Type: nvarchar(500)`),
-    DealLineType: z.string().nullable().describe(`
-        * * Field Name: DealLineType
-        * * Display Name: Deal Line Type
-        * * SQL Data Type: nvarchar(200)`),
-    Company: z.string().nullable().describe(`
-        * * Field Name: Company
-        * * Display Name: Company
-        * * SQL Data Type: nvarchar(50)`),
-});
-
-export type mjBizAppsSalesDealLineEntityType = z.infer<typeof mjBizAppsSalesDealLineSchema>;
 
 /**
  * zod schema definition for the entity MJ_BizApps_Sales: Deal Payment Schedules
@@ -1046,6 +864,17 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    OrderID: z.string().nullable().describe(`
+        * * Field Name: OrderID
+        * * Display Name: Order ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Orders: Order Headers (vwOrderHeaders.ID)`),
+    StandardAgreementModified: z.boolean().describe(`
+        * * Field Name: StandardAgreementModified
+        * * Display Name: Standard Agreement Modified
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance's review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.`),
     Pipeline: z.string().describe(`
         * * Field Name: Pipeline
         * * Display Name: Pipeline
@@ -1062,6 +891,10 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: DealStatusType
         * * Display Name: Deal Status Type
         * * SQL Data Type: nvarchar(200)`),
+    Account: z.string().nullable().describe(`
+        * * Field Name: Account
+        * * Display Name: Account
+        * * SQL Data Type: nvarchar(255)`),
     Company: z.string().describe(`
         * * Field Name: Company
         * * Display Name: Company
@@ -1086,6 +919,10 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: ClosedByUser
         * * Display Name: Closed By User
         * * SQL Data Type: nvarchar(100)`),
+    Order: z.string().nullable().describe(`
+        * * Field Name: Order
+        * * Display Name: Order
+        * * SQL Data Type: nvarchar(40)`),
 });
 
 export type mjBizAppsSalesDealEntityType = z.infer<typeof mjBizAppsSalesDealSchema>;
@@ -1494,6 +1331,16 @@ export const mjBizAppsSalesPipelineStageSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    OrderStatusOnEntry: z.union([z.literal('Confirmed'), z.literal('Draft'), z.literal('Quoted'), z.literal('Voided')]).nullable().describe(`
+        * * Field Name: OrderStatusOnEntry
+        * * Display Name: Order Status On Entry
+        * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Confirmed
+    *   * Draft
+    *   * Quoted
+    *   * Voided`),
     Pipeline: z.string().describe(`
         * * Field Name: Pipeline
         * * Display Name: Pipeline
@@ -2359,495 +2206,6 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
     */
     get BuyingRoleType(): string | null {
         return this.Get('BuyingRoleType');
-    }
-}
-
-
-/**
- * MJ_BizApps_Sales: Deal Line Types - strongly typed entity sub-class
- * * Schema: __mj_BizAppsSales
- * * Base Table: DealLineType
- * * Base View: vwDealLineTypes
- * * @description Whether a deal line is a ONE-TIME charge or a RECURRING one. A type table rather than a string column because recurring lines are what produce MRR/ARR and a renewal while one-time lines produce neither — so the distinction is behaviour, and behaviour belongs in a flag. IsRecurring is what the engine reads, which is what lets a customer call the concept Subscription or Implementation with no code aware of the rename.
- * * Primary Key: ID
- * @extends {BaseEntity}
- * @class
- * @public
- */
-@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Line Types')
-export class mjBizAppsSalesDealLineTypeEntity extends BaseEntity<mjBizAppsSalesDealLineTypeEntityType> {
-    /**
-    * Loads the MJ_BizApps_Sales: Deal Line Types record from the database
-    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Deal Line Types record.
-    * @param EntityRelationshipsToLoad - (optional) the relationships to load
-    * @returns {Promise<boolean>} - true if successful, false otherwise
-    * @public
-    * @async
-    * @memberof mjBizAppsSalesDealLineTypeEntity
-    * @method
-    * @override
-    */
-    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
-        const compositeKey: CompositeKey = new CompositeKey();
-        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
-        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
-    }
-
-    /**
-    * * Field Name: ID
-    * * Display Name: ID
-    * * SQL Data Type: uniqueidentifier
-    * * Default Value: newsequentialid()
-    */
-    get ID(): string {
-        return this.Get('ID');
-    }
-    set ID(value: string) {
-        this.Set('ID', value);
-    }
-
-    /**
-    * * Field Name: Code
-    * * Display Name: Code
-    * * SQL Data Type: nvarchar(40)
-    */
-    get Code(): string {
-        return this.Get('Code');
-    }
-    set Code(value: string) {
-        this.Set('Code', value);
-    }
-
-    /**
-    * * Field Name: Name
-    * * Display Name: Name
-    * * SQL Data Type: nvarchar(200)
-    */
-    get Name(): string {
-        return this.Get('Name');
-    }
-    set Name(value: string) {
-        this.Set('Name', value);
-    }
-
-    /**
-    * * Field Name: Description
-    * * Display Name: Description
-    * * SQL Data Type: nvarchar(MAX)
-    */
-    get Description(): string | null {
-        return this.Get('Description');
-    }
-    set Description(value: string | null) {
-        this.Set('Description', value);
-    }
-
-    /**
-    * * Field Name: IsRecurring
-    * * Display Name: Is Recurring
-    * * SQL Data Type: bit
-    * * Default Value: 0
-    * * Description: The behaviour flag. 1 for lines that carry into MRR/ARR and become a renewable subscription; 0 for lines billed once. Branch on this, never on Name or Code.
-    */
-    get IsRecurring(): boolean {
-        return this.Get('IsRecurring');
-    }
-    set IsRecurring(value: boolean) {
-        this.Set('IsRecurring', value);
-    }
-
-    /**
-    * * Field Name: DisplayRank
-    * * Display Name: Display Rank
-    * * SQL Data Type: int
-    * * Default Value: 0
-    */
-    get DisplayRank(): number {
-        return this.Get('DisplayRank');
-    }
-    set DisplayRank(value: number) {
-        this.Set('DisplayRank', value);
-    }
-
-    /**
-    * * Field Name: IsActive
-    * * Display Name: Is Active
-    * * SQL Data Type: bit
-    * * Default Value: 1
-    */
-    get IsActive(): boolean {
-        return this.Get('IsActive');
-    }
-    set IsActive(value: boolean) {
-        this.Set('IsActive', value);
-    }
-
-    /**
-    * * Field Name: __mj_CreatedAt
-    * * Display Name: Created At
-    * * SQL Data Type: datetimeoffset
-    * * Default Value: getutcdate()
-    */
-    get __mj_CreatedAt(): Date {
-        return this.Get('__mj_CreatedAt');
-    }
-
-    /**
-    * * Field Name: __mj_UpdatedAt
-    * * Display Name: Updated At
-    * * SQL Data Type: datetimeoffset
-    * * Default Value: getutcdate()
-    */
-    get __mj_UpdatedAt(): Date {
-        return this.Get('__mj_UpdatedAt');
-    }
-}
-
-
-/**
- * MJ_BizApps_Sales: Deal Lines - strongly typed entity sub-class
- * * Schema: __mj_BizAppsSales
- * * Base Table: DealLine
- * * Base View: vwDealLines
- * * @description A requested line on a deal. Stores INTENT (product, quantity, requested discount, override price, term); the Resolved* columns are WRITE-ONLY from an Orders.PreviewOrder response. Sales never multiplies quantity by price, applies a discount, computes tax, prorates a period, sums a total or rounds anything.
- * * Primary Key: ID
- * @extends {BaseEntity}
- * @class
- * @public
- */
-@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Lines')
-export class mjBizAppsSalesDealLineEntity extends BaseEntity<mjBizAppsSalesDealLineEntityType> {
-    /**
-    * Loads the MJ_BizApps_Sales: Deal Lines record from the database
-    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Deal Lines record.
-    * @param EntityRelationshipsToLoad - (optional) the relationships to load
-    * @returns {Promise<boolean>} - true if successful, false otherwise
-    * @public
-    * @async
-    * @memberof mjBizAppsSalesDealLineEntity
-    * @method
-    * @override
-    */
-    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
-        const compositeKey: CompositeKey = new CompositeKey();
-        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
-        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
-    }
-
-    /**
-    * * Field Name: ID
-    * * Display Name: ID
-    * * SQL Data Type: uniqueidentifier
-    * * Default Value: newsequentialid()
-    */
-    get ID(): string {
-        return this.Get('ID');
-    }
-    set ID(value: string) {
-        this.Set('ID', value);
-    }
-
-    /**
-    * * Field Name: DealID
-    * * Display Name: Deal ID
-    * * SQL Data Type: uniqueidentifier
-    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deals (vwDeals.ID)
-    */
-    get DealID(): string {
-        return this.Get('DealID');
-    }
-    set DealID(value: string) {
-        this.Set('DealID', value);
-    }
-
-    /**
-    * * Field Name: ProductID
-    * * Display Name: Product ID
-    * * SQL Data Type: uniqueidentifier
-    * * Description: SOFT reference (no FK) to a bizapps-orders Product. Soft because orders' migrations may not have run — which is exactly what lets this app stand up independently.
-    */
-    get ProductID(): string | null {
-        return this.Get('ProductID');
-    }
-    set ProductID(value: string | null) {
-        this.Set('ProductID', value);
-    }
-
-    /**
-    * * Field Name: ProductName
-    * * Display Name: Product Name
-    * * SQL Data Type: nvarchar(500)
-    * * Description: The product/service name AS WRITTEN ON THE SIGNED DOCUMENT — transcription, not a denormalized cache of the catalog name, and never auto-synced from it. Needed twice over: ProductID points at the orders catalog, which is not installed yet, so without this a line is an unreadable GUID; and once orders IS present, renaming a catalog product must not retroactively reword what a customer signed.
-    */
-    get ProductName(): string | null {
-        return this.Get('ProductName');
-    }
-    set ProductName(value: string | null) {
-        this.Set('ProductName', value);
-    }
-
-    /**
-    * * Field Name: Quantity
-    * * Display Name: Quantity
-    * * SQL Data Type: decimal(19, 4)
-    * * Default Value: 1
-    */
-    get Quantity(): number {
-        return this.Get('Quantity');
-    }
-    set Quantity(value: number) {
-        this.Set('Quantity', value);
-    }
-
-    /**
-    * * Field Name: RequestedDiscountPct
-    * * Display Name: Requested Discount Pct
-    * * SQL Data Type: decimal(5, 2)
-    */
-    get RequestedDiscountPct(): number | null {
-        return this.Get('RequestedDiscountPct');
-    }
-    set RequestedDiscountPct(value: number | null) {
-        this.Set('RequestedDiscountPct', value);
-    }
-
-    /**
-    * * Field Name: OverrideUnitPrice
-    * * Display Name: Override Unit Price
-    * * SQL Data Type: decimal(19, 4)
-    * * Description: A negotiated unit price. An INPUT to the pricing engine, never a replacement for it — the line still goes through Orders.PreviewOrder.
-    */
-    get OverrideUnitPrice(): number | null {
-        return this.Get('OverrideUnitPrice');
-    }
-    set OverrideUnitPrice(value: number | null) {
-        this.Set('OverrideUnitPrice', value);
-    }
-
-    /**
-    * * Field Name: TermMonths
-    * * Display Name: Term Months
-    * * SQL Data Type: int
-    */
-    get TermMonths(): number | null {
-        return this.Get('TermMonths');
-    }
-    set TermMonths(value: number | null) {
-        this.Set('TermMonths', value);
-    }
-
-    /**
-    * * Field Name: ServicePeriodStart
-    * * Display Name: Service Period Start
-    * * SQL Data Type: date
-    */
-    get ServicePeriodStart(): Date | null {
-        return this.Get('ServicePeriodStart');
-    }
-    set ServicePeriodStart(value: Date | null) {
-        this.Set('ServicePeriodStart', value);
-    }
-
-    /**
-    * * Field Name: ServicePeriodEnd
-    * * Display Name: Service Period End
-    * * SQL Data Type: date
-    */
-    get ServicePeriodEnd(): Date | null {
-        return this.Get('ServicePeriodEnd');
-    }
-    set ServicePeriodEnd(value: Date | null) {
-        this.Set('ServicePeriodEnd', value);
-    }
-
-    /**
-    * * Field Name: DealLineTypeID
-    * * Display Name: Deal Line Type ID
-    * * SQL Data Type: uniqueidentifier
-    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Line Types (vwDealLineTypes.ID)
-    * * Description: Whether this line is a one-time charge or a recurring one. A FK to DealLineType, replacing what was a free-text LineType column: recurring lines are what produce MRR/ARR and a renewal, and the moment code needs to tell them apart a string forces exactly the name comparison the vocabulary rule forbids. Branch on DealLineType.IsRecurring, never on the name.
-    */
-    get DealLineTypeID(): string | null {
-        return this.Get('DealLineTypeID');
-    }
-    set DealLineTypeID(value: string | null) {
-        this.Set('DealLineTypeID', value);
-    }
-
-    /**
-    * * Field Name: DisplayOrder
-    * * Display Name: Display Order
-    * * SQL Data Type: int
-    * * Default Value: 0
-    */
-    get DisplayOrder(): number {
-        return this.Get('DisplayOrder');
-    }
-    set DisplayOrder(value: number) {
-        this.Set('DisplayOrder', value);
-    }
-
-    /**
-    * * Field Name: Description
-    * * Display Name: Description
-    * * SQL Data Type: nvarchar(MAX)
-    */
-    get Description(): string | null {
-        return this.Get('Description');
-    }
-    set Description(value: string | null) {
-        this.Set('Description', value);
-    }
-
-    /**
-    * * Field Name: AnnualGrossFees
-    * * Display Name: Annual Gross Fees
-    * * SQL Data Type: decimal(19, 4)
-    * * Description: Annual gross fees for this line AS WRITTEN ON THE SIGNED DOCUMENT. An INPUT the AD transcribes, not a figure this app derives. Once orders is wired in, Orders.PreviewOrder's answer lands in the Resolved* columns and becomes the authority on what the deal is worth; this remains the record of what was signed.
-    */
-    get AnnualGrossFees(): number | null {
-        return this.Get('AnnualGrossFees');
-    }
-    set AnnualGrossFees(value: number | null) {
-        this.Set('AnnualGrossFees', value);
-    }
-
-    /**
-    * * Field Name: DiscountAmount
-    * * Display Name: Discount Amount
-    * * SQL Data Type: decimal(19, 4)
-    * * Description: The discount as a CURRENCY AMOUNT, as the order form expresses it. Coexists with RequestedDiscountPct deliberately — the template speaks in amounts, the pricing engine takes a percent — and there is no exactly-one-of constraint, because a deal can legitimately carry a negotiated percentage as engine input AND the figure printed on the signed page.
-    */
-    get DiscountAmount(): number | null {
-        return this.Get('DiscountAmount');
-    }
-    set DiscountAmount(value: number | null) {
-        this.Set('DiscountAmount', value);
-    }
-
-    /**
-    * * Field Name: Total
-    * * Display Name: Total
-    * * SQL Data Type: decimal(19, 4)
-    * * Description: THE SIGNED FIGURE for this line, transcribed from the executed document. On the PDF it equals AnnualGrossFees minus DiscountAmount, but THAT SUBTRACTION IS THE CUSTOMER'S AND THE AD'S, NOT THIS APP'S: nothing here computes, defaults or back-fills it, which is how the no-arithmetic rule stays literally true. Deliberately unconstrained in sign — a credit or concession line is legitimately negative, and bounding it would mean asserting the arithmetic.
-    */
-    get Total(): number | null {
-        return this.Get('Total');
-    }
-    set Total(value: number | null) {
-        this.Set('Total', value);
-    }
-
-    /**
-    * * Field Name: ResolvedUnitPrice
-    * * Display Name: Resolved Unit Price
-    * * SQL Data Type: decimal(19, 4)
-    * * Description: WRITE-ONLY from this app's perspective: populated only from an Orders.PreviewOrder response, never computed locally, never hand-edited.
-    */
-    get ResolvedUnitPrice(): number | null {
-        return this.Get('ResolvedUnitPrice');
-    }
-    set ResolvedUnitPrice(value: number | null) {
-        this.Set('ResolvedUnitPrice', value);
-    }
-
-    /**
-    * * Field Name: ResolvedExtendedAmount
-    * * Display Name: Resolved Extended Amount
-    * * SQL Data Type: decimal(19, 4)
-    * * Description: WRITE-ONLY, from Orders.PreviewOrder. Never quantity x price computed here.
-    */
-    get ResolvedExtendedAmount(): number | null {
-        return this.Get('ResolvedExtendedAmount');
-    }
-    set ResolvedExtendedAmount(value: number | null) {
-        this.Set('ResolvedExtendedAmount', value);
-    }
-
-    /**
-    * * Field Name: PriceComponentsJSON
-    * * Display Name: Price Components JSON
-    * * SQL Data Type: nvarchar(MAX)
-    * * Description: The explanation trail Orders.PreviewOrder returns (base, rules, adjustments, charges, tax), so a rep can answer "why is it this price" without a support ticket.
-    */
-    get PriceComponentsJSON(): string | null {
-        return this.Get('PriceComponentsJSON');
-    }
-    set PriceComponentsJSON(value: string | null) {
-        this.Set('PriceComponentsJSON', value);
-    }
-
-    /**
-    * * Field Name: PricedAt
-    * * Display Name: Priced At
-    * * SQL Data Type: datetimeoffset
-    */
-    get PricedAt(): Date | null {
-        return this.Get('PricedAt');
-    }
-    set PricedAt(value: Date | null) {
-        this.Set('PricedAt', value);
-    }
-
-    /**
-    * * Field Name: CompanyID
-    * * Display Name: Company ID
-    * * SQL Data Type: uniqueidentifier
-    * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
-    * * Description: DENORMALIZED stamp of the product's owning company at price time, mirroring OrderLine.CompanyID. This is what lets a cross-company deal materialize into orders with correct per-line company ownership. Server-maintained; never hand-set.
-    */
-    get CompanyID(): string | null {
-        return this.Get('CompanyID');
-    }
-    set CompanyID(value: string | null) {
-        this.Set('CompanyID', value);
-    }
-
-    /**
-    * * Field Name: __mj_CreatedAt
-    * * Display Name: Created At
-    * * SQL Data Type: datetimeoffset
-    * * Default Value: getutcdate()
-    */
-    get __mj_CreatedAt(): Date {
-        return this.Get('__mj_CreatedAt');
-    }
-
-    /**
-    * * Field Name: __mj_UpdatedAt
-    * * Display Name: Updated At
-    * * SQL Data Type: datetimeoffset
-    * * Default Value: getutcdate()
-    */
-    get __mj_UpdatedAt(): Date {
-        return this.Get('__mj_UpdatedAt');
-    }
-
-    /**
-    * * Field Name: Deal
-    * * Display Name: Deal
-    * * SQL Data Type: nvarchar(500)
-    */
-    get Deal(): string {
-        return this.Get('Deal');
-    }
-
-    /**
-    * * Field Name: DealLineType
-    * * Display Name: Deal Line Type
-    * * SQL Data Type: nvarchar(200)
-    */
-    get DealLineType(): string | null {
-        return this.Get('DealLineType');
-    }
-
-    /**
-    * * Field Name: Company
-    * * Display Name: Company
-    * * SQL Data Type: nvarchar(50)
-    */
-    get Company(): string | null {
-        return this.Get('Company');
     }
 }
 
@@ -4107,26 +3465,6 @@ export class mjBizAppsSalesDealTypeEntity extends BaseEntity<mjBizAppsSalesDealT
 export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntityType> {
 
   /**
-  * Related records: MJ_BizApps_Sales: Deal Lines
-  *
-  * Loads, validates and persists as one unit with this MJ_BizApps_Sales: Deals record — see
-  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
-  * the 'MJ_BizApps_Sales: Deals → MJ_BizApps_Sales: Deal Lines' relationship; edit that row, not this file.
-  *
-  */
-  public readonly Lines = this.DeclareRelatedRecords<mjBizAppsSalesDealLineEntity>({
-      Name: 'Lines',
-        RelatedEntity: 'MJ_BizApps_Sales: Deal Lines',
-        RelatedEntityJoinField: 'DealID',
-        OrderBy: 'DisplayOrder ASC',
-        Load: 'explicit',
-        OnRemove: 'delete',
-        Source: 'database',
-        Sequence: { Field: 'DisplayOrder', From: 1 },
-  });
-
-
-  /**
   * Related records: MJ_BizApps_Sales: Deal Team Members
   *
   * Loads, validates and persists as one unit with this MJ_BizApps_Sales: Deals record — see
@@ -4751,6 +4089,33 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
+    * * Field Name: OrderID
+    * * Display Name: Order ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Orders: Order Headers (vwOrderHeaders.ID)
+    */
+    get OrderID(): string | null {
+        return this.Get('OrderID');
+    }
+    set OrderID(value: string | null) {
+        this.Set('OrderID', value);
+    }
+
+    /**
+    * * Field Name: StandardAgreementModified
+    * * Display Name: Standard Agreement Modified
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance's review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.
+    */
+    get StandardAgreementModified(): boolean {
+        return this.Get('StandardAgreementModified');
+    }
+    set StandardAgreementModified(value: boolean) {
+        this.Set('StandardAgreementModified', value);
+    }
+
+    /**
     * * Field Name: Pipeline
     * * Display Name: Pipeline
     * * SQL Data Type: nvarchar(200)
@@ -4784,6 +4149,15 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     */
     get DealStatusType(): string | null {
         return this.Get('DealStatusType');
+    }
+
+    /**
+    * * Field Name: Account
+    * * Display Name: Account
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Account(): string | null {
+        return this.Get('Account');
     }
 
     /**
@@ -4838,6 +4212,15 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     */
     get ClosedByUser(): string | null {
         return this.Get('ClosedByUser');
+    }
+
+    /**
+    * * Field Name: Order
+    * * Display Name: Order
+    * * SQL Data Type: nvarchar(40)
+    */
+    get Order(): string | null {
+        return this.Get('Order');
     }
 }
 
@@ -5960,6 +5343,24 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
     */
     get __mj_UpdatedAt(): Date {
         return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: OrderStatusOnEntry
+    * * Display Name: Order Status On Entry
+    * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Confirmed
+    *   * Draft
+    *   * Quoted
+    *   * Voided
+    */
+    get OrderStatusOnEntry(): 'Confirmed' | 'Draft' | 'Quoted' | 'Voided' | null {
+        return this.Get('OrderStatusOnEntry');
+    }
+    set OrderStatusOnEntry(value: 'Confirmed' | 'Draft' | 'Quoted' | 'Voided' | null) {
+        this.Set('OrderStatusOnEntry', value);
     }
 
     /**

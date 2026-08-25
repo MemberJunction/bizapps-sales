@@ -55,7 +55,7 @@ looks like, and appending it would drop the rest of the generated half.
 If this is intentional, pass --force. Otherwise rebuild the database from zero and re-run CodeGen so
 it regenerates everything:
 
-    scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh
+    CONFIRM_DROP=<database> scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh
 EOF
     [[ "${2:-}" == "--force" ]] || exit 1
     echo "  (--force given; proceeding anyway)" >&2
@@ -73,7 +73,15 @@ fi
 # creating StoredValueTransaction). The suite caught it, but only because those two entities happened
 # to be on a covered path. Asking the database directly is cheap and catches it every time.
 if [[ -f .env ]]; then
+    # AN EXPLICIT DB_DATABASE MUST SURVIVE THIS SOURCE, or the guard interrogates a different
+    # database than the one CodeGen just ran against and reports clean about the wrong server.
+    # `set -a; . ./.env` overwrites the environment rather than deferring to it — measured
+    # 2026-08-25 in rebuild-db.sh, where the same line silently discarded the caller's target.
+    # Read-only here, so nothing was ever destroyed; the cost is a guard that can pass while the
+    # database you actually built has the orphaned entities it is meant to catch.
+    _CALLER_DB="${DB_DATABASE:-}"
     set -a; . ./.env; set +a
+    [[ -n "$_CALLER_DB" ]] && DB_DATABASE="$_CALLER_DB"
     ORPHANS=$(sqlcmd -S "${DB_HOST},${DB_PORT:-1433}" -U "${DB_USERNAME}" -P "${DB_PASSWORD}" -C -N o -b \
         -d "${DB_DATABASE}" -h -1 -W -Q "SET NOCOUNT ON;
         SELECT COUNT(*) FROM __mj.Entity e
@@ -87,7 +95,7 @@ That is what a CodeGen run that died partway looks like. Appending now would bak
 installs a database whose reads fail for those entities. Re-run the whole cycle so CodeGen
 regenerates from zero:
 
-    scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh
+    CONFIRM_DROP=<database> scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh
 EOF
         exit 1
     fi

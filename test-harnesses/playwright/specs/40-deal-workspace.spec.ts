@@ -40,11 +40,14 @@
  */
 import { expect, test } from '@playwright/test';
 import { EXPLORER_BASE_URL } from '../lib/env';
+import { CloseDb, OrderLinesForDeal, QueryAll } from '../lib/db';
+import { PurgeDeal } from '../lib/deal-flow';
 import {
   captureConsoleErrors,
   closeRestoredRecordTabs,
   expectOnlyKnownErrors,
   KNOWN_POST_DELETE_ERRORS,
+  openAllEntities,
   shot,
 } from '../lib/explorer';
 
@@ -54,6 +57,34 @@ const SALES_WORKSPACE_APP_ROUTE = '/app/sales';
 /** Unique per run, so a re-run never collides with a leftover and cleanup can find its own rows. */
 const RUN_TAG = `PW-${Date.now().toString(36).toUpperCase()}`;
 const DEAL_NAME = `Workspace smoke ${RUN_TAG}`;
+
+/**
+ * CLEANUP, WHICH LIVED IN A COMMENT.
+ *
+ * The docblock at the top of this file lists four DELETE statements to run "to clear them out", and
+ * argues the case for not deleting from the spec: "Deleting it would mean either driving the delete
+ * affordance (a second thing to debug when the real subject is the save) or reaching around the UI
+ * into SQL from a UI test." The reasoning is sound about the DELETE AFFORDANCE and does not carry to
+ * teardown -- 79-embedded-order-refresh reaches into SQL in exactly this way and is the better model.
+ *
+ * The cost of leaving it was paid by other files. 70-lifecycle, 71 and 78 open with AssertBaseline(),
+ * which asserts the WHOLE host is back to its seven seeded deals, so a `Workspace smoke PW-...` left
+ * here failed a spec several files later with "the host must be back to its seven seeded deals". This
+ * is the third file tonight with cleanup written as instructions for a human -- 41 and 60 were the
+ * others -- and all three docblocks still name DealLine, retired in 0d3d1ed.
+ *
+ * BY NAME rather than by a captured id, following 79: this spec composes its deal through the UI, so
+ * a failure part-way leaves a real row that no variable in this file ever held.
+ */
+test.afterAll(async () => {
+    const deals = await QueryAll<{ ID: string; OrderID: string | null }>(
+        `SELECT ID, OrderID FROM __mj_BizAppsSales.Deal WHERE Name = '${DEAL_NAME}'`,
+    );
+    for (const d of deals) {
+        await PurgeDeal(d.ID, d.OrderID ? String(d.OrderID) : null);
+    }
+    await CloseDb();
+});
 
 /** The five panes, by their visible label. Keys live in `deal-workspace.types.ts`. */
 const PANES = ['Party info', 'Product lines', 'Payment schedule', 'Terms', 'Variances'] as const;
@@ -112,17 +143,6 @@ async function selectFirstRealOption(
   throw new Error(`select "${label}" offered no real options — its lookup did not load`);
 }
 
-/** The REAL option labels of a select, skipping the em-dash placeholder. */
-async function realOptionLabels(select: import('@playwright/test').Locator): Promise<string[]> {
-  const labels: string[] = [];
-  for (const option of await select.locator('option').all()) {
-    const text = ((await option.textContent()) ?? '').trim();
-    if (text && !text.startsWith('—')) {
-      labels.push(text);
-    }
-  }
-  return labels;
-}
 
 test.describe('deal workspace — Phase 1 definition of done', () => {
   test('compose a complete deal through the custom form, and read it back', async ({ page }) => {
@@ -190,9 +210,49 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
       await shot(page, '40-03-party');
     });
 
+    /**
+     * ── THE FIRST SAVE, WHICH THIS SPEC USED TO SKIP ──────────────────────────────────────────────
+     *
+     * `Add line` is gated on `CanAddLine`, which is `!!Deal?.IsSaved`, because the embedded order is
+     * provisioned inside `DealEntityServer.Save()` on the first save (S-US4) -- there is no order to add
+     * a line to before then. The button says so in its own title: "Save the deal first".
+     *
+     * So this step is not scaffolding, it is the thing being tested one line earlier: a deal is composed,
+     * saved, and only then does it acquire the order that lines belong to. Skipping it made the spec fail
+     * on a disabled button, which reads as a broken control rather than a missing step.
+     *
+     * The message is asserted rather than the click alone, because a save that silently did not land
+     * leaves `Add line` disabled for exactly the same reason and would look identical here.
+     */
+    await test.step('save, so the deal acquires its embedded order', async () => {
+      const firstSave = page.locator('button', { hasText: /^\s*Save deal\s*$/ }).first();
+      await expect(firstSave, 'Save must be ENABLED once party info is complete').toBeEnabled({
+        timeout: 15_000,
+      });
+      await firstSave.click();
+      const msg = page.locator('.dw-msg');
+      await expect(msg, 'the save must report something').toBeVisible({ timeout: 20_000 });
+      await expect(msg, 'and it must not be an error').not.toHaveClass(/dw-msg--error/);
+      await shot(page, '40-03b-first-save');
+    });
+
+    /**
+     * DECLARED AT TEST SCOPE, not inside the step that fills it.
+     *
+     * The read-back step below is a separate closure, so a const declared inside the lines step is
+     * not visible there. tsc caught it as "Cannot find name 'chosenProducts'" while the run went
+     * GREEN -- because the read-back sits behind an `if (section is visible)` guard that did not
+     * fire, so the ReferenceError was never reached.
+     *
+     * That is the ComposeDeal shape again: an assertion that cannot execute, passing quietly. Worth
+     * the note because the harness has no compile gate, so only a hand-run tsc finds these.
+     */
+    const chosenProducts: string[] = [];
+
     await test.step('product lines — two of them', async () => {
       await openPane(page, 'Product lines');
       const add = page.locator('.dw-addbtn', { hasText: 'Add line' }).first();
+      await expect(add, 'Add line must be enabled once the deal is saved').toBeEnabled({ timeout: 20_000 });
 
       await add.click();
       await page.waitForTimeout(500);
@@ -202,54 +262,74 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
       const rows = page.locator('.dw-table tbody tr');
       await expect(rows, 'two line rows must exist').toHaveCount(2, { timeout: 10_000 });
 
-      // Fill both rows. The figures are TRANSCRIBED — nothing here expects the UI to compute Total.
+      /**
+       * ── REWRITTEN AGAINST THE ORDER-LINE GRID ─────────────────────────────────────────────────
+       *
+       * This transcribed a product NAME, annual gross fees, a discount amount and a total into five
+       * positional inputs. That was the `DealLine` grid, and Andrew formally descoped `DealLine` this
+       * morning — issues #36–#39 closed as not planned, with the note "An embedded Order record will
+       * store products and prices associated with the deal" — which is the same conclusion
+       * `docs/DECISIONS.md` D-DL1 (:461) reached from the invariant side.
+       *
+       * An `OrderLine` row is: a PRODUCT PICKER, a quantity, a read-only unit price, a read-only line
+       * total, and a discount percent. So there is no name to type and no total to transcribe — the
+       * two figures a rep supplies are quantity and discount, and the money comes back from the engine
+       * (rule 1: sales never computes it).
+       *
+       * The failure this replaces was `Cannot type text into input[type=number]`: the first input is
+       * now Quantity, so the old loop typed a product name into a number field.
+       */
       const values = [
-        { name: `${RUN_TAG} Platform seats`, qty: '100', gross: '120000', disc: '12000', total: '108000' },
-        { name: `${RUN_TAG} Onboarding`, qty: '1', gross: '20000', disc: '0', total: '20000' },
+        { qty: '100', discountPct: '10' },
+        { qty: '1', discountPct: '0' },
       ];
       /**
-       * THE TWO ROWS TAKE DIFFERENT LINE TYPES, which an earlier version did not.
+       * ── DELETED: THE RECURRING-PATH ASSERTIONS ────────────────────────────────────────────────
        *
-       * It picked the FIRST real option for every row, so both lines came out One-Time and the
-       * recurring path — the one that produces MRR/ARR and a renewal — was never exercised through the
-       * UI at all. Row 0 now takes the LAST offered type and row 1 the FIRST, which guarantees they
-       * differ whatever the seeded vocabulary happens to be.
+       * RETIRED BY `docs/DECISIONS.md` D-DL1 (:461). Three references to one control went with it: the
+       * "at least two types" precondition, the per-row type selection, and the "the two lines must
+       * carry DIFFERENT types" check below.
        *
-       * NOTE what is deliberately NOT asserted here: that a particular row is "Recurring". The meaning
-       * of a line type lives in its `IsRecurring` FLAG, not its label, and a UI test cannot see flags —
-       * so hardcoding the name would couple this spec to a renameable string while proving nothing
-       * about behaviour. The flag semantics are asserted server-side by integration check SD12, which
-       * joins to the type row and reads `IsRecurring` directly.
+       * D-DL1 settled that nothing routes by line kind. Recurrence is a property of the PRODUCT the rep
+       * already picks, so there is no sales behaviour left for a spec to assert — a sales spec claiming
+       * it would be asserting orders' concern from the wrong side of the boundary.
+       *
+       * The control does not exist either: `select.dw-cell-linetype` appears nowhere in the template,
+       * and the only line-level select is `.dw-cell-product`. That is why this failed as
+       * "must offer at least two types, Received: 0" — not a shrunken vocabulary, an absent control.
+       *
+       * AND THE OLD DOCBLOCK POINTED SOMEWHERE RETIRED, which is worth correcting rather than
+       * deleting silently: it deferred the flag semantics to integration check `SD12`. `SD12` is gone
+       * along with `SD4`, `SD5` and `SD16`, and `save-deal.checks.ts:20` records that their ids are
+       * deliberately not reused. So the pointer led nowhere, and there is no live check anywhere in the
+       * suite asserting product recurrence. That is the state D-DL1 chose, not a gap to be filled here.
        */
-      // Targeted by CLASS, not position: a line row now holds a product picker AND a line-type
-      // select, so `.first()` silently became the product one when that column was added.
-      const typeLabels = await realOptionLabels(rows.nth(0).locator('select.dw-cell-linetype'));
-      expect(
-        typeLabels.length,
-        'the line-type selector must offer at least two types, or the recurring path cannot be exercised',
-      ).toBeGreaterThanOrEqual(2);
-
-      const chosenTypes: string[] = [];
+      /**
+       * DIFFERENT PRODUCTS PER ROW, so the read-back later proves two distinct children rather than one
+       * written twice. Chosen by INDEX, not by SKU, so the spec does not rot when the catalogue changes
+       * — the same reasoning 60 uses.
+       */
       for (let i = 0; i < values.length; i++) {
         const row = rows.nth(i);
-        const inputs = row.locator('input');
-        await inputs.nth(0).fill(values[i].name);          // Product / service
-        await inputs.nth(1).fill(values[i].qty);           // Qty
-        await inputs.nth(2).fill(values[i].gross);         // Annual gross fees
-        await inputs.nth(3).fill(values[i].disc);          // Discount
-        await inputs.nth(4).fill(values[i].total);         // Total
 
-        // Line type is a real type table now, so it is a select and not free text.
-        const label = i === 0 ? typeLabels[typeLabels.length - 1] : typeLabels[0];
-        await row.locator('select.dw-cell-linetype').selectOption({ label });
-        chosenTypes.push(label);
+        const picker = row.locator('select.dw-cell-product');
+        await picker.selectOption({ index: i + 1 });       // index 0 is the "choose a product" placeholder
+        chosenProducts.push((await picker.locator('option:checked').innerText()).trim());
+
+        // Quantity is the FIRST number input; discount percent is the second. Unit price and line total
+        // sit between them and are read-only cells, not inputs, so they are not in this collection.
+        const numbers = row.locator('td.dw-num input[type="number"]');
+        await numbers.nth(0).fill(values[i].qty);
+        await numbers.nth(1).fill(values[i].discountPct);
+
         await page.waitForTimeout(250);
       }
 
       expect(
-        new Set(chosenTypes).size,
-        'the two lines must carry DIFFERENT types, so both branches are covered',
+        new Set(chosenProducts).size,
+        'the two rows must reference DIFFERENT products, or the read-back cannot tell one child from two',
       ).toBe(2);
+
       await shot(page, '40-04-lines');
     });
 
@@ -324,6 +404,135 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
       await shot(page, '40-08-saved');
     });
 
+    // ── 4b. THE PRICE THE ENGINE SENT BACK ──────────────────────────────────
+    await test.step('the engine priced the lines, with real figures', async () => {
+      /**
+       * ── NOTHING IN 22 SPEC FILES READ A PRICE UNTIL THIS STEP ────────────────────────────────
+       *
+       * The suite drove every input AROUND the price and never looked at the price. `20` asserts the
+       * two cells are read-only; this spec filled quantity and discount on either side of them. So a
+       * pricing bridge that returned 0.00 for every line — a resolver that found no price, a
+       * catalogue lookup that missed, an empty envelope — passed the entire browser suite. The
+       * server-side twin had the same hole for the same reason: `save-deal.SD19` asserted
+       * `UnitPrice !== null` on a column that is **NOT NULL in the schema**, so it could not fail.
+       *
+       * Rule 1 says sales never computes money and asks the engine instead. The engine ANSWERING is
+       * the half that was never checked.
+       *
+       * WHY NON-ZERO RATHER THAN A FIGURE: asserting an expected number would mean this repo knowing
+       * a price, which is the accretion Rule 1 exists to stop. `> 0` says a real number came back
+       * without saying which — the strongest claim sales is entitled to make from this side of the
+       * boundary.
+       *
+       * The em dash matters too: the template renders `{{ line.LineTotalNet ?? '—' }}`, so an
+       * unpriced line shows a dash rather than a blank. "Present" was never the question.
+       */
+      await openPane(page, 'Product lines');
+
+      const rows = page.locator('.dw-table tbody tr');
+      await expect(rows, 'both saved lines must still be on the grid').toHaveCount(2, { timeout: 20_000 });
+
+      // Prices arrive with the server's response to the save, so poll rather than assume the first
+      // paint carries them.
+      const priceCells = rows.first().locator('td.dw-readonly');
+      await expect(priceCells, 'a line renders unit price and line total as read-only cells')
+        .toHaveCount(2, { timeout: 10_000 });
+
+      const asNumber = async (cell: import('@playwright/test').Locator): Promise<number> => {
+        const raw = (await cell.innerText()).trim();
+        // Strip currency, thousands separators and whitespace; an em dash becomes NaN, which is the
+        // "the engine returned nothing" case and must NOT quietly read as zero-and-therefore-absent.
+        const cleaned = raw.replace(/[^0-9.\-]/g, '');
+        return cleaned === '' ? Number.NaN : Number(cleaned);
+      };
+
+      await expect
+        .poll(async () => asNumber(priceCells.nth(0)), {
+          timeout: 30_000,
+          message:
+            'the unit price cell never carried a real figure — a dash or 0.00 here means the pricing '
+            + 'engine did not price the line, which is the one failure Rule 1 exists to make impossible',
+        })
+        .toBeGreaterThan(0);
+
+      const unitPrice = await asNumber(priceCells.nth(0));
+      const lineTotal = await asNumber(priceCells.nth(1));
+
+      expect(
+        lineTotal,
+        'the line total must be a real figure too — it is what the deal amount is built from',
+      ).toBeGreaterThan(0);
+
+      /**
+       * On a line whose quantity is more than one, the total cannot equal the unit price. This is NOT
+       * a recomputation of the engine's arithmetic — sales does not multiply — it is the cheapest
+       * available check that the two cells hold genuinely different answers rather than one number
+       * rendered twice, which is what a stubbed or half-wired bridge tends to produce.
+       *
+       * The quantity is READ FROM THE ROW rather than assumed. This spec adds a line of 100 and a
+       * line of 1, and nothing guarantees which the grid puts first; on the quantity-1 line the two
+       * figures may legitimately match, and asserting otherwise would be inventing a rule.
+       */
+      const qty = Number(
+        (await rows.first().locator('td.dw-num input[type="number"]').first().inputValue()) || '0',
+      );
+      if (qty > 1) {
+        expect(
+          lineTotal,
+          `unit price and line total must be DIFFERENT answers on a line of ${qty}, not one number `
+          + 'rendered into two cells',
+        ).not.toBe(unitPrice);
+      } else {
+        console.log(`  (quantity is ${qty} — skipping the differ check, the two may legitimately match)`);
+      }
+
+      console.log(`  engine priced line 1: unit=${unitPrice} total=${lineTotal}`);
+      await shot(page, '40-08b-priced');
+    });
+
+    // ── 4c. THE CHILDREN, READ BACK WHERE NAVIGATION CANNOT BREAK IT ────────
+    await test.step('one save wrote the header AND both children', async () => {
+      /**
+       * ── THIS NO LONGER LOGS AND PASSES WHEN IT CANNOT LOOK ──────────────────────────────────────
+       *
+       * It used to. The whole block sat inside `if (section is visible) { assert } else { console.log }`,
+       * with the reasoning that failing a run over an accordion was disproportionate. The effect was
+       * that the STRONGEST claim in this file — one transactional save wrote the header and its
+       * children, read back through a surface that did not write them — was the one assertion that
+       * could quietly not run. It is the fourth assertion-that-cannot-fire found this week.
+       *
+       * The claim is now proven against the DATABASE, which is a legitimately different surface from
+       * the workspace that wrote it — the same standard `60` and `80` are held to — and it cannot be
+       * skipped by a missing affordance.
+       *
+       * WHY THE UI HALF MOVED RATHER THAN BEING MADE STRICT: the section it looked for is titled
+       * "Deal Lines", and that entity no longer exists. Andrew closed issues #36-#39 as not planned
+       * (`docs/DECISIONS.md` D-DL1); a deal's lines are rows on the embedded ORDER now, and the
+       * generated Deal form has no section for them. So the old code was not merely guarded — it was
+       * guarding a lookup that could never succeed, which is why it never once fired. Making it strict
+       * would have produced a permanent red for a UI that is correct.
+       */
+      const lines = await OrderLinesForDeal(DEAL_NAME);
+
+      expect(
+        lines.length,
+        'BOTH lines must have reached the database from ONE save — the header and its children '
+        + 'together, or the transaction did not do what the surface said it did',
+      ).toBe(2);
+
+      // Priced by orders, on the way in — the same claim the UI step above makes, asserted where it
+      // cannot be a rendering artefact.
+      for (const [i, line] of lines.entries()) {
+        expect(
+          Number(line.UnitPrice),
+          `line ${i + 1} must carry a REAL price from the engine, not zero`,
+        ).toBeGreaterThan(0);
+      }
+
+      await shot(page, '40-08c-children');
+    });
+
+
     // ── 5. Read back through the GENERATED entity browser ───────────────────
     // Deliberately read back through a DIFFERENT surface than the one that wrote it. Re-reading through
     // the workspace could pass on nothing but client state still sitting in memory.
@@ -342,6 +551,20 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
         await page.goto(`${EXPLORER_BASE_URL}/app/mjbizappssales`, { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(4000);
       }
+
+      /**
+       * REACH THE ENTITY LIST, DO NOT ASSUME IT. The navigation above lands on MJ's DataExplorer, and
+       * WHICH screen that shows is decided by one persisted field -- `selectedEntityName` in the
+       * `DataExplorer.State.<applicationId>` user setting. Anything that opened an entity earlier
+       * writes it, so this step arrived on whatever the previous spec last touched. Measured: it was
+       * showing the "Deal Status Types" grid, with no `Deals` card anywhere on the page, and the
+       * failure read as the Deals entity being missing.
+       *
+       * `openAllEntities` is the helper CLI-3 built for exactly this (f44d955). It also forces the
+       * panel's All Entities / My Favorites toggle back, which persists across sessions and empties
+       * the panel completely when left on Favorites.
+       */
+      await openAllEntities(page);
 
       const deals = page.getByText(/^\s*Deals\s*$/i).first();
       await expect(deals).toBeVisible({ timeout: 25_000 });
@@ -405,21 +628,7 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
        * perfectly correct. Expanding first is the difference between testing the data and testing the
        * default accordion state.
        */
-      const linesSection = page.getByText(/^\s*Deal Lines\s*$/i).first();
-      if ((await linesSection.count()) && (await linesSection.isVisible().catch(() => false))) {
-        await linesSection.click({ timeout: 10_000 }).catch(() => undefined);
-        await page.waitForTimeout(4000);
-        const expanded = await page.locator('body').innerText();
-        // Both lines, by the tag this run stamped on them — proof the one transactional save wrote the
-        // header AND the children, read back through a surface that did not write them.
-        expect(expanded, 'the deal lines must read back on the record').toContain(`${RUN_TAG} Platform seats`);
-        await shot(page, '40-11-readback-lines');
-      } else {
-        // Reported rather than failed: the section affordance is generated UI whose shape is MJ's, and
-        // the child round-trip is already asserted server-side. Losing the assertion is worth knowing
-        // about; failing the Phase 1 run over an accordion is not.
-        console.log('  note: the Deal Lines section header was not found — child read-back not asserted here');
-      }
+      await shot(page, '40-10b-readback-done');
     });
 
     // ── 6. The keystone ─────────────────────────────────────────────────────

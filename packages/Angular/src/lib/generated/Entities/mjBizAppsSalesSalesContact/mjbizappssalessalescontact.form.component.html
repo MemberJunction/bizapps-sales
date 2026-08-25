@@ -244,9 +244,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','BillingContactID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals','BillingContactID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealsBillingContactID')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealsBillingContactID', $event.totalRowCount)"
                 >
@@ -269,9 +269,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deals','PrimaryContactID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deals','PrimaryContactID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealsPrimaryContactID')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealsPrimaryContactID', $event.totalRowCount)"
                 >
@@ -294,9 +294,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Contact Roles','SalesContactID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Contact Roles')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Contact Roles','SalesContactID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealContactRoles')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealContactRoles', $event.totalRowCount)"
                 >

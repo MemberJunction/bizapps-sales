@@ -267,14 +267,19 @@
                   <option [ngValue]="a.ID">{{ a.Name }}</option>
                 }
               </select>
-              <!-- RELATED record: opens as its own Explorer tab, not in this workspace. -->
+              <!-- OPEN goes to an Explorer tab: an account outlives the deal and is edited on its own
+                   terms. CREATE opens a slide-in and selects the result back into this field, because
+                   S-US1 says the rep can do it without leaving the deal. Hidden when the field is not
+                   editable, so a locked deal cannot create a record it would then fail to attach. -->
               <span class="dw-related">
                 @if (deal.AccountID) {
                   <button type="button" class="dw-linkbtn"
                           (click)="OpenRelated(AccountEntity, deal.AccountID)">Open account</button>
                 }
-                <button type="button" class="dw-linkbtn"
-                        (click)="CreateRelated(AccountEntity)">New account</button>
+                @if (IsFieldEditable('AccountID')) {
+                  <button type="button" class="dw-linkbtn"
+                          (click)="CreateRelated(AccountEntity, 'AccountID')">New account</button>
+                }
               </span>
             </label>
 
@@ -286,14 +291,16 @@
                   <option [ngValue]="c.ID">{{ c.Name }}</option>
                 }
               </select>
-              <!-- RELATED record: opens as its own Explorer tab, not in this workspace. -->
+              <!-- Same split as the customer field above: OPEN leaves, CREATE does not. -->
               <span class="dw-related">
                 @if (deal.PrimaryContactID) {
                   <button type="button" class="dw-linkbtn"
                           (click)="OpenRelated(ContactEntity, deal.PrimaryContactID)">Open contact</button>
                 }
-                <button type="button" class="dw-linkbtn"
-                        (click)="CreateRelated(ContactEntity)">New contact</button>
+                @if (IsFieldEditable('PrimaryContactID')) {
+                  <button type="button" class="dw-linkbtn"
+                          (click)="CreateRelated(ContactEntity, 'PrimaryContactID')">New contact</button>
+                }
               </span>
             </label>
 
@@ -379,13 +386,10 @@
                 <thead>
                   <tr>
                     <th scope="col">Product</th>
-                    <th scope="col">Product / service <em>*</em></th>
-                    <th scope="col">Type</th>
                     <th scope="col" class="dw-num">Qty</th>
-                    <th scope="col" class="dw-num">Annual gross fees</th>
-                    <th scope="col" class="dw-num">Discount</th>
-                    <th scope="col" class="dw-num">Total</th>
-                    <th scope="col" class="dw-num">Disc %</th>
+                    <th scope="col" class="dw-num">Unit price</th>
+                    <th scope="col" class="dw-num">Line total</th>
+                    <th scope="col" class="dw-num">Discount %</th>
                     <th scope="col"><span class="dw-sr">Row actions</span></th>
                   </tr>
                 </thead>
@@ -395,11 +399,17 @@
                       <td>
                         <!-- Identity is Product.ID. The catalogue is already filtered to this deal's
                              selling company, Active status and today's availability window, so anything
-                             offered here is sellable — see deal-workspace.products.ts. -->
+                             offered here is sellable — see ProductFilterFor in packages/Entities/src,
+                               which is the predicate LoadProducts passes to RunView. -->
                         <select class="dw-cell-product" [ngModel]="line.ProductID"
                                 (ngModelChange)="OnProductChange(line, $event)"
                                 [title]="ProductLabel(line)">
-                          <option [ngValue]="null">— not linked —</option>
+                          <!-- KEPT, and it is not a choice: AddLine() never sets ProductID, so
+                               every new line is already in this state and this option is the only
+                               thing that labels it. Removing it would render a blank select on a
+                               row that still cannot be saved. The save is blocked instead --
+                               see UnlinkedLineIssues. -->
+                          <option [ngValue]="null">— choose a product —</option>
                           @for (p of Products; track p.ID) {
                             <option [ngValue]="p.ID">{{ p.SKU ? p.Name + ' (' + p.SKU + ')' : p.Name }}</option>
                           }
@@ -410,23 +420,32 @@
                           <small class="dw-field__hint">no longer offered</small>
                         }
                       </td>
-                      <td>
-                        <input type="text" [(ngModel)]="line.ProductName" (ngModelChange)="Touch()"
-                               placeholder="e.g. Platform — Enterprise Seat" />
+                      <td class="dw-num">
+                        <!-- min="1", NOT 0: orders' CK_OrderLine_Quantity is `Quantity <> 0`, so the old
+                             floor presented the one value the database forbids as the recommended one.
+                             Negative IS legal to orders — it is the reversal mechanism (BO-D10) — but a
+                             reversal is not something a deal line expresses, and orders' entity-server
+                             refuses a negative on a non-reversal line. Blocking it here means the rep is
+                             told by the form instead of by a server error. See AddLine(). -->
+                        <input type="number" min="1" step="1" [(ngModel)]="line.Quantity" (ngModelChange)="Touch()" />
                       </td>
-                      <td>
-                        <select class="dw-cell-linetype" [(ngModel)]="line.DealLineTypeID" (ngModelChange)="Touch()">
-                          <option [ngValue]="null">—</option>
-                          @for (lt of Lookups.LineTypes; track lt.ID) {
-                            <option [ngValue]="lt.ID">{{ lt.Name }}</option>
-                          }
-                        </select>
-                      </td>
-                      <td class="dw-num"><input type="number" min="0" step="1" [(ngModel)]="line.Quantity" (ngModelChange)="Touch()" /></td>
-                      <td class="dw-num"><input type="number" min="0" step="0.01" [(ngModel)]="line.AnnualGrossFees" (ngModelChange)="Touch()" /></td>
-                      <td class="dw-num"><input type="number" min="0" step="0.01" [(ngModel)]="line.DiscountAmount" (ngModelChange)="Touch()" /></td>
-                      <td class="dw-num"><input type="number" step="0.01" [(ngModel)]="line.Total" (ngModelChange)="Touch()" /></td>
-                      <td class="dw-num"><input type="number" min="0" max="100" step="0.01" [(ngModel)]="line.RequestedDiscountPct" (ngModelChange)="Touch()" /></td>
+                      <!-- Priced by orders, never entered here: sales states intent, orders states price. -->
+                      <td class="dw-num dw-readonly">{{ line.UnitPrice }}</td>
+                      <td class="dw-num dw-readonly">{{ line.LineTotalNet ?? '—' }}</td>
+                      <td class="dw-num">
+                            <!-- Percent in, fraction stored. The conversion refuses an ambiguous 0-1
+                                 value rather than guessing -- see SetDiscountPercent.
+                                 step is 0.01 because that is what OrderLine.DiscountPct
+                                 DECIMAL(7,4) can hold: a hundredth of one percent. It was 1, which
+                                 marked every stored sub-percent discount invalid in the control
+                                 itself -- the browser refusing a number the column stores exactly. -->
+                            <input type="number" min="0" max="100" step="0.01"
+                                   [ngModel]="DiscountPercentFor(line)"
+                                   (ngModelChange)="SetDiscountPercent(line, $event)" />
+                            @if (DiscountRefusals.has(line)) {
+                              <span class="dw-field-error">{{ DiscountRefusals.get(line) }}</span>
+                            }
+                          </td>
                       <td>
                         <!-- The grid shows what fits; the slide-in shows the rest (service period, term,
                              product reference, description). Only for a SAVED line -- a line created in
@@ -448,9 +467,13 @@
             </div>
           }
 
-          <button type="button" class="dw-addbtn" (click)="AddLine()">
+          <button type="button" class="dw-addbtn" (click)="AddLine()"
+                  [disabled]="!CanAddLine" [title]="AddLineBlockedReason ?? 'Add a product line'">
             <i class="fa-solid fa-plus" aria-hidden="true"></i> Add line
           </button>
+          @if (AddLineBlockedReason) {
+            <p class="dw-field__hint">{{ AddLineBlockedReason }}</p>
+          }
           <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'lines' }"></ng-container>
         </section>
       }
@@ -551,6 +574,18 @@
       <!-- ══════════════════════════ VARIANCES ══════════════════════════ -->
       @if (ActivePane === 'variances') {
         <section class="dw-pane">
+          <!-- THE FLAG SITS ABOVE THE PROSE, and it is not a summary of it. Finance's review branches
+               on the flag: true means capture each deviation against the template, false means read the
+               document anyway to confirm nothing was negotiated. An empty variances box means nobody
+               wrote anything down, which is a different claim from nothing having happened — so the rep
+               is asked, rather than the answer being inferred from whether they typed a paragraph. -->
+          <label class="dw-field dw-field--check">
+            <input type="checkbox" [(ngModel)]="deal.StandardAgreementModified"
+                   [disabled]="!IsFieldEditable('StandardAgreementModified')" (ngModelChange)="Touch()" />
+            <span class="dw-field__label">Standard agreement modified</span>
+          </label>
+          <small class="dw-field__hint">Copied onto the contract at Closed Won — it is what sends finance to the paper.</small>
+
           <label class="dw-field dw-field--wide">
             <span class="dw-field__label">Contract variances</span>
             <textarea rows="10" [(ngModel)]="deal.ContractVariances" [disabled]="!IsFieldEditable('ContractVariances')" (ngModelChange)="Touch()"
@@ -563,6 +598,16 @@
           <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'variances' }"></ng-container>
         </section>
       }
+    }
+
+    <!--
+      THE ACTIVITY TIMELINE (S-US9 #119). Deliberately OUTSIDE the pane switch above: it is a record of
+      what happened rather than a part of the draft, so it carries no validation state and belongs to no
+      DealWorkspaceSection. Shown only for a SAVED deal — an unsaved draft has no ID to link an activity
+      to, and offering the button would produce a save that cannot land.
+    -->
+    @if (Deal?.ID) {
+      <mjs-deal-activity-timeline [DealID]="Deal!.ID"></mjs-deal-activity-timeline>
     }
 
     <span workspaceFooterNote>
@@ -588,3 +633,4 @@
     </ul>
   }
 </ng-template>
+

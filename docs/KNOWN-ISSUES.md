@@ -5,6 +5,724 @@ future developer will otherwise rediscover the hard way.
 
 ---
 
+## 🔴 KI-26 — `mj sync push` AFTER seeding silently empties every product picker
+
+**Measured 2026-08-25, by doing it.** Two files both own `Pipeline.CompanyID` and they disagree:
+
+| Source | What it sets | Why |
+|---|---|---|
+| `metadata/pipelines/.sales-pipelines.json` | both pipelines to `@lookup:MJ: Companies.Name=Default Company` | the install default -- on a fresh database it is the only company that exists |
+| `scripts/seed-demo-data.sh` (lines 364, 408) | B2B to **Blue Cypress**, D2C to **BC Education Group** | *"shows that every rollup slices by company because Pipeline.CompanyID is required"* |
+
+Nothing reconciles them. Run the metadata push on an already-seeded host and the metadata wins, so
+**both pipelines collapse onto Default Company, which owns no products.**
+
+The failure does not mention companies or pipelines. The product catalogue is filtered by the deal's
+selling company, which comes from its pipeline, so what you get is:
+
+```
+TimeoutError: locator.selectOption: Timeout 30000ms exceeded.          x6
+Error: the product picker offered nothing -- the orders catalogue did not load
+Error: the orders catalogue must offer a product, or this proves nothing
+```
+
+Nine of thirteen Explorer failures in one run, every one of them reading as an orders problem. The
+orders catalogue was fine the whole time; it was being asked for products belonging to a company that
+has none.
+
+### The documented order already prevents this, and that is the point
+
+`WORKSPACE-SETUP.md` §5 says push metadata FIRST, then seed. Followed in that order, the seed's
+`UPDATE ... WHERE CompanyID <> @co` lands last and everything is correct. The trap is that the push is
+also the remedy for other things -- a missing action, a stale remote operation -- so there is a real
+reason to run it later, and doing so silently reverts the demo's company split.
+
+**If you push after seeding, re-run `scripts/seed-demo-data.sh`.** It is idempotent and its two
+guarded UPDATEs are exactly the repair. The minimum repair, if you do not want the rest of the seed:
+
+```sql
+DECLARE @co1 UNIQUEIDENTIFIER='C0A5E100-0001-4A01-9E11-5B7C3D2F8A01';   -- Blue Cypress
+DECLARE @co2 UNIQUEIDENTIFIER='B0111111-0000-4000-A000-000000000002';   -- BC Education Group
+UPDATE __mj_BizAppsSales.Pipeline SET CompanyID=@co1
+ WHERE ID='90111111-0000-4000-A000-000000000001' AND CompanyID<>@co1;
+UPDATE __mj_BizAppsSales.Pipeline SET CompanyID=@co2
+ WHERE ID='90111111-0000-4000-A000-000000000002' AND CompanyID<>@co2;
+```
+
+### Why the metadata cannot simply be corrected to match
+
+`C0A5E100` comes from `seed-dev-data.sh`, which says of itself: *"this is LOCAL DEV DATA. It is not in
+metadata/, not referenced by mj-app.json, and must never be treated as part of the app."* Pointing
+shipped metadata at a dev-only company would be worse than the current split. `CompanyID` is NOT NULL,
+so it cannot be omitted either. **The ordering rule is the fix**, which is why it is recorded here
+rather than patched.
+
+---
+
+## 🔴 KI-25 — `mj sync push --dir metadata` cannot seed `metadata/queries` onto a fresh database
+
+**Measured 2026-08-25 against a genuinely fresh install.** Everything else seeds cleanly — 22 directories,
+exit 0, including the two sales-owned task types. `queries` fails, and it fails the same way every time:
+
+```
+❌ FATAL ERROR: Failed to save MJ: Query Parameters record
+   Violation of UNIQUE KEY constraint 'UQ_QueryParameter_QueryID_Name'.
+   Cannot insert duplicate key in object '__mj.QueryParameter'.
+   The duplicate key value is (5a1e5000-0001-4000-a000-000000000008, CompanyID).
+```
+
+18 violations, the transaction rolls back whole, and **0 of the 16 queries land**. Running it a second
+time produces byte-identical output — it does not converge, so "just run it again" is not a workaround.
+
+### Cause
+
+**14 of the 16 query files declare their parameters explicitly**, under
+`relatedEntities: { "MJ: Query Parameters": [...] }`, with hand-written descriptions and sample values
+that are worth keeping. MJ *also* derives parameters from the query SQL. On a fresh database both
+happen, and the second insert collides with the first on `(QueryID, Name)`.
+
+**It is NOT a credentials problem**, despite the line that precedes it in the log:
+
+```
+No suitable model found for prompt SQL Query Parameter Extraction.
+No valid API credentials/keys are configured ... LLM enrichment failed, using heuristic descriptions.
+```
+
+That is a warning, and the push continues past it. Measured: **zero `__mj.Credential` rows on
+`MJ_V6_Host` and on the fresh install alike**, and no LLM key in any `.env` in the tree — so enrichment
+has never run here, on the host that works or the install that does not. Configuring a key would change
+the descriptions, not the collision.
+
+### Why it never surfaced before
+
+Same shape as **KI-24**, one layer up. `MJ_V6_Host` already holds those 16 queries with their parameters,
+so a push there UPDATES and no insert collides. **The seed path, like the rebuild path, has never been
+run from zero** — so the artefact that works and the artefact being shipped were, again, different
+things.
+
+### Workaround, and what it costs
+
+```bash
+DB_DATABASE=<db> node node_modules/@memberjunction/cli/bin/run.js sync push --dir metadata --exclude queries --ci
+```
+
+Verified: exit 0, 22/22 directories. **The cost is the 16 queries, and therefore the dashboard**, which
+is built on them. Anyone demoing the dashboard needs those rows by another route.
+
+### What would actually fix it
+
+Either MJ's query push upserts `QueryParameter` on `(QueryID, Name)` instead of inserting — which is an
+MJ-core change and the right one — or sales drops the 15 declaration blocks and lets MJ derive the
+parameters, losing the authored descriptions. **Not fixed here**: the first is not ours, and the second
+throws away real content to work around someone else's insert. Worth an answer from Amith before
+anyone edits 14 files.
+
+---
+
+## 🔴 KI-24 — The baseline-in-place practice lost its safety net on 2026-08-12, which is why the baseline drifted from every working database
+
+CLAUDE.md's rule is that schema changes **edit the baseline migration in place** rather than stacking
+fix-ups, and that this "is only safe because rebuilding from zero is routine." Rebuilding stopped
+being routine on 2026-08-12. A week later the script that does it stopped being *able* to work, and
+because nobody was running it, nobody found out.
+
+**Measured 2026-08-25:**
+
+| Fact | Evidence |
+|---|---|
+| The rebuild loop last ran **2026-08-12 22:32** | `migrations/codegen/.previous-generated-lines` holds `33740`, written only by `rebuild-db.sh`'s trim step; that is its mtime |
+| `Deal.OrderID` became a **REAL FK** to `__mj_BizAppsOrders.OrderHeader` on **2026-08-19** | `da0f69f`; unconditional and inline in `CREATE TABLE Deal`, baseline line 822 |
+| `rebuild-db.sh` installs MJ core and bizapps-common **only** | its header states this as a design choice: "the sales baseline stands up with only common present" |
+
+Those three facts cannot all be true at once. Since 2026-08-19 the script cannot build a database the
+sales baseline will apply to; since 2026-08-12 nobody has tried. **Every schema change in between was
+hand-applied to live databases and never round-tripped through a rebuild.** That is the mechanism
+behind both fresh-install defects found on 2026-08-25, which had been chased separately as unrelated
+bugs:
+
+* The baseline carried **172 `DealLine` and 87 `DealLineType` references with no `CREATE TABLE` for
+  either**, and died at batch 108 of 462 on `Cannot find the object "__mj_BizAppsSales.DealLineType"`.
+  The repair had existed on `fix/retire-deallinetype-baseline` since `0d3d1ed` was root-caused and was
+  simply never merged. Merged in `a472f73`.
+* The **six CodeGen emits of 19-20 Aug were applied to the databases but never folded into the
+  baseline**. So on a fresh install `Deal.OrderID`, `PipelineStage.OrderStatusOnEntry` and
+  `Deal.StandardAgreementModified` had no `EntityField` row at all -- the whole embedded-order model
+  invisible to MJ -- `spCreateDeal` did not take `@OrderID`, and `spCreatePipelineStage` took 22
+  parameters where both live databases have 24. Folded in `1e47ee6`.
+
+Both databases were correct only because someone had run CodeGen against them **by hand**, which is
+exactly why this never surfaced in testing: the thing under test and the thing being shipped were
+different artefacts.
+
+### Still open
+
+`rebuild-db.sh` has not been fixed. It needs the three steps its own header anticipates ("Both arrive
+when S2 wires the pricing bridge, and this script grows the steps then"). The order is not negotiable
+and is documented in `WORKSPACE-SETUP.md` §4: **common -> tasks -> accounting -> orders -> sales**.
+Until then, do not trust a green run of it.
+
+### Related, fixed in `9998fdb`
+
+Two scripts sourced `.env` with `set -a`, which overwrites the environment rather than deferring to
+it, so a `DB_DATABASE` passed by the caller was silently discarded. In `rebuild-db.sh` -- whose first
+act is `DROP DATABASE` -- `.env` reads `MJ_V6_Host`, the recording host holding the demo data, so the
+obvious precaution `DB_DATABASE=scratch scripts/rebuild-db.sh` resolved to `MJ_V6_Host` and would have
+destroyed it while the caller believed the override held. The target is now named in `CONFIRM_DROP`
+and there is no default.
+
+---
+
+## 🛑 KI-22 — BLOCKING THE FOUNDATION: no deal that has an order can be READ, and every new deal has one
+
+**Severity raised 2026-08-20 (Andrew).** This was filed as a known issue and it is not one. Every deal
+created since `DealEntityServer` began provisioning an embedded order (S-US4) has an order, so
+"anything that must read a deal before writing it" now means **every deal**. It looks narrow only
+because six of the seven story deals predate provisioning. Nothing in the deal workspace or on the
+pipeline board can open, move or edit a deal created from now on.
+
+### ROOT CAUSE FOUND — and it is one line of JSON in orders
+
+`bizapps-orders/metadata/.mj-sync.json` listed **7 of its 23** metadata directories in `directoryOrder`.
+Everything unlisted falls to default alphabetical ordering — which is harmless until an alphabetical
+neighbour is also a dependency:
+
+```
+"queries"          →  q u e r i e s
+"query-categories" →  q u e r y - c a t e g o r i e s
+                              ↑ 'i' < 'y', so queries sorts FIRST
+```
+
+So every query was pushed ahead of the category it references, and `mj sync push --dir metadata` halted:
+
+```
+✖ Push failed  Failed to process field 'CategoryID' in MJ: Queries:
+  Lookup failed: No record found in 'MJ: Query Categories' where Name='Orders'
+```
+
+**The halt is the bug, not the queries.** `sync push` stops there, so the NINE directories after it never
+ran — including `entity-fields` (16 of 23) and `entity-relationships` (17 of 23), which carry exactly the
+metadata KI-22 was about. The earlier observation that a push reported `entity-fields — 5 updated` while
+the values stayed NULL was the whole push being rolled back.
+
+Hypothesis credited to Andrew; measured here.
+
+### The fix, and what it unblocked
+
+Adding `query-categories` before `queries` to `directoryOrder`:
+
+| | before | after |
+|---|---|---|
+| directories processed | 14 of 23, then halt | **23 of 23, exit 0, 0 errors** |
+| `MJ: Query Categories` named `Orders` | 0 | 1 |
+| `EntityField.EmbeddedRecord` rows | **0** | **5** — the exact five orders ships |
+| `EntityRelationship.RelatedRecordCollection` rows | 18 | **23**, including `OrderHeader → OrderLines` with its full `Lines` declaration |
+
+`62 created, 98 updated, 0 errors.` This is the same class of problem as KI-21: orders' schema was
+migrated to this host and its metadata never was — because it *could* not be.
+
+### One line still stands between that and a working reopen
+
+With the metadata complete, orders' CodeGen file pass now produces code that keeps everything my earlier
+attempt broke — `InitialPaymentDetailID_Object` survives, `OrderHeader.Lines` survives — **and** gains
+the missing `RootReversesOrderHeaderID`. It fails to compile on exactly one line:
+
+```ts
+// packages/Entities/src/generated/entity_subclasses.ts:10
+import { mjBizAppsCommonAddressEntity } from '@mj-biz-apps/orders-entities';   // ← itself
+//                                            should be '@mj-biz-apps/common-entities'
+```
+
+That is the **`entityPackageName`** limitation this repo already documents at length in
+`packages/Entities/src/deal-entity.ts`: with a plain string, every non-core schema resolves to the
+generating package, so common's `Address` comes out as orders' own. It appeared only now because the
+completed push added the `BillToAddressID` / `ShipToAddressID` embeds that make CodeGen emit the import
+at all. **Do not "fix" it with a schema map** — that variant makes CodeGen exclude those schemas from
+generation entirely, measured both ways and recorded in `deal-entity.ts`.
+
+Corrected by hand as a DIAGNOSTIC (then reverted — generated code is not the place for it), all four
+orders packages build.
+
+### AND WITH THAT ONE LINE CORRECTED, EVERYTHING WORKS — verified end to end
+
+The whole chain, on `MJ_V6_Host`, with the API restarted:
+
+* **`DEAL-9001` opens in the deal workspace.** The deal that could not be read at all — name, pipeline,
+  stage, customer, primary contact, term all present.
+* **Its order lines render, priced by orders:** `Platform — Premium Seat (PLAT-PRM)`, Qty 3, Unit price
+  229, Line total 687, Discount % 0.
+* **The screen matches the database exactly** — `LineNumber 1, Quantity 3, UnitPrice 229,
+  LineTotalNet 687, DiscountPct 0, SKU PLAT-PRM`. Sales set the product and the quantity; every figure
+  came back from orders.
+* **Zero console errors.**
+
+That closes the half of the Explorer pass that has been blocked since the redesign: create → provision →
+add a line was already proven; reopen → resolve the embedded order → render its priced lines is now
+proven too.
+
+### The state this host is in right now, so nobody is surprised
+
+| Change | Where | Status |
+|---|---|---|
+| `query-categories` before `queries` in `directoryOrder` | `bizapps-orders/metadata/.mj-sync.json` | **the real fix.** Uncommitted in the orders working tree, ready to land — Josue has push access |
+| orders' metadata, fully pushed | `MJ_V6_Host` | 62 created, 98 updated, 0 errors |
+| orders' regenerated `src/generated` | orders working tree | uncommitted; correct except the one import |
+| that one import, hand-corrected | `packages/Entities/src/generated/entity_subclasses.ts:10` | **a DIAGNOSTIC, not a fix.** Generated code — the next CodeGen run wipes it |
+
+The hand-correction is deliberately left in place so the working environment can demonstrate the fix,
+and is called out here because it is exactly the kind of edit that must not be mistaken for generated
+output. **The durable fix is in MJ's CodeGen `entityPackageName` resolution**, and until it lands orders
+cannot be regenerated cleanly on any host that carries common's schema. `DECISIONS-NEEDED.md` DN-14.
+
+---
+
+## ✅ KI-23 — RESOLVED: `spCreateOrganization` and `spUpdateOrganization` were missing from `MJ_V6_Host` (host damage, not a common defect)
+
+**Found by clicking, not by reading**, while verifying #33's inline create-and-return in the Explorer.
+Creating a customer from the deal workspace fails with:
+
+```
+Failed to save parent entity 'MJ_BizApps_Common: Organizations': Error executing SQL
+  Could not find stored procedure '__mj_BizAppsCommon.spCreateOrganization'.
+```
+
+**The IsA chain did its job.** `SalesAccount` IS an Organization (same UUID), so the save reached for the
+parent first — exactly as designed — and the parent's insert procedure is absent.
+
+### It is a PARTIAL CodeGen application, which is why nobody noticed
+
+`__mj_BizAppsCommon` holds 46 procedures and 18 views. What it has, and what it does not:
+
+| Entity | Create | Update | Delete |
+|---|---|---|---|
+| `Person` | ✅ | ✅ | ✅ |
+| `OrganizationType` | ✅ | ✅ | ✅ |
+| **`Organization`** | ❌ | ❌ | ✅ |
+
+An Organization can be **deleted** but not created or updated. One entity, two of three procedures, on a
+schema that is otherwise complete — so nothing looks broken until something tries to write one.
+
+### Why it stayed invisible
+
+* **The demo seed writes Organizations with raw SQL `INSERT`**, not through the entity layer, so seeding
+  succeeds and every screen that only READS accounts is fine. All 92→93 integration checks pass, because
+  none of them creates an account — they resolve the seeded ones.
+* **It was visible earlier and I mis-triaged it.** My own CodeGen run reported
+  `Error executing permissions file ... spCreateOrganization ... Cannot find the object` and the same for
+  `spUpdateOrganization`, and I recorded it as "cross-app permission noise" because it named another app's
+  objects. It was not noise; it was this. A permissions step failing because the OBJECT is missing is a
+  different fact from a permissions step failing.
+
+### What it blocks
+
+* **#33's inline create-and-return cannot be demonstrated**, though the code is correct: the slide-in
+  opens over the workspace, the title renders, Save/Cancel are in the right places, and the picker
+  correctly does NOT change — because my code returns early when `AfterSaved()` yields nothing rather than
+  inventing a selection. The blank-picker question the click-through was meant to settle is therefore
+  still **unobserved**, not answered.
+* **Any path that creates or edits an account**: the UI, an Action, an agent, a script. Not UI-specific.
+* The HubSpot importer in S6, which will create accounts by definition.
+
+### RESOLVED — host damage, repaired additively
+
+**It was not a defect in bizapps-common.** Common's baseline creates all three procedures; two were lost
+from this host. The likely moment is the CodeGen run that reported them as permissions failures — which is
+what my own note that "a permissions step failing because the object is missing is a different fact" was
+pointing at without following through.
+
+**Enumerated before repairing, rather than assuming it was only those two.** All 16 tables in
+`__mj_BizAppsCommon` were checked for a complete create/update/delete trio:
+
+| Result | |
+|---|---|
+| Tables checked | 16 |
+| Complete trios | 15 |
+| Incomplete | **1 — `Organization` (create and update missing, delete present)** |
+| Procedures found | 46, against 48 expected for 16 tables — consistent with exactly two lost |
+| Triggers | all 16 present, including `trgUpdateOrganization` |
+
+One correction to my own first pass: I reported `Person` as missing its view. It is not —
+the view is `vwPeople`, and my check had guessed `vwPersons`. A naming guess of mine, not a gap.
+
+**Repaired the same way contracts was**, additively and with no CodeGen: the last definitions of both
+procedures were extracted from `V202608132239__v5.34.x__Layered_Base_Views_Metadata.sql` — the newest
+migration that defines them, and the one whose output matches the current columns — the
+`${flyway:defaultSchema}` placeholder substituted for `__mj_BizAppsCommon`, and the eight resulting
+batches run. No drops of anything else; `trgUpdateOrganization` is recreated from the same generated
+definition it already had. The three existing Organization rows were untouched, and the procedure count is
+now 48 with no incomplete trios.
+
+**The extracted SQL is deliberately NOT committed to this repo.** Sales carrying another app's schema
+fragment is the thing the IsA chain exists to avoid; it was run as a one-off host repair and is described
+here so it can be reproduced.
+
+**Verified by using it**, not by inspecting it: creating a customer from the deal workspace now writes both
+the `Organization` and the `SalesAccount` IsA child, `IsActive = 1`, visible in `vwSalesAccounts`. The
+three test records created while verifying were removed afterwards; the demo is back to its three accounts.
+
+**Contacts were never blocked** — `spCreatePerson` was present throughout.
+
+---
+
+## 🔴 KI-22 (as originally recorded) — Orders' generated GraphQL resolvers are behind the database
+
+**The second half of KI-21, and it is a DIFFERENT problem with the same symptom.** With orders'
+server package registered, the schema gained the type — and the load still failed:
+
+```
+Error: Cannot query field "RootReversesOrderHeaderID" on type "mjBizAppsOrdersOrderHeader_".
+        Did you mean "ReversesOrderHeaderID" or "ReversesOrderHeader"?
+Error in BaseEntity.Load(MJ_BizApps_Orders: Order Headers, Key: ID=8ADF440B-…)
+```
+
+### What is skewed against what
+
+| Where | `RootReversesOrderHeaderID` |
+|---|---|
+| `__mj_BizAppsOrders.vwOrderHeaders` (MJ_V6_Host) | **present** |
+| `__mj.EntityField` for *Order Headers* | **present**, `IsVirtual = 1` |
+| orders' `packages/Server/src/generated/generated.ts` | **absent** |
+| orders' `packages/Server/dist/…` | **absent** |
+
+The client builds its GraphQL selection set from **entity metadata**, so it asks for every registered
+field. The server's type comes from orders' **generated resolvers**. The database has the recursive
+hierarchy column MJ emits for a self-referencing FK (`ReversesOrderHeaderID` → `Root…`, `…Depth`,
+`…Path`, `…IsLeaf`, `…ChildCount`); orders' committed generated code predates it. So metadata promises a
+field the schema does not have, and every read of an Order Header fails.
+
+**It is not a stale `dist`.** Source and dist agree — both lack it. Rebuilding orders changes nothing;
+its CodeGen has to be re-run against this database.
+
+### Why sales feels it and orders does not
+
+Orders' own suite runs in process and never asks GraphQL for that field. Sales' deal workspace reads the
+embedded order **over GraphQL**, so it is the first consumer to notice. Nothing in sales can fix it.
+
+### What it blocks, precisely
+
+Reopening any deal that has an order — i.e. every deal created since the redesign.
+`DealWorkspaceService.LoadDeal` refuses rather than rendering a deal with no lines, which is the right
+behaviour and makes the failure visible instead of silent data loss:
+
+> deal … points at order … but the embedded record did not resolve. Refusing to render it as a deal
+> with no lines.
+
+Creating a deal, and creating its order, both still work: those go through **sales'** own resolver, and
+the order is written server-side inside `DealEntityServer.Save()`.
+
+### THE FIX WAS ATTEMPTED ON 2026-08-20 AND IT DOES NOT WORK. Read this before trying it again.
+
+The obvious move is to re-run orders' CodeGen file pass against this database and rebuild:
+
+```bash
+cd bizapps-orders && node node_modules/@memberjunction/cli/bin/run.js codegen --skipdb && npm run build
+```
+
+That was run, with a full database backup taken first and orders' `excludeSchemas` already guarding
+`__mj_BizAppsSales`. **It fixes the field and breaks two other things,** because the premise is wrong:
+this host's `__mj` metadata is not the metadata orders' committed code was generated against. Each
+regeneration trades one skew for another.
+
+| Round | What was regenerated | Outcome |
+|---|---|---|
+| 1 | files only | `RootReversesOrderHeaderID` **appears** ✅ · `OrderHeaderEntity.InitialPaymentDetailID_Object` **disappears** ❌ — `orders-entities` no longer compiles |
+| 2 | after setting the missing `EntityField.EmbeddedRecord` rows | the embeds come back ✅ · `entity_subclasses.ts` now **self-imports** `@mj-biz-apps/orders-entities` ❌ and `OrderHeader.Lines` **disappears** ❌ |
+
+Everything was restored: orders' generated files to `HEAD`, and the seven `EmbeddedRecord` rows back to
+`NULL`. Orders builds again and its `dist` matches its committed source.
+
+### What the two failed rounds actually establish
+
+**MJ_V6_Host is missing at least three CLASSES of orders' metadata**, not one field:
+
+* **`EntityField.EmbeddedRecord`** — **zero** rows on the whole host. Orders ships these in
+  `metadata/entity-fields/.embedded-payment-detail.json` and `.embedded-order-addresses.json`; that
+  file's own comment says they need MJ's v6.1+ column and a push. `mj sync push --dir metadata` reported
+  `entity-fields — 5 updated` and the values did **not** persist, so the push path for this column does
+  not work here either.
+* **`RelatedRecordCollection`** — `OrderHeader.Lines` vanished from the regenerated class, so this is
+  missing too. Which also means **KI-20's cause is not the only reason line removal misbehaves**: on
+  this host the collection is not even declared in metadata.
+* **whatever drives `entityPackageName`** — the self-import is the exact trap sales documents in
+  `packages/Entities/src/deal-entity.ts`, arriving from the other direction.
+
+**So this is not a CodeGen problem. It is an INSTALL problem** — the same family as KI-21. Orders'
+schema was migrated here and its metadata never was. `mj sync push --dir metadata` in bizapps-orders
+gets 14 directories in and then fails:
+
+```
+✖ Push failed  Failed to process field 'CategoryID' in MJ: Queries:
+  Lookup failed: No record found in 'MJ: Query Categories' where Name='Orders'
+```
+
+That missing category is the first hard stop. Clearing it, letting the whole push complete, and THEN
+regenerating is the sequence with a chance of working — and it is `mj app install` for bizapps-orders in
+all but name.
+
+### The board cannot route around it either — measured 2026-08-20
+
+The hope was that the pipeline board would give a stage-change surface that never opens a deal, making
+the gap narrower than it looks. **It does not.** Dragging `DEAL-9001` — the one seeded deal that has an
+order — refused, with the board saying so plainly:
+
+> "Northwind Health — Platform Rollout" could not be read, so it was not moved.
+
+and the same three console errors as the workspace, ending in
+`DealWorkspaceService.LoadDeal: ... the embedded record did not resolve`. The database was unchanged:
+same stage, same order status, same event count. The refusal is honest — nothing half-happened.
+
+**The isolating result matters more than the failure.** Dragging a deal with NO order works completely:
+`DEAL-9002` moved Qualification → Discovery, the target stage's probability default was applied
+(25% → 10%), and **exactly one `DealStageEvent` was appended, stamped with `Probability = 25` and
+`Amount = 42000`** — the values the deal held on the way OUT, not the 10 it arrived at. That is `BD2`'s
+claim, verified through the UI rather than in process.
+
+So the board is fine, the write path is fine, and the blocker is precisely and only the
+**embedded-order LOAD**. Anything that must read a deal before writing it — workspace, board, importer —
+hits it; anything that only creates hits nothing.
+
+> **A false alarm worth recording, because it is the third time this trap has been sprung here.** The
+> first run of that drag appeared to move the deal and append NO event, which read as a defect in the
+> merged writer. It was a STALE API: MJAPI had been running since before the board branch was merged, so
+> the process was holding a `DealEntityServer` with no `appendStageEvent` in it. `ng serve` rebuilt the
+> browser bundle and made everything look current. CLAUDE.md says to restart both servers after a
+> rebuild; the reason it keeps saying so is that the symptom is a plausible-looking wrong answer rather
+> than an error.
+
+That narrows what a fix has to restore: one GraphQL read of `MJ_BizApps_Orders: Order Headers` whose
+selection set matches the host's entity metadata.
+
+### Until then
+
+Reopening a deal that has an order does not work in the Explorer, and neither does moving one on the
+board, so the reopen half of the Explorer pass stays unverified. Creating a deal, provisioning its order and writing order lines all work: those
+go through **sales'** own resolver and never ask GraphQL for an Order Header. `DECISIONS-NEEDED.md` DN-8
+carries the decision.
+
+**Do not "just re-run CodeGen".** It has been tried twice, it is recorded here, and the second attempt
+left orders' tree broken until it was restored.
+
+---
+
+## 🔴 KI-21 — A host running Sales must ALSO register orders' server package, or no deal with an order can be opened
+
+**Found in the Explorer pass on 2026-08-20, on MJ_V6_Host — a database where orders' schema, entities and
+server classes were all present and the integration suite was fully green.** Every deal that HAS an order
+failed to open in the workspace:
+
+```
+Error: Cannot query field "mjBizAppsOrdersOrderHeader" on type "Query".
+Error in BaseEntity.Load(MJ_BizApps_Orders: Order Headers, Key: ID=8ADF440B-…)
+DealWorkspaceService.LoadDeal: deal 7A3FB14D-… points at order 8ADF440B-… but the embedded record did
+not resolve. Refusing to render it as a deal with no lines.
+```
+
+Since `DealEntityServer` provisions an order for every deal at creation, that is **every new deal**. Only
+the older order-less seeded rows still opened, which is what made it look like a data problem.
+
+### Why a green suite could not see it
+
+The integration checks run **in process**: they resolve entities through the provider directly, so orders'
+entities are reachable and every line assertion passes. The workspace reaches the same rows **over
+GraphQL**, and a resolver enters the schema only if its file path is passed to `buildSchema`. From
+`packages/ServerBootstrap/src/index.ts`:
+
+> side-effect-importing a resolver class only registers type-graphql metadata, but `buildSchema` includes
+> a resolver ONLY if it is PASSED in
+
+So importing orders' packages — which the class manifest does — registers its entity CLASSES and none of
+its resolvers.
+
+### The mechanism, exactly
+
+`loadDynamicAppPackages()` reads **`mj.config.cjs` → `dynamicPackages.server[]`**, written by
+`mj app install`, and collects each listed package's exported `RESOLVER_PATHS`. On MJ_V6_Host that array
+held one entry:
+
+```
+Loading Open App server packages...
+  Loaded Open App server package: @mj-biz-apps/sales-server (ran LoadBizAppsSalesServer) (+2 resolver paths)
+```
+
+Sales only. Orders' schema was migrated and its entities registered, but `mj app install` had never been
+run for it, so nothing contributed its resolver paths.
+
+**Being in `package.json` is not enough, and neither is being in the class manifest.** Both were true here.
+
+### The fix
+
+Register orders as an installed Open App on the host — `mj app install` for bizapps-orders, or by hand in
+`mj.config.cjs`:
+
+```js
+dynamicPackages: {
+  server: [
+    { PackageName: '@mj-biz-apps/sales-server',  StartupExport: 'LoadBizAppsSalesServer',  AppName: 'mj-bizapps-sales',  Enabled: true },
+    { PackageName: '@mj-biz-apps/orders-server', StartupExport: 'LoadBizAppsOrdersServer', AppName: 'mj-bizapps-orders', Enabled: true },
+  ],
+}
+```
+
+The names come from orders' own `mj-app.json` (`packages.server[].startupExport`), not from guesswork.
+
+### Why this is a KNOWN ISSUE and not a setup step
+
+It is **both**, and the reason it is here is the AWS install. `mj-app.json` declares
+`mj-bizapps-orders` a dependency, but a dependency declaration does not make the host register the
+dependency's server package — and nothing in Sales can force it to. A host that migrates orders' schema
+and stops there gets an app whose deal workspace cannot open a single deal, with a GraphQL error naming a
+field rather than a missing install. Verify it before a deployment is called done:
+
+```bash
+grep -A3 'dynamicPackages' mj.config.cjs      # orders-server must be listed
+# or, in the API's startup log:
+#   Loaded Open App server package: @mj-biz-apps/orders-server (+N resolver paths)
+```
+
+---
+
+## 🔴 KI-20 — Removing a line from an order FAILS THE WHOLE SAVE (updated 2026-08-21: it used to be silent)
+
+> ### ⚠️ THE SYMPTOM CHANGED, AND THE TITLE BELOW DESCRIBES THE OLD ONE
+>
+> Measured through the Explorer on 2026-08-21. Removing one of two lines and saving no longer drops the
+> removal quietly — it now refuses the entire save:
+>
+> ```
+> Save failed for OrderID_Object (MJ_BizApps_Orders: Order Headers): Failed to save order line 1:
+> Violation of UNIQUE KEY constraint 'UQ_OrderLine_OrderHeader_LineNumber'.
+> The duplicate key value is (b90e31c3-…, 1).
+> ```
+>
+> Orders renumbers the SURVIVING line from 2 to 1 while the removed row still holds LineNumber 1, so the
+> update collides with the row it is meant to replace. **A rep cannot remove a line at all**, and nothing
+> about the deal saves while a removal is staged.
+>
+> Loud is better than silent, and this is still orders' to fix — the cause remains in `savePendingLines`,
+> which is what the original entry describes. What changed is that it now announces itself.
+>
+> **How this was found is worth keeping.** `78-line-removal-tripwire` asserted "the UI must report NO
+> error", on the reasoning that KI-20's hazard was looking like success. That assertion had been passing
+> for the wrong reason: it searched for CSS classes that do not exist (`.dw-issue`, `.msg`; the real ones
+> are `.dw-issues li` and `.dw-msg`), so it matched nothing and could never fail. Fixing the selector is
+> what revealed the change. A tripwire pointed at a selector that matches nothing is indistinguishable
+> from a passing one.
+>
+> The spec now asserts the uniqueness violation by name, so it goes red the day the behaviour changes in
+> either direction.
+
+### The original entry, which still describes the cause
+
+
+**Measured on MJ_V6_Host, 2026-08-20, by `test-harnesses/prove-line-removal.mjs`.** The save reports
+SUCCESS and the row stays. Nothing logs, nothing throws, and the collection in memory is correct — so the
+UI shows the line gone until the page is reloaded.
+
+### The matrix, which is what makes the cause unambiguous
+
+| Verb | Route | Result |
+|---|---|---|
+| INSERT a line | `deal.Save()` | ✅ written |
+| EDIT a line | `deal.Save()` | ✅ written |
+| **REMOVE a line** | `deal.Save()` | ❌ **row survives, save returns true** |
+| **REMOVE a line** | `order.Save()` — the collection's own owner | ❌ **row survives, save returns true** |
+| **REMOVE a line** | `Lines.Load()` then `order.Save()` — different loader | ❌ **row survives** |
+| REMOVE an instalment (`Deal.PaymentSchedule`) | `deal.Save()` | ✅ **deleted** |
+
+The last row is the control, and it is why this is not an MJ bug and not about embedded records. MJ's
+collection-removal machinery works; `Deal.PaymentSchedule` proves it on the same save, in the same
+process. Only `OrderHeader.Lines` drops the deletion, and it does so through every route.
+
+### The cause, in bizapps-orders
+
+`OrderEntityServer.Save()` deliberately takes the collection out of MJ's hands:
+
+```ts
+const savedHeader = await super.Save({ ...options, SkipRelatedCollections: true });
+...
+await this.persistPreparedLines(options, decisions);
+```
+
+`SkipRelatedCollections: true` is correct and well-reasoned — the comment above it explains that lines
+must not insert before they have been expanded, priced, discounted, charged and taxed. But it means MJ
+never processes the collection, so the hand-rolled replacement is now solely responsible for every verb.
+And `savePendingLines()` is:
+
+```ts
+for (const line of this.Lines.Items) {
+    const saved = await line.Save(options);
+```
+
+Inserts and updates, iterated off the SURVIVORS. It never asks the collection for its pending removals, so
+a removed line is simply not in the loop and nothing deletes it.
+
+### What this affects in sales, today
+
+* **`DealWorkspaceComponent.RemoveLine()`** — the delete affordance on a deal line. It calls
+  `Lines.Remove(line)` and then saves, which is the correct API. The line comes back on reload.
+* **`save-deal.SD6`** asserts the defect rather than the requirement, on the CD7 pattern: **when orders
+  fixes this, SD6 starts failing, and that failure is the signal to invert it back.** Read SD6's own
+  comment before "fixing" it.
+* **`save-deal.SD14`** lost its repositioning half. A clean row whose `LineNumber` changes because a
+  neighbour was removed cannot be demonstrated while removal does not happen.
+
+### The fix, and where it must happen — written for whoever picks it up in orders
+
+In **bizapps-orders**, not here. Sales could delete the line row itself and that is deliberately NOT
+done: it would put a second app in charge of deleting orders' rows, and orders freezes a booked line
+with trigger 51003 for reasons sales does not model. `DECISIONS-NEEDED.md` DN-6 is the decision.
+
+**The two lines responsible**, both in `packages/CoreEntitiesServer/src/OrderEntityServer.ts`:
+
+1. `super.Save({ ...options, SkipRelatedCollections: true })` — correct, and the comment above it
+   explains why: lines must not insert before they are expanded, priced, discounted, charged and taxed.
+   Keep it. It means MJ never processes the collection, so the hand-rolled replacement owns every verb.
+2. `savePendingLines()` — `for (const line of this.Lines.Items) { await line.Save(options); }`. Inserts
+   and updates, iterated off the SURVIVORS. Nothing asks the collection for its pending removals.
+
+**What a fix has to get right, and none of it is guesswork:**
+
+* **Scope the delete to states where it is legal.** Trigger 51003 freezes a line on a Confirmed order,
+  and because the CRUD procs run under INSERT-EXEC a trigger rollback raises *"Cannot use the ROLLBACK
+  statement within an INSERT-EXEC statement"* — an error naming neither the line nor the rule. The
+  existing comment in `prepareLines` says this in orders' own words. So: delete on `Draft`/`Quoted`,
+  refuse with a real message afterwards.
+* **Delete BEFORE the inserts and updates**, which is the ordering MJ's own plan uses and the reason
+  `Deal.PaymentSchedule` re-sequences correctly: `LineNumber` is a `Sequence` field, and removing row 2
+  of 3 has to renumber row 3 before or as part of the same write.
+* **Do it inside the existing transaction**, alongside `persistPreparedLines`, so a failed delete rolls
+  back with the header rather than leaving a half-emptied order.
+* **Check `Lines.Dirty` still covers a pure removal.** `OrderEntityServer.Save()`'s ordinary-path
+  shortcut is `if (!booking && !this.Lines.Dirty && this.IsSaved) return super.Save(options)`. Its
+  comment claims `Dirty` "is true when a line was added, edited or removed". If a removal-only change
+  leaves `Dirty` false, that shortcut swallows the delete a second time — and the fix passes its own
+  test while the UI stays broken. **Verify that claim before trusting it.**
+
+**The reproduction is already written and needs no orders-side setup:**
+
+```bash
+cd bizapps-sales && node test-harnesses/prove-line-removal.mjs
+```
+
+Six labelled cases, including the control that proves MJ's machinery works. `save-deal.SD6` is the
+tripwire in the suite: **when this is fixed, SD6 starts failing**, and the three assertions to restore
+are listed verbatim in its comment.
+
+**One caveat found later, on 2026-08-20:** KI-22's second regeneration round showed `OrderHeader.Lines`
+disappearing from the generated class, which means the `RelatedRecordCollection` metadata for it is
+**absent on MJ_V6_Host**. The `dist` orders ships still declares the collection, so the harness result
+above stands — but anyone reproducing this on a freshly-generated host should confirm the collection
+exists before concluding anything about `savePendingLines()`.
+
+### How to reproduce in thirty seconds
+
+```bash
+node test-harnesses/prove-line-removal.mjs      # needs orders linked and MJ_V6_Host seeded
+```
+
+It prints the matrix above and cleans up after itself.
+
+---
+
 ## 🔴 KI-1 — `AllowMultipleSubtypes` is `false` on common's `Person` and `Organization`
 
 **This is fine today and becomes a silent data-corruption bug the moment a second app extends either
@@ -389,6 +1107,133 @@ Until step 3 exists, the doubling failure has no automated witness at all.
 >    `EventOrderLine` is an IsA child. Entity metadata is still written and post-CodeGen CRUD validation
 >    still passes. Judge it on the entity rows, not the exit code.
 
+## 🟠 KI-19 — The contract seam's END-TO-END path is unproven; the constraint it turns on is not
+
+**The fix is in and its premise is PROVEN; only the seam round trip is not.** Read the scope note at
+the bottom before treating this as an open correctness risk -- it is narrower than it first read.
+
+**The bug.** `LiveContractsSeam` set both `CustomerOrganizationID` and
+`CustomerPersonID`, and `CK_Contract_CustomerXor` requires exactly one:
+
+```sql
+CONSTRAINT CK_Contract_CustomerXor CHECK (
+    (CASE WHEN CustomerOrganizationID IS NULL THEN 0 ELSE 1 END)
+  + (CASE WHEN CustomerPersonID       IS NULL THEN 0 ELSE 1 END) = 1
+)
+```
+
+`validate()` requires an `AccountID` on a won deal, so the organization side was always populated —
+meaning **every B2B won deal with a primary contact produced a contract the database refused.** Only a
+deal with no contact at all got through, which is exactly the shape the existing CT fixture used, which
+is why it was invisible. Fixed by sending the contact as `PrimaryContactPersonID` (a real column on
+`Contract`) and leaving `CustomerPersonID` null.
+
+### Why it is unproven, and it is not the database's fault
+
+Proving it needs contracts' `SaveContractOperation` to actually run — the seam dispatches
+`Contracts.SaveContract` rather than saving entities itself. That needs **both** MJ new enough to build
+this branch **and** the `bizapps-contracts` package loaded in-process. No stack has both:
+
+| Stack | MJ supports the embed | `bizapps-contracts` |
+|---|---|---|
+| `/c/v6` — where this branch builds | yes (`next`, `0f2055fa`) | **absent** — never added as a workspace member |
+| `/c/v6repro` — the only stack with contracts | **no** (`cbfc330c`, zero `DeclareEmbeddedRecord`) | present |
+
+`MJ_V6_Repro` the *database* is fine — 10 contract tables, `PrimaryContactPersonID` present,
+`CK_Contract_CustomerXor` present, and its core is now migrated current. Running the harness there gets
+as far as `ContractsIsInstalled() === true` and then fails with
+`Remote operation 'undefined' has no server implementation` — because the operation's server half lives
+in a package this workspace does not have.
+
+**Importing contracts across from `/c/v6repro` is not a shortcut**: it would resolve
+`@memberjunction/*` from repro's older MJ and put two copies of MJ core in one process, which is the
+single-copy rule in `docs/WORKSPACE-SETUP.md` and breaks `ClassFactory` and decorator identity.
+
+### What closing the REMAINING gap costs (not blocking; the premise is proven)
+
+Either **add `bizapps-contracts` to `/c/v6`** (clone, workspace member, install, build it against MJ
+`next` — unproven, it carried a local conversion patch — then migrate its schema into `MJ_V6_Host` and
+push its metadata), or **bring `/c/v6repro/MJ` up to `next`** (pull, install, full build including the
+`ai-cerebras` and `actions-bizapps-formbuilders` breakage that needs `--noCheck` emits, then rebuild all
+seven repro members). Both are substantial and both modify a shared stack.
+
+### What IS verified — including the claim the fix turns on
+
+**`CK_Contract_CustomerXor` was observed rejecting the old shape.** A CHECK constraint needs no MJ, no
+contracts server half and no `Contracts.SaveContract` — so the missing stack does not stand in the way of
+proving the premise. `test-harnesses/prove-customer-xor.mjs` inserts a minimal `Contract` row four ways
+inside one transaction and rolls back, against real FK targets so a failure can only be the XOR:
+
+| Row | Result |
+|---|---|
+| both columns set — **what the seam used to send** | **rejected**, by `CK_Contract_CustomerXor` by name |
+| organization only — **what the fix now sends** | accepted |
+| person only | accepted |
+| neither | rejected — it is *exactly*-one, not at-most-one |
+
+So the fix's correctness no longer rests on reading the constraint text. What remains unproven is only
+the **round trip through the seam** — that `CreateContractFromDeal` composes a payload
+`Contracts.SaveContract` accepts and that the contact lands in `PrimaryContactPersonID`.
+
+### Also verified
+
+The constraint text and the target column were read from contracts' own migration, the fix compiles, and
+`test-harnesses/prove-contract-customer.mjs` is written and refuses to pass vacuously — it asserts the
+contracts schema, the constraint's existence and `ContractsIsInstalled()` before it tests anything, and
+exits non-zero if any is missing. It is ready to run the moment a stack can host it.
+
+**Do not mark the CT bundle green on a host without contracts.** A skipped bundle is visually identical
+to a passing one, and that shape has already burned this project four times.
+
+---
+
+## 🟠 KI-18 — CodeGen's remote-operation generation is not schema-scoped, so every app's file holds every app's operations
+
+**The sibling of KI-10, and the one `excludeSchemas` cannot fix.** KI-10's rule is that an app's CodeGen
+must exclude its siblings' schemas so it never emits their entities. That rule works, and sales' list is
+complete. It has no effect here, because **remote operations are not generated from schemas at all.**
+
+`runCodeGen.ts` selects them with an unfiltered view over the metadata table:
+
+```ts
+const remoteOpsResult = await new MJ.RunView().RunView<MJRemoteOperationEntity>(
+  { EntityName: 'MJ: Remote Operations', ResultType: 'entity_object' },
+  currentUser,
+);
+```
+
+and the generator then emits **every row whose `Status` is `Active`**. There is no schema filter, no
+exclusion hook and no config knob. So on a database hosting several Open Apps, each app's
+`remote_operations.ts` contains the union of all their operations.
+
+### What it actually costs
+
+**Churn and size, not correctness.** Sales' committed file already carries eight prefixes — `AISkill.`,
+`PredictiveStudio.`, `RecordComparison.`, `RecordProcess.`, `Sales.`, `TaskGraph.`, `Template.`,
+`Workflow.` — because MJ core's own operations were always in scope. Generating on the shared v6 host
+simply extends that to orders' (`OrdersPriceOrder`, `OrdersAdvanceOrderState`, …), about **+1,385 lines**.
+
+It does **not** shadow anyone's implementation, which was the first thing to check. The generated classes
+are **shells**: the file's own header says a hand-authored server subclass, registered via
+`@RegisterClass`, supplies the `InternalExecute` body. The generated shells carry no `@RegisterClass` of
+their own, so a sales-side copy of `Orders.PriceOrder` cannot win a ClassFactory key from orders' real
+implementation.
+
+### The ruling
+
+**The host is canonical.** Sales' generated code is produced against `MJ_V6_Host`, because that is the
+only database where the Deal → Order embed can resolve `RelatedEntityID` to a real `OrderHeader` entity.
+Accept the wider `remote_operations.ts` that follows; do not revert it after each run and do not chase a
+sales-only database to keep the file narrow — that would trade a correctness property for a cosmetic one.
+
+### What would fix it upstream
+
+A scope filter on that `RunView` — by operation-key prefix, by owning schema, or by the app manifest — so
+an app emits only the operations it owns. That is an MJ CodeGen change and belongs with the
+`entityPackageName` question in the same conversation, since both are about an app knowing which artifacts
+are its own.
+
+---
 ## 🟠 KI-10 (as originally recorded) — The shared v6 host cannot hold orders' schema, and app CodeGen must exclude Sales
 
 **Two separate hazards on `MJ_V6_Host`, both found the hard way and both cheap to avoid once known.**
@@ -771,7 +1616,7 @@ second is the better shape and the reason this is recorded rather than patched.
 
 ---
 
-## 🟢 KI-17 — Opening a Sales Account logs a ClassFactory fallback for common's Organizations
+## 🟢 KI-17 — ClassFactory falls back to `_BaseEntity` for ANY of bizapps-common's entities
 
 Clicking a customer name opens the account as its own Explorer record tab, and it renders correctly.
 It also writes a warning to the browser console:
@@ -780,6 +1625,14 @@ It also writes a warning to the browser console:
 ClassFactory: no registration found for base class '_BaseEntity' with key
 'MJ_BizApps_Common: Organizations'. … Falling back to an instance of '_BaseEntity' itself.
 ```
+
+**IT IS THE WHOLE FAMILY, NOT ONE ENTITY.** Recorded first for `Organizations` because that is where it
+was noticed, and the title said so for a while — which was a trap: a later reader met the same warning
+naming `MJ_BizApps_Common: Addresses` (server-side, from a harness) and had to decide whether it was new.
+It is not. **Any** entity in `__mj_BizAppsCommon` hits this, because the cause is that none of common's
+subclasses are registered in the consuming process — not anything specific to one table. Observed so far
+for `Organizations` (Explorer, opening a Sales Account) and `Addresses` (node harness); expect it for
+`People`, `ContactMethods` and the rest on whatever surface reaches them first.
 
 **Why.** `SalesAccount` is an IsA child of common's `Organization`, so loading one asks the ClassFactory
 for the PARENT entity class. Sales' own subclasses are registered in the Explorer; **bizapps-common's are

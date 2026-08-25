@@ -12,9 +12,14 @@
  * a second section later means adding an Application nav item plus a resource, not a widget here.
  *
  * ONE SECTION TODAY. Contracts has three (Contracts / Billing / Setup) because it has three distinct
- * jobs. Sales has one job worth its own section so far — working deals. Accounts, forecasting and the
- * pipeline board are real sections later, and they are absent rather than stubbed because **a nav item
- * pointing at an unregistered component mounts a blank tab with no error anywhere**.
+ * jobs. Sales has one job worth its own section so far — working deals. Accounts and forecasting are real
+ * sections later, and they are absent rather than stubbed because **a nav item pointing at an
+ * unregistered component mounts a blank tab with no error anywhere**.
+ *
+ * The pipeline BOARD is a rail page here rather than a section of its own, and that is a claim about what
+ * it is: another way to look at the same deals, alongside the dashboard and the roster — not a different
+ * job. It sits between them because that is the order of narrowing: what is happening, where things
+ * stand, then this specific deal.
  *
  * DECLARING THE RAIL HERE rather than inside the component keeps the whole IA readable in one file,
  * gives badge counts a single injection point, and makes the nav testable without instantiating Angular.
@@ -69,6 +74,7 @@ export const SALES_SECTIONS: SalesSection[] = [
 export const DEALS_SUB_PAGES: SalesSubPage[] = [
     { Id: 'dashboard', Label: 'Dashboard', Icon: 'fa-solid fa-gauge-high', Description: 'What is moving, what has stalled' },
     { Id: 'list', Label: 'All deals', Icon: 'fa-solid fa-table-list' },
+    { Id: 'board', Label: 'Board', Icon: 'fa-solid fa-diagram-project', Description: 'Move deals through the pipeline' },
     { Id: 'workspace', Label: 'Workspace', Icon: 'fa-solid fa-layer-group', Description: 'Open, edit and create' },
 ];
 

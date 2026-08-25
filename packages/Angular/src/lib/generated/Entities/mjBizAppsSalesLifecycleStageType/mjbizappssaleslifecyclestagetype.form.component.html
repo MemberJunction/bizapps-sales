@@ -120,9 +120,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Sales Accounts','LifecycleStageTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Sales Accounts')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Sales Accounts','LifecycleStageTypeID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesSalesAccounts')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesSalesAccounts', $event.totalRowCount)"
                 >
@@ -145,9 +145,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Sales Contacts','LifecycleStageTypeID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Sales Contacts')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Sales Contacts','LifecycleStageTypeID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsSalesSalesContacts')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesSalesContacts', $event.totalRowCount)"
                 >

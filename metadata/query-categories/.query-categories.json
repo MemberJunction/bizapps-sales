@@ -1,0 +1,23 @@
+[
+  {
+    "_comments": [
+      "The category every sales read model hangs off. One row, and it MUST be pushed before the",
+      "queries directory -- see the ordering note in metadata/.mj-sync.json, which records the trap",
+      "bizapps-orders hit and documented: 'queries' sorts before 'query-categories' alphabetically, so",
+      "without an explicit directoryOrder entry the queries are pushed first, every CategoryID lookup",
+      "fails, and the ENTIRE push halts there rather than skipping the queries.",
+      "",
+      "Fixed UUID so a re-push against a rebuilt database updates this row rather than creating a",
+      "second 'Sales' category that half the queries point at."
+    ],
+    "fields": {
+      "Name": "Sales",
+      "ParentID": null,
+      "Description": "BizApps Sales read models — the master plan §9 measures as parameterized MJ Queries. §9.5 requires these to be Queries rather than hand-rolled Angular aggregation, so Skip, the query builder and report snapshots can all reach them. Every query branches on behaviour FLAGS (IsWon, IsOpen, IncludeInCommit, IsOwnerRole) and never on a status, stage or role NAME.",
+      "UserID": "@lookup:MJ: Users.Name=System"
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0000-4000-A000-000000000001"
+    }
+  }
+]

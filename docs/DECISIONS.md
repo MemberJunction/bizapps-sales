@@ -10,6 +10,62 @@ assumes it was an accident.
 
 ---
 
+## 2026-08-20 — the order's status is a property of the STAGE
+
+### D-OS1 — `PipelineStage.OrderStatusOnEntry`, replacing `CloseWonPolicy.OrderState`
+
+**Decided by Andrew**, choosing against the design this repo proposed. The proposal was a flag on the
+close policy; the ruling is a nullable column on `PipelineStage`. When a deal enters a stage carrying a
+value, the automation moves the deal's order to that status. Blank means the stage says nothing.
+
+**Why the stage and not the policy.** `PipelineStage.DealStatusTypeID` already answers exactly this
+question for the deal's OWN status, two lines above the new column in the same table. A close-time
+policy key could only ever speak at one moment, and only about a won close; a stage speaks on every
+transition — forward, backward, won, lost. And it is ONE source of truth: a policy key and a stage
+table can agree today and drift apart in a deployment nobody is watching.
+
+**Values are limited to `Draft | Quoted | Confirmed | Voided`,** enforced by
+`CK_PipelineStage_OrderStatusOnEntry`. `Posted` and `Fulfilled` are deliberately absent: they are
+finance and fulfilment OUTCOMES reached by orders' own advance, not something a salesperson moving a
+card decides. A stage that could name them would let the board post to the ledger.
+
+*On Rule 2:* a CHECK constraint on a vocabulary looks like the thing Rule 2 forbids, and is not. The
+vocabulary is ORDERS' — `OrderHeader.Status` is their CHECK-constrained column — and the same reasoning
+already governs `ProductFilterFor`'s `Status = 'Active'` literal. What this constraint enforces is a
+structural restriction on a foreign set: the subset a SALES stage may name.
+
+### D-OS2 — a refused order update must never block the stage change
+
+**Andrew, verbatim:** *"The Deal stage is the salesperson's record of the sales process; it should never
+be held hostage by order-side rules."*
+
+So the update runs through orders' own transition validation, the stage change succeeds regardless, the
+order's status is left exactly as it was, and a warning says what did not happen and why.
+
+**Mechanically:** `CanTransition` — imported from orders rather than restated, so a refusal here and a
+refusal in `OrderEntityServer.passesStatusTransition()` cannot disagree — is asked BEFORE anything is
+attempted. A legal-but-failing move (confirming books journal entries and needs a payer) runs in its own
+`BeginEntityTransaction` scope, which joins the ambient transaction as a savepoint, so rolling it back
+leaves the deal's own transaction intact.
+
+**This makes S-US8's reopen warn every time, and that is correct.** A lost deal voids its order,
+`Voided` is terminal in orders, and reopening asks for `Quoted`. The deal reopens; the order does not
+come back. **Do not special-case it and do not write an un-void workaround.** Amith is considering
+making `Voided` non-terminal for never-confirmed orders; if he allows it, the same code starts
+succeeding instead of warning, with no change here.
+
+### D-OS3 — the writer lives on the WRITE PATH
+
+In `DealEntityServer.Save()`, keyed on `PipelineStageID` changing, beside `provisionEmbeddedOrder()`
+rather than inside it — provisioning happens once at birth, this happens on every stage change for the
+rest of the deal's life.
+
+**Not in the UI**, because a stage change arrives from the board's drag, an importer, an agent or a raw
+`BaseEntity.Save()`. This is the same argument as the close lock, and the third time this repo has
+reached for it.
+
+---
+
 ## 2026-08-04 — the seven S1 open questions
 
 Ruled by **Josue** (repo owner, sales) at the close of the S0/S1 bootstrap. These resolve
@@ -401,3 +457,81 @@ repo's numbering. This entry is the decision that should have existed.
 **Why the correction is recorded rather than simply deleted with the file:** the claim was load-bearing
 for planning. It is what made Phase 1 look like a five-minute change, and anyone re-reading an old copy of
 `VENDORED.md` or the first draft of the rework plan would believe it again.
+
+## D-DL1 — What happened to every invariant that lived on `DealLine`
+
+**Recorded because of PR #8.** When `DealDraft` was retired, six invariants lived only in the deleted
+code and one — the `DealLineTypeID` advisory — was genuinely lost until somebody went looking for it.
+`DealLine.Validate()` and its pricing-provenance guard are the same shape, so every rule is accounted
+for here before the table goes, not after.
+
+| Invariant on `DealLine` | Verdict | Where it lives now |
+|---|---|---|
+| `ProductName` required | **strengthened** | `OrderLine.ProductID` is `NOT NULL` with a real FK to the catalogue. A name was a transcription that could be anything; an ID cannot. |
+| `Quantity >= 0` | **relocated, WIDENED** | `CK_OrderLine_Quantity CHECK (Quantity <> 0)`. Orders forbids *zero* and **permits negative** — a return or credit line is negative. Sales forbade negatives. See the note below. |
+| `RequestedDiscountPct` within 0–100 | **relocated, UNIT CHANGED** | `CK_OrderLine_DiscountPct CHECK (DiscountPct >= 0 AND DiscountPct <= 1)`. Orders stores a **fraction**, sales stored a **percentage**. See the note below. |
+| `DiscountAmount >= 0` | **relocated, identical** | `CK_OrderLine_DiscountAmount CHECK (DiscountAmount >= 0)` |
+| `ServicePeriodEnd >= ServicePeriodStart` | **relocated, identical** | `CK_OrderLine_ServicePeriod`, same predicate, null-tolerant the same way |
+| `AnnualGrossFees >= 0` | **dropped, correctly** | A sales-side money column that only ever held a transcription. Money is wholly orders' concern now; there is no sales-side figure left to bound. |
+| `RefusePricingProvenanceEdits` — the four write-only `Resolved*` columns | **dropped, correctly** | The columns go with the table. The guard existed because sales held pricing provenance it was not allowed to author; it now holds none. `OrderLine.UnitPrice` is orders' to write and `CK_OrderLine_UnitPrice CHECK (UnitPrice >= 0)` bounds it there. |
+| "Total vs gross − discount is deliberately NOT checked" | **moot** | It was a note about not computing money on transcribed columns that no longer exist. The rule it protected is now structural: sales has no money columns on a line at all. |
+| The null-`ProductID` refusal (KI-14, PR #22) | **dropped, correctly** | Unreachable. `OrderLine.ProductID` is `NOT NULL`, so the name-only shape cannot be constructed. The HubSpot-import half of KI-14 becomes an import-time concern only. |
+
+### Two of those are behaviour changes, not relocations
+
+**Negative quantities become possible.** Sales refused them; orders allows them because a return line is
+a negative line. Nothing in the deal workspace should offer a negative quantity, so this is a UI
+constraint now rather than a data one — and the data layer will no longer catch it if the UI regresses.
+
+**Discount changes units: 0–100 becomes 0–1.** This is the one that would have become a silent
+hundred-fold bug. A rep entering "10" for ten percent must reach `OrderLine.DiscountPct` as `0.1`. The
+CHECK constraint catches anything above 1, so a raw percentage fails loudly rather than discounting to
+zero — but it fails at the database, naming a constraint, which is a poor error for a typo in a form.
+The workspace converts, and that conversion is the kind of thing worth a check of its own.
+
+---
+
+## D-DL2 — The rep states a discount as a PERCENT only, and never as an amount
+
+**S-US4 is explicit that no price field is enterable by the rep.** The deal-workspace line grid had an
+editable `DiscountAmount` currency input beside the percent one — inherited from `DealLine`, where the two
+coexisted deliberately: the order form template speaks in amounts, the pricing engine takes a percent, and
+`DealLine` transcribed both. That reasoning died with the table. The amount input is removed; the percent
+path and its conversion guard (D-DL1) are untouched.
+
+### Why it was removed rather than made read-only
+
+Read-only was the obvious move — `UnitPrice` and `LineTotalNet` became read-only displays for exactly this
+reason — and it would have been **wrong**, actively so. Orders documents why, in
+`InvoiceBehavior.ts`:
+
+> `OrderLine.DiscountAmount` **IS NOT THE DISCOUNT**. A discount can be recorded as an amount or as a
+> percentage, and when it is a percentage the amount column stays zero: in the review seed, 15 orders
+> carry a discount and 16 lines have a `LineTotalNet` below list with `DiscountAmount = 0`. Trusting the
+> column prints "Subtotal 600.00 / Total 540.00" with no discount row between them — a bill that is off
+> by sixty dollars and looks completely ordinary.
+
+So `DiscountAmount` is an **input channel**, not a computed figure. Since the workspace now sends a
+percent, that column stays `0` on every line it writes — and a read-only cell showing `0` next to a real
+10% discount is the same lie orders' invoice code exists to avoid, moved upstream into the rep's own
+screen.
+
+**The discount is derived, not stored:** `list − net`, whichever way it was entered. That is
+`LineDiscountOf()` in orders, and it carries the correct sign on a return line without a special case.
+
+### What this costs, stated plainly
+
+**A rep can no longer express a discount as a currency amount** — only as a percent. If a signed order
+form says "less $500", somebody converts it. That is a real narrowing of what the screen can capture, and
+it is accepted rather than overlooked: sales stating an amount would be sales stating money, and the
+alternative (keeping the input) puts a price field back in the rep's hands, which the story forbids.
+
+If an amount-entered discount is genuinely needed, it belongs in orders — the column is theirs, the
+pricing walk is theirs, and the derivation already handles both channels.
+
+### For anyone adding a discount display later
+
+Do **not** bind `DiscountAmount` and call it the discount. Derive it (`list − net`) or ask orders for the
+figure. The column is not the number you want, and it will be zero exactly when a discount exists.
+
+---
