@@ -130,7 +130,25 @@ test('demo tour: every screen the demo shows, with its seeded data', async ({ pa
    * the roster happens to sort first.
    */
   await test.step('Product lines — intent, not prices', async () => {
-    await openSalesApp(page);
+    /**
+     * THE SALES APP, NOT THE ENTITY BROWSER. This step used `openSalesApp`, which despite its name
+     * navigates to `lib/explorer.ts`'s `SALES_APP_ROUTE` = `/app/mjbizappssales` -- MJ's DataExplorer.
+     * The "All deals" rail belongs to the CUSTOM app at `/app/sales`. The step entered one surface and
+     * then looked for the other's furniture, so `railItem('All deals')` timed out after 30s, every run.
+     *
+     * There are SIX constants named `SALES_APP_ROUTE` in this harness holding THREE different values:
+     * `/app/mjbizappssales` (lib/explorer.ts:245), `/app/sales/Deals` (lib/workspace.ts:26), and
+     * `/app/sales` declared locally in specs 41, 60, 70 and 80. Which one an importer gets depends on
+     * which module it reached for, and nothing warns. That is the actual defect; this navigation is
+     * spelled out literally so this step cannot pick up the wrong one.
+     *
+     * Mirrors 50-sales-shell, which clicks the same rail item and passes.
+     */
+    await page.goto(`${EXPLORER_BASE_URL}/app/sales`, { waitUntil: 'domcontentloaded' });
+    await expect(
+      page.locator('mjs-sales-section'),
+      'the sales section must render before its rail is usable',
+    ).toBeVisible({ timeout: 40_000 });
     await railItem(page, 'All deals').click();
 
     const row = page.locator('.wrap--list .wl tbody tr', { hasText: 'Northwind Health' }).first();
