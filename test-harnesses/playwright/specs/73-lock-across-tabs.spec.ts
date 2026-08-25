@@ -29,7 +29,7 @@ import { expect, test } from '@playwright/test';
 
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryOne } from '../lib/db';
-import { FieldIsEditable, WORKSPACE_ROOT } from '../lib/workspace';
+import { WORKSPACE_ROOT } from '../lib/workspace';
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { SALES_APP_ROUTE } from '../lib/workspace';
 
@@ -49,6 +49,39 @@ async function openFromRoster(page: import('@playwright/test').Page, name: strin
 }
 
 /** Brings an already-open workspace tab to the front by its label. */
+/**
+ * EDITABILITY, ASSERTED WITH RETRY RATHER THAN SAMPLED ONCE.
+ *
+ * `expect(await FieldIsEditable(...)).toBe(x)` reads the DOM a single time. The value it reads is
+ * refreshed ASYNCHRONOUSLY: DealWorkspaceComponent.SelectTab calls `void this.SyncToActiveDeal()` and
+ * deliberately does not await it -- "the template binds to `Lock`, so the refresh lands on a later
+ * change-detection pass". So the spec was racing a server round-trip against a fixed 1.5s sleep, and
+ * step 4 lost: switching back to the OPEN deal still saw the CLOSED deal's lock and reported the
+ * stale-lock bug that the component had already fixed.
+ *
+ * This is NOT waiting for the assertion to come true. A permanently stale lock -- the actual defect,
+ * which this spec exists to catch -- never becomes enabled and still fails, just after 30s instead of
+ * after 1.5. What it stops failing on is a slow refresh, which is not the bug.
+ *
+ * The same fixed-sleep shape is why 10-deal-crud reads "Loading workspace..." out of the page.
+ */
+async function expectEditable(
+    page: import('@playwright/test').Page,
+    label: string,
+    editable: boolean,
+    why: string,
+): Promise<void> {
+    const control = page.locator('.dw-field', { hasText: label }).first().locator('input, textarea, select').first();
+    await expect(control, `field "${label}" must exist to ask whether it is editable`).toHaveCount(1, {
+        timeout: 15_000,
+    });
+    if (editable) {
+        await expect(control, why).toBeEnabled({ timeout: 30_000 });
+    } else {
+        await expect(control, why).toBeDisabled({ timeout: 30_000 });
+    }
+}
+
 async function selectTab(page: import('@playwright/test').Page, fragment: string): Promise<void> {
     const tab = page.locator('.mj-tabs__tab', { hasText: fragment }).first();
     await expect(tab, `a workspace tab matching "${fragment}" must be open`).toBeVisible({ timeout: 30_000 });
@@ -90,7 +123,7 @@ test.describe('close lock — per tab, not per component', () => {
             page.getByText(/closed .*and locked/i).first(),
             'a locked deal must say so — the notice is what tells a rep why nothing responds',
         ).toBeVisible({ timeout: 30_000 });
-        expect(await FieldIsEditable(page, 'Deal name'), 'a locked deal name must be read-only').toBe(false);
+        await expectEditable(page, 'Deal name', false, 'a locked deal name must be read-only');
         await expect(
             page.getByRole('button', { name: 'New account', exact: true }),
             'and the inline-create control must be ABSENT, not merely disabled — a locked deal must not ' +
@@ -99,7 +132,7 @@ test.describe('close lock — per tab, not per component', () => {
 
         // ── 2. The open deal, in the same session, is editable ──────────────
         await openFromRoster(page, open!.Name);
-        expect(await FieldIsEditable(page, 'Deal name'), 'an open deal must be editable').toBe(true);
+        await expectEditable(page, 'Deal name', true, 'an open deal must be editable');
         await expect(
             page.getByRole('button', { name: 'New account', exact: true }),
             'and it must offer inline create',
@@ -107,10 +140,7 @@ test.describe('close lock — per tab, not per component', () => {
 
         // ── 3. Back to the closed one — still locked ────────────────────────
         await selectTab(page, locked!.Name.slice(0, 18));
-        expect(
-            await FieldIsEditable(page, 'Deal name'),
-            'returning to the closed deal must find it still locked',
-        ).toBe(false);
+        await expectEditable(page, 'Deal name', false, 'returning to the closed deal must find it still locked');
 
         // ── 4. Back to the open one — STILL EDITABLE. This is the defect. ───
         /**
@@ -119,11 +149,13 @@ test.describe('close lock — per tab, not per component', () => {
          * wrong with. A rep's report of this reads "the form randomly stops working".
          */
         await selectTab(page, open!.Name.slice(0, 18));
-        expect(
-            await FieldIsEditable(page, 'Deal name'),
+        await expectEditable(
+            page,
+            'Deal name',
+            true,
             'the OPEN deal must still be editable after returning from a closed one — this is the bug ' +
                 'that left an unrelated deal read-only',
-        ).toBe(true);
+        );
         await expect(
             page.getByRole('button', { name: 'New account', exact: true }),
             'and its inline-create control must be back',
