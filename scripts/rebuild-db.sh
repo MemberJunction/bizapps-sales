@@ -32,10 +32,15 @@
 # WHAT IT DELIBERATELY DOES NOT DO, unlike the bizapps-orders script it is derived from:
 #   * no bizapps-accounting step, and no accounting seed metadata. Sales books nothing and computes
 #     no money — it asks Orders.PreviewOrder. Nothing in the S1 schema references an accounting row.
-#   * no bizapps-orders step. DealLine.ProductID and Deal.ContractID are SOFT references (DG-6), so
-#     the sales baseline stands up with only common present. This is the single fact that makes the
-#     S1 CRUD milestone reachable without the whole family installed and built.
-#   Both arrive when S2 wires the pricing bridge, and this script grows the steps then.
+#   * no bizapps-contracts step. It does not install on a fresh database (KI-13), and sales has no
+#     FK into it -- measured 2026-08-25: sales' only cross-schema FKs are to __mj,
+#     __mj_BizAppsCommon and __mj_BizAppsOrders. If that changes, contracts goes LAST, after sales.
+#
+#   IT USED TO SKIP ORDERS AND ACCOUNTING TOO, on the grounds that "DealLine.ProductID and
+#   Deal.ContractID are SOFT references (DG-6), so the sales baseline stands up with only common
+#   present." That was true when it was written and stopped being true on 2026-08-19, when da0f69f
+#   gave Deal.OrderID a real FK to __mj_BizAppsOrders.OrderHeader. DealLine no longer exists at all.
+#   The steps the header promised would "arrive when S2 wires the pricing bridge" are now present.
 #
 # AFTER THIS, still by hand (they need judgement, not automation):
 #   npm run mj:codegen                     # regenerate entity metadata + SQL objects
@@ -77,13 +82,47 @@ fi
 DB_DATABASE="$CONFIRM_DROP"
 
 MJ_VERSION="${MJ_CORE_VERSION:-v5.51.0}"
-COMMON_REPO="${BIZAPPS_COMMON_REPO:-$ROOT/../bizapps-common}"
 MJ="node $ROOT/node_modules/@memberjunction/cli/bin/run.js"
 SQLCMD="sqlcmd -S ${DB_HOST},${DB_PORT:-1433} -U ${DB_USERNAME} -P ${DB_PASSWORD} -C -N o"
 
 say() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
-say "1/4  Recreating ${DB_DATABASE}"
+# THE SIBLING APPS, IN DEPENDENCY ORDER. This order is not negotiable and it is the same one
+# WORKSPACE-SETUP.md section 4 documents. Verified end to end 2026-08-25 against a genuinely empty
+# database: core 45 migrations, common 12, tasks 4, accounting 2, orders 10, sales 4 -- all clean.
+#
+# ORDERS IS REQUIRED, and this script did not install it until now. Deal.OrderID became a REAL FK to
+# __mj_BizAppsOrders.OrderHeader on 2026-08-19 (da0f69f), inline and unconditional in CREATE TABLE
+# Deal, so the sales baseline stops applying without orders present. The header of this script had
+# claimed the opposite as a design choice ("the sales baseline stands up with only common present")
+# and that claim outlived the commit that falsified it by six days. Nobody noticed because nobody ran
+# this script in between -- see KNOWN-ISSUES KI-24 for what that cost.
+#
+# EACH REPO MIGRATES ITSELF, with its own --schema. The previous version applied common by hand with
+# sqlcmd plus a sed substitution, because running `mj migrate` from THIS repo rewrites the sibling's
+# ${flyway:defaultSchema} to __mj_BizAppsSales. Invoking the sibling's own CLI from the sibling's own
+# directory does not have that problem, so the substitution -- and the whole class of bug that
+# KNOWN-ISSUES KI-2 records against the orders variant of this script -- simply goes away.
+SIBLINGS=(
+    "bizapps-common:__mj_BizAppsCommon"
+    "bizapps-tasks:__mj_BizAppsTasks"
+    "bizapps-accounting:__mj_BizAppsAccounting"
+    "bizapps-orders:__mj_BizAppsOrders"
+)
+
+# FAIL BEFORE DROPPING ANYTHING, not halfway through. A missing sibling used to surface as a sed
+# error after the database had already been recreated, leaving a half-built shell. .env's
+# BIZAPPS_COMMON_REPO pointed at a directory that does not exist when this was written.
+for entry in "${SIBLINGS[@]}"; do
+    name="${entry%%:*}"
+    var="BIZAPPS_$(printf '%s' "${name#bizapps-}" | tr '[:lower:]' '[:upper:]')_REPO"
+    dir="${!var:-$ROOT/../$name}"
+    [[ -d "$dir/migrations" ]] || { echo "missing sibling repo: $dir/migrations (set $var)" >&2; exit 1; }
+    [[ -f "$dir/node_modules/@memberjunction/cli/bin/run.js" ]] || {
+        echo "sibling has no CLI: $dir (run pnpm install there)" >&2; exit 1; }
+done
+
+say "1/7  Recreating ${DB_DATABASE}"
 $SQLCMD -d master -Q "
     IF DB_ID('${DB_DATABASE}') IS NOT NULL
     BEGIN
@@ -92,33 +131,30 @@ $SQLCMD -d master -Q "
     END
     CREATE DATABASE [${DB_DATABASE}];"
 
-say "2/4  MJ core @ ${MJ_VERSION}"
+say "2/7  MJ core @ ${MJ_VERSION}"
 $MJ migrate -t "${MJ_VERSION}"
 
-say "3/4  bizapps-common"
-# See the header note on why this is sqlcmd + sed rather than `mj migrate`.
-#
-# THE SUBSTITUTED SQL GOES THROUGH A TEMP FILE, NOT A PIPE. `sqlcmd -i /dev/stdin` is what the
-# sibling repo uses and it works there because that path is a Linux/macOS construct; the Windows
-# (Go) sqlcmd has no /proc/self/fd/0 and dies with "Error occurred while opening or operating on
-# file /dev/stdin". `-i` wants a real path on every platform, so we give it one.
-COMMON_TMP="$(mktemp -t bizapps-common-XXXXXX.sql)"
-trap 'rm -f "$COMMON_TMP"' EXIT
-for f in "$COMMON_REPO"/migrations/*.sql; do
-    printf '  %s\n' "$(basename "$f")"
-    sed 's/\${flyway:defaultSchema}/__mj_BizAppsCommon/g; s/\${mjSchema}/__mj/g' "$f" > "$COMMON_TMP"
-    # -b makes sqlcmd exit non-zero on a SQL error, so `set -e` actually stops the rebuild. Without
-    # it the loop swallows failures and reports a successful rebuild over a half-applied dependency —
-    # which is exactly how the placeholder bug above stayed invisible.
-    $SQLCMD -b -d "${DB_DATABASE}" -i "$(cygpath -w "$COMMON_TMP" 2>/dev/null || echo "$COMMON_TMP")"
+
+# Declared and validated above, before the drop. Only the migrating happens here.
+n=2
+for entry in "${SIBLINGS[@]}"; do
+    name="${entry%%:*}"; schema="${entry#*:}"; n=$((n+1))
+    var="BIZAPPS_$(printf '%s' "${name#bizapps-}" | tr '[:lower:]' '[:upper:]')_REPO"
+    dir="${!var:-$ROOT/../$name}"
+    say "$n/7  $name -> $schema"
+    ( cd "$dir" && DB_DATABASE="$DB_DATABASE" \n        node node_modules/@memberjunction/cli/bin/run.js migrate --schema "$schema" --dir ./migrations )
 done
+
+# bizapps-contracts is deliberately NOT here. It does not install on a fresh database (KI-13) and
+# sales has no FK into it -- measured: sales' only cross-schema FKs are to __mj, __mj_BizAppsCommon
+# and __mj_BizAppsOrders. If that changes, contracts goes LAST, after sales.
 
 # TRIM THE GENERATED HALF BEFORE APPLYING. Once CodeGen output lives in the baseline, a rebuild
 # produces a database whose entity metadata is ALREADY current — so the next CodeGen run has nothing
 # to do and emits only a delta, which append-codegen.sh then refuses (rightly) as a partial. The
 # cycle is only self-consistent if the rebuild applies the hand-authored DDL alone and CodeGen
 # regenerates the rest from scratch. This is what makes "edit the baseline in place" safe.
-say "4/4  bizapps-sales (hand-authored DDL only)"
+say "7/7  bizapps-sales (hand-authored DDL only)"
 MARKER='CODEGEN OUTPUT — GENERATED CODE BELOW THIS LINE'
 SALES_MIGRATION=$(grep -rl "$MARKER" "$ROOT/migrations"/*.sql | head -1)
 if [[ -n "$SALES_MIGRATION" ]]; then
