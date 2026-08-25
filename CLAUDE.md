@@ -218,6 +218,47 @@ So, while any mutation run is live:
 
 This is the same family as rule 5: the dangerous state is the one that looks normal.
 
+### 8. THE DEFENCE IS NOT CARE. IT IS ARRANGING FOR THE CLAIM TO BE RE-CHECKED WHEN IT IS USED
+
+Every defect worth the name in this repo has been the same one wearing a different costume: **a claim
+that was true when somebody checked it, and stayed asserted after it stopped being true.** Not a mistake
+at the moment of writing — correct then, and left standing.
+
+Measured instances, all of them:
+
+| The claim | True when | Wrong by |
+|---|---|---|
+| `links[0]` is the row I mean | one row existed | a second row arrived |
+| a mutant's `from` anchor matches | before the edit | the edit that moved the line |
+| `next` is 222 commits behind | when the report was written | 20 commits later |
+| "Sales runs standalone" | before `DealLine` was retired | the redesign |
+| `selected === 0` catches a vacuous run | when zero was the only way to run nothing | 7 of 132 |
+| a declaration is cleared | on the exit that had the clear | three exits added later |
+| the tree is clean | before a mutation run started | the run |
+| activities checks assume an empty host | before the feature was used | the first real ingest |
+
+**Care does not help.** Every one of those was written by someone being careful, and several carry a
+comment correctly predicting the failure that then happened anyway — the `_declaredTransition` clear
+describes its own consequence precisely and only one of four exits performed it.
+
+**What helps is making the check happen where the claim is USED, not where it was made.**
+
+* Do not index a collection and then assert which row it is — **find the row, then assert about it.**
+* Run the anchor validator **after** an edit, not before. Before tells you the state you are leaving.
+* **Filter, do not count.** `exactly one link` is a statement about today's data; `the link to the ORDER`
+  is a statement about the requirement.
+* A guard keyed on a **cause** survives a new code path; one keyed on a **threshold** does not. `skipped
+  > 0` cannot be outgrown; `selected === 0` was outgrown twice.
+* Prefer `try/finally` to a clear at each exit. The bug is always the exit somebody adds later.
+* Scope a check to **its own fixtures**. A check that requires a globally empty table is asserting
+  something about the world, not about the code.
+* **Measure the number rather than relaying it.** A relayed figure is indistinguishable from a measured
+  one right up until it matters.
+
+And the tell, which is worth more than the list: **a green result nobody investigates.** A red is
+examined; a pass is not. So the highest-value question about any check is not "does it pass" but
+**"what would make it pass while the thing it names is broken?"** Every entry in that table answers it.
+
 ---
 
 ## Environment & Database

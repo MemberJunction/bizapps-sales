@@ -145,16 +145,29 @@ pipeline. Line-dependent surfaces correctly show nothing for the others.
 
 ```bash
 pnpm run verify                                   # SEVEN static gates, then the build (6/6)
-RUN_MUTATION_TESTS=1 pnpm run test:integration    # live-DB checks
+pnpm run test:integration                         # live-DB checks — runs ALL of them
 pnpm run test:coverage-gate                       # asserts the run actually covered what it claims
 ```
 
-**`RUN_MUTATION_TESTS=1` is mandatory.** Every check is `RequiresMutation`; without the flag the driver
-skips all of them and reports success. A run that reports mostly-skipped is not a pass.
+**The prefix is gone, and that is the fix rather than a simplification.** This used to read
+`RUN_MUTATION_TESTS=1 pnpm run test:integration`. Every check is `RequiresMutation`, so without that flag
+the runner skipped nearly all of them — and `RUN_MUTATION_TESTS=1 ...` is **sh syntax**. In PowerShell
+or `cmd`, which is what most people here are actually typing into, the prefix does not set anything.
+
+`test:integration` now passes `--mutations` itself, so **the documented command runs the whole suite on
+every shell.** If you need a deliberately narrow run, that is now the thing you opt into:
+`MJ_ALLOW_SKIPPED=1 node test-harnesses/integration.mjs`.
+
+> #### ⚠ If you see `7 passed, 0 failed, 125 skipped`, the suite did NOT pass
+>
+> That output used to come with a green tick and exit 0, which reads as "everything is fine" and is the
+> opposite of what happened: 125 checks never ran. It now exits non-zero and says so. **A run that
+> reports mostly-skipped is not a pass** — and it no longer pretends to be.
 
 **Run the coverage gate after the suite, and trust it over the tally.** It reads the log the suite
 writes and fails if fewer checks ran than this host should have run — the failure a green
-"0 failed" hides. It is also the check that catches a forgotten `RUN_MUTATION_TESTS=1`.
+"0 failed" hides. It is the second line of defence: the runner now refuses a skipped run itself, and the
+gate is what catches a run that was complete but covered the wrong bundles.
 
 | Bundle | Checks | Requires |
 |---|---|---|
@@ -172,7 +185,7 @@ gate expects exactly that. So the count you see *is* the coverage this host can 
 Run one on its own only when narrowing something down:
 
 ```bash
-RUN_MUTATION_TESTS=1 pnpm run test:integration close-won-d2c
+pnpm run test:integration close-won-d2c
 ```
 
 Invoked that way on a host whose app is absent, a conditional bundle **fails loudly with a named

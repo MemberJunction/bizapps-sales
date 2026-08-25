@@ -68,7 +68,13 @@ function flushLog() {
 const args = process.argv.slice(2);
 const only = args.filter((a) => !a.startsWith('-'));
 
-const RUN_MUTATIONS = process.env.RUN_MUTATION_TESTS === '1';
+/**
+ * `--mutations` is equivalent to `RUN_MUTATION_TESTS=1`, and exists so `package.json` can turn the
+ * suite on WITHOUT an env-var prefix, which is not portable across cmd, PowerShell and sh. The
+ * documented command must run the checks; making that depend on the caller remembering a prefix is
+ * what produced a green tick over 125 checks nobody ran.
+ */
+const RUN_MUTATIONS = process.env.RUN_MUTATION_TESTS === '1' || process.argv.includes('--mutations');
 
 const { DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD } = process.env;
 if (!DB_DATABASE) {
@@ -662,7 +668,7 @@ if (failures.length && process.env.IT_VERBOSE) {
 }
 
 const RUN_SECONDS = Math.round((Date.now() - RUN_STARTED_AT) / 1000);
-console.log(`\n${fail === 0 && selected > 0 ? '✅' : '❌'} ${pass} passed, ${fail} failed, ${skipped} skipped` + ` -- ${RUN_SECONDS}s`);
+console.log(`\n${fail === 0 && selected > 0 && skipped === 0 ? '✅' : '❌'} ${pass} passed, ${fail} failed, ${skipped} skipped` + ` -- ${RUN_SECONDS}s`);
 
 /**
  * A red on a SLOW run is not evidence on its own. Said here, next to the failure, rather than in a
@@ -674,6 +680,42 @@ if (fail > 0 && RUN_SECONDS > 150) {
         + `\n  whose identity changes between runs, so REPEAT before acting on the red, and say which runs`
         + `\n  you are reporting. A quiet host completes in 90-120s.`,
     );
+}
+
+/**
+ * ── A SKIPPED CHECK IS A CHECK THAT DID NOT RUN, WHATEVER THE TALLY SAYS ──────────
+ *
+ * `selected === 0` was the wrong threshold for the SECOND time. The bare documented command printed
+ * `✅ 7 passed, 0 failed, 125 skipped` in one second and exited 0, because seven is not zero — a
+ * green tick over 125 checks nobody ran, on the exact command `docs/QA-GUIDE.md` tells a tester to
+ * use. It reads as "the suite is fine"; it took a maintainer an hour to conclude the suite was broken.
+ *
+ * KEYED ON THE CAUSE, NOT ON A FRACTION. `skipped` has exactly one source in this runner —
+ * `RequiresMutation && !RUN_MUTATIONS` at the filter above — so "any skip without an opt-out" is
+ * precise and needs no threshold anybody would have to justify. Bundles excluded for a missing
+ * sibling reduce the candidate set; they do not count as skips, so they are unaffected.
+ *
+ * The opt-out is explicit and the same shape as `MJ_SKIP_DOWNSTREAM`: a deliberate narrow run stays
+ * green, an accidental one goes red.
+ */
+if (skipped > 0 && process.env.MJ_ALLOW_SKIPPED !== '1') {
+    console.error(
+        [
+            '',
+            `✖ ${skipped} OF ${skipped + selected} CHECKS DID NOT RUN, so this result proves far less than it`,
+            '  appears to. They are RequiresMutation and RUN_MUTATION_TESTS is not set.',
+            '',
+            `  ${pass} passed / ${fail} failed is a tally over ${selected} check(s), not over the suite.`,
+            '',
+            '  Run the whole suite:      npm run test:integration',
+            '  Deliberately narrow run:  MJ_ALLOW_SKIPPED=1 node test-harnesses/integration.mjs',
+            '',
+        ].join(String.fromCharCode(10)),
+    );
+    flushLog();
+    await releaseRunLock();
+    await pool.close();
+    process.exit(2);
 }
 
 // ── The vacuous-pass guard ─────────────────────────────────────────────────────────────────────

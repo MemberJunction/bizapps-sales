@@ -36,7 +36,7 @@
     "install:deps": "npm install",
     "setup": "echo 'Please run: npm run mj:migrate && npm run mj:codegen && npm run build'",
     "test:unit": "vitest run",
-    "test:integration": "node test-harnesses/integration.mjs",
+    "test:integration": "node test-harnesses/integration.mjs --mutations",
     "test:coverage-gate": "node scripts/assert-check-count.mjs",
     "test:vocabulary-gate": "node scripts/assert-no-vocabulary-comparisons.mjs",
     "test:money-gate": "node scripts/assert-no-money-arithmetic.mjs",
