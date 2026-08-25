@@ -124,6 +124,7 @@ DELETE FROM __mj_BizAppsSales.Pipeline        WHERE Code IN ('B2B','D2C','ENT-NE
 -- shared parent that is spared.
 DELETE FROM __mj_BizAppsSales.SalesContact    WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
 BEGIN TRY
+    DELETE FROM __mj_BizAppsCommon.ContactMethod WHERE PersonID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
     DELETE FROM __mj_BizAppsCommon.Person     WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
 END TRY
 BEGIN CATCH
@@ -266,6 +267,38 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.SalesContact WHERE ID=@c3)
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.SalesContact WHERE ID=@c4)
   INSERT INTO __mj_BizAppsSales.SalesContact (ID, LifecycleStageTypeID, LeadSourceTypeID, Seniority, OptedOutOfOutreach)
     VALUES (@c4, @lcOpp, @lsPart, N'Partner Principal', 0);
+
+-- ==================== CONTACT METHOD — what makes the Outlook demo show anything ====================
+--
+-- WITHOUT THIS ROW THE MAIL INGEST WRITES NOTHING, and it fails in the least obvious way: the run
+-- reports success, fetches everything, and files every message as irrelevant. `RelevanceFilter` resolves
+-- an ADDRESS to a Person through a contact method, and `DealMatcher.MatchOpenDeals` then keys on
+-- `PrimaryContactID IN (...)` or `AccountID IN (...)`. An address nobody owns matches nobody, so a real
+-- inbox against a seeded database gives "25 fetched, 25 irrelevant, 0 written" and looks like a bug in
+-- the pipeline rather than a gap in the fixture.
+--
+-- SO IT IS SEEDED RATHER THAN HAND-ADDED. A hand-added row does not survive `--remove`, and the demo set
+-- is rebuilt between takes; the next take would silently go back to writing nothing.
+--
+-- WHY DANA WHITFIELD, AND WHY BOTH DEALS LIGHT UP. Dana (@c1) is the primary contact on **DEAL-9001 AND
+-- DEAL-9003** — verified, they share her and share an account. So one contact method makes every matched
+-- message attach to both deals. That is `MatchOpenDeals`' documented multi-match behaviour, not an
+-- accident: an address identifies a PERSON, and a person can be live on more than one deal at once.
+-- Routing a message to one deal by reading its subject would be content-based guessing, which this
+-- product deliberately does not do.
+--
+-- The address is a second mailbox the demo operator controls, used to send deal correspondence INTO the
+-- work mailbox. Messages the operator sent from the work address to himself carry no second address at
+-- all, so they match nothing and stay off the timeline — which is correct, and is what stops the whole
+-- inbox landing on a deal.
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsCommon.ContactMethod
+             WHERE PersonID=@c1 AND Value=N'josue.garcia5824@gmail.com')
+INSERT INTO __mj_BizAppsCommon.ContactMethod (ID, PersonID, ContactTypeID, Value, Label, IsPrimary)
+  VALUES (NEWID(), @c1,
+          (SELECT TOP 1 ID FROM __mj_BizAppsCommon.ContactType WHERE Name=N'Email'),
+          N'josue.garcia5824@gmail.com',
+          N'Outlook demo — deal correspondence',
+          0);
 
 -- ============================ PIPELINE 1 — and the point about labels ============================
 --
