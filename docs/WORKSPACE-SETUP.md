@@ -465,6 +465,28 @@ find yourself about to run CodeGen to "register entities", stop — something el
 > operation -- so there is a real reason to run it later in a host's life. When you do, re-seed after.
 
 
+> ### ⚠️ NONE OF THE COMMANDS BELOW NAME A DATABASE. They hit whatever `.env` says.
+>
+> On a machine with one database this is fine and you can ignore it. On **this** machine it is a live
+> trap, and it has already cost us once: `.env` in **both** `bizapps-sales` and `bizapps-orders`
+> reads `DB_DATABASE=MJ_V6_Host` — the **recording host**. A bare `mj sync push` from either repo
+> therefore rewrites the demo stack, not your workspace database. That is the exact mechanism behind
+> KI-26, where a push repointed both pipelines at a company owning no products and emptied every
+> product picker.
+>
+> Prefix every push and every seed with the database you actually mean:
+>
+> ```bash
+> DB_DATABASE=MJ_Sales_Latest node ../MJ/packages/MJCLI/bin/run.js sync push --dir <dirs>
+> ```
+>
+> The prefix is safe and it does win — `mj.config.cjs` calls `dotenv.config()`, which by design does
+> **not** overwrite a variable already present in the environment. Verified 2026-08-25:
+> `DB_DATABASE=MJ_Sales_Latest node -e "console.log(require('./mj.config.cjs').dbDatabase)"` prints
+> `MJ_Sales_Latest`, not the `.env` value. Note this is the **opposite** of the bug fixed in this
+> repo's shell scripts, where `set -a; source .env` clobbered the caller's override — same symptom,
+> reversed cause, so do not assume one from the other.
+
 ```bash
 # a. app metadata — type tables, remote operations, and (for sales) the form chrome
 #
