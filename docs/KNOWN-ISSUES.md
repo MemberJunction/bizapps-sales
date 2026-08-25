@@ -5,6 +5,65 @@ future developer will otherwise rediscover the hard way.
 
 ---
 
+## 🟠 KI-27 — orders is collapsing the order lifecycle, and one of our checks writes a status that will stop existing
+
+**Measured 2026-08-25, against orders at `origin/next` — not yet applied to any host we use.** Amith
+expects orders green within the hour, so this lands soon.
+
+`V202608241300__v0.1.x__OrderHeader_Status_And_Fulfillment.sql` rewrites the lifecycle:
+
+* `CK_OrderHeader_Status` becomes **`('Draft','Quoted','Confirmed','Voided')`** — `Posted` and
+  `Fulfilled` are gone as statuses. Verified on a database built from that migration.
+* `FulfillmentStatus` is added as a separate column; fulfilment is no longer a status at all.
+* `PaymentStatus` is **dropped** — payment progress derives from the trigger-maintained totals.
+* `IsBooked` in `orders-entities` becomes `status === 'Confirmed'`, down from
+  `Confirmed | Posted | Fulfilled`.
+
+### Sales' PRODUCT code is insulated, and this is why the rule exists
+
+`CloseDealOperation` does not enumerate booked statuses. It imports the predicate:
+
+```ts
+import { IsBooked } from '@mj-biz-apps/orders-entities';
+```
+
+So when orders narrows it to `Confirmed`, sales follows with the package and nothing here changes.
+That is the vocabulary-is-data rule paying for itself — a hardcoded
+`status === 'Confirmed' || status === 'Posted'` would have needed finding and editing under time
+pressure, and the one that got missed would have silently under-blocked a reopen.
+
+### One CHECK will break, and it needs rethinking rather than renaming
+
+`packages/IntegrationTests/src/checks/close-deal.checks.ts:1694`
+
+```sql
+UPDATE __mj_BizAppsOrders.OrderHeader SET Status = 'Posted' WHERE ID = '...'
+```
+
+That is the only executable use of `'Posted'` in the repo — every other mention is prose. The
+statement will fail the CHECK constraint once the migration is applied.
+
+**Do not fix it with a find-and-replace.** The check exists to prove that a reopen is refused at a
+lifecycle stage FURTHER ALONG than `Confirmed` — its own comment says "the ledger has moved FURTHEST at
+the far end". Under the new model there is no further-along status; `Confirmed` is the booked state and
+fulfilment moved to another column. The second half of that check is asserting something the domain no
+longer has, so it needs a decision about what it should assert, not a substitution.
+
+### Why it is not fixed here
+
+Our suite runs against `MJ_V6_Host`, which still carries the old schema, so the check passes today.
+Editing it now to match a schema that is applied nowhere would break a green test in order to
+anticipate a migration that has not landed — and Amith's instruction is explicitly *"don't apply things
+just yet"*. The right sequence is: orders goes green, the host takes the migration, then this check is
+re-decided against the lifecycle that actually exists.
+
+**Verified alongside this:** sales' own migrations apply cleanly on top of every sibling at its current
+`origin/next` — core 58, common 13, tasks 5, accounting 4, orders 13, sales 4, all success. 20
+entities, 338 EntityFields, 0 unregistered, `FK_Deal_OrderHeader` intact. The sibling movement does not
+break the install; it breaks one test line.
+
+---
+
 ## 🔴 KI-26 — `mj sync push` AFTER seeding silently empties every product picker
 
 **Measured 2026-08-25, by doing it.** Two files both own `Pipeline.CompanyID` and they disagree:
