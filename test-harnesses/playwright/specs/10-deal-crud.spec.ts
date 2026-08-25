@@ -238,12 +238,37 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
     await shot(page, '19-deal-updated');
 
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(6000);
-    const afterUpdate = await page.locator('body').innerText();
-    expect(afterUpdate, 'updated Amount must persist across a reload').toContain('185000');
-    expect(afterUpdate, 'updated Probability must persist').toContain('45');
-    expect(afterUpdate, 'updated Term Months must persist').toContain('24');
-    expect(afterUpdate, 'the OLD amount must be gone').not.toContain('120000');
+
+    /**
+     * RETRYING ASSERTIONS, NOT A FIXED SLEEP AND A SINGLE READ.
+     *
+     * This was `waitForTimeout(6000)` followed by one `innerText()`. When the reload took longer than
+     * six seconds the read returned
+     *
+     *     Loading workspace...
+     *     MemberJunction - v6.1.0-edge.2
+     *
+     * and the failure said "updated Amount must persist across a reload" -- which reads as a lost
+     * write. Nothing had been lost; the page had not finished rendering. A message that names the
+     * wrong cause is worse than a slow test, because the next person goes looking at the save path.
+     *
+     * `toContainText` polls, so a slow render costs seconds instead of a false accusation, and a value
+     * that genuinely did not persist still fails.
+     */
+    const body = page.locator('body');
+    await expect(body, 'updated Amount must persist across a reload').toContainText('185000', {
+        timeout: 30_000,
+    });
+    await expect(body, 'updated Probability must persist').toContainText('45', { timeout: 10_000 });
+    await expect(body, 'updated Term Months must persist').toContainText('24', { timeout: 10_000 });
+
+    /**
+     * THE ABSENCE CHECK GOES LAST, DELIBERATELY. A retrying `not.toContainText` passes trivially
+     * against a page that has not rendered yet -- an empty body contains nothing, including the old
+     * amount. It is only meaningful once the three assertions above have proved the form is showing
+     * the updated deal.
+     */
+    await expect(body, 'the OLD amount must be gone').not.toContainText('120000', { timeout: 10_000 });
     await shot(page, '20-deal-update-verified');
 
     // KEYSTONE, part 1 — asserted here rather than only at the end so that create/read/update are held
