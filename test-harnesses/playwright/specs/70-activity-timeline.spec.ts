@@ -150,7 +150,27 @@ async function openDealInWorkspace(page: Page, deal: Subject): Promise<void> {
 }
 
 test.describe('deal activity timeline — S-US9 through the UI', () => {
+    /**
+     * CLEANUP, WHICH WAS A COMMENT. Fourth file tonight after 41, 60 and 40.
+     *
+     * The docblock above lists two DELETEs under "To clear them", and that was the whole of it. This
+     * spec writes activities through the UI, so every run left two behind on a shared host -- measured
+     * after one run: the host went from its 2 seeded Outlook activities to 4.
+     *
+     * That matters more here than for the deal specs. These rows land in __mj_BizAppsCommon, another
+     * app's schema, and they show up on a real deal's timeline -- DEAL-9001 carries the demo's two
+     * ingested mails, and test rows sitting beside them are indistinguishable to anyone looking at the
+     * screen.
+     *
+     * Scoped to THIS run's tag rather than `AT-%`, so a concurrent run's rows are never touched.
+     * Links first: ActivityLink has an FK to Activity.
+     */
     test.afterAll(async () => {
+        await QueryAll(
+            `DELETE FROM __mj_BizAppsCommon.ActivityLink
+              WHERE ActivityID IN (SELECT ID FROM __mj_BizAppsCommon.Activity WHERE Title LIKE '${RUN_TAG}%')`,
+        );
+        await QueryAll(`DELETE FROM __mj_BizAppsCommon.Activity WHERE Title LIKE '${RUN_TAG}%'`);
         await CloseDb();
     });
 
