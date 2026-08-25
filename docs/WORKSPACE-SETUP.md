@@ -115,20 +115,18 @@ whatever you like, but keep the six repos as direct children.
 ```bash
 mkdir C:\ws && cd C:\ws
 git clone --branch next https://github.com/MemberJunction/MJ.git
-for r in bizapps-common bizapps-accounting bizapps-orders bizapps-contracts; do
+for r in bizapps-common bizapps-accounting bizapps-orders bizapps-contracts bizapps-sales bizapps-tasks; do
   git clone --branch next https://github.com/MemberJunction/$r.git
 done
-
-# NOT next for these two — see the warning below.
-git clone --branch feature/embed-order-on-deal https://github.com/MemberJunction/bizapps-sales.git
-git clone --branch next https://github.com/MemberJunction/bizapps-tasks.git   # NOT closewon -- see below
 ```
 
-> #### ⚠ ONE OF THESE MUST NOT COME FROM `next`, and the other one MUST
+> #### ⚠ EVERY REPO COMES FROM `next` NOW — and two of these lines used to say otherwise
 >
-> * **bizapps-sales** `next` is **242 commits behind** the current line. It predates the embedded-order
->   redesign entirely — `DealLine` still exists there — so a workspace built from it cannot reproduce
->   anything in this document and fails in ways that look like environment problems.
+> * **bizapps-sales** used to require `feature/embed-order-on-deal`, because `next` trailed the current
+>   line by 272 commits and predated the embedded-order redesign entirely. **PR #25 merged that branch
+>   into `next` on 2026-08-25**, so the special case is gone. The commit count in this warning had
+>   already been corrected from 222 to 242 as the branch moved; a branch name pinned in a document goes
+>   stale on every push, which is the reason for landing it rather than documenting around it.
 > * **bizapps-tasks** must come from **`next`**, and the line that used to sit here said the opposite.
 >   It read: *"one commit AHEAD of `next` on `feature/closewon-task-types`, and that commit is what
 >   close-won task creation needs."* One commit ahead was true. It was also **11 commits BEHIND**, and
@@ -142,7 +140,7 @@ git clone --branch next https://github.com/MemberJunction/bizapps-tasks.git   # 
 >   ```
 >
 >   Measured 2026-08-25 on a fresh install, then measured again after applying tasks@`next`: the column
->   appears and `metadata	ask-types — 2 created` succeeds. The one commit `feature/closewon-task-types`
+>   appears and `metadata/task-types — 2 created` succeeds. The one commit `feature/closewon-task-types`
 >   is ahead by (`cddd76b`) changes a single file, adding those two task types to **tasks'** metadata --
 >   rows that `metadata/task-types/.task-types.json` here says tasks *"deliberately does not carry"*,
 >   because sales owns them under Amith's 2026-08-20 ruling. So the branch is not merely stale, its one
