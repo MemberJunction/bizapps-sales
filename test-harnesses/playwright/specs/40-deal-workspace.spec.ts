@@ -47,6 +47,7 @@ import {
   closeRestoredRecordTabs,
   expectOnlyKnownErrors,
   KNOWN_POST_DELETE_ERRORS,
+  openAllEntities,
   shot,
 } from '../lib/explorer';
 
@@ -550,6 +551,20 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
         await page.goto(`${EXPLORER_BASE_URL}/app/mjbizappssales`, { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(4000);
       }
+
+      /**
+       * REACH THE ENTITY LIST, DO NOT ASSUME IT. The navigation above lands on MJ's DataExplorer, and
+       * WHICH screen that shows is decided by one persisted field -- `selectedEntityName` in the
+       * `DataExplorer.State.<applicationId>` user setting. Anything that opened an entity earlier
+       * writes it, so this step arrived on whatever the previous spec last touched. Measured: it was
+       * showing the "Deal Status Types" grid, with no `Deals` card anywhere on the page, and the
+       * failure read as the Deals entity being missing.
+       *
+       * `openAllEntities` is the helper CLI-3 built for exactly this (f44d955). It also forces the
+       * panel's All Entities / My Favorites toggle back, which persists across sessions and empties
+       * the panel completely when left on Favorites.
+       */
+      await openAllEntities(page);
 
       const deals = page.getByText(/^\s*Deals\s*$/i).first();
       await expect(deals).toBeVisible({ timeout: 25_000 });
