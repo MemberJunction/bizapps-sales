@@ -54,17 +54,43 @@ WHERE NOT EXISTS (SELECT 1 FROM __mj.EntityField ef WHERE ef.EntityID = e.ID AND
 ORDER BY e.Name, c.column_id;
 ```
 
-### Work around
+### Work around — **only CodeGen does this. There is no SQL shortcut.**
 
-These are the procs CodeGen calls, so this is the *"then generate"* step with no files generated and no
-repository touched. `'sys,staging'` is CodeGen's own default `excludeSchemas`:
+⚠️ **An earlier version of this entry prescribed the two schema-sync procs below. That was wrong — they
+were run against `MJ_Sales_Latest` on 2026-08-25 and the drift stayed at exactly 10.** Corrected here so
+nobody loses an hour to it:
 
 ```sql
+-- DOES NOT WORK for missing fields. Updates existing rows only.
 EXEC __mj.spUpdateExistingEntitiesFromSchema      @ExcludedSchemaNames = 'sys,staging';
 EXEC __mj.spUpdateExistingEntityFieldsFromSchema  @ExcludedSchemaNames = 'sys,staging', @EntityIDs = NULL;
 ```
 
-Do **not** reach for `spDeleteUnneededEntityFields` — it removes rows, and nothing here needs that.
+`spUpdateExistingEntityFieldsFromSchema` filters on **`AND ef.ID IS NOT NULL`** — by construction it can
+only touch `EntityField` rows that already exist. Its `INSERT INTO` statements all target table variables
+(`@FilteredRows`, `@ExcludedSchemas`, `@ScopedEntityIDs`), never `__mj.EntityField`.
+
+**MJ's own repeatable migration does not fix it either.** `MJ/migrations/R__RefreshMetadata.sql` runs
+`spUpdateExistingEntitiesFromSchema`, `spUpdateSchemaInfoFromDatabase`, `spDeleteUnneededEntityFields` and
+`spUpdateExistingEntityFieldsFromSchema` — all four are update/delete only. So re-running migrations, in
+any order, cannot close this gap.
+
+Creating a new `EntityField` row happens **only** in CodeGen's TypeScript layer:
+`MJ/packages/CodeGenLib/src/Database/manage-metadata.ts` → `createNewEntityFieldsFromSchema()`, which
+issues per-field `INSERT INTO EntityField` with computed `Sequence`, display-name derivation, type
+mapping, FK detection and default-value parsing. **Do not hand-write a substitute** — that is a large
+surface to get subtly wrong, and a wrong `EntityField` row fails later and further away than a missing one.
+
+So the only supported fix is **run CodeGen against the database after migrating**, which is exactly what
+`bizapps-orders`' migration header tells you to do.
+
+> **This collides with Amith's standing rule that CodeGen runs need his approval plus a quality gate.**
+> That is not a reason to skip it quietly — it is the reason this is a 🔴 and needs raising. A fresh
+> BizApps install cannot be made correct without it.
+
+*Status of the above: the proc behaviour is **measured** (ran them, drift unchanged at 10). That only
+CodeGen can create the rows is read from MJ's source, **not** executed — nobody has yet run CodeGen against
+a fresh install and re-measured. Do that before treating "run CodeGen" as proven.*
 
 ### What does NOT fix it
 

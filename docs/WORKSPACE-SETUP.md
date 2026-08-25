@@ -497,17 +497,23 @@ is wrong.
 > ORDER BY e.Name, c.column_id;
 > ```
 >
-> **Fix it** — these are the procs CodeGen itself calls, so this is the documented *"then generate"* step
-> without generating any files or touching any repository. `'sys,staging'` is CodeGen's own default
-> `excludeSchemas`:
+> **Fixing it requires running CodeGen. No SQL shortcut exists — this was tested.**
+>
+> The obvious-looking fix does **not** work:
 >
 > ```sql
+> -- Run on MJ_Sales_Latest 2026-08-25. Drift stayed at exactly 10.
 > EXEC __mj.spUpdateExistingEntitiesFromSchema      @ExcludedSchemaNames = 'sys,staging';
 > EXEC __mj.spUpdateExistingEntityFieldsFromSchema  @ExcludedSchemaNames = 'sys,staging', @EntityIDs = NULL;
 > ```
 >
-> Do **not** add `spDeleteUnneededEntityFields` reflexively. It deletes rows rather than adding them, and
-> nothing here needs it.
+> `spUpdateExistingEntityFieldsFromSchema` filters on `AND ef.ID IS NOT NULL` — it updates existing rows
+> and cannot create missing ones. Neither can `MJ/migrations/R__RefreshMetadata.sql`, which runs those two
+> plus `spUpdateSchemaInfoFromDatabase` and `spDeleteUnneededEntityFields` — all update-or-delete.
+>
+> New `EntityField` rows are created only by CodeGen's `createNewEntityFieldsFromSchema()` in
+> `CodeGenLib/src/Database/manage-metadata.ts`. See **KI-28** for the full detail and for why this needs
+> Amith rather than a local decision.
 >
 > Pushing orders' `metadata/entity-fields` does **not** fix this — checked on `origin/next`, that directory
 > holds only the two embedded-field overrides and none of the ten.
