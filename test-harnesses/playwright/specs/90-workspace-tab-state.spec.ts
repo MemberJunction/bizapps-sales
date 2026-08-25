@@ -149,6 +149,20 @@ test.describe('deal workspace — state that belongs to one deal', () => {
         // ── deal A, on company alpha's pipeline ────────────────────────────────────────────────
         await createDeal(page, nameA, alpha.PipelineID);
 
+        /**
+         * ALPHA'S CATALOGUE, RECORDED BEFORE BETA EXISTS — the baseline the leak is measured against.
+         *
+         * Without it there is nothing to compare against: "exclusive to beta" can only be derived from
+         * alpha's UNCONTAMINATED list, and after the tab switch `offeredOnA` is the value under test.
+         * Deriving the baseline from the value under test is what collapsed the old assertion — see the
+         * note on ASSERTION 1.
+         */
+        const alphaBefore = await productOptions(page);
+        expect(
+            alphaBefore.length,
+            'company alpha must offer at least one product before beta exists, or there is no baseline',
+        ).toBeGreaterThan(0);
+
         // ── deal B, on company beta's pipeline, in a second tab ────────────────────────────────
         await page.locator('.mj-tabs__new').click();
         await createDeal(page, nameB, beta.PipelineID);
@@ -176,8 +190,42 @@ test.describe('deal workspace — state that belongs to one deal', () => {
          * Stated as a set difference rather than a length comparison: two companies can legitimately
          * own the same NUMBER of products, so counting proves nothing. What must be true is that
          * nothing on offer is exclusive to beta.
+         *
+         * ── THIS ASSERTION COULD NOT FAIL, AND THAT IS WORTH KEEPING WRITTEN DOWN ──────────────────
+         *
+         * It used to read:
+         *
+         *     const betaOnly = offeredOnB.filter((l) => !offeredOnA.includes(l));
+         *     const leaked   = offeredOnA.filter((l) =>  betaOnly.includes(l));
+         *
+         * `betaOnly` is everything in B that is NOT in A. `leaked` then asks which members of A are in
+         * that set — which is asking which members of A are not members of A. **It is the intersection
+         * of a set with its own complement, so it is `[]` for every possible input**, and the assertion
+         * passed whether the defect was fully present or fully absent. `offeredOnA` appeared on both
+         * sides, so the value under test was also the baseline.
+         *
+         * The fix is the baseline captured above, before beta exists. Now:
+         *   betaOnly = B's catalogue minus ALPHA'S OWN, so it really is beta-exclusive;
+         *   leaked   = what A is offering now that only beta should have.
+         * If the picker fails to refresh, `offeredOnA` becomes B's list and every beta-exclusive
+         * product lands in `leaked`.
          */
-        const betaOnly = offeredOnB.filter((label) => !offeredOnA.includes(label));
+        const betaOnly = offeredOnB.filter((label) => !alphaBefore.includes(label));
+
+        /**
+         * AND THE FIXTURE MUST BE ABLE TO SHOW A LEAK AT ALL.
+         *
+         * If the two companies happen to sell identical catalogues, `betaOnly` is empty, `leaked` is
+         * empty for any input, and the assertion silently returns to being unfalsifiable — the same
+         * defect in a different disguise. A test that cannot fail must say so rather than pass.
+         */
+        expect(
+            betaOnly.length,
+            `${beta.CompanyName} offers nothing that ${alpha.CompanyName} does not also offer, so a `
+                + 'leak would be undetectable and this check proves nothing. Seed a product exclusive '
+                + 'to one of the two companies.',
+        ).toBeGreaterThan(0);
+
         const leaked = offeredOnA.filter((label) => betaOnly.includes(label));
         expect(
             leaked,
@@ -325,6 +373,18 @@ test.describe('deal workspace — state that belongs to one deal', () => {
         const last = `${RUN_TAG} close-tab C on ${alpha.CompanyName}`;
 
         await createDeal(page, first, alpha.PipelineID);
+
+        /**
+         * ALPHA'S CATALOGUE, BEFORE THE BETA TAB EXISTS. Both survivors are on alpha, so this is what
+         * the picker must be showing at the end. Captured here for the same reason as in the tab-switch
+         * test above: the value under test cannot also be its own baseline.
+         */
+        const alphaBefore = await productOptions(page);
+        expect(
+            alphaBefore.length,
+            `setup: company ${alpha.CompanyName} must offer products, or there is no baseline`,
+        ).toBeGreaterThan(0);
+
         await page.locator('.mj-tabs__new').click();
         await createDeal(page, middle, beta.PipelineID);
         await page.locator('.mj-tabs__new').click();
@@ -369,7 +429,24 @@ test.describe('deal workspace — state that belongs to one deal', () => {
          * open, on a tab nobody chose.
          */
         const afterClose = await productOptions(page);
-        const betaOnly = onBeta.filter((label) => !afterClose.includes(label));
+
+        /**
+         * SAME COLLAPSE AS ASSERTION 1, SAME FIX. This read
+         *
+         *     const betaOnly = onBeta.filter((l) => !afterClose.includes(l));
+         *     const stale    = afterClose.filter((l) => betaOnly.includes(l));
+         *
+         * which asks which members of `afterClose` are not members of `afterClose` — always `[]`, so
+         * this test's only real assertion could not fail either. `betaOnly` is now derived from alpha's
+         * pre-beta baseline, so it is genuinely beta-exclusive and `stale` can be non-empty.
+         */
+        const betaOnly = onBeta.filter((label) => !alphaBefore.includes(label));
+        expect(
+            betaOnly.length,
+            `${beta.CompanyName} offers nothing exclusive to it, so a stale catalogue would be `
+                + 'indistinguishable from a correct one and this check proves nothing.',
+        ).toBeGreaterThan(0);
+
         const stale = afterClose.filter((label) => betaOnly.includes(label));
         expect(
             stale,
