@@ -40,7 +40,8 @@
  */
 import { expect, test } from '@playwright/test';
 import { EXPLORER_BASE_URL } from '../lib/env';
-import { OrderLinesForDeal } from '../lib/db';
+import { CloseDb, OrderLinesForDeal, QueryAll } from '../lib/db';
+import { PurgeDeal } from '../lib/deal-flow';
 import {
   captureConsoleErrors,
   closeRestoredRecordTabs,
@@ -55,6 +56,34 @@ const SALES_WORKSPACE_APP_ROUTE = '/app/sales';
 /** Unique per run, so a re-run never collides with a leftover and cleanup can find its own rows. */
 const RUN_TAG = `PW-${Date.now().toString(36).toUpperCase()}`;
 const DEAL_NAME = `Workspace smoke ${RUN_TAG}`;
+
+/**
+ * CLEANUP, WHICH LIVED IN A COMMENT.
+ *
+ * The docblock at the top of this file lists four DELETE statements to run "to clear them out", and
+ * argues the case for not deleting from the spec: "Deleting it would mean either driving the delete
+ * affordance (a second thing to debug when the real subject is the save) or reaching around the UI
+ * into SQL from a UI test." The reasoning is sound about the DELETE AFFORDANCE and does not carry to
+ * teardown -- 79-embedded-order-refresh reaches into SQL in exactly this way and is the better model.
+ *
+ * The cost of leaving it was paid by other files. 70-lifecycle, 71 and 78 open with AssertBaseline(),
+ * which asserts the WHOLE host is back to its seven seeded deals, so a `Workspace smoke PW-...` left
+ * here failed a spec several files later with "the host must be back to its seven seeded deals". This
+ * is the third file tonight with cleanup written as instructions for a human -- 41 and 60 were the
+ * others -- and all three docblocks still name DealLine, retired in 0d3d1ed.
+ *
+ * BY NAME rather than by a captured id, following 79: this spec composes its deal through the UI, so
+ * a failure part-way leaves a real row that no variable in this file ever held.
+ */
+test.afterAll(async () => {
+    const deals = await QueryAll<{ ID: string; OrderID: string | null }>(
+        `SELECT ID, OrderID FROM __mj_BizAppsSales.Deal WHERE Name = '${DEAL_NAME}'`,
+    );
+    for (const d of deals) {
+        await PurgeDeal(d.ID, d.OrderID ? String(d.OrderID) : null);
+    }
+    await CloseDb();
+});
 
 /** The five panes, by their visible label. Keys live in `deal-workspace.types.ts`. */
 const PANES = ['Party info', 'Product lines', 'Payment schedule', 'Terms', 'Variances'] as const;
