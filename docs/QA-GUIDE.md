@@ -22,7 +22,7 @@ covers only what a tester needs afterwards.
 | Node | **≥ 18** | `package.json` engines |
 | pnpm | **10.33.0** | `packageManager`; always install from the **workspace root**, never inside a member |
 | SQL Server | 2019+ | Local dev target is SQL Server |
-| MJ core | **`6.1.0-edge.2`** | Must satisfy `mj-app.json`'s `mjVersionRange`: `>=6.0.0 <7.0.0` |
+| MJ core | **`6.1.0-edge.3`** | Must satisfy `mj-app.json`'s `mjVersionRange`: `>=6.0.0 <7.0.0`, AND match the packages, which pin `^6.1.0-edge.3` in all seven manifests |
 | bizapps-common | workspace member | Required — Sales' accounts and contacts are IS-A children of common's Organization and Person |
 | bizapps-orders | workspace member | **REQUIRED.** A deal cannot be SAVED without it — the save provisions an embedded `OrderHeader` in orders' schema. `mj-app.json` declares it a hard dependency |
 | bizapps-contracts | workspace member | Optional for CRUD; **required for close-won to create a contract.** A contract has been created on `MJ_V6_Host`, so it is installable there |
@@ -81,7 +81,7 @@ CODEGEN_DB_PASSWORD=<password>
 
 # ── MJ core ─────────────────────────────────────────────────────────────────
 MJ_CORE_SCHEMA=__mj
-MJ_CORE_VERSION=v6.1.0-edge.2
+MJ_CORE_VERSION=v6.1.0-edge.3
 ```
 
 `MJ_CORE_VERSION` pins the MJ core the migrations expect. It must match what `@memberjunction/*`

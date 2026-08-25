@@ -272,6 +272,19 @@ examined; a pass is not. So the highest-value question about any check is not "d
   actually resolved to — a DB behind the packages driving it produces "column does not exist" on core
   metadata.
 
+  > **✅ CLOSED 2026-08-25.** `.env` and `docs/QA-GUIDE.md` now read `v6.1.0-edge.3`, matching the
+  > packages. Measured before changing anything: upgrading a database from edge.2 to edge.3 applied
+  > **14 migrations in 54 seconds** and left sales untouched -- 20 entities, 338 EntityFields, **0
+  > unregistered columns**, all five sales migrations still green, `spCreateDeal` still taking
+  > `@OrderID`. It is an incremental migration, not a rebuild.
+  >
+  > It had to close because the first registry publish is imminent and every dependency sales declares
+  > is already published, including `@memberjunction/core@6.1.0-edge.3`. A tester installing published
+  > sales packages would otherwise get edge.3 CODE against an edge.2 DATABASE, which is the exact
+  > failure the rule above describes.
+  >
+  > The original note, kept because the reasoning is still the reasoning:
+  >
   > **⚠️ KNOWN MISMATCH, recorded deliberately rather than fixed (2026-08-24).** The package pins now say
   > **`6.1.0-edge.3`** (52 of them, across 7 manifests) while `.env` still reads
   > `MJ_CORE_VERSION=v6.1.0-edge.2`. The bump was needed because published `edge.2` does **not** contain
