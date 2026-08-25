@@ -225,7 +225,7 @@ in this order — it is the dependency order, and it is not negotiable:
 | 4 | accounting | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 2 |
 | 5 | orders | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 9 |
 | 6 | **contracts** | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 1 — **see the warning below** |
-| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 2 |
+| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | **4** — see below |
 
 > ⚠️ **Contracts migrates LAST, and does not currently install on a fresh database.** It FKs into
 > common, tasks, orders AND accounting — the full stack — so nothing else may follow it. More
@@ -233,6 +233,18 @@ in this order — it is the dependency order, and it is not negotiable:
 > CodeGen ran on. Read `docs/KNOWN-ISSUES.md` **KI-13** before attempting it: the first error names the
 > wrong table, and three of the six broken references fail *silently* as a column-count mismatch that
 > breaks every insert. Always column-diff contracts' ten entities after installing.
+
+> ⚠️ **Sales applies FOUR migrations, not two.** The baseline pair (`B…Schema`, `V…Tables_and_Objects`)
+> was joined on 2026-08-21 by `V202608211200__…DealStageEvent_Amount_Provenance` and
+> `V202608211201__…Refresh_DealStageEvent_View`. This table said 2 until it was measured against a
+> genuinely empty database.
+>
+> That staleness has the same cause as a known issue worth reading: **an applied migration in this repo
+> can be silently rewritten.** `V202608042101` has been edited four times since it applied on 2026-08-13
+> at checksum 666373835, and those two Aug 21 migrations went on applying cleanly without Flyway ever
+> objecting to the changed checksum. So the file on disk and the file that built a long-lived database
+> are different artefacts, and nothing detects the divergence — which is exactly why `MJ_V6_Host` worked
+> while a fresh install did not.
 
 > **Sales' `mj:migrate` now passes `--schema` itself**, so `npm run mj:migrate` is safe. It did not until
 > this pass: the bare form wrote flyway history into `__mj` — where MJ core's newer migrations already sit
