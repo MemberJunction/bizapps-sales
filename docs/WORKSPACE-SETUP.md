@@ -121,20 +121,37 @@ done
 
 # NOT next for these two — see the warning below.
 git clone --branch feature/embed-order-on-deal https://github.com/MemberJunction/bizapps-sales.git
-git clone --branch feature/closewon-task-types https://github.com/MemberJunction/bizapps-tasks.git
+git clone --branch next https://github.com/MemberJunction/bizapps-tasks.git   # NOT closewon -- see below
 ```
 
-> #### ⚠ TWO OF THESE MUST NOT COME FROM `next`, and cloning them from it wastes the whole setup
+> #### ⚠ ONE OF THESE MUST NOT COME FROM `next`, and the other one MUST
 >
 > * **bizapps-sales** `next` is **242 commits behind** the current line. It predates the embedded-order
 >   redesign entirely — `DealLine` still exists there — so a workspace built from it cannot reproduce
 >   anything in this document and fails in ways that look like environment problems.
-> * **bizapps-tasks** is one commit AHEAD of `next` on `feature/closewon-task-types`, and that commit is
->   what close-won task creation needs.
+> * **bizapps-tasks** must come from **`next`**, and the line that used to sit here said the opposite.
+>   It read: *"one commit AHEAD of `next` on `feature/closewon-task-types`, and that commit is what
+>   close-won task creation needs."* One commit ahead was true. It was also **11 commits BEHIND**, and
+>   those eleven carry `V202608200800__v1.2.x_TaskType_Code_Statuses_Workflow_Hooks.sql`, which creates
+>   `TaskType.Code`. Sales' own `metadata/task-types` keys on `Code`, so cloning tasks the way this
+>   document used to say makes sales' metadata push fail outright:
 >
-> Both branch names are recorded here rather than left as "use the current branch", because a tester has
-> no way to know which that is. If they have moved on, the truth is `git branch -vv` in a working
-> checkout — not `next`.
+>   ```
+>   Field "Code" does not exist on entity "MJ_BizApps_Tasks: Task Types"   x2
+>   ✗ Validation failed with 2 error(s)
+>   ```
+>
+>   Measured 2026-08-25 on a fresh install, then measured again after applying tasks@`next`: the column
+>   appears and `metadata	ask-types — 2 created` succeeds. The one commit `feature/closewon-task-types`
+>   is ahead by (`cddd76b`) changes a single file, adding those two task types to **tasks'** metadata --
+>   rows that `metadata/task-types/.task-types.json` here says tasks *"deliberately does not carry"*,
+>   because sales owns them under Amith's 2026-08-20 ruling. So the branch is not merely stale, its one
+>   contribution duplicates rows this app is responsible for.
+>
+> Branch names are recorded here rather than left as "use the current branch", because a tester has no
+> way to know which that is. But a recorded branch name goes stale silently, which is exactly what
+> happened above -- so check a claim like this against the migration that actually creates the column
+> you need, not against the note. `git log --all --oneline -S "<column>" -- migrations/` settles it.
 
 `bizapps-tasks` is **not optional**, even though nothing you test touches tasks directly: accounting has a
 hard foreign key into it, and orders has one into accounting. Leave it out and orders' migration fails on a
@@ -290,7 +307,12 @@ find yourself about to run CodeGen to "register entities", stop — something el
 
 ```bash
 # a. app metadata — type tables, remote operations, and (for sales) the form chrome
-cd C:\ws\bizapps-sales     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir metadata
+#
+#    --exclude queries IS REQUIRED ON A FRESH DATABASE. Without it the push dies with 18 UNIQUE-key
+#    violations on __mj.QueryParameter and rolls back whole, landing NONE of the 22 directories. It
+#    is deterministic and re-running does not converge. KNOWN-ISSUES KI-25 has the cause; the cost of
+#    excluding them is the 16 queries and therefore the dashboard.
+cd C:\ws\bizapps-sales     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir metadata --exclude queries
 cd C:\ws\bizapps-accounting && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <currencies, gl-account-roles, journal-entry-types>
 cd C:\ws\bizapps-orders     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <product/revrec/subscription types, remote-operations + categories, journal-entry-types, payment & charge types>
 

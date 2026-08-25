@@ -5,6 +5,66 @@ future developer will otherwise rediscover the hard way.
 
 ---
 
+## 🔴 KI-25 — `mj sync push --dir metadata` cannot seed `metadata/queries` onto a fresh database
+
+**Measured 2026-08-25 against a genuinely fresh install.** Everything else seeds cleanly — 22 directories,
+exit 0, including the two sales-owned task types. `queries` fails, and it fails the same way every time:
+
+```
+❌ FATAL ERROR: Failed to save MJ: Query Parameters record
+   Violation of UNIQUE KEY constraint 'UQ_QueryParameter_QueryID_Name'.
+   Cannot insert duplicate key in object '__mj.QueryParameter'.
+   The duplicate key value is (5a1e5000-0001-4000-a000-000000000008, CompanyID).
+```
+
+18 violations, the transaction rolls back whole, and **0 of the 16 queries land**. Running it a second
+time produces byte-identical output — it does not converge, so "just run it again" is not a workaround.
+
+### Cause
+
+**14 of the 16 query files declare their parameters explicitly**, under
+`relatedEntities: { "MJ: Query Parameters": [...] }`, with hand-written descriptions and sample values
+that are worth keeping. MJ *also* derives parameters from the query SQL. On a fresh database both
+happen, and the second insert collides with the first on `(QueryID, Name)`.
+
+**It is NOT a credentials problem**, despite the line that precedes it in the log:
+
+```
+No suitable model found for prompt SQL Query Parameter Extraction.
+No valid API credentials/keys are configured ... LLM enrichment failed, using heuristic descriptions.
+```
+
+That is a warning, and the push continues past it. Measured: **zero `__mj.Credential` rows on
+`MJ_V6_Host` and on the fresh install alike**, and no LLM key in any `.env` in the tree — so enrichment
+has never run here, on the host that works or the install that does not. Configuring a key would change
+the descriptions, not the collision.
+
+### Why it never surfaced before
+
+Same shape as **KI-24**, one layer up. `MJ_V6_Host` already holds those 16 queries with their parameters,
+so a push there UPDATES and no insert collides. **The seed path, like the rebuild path, has never been
+run from zero** — so the artefact that works and the artefact being shipped were, again, different
+things.
+
+### Workaround, and what it costs
+
+```bash
+DB_DATABASE=<db> node node_modules/@memberjunction/cli/bin/run.js sync push --dir metadata --exclude queries --ci
+```
+
+Verified: exit 0, 22/22 directories. **The cost is the 16 queries, and therefore the dashboard**, which
+is built on them. Anyone demoing the dashboard needs those rows by another route.
+
+### What would actually fix it
+
+Either MJ's query push upserts `QueryParameter` on `(QueryID, Name)` instead of inserting — which is an
+MJ-core change and the right one — or sales drops the 15 declaration blocks and lets MJ derive the
+parameters, losing the authored descriptions. **Not fixed here**: the first is not ours, and the second
+throws away real content to work around someone else's insert. Worth an answer from Amith before
+anyone edits 14 files.
+
+---
+
 ## 🔴 KI-24 — The baseline-in-place practice lost its safety net on 2026-08-12, which is why the baseline drifted from every working database
 
 CLAUDE.md's rule is that schema changes **edit the baseline migration in place** rather than stacking
