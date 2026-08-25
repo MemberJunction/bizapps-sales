@@ -244,7 +244,18 @@ test.describe('pipeline board — a drag writes three things, and never closes a
          * closing target is the subject of the second test and would make this one refuse.
          */
         const currentIndex = stages.findIndex((s) => s.ID.toLowerCase() === deal.PipelineStageID.toLowerCase());
-        const target = stages.find((s, i) => i !== currentIndex && s.IsClosing === 0);
+        const candidates = stages.filter((s, i) => i !== currentIndex && s.IsClosing === 0);
+        expect(candidates.length, 'this pipeline has no second non-closing stage to move to').toBeGreaterThan(0);
+
+        /**
+         * PREFER A STAGE THAT ACTUALLY DECLARES AN ORDER STATUS — assertion 3 depends on it.
+         *
+         * This used to take the FIRST non-closing stage, which on both seeded pipelines is index 0 or 1,
+         * and `OrderStatusOnEntry` is NULL on both. The order-follows-stage assertion below was wrapped
+         * in `if (target.OrderStatusOnEntry)` and therefore **had never executed once** — the third of
+         * the three things this spec's header says it proves was silently not being proved.
+         */
+        const target = candidates.find((s) => s.OrderStatusOnEntry) ?? candidates[0];
         expect(target, 'this pipeline has no second non-closing stage to move to').toBeTruthy();
 
         /** The DEPARTING values, read BEFORE the move — the whole point of the stamps. */
@@ -302,21 +313,39 @@ test.describe('pipeline board — a drag writes three things, and never closes a
         );
         expect(order, 'the deal points at an order that does not exist').toBeTruthy();
 
-        if (target!.OrderStatusOnEntry) {
-            /**
-             * READ FROM THE STAGE, not hardcoded. The rule is data-driven — `PipelineStage.OrderStatusOnEntry`
-             * — so asserting a literal would be asserting the seed. Orders may also REFUSE a transition
-             * (Voided is final), in which case the deal's stage change still proceeds by design (D-OS1); that
-             * is why this is a two-way assertion rather than a bare equality.
-             */
-            const refused = (order as { Status: string }).Status !== target!.OrderStatusOnEntry;
-            expect(
-                refused === false || (order as { Status: string }).Status === 'Voided',
-                `the order should have become '${target!.OrderStatusOnEntry}' on entering `
-                    + `'${target!.Name}' — it is '${(order as { Status: string }).Status}'. A mismatch that is `
-                    + 'not Voided means the stage-to-order writer did not run.',
-            ).toBe(true);
-        }
+        /**
+         * ── THIS ASSERTION HAD NEVER EXECUTED, AND THE GUARD IS WHY ────────────────────────────────
+         *
+         * It was wrapped in `if (target.OrderStatusOnEntry) { … }`. `target` was the first non-closing
+         * stage — index 0 or 1 on both seeded pipelines — and `OrderStatusOnEntry` is NULL on both. So
+         * the condition was never true, the block never ran, and the spec reported green having proved
+         * two of the three claims in its own header.
+         *
+         * The guard is now an ASSERTION on the fixture rather than a silent skip. If no non-closing
+         * stage declares an order status, this claim cannot be tested at all and the spec says so
+         * instead of passing. A condition that quietly skips the only assertion that matters is
+         * indistinguishable from one that passes.
+         */
+        expect(
+            target!.OrderStatusOnEntry,
+            `no non-closing stage on pipeline "${deal.PipelineID}" declares OrderStatusOnEntry, so `
+                + '"the order follows the stage" — claim 3 in this file\'s header — cannot be tested. '
+                + 'Seed a non-closing PipelineStage with OrderStatusOnEntry set.',
+        ).toBeTruthy();
+
+        /**
+         * READ FROM THE STAGE, not hardcoded. The rule is data-driven — `PipelineStage.OrderStatusOnEntry`
+         * — so asserting a literal would be asserting the seed. Orders may also REFUSE a transition
+         * (Voided is final), in which case the deal's stage change still proceeds by design (D-OS1); that
+         * is why this is a two-way assertion rather than a bare equality.
+         */
+        const refused = (order as { Status: string }).Status !== target!.OrderStatusOnEntry;
+        expect(
+            refused === false || (order as { Status: string }).Status === 'Voided',
+            `the order should have become '${target!.OrderStatusOnEntry}' on entering `
+                + `'${target!.Name}' — it is '${(order as { Status: string }).Status}'. A mismatch that is `
+                + 'not Voided means the stage-to-order writer did not run.',
+        ).toBe(true);
 
         expect(drain(sink), 'no console errors during a drag').toEqual([]);
     });

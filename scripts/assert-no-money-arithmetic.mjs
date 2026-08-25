@@ -127,10 +127,14 @@ function* walk(dir) {
 const violations = [];
 const allowed = [];
 let scanned = 0;
+/** Per-root tally, so a root that silently matches nothing is detectable. */
+const perRoot = new Map();
 
 for (const searchRoot of SEARCH_ROOTS) {
+    let rootCount = 0;
     for (const file of walk(join(ROOT, searchRoot))) {
         scanned++;
+        rootCount++;
         const lines = readFileSync(file, 'utf8').split(/\r?\n/);
         lines.forEach((line, i) => {
             const code = line.trim();
@@ -156,6 +160,7 @@ for (const searchRoot of SEARCH_ROOTS) {
             }
         });
     }
+    perRoot.set(searchRoot, rootCount);
 }
 
 /**
@@ -165,6 +170,28 @@ for (const searchRoot of SEARCH_ROOTS) {
 if (scanned === 0) {
     console.error(`\nmoney-grep: ERROR — no source files found under ${SEARCH_ROOTS.join(', ')}.`);
     console.error('A gate that measures nothing must not report success.\n');
+    process.exit(2);
+}
+
+/**
+ * AND NEITHER IS A PARTIAL SCAN. The guard above catches the loud case -- nothing read at all. This
+ * catches the quiet one: delete one of six roots and the scan loses about a sixth of the codebase
+ * while the summary still prints `clean` and the file count beside it still looks reassuringly large.
+ *
+ * Measured on the sibling vocabulary gate rather than assumed: pointing `packages/Angular/src` at a
+ * path that does not exist took the scan from 62 files to 45 -- 27% gone -- and it printed clean.
+ *
+ * A root is DECLARED in this file, so a root yielding nothing is a fact about the declaration rather
+ * than about the code: either the path moved and this list is stale, or the package is gone and the
+ * list should say so. Both are edits to make deliberately, where a reviewer can see them.
+ */
+const emptyRoots = SEARCH_ROOTS.filter((r) => (perRoot.get(r) ?? 0) === 0);
+if (emptyRoots.length > 0) {
+    console.error(`\nmoney-grep: ERROR — ${emptyRoots.length} of ${SEARCH_ROOTS.length} declared root(s) matched no files:`);
+    for (const r of emptyRoots) console.error(`    ${r}`);
+    console.error(`\nThe other roots scanned ${scanned} file(s), so this would have printed "clean" while`);
+    console.error('silently covering less of the codebase than it claims. Fix the path, or remove the');
+    console.error('root from SEARCH_ROOTS on purpose.\n');
     process.exit(2);
 }
 
