@@ -123,7 +123,7 @@ the database, not the screen.
 121). The Explorer harness now runs 26 passed / 1 failed / 3 skipped, the single failure being console
 noise from an orphaned restored-record reference on the shared dev host, not a product defect.
 
-### #119 — S-US9: Log an activity on a deal → **met**
+### #119 — S-US9: Log an activity on a deal → **met** (all three criteria, as of 2026-08-25)
 
 **AND IT WAS BROKEN UNTIL TODAY, WHICH IS THE FINDING THAT MATTERS.** The timeline resolved its action
 with `(provider as unknown as { Actions?: ... }).Actions ?? []`. `IMetadataProvider` exposes no `Actions`
@@ -141,7 +141,7 @@ resolving through a `RunView` against `MJ: Actions`, which is MJ's own pattern f
 |---|---|---|
 | An activity can be created from the deal workspace and appears on the deal | **met** | `70-activity-timeline` write path, 17s; **AC1** writes ONE Activity linked `Regarding` |
 | Activities link to the deal, account and contact as applicable | **met** | **AC3** links the deal parties under COMMON entities with the shared PK unchanged; **AC4** an unknown participant becomes an identity link rather than a stub Person |
-| Activities on a closed deal remain visible; whether new ones can be added follows the close rule | **NOT ESTABLISHED** | No check and no spec covers it. Stated as unproven rather than assumed — the close lock is enforced elsewhere, but nobody has asserted it for this pane |
+| Activities on a closed deal remain visible; whether new ones can be added follows the same rule as other open-on-purpose fields | **met** — closed 2026-08-25 | `70-activity-timeline`, third test. It resolves a locked deal BY FLAG, proves the lock is genuinely on (Deal name frozen — it sits outside `DEAL_FIELDS_EDITABLE_WHILE_LOCKED`), then asserts the timeline still renders, the log control is still offered, and the activity actually lands with its participant links. Logging stays open for the reason `close-lock.ts` gives for Description and NextStep: "a closed deal still needs notes… without reopening the deal and falsifying its provenance" |
 
 Verified on the host, and it is worth recording what a real ingested item looks like, because it is the
 shape the criteria describe: three links per activity — `Regarding` → the Deal, `From` → a Person, and

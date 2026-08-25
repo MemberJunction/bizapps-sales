@@ -321,6 +321,78 @@ test.describe('deal activity timeline — S-US9 through the UI', () => {
             'a refusal writes nothing; an acceptance writes exactly one',
         ).toBeLessThanOrEqual(1);
     });
+
+    /**
+     * S-US9's THIRD CRITERION, which the story audit recorded as NOT ESTABLISHED until now.
+     *
+     * The issue asks: "Activities on a closed deal remain visible; whether new ones can be added to a
+     * closed deal follows the same rule as other open-on-purpose fields."
+     *
+     * `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` is that rule, and close-lock.ts gives the reasoning: the lock
+     * is field-by-field rather than a wall "because a closed deal still needs notes: someone has to be
+     * able to write 'customer asked about renewal' without reopening the deal and falsifying its
+     * provenance". Description and NextStep stay open for exactly that.
+     *
+     * An activity is the same kind of thing -- the workspace template calls the timeline "a record of
+     * what happened rather than a part of the draft" -- so logging must stay available. This asserts
+     * that, and asserts the lock is genuinely ON first, so a green result cannot come from having
+     * opened an OPEN deal by accident.
+     */
+    test('a CLOSED deal keeps its timeline, and logging follows the open-on-purpose rule', async ({ page }) => {
+        const sink = captureConsoleErrors(page);
+
+        /** BY THE FLAG, never by name -- a renamed seed must not silently stop testing the locked case. */
+        const locked = await QueryOne<Subject>(`
+            SELECT TOP 1 d.ID, d.Name, d.AccountID, d.PrimaryContactID
+              FROM __mj_BizAppsSales.Deal d
+              JOIN __mj_BizAppsSales.DealStatusType s ON s.ID = d.DealStatusTypeID
+             WHERE s.LocksDeal = 1 AND d.AccountID IS NOT NULL AND d.PrimaryContactID IS NOT NULL
+             ORDER BY d.DealNumber`);
+        expect(
+            locked,
+            'the host needs a CLOSED deal with an account and a contact, or this criterion cannot be exercised',
+        ).toBeTruthy();
+
+        await openDealInWorkspace(page, locked as Subject);
+
+        await expect(page.locator('.dat'), 'a closed deal must still show its activity timeline').toBeVisible({
+            timeout: 20_000,
+        });
+
+        /** PROVE THE LOCK IS ON, so everything below is not a green result on an open deal. */
+        await expect(
+            page.locator('.dw-field', { hasText: 'Deal name' }).first().locator('input').first(),
+            'the deal name sits OUTSIDE the editable-while-locked set, so it must be frozen -- if this is '
+                + 'enabled the deal is not actually locked and the rest of this test proves nothing',
+        ).toBeDisabled({ timeout: 20_000 });
+
+        await expect(
+            page.locator('.dat__add'),
+            'logging must stay available on a closed deal, the same way Description and NextStep do',
+        ).toBeEnabled({ timeout: 20_000 });
+
+        /** AND IT MUST LAND. An offered button that writes nothing is the worse failure of the two. */
+        const title = `${RUN_TAG} post-close note`;
+        await page.locator('.dat__add').click();
+        await timelineField(page, 'Type').locator('select').selectOption('Note');
+        await timelineField(page, 'Subject').locator('input').fill(title);
+        await timelineField(page, 'Notes').locator('textarea').fill('Logged against a CLOSED deal by 70-activity-timeline.spec.ts');
+        await page.locator('.dat__save').click();
+
+        await expect(page.locator('.dat__error'), 'logging on a closed deal must not error').toHaveCount(0, {
+            timeout: 20_000,
+        });
+        await expect(page.locator('.dat__form')).toHaveCount(0, { timeout: 20_000 });
+
+        const row = await activityByTitle(title);
+        expect(row, 'the activity must exist in the database, not merely on the screen').toBeTruthy();
+
+        const links = await linksFor((row as { ID: string }).ID);
+        expect(links.length, 'and it must carry its participant links like any other activity').toBeGreaterThan(0);
+
+        await shot(page, '70-closed-deal-logging');
+        drain(sink);
+    });
 });
 
 /**
