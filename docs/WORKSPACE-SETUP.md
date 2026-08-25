@@ -561,22 +561,86 @@ is wrong.
 > reversed cause, so do not assume one from the other.
 
 ```bash
-# a. app metadata — type tables, remote operations, and (for sales) the form chrome
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# THE ORDER BELOW IS THE ONE THAT WORKS -- with one caveat, stated up front.
+#
+# Every step here was executed on 2026-08-25 and every claim about what breaks was measured by
+# hitting it. What has NOT been done is running this sequence start to finish in one clean pass --
+# it was reconstructed from a session that arrived at a working database by a messier route. The
+# steps and their order are right; treat the SEQUENCE as reasoned until someone rebuilds from empty
+# and confirms it, then delete this paragraph.
+# Three things changed from the version this file used to carry, and each was a hard failure:
+#   1. CodeGen now runs FIRST. Without it the orders push in (b) fails outright -- see KI-28.
+#   2. bizapps-common is pushed. It was missing entirely, costing the six ActivityType codes.
+#   3. The catalogue is seeded BEFORE the demo data, not after. Reversed, every deal is
+#      provisioned with no product to embed and comes up with no order.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+
+# a. CODEGEN, for orders and common. Migrate, then generate.
+#
+#    Several orders migrations add a column and leave its EntityField row to CodeGen; common's
+#    activity tables are not registered as entities at all. Skip this and step (b) dies with
+#    "Column name or number of supplied values does not match table definition" -- several hundred
+#    lines of generated SQL naming neither EntityField nor the column. KI-28 has the full detail.
+#
+#    Each app's mj.config.cjs excludes every schema but its own, so these are scoped, not global.
+cd C:\ws\bizapps-orders && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/run.js codegen
+cd C:\ws\bizapps-common && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/run.js codegen
+
+#    Verify before continuing -- this must return NOTHING:
+#      SELECT e.Name, c.name FROM __mj.Entity e
+#        JOIN sys.views v ON v.name = e.BaseView
+#        JOIN sys.schemas s ON s.schema_id = v.schema_id AND s.name = e.SchemaName
+#        JOIN sys.columns c ON c.object_id = v.object_id
+#       WHERE NOT EXISTS (SELECT 1 FROM __mj.EntityField ef
+#                          WHERE ef.EntityID = e.ID AND ef.Name = c.name);
+#
+#    ⚠ CodeGen also REWRITES that repo's generated TypeScript, against the database you point it at.
+#    Point it at an under-provisioned one and it will happily replace good generated code with worse
+#    (it dropped OrderHeader.Lines here and broke the workspace build). Discard those file changes
+#    afterwards -- `git checkout -- .` in that repo -- which is what Amith means by "discard CodeGen
+#    output". The DATABASE rows are what you came for; the files are a side effect.
+
+# b. app metadata — type tables, remote operations, and (for sales) the form chrome
 #
 #    --exclude queries USED TO BE REQUIRED here and no longer is (KI-25, fixed 2026-08-25). If you are
 #    reading an older copy of this file, drop that flag: the queries seed with everything else now, and
 #    excluding them costs you the dashboard.
-cd C:\ws\bizapps-sales     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir metadata
+cd C:\ws\bizapps-sales      && node ../MJ/packages/MJCLI/bin/run.js sync push --dir metadata
 cd C:\ws\bizapps-accounting && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <currencies, gl-account-roles, journal-entry-types>
 cd C:\ws\bizapps-orders     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <product/revrec/subscription types, remote-operations + categories, journal-entry-types, payment & charge types>
+cd C:\ws\bizapps-common     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <activity-types, address-types, contact-types, organization-types, relationship-types>
 
-# b. sales dev + demo data (companies, pipelines, accounts, contacts)
-cd C:\ws\bizapps-sales && bash scripts/seed-dev-data.sh && bash scripts/seed-demo-data.sh
+#    bizapps-common is the line that used to be missing. activity-types carries the six codes
+#    (Call, Email, Meeting, Note, ...) that every Activity is resolved BY CODE against; without them
+#    15 activity checks fail with "No ActivityType with Code 'Email' exists".
+#
+#    Do NOT include common's application-roles here: it looks up an Applications record named
+#    'Common' that this sequence never creates, and the whole push rolls back on it.
 
-# c. orders catalogue, then the six accounting/pricing layers
+# c. sales dev data — companies, pipelines, accounts, contacts
+cd C:\ws\bizapps-sales && bash scripts/seed-dev-data.sh
+
+# d. orders catalogue, then the six accounting/pricing layers. BEFORE the demo data.
 sqlcmd … -i scripts/dev/seed-orders-catalog.sql
 sqlcmd … -i scripts/dev/seed-revenue-stack.sql
 ```
+
+> ### e. THEN the demo data — last, because it embeds what the catalogue provides
+>
+> ```bash
+> cd C:\ws\bizapps-sales && bash scripts/seed-demo-data.sh
+> ```
+>
+> This used to sit in step (b), ahead of the catalogue. Run in that order it still "succeeds" — it
+> reports seven deals — but every one of them is provisioned with **no order**, because there was no
+> sellable product to embed. Nothing warns you. It surfaces later as fifteen integration failures
+> reading `setup: no order on this host`, which name neither the seed nor its ordering.
+>
+> The seed tears its own `DEAL-9%` rows down first and is idempotent, so if you have already run it
+> in the wrong order, just run it again after the catalogue. Confirm with the line it prints:
+> **`deals w/ order   7`**. If that reads 0, the catalogue was not there when it ran.
+
 
 > ### Narrow pushes: assemble a temp parent, and copy `.mj-sync.json` into it
 >
