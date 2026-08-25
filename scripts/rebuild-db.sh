@@ -47,7 +47,34 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+# THE TARGET DATABASE IS NAMED BY THE CALLER, NOT INFERRED FROM .env.
+#
+# Step 1 of this script is DROP DATABASE. Sourcing .env with `set -a` overwrites anything already in
+# the environment, so the obvious safety measure — `DB_DATABASE=scratch scripts/rebuild-db.sh` —
+# was silently discarded and the run proceeded against .env's value. Measured 2026-08-25: with
+# DB_DATABASE=MY_SCRATCH_DB exported, the value after this source was MJ_V6_Host, the recording host
+# that holds the demo data. A caller taking that precaution would have destroyed it while believing
+# the override held.
+#
+# So: .env still supplies credentials and every other setting, but the database this script DROPS
+# must be named explicitly in CONFIRM_DROP, and it wins over .env. There is no default and no
+# prompt — an unattended run with no CONFIRM_DROP stops instead of guessing.
+#
+#   CONFIRM_DROP=MJ_Sales_FreshInstall scripts/rebuild-db.sh
+#
+# This is deliberately not a blocklist of protected names. A blocklist protects the hosts someone
+# thought of; naming the target protects every database including the ones added next week.
 set -a; . ./.env; set +a
+
+if [[ -z "${CONFIRM_DROP:-}" ]]; then
+    printf '\033[1mrebuild-db.sh refuses to guess which database to drop.\033[0m\n' >&2
+    printf '  .env currently resolves DB_DATABASE to: %s\n' "${DB_DATABASE:-<unset>}" >&2
+    printf '  Treat that as the value NOT to copy unless you truly mean it — the everyday .env\n' >&2
+    printf '  target is a working host, not a scratch database. Name the scratch database:\n' >&2
+    printf '      CONFIRM_DROP=<database-to-destroy> scripts/rebuild-db.sh\n' >&2
+    exit 2
+fi
+DB_DATABASE="$CONFIRM_DROP"
 
 MJ_VERSION="${MJ_CORE_VERSION:-v5.51.0}"
 COMMON_REPO="${BIZAPPS_COMMON_REPO:-$ROOT/../bizapps-common}"
