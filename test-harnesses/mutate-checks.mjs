@@ -683,7 +683,7 @@ const MUTATIONS = [
     // Half one: the warning stops reaching Issues. Routing still carries the reason, the workspace still
     // renders it, and a programmatic caller is blind again -- which is exactly the state before the fix.
     { id: 'M-RI1', file: CDO, expect: ['CD23'],
-      from: 'Issues: [...taskIssues, ...orderStatusIssues(deal), ...routingIssues(routing)],',
+      from: 'Issues: [...taskIssues, ...orderStatusIssues(deal), ...routingIssues(routing, false)],',
       to: 'Issues: [...taskIssues, ...orderStatusIssues(deal)],',
       note: 'a refused downstream route is reported in Routing only, so a caller reading Success and Issues sees unqualified success' },
 
