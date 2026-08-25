@@ -505,9 +505,40 @@ sqlcmd … -i scripts/dev/seed-orders-catalog.sql
 sqlcmd … -i scripts/dev/seed-revenue-stack.sql
 ```
 
+> ### Narrow pushes: assemble a temp parent, and copy `.mj-sync.json` into it
+>
 > `mj sync push` discovers entity directories **beneath** `--dir`. Pointing it at a single leaf directory
-> fails with *"No entity directories found"* — assemble a temp parent holding just the dirs you want when
-> you need a narrow push.
+> fails with *"No entity directories found"*, so assemble a temp parent holding just the dirs you want.
+>
+> **Copy the metadata root's `.mj-sync.json` in alongside them.** Without it the push refuses:
+>
+> ```
+> No .mj-sync.json configuration file found in directory
+> ✗ Validation failed with 1 error(s)
+> ```
+>
+> That file is not a formality — it carries `directoryOrder`, and for these directories the order is
+> load-bearing: `remote-operation-categories` must precede `remote-operations`, or every operation
+> fails its `CategoryID` lookup. Copy it, do not hand-write it.
+>
+> **A temp parent is also how you keep the source repo clean, which matters more than the discovery
+> rule.** `sync push` **writes back into the files you point it at** — `PushService` assigns
+> `record.primaryKey = newPrimaryKey` after creating a record and writes it to the source file via
+> `JsonWriteHelper.writeOrderedRecordData`. Point it at another app's `metadata/` and you dirty that
+> repo's working tree with generated IDs; point it at a copy and the writeback lands in the copy. This is
+> what Amith means by *"discard CodeGen or mj sync output"*.
+>
+> **`--dry-run` will report lookup failures that a real push does not have.** Dry run does not create
+> records, so any cross-directory reference — `remote-operations` → `remote-operation-categories` here —
+> fails to resolve against a database where the target does not yet exist:
+>
+> ```
+> ❌ LOOKUP FAILURE in MJ: Remote Operations
+>    Error: Lookup failed: No record found in 'MJ: Remote Operation Categories' where Name='Order Pricing'
+> ```
+>
+> That is an artifact of dry run, not a defect in the metadata. Read it as *"this record depends on one
+> that would have been created a moment earlier"*, and check `directoryOrder` rather than the record.
 
 `seed-revenue-stack.sql` does the six layers a booking crosses and **refuses with a pointed message** if the
 metadata pushes have not run. It is idempotent, so re-run it freely. What it covers, and the error you get
