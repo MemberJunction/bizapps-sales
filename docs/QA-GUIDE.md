@@ -22,7 +22,7 @@ covers only what a tester needs afterwards.
 | Node | **≥ 18** | `package.json` engines |
 | pnpm | **10.33.0** | `packageManager`; always install from the **workspace root**, never inside a member |
 | SQL Server | 2019+ | Local dev target is SQL Server |
-| MJ core | **`6.1.0-edge.3`** | Must satisfy `mj-app.json`'s `mjVersionRange`: `>=6.0.0 <7.0.0`, AND match the packages, which pin `^6.1.0-edge.3` in all seven manifests |
+| MJ core | **`6.1.0-edge.3`** | Must satisfy `mj-app.json`'s `mjVersionRange`: `>=6.1.0-edge.2 <7.0.0`, AND match the packages, which pin `^6.1.0-edge.3` in all seven manifests. The range carries a prerelease comparator ON THE 6.1.0 TUPLE deliberately -- see below |
 | bizapps-common | workspace member | Required — Sales' accounts and contacts are IS-A children of common's Organization and Person |
 | bizapps-orders | workspace member | **REQUIRED.** A deal cannot be SAVED without it — the save provisions an embedded `OrderHeader` in orders' schema. `mj-app.json` declares it a hard dependency |
 | bizapps-contracts | workspace member | Optional for CRUD; **required for close-won to create a contract.** A contract has been created on `MJ_V6_Host`, so it is installable there |
@@ -102,6 +102,24 @@ nothing in sales uses an encrypted field. Ignore it.
 |---|---|
 | Host MJAPI (GraphQL) | **4143** |
 | Host MJExplorer | **4341** |
+
+> #### Why `mjVersionRange` looks odd
+>
+> It reads `>=6.1.0-edge.2 <7.0.0` rather than the tidier `>=6.0.0 <7.0.0`, and the difference is not
+> cosmetic. **Semver excludes a prerelease from a range unless some comparator shares its exact
+> `major.minor.patch` tuple.** `6.1.0-edge.3` has tuple `6.1.0`, so comparators at `6.0.0` and `7.0.0`
+> cannot admit it:
+>
+> ```
+> satisfies('6.1.0-edge.3', '>=6.0.0 <7.0.0')                      -> false
+> satisfies('6.1.0-edge.3', '>=6.0.0 <7.0.0', {includePrerelease}) -> true
+> satisfies('6.1.0-edge.3', '>=6.1.0-edge.2 <7.0.0')               -> true
+> ```
+>
+> The old range therefore REJECTED the core we run, and `>=6.0.0-0 <7.0.0` does not fix it either --
+> the prerelease comparator has to sit on the 6.1.0 tuple. Raised by Madhav; measured here rather than
+> taken on faith. `bizapps-common`, `bizapps-tasks` and `bizapps-contracts` already use this exact
+> form, so this brings sales into line rather than inventing something.
 
 **MJExplorer must serve on 4341.** The MSAL redirect URI is pre-registered in Entra for that origin; on
 any other port the login round-trip fails. If 4341 is busy, stop whatever holds it rather than changing

@@ -28,6 +28,7 @@
     "build:generated": "turbo --log-order=stream build --filter=\"@mj-biz-apps/sales-entities\" --filter=\"@mj-biz-apps/sales-actions\"",
     "build:packages": "turbo --log-order=stream build --filter=\"@mj-biz-apps/sales-*\"",
     "mj": "node node_modules/@memberjunction/cli/bin/run.js",
+    "version": "changeset version",
     "mj:migrate": "node node_modules/@memberjunction/cli/bin/run.js migrate --schema __mj_BizAppsSales --dir ./migrations",
     "mj:codegen": "node node_modules/@memberjunction/cli/bin/run.js codegen",
     "mj:codegen:files": "node node_modules/@memberjunction/cli/bin/run.js codegen --skipdb",
