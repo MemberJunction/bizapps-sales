@@ -1,7 +1,12 @@
 # Story audit — the code half, on the INTEGRATED branch
 
-**Date:** 2026-08-20 · **Branch:** `feature/embed-order-on-deal`, after integrating three feature
-branches · **Source:** `MemberJunction/bc-aidp-next-golive`, read-only
+**Third pass:** 2026-08-20 · `feature/embed-order-on-deal`, after integrating three feature branches
+**Fourth pass:** 2026-08-25 · **`next`**, after PR #25 merged that branch in
+**Source:** `MemberJunction/bc-aidp-next-golive`, read-only
+
+> The third pass below stands as written and is not edited. The fourth pass audits the two stories it
+> deliberately declined — **S-US9 (#119)** and **S-US10 (#120)** — and revises nothing else, because
+> nothing else changed. See **FOURTH PASS** immediately after the verdicts table.
 
 ## THIS IS THE THIRD PASS, AND THE FIRST ONE WORTH REPORTING
 
@@ -97,11 +102,76 @@ The rule for this pass was *prove met criteria against the database, not the scr
 | **#116** S-US6 Close a deal as Won | **met** |
 | **#117** S-US7 Close a deal as Lost | **met** |
 | **#118** S-US8 Reopen a closed deal | **partially met** — 3 of 4; the order cannot come back |
+| **#119** S-US9 Log an activity on a deal | **met** — fourth pass. **It was broken until 2026-08-25**, see below |
+| **#120** S-US10 Auto-ingest Outlook mail and meetings | **partially met** — fourth pass; 3 of 4, and the fourth is a deliberate design choice |
 | **#121** S-US11 Pipeline board and dashboard | **met** |
 
 Four of the nine are met outright. Every remaining gap but one is **upstream of this repo** — orders'
 line removal (KI-20), orders' terminal `Voided`, and two columns contracts does not have. The one that is
 ours is #33's inline create-and-return.
+
+---
+
+## FOURTH PASS — 2026-08-25, on `next`
+
+The third pass declined S-US9 and S-US10 on the grounds that they arrived with the third merge and were
+not in scope: *"claiming a verdict on them would repeat the mistake this pass exists to correct."* That
+was right then. They are audited now, against `next` after PR #25, with the same rule — prove it against
+the database, not the screen.
+
+**Evidence base has moved**: 132 integration checks across the same bundles, 0 failed, 0 skipped (was
+121). The Explorer harness now runs 26 passed / 1 failed / 3 skipped, the single failure being console
+noise from an orphaned restored-record reference on the shared dev host, not a product defect.
+
+### #119 — S-US9: Log an activity on a deal → **met**
+
+**AND IT WAS BROKEN UNTIL TODAY, WHICH IS THE FINDING THAT MATTERS.** The timeline resolved its action
+with `(provider as unknown as { Actions?: ... }).Actions ?? []`. `IMetadataProvider` exposes no `Actions`
+member, so the cast produced `undefined`, `?? []` made it an empty array, and the lookup returned null on
+every call ever made. The UI then reported *"The Log Activity action is not installed in this
+deployment — run `mj sync push --dir metadata`"*, which is specific, actionable and wrong: the row is
+present, Active, in the Sales category, identical to a freshly seeded database.
+
+That message cost real time — the metadata push it recommends was performed, changed nothing, and
+repointed both pipelines onto a company with no products on the way past (KI-26). Fixed in `ed20da6` by
+resolving through a `RunView` against `MJ: Actions`, which is MJ's own pattern from
+`interactive-form-apply.service.ts`.
+
+| Criterion | Verdict | Evidence |
+|---|---|---|
+| An activity can be created from the deal workspace and appears on the deal | **met** | `70-activity-timeline` write path, 17s; **AC1** writes ONE Activity linked `Regarding` |
+| Activities link to the deal, account and contact as applicable | **met** | **AC3** links the deal parties under COMMON entities with the shared PK unchanged; **AC4** an unknown participant becomes an identity link rather than a stub Person |
+| Activities on a closed deal remain visible; whether new ones can be added follows the close rule | **NOT ESTABLISHED** | No check and no spec covers it. Stated as unproven rather than assumed — the close lock is enforced elsewhere, but nobody has asserted it for this pane |
+
+Verified on the host, and it is worth recording what a real ingested item looks like, because it is the
+shape the criteria describe: three links per activity — `Regarding` → the Deal, `From` → a Person, and
+`To` → **no entity at all**, carried as `IdentityKind=Email` / `IdentityValue=...`. That is not a broken
+link. It is the schema's designed answer for a participant who is not a known contact, and it is what
+the sync job's `unattributed` counter reports.
+
+### #120 — S-US10: Auto-ingest Outlook mail and meetings → **partially met**, 3 of 4
+
+| Criterion | Verdict | Evidence |
+|---|---|---|
+| Emails involving a deal's contacts appear without manual entry | **met** | **AC6** relevance by exact ContactMethod match, never by domain; **AC7** an irrelevant batch writes nothing, filter before any write. Two real ingested mails sit on DEAL-9001 |
+| Meetings involving a deal's contacts appear without manual entry | **met** | **AC13** a meeting goes through the same pipeline — attendees, dedupe, Meeting by code; **AC14** mail and meetings keep separate watermarks; **AC18** a cancelled meeting stores Cancelled (D-25) |
+| Items link to account and contact **even where no deal match exists** | **NOT MET — deliberately** | **AC10**: a known contact on no open deal is *"reported, not filed and not invented"*. Items without a deal match are surfaced, not written. That is a design decision, not an oversight, but it is not what the criterion asks for and should be settled with the story's author rather than quietly counted as met |
+| Duplicates are not created on repeated sync runs | **met** | **AC8** the same batch twice writes once, idempotent on `(SourceSystem, ExternalID)`; **AC9** the watermark advances and the next run fetches nothing; **AC20**/**AC22** a failed write or lookup HOLDS the watermark |
+
+### #93 — confirmed still met, with fresh evidence
+
+The third pass listed #93 as settled without re-examining it. It asks that deal lines reference the
+catalogue `Product` by ID rather than carrying a product name as text. Re-measured on the host today:
+**69 order lines, 69 with a real `ProductID`, 69 resolving to a catalogue row** — no name-text lines
+anywhere. The embedded-order redesign satisfies it by construction, since the lines live on the order
+and `OrderLine.ProductID` is a real FK.
+
+### What the tracker says versus what is true
+
+Ten of the eleven S-US issues are still OPEN in `bc-aidp-next-golive`, including **#35, #116, #117 and
+#121, which this audit calls met**, and now **#119**. The tracker understates what is done. Every
+remaining gap is upstream: order-line removal (KI-20) and terminal `Voided` belong to orders, the two
+contract field gaps to contracts (D-9, D-10).
 
 ---
 
