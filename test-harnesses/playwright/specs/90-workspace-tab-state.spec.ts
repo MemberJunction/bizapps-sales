@@ -118,7 +118,11 @@ async function linesFor(dealName: string): Promise<LineRow[]> {
                pr.Name        AS ProductName
           FROM __mj_BizAppsSales.Deal d
           JOIN __mj_BizAppsOrders.OrderHeader oh ON oh.ID = d.OrderID
-          JOIN __mj_BizAppsOrders.OrderLine   ol ON ol.OrderID = oh.ID
+          -- OrderHeaderID, not OrderID: OrderLine's FK to its header is OrderHeaderID. The
+          -- wrong name made this query fail with "Invalid column name 'OrderID'", which is a
+          -- RequestError from the spec's own SQL and reads like a product fault. lib/db.ts's
+          -- OrderLinesForDeal has always used the right column; this copy drifted.
+          JOIN __mj_BizAppsOrders.OrderLine   ol ON ol.OrderHeaderID = oh.ID
           LEFT JOIN __mj_BizAppsOrders.Product pr ON pr.ID = ol.ProductID
          WHERE d.Name = '${dealName.replace(/'/g, "''")}'
     `);
@@ -239,8 +243,24 @@ test.describe('deal workspace — state that belongs to one deal', () => {
                 + 'making the deal unquotable',
         ).toBeGreaterThan(0);
 
-        // ── add a line and save, so the consequence lands in a row ────────────────────────────
-        await page.locator('.dw-addbtn').click();
+        /**
+         * ── add a line and save, so the consequence lands in a row ────────────────────────────
+         *
+         * ONLY IF THERE IS NOT ONE ALREADY. Reading the offered options above goes through the helper
+         * at the foot of this file, which adds a line when the pane has none -- "a picker only exists
+         * once there is a line to hold it". Clicking Add line unconditionally here therefore produced
+         * a SECOND row, and the product below is set on `.first()`, so row two stayed on
+         * "- choose a product -".
+         *
+         * The workspace then refused the save, correctly and by design (b3809fe, "a line with no
+         * product blocks the save"), and `save()` timed out clicking a disabled button for 30s. The
+         * failure read as the Save control being broken. It was the validation working: the screenshot
+         * shows both rows, the second empty, and "Product cannot be null. Choose a product for this
+         * line." in the panel.
+         */
+        if ((await page.locator('.dw-cell-product').count()) === 0) {
+            await page.locator('.dw-addbtn').click();
+        }
         const picker = page.locator('.dw-cell-product').first();
         await picker.selectOption({ index: 1 });          // index 0 is "— not linked —"
         /**
