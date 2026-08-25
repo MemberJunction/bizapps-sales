@@ -27,7 +27,7 @@ The real host was fine. Cost: a wrong diagnosis and a needless re-seed.
 
 | Database | Tree that owns its `.env` | Serves | Contents |
 |---|---|---|---|
-| **`MJ_V6_Host`** | `/c/v6/MJ` | **API 4143**, Explorer **4341** | The **demo/recording** stack. Orders installed (~50 tables), contracts **absent**. Seven `DEAL-900x` deals, all lines carrying real catalogue `ProductID`s. |
+| **`MJ_V6_Host`** | `/c/v6/MJ` | **API 4143**, Explorer **4341** | The **demo/recording** stack. Orders installed (~50 tables). Contracts **present as of 2026-08-25** — a contract was created here during close-won testing; this line previously said absent. Seven `DEAL-900x` deals, all lines carrying real catalogue `ProductID`s. |
 | **`MJ_V6_Repro`** | `/c/v6repro/*` (7 members) | nothing running by default | The **isolated schema/CodeGen** stack, and the **only** one with contracts (~10 tables) as well as orders. The only place the contract-gated bundles can prove anything. |
 | **`MJ_BizAppsSales_V6`** | `/c/v6/bizapps-sales` | API 4141 *(configured)* | **Sales-only** — no orders schema, no contracts. Which makes it the honest test of a standalone host: the default gate must be green here, and the downstream-gated bundles must refuse *loudly*. |
 | **`MJ_BizAppsSales`** | `/c/Dev/MJ/bizapps-sales` | API 4141 *(configured)* | The **original pre-workspace** dev database. Predates the product-picker work, so its demo lines carry names with no `ProductID`. Nothing current depends on it. |
@@ -115,10 +115,26 @@ whatever you like, but keep the six repos as direct children.
 ```bash
 mkdir C:\ws && cd C:\ws
 git clone --branch next https://github.com/MemberJunction/MJ.git
-for r in bizapps-common bizapps-tasks bizapps-accounting bizapps-orders bizapps-sales bizapps-contracts; do
+for r in bizapps-common bizapps-accounting bizapps-orders bizapps-contracts; do
   git clone --branch next https://github.com/MemberJunction/$r.git
 done
+
+# NOT next for these two — see the warning below.
+git clone --branch feature/embed-order-on-deal https://github.com/MemberJunction/bizapps-sales.git
+git clone --branch feature/closewon-task-types https://github.com/MemberJunction/bizapps-tasks.git
 ```
+
+> #### ⚠ TWO OF THESE MUST NOT COME FROM `next`, and cloning them from it wastes the whole setup
+>
+> * **bizapps-sales** `next` is **242 commits behind** the current line. It predates the embedded-order
+>   redesign entirely — `DealLine` still exists there — so a workspace built from it cannot reproduce
+>   anything in this document and fails in ways that look like environment problems.
+> * **bizapps-tasks** is one commit AHEAD of `next` on `feature/closewon-task-types`, and that commit is
+>   what close-won task creation needs.
+>
+> Both branch names are recorded here rather than left as "use the current branch", because a tester has
+> no way to know which that is. If they have moved on, the truth is `git branch -vv` in a working
+> checkout — not `next`.
 
 `bizapps-tasks` is **not optional**, even though nothing you test touches tasks directly: accounting has a
 hard foreign key into it, and orders has one into accounting. Leave it out and orders' migration fails on a
@@ -141,8 +157,23 @@ packages:
   - 'MJ/packages/*'          # plus every nested glob from MJ/pnpm-workspace.yaml
   - 'bizapps-common'
   - 'bizapps-common/packages/*'
-  # …and so on for tasks, accounting, orders, sales
+  - 'bizapps-tasks'
+  - 'bizapps-tasks/packages/*'
+  - 'bizapps-accounting'
+  - 'bizapps-accounting/packages/*'
+  - 'bizapps-orders'
+  - 'bizapps-orders/packages/*'
+  - 'bizapps-sales'
+  - 'bizapps-sales/packages/*'
+  - 'bizapps-contracts'          # ⚠ was MISSING here; step 6 cannot run without it
+  - 'bizapps-contracts/packages/*'
 ```
+
+**Every member is listed explicitly, and contracts is the reason.** This block used to end with
+*"…and so on for tasks, accounting, orders, sales"* — which omitted **contracts entirely**. A literal
+reading built a workspace that installs and builds fine and then cannot perform step 6, with a failure
+that points at contracts rather than at this list. Elisions are fine in prose and not in a block someone
+copies.
 
 ```json
 // C:\ws\package.json — TEMPORARY. devDependencies are LOAD-BEARING: without
