@@ -305,6 +305,24 @@ find yourself about to run CodeGen to "register entities", stop — something el
 
 ## 5. Seed, in this order
 
+> ### ⚠ THE ORDER IS LOAD-BEARING, AND THE FAILURE IT PREVENTS NAMES THE WRONG THING
+>
+> Push metadata FIRST, then seed. Both `metadata/pipelines/.sales-pipelines.json` and
+> `scripts/seed-demo-data.sh` set `Pipeline.CompanyID`, and they disagree: the metadata says
+> **Default Company** (correct on a fresh database, where nothing else exists), the seed splits the two
+> pipelines across **Blue Cypress** and **BC Education Group** so the demo can show that every rollup
+> slices by company.
+>
+> In this order the seed lands last and everything is right. **Push again after seeding and the
+> metadata wins**, both pipelines collapse onto a company that owns no products, and every product
+> picker in the app goes empty. What you see is `locator.selectOption` timeouts and *"the orders
+> catalogue did not load"* -- nine failures in one run, none of which mentions a company or a pipeline.
+> Measured 2026-08-25. See **KI-26** for the repair, which is to re-run `seed-demo-data.sh`.
+>
+> This matters because the push is also the remedy for other things -- a missing action, a stale remote
+> operation -- so there is a real reason to run it later in a host's life. When you do, re-seed after.
+
+
 ```bash
 # a. app metadata — type tables, remote operations, and (for sales) the form chrome
 #

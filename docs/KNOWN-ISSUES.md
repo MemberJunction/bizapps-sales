@@ -5,6 +5,60 @@ future developer will otherwise rediscover the hard way.
 
 ---
 
+## 🔴 KI-26 — `mj sync push` AFTER seeding silently empties every product picker
+
+**Measured 2026-08-25, by doing it.** Two files both own `Pipeline.CompanyID` and they disagree:
+
+| Source | What it sets | Why |
+|---|---|---|
+| `metadata/pipelines/.sales-pipelines.json` | both pipelines to `@lookup:MJ: Companies.Name=Default Company` | the install default -- on a fresh database it is the only company that exists |
+| `scripts/seed-demo-data.sh` (lines 364, 408) | B2B to **Blue Cypress**, D2C to **BC Education Group** | *"shows that every rollup slices by company because Pipeline.CompanyID is required"* |
+
+Nothing reconciles them. Run the metadata push on an already-seeded host and the metadata wins, so
+**both pipelines collapse onto Default Company, which owns no products.**
+
+The failure does not mention companies or pipelines. The product catalogue is filtered by the deal's
+selling company, which comes from its pipeline, so what you get is:
+
+```
+TimeoutError: locator.selectOption: Timeout 30000ms exceeded.          x6
+Error: the product picker offered nothing -- the orders catalogue did not load
+Error: the orders catalogue must offer a product, or this proves nothing
+```
+
+Nine of thirteen Explorer failures in one run, every one of them reading as an orders problem. The
+orders catalogue was fine the whole time; it was being asked for products belonging to a company that
+has none.
+
+### The documented order already prevents this, and that is the point
+
+`WORKSPACE-SETUP.md` §5 says push metadata FIRST, then seed. Followed in that order, the seed's
+`UPDATE ... WHERE CompanyID <> @co` lands last and everything is correct. The trap is that the push is
+also the remedy for other things -- a missing action, a stale remote operation -- so there is a real
+reason to run it later, and doing so silently reverts the demo's company split.
+
+**If you push after seeding, re-run `scripts/seed-demo-data.sh`.** It is idempotent and its two
+guarded UPDATEs are exactly the repair. The minimum repair, if you do not want the rest of the seed:
+
+```sql
+DECLARE @co1 UNIQUEIDENTIFIER='C0A5E100-0001-4A01-9E11-5B7C3D2F8A01';   -- Blue Cypress
+DECLARE @co2 UNIQUEIDENTIFIER='B0111111-0000-4000-A000-000000000002';   -- BC Education Group
+UPDATE __mj_BizAppsSales.Pipeline SET CompanyID=@co1
+ WHERE ID='90111111-0000-4000-A000-000000000001' AND CompanyID<>@co1;
+UPDATE __mj_BizAppsSales.Pipeline SET CompanyID=@co2
+ WHERE ID='90111111-0000-4000-A000-000000000002' AND CompanyID<>@co2;
+```
+
+### Why the metadata cannot simply be corrected to match
+
+`C0A5E100` comes from `seed-dev-data.sh`, which says of itself: *"this is LOCAL DEV DATA. It is not in
+metadata/, not referenced by mj-app.json, and must never be treated as part of the app."* Pointing
+shipped metadata at a dev-only company would be worse than the current split. `CompanyID` is NOT NULL,
+so it cannot be omitted either. **The ordering rule is the fix**, which is why it is recorded here
+rather than patched.
+
+---
+
 ## 🔴 KI-25 — `mj sync push --dir metadata` cannot seed `metadata/queries` onto a fresh database
 
 **Measured 2026-08-25 against a genuinely fresh install.** Everything else seeds cleanly — 22 directories,
