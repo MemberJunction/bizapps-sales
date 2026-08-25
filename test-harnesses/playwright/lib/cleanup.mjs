@@ -237,13 +237,42 @@ INSERT INTO @tasks (ID)
            SELECT ID FROM @deals UNION SELECT ID FROM @orders UNION SELECT ID FROM @contracts)
   UNION
   SELECT t.ID FROM __mj_BizAppsTasks.Task t
-   WHERE EXISTS (SELECT 1 FROM @inner WHERE t.Name LIKE P);
+   WHERE EXISTS (SELECT 1 FROM @inner WHERE t.Name LIKE P)
+  UNION
+  /*
+   * RESIDUE FROM AN EARLIER RUN -- a task whose TaskLink names a Deal row that is already gone.
+   *
+   * Neither route above reaches it: the link's RecordID is not in @deals because the deal no longer
+   * exists, and a task raised for a deal whose name did not carry a harness prefix has no prefix of its
+   * own either. Same shape as the second @contracts route, added for the same reason -- the residue
+   * counter now detects this class, so the sweep has to be able to clean it.
+   */
+  SELECT DISTINCT tl.TaskID FROM __mj_BizAppsTasks.TaskLink tl
+   WHERE tl.EntityID = @dealEntity
+     AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d
+                      WHERE d.ID = TRY_CONVERT(UNIQUEIDENTIFIER, tl.RecordID));
 
 /* ACTIVITIES — ActivityLink carries the Regarding link to the deal, and dies with it. */
 DECLARE @acts TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
 INSERT INTO @acts (ID)
   SELECT DISTINCT al.ActivityID FROM __mj_BizAppsCommon.ActivityLink al
-   WHERE TRY_CONVERT(UNIQUEIDENTIFIER, al.RecordID) IN (SELECT ID FROM @deals);
+   WHERE TRY_CONVERT(UNIQUEIDENTIFIER, al.RecordID) IN (SELECT ID FROM @deals)
+  UNION
+  /*
+   * RESIDUE FROM AN EARLIER RUN, the same second route @contracts already has.
+   *
+   * An activity linked to a deal THIS run is deleting is caught above. An activity linked to a deal a
+   * PREVIOUS run already deleted is caught by nothing: its deal is not in @deals because the row is
+   * gone. It is unreachable forever, and it is one of the leak classes the header block names.
+   *
+   * Added because the residue counter at the bottom now detects exactly this. A detector that reports
+   * a leak the sweep cannot clean would fail every run from then on -- the capture and the check have
+   * to cover the same class, by different routes.
+   */
+  SELECT DISTINCT al.ActivityID FROM __mj_BizAppsCommon.ActivityLink al
+   WHERE al.EntityID = @dealEntity
+     AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d
+                      WHERE d.ID = TRY_CONVERT(UNIQUEIDENTIFIER, al.RecordID));
 
 /* ── DELETE: CHILDREN BEFORE PARENTS, ALWAYS ────────────────────────────────────────────────────
  *
@@ -367,19 +396,75 @@ SELECT 'record_log_cleared=' + CAST(@logCleared AS varchar);
  * together, which
  * is how "remaining_deals=0" was printed over 30 surviving rows for days. A verification that shares
  * the defect of the thing it verifies is not verification.
+ *
+ * ── THE PRINCIPLE ABOVE WAS ONLY APPLIED TO TWO OF THE SIX ──────────────────────────────────────
+ *
+ * remaining_deals and remaining_pipelines re-derive from the prefix, independently of what the
+ * sweep captured. The other four re-joined @orders / @tasks / @contracts / @acts -- the very
+ * table variables the DELETEs above consumed. That answers "did the delete I ATTEMPTED succeed?",
+ * which is a real question but a much smaller one, and it is structurally blind to the failure that
+ * actually leaks rows: **a row the capture never saw in the first place.**
+ *
+ * Those are precisely the classes this file documents at the top:
+ *
+ *     a task with no TaskLink          -- never entered @tasks, so @tasks cannot reveal it
+ *     a contract whose deal was swept  -- never entered @contracts
+ *     an activity whose deal is gone   -- never entered @acts
+ *
+ * A capture-based check cannot see a capture miss. So three of the four now re-derive from the
+ * SURVIVING evidence instead: the harness prefix, and the dangling reference a leak leaves behind.
  */
 SELECT 'remaining_deals=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Deal
   WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P) AND ID NOT IN (SELECT ID FROM @keep);
 SELECT 'remaining_pipelines=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsSales.Pipeline
   WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
-SELECT 'remaining_orders=' + CAST(COUNT(*) AS varchar)
+
+/*
+ * ORDERS ARE THE ONE HONEST EXCEPTION, AND IT IS LABELLED RATHER THAN PAPERED OVER.
+ *
+ * An OrderHeader carries no harness marker of its own. It is reachable only through Deal.OrderID,
+ * and once the deal row is gone there is nothing on the order that distinguishes a leaked harness
+ * order from one of the ~50 standalone orders in the seed. Orphan-ness is not a marker either: most
+ * seeded orders belong to no deal.
+ *
+ * So this counter genuinely can only verify the attempted delete, and it says so in its name. The
+ * defence against the leak class is structural instead -- @orders is captured BEFORE the deal rows
+ * are deleted, which is the inversion the header block describes. If that capture is ever moved
+ * after the delete, nothing here will catch it; that is a fact worth knowing rather than hiding.
+ */
+SELECT 'remaining_orders_attempted=' + CAST(COUNT(*) AS varchar)
   FROM __mj_BizAppsOrders.OrderHeader oh JOIN @orders o ON oh.ID = o.ID;
-SELECT 'remaining_tasks=' + CAST(COUNT(*) AS varchar)
-  FROM __mj_BizAppsTasks.Task t JOIN @tasks x ON x.ID = t.ID;
-SELECT 'remaining_contracts=' + CAST(COUNT(*) AS varchar)
-  FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID;
-SELECT 'remaining_activities=' + CAST(COUNT(*) AS varchar)
-  FROM __mj_BizAppsCommon.Activity a JOIN @acts x ON x.ID = a.ID;
+
+/*
+ * TASKS -- re-derived two ways, neither of them from @tasks.
+ *
+ * By name, which is how CloseWonTaskService names a task after the deal that raised it
+ * ("Review order for PW-LIFE-xxxx"), and by a TaskLink still pointing at a Deal row that no longer
+ * exists. The second is what catches a task the name route missed: the link is the dangling evidence
+ * a leak leaves behind, and it survives the sweep precisely when the sweep failed.
+ */
+SELECT 'remaining_tasks=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsTasks.Task t
+ WHERE EXISTS (SELECT 1 FROM @inner WHERE t.Name LIKE P)
+    OR EXISTS (
+         SELECT 1 FROM __mj_BizAppsTasks.TaskLink tl
+          WHERE tl.TaskID = t.ID
+            AND tl.EntityID = @dealEntity
+            AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d
+                             WHERE d.ID = TRY_CONVERT(UNIQUEIDENTIFIER, tl.RecordID)));
+
+/* CONTRACTS -- a deal-created contract whose creating deal no longer exists. The documented class. */
+SELECT 'remaining_contracts=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsContracts.Contract c
+ WHERE c.CreatingEntityID = @dealEntity
+   AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d WHERE d.ID = c.CreatingRecordID);
+
+/* ACTIVITIES -- an activity still linked to a Deal row that is gone. */
+SELECT 'remaining_activities=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsCommon.Activity a
+ WHERE EXISTS (
+         SELECT 1 FROM __mj_BizAppsCommon.ActivityLink al
+          WHERE al.ActivityID = a.ID
+            AND al.EntityID = @dealEntity
+            AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d
+                             WHERE d.ID = TRY_CONVERT(UNIQUEIDENTIFIER, al.RecordID)));
 `;
 
 export function cleanup() {
