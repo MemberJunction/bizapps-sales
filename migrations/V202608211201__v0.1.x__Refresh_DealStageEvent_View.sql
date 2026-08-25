@@ -24,5 +24,20 @@
 --
 GO
 
-EXEC sp_refreshview N'__mj_BizAppsSales.vwDealStageEvents';
+--  ── GUARDED, BECAUSE ON A REBUILD THE VIEW DOES NOT EXIST YET ──────────────────────────────────
+--
+--  `vwDealStageEvents` is GENERATED. `scripts/rebuild-db.sh` trims the generated half of the
+--  baseline and applies hand-authored DDL only, leaving CodeGen to recreate the views afterwards.
+--  So on a rebuild this ran against a view that did not exist and failed the whole migration:
+--
+--      Could not find object '__mj_BizAppsSales.vwDealStageEvents' or you do not have permission.
+--
+--  Skipping is not a compromise here -- it is the right answer. There is nothing to REBIND on a
+--  rebuild: CodeGen creates the view fresh, against the table as it stands, so it already carries
+--  the new column. The rebind is only needed where the view already exists from a previous
+--  generated half, which is exactly the case this guard still lets through.
+--
+--  Measured 2026-08-25 on a rebuild from empty, the first since this landed on 2026-08-21.
+IF OBJECT_ID(N'__mj_BizAppsSales.vwDealStageEvents', 'V') IS NOT NULL
+    EXEC sp_refreshview N'__mj_BizAppsSales.vwDealStageEvents';
 GO
