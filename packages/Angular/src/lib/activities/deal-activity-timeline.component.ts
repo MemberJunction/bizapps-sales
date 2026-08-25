@@ -300,7 +300,7 @@ export class DealActivityTimelineComponent {
                 return;
             }
 
-            const actionID = this.logActivityActionID(provider);
+            const actionID = await this.logActivityActionID(provider);
             if (!actionID) {
                 this.Error =
                     'The Log Activity action is not installed in this deployment. It is seeded from '
@@ -361,10 +361,41 @@ export class DealActivityTimelineComponent {
         return new GraphQLActionClient(gql);
     }
 
-    /** `RunAction` takes an ID, so the name is resolved from metadata the provider already holds. */
-    private logActivityActionID(provider: IMetadataProvider): string | null {
-        const actions = (provider as unknown as { Actions?: { ID: string; Name: string }[] }).Actions ?? [];
-        return actions.find((a) => a.Name === LOG_ACTIVITY_ACTION)?.ID ?? null;
+    /**
+     * Resolve the action's ID by NAME, with a RunView against `MJ: Actions`.
+     *
+     * THIS READ `provider.Actions` AND THAT PROPERTY DOES NOT EXIST. `IMetadataProvider` exposes no
+     * `Actions` member, so the cast produced `undefined`, `?? []` turned that into an empty array, and
+     * the lookup returned null on every call. The component then reported
+     *
+     *     The Log Activity action is not installed in this deployment.
+     *
+     * which is a specific, actionable and completely wrong diagnosis: measured 2026-08-25, the action
+     * row is present, Active, in the Sales category, with DriverClass Sales.LogActivity, and identical
+     * to the row on a freshly seeded database. Anyone following that message ran `mj sync push` -- as I
+     * did -- and changed nothing, because nothing was missing. `?? []` is what made a missing property
+     * indistinguishable from a missing row.
+     *
+     * The pattern here is MJ's own, from `interactive-form-apply.service.ts`, the same service this
+     * component's docblock already cites for using GraphQLActionClient: "Falls back to a direct RunView
+     * against the Action entity when ActionEngine isn't loaded." ActionEngineBase would also work, but
+     * it needs Config() and is not initialised on this surface -- which is precisely the case MJ's
+     * fallback exists for.
+     */
+    private async logActivityActionID(provider: IMetadataProvider): Promise<string | null> {
+        try {
+            const rv = RunView.FromMetadataProvider(provider);
+            const result = await rv.RunView({
+                EntityName: 'MJ: Actions',
+                ExtraFilter: `Name='${LOG_ACTIVITY_ACTION.replace(/'/g, "''")}'`,
+                Fields: ['ID'],
+                MaxRows: 1,
+                ResultType: 'simple',
+            });
+            return result.Success ? ((result.Results?.[0] as { ID?: string })?.ID ?? null) : null;
+        } catch {
+            return null;
+        }
     }
 
     /** Newest first, by when it HAPPENED rather than when it was filed. */
