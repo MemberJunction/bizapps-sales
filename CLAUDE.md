@@ -300,7 +300,9 @@ Schema changes **edit the baseline migration in place**; do not stack fix-up mig
 safe because rebuilding from zero is routine:
 
 ```bash
-scripts/rebuild-db.sh                    # drop+create, MJ core, bizapps-common, this app's DDL
+CONFIRM_DROP=<database> scripts/rebuild-db.sh   # drop+create, MJ core, bizapps-common, this app's DDL
+#   ^ names the database to DESTROY. There is no default: the script refuses rather than fall back
+#     to .env, whose value is your everyday host.
 npm run mj:codegen                       # PASS 1 — entity metadata + SQL objects
 scripts/append-codegen.sh                # fold generated SQL below the baseline's banner
 pnpm mj sync push --dir metadata    # seed the type tables + remote-operation rows

@@ -5,6 +5,59 @@ future developer will otherwise rediscover the hard way.
 
 ---
 
+## 🔴 KI-24 — The baseline-in-place practice lost its safety net on 2026-08-12, which is why the baseline drifted from every working database
+
+CLAUDE.md's rule is that schema changes **edit the baseline migration in place** rather than stacking
+fix-ups, and that this "is only safe because rebuilding from zero is routine." Rebuilding stopped
+being routine on 2026-08-12. A week later the script that does it stopped being *able* to work, and
+because nobody was running it, nobody found out.
+
+**Measured 2026-08-25:**
+
+| Fact | Evidence |
+|---|---|
+| The rebuild loop last ran **2026-08-12 22:32** | `migrations/codegen/.previous-generated-lines` holds `33740`, written only by `rebuild-db.sh`'s trim step; that is its mtime |
+| `Deal.OrderID` became a **REAL FK** to `__mj_BizAppsOrders.OrderHeader` on **2026-08-19** | `da0f69f`; unconditional and inline in `CREATE TABLE Deal`, baseline line 822 |
+| `rebuild-db.sh` installs MJ core and bizapps-common **only** | its header states this as a design choice: "the sales baseline stands up with only common present" |
+
+Those three facts cannot all be true at once. Since 2026-08-19 the script cannot build a database the
+sales baseline will apply to; since 2026-08-12 nobody has tried. **Every schema change in between was
+hand-applied to live databases and never round-tripped through a rebuild.** That is the mechanism
+behind both fresh-install defects found on 2026-08-25, which had been chased separately as unrelated
+bugs:
+
+* The baseline carried **172 `DealLine` and 87 `DealLineType` references with no `CREATE TABLE` for
+  either**, and died at batch 108 of 462 on `Cannot find the object "__mj_BizAppsSales.DealLineType"`.
+  The repair had existed on `fix/retire-deallinetype-baseline` since `0d3d1ed` was root-caused and was
+  simply never merged. Merged in `a472f73`.
+* The **six CodeGen emits of 19-20 Aug were applied to the databases but never folded into the
+  baseline**. So on a fresh install `Deal.OrderID`, `PipelineStage.OrderStatusOnEntry` and
+  `Deal.StandardAgreementModified` had no `EntityField` row at all -- the whole embedded-order model
+  invisible to MJ -- `spCreateDeal` did not take `@OrderID`, and `spCreatePipelineStage` took 22
+  parameters where both live databases have 24. Folded in `1e47ee6`.
+
+Both databases were correct only because someone had run CodeGen against them **by hand**, which is
+exactly why this never surfaced in testing: the thing under test and the thing being shipped were
+different artefacts.
+
+### Still open
+
+`rebuild-db.sh` has not been fixed. It needs the three steps its own header anticipates ("Both arrive
+when S2 wires the pricing bridge, and this script grows the steps then"). The order is not negotiable
+and is documented in `WORKSPACE-SETUP.md` §4: **common -> tasks -> accounting -> orders -> sales**.
+Until then, do not trust a green run of it.
+
+### Related, fixed in `9998fdb`
+
+Two scripts sourced `.env` with `set -a`, which overwrites the environment rather than deferring to
+it, so a `DB_DATABASE` passed by the caller was silently discarded. In `rebuild-db.sh` -- whose first
+act is `DROP DATABASE` -- `.env` reads `MJ_V6_Host`, the recording host holding the demo data, so the
+obvious precaution `DB_DATABASE=scratch scripts/rebuild-db.sh` resolved to `MJ_V6_Host` and would have
+destroyed it while the caller believed the override held. The target is now named in `CONFIRM_DROP`
+and there is no default.
+
+---
+
 ## 🛑 KI-22 — BLOCKING THE FOUNDATION: no deal that has an order can be READ, and every new deal has one
 
 **Severity raised 2026-08-20 (Andrew).** This was filed as a known issue and it is not one. Every deal

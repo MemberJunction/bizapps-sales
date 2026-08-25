@@ -285,7 +285,7 @@ scripts/seed-demo-data.sh              # put them back
 Full rebuild from zero, if the database gets into a state you don't trust:
 
 ```bash
-scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh \
+CONFIRM_DROP=<database> scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh \
   && pnpm mj sync push --dir metadata \
   && scripts/seed-dev-data.sh josue.garcia@bluecypress.io \
   && scripts/seed-demo-data.sh && npm run build

@@ -55,7 +55,7 @@ looks like, and appending it would drop the rest of the generated half.
 If this is intentional, pass --force. Otherwise rebuild the database from zero and re-run CodeGen so
 it regenerates everything:
 
-    scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh
+    CONFIRM_DROP=<database> scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh
 EOF
     [[ "${2:-}" == "--force" ]] || exit 1
     echo "  (--force given; proceeding anyway)" >&2
@@ -95,7 +95,7 @@ That is what a CodeGen run that died partway looks like. Appending now would bak
 installs a database whose reads fail for those entities. Re-run the whole cycle so CodeGen
 regenerates from zero:
 
-    scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh
+    CONFIRM_DROP=<database> scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh
 EOF
         exit 1
     fi

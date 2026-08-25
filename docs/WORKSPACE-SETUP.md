@@ -283,7 +283,7 @@ in this order — it is the dependency order, and it is not negotiable:
 > and tells you nothing about the schema. Fixed to match the other four apps.
 
 **No CodeGen run is needed.** Each app's baseline carries its generated half, so after step 6 the database
-already has all ~500 entities registered (22 sales, 49 orders, 23 accounting, 19 tasks, 10 common). If you
+already has all ~500 entities registered (20 sales, 49 orders, 23 accounting, 19 tasks, 10 common). If you
 find yourself about to run CodeGen to "register entities", stop — something else is wrong.
 
 ## 5. Seed, in this order
