@@ -57,7 +57,27 @@ GO
 -- ── 2. THE ENTITY FIELD, so the entity layer can write it ───────────────────────────────────────
 -- Hardcoded ID, like every other metadata row in this repo. Sequence follows the same MAX+10 expression
 -- CodeGen uses, so the field lands after the ones already registered.
-IF NOT EXISTS (
+-- ── THE ENTITY MUST EXIST FIRST, AND ON A REBUILD IT DOES NOT ─────────────────────────────────
+--
+-- `EntityID` below is a hardcoded FK into `Entity`. That row is created by the GENERATED half of
+-- the baseline -- and `scripts/rebuild-db.sh` deliberately TRIMS that half, applying hand-authored
+-- DDL only so that CodeGen can regenerate it from scratch. That trim is what makes "edit the
+-- baseline in place" safe, so it is not going away.
+--
+-- Without the `IF EXISTS` below, this migration therefore fails on every rebuild:
+--
+--   Failed at batch 3/5 (lines 56-97): The INSERT statement conflicted with the FOREIGN KEY
+--   constraint "FK_EntityField_Entity"
+--
+-- and it takes the whole of step 7/7 with it, leaving a database with no sales schema at all.
+-- Measured 2026-08-25 on a rebuild from empty -- the first full rebuild since this migration
+-- landed on 2026-08-21 (see KI-24: the rebuild loop had lapsed, so nothing exercised it).
+--
+-- Skipping is correct rather than merely safe. On a rebuild CodeGen runs immediately after and
+-- registers this field from the schema itself, which is the same row by a better route. On a
+-- normal install the generated half is present, the entity exists, and this INSERT does its job.
+IF EXISTS (SELECT 1 FROM [${mjSchema}].[Entity] WHERE ID = '5AC3D14E-A9BA-4667-AF73-5928DAE446BF')
+AND NOT EXISTS (
     SELECT 1 FROM [${mjSchema}].[EntityField]
      WHERE ID = 'b7f4a1c2-3d5e-4a68-9c07-1e2f3a4b5c6d'
         OR (EntityID = '5AC3D14E-A9BA-4667-AF73-5928DAE446BF' AND Name = 'AmountAtTransitionIsComputed')
