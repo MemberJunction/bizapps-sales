@@ -256,13 +256,16 @@ notice and is harmless.
 
 ## 3b. ALTERNATIVE — installing from PUBLISHED packages
 
-> ## ⚠ UNVERIFIED. NOBODY HAS RUN THIS.
+> ## ✅ VERIFIED 2026-08-25 — rehearsed against the live registry
 >
-> Everything else in this document was executed and measured. **This section was not** — the sales
-> packages were not published when it was written, so it could not be. It is written from
-> `mj-app.json` and from what the packages actually contain, both of which are facts; the *sequence* is
-> reasoned, not tested. Treat every step as a hypothesis and expect to correct it. When the packages
-> land, someone should run this and replace this banner with what actually happened.
+> This section was written before the packages existed, as a hypothesis. It has now been **executed**
+> against the real registry, in a clean directory outside any workspace, with all five packages live at
+> `5.1.0`. Two of the four risks it named turned out to be non-issues; the other two are recorded
+> honestly below as still-untested. The measured results are inlined throughout — where a claim below
+> says *measured*, it was.
+>
+> One correction to the reasoning above: the sequence is right, but step 2 is **not sufficient on its
+> own** and step 3 is not optional. That was already stated; the run confirms it.
 
 ### THE APP SHIPS THROUGH TWO CHANNELS, AND ONLY ONE OF THEM IS NPM
 
@@ -295,8 +298,9 @@ Sections 4, 5 and 6 do not change. They are the repository half, and they are th
 
 ```bash
 # 1. An MJ host at a version satisfying mj-app.json's mjVersionRange (>=6.1.0-edge.2 <7.0.0).
-#    NOTE: MJ core's `latest` on npm is still 5.51.1 -- the v6 line is a PRERELEASE, so this must be
-#    installed explicitly by version, not by tag.
+#    NOTE: MJ core's `latest` on npm is still 5.51.1 -- the v6 line is a PRERELEASE, so THE HOST must
+#    be installed explicitly by version, not by tag. This does NOT apply to the step-2 install below:
+#    sales' own `^6.1.0-edge.3` ranges resolve to 6.1.0-edge.3 unaided (measured 2026-08-25).
 
 # 2. The four runtime packages into that host:
 npm install @mj-biz-apps/sales-server @mj-biz-apps/sales-ng             @mj-biz-apps/sales-entities @mj-biz-apps/sales-actions
@@ -313,22 +317,84 @@ The server and client packages carry `"role": "bootstrap"` with `startupExport`
 `LoadBizAppsSalesServer` / `LoadBizAppsSalesClient`, so the host must load them at startup the way it
 does for the other apps — MJAPI's startup log lists them as *"Loaded Open App server package"*.
 
-### What is most likely to be wrong here
+### What was actually wrong — measured, not reasoned
 
-Named specifically, so whoever runs this knows where to look first rather than debugging blind:
+The four risks this section originally named, each with the result of running it. Rehearsed
+2026-08-25 in an empty directory (`npm init -y`, then the step-2 install verbatim), with **no
+workspace, no symlinks and no `node_modules` inherited from anywhere**.
 
-* **Version resolution.** Sales' packages depend on `@memberjunction/*` at `^6.1.0-edge.3`. In this
-  workspace those resolve through symlinks and the range never bites. From a registry it will — and
-  MJ's `latest` being 5.51.1 means a plain install may pull the wrong major.
-* **`mjVersionRange` enforcement.** Nothing in the local tree enforces it today; an installer might.
-  The range is now `>=6.1.0-edge.2 <7.0.0`, which admits `6.1.0-edge.3` — see the note in QA-GUIDE
-  about why the tidier-looking `>=6.0.0 <7.0.0` does not.
-* **Startup registration.** If the host does not run the bootstrap exports, entities resolve to
-  `BaseEntity` and every deal read fails in a way that looks like a permissions problem (KI-21 is the
-  same failure from the other direction).
-* **Which repository revision.** The packages are versioned; the migrations are not. Installing
-  `5.1.0` and cloning a newer `next` gives you code and schema from different points. Match them by
-  the tag `changeset publish` creates.
+* **Version resolution — NOT A PROBLEM. The worry was unfounded.** The concern was that MJ's `latest`
+  being `5.51.1` would make `^6.1.0-edge.3` pull the wrong major. It does not: npm resolved every MJ
+  package to `6.1.0-edge.3` exactly. A caret range whose base is a prerelease still only matches
+  within that major, and the prerelease comparator sits on the same `6.1.0` tuple, so `5.51.1` is
+  never a candidate. Measured:
+
+  ```
+  @memberjunction/core                    6.1.0-edge.3
+  @memberjunction/global                  6.1.0-edge.3
+  @memberjunction/core-entities           6.1.0-edge.3
+  @memberjunction/sqlserver-dataprovider  6.1.0-edge.3
+  @memberjunction/actions-base            6.1.0-edge.3
+  ```
+
+  843 packages installed, exit 0. npm prints a run of `ERESOLVE overriding peer dependency` **warnings**
+  — they are warnings, the install succeeds, and no `--legacy-peer-deps` or `--force` was needed.
+  Siblings arrive transitively: `orders-entities@5.1.0`, `common-entities@5.35.1`, `tasks-*@1.3.0`.
+
+* **Which repository revision — NOT A PROBLEM, and now provable.** The original worry was that
+  installing `5.1.0` while cloning a newer `next` would pair code with mismatched schema. It does not
+  today: every published file was compared byte-for-byte against a local build of `origin/next`
+  @ `e40c460`, and **all 178 files in all five packages are identical** —
+  `sales-ng` 90, `sales-core-entities-server` 52, `sales-entities` 20, `sales-server` 12,
+  `sales-actions` 4. Zero differing, zero extra.
+
+  ⚠️ **This is a fact about today, not a guarantee.** `npm publish` recorded **no `gitHead`** in any of
+  the five packages, so provenance cannot be read back out of the registry — the only way to check the
+  pairing is the byte comparison above. Re-run it whenever `next` moves without a republish:
+
+  ```bash
+  # from a directory where the published packages are installed
+  cmp -s node_modules/@mj-biz-apps/sales-entities/dist/index.js          /path/to/bizapps-sales/packages/Entities/dist/index.js && echo MATCH || echo DIVERGED
+  ```
+
+* **`mjVersionRange` enforcement — STILL UNTESTED.** Nothing in this rehearsal exercised it, because
+  nothing installed the app *as an Open App* — the packages were installed as plain npm dependencies.
+  The range is `>=6.1.0-edge.2 <7.0.0` and it does admit the `6.1.0-edge.3` that npm actually
+  resolves, so the two are at least consistent. Whether a host rejects or ignores a mismatch is
+  unknown.
+
+* **Startup registration — PARTIALLY TESTED.** The bootstrap exports exist and are importable from the
+  published artifacts, which is the half that can be checked without a host:
+  `LoadBizAppsSalesServer` is exported by `sales-server`; `sales-entities` exposes 104 exports and
+  `sales-core-entities-server` 144. What is **not** tested is whether an MJ host actually calls them at
+  startup. If it does not, the KI-21 failure shape applies and deals fail looking like a permissions
+  problem.
+
+### One thing to know before you smoke-test
+
+`@mj-biz-apps/sales-server` **reads MJ configuration at import time**, so importing it with no config
+present throws before any of your code runs:
+
+```
+No config file found, using DEFAULT_SERVER_CONFIG
+Error parsing config file [ dbDatabase / dbUsername / dbPassword — "Required" ]
+Configuration validation failed
+```
+
+This is MJ core's config loader, **not a sales defect** — the other three packages import cleanly with
+no config at all. A real host always has a config, so this only bites a bare `node -e "import(...)"`
+smoke test. Drop an `mj.config.cjs` next to it and the import succeeds (9 exports). Worth knowing
+because the error names database fields and reads like a connectivity failure, which it is not.
+
+### What this rehearsal did NOT cover
+
+Stated so nobody reads the green banner as broader than it is:
+
+* No MJ host was started, so nothing exercised Open App discovery, `mjVersionRange`, or startup
+  bootstrap invocation.
+* No UI was loaded from the published `sales-ng`; only its bundle contents were compared.
+* The database half was built the normal way, from this repository — **section 3b changes nothing
+  about sections 4–6**, and those remain the tested path.
 
 ---
 
