@@ -398,6 +398,82 @@ Stated so nobody reads the green banner as broader than it is:
 
 ---
 
+## 3c. EVERY REPO MOVES TOGETHER, OR THE FAILURES LOOK LIKE PRODUCT BUGS
+
+Measured 2026-08-25, after a session lost hours to it. If your workspace has been sitting for more
+than a few days, read this before believing any failure.
+
+### The symptom does not name the cause
+
+Checkouts trailing the database produce failures that read exactly like Sales bugs:
+
+```
+the deal "PW-LIFE-... lifecycle" must exist in the database after saving -- no row appeared
+fixture: "Close CL-... won" reported saved but no row exists
+Cannot query field "Origin" on type "mjBizAppsOrdersOrderHeader_"
+```
+
+**A save that reports success and writes nothing is the signature.** It is the same
+`INSERT INTO @ResultTable EXEC sp...` column-count mismatch as KI-28 arriving from the other side:
+the database knows a column the compiled entity class does not, the counts differ, and the
+transaction aborts under a UI that has already said "saved".
+
+When this bit, the checkouts were **59** (orders), **47** (accounting), **17** (tasks) and
+**204** (MJ) commits behind a database built from `origin/next`. Nothing was wrong with Sales.
+
+### Check alignment first
+
+```bash
+for r in MJ bizapps-common bizapps-tasks bizapps-accounting bizapps-orders bizapps-sales; do
+  cd /c/v6/$r || continue
+  git fetch -q origin
+  echo "$r behind=$(git rev-list --count HEAD..origin/next) dirty=$(git status --porcelain | wc -l) branch=$(git rev-parse --abbrev-ref HEAD)"
+done
+```
+
+Everything should read `behind=0`. If it does not, fix that before filing anything.
+
+### MJ published 6.1.0-edge.3 and MJ next are NOT the same code
+
+The nastiest one. MJ has not bumped its version since publishing `edge.3`, so the registry tarball
+and the local `next` build **share a version number and differ in content**. pnpm cannot tell them
+apart. A package that does not *declare* `@memberjunction/global` directly --
+`orders-core-entities-server`, for one -- resolves it by hoisting and can get the registry copy,
+which lacks exports its code imports:
+
+```
+error TS2305: Module "@memberjunction/global" has no exported member EscapeSQLString
+error TS2305: Module "@memberjunction/core-entities" has no exported member BaseIdentityClaimDriver
+```
+
+**`linkWorkspacePackages: true` does not prevent this, and neither does `preferWorkspacePackages`.**
+Both were set and both were measured; neither applies when the version literally matches and the
+package is not a declared dependency.
+
+Make local-wins unconditional in the generated root `/c/v6/package.json` -- an override per
+`@memberjunction/*` package (306 here, so generate it):
+
+```json
+{ "pnpm": { "overrides": { "@memberjunction/global": "workspace:*" } } }
+```
+
+**Use `workspace:*`, never `link:`.** `link:` symlinks a package without installing its own
+dependencies, which produced `Cannot find package axios imported from MJServer/dist/...` and a
+server that would not boot. That was tried first. It is a dead end.
+
+### Three more that cost time
+
+* **A stale `dist` outlives its source.** After MJ moved, `MJServer/dist` still imported `axios`,
+  which its current source does not import at all. Clear it with `turbo run build --force` on the
+  affected filter. A build that succeeds from cache proves nothing after a large upstream jump.
+* **The database has to catch up too.** With MJ updated, the API refused to start with
+  `Entity MJ: Identity Claim Types not found in metadata` -- code ahead of schema. Run `mj migrate`
+  from MJ against your database (5 migrations here, 510 to 512 entities).
+* **Orphaned servers squat on ports.** A failed API start can leave a child holding 4143 and the
+  next attempt dies with `EADDRINUSE`. Check the listener PID and its start time before assuming
+  the port is yours.
+
+---
 ## 4. Create the database and migrate — order matters
 
 ```bash
