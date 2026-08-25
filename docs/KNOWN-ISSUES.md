@@ -131,6 +131,35 @@ Measured on a database with everything else seeded: `sync push --dir metadata` w
 queries to **exit 0, 23/23 directories, 15 queries, 65 parameters**. `--exclude queries` is no longer
 needed and has been removed from WORKSPACE-SETUP.
 
+### THE DECLARED PARAMETERS NEVER REACHED ANY DATABASE, WHICH MEANS THIS COST NOTHING
+
+Checked on `MJ_V6_Host` — the host that has worked all along, seeded long before this fix:
+
+```
+CompanyID | type=string | "Optional text value for Company I D"
+```
+
+Heuristic text and `string`, not the authored description and not `date`. **65 parameters, exactly what
+a derived install produces.** So MJ has always derived them and the declared rows have always failed to
+land; the failure was only ever visible on a FRESH push, because on an existing database the query
+already exists and sync reports no change.
+
+That makes this a strictly-better outcome rather than a trade. A fresh install and the working host now
+produce **byte-identical parameters — 65 rows, 0 differing** across all 15 queries, compared
+name-for-name on `(query, parameter, type, required)`. Nothing that was ever live has been lost.
+
+Verified at runtime too: the integration suite is 132/0/0 with **FS11, FS12 and FS13** green, and those
+run the REAL forecast query with `PeriodStart`/`PeriodEnd` passed as parameters.
+
+### Edge cases checked
+
+* **Idempotent** — a second push reports "15 records, no changes"; counts stay 15 / 65, not doubled.
+* **Teardown leaves them alone** — `seed-demo-data.sh --remove` takes deals to 0 and leaves queries at
+  15 / 65, which is right: queries are metadata, not demo data.
+* **Re-seed and push-after-seed** — both exit 0, queries stay 15 / 65. Note the push-after-seed run
+  reproduced **KI-26** exactly, repointing both pipelines onto Default Company, so that ordering rule is
+  deterministic and the warning in WORKSPACE-SETUP is accurate.
+
 Names and `IsRequired` survive derivation unchanged. `Type` degrades from `date` to `string` on the
 period parameters, which is harmless: `QueryForecastSource` passes them as ISO date-only strings on
 purpose — *"a full timestamp would invite a query to compare a date column against an instant"* — and
