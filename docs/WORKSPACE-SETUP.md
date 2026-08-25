@@ -306,7 +306,7 @@ git clone --branch next https://github.com/MemberJunction/bizapps-sales.git
 ```
 
 Then run **sections 4, 5 and 6 exactly as written**, from the clone — migrate in the documented order,
-seed with `--exclude queries` (KI-25), build and verify. Section 6's build step becomes unnecessary for
+seed, build and verify. Section 6's build step becomes unnecessary for
 sales itself, since its code arrives compiled.
 
 The server and client packages carry `"role": "bootstrap"` with `startupExport`
@@ -402,11 +402,10 @@ find yourself about to run CodeGen to "register entities", stop — something el
 ```bash
 # a. app metadata — type tables, remote operations, and (for sales) the form chrome
 #
-#    --exclude queries IS REQUIRED ON A FRESH DATABASE. Without it the push dies with 18 UNIQUE-key
-#    violations on __mj.QueryParameter and rolls back whole, landing NONE of the 22 directories. It
-#    is deterministic and re-running does not converge. KNOWN-ISSUES KI-25 has the cause; the cost of
-#    excluding them is the 16 queries and therefore the dashboard.
-cd C:\ws\bizapps-sales     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir metadata --exclude queries
+#    --exclude queries USED TO BE REQUIRED here and no longer is (KI-25, fixed 2026-08-25). If you are
+#    reading an older copy of this file, drop that flag: the queries seed with everything else now, and
+#    excluding them costs you the dashboard.
+cd C:\ws\bizapps-sales     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir metadata
 cd C:\ws\bizapps-accounting && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <currencies, gl-account-roles, journal-entry-types>
 cd C:\ws\bizapps-orders     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <product/revrec/subscription types, remote-operations + categories, journal-entry-types, payment & charge types>
 

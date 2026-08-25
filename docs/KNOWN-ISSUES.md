@@ -118,7 +118,29 @@ rather than patched.
 
 ---
 
-## 🔴 KI-25 — `mj sync push --dir metadata` cannot seed `metadata/queries` onto a fresh database
+## ✅ KI-25 — RESOLVED 2026-08-25: `metadata/queries` seeds onto a fresh database now
+
+**Fixed in `c25bad3`.** 13 of the 16 query files declared their parameters under
+`relatedEntities['MJ: Query Parameters']`, and MJ derives the same parameters from the query SQL, so on
+a fresh database the declared rows collided with the derived ones on the UNIQUE `(QueryID, Name)`
+index. Removing the declarations lets MJ derive them; the authored `Description` and `SampleValue` for
+all 58 parameters are preserved verbatim in each file's `_comments`, so the repo keeps the knowledge
+the rows no longer carry.
+
+Measured on a database with everything else seeded: `sync push --dir metadata` went from FATAL with 0
+queries to **exit 0, 23/23 directories, 15 queries, 65 parameters**. `--exclude queries` is no longer
+needed and has been removed from WORKSPACE-SETUP.
+
+Names and `IsRequired` survive derivation unchanged. `Type` degrades from `date` to `string` on the
+period parameters, which is harmless: `QueryForecastSource` passes them as ISO date-only strings on
+purpose — *"a full timestamp would invite a query to compare a date column against an instant"* — and
+nothing in sales reads `QueryParameter.Type`.
+
+The better fix is still MJ upserting `QueryParameter` on `(QueryID, Name)` rather than inserting, which
+would let an app declare parameters AND have them derived. That is not ours, and this removes the
+blocker without waiting for it.
+
+### The original report, kept because the mechanism is worth recognising again
 
 **Measured 2026-08-25 against a genuinely fresh install.** Everything else seeds cleanly — 22 directories,
 exit 0, including the two sales-owned task types. `queries` fails, and it fails the same way every time:
