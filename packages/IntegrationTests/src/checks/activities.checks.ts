@@ -209,10 +209,43 @@ const reader = new ActivityReader();
 const ingest = new ActivityIngestService();
 
 /** How many activities exist for a deal right now — the count idempotency is asserted against. */
-async function activityCountForDeal(ctx: Ctx, dealID: string, provider: IMetadataProvider): Promise<number> {
+/**
+ * ── SCOPED TO THE CALLER'S OWN FIXTURES, NOT TO EVERYTHING ON THE DEAL ──────────────
+ *
+ * This counted every activity linked to the deal, which silently assumed the host's timeline was
+ * EMPTY. It stopped being true the first time the feature was used for real: two genuine Outlook
+ * activities were ingested and linked to a seeded demo deal, and five checks went red at once —
+ * AC7 reading "expected 0, got 2", AC8 "expected 2, got 4".
+ *
+ * None of those checks was about the host's global state. They are about what THIS run wrote, and a
+ * check that requires a globally empty table was always going to break the day somebody used the
+ * product. `externalIdPrefix` scopes the count to the fixtures the caller seeded (`ac7-a`, `ac8-b`),
+ * so real data and demo data can coexist with the suite instead of racing it.
+ *
+ * Omitting the prefix keeps the old whole-deal count, which a check about TOTAL timeline content
+ * would still legitimately want.
+ */
+async function activityCountForDeal(
+    ctx: Ctx,
+    dealID: string,
+    provider: IMetadataProvider,
+    externalIdPrefix?: string,
+): Promise<number> {
     const dealEntity = provider.Entities.find((e) => e.Name === E_DEAL)?.ID ?? '';
     const links = await rows(ctx, E_ACTIVITY_LINK, `EntityID = '${dealEntity}' AND RecordID = '${dealID}'`);
-    return new Set(links.map((l) => String(l['ActivityID']).toLowerCase())).size;
+    const ids = new Set(links.map((l) => String(l['ActivityID']).toLowerCase()));
+    if (!externalIdPrefix) {
+        return ids.size;
+    }
+    if (ids.size === 0) {
+        return 0;
+    }
+    const inList = [...ids].map((id) => `'${id}'`).join(', ');
+    const mine = await rows(
+        ctx, E_ACTIVITY,
+        `ID IN (${inList}) AND ExternalID LIKE '${externalIdPrefix}%'`,
+    );
+    return mine.length;
 }
 
 export const ActivitiesChecks: NamedCheck[] = [
@@ -518,7 +551,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                 const after = (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length;
                 AssertEqual(after, before, 'the Activity table did not move — personal mail never lands');
                 AssertEqual(
-                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx)),
+                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac7-'),
                     0,
                     'and the deal gained no timeline entries',
                 );
@@ -542,7 +575,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                 AssertEqual(first.Written, 2, 'the first run writes both items');
                 AssertEqual(first.Duplicates, 0, 'and finds no duplicates');
 
-                const countAfterFirst = await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx));
+                const countAfterFirst = await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac8-');
                 AssertEqual(countAfterFirst, 2, 'two activities on the deal');
 
                 /**
@@ -565,7 +598,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                 AssertEqual(second.Duplicates, 2, 'both were recognised as already present');
 
                 AssertEqual(
-                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx)),
+                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac8-'),
                     countAfterFirst,
                     'THE ROW COUNT DID NOT MOVE — the claim S-US10 makes about repeated sync runs',
                 );
@@ -817,9 +850,24 @@ export const ActivitiesChecks: NamedCheck[] = [
                     E_ACTIVITY_LINK,
                     `EntityID = '${entityID(ctx, E_DEAL)}' AND RecordID = '${deal.DealID}'`,
                 );
-                const activityID = String(links[0]['ActivityID']);
-                const [activity] = await rows(ctx, E_ACTIVITY, `ID = '${activityID}'`);
-                Assert(!!activity, 'the meeting activity does not resolve to a row');
+                /**
+                 * `links[0]` WAS ROW-ORDER DEPENDENT, and it broke the day the deal had other activities.
+                 *
+                 * Two real Outlook activities were ingested against a seeded demo deal, so the first link
+                 * on that deal is no longer necessarily the meeting this check just filed — it read an
+                 * EMAIL and then asserted its type was Meeting. Identical in shape to the `links[0]` bug
+                 * in WT1: indexing an unfiltered array passes until the ordering changes underneath it.
+                 *
+                 * Resolved by the fixture's own ExternalID instead, which cannot be confused with anything
+                 * the product wrote.
+                 */
+                const activityIDs = links.map((l) => String(l['ActivityID']).toLowerCase());
+                Assert(activityIDs.length > 0, 'the meeting produced no link at all');
+                const [activity] = await rows(
+                    ctx, E_ACTIVITY,
+                    `ID IN (${activityIDs.map((id) => `'${id}'`).join(', ')}) AND ExternalID = 'ac13-event-1'`,
+                );
+                Assert(!!activity, "this check's own meeting (ac13-event-1) does not resolve to a row");
 
                 // Meeting resolved BY CODE, same lookup email uses.
                 const [meetingType] = await rows(ctx, E_ACTIVITY_TYPE, "Code = 'Meeting'");
@@ -836,7 +884,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                 AssertEqual(String(activity['ExternalThreadID']), 'ac13-series-1', 'the series groups occurrences');
 
                 // The SAME relevance and no-match handling email gets.
-                const partyLinks = await rows(ctx, E_ACTIVITY_LINK, `ActivityID = '${activityID}'`);
+                const partyLinks = await rows(ctx, E_ACTIVITY_LINK, `ActivityID = '${activity['ID']}'`);
                 Assert(
                     partyLinks.some(
                         (l) => String(l['EntityID']).toLowerCase() === entityID(ctx, E_PERSON).toLowerCase(),
@@ -1026,8 +1074,25 @@ export const ActivitiesChecks: NamedCheck[] = [
                     );
 
                     Assert(result.Success, `the job failed — ${result.Issues.join(' | ')}`);
-                    AssertEqual(result.ConnectionsAttempted, 1, 'one Active connection was read');
-                    AssertEqual(result.Runs.length, 2, 'and BOTH surfaces ran against it');
+                    /**
+                     * SCOPED TO THIS CHECK'S OWN CONNECTION, not to how many exist on the host.
+                     *
+                     * These asserted "exactly one connection was attempted" and "exactly two runs",
+                     * which was a true statement about a host that had no real sync connection and a
+                     * weaker one about the requirement. A live connection was created on this host at
+                     * 01:49 for the demo, so the job legitimately attempts two — and the check went red
+                     * for a reason that has nothing to do with what it tests. Filter, do not count.
+                     */
+                    Assert(
+                        result.ConnectionsAttempted >= 1,
+                        `the job must read at least this check's connection — got ${result.ConnectionsAttempted}`,
+                    );
+                    const mine = result.Runs.filter((r) => r.ConnectionID === connectionID);
+                    AssertEqual(mine.length, 2, 'and BOTH surfaces ran against THIS connection');
+                    Assert(
+                        mine.some((r) => r.Surface === 'Message') && mine.some((r) => r.Surface === 'Calendar'),
+                        'one run per surface on this connection, each labelled',
+                    );
                     Assert(
                         result.Runs.some((r) => r.Surface === 'Message') &&
                             result.Runs.some((r) => r.Surface === 'Calendar'),
@@ -1037,7 +1102,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                     const written = result.Runs.reduce((n, r) => n + r.Result.Written, 0);
                     AssertEqual(written, 2, 'an email and a meeting were both filed');
                     AssertEqual(
-                        await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx)),
+                        await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac16-'),
                         2,
                         'and both are on the deal timeline',
                     );
@@ -1071,10 +1136,15 @@ export const ActivitiesChecks: NamedCheck[] = [
                 );
 
                 Assert(result.Success, `the default run must succeed — ${result.Issues.join(' | ')}`);
-                AssertEqual(result.ConnectionsAttempted, 1, 'it did read the connection');
-                AssertEqual(result.Runs.length, 2, 'and ran both surfaces');
+                Assert(
+                    result.ConnectionsAttempted >= 1,
+                    // Scoped, for the reason AC16 records: a real connection now exists on this host.
+                    `the job must read at least this check's connection — got ${result.ConnectionsAttempted}`,
+                );
+                const mineRuns = result.Runs.filter((r) => r.ConnectionID === connectionID);
+                AssertEqual(mineRuns.length, 2, 'and ran both surfaces against THIS connection');
                 AssertEqual(
-                    result.Runs.reduce((n, r) => n + r.Result.Fetched, 0),
+                    mineRuns.reduce((n, r) => n + r.Result.Fetched, 0),
                     0,
                     'fetching nothing',
                 );
@@ -1084,7 +1154,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                     'and writing nothing — an hourly run against this default cannot invent data',
                 );
                 AssertEqual(
-                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx)),
+                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac17-'),
                     0,
                     'nor touch the deal',
                 );
