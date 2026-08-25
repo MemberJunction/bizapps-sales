@@ -142,7 +142,8 @@ for entry in "${SIBLINGS[@]}"; do
     var="BIZAPPS_$(printf '%s' "${name#bizapps-}" | tr '[:lower:]' '[:upper:]')_REPO"
     dir="${!var:-$ROOT/../$name}"
     say "$n/7  $name -> $schema"
-    ( cd "$dir" && DB_DATABASE="$DB_DATABASE" \n        node node_modules/@memberjunction/cli/bin/run.js migrate --schema "$schema" --dir ./migrations )
+    ( cd "$dir" && DB_DATABASE="$DB_DATABASE" \
+        node node_modules/@memberjunction/cli/bin/run.js migrate --schema "$schema" --dir ./migrations )
 done
 
 # bizapps-contracts is deliberately NOT here. It does not install on a fresh database (KI-13) and
