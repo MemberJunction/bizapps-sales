@@ -1757,6 +1757,73 @@ export const CloseDealChecks: NamedCheck[] = [
                 AssertEqual(Number(reopened.n), 1, 'and the deal really is open again');
             }),
     },
+    {
+        Id: 'close-deal.CD25',
+        Name: 'CD25: a PREVIEW does not report a failure for a route nothing has attempted',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── THE FIRST THING A TESTER SAW WAS A FAILURE THAT HAD NOT HAPPENED ──────────
+                 *
+                 * `execute()` does not run until AFTER the preview returns, so in preview `Executed` is
+                 * false on every route BY CONSTRUCTION. The issue builder filtered on
+                 * `Planned && !Executed`, so every B2B preview reported
+                 * "Contract was planned but not created: no reason given" — a failure message for
+                 * something nobody had attempted, on the first click of manual testing.
+                 *
+                 * The fix is not to go quiet in preview. A preview must still say what it plans, and it
+                 * does: `Routing` carries the plan and is asserted here alongside the absence of the
+                 * false failure. `Issues` is the channel for what is WRONG, and its severity union is
+                 * `'error' | 'warning'` with no informational level, so a plan does not belong in it.
+                 *
+                 * BOTH HALVES MATTER. Asserting only "no issues" would pass a version that had simply
+                 * stopped reporting routes at all, which is the other way to be wrong here.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.ContractPolicyPipelineID, f.ContractPolicyStageID, 'CD25 preview no false failure',
+                    twoInstalments(),
+                );
+
+                const out = await close(ctx, {
+                    DealID: dealID,
+                    DealStatusTypeID: f.WonStatusID,
+                    PreviewOnly: true,
+                });
+
+                Assert(out.Success, `the preview failed: ${JSON.stringify(out.Issues)}`);
+                Assert(out.WasPreview, 'and says it was a preview');
+
+                // THE PLAN IS STILL REPORTED  — this is what stops the fix being "suppress everything".
+                const contractRoute = out.Routing.find((r) => r.Target === 'Contract');
+                Assert(
+                    !!contractRoute && contractRoute.Planned === true,
+                    `a contract-creating policy must still PLAN a Contract route in preview — ${JSON.stringify(out.Routing)}`,
+                );
+                Assert(
+                    contractRoute!.Executed !== true,
+                    'and must not claim it executed, because a preview executes nothing',
+                );
+
+                // AND NO FAILURE IS CLAIMED for it.
+                const falseFailures = out.Issues.filter(
+                    (i) => i.Message.includes('was planned but not created'),
+                );
+                AssertEqual(
+                    falseFailures.length,
+                    0,
+                    'a preview must not report a route as FAILED when nothing has been attempted yet — '
+                        + `saw ${JSON.stringify(falseFailures.map((i) => i.Message))}`,
+                );
+
+                // Belt and braces: nothing at all should mention the contract as not created.
+                Assert(
+                    !out.Issues.some((i) => i.Message.includes('no reason given')),
+                    `"no reason given" is the tell of a route reported before it was tried — ${JSON.stringify(out.Issues)}`,
+                );
+            }),
+    },
 ];
 
 for (const check of CloseDealChecks) {

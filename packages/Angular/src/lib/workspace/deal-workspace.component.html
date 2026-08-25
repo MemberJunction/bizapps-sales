@@ -420,7 +420,15 @@
                           <small class="dw-field__hint">no longer offered</small>
                         }
                       </td>
-                      <td class="dw-num"><input type="number" min="0" step="1" [(ngModel)]="line.Quantity" (ngModelChange)="Touch()" /></td>
+                      <td class="dw-num">
+                        <!-- min="1", NOT 0: orders' CK_OrderLine_Quantity is `Quantity <> 0`, so the old
+                             floor presented the one value the database forbids as the recommended one.
+                             Negative IS legal to orders — it is the reversal mechanism (BO-D10) — but a
+                             reversal is not something a deal line expresses, and orders' entity-server
+                             refuses a negative on a non-reversal line. Blocking it here means the rep is
+                             told by the form instead of by a server error. See AddLine(). -->
+                        <input type="number" min="1" step="1" [(ngModel)]="line.Quantity" (ngModelChange)="Touch()" />
+                      </td>
                       <!-- Priced by orders, never entered here: sales states intent, orders states price. -->
                       <td class="dw-num dw-readonly">{{ line.UnitPrice }}</td>
                       <td class="dw-num dw-readonly">{{ line.LineTotalNet ?? '—' }}</td>

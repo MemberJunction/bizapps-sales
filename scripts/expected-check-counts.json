@@ -34,7 +34,7 @@
   ],
   "bundles": {
     "save-deal": { "count": 33, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD37" },
-    "close-deal": { "count": 24, "requires": "orders", "ids": "CD1-CD24" },
+    "close-deal": { "count": 25, "requires": "orders", "ids": "CD1-CD25" },
     "product-picker": { "count": 4, "requires": "orders", "ids": "PP1-PP4" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
     "close-won-contract": { "count": 4, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild" },

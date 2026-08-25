@@ -864,6 +864,26 @@ export class DealWorkspaceComponent implements OnInit {
         const line = await order?.Lines.Create();
 
         /**
+         * QUANTITY, FOR EXACTLY THE REASON THE COMMENT BELOW GIVES FOR `CompanyID`.
+         *
+         * The reasoning was written once and never carried one column over. `OrderLine.Quantity` is
+         * `DECIMAL(18,4) NOT NULL` with NO SQL default and no orders-side stamp, so a freshly added
+         * line was invalid from the moment it appeared: `deal.Validate()` runs in the BROWSER, sees a
+         * null in a NOT NULL column, and the Save button never enables — or the save reaches the
+         * database and comes back "Quantity cannot be null". `DealLine.Quantity` used to be
+         * `NOT NULL DEFAULT 1`; that default died with the entity and nothing replaced it.
+         *
+         * ONE is the only defensible starting value. Orders' constraint is
+         * `CK_OrderLine_Quantity CHECK (Quantity <> 0)` — ZERO is illegal and NEGATIVE is legal,
+         * which is the opposite polarity to what a form usually assumes. Negative is orders'
+         * REVERSAL mechanism (BO-D10), and "negative only on reversal lines" is enforced in orders'
+         * entity-server validation rather than by the CHECK. A deal line is an intent to SELL, so a
+         * negative quantity from this surface is not a reversal, it is a line orders will refuse
+         * after the rep has been told it was fine. See the input's `min` in the template.
+         */
+        line?.Set('Quantity', 1);
+
+        /**
          * `CompanyID` IS SET HERE, AND WITHOUT IT THE SAVE BUTTON NEVER ENABLES.
          *
          * `OrderLine.CompanyID` is NOT NULL with no default, and orders stamps it from the product in

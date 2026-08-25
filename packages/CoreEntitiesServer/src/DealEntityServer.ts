@@ -578,6 +578,30 @@ export class DealEntityServer extends DealEntity {
             } catch (rollbackErr) {
                 LogError(`Failed to roll back after a failed deal save: ${rollbackErr}`);
             }
+            /**
+             * ── THE SAME COMPENSATION AS THE `!saved` BRANCH, AND FOR THE SAME REASON ──────────────
+             *
+             * The branch above documents this exactly and then only half of the exits performed it. A
+             * `return false` from the save cleared the number; a THROW did not, and the rollback still
+             * returned the counter — so the value stayed on the in-memory record, `Save()` asked
+             * `this.IsSaved || this.DealNumber`, found it truthy, took the `assignNumber: false` arm and
+             * re-inserted a number the sequence had already re-issued. Duplicate key, deal unsaveable for
+             * the life of the tab, and an error naming a field the rep never touched. Precisely the
+             * failure the comment above says was fixed.
+             *
+             * THE THROWING PATHS ARE REAL, not hypothetical. `getNextDealNumber()` runs inside this
+             * scope, and at least three later statements throw rather than return false:
+             * `defaultOpeningStatusID()`'s RunView, `applyStageOrderStatus()` whose
+             * `BeginEntityTransaction` sits outside its own try/catch, and the post-save
+             * `appendStageEvent()`. Any of them lands here.
+             *
+             * Guarded by `work.assignNumber` for the reason the other branch gives: a retry of an
+             * ALREADY-numbered deal must keep its number, because that number is in contracts, orders
+             * and people's email. Only the scope that drew one may give it back.
+             */
+            if (work.assignNumber) {
+                this.DealNumber = null;
+            }
             return false;
         }
     }

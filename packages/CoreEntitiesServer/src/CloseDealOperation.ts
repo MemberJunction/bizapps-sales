@@ -156,16 +156,43 @@ function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
  * fear is not the warning disappearing — it is somebody reading a warning as a bug and "fixing" it by
  * failing the close.
  */
-function routingIssues(routing: readonly SalesCloseRoutingResult[]): SalesCloseIssue[] {
+function routingIssues(
+    routing: readonly SalesCloseRoutingResult[],
+    /**
+     * PREVIEW CHANGES WHAT "NOT EXECUTED" MEANS, and getting this wrong told every tester their
+     * first close had failed.
+     *
+     * `execute()` does not run until AFTER the preview returns, so in preview `Executed` is false on
+     * every route by construction. Filtering on `Planned && !Executed` therefore reported
+     * "Contract was planned but not created: no reason given" on EVERY B2B preview — a failure
+     * message for something nobody had attempted yet.
+     *
+     * Suppressing route reporting in preview would be the wrong correction: a preview exists to say
+     * what it plans. But that is what `Routing` is for, and it IS returned in preview, in full.
+     * `Issues` is the channel for what is WRONG, and its severity union is `'error' | 'warning'` —
+     * there is no informational level to demote a plan into, so a plan does not belong here at all.
+     *
+     * WHAT STILL WARRANTS A WARNING IN PREVIEW is a route that already knows it cannot run, and the
+     * distinction was already in the data. A route carrying a `Reason` AT PLAN TIME has a known
+     * blocker — the Subscription route names orders' missing `Subscription.BillingMode` — while a
+     * route with no reason is simply one nothing has tried yet. Preview reports the first and stays
+     * quiet about the second. That is also what makes a real refusal distinguishable from the
+     * ordinary case, which it was not before: every route read the same.
+     */
+    preview: boolean,
+): SalesCloseIssue[] {
     return routing
         .filter((r) => r.Planned === true && r.Executed !== true)
+        .filter((r) => !preview || r.Reason != null)
         .map((r) => ({
             Section: 'deal' as const,
             Field: null,
             Severity: 'warning' as const,
             // Worded to match what the workspace shows, so a rep reading the screen and an agent
             // reading the envelope are quoting the same sentence back at each other.
-            Message: `${r.Target} was planned but not created: ${r.Reason ?? 'no reason given'}`,
+            Message: preview
+                ? `${r.Target} is planned, but will not be created: ${r.Reason}`
+                : `${r.Target} was planned but not created: ${r.Reason ?? 'no reason given'}`,
         }));
 }
 
@@ -341,7 +368,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 // previews before closing should not learn about it only after committing.
                 return {
                     Success: true,
-                    Issues: routingIssues(routing),
+                    Issues: routingIssues(routing, true),
                     IsWon: target.IsWon,
                     IsLost: target.IsLost,
                     Locked: false,
@@ -500,7 +527,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  * written inside `deal.Save()` a few lines further down. So a reader of the array reads
                  * the close in sequence, which is the only ordering that means anything here.
                  */
-                Issues: [...taskIssues, ...orderStatusIssues(deal), ...routingIssues(routing)],
+                Issues: [...taskIssues, ...orderStatusIssues(deal), ...routingIssues(routing, false)],
                 IsWon: target.IsWon,
                 IsLost: target.IsLost,
                 Locked: target.LocksDeal,
