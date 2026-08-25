@@ -332,3 +332,65 @@ and the person who lost them has no way to know why.
 5. Verify: no stray mutation in `dist/`, and the suite application lock released.
 6. **Record anything you killed that you could not attribute** in your session status file, so the
    session that lost it learns why rather than re-diagnosing it.
+
+## Editing these files — run the edit in the FOREGROUND
+
+**A scripted edit run inside a backgrounded command can fail invisibly.** If its anchor does not match,
+the assertion fires, nothing is written, and the failure message goes to a log nobody reads — while the
+run you launched in the same command carries on against the OLD file and reports a result you will
+attribute to the new one.
+
+That happened here twice in one round, compounding: an LF anchor was matched against a CRLF file so it
+matched zero times, the edit silently did nothing, and the SECOND edit then anchored on the first one's
+expected output and failed for the same invisible reason. Two runs were reported as testing a fix that
+was never applied, and one of them passed by luck.
+
+**The rule: anything whose success you would report goes in the foreground, and you check it landed.**
+Print the anchor count, and confirm with `git status` before drawing a conclusion from a run.
+
+Two specifics worth knowing when writing one:
+
+- **These files are CRLF.** Normalise before matching (`s.replace('
+
+', '
+')`) and restore on write,
+  or every multi-line anchor silently matches nothing.
+- **`lib/cleanup.mjs` holds its SQL in a JS template literal**, so a backtick anywhere in it — including
+  inside a comment, like `` `__mj.UserRecordLog` `` — terminates the string. `node --check` catches it.
+
+## THE HIDDEN-TAB RULE — scope every locator to what is VISIBLE
+
+**MJ's shell keeps every open tab's form in the DOM and merely HIDES the inactive ones.** A spec that has
+opened two records is holding two record views at once, and only the front one can be interacted with.
+
+So an unscoped `.first()` is not "the obvious one" — it is a lottery weighted towards the OLDEST tab,
+because that is the one earliest in document order.
+
+**The rule: any locator that could match a form field, a record control, or a grid row must be scoped to
+the visible copy.** Either form works:
+
+```ts
+page.locator('button[title="Delete this Record"]:visible').first()   // CSS pseudo-class
+page.getByText(DEAL_NAME).filter({ visible: true }).first()          // filter, for getByText/getByRole
+```
+
+This is not a style preference. It has cost real time four separate ways, and every one of them looked
+like a product defect:
+
+- **`fieldLabelVisible`** matched the DEAL form's hidden `Name` input while a "New Deals Record" tab was
+  still open, and asserted against the wrong form's value.
+- **`deleteRecordViaRecordView`** resolved `button[title="Delete this Record"]` **36 times, every one
+  `hidden`**, and failed with *"the record view must expose Delete this Record"* — about a record view
+  that exposes it perfectly well. **The delete step never executed once**, so deletion through the UI went
+  unexercised by this suite for its entire life.
+- **`40-deal-workspace`'s row locator** resolved to a hidden ROSTER row instead of the entity-browser
+  grid, timing-dependent on whether the roster had loaded that deal — the worst kind of failure to read.
+- **A reload wait** written *while fixing the delete locator* made the identical mistake one step later:
+  a bare `getByText(DEAL_NAME).first()` matched a hidden tab's copy and waited 30s for something that
+  could never become visible.
+
+That last one is the reason this is a README rule and not a comment on two locators. Knowing about the
+trap is not enough to avoid it; the habit has to be "scope it" every time.
+
+**The tell:** a failure whose call log says the locator *resolved* — often many times — and reports
+`hidden` or `element(s) not found` for something you can plainly see on screen. That is this, not the app.

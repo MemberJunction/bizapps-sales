@@ -40,6 +40,7 @@
  */
 import { expect, test } from '@playwright/test';
 import { EXPLORER_BASE_URL } from '../lib/env';
+import { OrderLinesForDeal } from '../lib/db';
 import {
   captureConsoleErrors,
   closeRestoredRecordTabs,
@@ -373,6 +374,135 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
       await shot(page, '40-08-saved');
     });
 
+    // ── 4b. THE PRICE THE ENGINE SENT BACK ──────────────────────────────────
+    await test.step('the engine priced the lines, with real figures', async () => {
+      /**
+       * ── NOTHING IN 22 SPEC FILES READ A PRICE UNTIL THIS STEP ────────────────────────────────
+       *
+       * The suite drove every input AROUND the price and never looked at the price. `20` asserts the
+       * two cells are read-only; this spec filled quantity and discount on either side of them. So a
+       * pricing bridge that returned 0.00 for every line — a resolver that found no price, a
+       * catalogue lookup that missed, an empty envelope — passed the entire browser suite. The
+       * server-side twin had the same hole for the same reason: `save-deal.SD19` asserted
+       * `UnitPrice !== null` on a column that is **NOT NULL in the schema**, so it could not fail.
+       *
+       * Rule 1 says sales never computes money and asks the engine instead. The engine ANSWERING is
+       * the half that was never checked.
+       *
+       * WHY NON-ZERO RATHER THAN A FIGURE: asserting an expected number would mean this repo knowing
+       * a price, which is the accretion Rule 1 exists to stop. `> 0` says a real number came back
+       * without saying which — the strongest claim sales is entitled to make from this side of the
+       * boundary.
+       *
+       * The em dash matters too: the template renders `{{ line.LineTotalNet ?? '—' }}`, so an
+       * unpriced line shows a dash rather than a blank. "Present" was never the question.
+       */
+      await openPane(page, 'Product lines');
+
+      const rows = page.locator('.dw-table tbody tr');
+      await expect(rows, 'both saved lines must still be on the grid').toHaveCount(2, { timeout: 20_000 });
+
+      // Prices arrive with the server's response to the save, so poll rather than assume the first
+      // paint carries them.
+      const priceCells = rows.first().locator('td.dw-readonly');
+      await expect(priceCells, 'a line renders unit price and line total as read-only cells')
+        .toHaveCount(2, { timeout: 10_000 });
+
+      const asNumber = async (cell: import('@playwright/test').Locator): Promise<number> => {
+        const raw = (await cell.innerText()).trim();
+        // Strip currency, thousands separators and whitespace; an em dash becomes NaN, which is the
+        // "the engine returned nothing" case and must NOT quietly read as zero-and-therefore-absent.
+        const cleaned = raw.replace(/[^0-9.\-]/g, '');
+        return cleaned === '' ? Number.NaN : Number(cleaned);
+      };
+
+      await expect
+        .poll(async () => asNumber(priceCells.nth(0)), {
+          timeout: 30_000,
+          message:
+            'the unit price cell never carried a real figure — a dash or 0.00 here means the pricing '
+            + 'engine did not price the line, which is the one failure Rule 1 exists to make impossible',
+        })
+        .toBeGreaterThan(0);
+
+      const unitPrice = await asNumber(priceCells.nth(0));
+      const lineTotal = await asNumber(priceCells.nth(1));
+
+      expect(
+        lineTotal,
+        'the line total must be a real figure too — it is what the deal amount is built from',
+      ).toBeGreaterThan(0);
+
+      /**
+       * On a line whose quantity is more than one, the total cannot equal the unit price. This is NOT
+       * a recomputation of the engine's arithmetic — sales does not multiply — it is the cheapest
+       * available check that the two cells hold genuinely different answers rather than one number
+       * rendered twice, which is what a stubbed or half-wired bridge tends to produce.
+       *
+       * The quantity is READ FROM THE ROW rather than assumed. This spec adds a line of 100 and a
+       * line of 1, and nothing guarantees which the grid puts first; on the quantity-1 line the two
+       * figures may legitimately match, and asserting otherwise would be inventing a rule.
+       */
+      const qty = Number(
+        (await rows.first().locator('td.dw-num input[type="number"]').first().inputValue()) || '0',
+      );
+      if (qty > 1) {
+        expect(
+          lineTotal,
+          `unit price and line total must be DIFFERENT answers on a line of ${qty}, not one number `
+          + 'rendered into two cells',
+        ).not.toBe(unitPrice);
+      } else {
+        console.log(`  (quantity is ${qty} — skipping the differ check, the two may legitimately match)`);
+      }
+
+      console.log(`  engine priced line 1: unit=${unitPrice} total=${lineTotal}`);
+      await shot(page, '40-08b-priced');
+    });
+
+    // ── 4c. THE CHILDREN, READ BACK WHERE NAVIGATION CANNOT BREAK IT ────────
+    await test.step('one save wrote the header AND both children', async () => {
+      /**
+       * ── THIS NO LONGER LOGS AND PASSES WHEN IT CANNOT LOOK ──────────────────────────────────────
+       *
+       * It used to. The whole block sat inside `if (section is visible) { assert } else { console.log }`,
+       * with the reasoning that failing a run over an accordion was disproportionate. The effect was
+       * that the STRONGEST claim in this file — one transactional save wrote the header and its
+       * children, read back through a surface that did not write them — was the one assertion that
+       * could quietly not run. It is the fourth assertion-that-cannot-fire found this week.
+       *
+       * The claim is now proven against the DATABASE, which is a legitimately different surface from
+       * the workspace that wrote it — the same standard `60` and `80` are held to — and it cannot be
+       * skipped by a missing affordance.
+       *
+       * WHY THE UI HALF MOVED RATHER THAN BEING MADE STRICT: the section it looked for is titled
+       * "Deal Lines", and that entity no longer exists. Andrew closed issues #36-#39 as not planned
+       * (`docs/DECISIONS.md` D-DL1); a deal's lines are rows on the embedded ORDER now, and the
+       * generated Deal form has no section for them. So the old code was not merely guarded — it was
+       * guarding a lookup that could never succeed, which is why it never once fired. Making it strict
+       * would have produced a permanent red for a UI that is correct.
+       */
+      const lines = await OrderLinesForDeal(DEAL_NAME);
+
+      expect(
+        lines.length,
+        'BOTH lines must have reached the database from ONE save — the header and its children '
+        + 'together, or the transaction did not do what the surface said it did',
+      ).toBe(2);
+
+      // Priced by orders, on the way in — the same claim the UI step above makes, asserted where it
+      // cannot be a rendering artefact.
+      for (const [i, line] of lines.entries()) {
+        expect(
+          Number(line.UnitPrice),
+          `line ${i + 1} must carry a REAL price from the engine, not zero`,
+        ).toBeGreaterThan(0);
+      }
+
+      await shot(page, '40-08c-children');
+    });
+
+
     // ── 5. Read back through the GENERATED entity browser ───────────────────
     // Deliberately read back through a DIFFERENT surface than the one that wrote it. Re-reading through
     // the workspace could pass on nothing but client state still sitting in memory.
@@ -454,30 +584,7 @@ test.describe('deal workspace — Phase 1 definition of done', () => {
        * perfectly correct. Expanding first is the difference between testing the data and testing the
        * default accordion state.
        */
-      const linesSection = page.getByText(/^\s*Deal Lines\s*$/i).first();
-      if ((await linesSection.count()) && (await linesSection.isVisible().catch(() => false))) {
-        await linesSection.click({ timeout: 10_000 }).catch(() => undefined);
-        await page.waitForTimeout(4000);
-        const expanded = await page.locator('body').innerText();
-        /**
-         * BY PRODUCT, because a line has no name of its own any more.
-         *
-         * This asserted the RUN_TAG stamped into a typed line name. An `OrderLine` references a
-         * product and carries no free text, so the identity that reads back is the product's. The
-         * claim is unchanged — one transactional save wrote the header AND the children, read back
-         * through a surface that did not write them — only the thing being recognised has moved.
-         */
-        expect(
-          expanded,
-          'the order lines must read back on the record, identified by the product each references',
-        ).toContain(chosenProducts[0]);
-        await shot(page, '40-11-readback-lines');
-      } else {
-        // Reported rather than failed: the section affordance is generated UI whose shape is MJ's, and
-        // the child round-trip is already asserted server-side. Losing the assertion is worth knowing
-        // about; failing the Phase 1 run over an accordion is not.
-        console.log('  note: the Deal Lines section header was not found — child read-back not asserted here');
-      }
+      await shot(page, '40-10b-readback-done');
     });
 
     // ── 6. The keystone ─────────────────────────────────────────────────────

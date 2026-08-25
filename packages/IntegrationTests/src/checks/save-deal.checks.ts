@@ -956,7 +956,25 @@ export const SaveDealChecks: NamedCheck[] = [
                  *
                  * WHAT IT DELIBERATELY DOES NOT ASSERT: a figure. Checking that `UnitPrice` equals some
                  * expected number would mean this repo knowing a price, which is precisely the accretion
-                 * Rule 1 exists to stop. Non-null is the strongest claim sales is entitled to make.
+                 * Rule 1 exists to stop.
+                 *
+                 * ── BUT NON-NULL WAS NOT A CLAIM AT ALL, AND THAT WENT UNNOTICED ────────────────────
+                 *
+                 * The reasoning above is right and the assertion that followed it was empty.
+                 * `__mj_BizAppsOrders.OrderLine.UnitPrice` is **NOT NULL** (verified against the live
+                 * schema), so `UnitPrice !== null` is guaranteed by the database before any code runs.
+                 * The check could not fail. It read as the app's central guarantee and asserted nothing.
+                 *
+                 * **Zero is not null.** A pricing bridge that returned 0.00 for every line — a resolver
+                 * that silently found no price, a catalogue lookup that missed, an integration returning
+                 * an empty envelope — satisfied every check in this repo and every assertion in the
+                 * browser suite. That is the one failure mode Rule 1 exists to make impossible, and it
+                 * was the one nothing looked for.
+                 *
+                 * `> 0` is the strongest claim sales can make WITHOUT knowing a price: it says orders
+                 * returned a real number, not that it returned any particular one. It stays honest about
+                 * the boundary — this repo still does not know what a thing costs — while refusing the
+                 * one answer that means the engine did not actually price anything.
                  */
                 const f = await ResolveSalesFixture(ctx);
                 const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD19 engine pricing'; });
@@ -977,7 +995,11 @@ export const SaveDealChecks: NamedCheck[] = [
                 Assert(!!row, 'the line reached the database');
                 AssertEqual(String(row.ProductID).toLowerCase(), productID.toLowerCase(), 'the product is the one sales sent');
                 AssertEqual(Number(row.Quantity), 3, 'the quantity round-trips exactly as sent');
-                Assert(row.UnitPrice !== null && row.UnitPrice !== undefined, 'ORDERS priced it — sales sent no price');
+                Assert(
+                    Number(row.UnitPrice) > 0,
+                    'ORDERS priced it with a REAL figure — sales sent no price, and zero would mean the '
+                    + 'engine priced nothing',
+                );
                 Assert(!!row.CompanyID, 'orders stamped CompanyID from the product');
                 AssertEqual(Number(row.LineNumber), 1, 'and the collection numbered it');
             }),

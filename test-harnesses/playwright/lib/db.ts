@@ -116,22 +116,73 @@ export async function DealByName(name: string): Promise<
         WHERE d.Name = '${name.replace(/'/g, "''")}'`);
 }
 
-/** The stage events a deal has accumulated, newest first. Append-only, so this only ever grows. */
-export async function StageEventsFor(dealID: string): Promise<{ ID: string; Notes: string | null }[]> {
+/**
+ * The stage events a deal has accumulated, newest first. Append-only, so this only ever grows.
+ *
+ * The TRANSITION STAMPS are selected because they are the reason the row is worth keeping. Without
+ * `AmountAtTransition` / `ProbabilityAtTransition`, "what did we think the forecast was on the 1st" is
+ * unanswerable once the amounts move — which is the whole of Rule 3. They were previously not selected,
+ * so no browser spec could assert them on the close path even though `80` asserts them on the drag path.
+ */
+export async function StageEventsFor(dealID: string): Promise<
+    {
+        ID: string;
+        Notes: string | null;
+        AmountAtTransition: number | null;
+        ProbabilityAtTransition: number | null;
+        FromStageID: string | null;
+        ToStageID: string | null;
+    }[]
+> {
     return QueryAll(`
-        SELECT CONVERT(varchar(36), ID) AS ID, Notes
+        SELECT CONVERT(varchar(36), ID) AS ID, Notes,
+               AmountAtTransition, ProbabilityAtTransition,
+               CONVERT(varchar(36), FromStageID) AS FromStageID,
+               CONVERT(varchar(36), ToStageID) AS ToStageID
         FROM __mj_BizAppsSales.DealStageEvent
         WHERE DealID = '${dealID}'
         ORDER BY ChangedAt DESC`);
 }
 
 /**
+ * The embedded order's lines for a deal, joined through `Deal.OrderID`.
+ *
+ * NOT through `OrderHeader.Description`, which is what `OrdersForDealNamed` matches on. That column is
+ * set by `CloseDealOperation.buildOrderInput` at CLOSE time; an order provisioned with the deal on first
+ * save leaves it NULL — measured, most orders on this host have a null description. A read-back that
+ * joined on the name would therefore find nothing for an unclosed deal and, depending on how it was
+ * written, either fail confusingly or pass vacuously.
+ */
+export async function OrderLinesForDeal(dealName: string): Promise<
+    { ProductID: string; Quantity: number; UnitPrice: number; LineNumber: number }[]
+> {
+    return QueryAll(`
+        SELECT CONVERT(varchar(36), l.ProductID) AS ProductID, l.Quantity, l.UnitPrice, l.LineNumber
+        FROM __mj_BizAppsSales.Deal d
+        JOIN __mj_BizAppsOrders.OrderLine l ON l.OrderHeaderID = d.OrderID
+        WHERE d.Name = '${dealName.replace(/'/g, "''")}'
+        ORDER BY l.LineNumber`);
+}
+
+/**
  * Orders whose description names this deal.
  *
- * `CloseDealOperation.buildOrderInput` sets the order header's `Description` to the DEAL NAME, which is
- * the only link from an order back to its deal today — there is no `Deal.OrderID` column (that is a
- * separate architecture decision). Matching on it is therefore the honest available join, and the run
- * tag in every spec's deal name keeps it unambiguous across re-runs.
+ * `CloseDealOperation.buildOrderInput` sets the order header's `Description` to the DEAL NAME, and the
+ * run tag in every spec's deal name keeps that unambiguous across re-runs.
+ *
+ * ── CORRECTION: `Deal.OrderID` EXISTS, and this docblock said it did not ─────────────────────────
+ *
+ * It claimed "there is no `Deal.OrderID` column (that is a separate architecture decision)". There is
+ * one — nullable, verified against the live schema, and `save-deal.checks.ts` reads `deal.OrderID`
+ * directly. The column arrived with the embedded-order work and this comment was never updated.
+ *
+ * The distinction MATTERS, and reading the stale comment sent a read-back down the wrong path once:
+ * `Description` is set at CLOSE time, so an order provisioned with the deal on first save leaves it
+ * NULL — measured, most orders on this host have a null description. Joining on the name therefore
+ * finds nothing for an unclosed deal.
+ *
+ * So: use `OrderLinesForDeal` (below), which joins through `Deal.OrderID`, for anything about a deal's
+ * own order. This helper stays for the CLOSED case, where the description is the thing that was set.
  */
 export async function OrdersForDealNamed(dealName: string): Promise<
     { ID: string; OrderNumber: string | null; Status: string; TotalGross: number | null }[]

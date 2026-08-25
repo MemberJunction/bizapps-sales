@@ -91,6 +91,8 @@ export * from './activities/ActivityWriterService.js';
 export * from './activities/ActivityReader.js';
 export * from './activities/ActivitySource.js';
 export * from './activities/FixtureActivitySource.js';
+export * from './activities/GraphMessageMapper.js';
+export * from './activities/ImportedGraphActivitySource.js';
 export * from './activities/MSGraphActivitySource.js';
 export * from './activities/MSGraphCalendarSource.js';
 export * from './activities/RelevanceFilter.js';
