@@ -510,10 +510,16 @@ export const SaveDealChecks: NamedCheck[] = [
                  *
                  * ── THE ASSERTIONS TO RESTORE, when KI-20 is fixed ──
                  *   AssertEqual(after.length, 1, 'the removed line was deleted');
-                 *   AssertEqual(String(after[0].ProductID).toLowerCase(),
-                 *               String(before[0].ProductID).toLowerCase(),
-                 *               'the surviving line is the one that was kept, not merely one of the two');
-                 *   AssertEqual(Number(after[0].LineNumber), 1, 'what remains was re-sequenced');
+                 *   const survivor = after.find((r) => String(r.ID) === String(before[0].ID));
+                 *   Assert(!!survivor, 'the surviving line is the one that was KEPT, not merely one of the two');
+                 *   AssertEqual(Number(survivor.LineNumber), 1, 'what remains was re-sequenced');
+                 *
+                 * NOTE THE `find`, AND DO NOT SIMPLIFY IT BACK. The earlier draft of this list read
+                 * `after[0].ProductID` compared against `before[0].ProductID` — indexing a collection and
+                 * then asserting WHICH row it is. That is the defect twice found and fixed elsewhere
+                 * (close-won-tasks WT1, activities AC13): it passes until the row order shifts, then fails
+                 * somewhere unrelated to its subject. Restoring the list verbatim would have reintroduced
+                 * it the day KI-20 is fixed. Identify the row, then assert about it.
                  */
                 const deal = await reopen(ctx, created.ID);
                 const lines = deal.OrderID_Object!.Lines;

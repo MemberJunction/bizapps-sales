@@ -258,6 +258,28 @@ node test-harnesses/mutate-checks.mjs M-XX 2>&1 | tee /tmp/run.txt   # survives 
 node test-harnesses/mutate-checks.mjs M-XX > /tmp/run.txt 2>&1       # loses everything on a kill
 ```
 
+## Run the anchor validator AFTER an edit, not before — or it lies to you
+
+**A source edit that touches a line a mutant anchors on has silently disarmed that mutant.** The driver
+matches `from` EXACTLY; a missed match is reported as a SKIP, and a skip reads as anchor drift against a
+moved tree rather than as the edit you just made.
+
+Measured on myself. Changing `routingIssues(routing)` to `routingIssues(routing, false)` — a two-token
+change to give the preview branch its own semantics — disarmed `M-RI1`, which anchors on that exact
+line. I had run the validator BEFORE the edit, so it was green, and nothing said otherwise until a merge
+several commits later ran it again for an unrelated reason.
+
+**The ordering is the whole difference between the validator working and the validator lying.** Running
+it first tells you the state you are leaving; running it after tells you the state you are creating. It
+costs a second:
+
+```bash
+node <scratch>/verify-anchors.mjs      # every mutant's `from` must match its file EXACTLY ONCE
+```
+
+The same rule applies to a merge, and for the same reason: whoever merges last owns every anchor in the
+result, not just the ones their own branch touched.
+
 ## Orphaned runs: the procedure
 
 Three facts, each of which cost real time on 2026-08-24. The first is the one nobody had written down.

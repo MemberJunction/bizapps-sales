@@ -11,9 +11,14 @@
  * So this spec asserts the BROKEN behaviour on purpose. **It must fail the day orders fixes this**, and
  * that failure is the signal to rewrite it into the three assertions it should have carried all along:
  *
- *     expect(after.length).toBe(1);                    // the removal took
- *     expect(after[0].ProductID).toBe(survivorID);     // and took the RIGHT row
- *     expect(Number(after[0].LineNumber)).toBe(1);     // and what remains was re-sequenced
+ *     expect(after.length).toBe(1);                                  // the removal took
+ *     const survivor = after.find((r) => r.ProductID === survivorID);
+ *     expect(survivor, 'the RIGHT row survived').toBeTruthy();        // identify, do not index
+ *     expect(Number(survivor.LineNumber)).toBe(1);                    // and it was re-sequenced
+ *
+ * The `find` is deliberate. This list used to read `after[0].ProductID` — index a collection, then
+ * assert which row it is. That shape has been found and fixed twice already (WT1, AC13); pasting it
+ * back the day orders fixes KI-20 would reintroduce it. Identify the row first.
  *
  * The integration suite carries the same tripwire at `save-deal.SD6`. This one is worth having beside it
  * because SD6 drives the entity layer directly: it proves the SALES side does its part. Only a browser
