@@ -2129,6 +2129,102 @@ export const SaveDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'save-deal.SD39',
+        Name: 'SD39: a successful save leaves the deal CLEAN, not holding four dirty fields',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── A LIE ABOUT STATE IS ACTED ON BY WHOEVER BELIEVES IT ────────────────────
+                 *
+                 * `refreshAmountFromOrder()` writes the amount cache to the database with raw SQL and
+                 * then assigns the four provenance fields to the in-memory record so a caller reading the
+                 * entity back sees what was written. That assignment happens AFTER `super.Save()` has
+                 * already returned, so nothing clears the dirty flags it sets.
+                 *
+                 * The record is therefore DIRTY immediately after a save that fully succeeded. Anything
+                 * that asks the entity whether it has unsaved work — a Save button's enabled state, a
+                 * batch job skipping clean records, a guard that refuses to discard unsaved edits — gets
+                 * the wrong answer, and gets it every time.
+                 *
+                 * Asserted on `Dirty` rather than on the four fields individually: the fields holding the
+                 * right VALUES is not in question, and it is the flag that callers read.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD39 clean after save'; });
+                await twoLines(ctx, created);
+                await saveOk(created, 'create with lines, which refreshes the amount cache');
+
+                Assert(
+                    Number(created.Amount) > 0,
+                    `setup: the amount cache must have been refreshed, or this proves nothing `
+                        + `(Amount=${created.Amount}, IsComputed=${created.AmountIsComputed})`,
+                );
+                Assert(
+                    !created.Dirty,
+                    'a save that SUCCEEDED must leave the record clean. It is holding dirty fields that '
+                        + 'were written by the same save, so every caller that reads Dirty to decide '
+                        + 'whether to save is told there is unsaved work when there is none',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD40',
+        Name: 'SD40: a REFUSED save does not leave a declared transition standing',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── A DECLARATION GOVERNS ONE SAVE ──────────────────────────────────────
+                 *
+                 * `Save()` clears `_declaredTransition` near its end, and the comment there says why:
+                 * left standing it "would suppress the stage defaults on the next unrelated edit to the
+                 * same in-memory record and put its note on that edit's event".
+                 *
+                 * But three guards return BEFORE that line — the close-lock refusal, the owner-stamp
+                 * refusal, and a failure resolving the server-maintained stamps. A caller that declares a
+                 * transition and is then refused keeps the declaration, and the NEXT save of that same
+                 * object inherits it: stage defaults suppressed, and the previous note stamped onto an
+                 * unrelated event.
+                 *
+                 * Induced through the owner-stamp refusal because it is the one a check can trigger
+                 * deterministically: setting `OwnerEmployeeID` directly, with no roster loaded, is
+                 * refused by design.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const created = await newDeal(ctx, f, (d) => { d.Name = 'SD40 declaration outlives refusal'; });
+                await saveOk(created, 'create');
+
+                const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await deal.Load(created.ID), 'the deal reloads');
+
+                (deal as unknown as { DeclareTransition(kind: string, note: string): void })
+                    .DeclareTransition('Close', 'SD40 note that must not survive');
+
+                // Refused by the owner stamp: supplied directly, no roster in this save.
+                deal.OwnerEmployeeID = f.EmployeeID;
+                const refused = await deal.Save();
+                Assert(refused === false, 'setup: the owner-stamp guard must refuse this save');
+
+                // Now an ordinary edit on the SAME object. It must not inherit the declaration.
+                deal.OwnerEmployeeID = null;
+                deal.NextStep = 'an unrelated edit after the refusal';
+                await saveOk(deal, 'the next, unrelated save');
+
+                const stale = await TxOne<{ N: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.DealStageEvent
+                      WHERE DealID = '${created.ID}' AND Notes LIKE '%SD40 note%'`,
+                );
+                AssertEqual(
+                    Number(stale.N),
+                    0,
+                    'the note from a REFUSED save must not land on a later, unrelated event — a '
+                        + 'declaration governs ONE save',
+                );
+            }),
+    },
 ];
 
 for (const check of SaveDealChecks) {

@@ -209,6 +209,31 @@ export class DealEntityServer extends DealEntity {
      * where the ordering between them is decided and is the only place this class opens a transaction.
      */
     public override async Save(options?: EntitySaveOptions): Promise<boolean> {
+        /**
+         * ── A DECLARATION GOVERNS ONE SAVE, AND EVERY EXIT IS A SAVE ENDING ──────────────
+         *
+         * The clear used to sit near the end of the body, and three guards return BEFORE it: the
+         * close-lock refusal, the owner-stamp refusal, and a failure resolving the server-maintained
+         * stamps. A caller that declared a transition and was then REFUSED kept the declaration, and
+         * the next save of that same object inherited it — stage defaults suppressed, and the previous
+         * note stamped onto an unrelated event. `SD40` measured exactly that: the note survived a
+         * refusal and landed on the following edit's event.
+         *
+         * `finally` rather than a fourth clear at each guard, because the bug was a missing clear on a
+         * path somebody added later, and a fourth one would only postpone the same mistake to the fifth
+         * exit. This shape cannot be got wrong by adding a return.
+         *
+         * It runs AFTER the body, so the declaration is still standing while `saveWithinScope` consumes
+         * it — which is the one ordering constraint here.
+         */
+        try {
+            return await this.saveDeclared(options);
+        } finally {
+            this._declaredTransition = null;
+        }
+    }
+
+    private async saveDeclared(options?: EntitySaveOptions): Promise<boolean> {
         // Per-save, so a caller reading them after `Save()` sees this save's warnings and not the last
         // one's. Cleared before the close lock can return early — an abandoned save has no warnings.
         this._orderStatusWarnings.length = 0;
@@ -370,9 +395,9 @@ export class DealEntityServer extends DealEntity {
                   needsStatusDefault,
               });
 
-        // A declaration governs ONE save. Left standing, it would suppress the stage defaults on the next
-        // unrelated edit to the same in-memory record and put its note on that edit's event.
-        this._declaredTransition = null;
+        // The declaration is cleared by the `finally` in `Save()` above, which covers this exit and the
+        // three guards that return before ever reaching here. The clear that used to live on this line
+        // covered only this one.
 
         if (!saved) {
             this.explainOrderProvisioningFailure();
@@ -1417,6 +1442,24 @@ export class DealEntityServer extends DealEntity {
         this.AmountIsComputed = true;
         this.AmountComputedAt = now;
         this.AmountSourceHash = hash;
+
+        /**
+         * ── ...AND THE DIRTY FLAGS THOSE FOUR ASSIGNMENTS JUST SET ARE CLEARED ──────────────
+         *
+         * This method writes the cache with raw SQL and runs AFTER `super.Save()` has returned, so the
+         * assignments above set dirty flags that nothing will ever clear. The record was therefore DIRTY
+         * immediately after a save that fully succeeded — a lie about state, told to every caller that
+         * asks the entity whether it has unsaved work: a Save button's enabled state, a batch job
+         * skipping clean records, a guard refusing to discard unsaved edits. `SD39` pins it.
+         *
+         * The VALUES are correct and stay; only the dirty BASELINE moves, which is exactly what
+         * `ResetOldValue()` is for — it sets the tracked old value to the current one. These four are
+         * legitimate to reset because the database already holds precisely what is in memory: this
+         * method put it there itself, in the statement above.
+         */
+        for (const name of ['Amount', 'AmountIsComputed', 'AmountComputedAt', 'AmountSourceHash']) {
+            this.GetFieldByName(name)?.ResetOldValue();
+        }
     }
 
     /* ── The close lock (L-17, master plan §7.3) ────────────────────────────── */
