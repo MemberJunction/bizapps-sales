@@ -629,8 +629,30 @@ cd C:\ws\bizapps-sales
 RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs                     # 30/30
 RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs product-picker      #  4/4
 RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs close-won-handoff   #  4/4
-RUN_MUTATION_TESTS=1 node test-harnesses/smoke-close-won.mjs                 # 11/11
+# RUN_MUTATION_TESTS=1 node test-harnesses/smoke-close-won.mjs               # ⚠ SEE BELOW -- 5/11
 ```
+
+> ### ⚠ `smoke-close-won.mjs` IS ROTTED. It is commented out above, and 11/11 was never re-measured.
+>
+> Measured 2026-08-25: **5/11**, and before repair it did not run at all. It had accumulated three
+> dead references from changes that landed without it being re-run — which is why the number in this
+> document went stale silently rather than going red.
+>
+> | Dead reference | Left by |
+> |---|---|
+> | `MJ_BizApps_Sales: Deal Line Types` | the `DealLine` retirement — **the entity exists on no host**, so this threw `Entity ... not found in metadata` at step 2 |
+> | `deal.Lines.Create()` | same retirement — lines live on the embedded order now |
+> | `preview.Amount` | the `PreviewOrderMoney` removal — a `ReferenceError` on a variable whose assignment had already been deleted |
+>
+> The first two and the third are fixed. What remains is **not** a stale reference and is not a quick
+> repair: `ClassFactory` falls back to `BaseEntity` inside this harness, so `DealEntityServer` never
+> provisions the embedded order (`deal.OrderID` stays `undefined`) and `OrderLineEntityServer` never
+> stamps `UnitPrice`/`LineNumber`. That is a harness bootstrap problem in the same family as KI-17.
+>
+> **Nothing is uncovered by leaving it.** Every behaviour it asserts is also asserted by
+> `integration.mjs`, which is green at **126/6** on this same database — the 6 being contracts checks
+> on a host without contracts. Use that as the gate; treat this harness as needing repair before it is
+> quoted again.
 
 **`RUN_MUTATION_TESTS=1` is mandatory.** Without it the suites run ZERO checks and report success — a
 vacuous pass, which is the failure mode `assert-check-count.mjs` exists to catch.

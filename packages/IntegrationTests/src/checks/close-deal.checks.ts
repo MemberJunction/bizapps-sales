@@ -1680,28 +1680,40 @@ export const CloseDealChecks: NamedCheck[] = [
                 AssertEqual(Number(stillClosed.n), 0, 'and the deal was not reopened behind the refusal');
 
                 /**
-                 * ── AND AGAIN AT `Posted`, WHICH IS THE ASSERTION THAT KILLS THE OBVIOUS SHORTCUT ──
+                 * ── THE `Posted` STEP THAT USED TO BE HERE IS GONE, AND ITS ABSENCE IS NOW ASSERTED ──
                  *
-                 * If `Confirmed` were the only booked state tested, `IsBooked(...)` could be "simplified"
-                 * to `status === 'Confirmed'` and every assertion above would still pass. The lifecycle
-                 * runs `Confirmed -> Posted -> Fulfilled`, and the ledger has moved FURTHEST at the far
-                 * end -- so the equality test lets through exactly the orders that most need refusing.
+                 * This used to advance the same order to `Posted` and demand the refusal again, killing the
+                 * "just simplify IsBooked to status === 'Confirmed'" shortcut. Orders has since COLLAPSED the
+                 * lifecycle: `CK_OrderHeader_Status` permits only Draft | Quoted | Confirmed | Voided,
+                 * fulfillment moved to its own `FulfillmentStatus` column, and orders' `IsBooked` on `next` is
+                 * now literally `status === 'Confirmed'`. The shortcut became the design. See KI-27.
                  *
-                 * Same order, advanced one step. It must still refuse.
+                 * Writing 'Posted' here now violates the CHECK constraint outright, which is how this surfaced —
+                 * as a bare "Error executing SQL" on a fresh all-`next` install.
+                 *
+                 * Rather than delete the intent, it is INVERTED: pin the collapse. If orders ever re-expands the
+                 * lifecycle this fails and names the assertion to restore — the only way a check removed because
+                 * of a design change survives that design change being undone.
                  */
-                await TxExec(
+                const statusRule = await TxOne<{ definition: string }>(
                     ctx,
-                    `UPDATE ${ORDERS_SCHEMA}.OrderHeader SET Status = 'Posted' WHERE ID = '${bookedOrder.ID}'`,
-                    'CD24: advance the order past Confirmed',
-                );
-                const refusedPosted = await reopen(
-                    ctx, { DealID: bookedDeal, Reason: 'CD24: attempting a reopen behind a POSTED order.' },
+                    `SELECT cc.definition FROM sys.check_constraints cc
+                       JOIN sys.tables t  ON t.object_id = cc.parent_object_id
+                       JOIN sys.schemas s ON s.schema_id = t.schema_id
+                      WHERE s.name = '${ORDERS_SCHEMA}' AND t.name = 'OrderHeader'
+                        AND cc.definition LIKE '%[[]Status]%'`,
                 );
                 Assert(
-                    refusedPosted.Success === false,
-                    'a reopen behind a POSTED order must be refused too — Posted is past Confirmed, not '
-                        + 'short of it. If this passes and the Confirmed case above still fails, the guard '
-                        + `has been narrowed to an equality test. Got ${JSON.stringify(refusedPosted.Issues)}`,
+                    /Confirmed/.test(statusRule?.definition ?? ''),
+                    'CD24: could not read the OrderHeader Status rule, so the pin below would pass vacuously — '
+                        + `got ${JSON.stringify(statusRule)}`,
+                );
+                Assert(
+                    !/Posted|Fulfilled/.test(statusRule.definition),
+                    'orders has RE-EXPANDED OrderHeader.Status past Confirmed '
+                        + `(${statusRule.definition}). Restore the "advance past Confirmed" assertion removed `
+                        + 'here — with more than one booked status, IsBooked can be narrowed to an equality '
+                        + 'test again and nothing else in this check would catch it.',
                 );
 
                 /* ── HALF B: confirmed-then-voided does NOT refuse ───────────────────────────── */

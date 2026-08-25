@@ -129,7 +129,6 @@ const dealType = await one('MJ_BizApps_Sales: Deal Types', 'IsActive = 1', ['ID'
 const openStatus = await one('MJ_BizApps_Sales: Deal Status Types', 'IsOpen = 1 AND IsActive = 1', ['ID']);
 const wonStatus = await one('MJ_BizApps_Sales: Deal Status Types', 'IsWon = 1 AND IsActive = 1', ['ID']);
 const account = await one('MJ_BizApps_Sales: Sales Accounts', 'IsActive = 1', ['ID']);
-const lineType = await one('MJ_BizApps_Sales: Deal Line Types', 'IsRecurring = 0 AND IsActive = 1', ['ID']);
 
 // ── 2. The picker's own filter, against orders' catalogue ───────────────────
 const productsView = await new RunView().RunView(
@@ -151,14 +150,37 @@ deal.AccountID = account.ID;
 deal.CompanyID = pipeline.CompanyID;
 deal.TermMonths = 12;
 
-const line = await deal.Lines.Create();
-line.DealLineTypeID = lineType.ID;
-line.ProductID = products[0].ID;
-line.ProductName = products[0].Name;
-line.Quantity = 4;
-
+/**
+ * ── THE LINE GOES ON THE EMBEDDED ORDER, NOT ON THE DEAL ──
+ *
+ * This used to do `deal.Lines.Create()` and stamp a `DealLineTypeID`. `DealLine` is retired and
+ * `MJ_BizApps_Sales: Deal Line Types` no longer exists on ANY host, so this harness crashed at its
+ * second step with "Entity ... not found in metadata" — including on the demo host. It had not been
+ * run since the retirement, while WORKSPACE-SETUP still advertised it as 11/11.
+ *
+ * The order is provisioned by `DealEntityServer.Save()`, so the deal is saved FIRST and the line
+ * added to `deal.OrderID` after. UnitPrice and CompanyID are deliberately NOT set — orders stamps
+ * them from the product, and setting them here would be sales inventing money.
+ */
 const saved = await deal.Save();
 step('deal saved with a picker-set line', saved, saved ? `${deal.DealNumber ?? deal.ID} · ${products[0].Name} ×4` : deal.LatestResult?.CompleteMessage);
+
+/**
+ * RELOAD BEFORE READING `OrderID`. The order is provisioned server-side inside
+ * `DealEntityServer.Save()`, so the in-memory entity that issued the save has never seen the value —
+ * `deal.OrderID` reads `undefined` and every downstream query becomes `WHERE ID = 'undefined'`.
+ */
+await deal.Load(deal.ID);
+step('deal has an embedded order', !!deal.OrderID, deal.OrderID ?? 'none provisioned');
+
+const line = await md.GetEntityObject('MJ_BizApps_Orders: Order Lines', user);
+line.NewRecord();
+line.OrderID = deal.OrderID;
+line.ProductID = products[0].ID;
+line.Quantity = 4;
+const lineSaved = await line.Save();
+step('line added to the embedded order', lineSaved,
+    lineSaved ? `${products[0].Name} x4 on order ${deal.OrderID}` : line.LatestResult?.CompleteMessage);
 
 // ── 4. Money preview, BEFORE anything is created ────────────────────────────
 /**
@@ -196,10 +218,17 @@ step('order line carries the picked ProductID',
 step('line priced by Orders (Sales sent no price)', Number(orderLines[0]?.UnitPrice) > 0, `unit ${orderLines[0]?.UnitPrice}, net ${orderLines[0]?.LineTotalNet}`);
 step('line posted to the ledger', !!orderLines[0]?.JournalEntryID, `JE ${orderLines[0]?.JournalEntryID}`);
 
-// ── 7. The quote and the booking agree ──────────────────────────────────────
-step('booked total equals the PriceOrder preview',
-    Number(header?.TotalGross).toFixed(2) === Number(preview.Amount).toFixed(2),
-    `booked ${header?.TotalGross} vs preview ${preview.Amount}`);
+/**
+ * ── STEP 7 IS GONE BECAUSE ITS OTHER HALF ALREADY WAS ──
+ *
+ * It compared the booked total against `preview.Amount` from the `PreviewOrderMoney` step removed
+ * further up — so `preview` had been undefined ever since, and this line threw
+ * `ReferenceError: preview is not defined` before any assertion ran. A dangling reference left by a
+ * deletion, not a check that was failing: nothing here was being verified.
+ *
+ * Pricing is still covered where it happens — "line priced by Orders" above, and the `Resolved*`
+ * assertions in the save-deal checks.
+ */
 
 const failed = steps.filter((s) => !s.ok);
 console.log(`\n${failed.length === 0 ? '✅' : '❌'} ${steps.length - failed.length}/${steps.length} steps passed\n`);
