@@ -4,64 +4,44 @@
       "Name": "Sales: Stage Conversion and Dwell",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
       "UserQuestion": "How do deals move between stages, how long do they sit, and which stages get skipped?",
-      "Description": "Conversion and dwell at the TRANSITION grain (master plan §9.1, §9.3 measure 7). This is the one measure that cannot be answered from Deal at all: the current stage says where a deal is, only the append-only event log says where it has been. Skipped and backward moves fall out for free because rows key on the (From, To) pair rather than on adjacency.",
+      "Description": "Conversion and dwell at the TRANSITION grain (master plan \u00a79.1, \u00a79.3 measure 7). This is the one measure that cannot be answered from Deal at all: the current stage says where a deal is, only the append-only event log says where it has been. Skipped and backward moves fall out for free because rows key on the (From, To) pair rather than on adjacency.",
       "SQL": "@file:SQL/stage-conversion-and-dwell.sql",
-      "TechnicalDescription": "Grain: DealStageEvent. Date dimension: ChangedAt. Dwell comes from the stored DaysInPreviousStage stamp rather than being derived by joining each event to its predecessor — the importer preserves original ChangedAt values, so the stamps are the authority. AmountAtTransition is the DEPARTING value, so value-weighted conversion reflects what was at stake at that moment rather than what the deal is worth today.",
+      "TechnicalDescription": "Grain: DealStageEvent. Date dimension: ChangedAt. Dwell comes from the stored DaysInPreviousStage stamp rather than being derived by joining each event to its predecessor \u2014 the importer preserves original ChangedAt values, so the stamps are the authority. AmountAtTransition is the DEPARTING value, so value-weighted conversion reflects what was at stake at that moment rather than what the deal is worth today.",
       "Status": "Approved",
       "QualityRank": 9,
       "ExecutionCostRank": 3,
       "UsesTemplate": true
     },
-    "relatedEntities": {
-      "MJ: Query Parameters": [
-        {
-          "fields": {
-            "QueryID": "@parent:ID",
-            "Name": "CompanyID",
-            "Type": "string",
-            "IsRequired": false,
-            "Description": "Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
-            "SampleValue": "C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
-            "DetectionMethod": "Manual"
-          }
-        },
-        {
-          "fields": {
-            "QueryID": "@parent:ID",
-            "Name": "PipelineID",
-            "Type": "string",
-            "IsRequired": false,
-            "Description": "One pipeline. Omit for all pipelines.",
-            "SampleValue": "90111111-0000-4000-A000-000000000001",
-            "DetectionMethod": "Manual"
-          }
-        },
-        {
-          "fields": {
-            "QueryID": "@parent:ID",
-            "Name": "PeriodStart",
-            "Type": "date",
-            "IsRequired": false,
-            "Description": "Inclusive start of the window. Omit for no lower bound.",
-            "SampleValue": "2026-01-01",
-            "DetectionMethod": "Manual"
-          }
-        },
-        {
-          "fields": {
-            "QueryID": "@parent:ID",
-            "Name": "PeriodEnd",
-            "Type": "date",
-            "IsRequired": false,
-            "Description": "Inclusive end of the window. Omit for no upper bound.",
-            "SampleValue": "2026-12-31",
-            "DetectionMethod": "Manual"
-          }
-        }
-      ]
-    },
     "primaryKey": {
       "ID": "5A1E5000-0001-4000-A000-000000000006"
-    }
+    },
+    "_comments": [
+      "PARAMETERS ARE DERIVED BY MJ, NOT DECLARED HERE -- and the authored detail is kept below.",
+      "",
+      "They were declared as relatedEntities['MJ: Query Parameters'], and that made this whole",
+      "directory unseedable on a fresh database. MJ derives parameters from the SQL when the query is",
+      "created; the declared rows then collided with them on the UNIQUE (QueryID, Name) index -- 18",
+      "violations, whole-transaction rollback, 0 of 16 queries landing, byte-identical on a retry.",
+      "That was KI-25, and it cost every fresh install its dashboard.",
+      "",
+      "Removing the declarations lets MJ derive them: names and IsRequired come out identical. Type",
+      "degrades from date to string on the period parameters, which is harmless here because",
+      "QueryForecastSource passes them as ISO date-only STRINGS on purpose -- 'a full timestamp would",
+      "invite a query to compare a date column against an instant'. What would genuinely have been",
+      "lost is the authored Description and SampleValue, so they are preserved verbatim:",
+      "",
+      "  CompanyID (string)",
+      "    Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
+      "    e.g. C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
+      "  PipelineID (string)",
+      "    One pipeline. Omit for all pipelines.",
+      "    e.g. 90111111-0000-4000-A000-000000000001",
+      "  PeriodStart (date)",
+      "    Inclusive start of the window. Omit for no lower bound.",
+      "    e.g. 2026-01-01",
+      "  PeriodEnd (date)",
+      "    Inclusive end of the window. Omit for no upper bound.",
+      "    e.g. 2026-12-31"
+    ]
   }
 ]
