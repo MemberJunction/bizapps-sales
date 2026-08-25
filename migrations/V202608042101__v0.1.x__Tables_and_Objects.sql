@@ -52,10 +52,16 @@
 --   → __mj_BizAppsCommon.Organization   SalesAccount.ID   (the IsA link, §4.1)
 --   → __mj_BizAppsCommon.Person         SalesContact.ID   (the IsA link, §4.1),
 --                                       DealTeamMember.PersonID (D-6)
+--   → __mj_BizAppsOrders.OrderHeader    Deal.OrderID (the embedded order; FK_Deal_OrderHeader).
+--                                       Added 2026-08-19 by da0f69f. This one MOVED from the SOFT
+--                                       list below and it changed what the baseline needs installed
+--                                       first -- see the install-order note.
 --
 -- SOFT (plain UNIQUEIDENTIFIER, no FK) — because the target app's migrations may not have run.
--- This is DG-6, and it is the reason this baseline stands up with only bizapps-common present:
---   * Deal.OrderID                      → bizapps-orders OrderHeader (a REAL FK; see FK_Deal_OrderHeader)
+-- This is DG-6. It USED to be the reason this baseline stood up with only bizapps-common present;
+-- that stopped being true on 2026-08-19 when Deal.OrderID became a hard FK, and the line below was
+-- left in this list annotated "a REAL FK" -- a list of soft references whose first entry was hard.
+-- What remains genuinely soft:
 --   * Deal.ContractID / RenewsContractID → bizapps-contracts (§4.4, L-15 — the reference points
 --                                          DOWN the graph; there is deliberately no Contract.DealID,
 --                                          because it is ONE contract to MANY deals)
@@ -67,8 +73,13 @@
 --   * Deal.CampaignID                   → no FK. Not present in MJ core at the version this
 --                                          baseline was authored against; verify before promoting.
 --
--- INSTALL-ORDER DEPENDENCY: bizapps-common MUST be installed before this migration. §4.1's two
--- IsA tables fail without it — deliberately, as the dependency check.
+-- INSTALL-ORDER DEPENDENCY: bizapps-common AND bizapps-orders MUST both be installed before this
+-- migration. §4.1's two IsA tables fail without common — deliberately, as the dependency check —
+-- and CREATE TABLE Deal fails without orders, because FK_Deal_OrderHeader is inline and
+-- unconditional. Orders in turn needs tasks and accounting, so the full order is
+--     MJ core → common → tasks → accounting → orders → sales
+-- which is WORKSPACE-SETUP.md §4. scripts/rebuild-db.sh still installs only core and common and
+-- therefore cannot build a database this migration applies to; see KNOWN-ISSUES KI-24.
 --
 -- SQL Server is the source of truth; the PostgreSQL counterpart is produced via
 -- @memberjunction/sql-converter. Production is PostgreSQL, so this file stays converter-friendly:
