@@ -5,6 +5,80 @@ future developer will otherwise rediscover the hard way.
 
 ---
 
+## 🔴 KI-28 — a fresh install registers 10 fewer FIELDS than the views expose, and 4 are on entities we write
+
+**Measured 2026-08-25 on `MJ_Sales_Latest`, a fresh database built from every sibling at `origin/next`
+following `WORKSPACE-SETUP.md` exactly. This is what QA will do, so this is what QA will hit.**
+
+Several orders migrations add a column and deliberately leave its `EntityField` row to CodeGen.
+`bizapps-orders/migrations/V202608101200__v0.1.x__Pricing_driver_class.sql` states the policy in its own
+header: *"registering them as `EntityField` rows is CodeGen's job … Migrate, then generate."*
+
+A database built from migrations alone therefore has `__mj.EntityField` **short of the views**:
+
+| Entity | Missing | Do we write it? |
+|---|---|---|
+| `MJ_BizApps_Orders: Order Headers` | `Origin`, `SourceCheckoutWidgetID`, `SourceCheckoutWidget` | **yes** |
+| `MJ_BizApps_Orders: Order Lines` | `RootReversesOrderLineID` | **yes** |
+| `MJ_BizApps_Orders: Products` | `RootSuccessorProductID` | read only |
+| `MJ_BizApps_Orders: Product Types` | `PricingDriverClass` | seed only |
+| `MJ_BizApps_Orders: Subscriptions` | `RootMigratesFrom/ToSubscriptionID` | no |
+| `MJ_BizApps_Orders: Payment Headers` | `RootReversesPaymentHeaderID` | no |
+| `MJ_BizApps_Orders: Checkout Sessions` | `Distribution` | no |
+
+### Why it is worth a KI rather than a footnote
+
+**The error names nothing that would lead you here.** Saving an affected entity builds `@ResultTable` from
+`EntityField`, then runs `INSERT INTO @ResultTable EXEC sp<Create|Update><Entity>`. The proc returns the
+*view's* columns, the counts differ, and SQL Server says:
+
+```
+Column name or number of supplied values does not match table definition.
+```
+
+followed by several hundred lines of generated SQL naming neither `EntityField` nor the missing column.
+First encountered here as a `sync push` failure on `MJ_BizApps_Orders: Product Types`.
+
+**And the demo host cannot reproduce it.** `MJ_V6_Host` measures **0 drift**, because CodeGen has been run
+on it. Only a fresh install shows this, which is precisely the configuration nobody was testing.
+
+### Detect
+
+```sql
+SELECT e.Name, c.name AS MissingField
+FROM __mj.Entity e
+JOIN sys.views v ON v.name = e.BaseView
+JOIN sys.schemas s ON s.schema_id = v.schema_id AND s.name = e.SchemaName
+JOIN sys.columns c ON c.object_id = v.object_id
+WHERE NOT EXISTS (SELECT 1 FROM __mj.EntityField ef WHERE ef.EntityID = e.ID AND ef.Name = c.name)
+ORDER BY e.Name, c.column_id;
+```
+
+### Work around
+
+These are the procs CodeGen calls, so this is the *"then generate"* step with no files generated and no
+repository touched. `'sys,staging'` is CodeGen's own default `excludeSchemas`:
+
+```sql
+EXEC __mj.spUpdateExistingEntitiesFromSchema      @ExcludedSchemaNames = 'sys,staging';
+EXEC __mj.spUpdateExistingEntityFieldsFromSchema  @ExcludedSchemaNames = 'sys,staging', @EntityIDs = NULL;
+```
+
+Do **not** reach for `spDeleteUnneededEntityFields` — it removes rows, and nothing here needs that.
+
+### What does NOT fix it
+
+Pushing orders' `metadata/entity-fields`. Checked on `origin/next`: that directory holds only
+`address-embed` and `payment-detail-embed`, and none of the ten fields appear in it.
+
+### Who owns the real fix
+
+Orders. Either their CodeGen output gets appended into a versioned migration the way
+`scripts/append-codegen.sh` does here, or the install procedure has to say "run CodeGen after migrating"
+out loud. **This is a cross-app matter and needs Amith — do not change orders from this repo.**
+
+---
+
 ## 🟠 KI-27 — orders is collapsing the order lifecycle, and one of our checks writes a status that will stop existing
 
 **Measured 2026-08-25, against orders at `origin/next` — not yet applied to any host we use.** Amith

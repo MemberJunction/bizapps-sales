@@ -441,9 +441,76 @@ in this order — it is the dependency order, and it is not negotiable:
 > — and died with *"Detected resolved migration not applied to database"*, an error that names a migration
 > and tells you nothing about the schema. Fixed to match the other four apps.
 
-**No CodeGen run is needed.** Each app's baseline carries its generated half, so after step 6 the database
-already has all ~500 entities registered (20 sales, 49 orders, 23 accounting, 19 tasks, 10 common). If you
-find yourself about to run CodeGen to "register entities", stop — something else is wrong.
+**No CodeGen run is needed to register ENTITIES.** Each app's baseline carries its generated half, so
+after step 6 the database already has all ~500 entities registered (20 sales, 49 orders, 23 accounting, 19
+tasks, 10 common). If you find yourself about to run CodeGen to "register entities", stop — something else
+is wrong.
+
+> ### ⚠ BUT SOME FIELDS ARE NOT REGISTERED, AND THIS SENTENCE USED TO CLAIM OTHERWISE
+>
+> This paragraph read *"No CodeGen run is needed"* without qualification. **That is false for FIELDS**, and
+> the way it fails is expensive to diagnose, so it is worth the detail.
+>
+> Several orders migrations add a column and deliberately leave its `EntityField` row to CodeGen.
+> `bizapps-orders/migrations/V202608101200__v0.1.x__Pricing_driver_class.sql` says so in its own header:
+>
+> > *"registering them as `EntityField` rows is CodeGen's job. The generated SQL is deliberately NOT
+> > shipped alongside … Migrate, then generate."*
+>
+> So a database built from migrations alone ends up with `__mj.EntityField` **short of what the views
+> actually expose**. Measured 2026-08-25 on a fresh all-`next` install (`MJ_Sales_Latest`): **10 columns
+> across 6 orders entities**, four of them on entities **sales writes** —
+>
+> | Entity | Missing from `EntityField` |
+> |---|---|
+> | `Order Headers` | `Origin`, `SourceCheckoutWidgetID`, `SourceCheckoutWidget` |
+> | `Order Lines` | `RootReversesOrderLineID` |
+> | `Products` | `RootSuccessorProductID` |
+> | `Product Types` | `PricingDriverClass` |
+> | `Subscriptions` | `RootMigratesFromSubscriptionID`, `RootMigratesToSubscriptionID` |
+> | `Payment Headers` | `RootReversesPaymentHeaderID` |
+> | `Checkout Sessions` | `Distribution` |
+>
+> **The failure does not mention metadata.** Saving any affected entity builds `@ResultTable` from
+> `EntityField` and then does `INSERT INTO @ResultTable EXEC sp<Create|Update><Entity>`. The proc returns
+> the *view's* columns, so the counts differ and SQL Server says:
+>
+> ```
+> Column name or number of supplied values does not match table definition.
+> ```
+>
+> …followed by several hundred lines of generated SQL. Nothing in it points at `EntityField`. If you are
+> reading that error, run the query below before anything else.
+>
+> **Why the demo host never showed this:** `MJ_V6_Host` has had CodeGen run on it and measures **0 drift**.
+> Only a *fresh* install exhibits it — which is exactly what QA does.
+>
+> **Detect it** (returns nothing when clean):
+>
+> ```sql
+> SELECT e.Name, c.name AS MissingField
+> FROM __mj.Entity e
+> JOIN sys.views v ON v.name = e.BaseView
+> JOIN sys.schemas s ON s.schema_id = v.schema_id AND s.name = e.SchemaName
+> JOIN sys.columns c ON c.object_id = v.object_id
+> WHERE NOT EXISTS (SELECT 1 FROM __mj.EntityField ef WHERE ef.EntityID = e.ID AND ef.Name = c.name)
+> ORDER BY e.Name, c.column_id;
+> ```
+>
+> **Fix it** — these are the procs CodeGen itself calls, so this is the documented *"then generate"* step
+> without generating any files or touching any repository. `'sys,staging'` is CodeGen's own default
+> `excludeSchemas`:
+>
+> ```sql
+> EXEC __mj.spUpdateExistingEntitiesFromSchema      @ExcludedSchemaNames = 'sys,staging';
+> EXEC __mj.spUpdateExistingEntityFieldsFromSchema  @ExcludedSchemaNames = 'sys,staging', @EntityIDs = NULL;
+> ```
+>
+> Do **not** add `spDeleteUnneededEntityFields` reflexively. It deletes rows rather than adding them, and
+> nothing here needs it.
+>
+> Pushing orders' `metadata/entity-fields` does **not** fix this — checked on `origin/next`, that directory
+> holds only the two embedded-field overrides and none of the ten.
 
 ## 5. Seed, in this order
 
