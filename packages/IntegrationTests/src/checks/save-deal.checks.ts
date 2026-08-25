@@ -2026,6 +2026,81 @@ export const SaveDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'save-deal.SD38',
+        Name: 'SD38: a create that brings its own DealNumber still gets an opening status',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── THE IMPORTER'S SHAPE, AND THE ONE THE GUARD CLAIMED TO COVER ────────────
+                 *
+                 * `Save()` routes on `this.IsSaved || this.DealNumber`, which is about NUMBERING. The
+                 * status default is about CREATION. Conflating them hard-coded the default OFF for a
+                 * create that supplies its own number — exactly what an importer does — so it took
+                 * the numbered arm, got `needsStatusDefault: false`, and wrote NULL.
+                 *
+                 * That is the case the early-return guard in `saveWithinScope` names in its own comment
+                 * as the reason it exists. The term and its caller disagreed, and the importer lost.
+                 *
+                 * A NULL status is invisible rather than broken: every measure joining `DealStatusType`
+                 * silently drops the row, so an import of a thousand deals under-reports and nothing
+                 * errors. SD36 covers the ordinary create; this covers the numbered one.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const expected = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.DealStatusType
+                      WHERE IsActive = 1 AND IsOpen = 1 AND LocksDeal = 0 ORDER BY DisplayRank ASC`,
+                );
+                Assert(!!expected?.ID, 'setup: an active, open, non-locking status must exist');
+
+                /**
+                 * IN A CLOSING STAGE, for the reason SD36 records: the fixture stage declares an OPEN
+                 * status, so `applyStageDefaults` fills it and the check passes whether or not the
+                 * creation default ran. Measured — the first version of this check passed with the fix
+                 * reverted. A stage whose status LOCKS contributes nothing (planStageDefaults refuses to
+                 * derive from it), so only the creation default can supply a status here.
+                 */
+                const closingStage = await QueryOneRow<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 s.ID
+                       FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.PipelineID}' AND s.IsActive = 1 AND t.LocksDeal = 1
+                      ORDER BY s.DisplayOrder`,
+                );
+                Assert(!!closingStage.ID, 'the fixture pipeline needs a stage declaring a LOCKING status');
+
+                const supplied = `SD38-${Date.now().toString(36).toUpperCase()}`;
+                const created = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD38 importer supplies its own number';
+                    d.DealStatusTypeID = null;      // the rep/importer never set one
+                    d.DealNumber = supplied;        // ...but DID bring a number
+                    d.PipelineStageID = String(closingStage.ID);
+                });
+                await saveOk(created, 'a create carrying its own DealNumber');
+
+                const row = await TxOne<{ DealStatusTypeID: string | null; DealNumber: string }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, DealNumber FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                AssertEqual(
+                    String(row.DealNumber), supplied,
+                    'setup: the supplied number must survive — otherwise this is not the arm under test',
+                );
+                Assert(
+                    !!row.DealStatusTypeID,
+                    'a create that brought its own number must STILL get an opening status. NULL here is '
+                        + 'invisible: every measure joining DealStatusType drops the row silently',
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID).toLowerCase(),
+                    String(expected.ID).toLowerCase(),
+                    'and it must be the first active, open, non-locking status by rank',
+                );
+            }),
+    },
 ];
 
 for (const check of SaveDealChecks) {

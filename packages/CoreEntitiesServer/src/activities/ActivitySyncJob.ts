@@ -125,11 +125,27 @@ export class ActivitySyncJob {
             {
                 EntityName: E_ACTIVITY_SYNC_CONNECTION,
                 /**
-                 * Only Active, and only this provider. Gmail is a permitted `Provider` value in the schema
-                 * and is explicitly out of scope — filtering here rather than skipping later means an
-                 * unrelated connector cannot be picked up by accident the day somebody adds one.
+                 * Only this provider. Gmail is a permitted `Provider` value in the schema and is
+                 * explicitly out of scope — filtering here rather than skipping later means an unrelated
+                 * connector cannot be picked up by accident the day somebody adds one.
+                 *
+                 * ── AND `Error` TOO, OR THE RETRY PATH IS UNREACHABLE ──────────────────────
+                 *
+                 * `RunSync` defines its runnable set as `Active || Error`, deliberately: a connection that
+                 * failed is expected to be retried, and `clearFailure` returns it to `Active` when a run
+                 * finally succeeds. This job is the ONLY production caller, and it filtered to `Active`
+                 * alone — so nothing ever handed `RunSync` an errored connection and the retry branch
+                 * was dead code that read as working.
+                 *
+                 * The consequence is quiet and permanent: one throttle, one expired token, one bad night
+                 * sets `Status = 'Error'`, and the connection is never selected again. It does not alarm;
+                 * it simply stops appearing, which is the failure mode this file's header is about.
+                 *
+                 * Kept as an explicit two-value list rather than "not Disabled", so a status added later
+                 * is opted IN deliberately rather than inherited by a negation nobody revisits.
                  */
-                ExtraFilter: `Status = 'Active' AND Provider = '${SOURCE_SYSTEM_M365}'`,
+                ExtraFilter:
+                    `Status = 'Active' AND Provider = '${SOURCE_SYSTEM_M365}'`, // vocabulary-grep-allow: operational state, not vocabulary
                 ResultType: 'simple',
                 Fields: ['ID', 'Mailbox', 'CredentialsRef'],
             },

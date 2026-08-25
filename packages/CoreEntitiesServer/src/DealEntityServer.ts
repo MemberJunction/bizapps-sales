@@ -341,15 +341,33 @@ export class DealEntityServer extends DealEntity {
         // Nothing to number: an existing deal, or one that already has a number. A number is only ever
         // assigned once — it appears in contracts, orders and people's email, so re-saving a deal must
         // never renumber it.
+        /**
+         * ── COMPUTED ONCE, BECAUSE SPLITTING IT ACROSS THE ARMS GOT IT WRONG ──────────────────
+         *
+         * The arms below route on NUMBERING — "has this deal already got a number" — and the status
+         * default is a question about CREATION. Those are not the same question, and treating them as
+         * one hard-coded the default OFF for the exact case the early-return guard was written to cover.
+         *
+         * A create that supplies its own `DealNumber` — an importer does precisely this — is not
+         * saved, so it still needs a status; but `this.IsSaved || this.DealNumber` is truthy, so it took
+         * the first arm and got `needsStatusDefault: false`. The guard term in `saveWithinScope` says in
+         * its own comment that it exists so such a create "would not take the fast path and land NULL
+         * again", and the caller then guaranteed it landed NULL anyway. The term and its caller
+         * contradicted each other, and the importer was the case that lost.
+         *
+         * `!this.IsSaved` is the whole test: an update never needs a default (it either has a status or
+         * the rep cleared it deliberately — SD37), and every create does unless one was supplied.
+         */
+        const needsStatusDefault = !this.IsSaved && !this.DealStatusTypeID;
+
         const saved = this.IsSaved || this.DealNumber
             ? await this.saveWithinScope(options, {
                   stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
-                  needsStatusDefault: false,
+                  needsStatusDefault,
               })
             : await this.saveWithinScope(options, {
                   stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
-                  // CREATION ONLY. This arm is the create arm; an update never reaches it.
-                  needsStatusDefault: !this.DealStatusTypeID,
+                  needsStatusDefault,
               });
 
         // A declaration governs ONE save. Left standing, it would suppress the stage defaults on the next

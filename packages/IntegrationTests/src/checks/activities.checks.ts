@@ -1428,6 +1428,63 @@ export const ActivitiesChecks: NamedCheck[] = [
                 Assert(!connection['LastSyncAt'], 'nor was anything persisted to the watermark column');
             }),
     },
+    {
+        Id: 'activities.AC23',
+        Name: 'AC23: a FAILED run does not clear the failure row it is supposed to leave behind',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── EACH FAILURE ERASED THE EVIDENCE OF THE LAST ────────────────────────────
+                 *
+                 * `clearFailure()` ran BEFORE `Success` was computed, so it ran unconditionally: a run
+                 * where every write failed still reset the connection to `Active` with `LastError`
+                 * blanked. AC20 made the RESULT honest and left the ROW lying — and the row is the half
+                 * a human looks at.
+                 *
+                 * This file's service header says that row exists so a week of failure is VISIBLE. A
+                 * connection failing every night forever looked healthy every morning, because each run
+                 * wiped the record of the one before it.
+                 *
+                 * Same forced-failure fixture as AC20: hiding the Email activity type makes the write
+                 * fail while fetch and relevance still succeed, which is the shape a transient database
+                 * failure produces.
+                 */
+                const deal = await openDeal(ctx);
+                await giveContactAnAddress(ctx, deal.ContactID);
+                const connectionID = await makeConnection(ctx, null);
+
+                // Put the connection in the state a previous failure would have left it in.
+                await ingest.RunSync(connectionID, new FixtureActivitySource([]), ProviderOf(ctx), ctx.User);
+                const conn = await ProviderOf(ctx).GetEntityObject<mjBizAppsCommonActivitySyncConnectionEntity>(
+                    E_SYNC_CONNECTION, ctx.User,
+                );
+                Assert(await conn.Load(connectionID), 'setup: the connection would not load');
+                conn.Status = 'Error'; // vocabulary-grep-allow: operational state, not vocabulary
+                conn.LastError = 'AC23 previous failure';
+                Assert(await conn.Save(), `setup: could not put the connection in Error -- ${conn.LatestResult?.CompleteMessage}`);
+
+                await hideActivityType(ctx, 'Email');
+                const run = await ingest.RunSync(
+                    connectionID, new FixtureActivitySource([item({ ExternalID: 'ac23-will-fail' })]),
+                    ProviderOf(ctx), ctx.User,
+                );
+                AssertEqual(run.Failed, 1, 'setup: the write must fail, or this proves nothing');
+                Assert(!run.Success, 'setup: and the run must report failure');
+
+                const [connection] = await rows(ctx, E_SYNC_CONNECTION, `ID = '${connectionID}'`);
+                AssertEqual(
+                    String(connection['Status']),
+                    'Error',
+                    'a run whose every write failed must NOT reset the connection to Active ' // vocabulary-grep-allow: operational state, not vocabulary
+                        + '— clearing on failure means each failure erases the evidence of the last',
+                );
+                Assert(
+                    !!connection['LastError'],
+                    'and LastError must survive: the row exists so a week of failure is visible',
+                );
+            }),
+    },
 ];
 
 for (const check of ActivitiesChecks) {

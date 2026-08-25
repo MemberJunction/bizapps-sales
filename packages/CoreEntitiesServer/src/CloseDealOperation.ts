@@ -1079,6 +1079,40 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * A deal with NO order has no peer here and is not refused, which is the correct reading:
              * there is no ledger to have moved.
              */
+            /**
+             * ── AN UNREADABLE PEER IS REFUSED, NOT WAVED THROUGH ────────────────────────
+             *
+             * `OrderID_Object` returns silently UNEXPOSED when the peer did not load —
+             * `EmbeddedRecord.LoadEager` gates `Value` behind a private flag and does not throw. So
+             * `order` was undefined, `orderStatus` was null, and the refusal was SKIPPED for exactly the
+             * state it should refuse hardest: a deal that points at an order nobody can read. The
+             * booked-order guard silently became "no order, carry on".
+             *
+             * `deal.OrderID` is the discriminator and it is on the deal's own row, so it is readable even
+             * when the peer is not. FK set + peer unresolved is not "no order" — it is "unknown
+             * order", and an unknown ledger state cannot be certified safe to reopen.
+             *
+             * THE SIBLING CALL SITE ALREADY DECIDED THIS. `DealWorkspaceService.LoadDeal` treats the same
+             * state as a hard failure and refuses to render, on the reasoning that a deal with an
+             * unreadable order must not be shown as a deal with no lines. Two files reading one state and
+             * returning opposite verdicts is the defect; this makes them agree.
+             */
+            if (deal.OrderID && !deal.OrderID_Object) {
+                return {
+                    ...empty,
+                    Issues: [
+                        issue(
+                            'deal',
+                            `This deal cannot be reopened: it points at order ${deal.OrderID}, which could `
+                                + `not be read, so whether that order has booked is unknown. Reopening on an `
+                                + `unknown ledger state is the one thing this refusal exists to prevent. `
+                                + `Try again, and if it persists the order is the thing to look at.`,
+                            'DealID',
+                        ),
+                    ],
+                };
+            }
+
             const order = deal.OrderID_Object;
             const orderStatus = order?.Status ?? null;
             if (orderStatus && IsBooked(orderStatus)) {

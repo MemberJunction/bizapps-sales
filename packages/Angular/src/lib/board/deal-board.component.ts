@@ -256,10 +256,36 @@ export class DealBoardComponent {
         return this.Deals.filter((d) => d.PipelineID === pipelineID && !d.PipelineStageID);
     }
 
-    /** The drop-list ids CDK needs to know a card may travel between columns. */
+    /**
+     * The drop-list ids CDK needs to know a card may travel between columns.
+     *
+     * ── CACHED BY VALUE, BECAUSE THIS FEEDS `[cdkDropListConnectedTo]` ──────────────────
+     *
+     * `.map()` returns a NEW ARRAY IDENTITY on every call, this component runs default change
+     * detection, and CDK re-wires its drop-list connections whenever that input's identity changes.
+     * During a drag Angular runs change detection on every `pointermove`, so the board was tearing down
+     * and rebuilding the connection graph continuously — on the one gesture the demo shows.
+     *
+     * The sibling `Products` getter in the workspace already documents this exact hazard and returns a
+     * stable reference for it. The reasoning was there; it had not reached here.
+     *
+     * Rebuilt only when the JOINED ids actually change, so adding, removing or reordering a stage still
+     * re-wires — which is the behaviour that must not be lost by caching. Comparing the joined
+     * string rather than the array means a re-render that produces equal ids reuses the reference,
+     * which is the whole point.
+     */
     public get ColumnIDs(): string[] {
-        return this.Columns.map((c) => `col-${c.StageID}`);
+        const ids = this.Columns.map((c) => `col-${c.StageID}`);
+        const key = ids.join('|');
+        if (key !== this._columnIDsKey) {
+            this._columnIDsKey = key;
+            this._columnIDs = ids;
+        }
+        return this._columnIDs;
     }
+
+    private _columnIDsKey = ' ';   // not '' — an empty board must still populate the cache once
+    private _columnIDs: string[] = [];
 
     public SelectPipeline(pipelineID: string): void {
         this.SelectedPipelineID = pipelineID;

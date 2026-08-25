@@ -270,12 +270,27 @@ export class ActivityIngestService {
                 );
             }
 
-            await this.clearFailure(connectionID, provider, contextUser);
             /**
              * A run that failed on individual items is NOT a success. It used to report one, which is
              * what let the connection look healthy while losing mail.
              */
             result.Success = result.Failed === 0;
+
+            /**
+             * ── AND THE FAILURE ROW IS ONLY CLEARED ON AN ACTUAL SUCCESS ────────────────────
+             *
+             * `clearFailure` ran BEFORE `Success` was computed, so it ran unconditionally: a run where
+             * EVERY write failed still reset the connection to `Active` with `LastError` blanked. The
+             * fix above made the RESULT honest and left the ROW lying, which is the half a human
+             * actually looks at.
+             *
+             * This file's own header says that row exists so a week of failure is visible. Clearing it
+             * on a failed run is the precise inverse — each failure erases the evidence of the last, so
+             * a connection failing every night forever looks healthy every morning.
+             */
+            if (result.Success) {
+                await this.clearFailure(connectionID, provider, contextUser);
+            }
             return result;
         } catch (err) {
             LogError(`ActivityIngestService.RunSync failed for connection ${connectionID}: ${err}`);
