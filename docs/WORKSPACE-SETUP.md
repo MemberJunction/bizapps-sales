@@ -254,6 +254,84 @@ node MJ/packages/MJCLI/bin/run.js dev workspace doctor --dir C:\ws
 Doctor should report **8 passed, 1 warned, 0 failed**. The warning is a pnpm-not-on-PATH-at-the-parent
 notice and is harmless.
 
+## 3b. ALTERNATIVE — installing from PUBLISHED packages
+
+> ## ⚠ UNVERIFIED. NOBODY HAS RUN THIS.
+>
+> Everything else in this document was executed and measured. **This section was not** — the sales
+> packages were not published when it was written, so it could not be. It is written from
+> `mj-app.json` and from what the packages actually contain, both of which are facts; the *sequence* is
+> reasoned, not tested. Treat every step as a hypothesis and expect to correct it. When the packages
+> land, someone should run this and replace this banner with what actually happened.
+
+### THE APP SHIPS THROUGH TWO CHANNELS, AND ONLY ONE OF THEM IS NPM
+
+This is the thing to understand before deciding whether publishing removes the need for a clone. It
+does not. `mj-app.json` declares the two halves separately:
+
+| Half | Where it comes from | Declared as |
+|---|---|---|
+| Database schema | **the repository** | `"migrations": { "directory": "migrations", "engine": "skyway" }` |
+| Entity metadata, type tables, actions | **the repository** | `"metadata": { "directory": "metadata" }` |
+| Demo and dev data | **the repository** | `scripts/seed-dev-data.sh`, `scripts/seed-demo-data.sh` |
+| Runtime code | **npm** | `@mj-biz-apps/sales-server`, `-ng`, `-entities`, `-actions` |
+
+The npm packages carry `files: ["/dist"]`. Verified with `npm pack --dry-run`: the tarballs contain
+compiled JavaScript, type declarations, `package.json` and `LICENSE` — **no migrations, no metadata, no
+seed scripts**. The manifest references those by DIRECTORY PATH, which only resolves against a
+checkout.
+
+**So a tester still needs this repository.** What publishing removes is the need to BUILD it.
+
+### What actually changes
+
+Sections 2 and 3 — the chicken-and-egg CLI bootstrap, the borrowed `turbo.json`, the
+`strict-peer-dependencies` edit, `linkWorkspacePackages` — exist only because you are compiling MJ and
+six apps from source. Installing published packages into an existing MJ host removes all of it.
+
+Sections 4, 5 and 6 do not change. They are the repository half, and they are the same either way.
+
+### The sequence, as reasoned
+
+```bash
+# 1. An MJ host at a version satisfying mj-app.json's mjVersionRange (>=6.1.0-edge.2 <7.0.0).
+#    NOTE: MJ core's `latest` on npm is still 5.51.1 -- the v6 line is a PRERELEASE, so this must be
+#    installed explicitly by version, not by tag.
+
+# 2. The four runtime packages into that host:
+npm install @mj-biz-apps/sales-server @mj-biz-apps/sales-ng             @mj-biz-apps/sales-entities @mj-biz-apps/sales-actions
+
+# 3. Clone THIS repository anyway, for the database half:
+git clone --branch next https://github.com/MemberJunction/bizapps-sales.git
+```
+
+Then run **sections 4, 5 and 6 exactly as written**, from the clone — migrate in the documented order,
+seed with `--exclude queries` (KI-25), build and verify. Section 6's build step becomes unnecessary for
+sales itself, since its code arrives compiled.
+
+The server and client packages carry `"role": "bootstrap"` with `startupExport`
+`LoadBizAppsSalesServer` / `LoadBizAppsSalesClient`, so the host must load them at startup the way it
+does for the other apps — MJAPI's startup log lists them as *"Loaded Open App server package"*.
+
+### What is most likely to be wrong here
+
+Named specifically, so whoever runs this knows where to look first rather than debugging blind:
+
+* **Version resolution.** Sales' packages depend on `@memberjunction/*` at `^6.1.0-edge.3`. In this
+  workspace those resolve through symlinks and the range never bites. From a registry it will — and
+  MJ's `latest` being 5.51.1 means a plain install may pull the wrong major.
+* **`mjVersionRange` enforcement.** Nothing in the local tree enforces it today; an installer might.
+  The range is now `>=6.1.0-edge.2 <7.0.0`, which admits `6.1.0-edge.3` — see the note in QA-GUIDE
+  about why the tidier-looking `>=6.0.0 <7.0.0` does not.
+* **Startup registration.** If the host does not run the bootstrap exports, entities resolve to
+  `BaseEntity` and every deal read fails in a way that looks like a permissions problem (KI-21 is the
+  same failure from the other direction).
+* **Which repository revision.** The packages are versioned; the migrations are not. Installing
+  `5.1.0` and cloning a newer `next` gives you code and schema from different points. Match them by
+  the tag `changeset publish` creates.
+
+---
+
 ## 4. Create the database and migrate — order matters
 
 ```bash
