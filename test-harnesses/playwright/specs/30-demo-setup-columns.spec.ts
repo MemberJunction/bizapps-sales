@@ -57,10 +57,19 @@ const SETUP: Array<{ entity: string; columns: string[] }> = [
     entity: 'Deal Payment Schedules',
     columns: ['Deal', 'Payment Date', 'Amount', 'Description', 'Display Order'],
   },
-  {
-    entity: 'Deal Line Types',
-    columns: ['Code', 'Is Recurring', 'Display Rank'],
-  },
+  /**
+   * `Deal Line Types` IS GONE FOR THE SAME REASON `Deal Lines` IS, and it outlived it by four days.
+   *
+   * The note above removed the parent entity when D-DL1 retired it, and left the type table behind.
+   * `DealLineType` was retired in the SAME commit (`0d3d1ed`) -- it has no table and no `__mj.Entity`
+   * row, so this step asked the app to list an entity that does not exist and could only ever fail.
+   * It did, every run, as `"Deal Line Types" must be listed`, and read as a demo-setup problem rather
+   * than as a leftover.
+   *
+   * There is no demo point to relocate. The type table only ever classified DealLine rows as one-time
+   * or recurring; nothing routes by line kind any more (see close-deal.checks.ts:138), and the
+   * embedded order carries its own product lines.
+   */
   {
     entity: 'Deal Stage Events',
     columns: ['Deal', 'Changed At', 'Amount At Transition', 'Probability At Transition',
