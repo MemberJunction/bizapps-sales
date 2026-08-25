@@ -33,7 +33,8 @@ import { expect, test } from '@playwright/test';
 
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, expectOnlyKnownErrors, shot } from '../lib/explorer';
-import { CloseDb, DealByName, StageEventsFor } from '../lib/db';
+import { CloseDb, DealByName, QueryAll, StageEventsFor } from '../lib/db';
+import { PurgeDeal } from '../lib/deal-flow';
 
 const SALES_APP_ROUTE = '/app/sales';
 const RUN_TAG = `CL-${Date.now().toString(36).toUpperCase()}`;
@@ -174,7 +175,31 @@ async function createDealWithLine(page: Page, suffix: string): Promise<string> {
     return name;
 }
 
+/**
+ * THIS HOOK CLOSED THE CONNECTION AND DELETED NOTHING.
+ *
+ * The file's own docblock lists four DELETE statements under "clean up with" -- instructions for a
+ * human, in a comment. Meanwhile this spec creates FOUR deals (`won`, `readonly`, `lost`, `reopen`),
+ * every one of which survived the run.
+ *
+ * That is what broke three other specs. 70-lifecycle, 71 and 78 open with AssertBaseline(), which
+ * asserts the WHOLE host is back to its seven seeded deals; this spec's four plus 41's one is the
+ * residue they tripped over. Measured: expected 7, received 11. All three reported the host as wrong
+ * when the fault was here, several files earlier -- which is why it survived so long.
+ *
+ * PurgeByPrefix is unavailable: it refuses any prefix not starting with `PW-`, and these are `CL-`.
+ * Resolved by name instead and handed to PurgeDeal, which removes children first. Scoped to THIS run's
+ * tag rather than to `Close CL-%`, so a concurrent run's rows are never touched.
+ *
+ * The stale SQL in that docblock also still names DealLine, retired in 0d3d1ed.
+ */
 test.afterAll(async () => {
+    const deals = await QueryAll<{ ID: string; OrderID: string | null }>(
+        `SELECT ID, OrderID FROM __mj_BizAppsSales.Deal WHERE Name LIKE 'Close ${RUN_TAG} %'`,
+    );
+    for (const d of deals) {
+        await PurgeDeal(d.ID, d.OrderID ? String(d.OrderID) : null);
+    }
     await CloseDb();
 });
 

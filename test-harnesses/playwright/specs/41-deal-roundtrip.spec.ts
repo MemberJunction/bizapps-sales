@@ -33,11 +33,43 @@
 import { expect, test } from '@playwright/test';
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, expectOnlyKnownErrors, KNOWN_POST_DELETE_ERRORS, shot } from '../lib/explorer';
+import { CloseDb, QueryAll } from '../lib/db';
+import { PurgeDeal } from '../lib/deal-flow';
 
 const SALES_APP_ROUTE = '/app/sales';
 
 const RUN_TAG = `RT-${Date.now().toString(36).toUpperCase()}`;
 const DEAL_NAME = `Round trip ${RUN_TAG}`;
+
+/**
+ * CLEANUP, WHICH THIS SPEC DID NOT HAVE AT ALL.
+ *
+ * The docblock at the top of this file lists four DELETE statements under "clean up with", and that was
+ * the whole of it -- instructions for a human, in a comment, in a suite nobody runs by hand. So every
+ * run left `Round trip RT-...` behind, and 60-close-deal left four more of its own the same way.
+ *
+ * That is what broke three OTHER specs. 70-lifecycle, 71 and 78 open by calling AssertBaseline(), which
+ * asserts the WHOLE host is back to its seven seeded deals. Residue from specs that ran earlier failed
+ * that precondition, so all three reported a problem with the host rather than with the spec that left
+ * the rows. Measured: expected 7, received 11.
+ *
+ * The global sweep in lib/cleanup.mjs does know about `RT-`, which is why the host looks clean BETWEEN
+ * runs and the residue is invisible except from inside one. PurgeByPrefix cannot be used here -- it
+ * refuses any prefix that does not start with `PW-` -- so this resolves the rows by name and hands them
+ * to PurgeDeal, which removes children first.
+ *
+ * The stale SQL in that docblock also still names DealLine, retired in 0d3d1ed. A human following it
+ * today would get an error on the second statement and stop.
+ */
+test.afterAll(async () => {
+    const deals = await QueryAll<{ ID: string; OrderID: string | null }>(
+        `SELECT ID, OrderID FROM __mj_BizAppsSales.Deal WHERE Name = '${DEAL_NAME}'`,
+    );
+    for (const d of deals) {
+        await PurgeDeal(d.ID, d.OrderID ? String(d.OrderID) : null);
+    }
+    await CloseDb();
+});
 
 /** The dates under test. Chosen distinct so a mix-up between fields is visible rather than plausible. */
 const EXECUTION_DATE = '2026-09-15';
