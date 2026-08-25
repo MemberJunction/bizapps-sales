@@ -66,7 +66,33 @@ test.describe('closed lost and reopen — what happens to the order', () => {
         test.setTimeout(600_000);
         const sink = captureConsoleErrors(page);
 
-        const composed = await ComposeDeal(page, `${RUN} lost path`);
+        /**
+         * THE PIPELINE BY THE RULE THIS SPEC EXERCISES, not by whichever option is first.
+         *
+         * This called ComposeDeal with no pipeline, which falls through to SelectFirstReal('Pipeline')
+         * -- it takes whatever option the select happens to list first. Only B2B has a losing stage
+         * declaring Voided; D2C has no losing stage at all. So on a D2C pick the lookup below returned
+         * undefined and the spec failed at its own precondition with "the pipeline needs a losing stage
+         * that declares Voided", which reads as a seed gap. The seed is correct -- B2B/Lost/Voided is
+         * present and matches every condition. The spec was choosing by position.
+         *
+         * Same shape 70-lifecycle already guards against, and its wording applies here unchanged:
+         * picking the pipeline by its label "would silently test the D2C path the day the seed
+         * reorders them". Resolved by the property instead, so it cannot drift.
+         */
+        const pipeline = await QueryOne<{ Name: string }>(`
+            SELECT TOP 1 p.Name
+              FROM __mj_BizAppsSales.Pipeline p
+              JOIN __mj_BizAppsSales.PipelineStage s ON s.PipelineID = p.ID
+              JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = s.DealStatusTypeID
+             WHERE p.IsActive = 1 AND s.IsActive = 1 AND t.IsLost = 1 AND s.OrderStatusOnEntry = 'Voided'
+             ORDER BY p.DisplayRank`);
+        expect(
+            pipeline?.Name,
+            'a pipeline whose losing stage declares Voided is required, or this rule cannot be exercised',
+        ).toBeTruthy();
+
+        const composed = await ComposeDeal(page, `${RUN} lost path`, pipeline!.Name);
         dealID = composed.DealID;
         orderID = composed.OrderID;
 
