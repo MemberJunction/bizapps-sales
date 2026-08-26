@@ -3,10 +3,10 @@
     "fields": {
       "Name": "Sales: Win Rate by Count and Value",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
-      "UserQuestion": "What is our win rate \u2014 both by number of deals and by value?",
-      "Description": "Win rate reported BOTH ways (master plan \u00a79.3 measure 5), because they diverge exactly when it matters: winning nine small deals and losing one large one is a 90% rate by count and can be under 50% by value. Reporting either alone hides a pipeline problem for a quarter.",
+      "UserQuestion": "What is our win rate — both by number of deals and by value?",
+      "Description": "Win rate reported BOTH ways (master plan §9.3 measure 5), because they diverge exactly when it matters: winning nine small deals and losing one large one is a 90% rate by count and can be under 50% by value. Reporting either alone hides a pipeline problem for a quarter.",
       "SQL": "@file:SQL/win-rate.sql",
-      "TechnicalDescription": "Grain: Deal. Denominator is closed deals only (IsClosed), since an open deal has not been decided and including it drags every rate toward zero as the pipeline grows. Won and lost read IsWon / IsLost separately rather than treating \"not won\" as lost, so a closed status that is neither shows as the gap between ClosedCount and Won+Lost. NULLIF guards both divisions \u2014 no closed deals returns NULL, which is a different fact from a rate of zero.",
+      "TechnicalDescription": "Grain: Deal. Denominator is closed deals only (IsClosed), since an open deal has not been decided and including it drags every rate toward zero as the pipeline grows. Won and lost read IsWon / IsLost separately rather than treating \"not won\" as lost, so a closed status that is neither shows as the gap between ClosedCount and Won+Lost. NULLIF guards both divisions — no closed deals returns NULL, which is a different fact from a rate of zero.",
       "Status": "Approved",
       "QualityRank": 8,
       "ExecutionCostRank": 2,
@@ -42,6 +42,10 @@
       "  PeriodEnd (date)",
       "    Inclusive end of the window. Omit for no upper bound.",
       "    e.g. 2026-12-31"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:23.682Z",
+      "checksum": "a2fca59caca2993b6e931ed5ac1ba3f38e4ca6238b0c20079d8cb25a4648b546"
+    }
   }
 ]

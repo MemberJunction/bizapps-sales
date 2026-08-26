@@ -4,9 +4,9 @@
       "Name": "Sales: Slipped Deals",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
       "UserQuestion": "Which deals had their expected close date moved, by how much, and are they still open?",
-      "Description": "Deals whose expected close date moved (master plan \u00a79.3 measure 8). Deals pulled FORWARD are kept rather than filtered out, because a report that only ever shows bad news is one people learn to discount.",
+      "Description": "Deals whose expected close date moved (master plan §9.3 measure 8). Deals pulled FORWARD are kept rather than filtered out, because a report that only ever shows bad news is one people learn to discount.",
       "SQL": "@file:SQL/slippage.sql",
-      "TechnicalDescription": "Grain: Deal, sourced from __mj.RecordChange. Neither Deal nor DealStageEvent holds the previous ExpectedCloseDate, so the history comes from MJ's own audit trail: Entity.TrackRecordChanges is 1 on Deals and ChangesJSON carries {\"Field\":{\"field\",\"oldValue\",\"newValue\"}} per changed column, read with JSON_VALUE. This means slippage needs no new column and no new stamp. It does depend on RecordChange rows surviving \u2014 a retention policy on that table would silently shorten this report's history rather than break it. Date dimension: RecordChange.ChangedAt (when the slip was recorded). NetDaysSlipped compares earliest-from to latest-to, so a deal moved twice the same way is not counted twice.",
+      "TechnicalDescription": "Grain: Deal, sourced from __mj.RecordChange. Neither Deal nor DealStageEvent holds the previous ExpectedCloseDate, so the history comes from MJ's own audit trail: Entity.TrackRecordChanges is 1 on Deals and ChangesJSON carries {\"Field\":{\"field\",\"oldValue\",\"newValue\"}} per changed column, read with JSON_VALUE. This means slippage needs no new column and no new stamp. It does depend on RecordChange rows surviving — a retention policy on that table would silently shorten this report's history rather than break it. Date dimension: RecordChange.ChangedAt (when the slip was recorded). NetDaysSlipped compares earliest-from to latest-to, so a deal moved twice the same way is not counted twice.",
       "Status": "Approved",
       "QualityRank": 8,
       "ExecutionCostRank": 4,
@@ -45,6 +45,10 @@
       "  OpenOnly (string)",
       "    Pass \"true\" to show only deals that are still open.",
       "    e.g. true"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:22.743Z",
+      "checksum": "52936a98b90a2b6a37a5820fa9bb434c9bd6a92502ca5f5619afc8c0a3f3a55a"
+    }
   }
 ]

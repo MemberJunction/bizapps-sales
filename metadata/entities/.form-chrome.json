@@ -19,7 +19,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Account Types"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:03.289Z",
+      "lastModified": "2026-08-26T00:25:25.369Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -43,7 +43,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Buying Role Types"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:03.378Z",
+      "lastModified": "2026-08-26T00:25:25.399Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -67,7 +67,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Roles"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:03.471Z",
+      "lastModified": "2026-08-26T00:25:25.489Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -91,7 +91,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Status Types"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:03.233Z",
+      "lastModified": "2026-08-26T00:25:25.429Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -115,7 +115,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Types"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:03.561Z",
+      "lastModified": "2026-08-26T00:25:25.459Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -139,7 +139,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Forecast Category Types"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:03.819Z",
+      "lastModified": "2026-08-26T00:25:25.519Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -163,7 +163,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Lead Source Types"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:03.903Z",
+      "lastModified": "2026-08-26T00:25:25.549Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -187,7 +187,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Lifecycle Stage Types"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:03.647Z",
+      "lastModified": "2026-08-26T00:25:25.579Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -211,7 +211,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Loss Reasons"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:03.732Z",
+      "lastModified": "2026-08-26T00:25:25.610Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -235,7 +235,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Pipelines"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:03.979Z",
+      "lastModified": "2026-08-26T00:25:25.635Z",
       "checksum": "b1e5da9f238870a82ece2638ac0e405f1e9548a3e15649b9ea1ce2b8fac1b1b8"
     }
   },
@@ -258,7 +258,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Pipeline Stages"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:04.146Z",
+      "lastModified": "2026-08-26T00:25:25.907Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -281,7 +281,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Sales Accounts"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:04.241Z",
+      "lastModified": "2026-08-26T00:25:25.708Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -306,7 +306,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Sales Contacts"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:04.423Z",
+      "lastModified": "2026-08-26T00:25:25.739Z",
       "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
     }
   },
@@ -328,7 +328,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Contact Roles"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:04.330Z",
+      "lastModified": "2026-08-26T00:25:25.826Z",
       "checksum": "86694cd19e4ef47c4ae5ae785cb0fccc0ca85441af31c3743eb864debd2979a9"
     }
   },
@@ -350,7 +350,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Payment Schedules"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:04.513Z",
+      "lastModified": "2026-08-26T00:25:25.768Z",
       "checksum": "86694cd19e4ef47c4ae5ae785cb0fccc0ca85441af31c3743eb864debd2979a9"
     }
   },
@@ -372,7 +372,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Team Members"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:04.687Z",
+      "lastModified": "2026-08-26T00:25:25.798Z",
       "checksum": "86694cd19e4ef47c4ae5ae785cb0fccc0ca85441af31c3743eb864debd2979a9"
     }
   },
@@ -394,7 +394,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Forecast Snapshots"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:04.599Z",
+      "lastModified": "2026-08-26T00:25:25.855Z",
       "checksum": "86694cd19e4ef47c4ae5ae785cb0fccc0ca85441af31c3743eb864debd2979a9"
     }
   },
@@ -416,7 +416,7 @@
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Sequences"
     },
     "sync": {
-      "lastModified": "2026-08-19T23:55:04.769Z",
+      "lastModified": "2026-08-26T00:25:25.883Z",
       "checksum": "86694cd19e4ef47c4ae5ae785cb0fccc0ca85441af31c3743eb864debd2979a9"
     }
   }

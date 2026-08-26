@@ -3,10 +3,10 @@
     "fields": {
       "Name": "Sales: Bookings by Owner",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
-      "UserQuestion": "Whose number is this \u2014 bookings credited to the deal owner, each deal counted once?",
-      "Description": "ATTRIBUTION BASIS: OWNER-ROLE FILTER, every deal counted exactly once. This is the \"bookings by AE\" question and it is the one to use for any figure that must reconcile \u2014 a board number, a commission input, an accounting tie-out. Its pair is \"Sales: Deal Involvement by Rep\", which is attribution-weighted and does NOT sum to bookings. Master plan \u00a79.4: \"There is no safe default that works for both.\" ADDITIVITY: every money column and count here totals correctly across rows, because the IsOwnerRole filter puts each deal on exactly one row. WinRateByCount is a ratio and does not average across rows.",
+      "UserQuestion": "Whose number is this — bookings credited to the deal owner, each deal counted once?",
+      "Description": "ATTRIBUTION BASIS: OWNER-ROLE FILTER, every deal counted exactly once. This is the \"bookings by AE\" question and it is the one to use for any figure that must reconcile — a board number, a commission input, an accounting tie-out. Its pair is \"Sales: Deal Involvement by Rep\", which is attribution-weighted and does NOT sum to bookings. Master plan §9.4: \"There is no safe default that works for both.\" ADDITIVITY: every money column and count here totals correctly across rows, because the IsOwnerRole filter puts each deal on exactly one row. WinRateByCount is a ratio and does not average across rows.",
       "SQL": "@file:SQL/bookings-by-owner.sql",
-      "TechnicalDescription": "Grain: DealTeamMember, filtered to DealRole.IsOwnerRole = 1 \u2014 a FLAG. Without that filter a deal with an AE, an SE and an SDR contributes its amount three times, which is the double-count \u00a79.4 names. Deliberately does NOT read Deal.OwnerEmployeeID: that is a denormalised stamp derived from this same team row, and CLAUDE.md makes DealTeamMember the source of truth for membership. Date dimension: ActualCloseDate.",
+      "TechnicalDescription": "Grain: DealTeamMember, filtered to DealRole.IsOwnerRole = 1 — a FLAG. Without that filter a deal with an AE, an SE and an SDR contributes its amount three times, which is the double-count §9.4 names. Deliberately does NOT read Deal.OwnerEmployeeID: that is a denormalised stamp derived from this same team row, and CLAUDE.md makes DealTeamMember the source of truth for membership. Date dimension: ActualCloseDate.",
       "Status": "Approved",
       "QualityRank": 9,
       "ExecutionCostRank": 2,
@@ -42,6 +42,10 @@
       "  PeriodEnd (date)",
       "    Inclusive end of the window. Omit for no upper bound.",
       "    e.g. 2026-12-31"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:16.872Z",
+      "checksum": "3575219d1352bcc7bf388e3eb414be210bf88f01ca92663dcc6c3cfd92f815df"
+    }
   }
 ]

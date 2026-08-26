@@ -4,9 +4,9 @@
       "Name": "Sales: Forecast History",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
       "UserQuestion": "What did we think the forecast was on a past date, and how has it moved since?",
-      "Description": "Point-in-time forecast from ForecastSnapshot (master plan \u00a79.4). A DIFFERENT QUESTION from \"Sales: Forecast by Category\", not a variant of it: reconstructing a past forecast from Deal is impossible, not merely inaccurate, because amounts change, dates move and deals get recategorised without the current row carrying what it used to say. CommitChangeSincePrior is the column a forecast review actually reads \u2014 not the level, but the movement.",
+      "Description": "Point-in-time forecast from ForecastSnapshot (master plan §9.4). A DIFFERENT QUESTION from \"Sales: Forecast by Category\", not a variant of it: reconstructing a past forecast from Deal is impossible, not merely inaccurate, because amounts change, dates move and deals get recategorised without the current row carrying what it used to say. CommitChangeSincePrior is the column a forecast review actually reads — not the level, but the movement.",
       "SQL": "@file:SQL/forecast-history.sql",
-      "TechnicalDescription": "Grain: ForecastSnapshot, written by the Sales.CaptureForecastSnapshot Action on the Sales - Forecast Snapshot (daily) ScheduledJob. (scripts/capture-forecast-snapshot.sql is a manual tool, deliberately unseeded -- see its header.) Two independent date concepts: CapturedAt is when the picture was taken (\"as we saw it on the 1st\"), PeriodStart/PeriodEnd describe which period it was ABOUT \u2014 filtered separately because conflating them answers neither question. Column names are *Amount-suffixed, diverging from \u00a79.5's bare Commit/BestCase/Pipeline/Closed; the shipped names are authoritative per docs/DECISIONS.md D6, since COMMIT is reserved in T-SQL and Postgres and production is Postgres.",
+      "TechnicalDescription": "Grain: ForecastSnapshot, written by the Sales.CaptureForecastSnapshot Action on the Sales - Forecast Snapshot (daily) ScheduledJob. (scripts/capture-forecast-snapshot.sql is a manual tool, deliberately unseeded -- see its header.) Two independent date concepts: CapturedAt is when the picture was taken (\"as we saw it on the 1st\"), PeriodStart/PeriodEnd describe which period it was ABOUT — filtered separately because conflating them answers neither question. Column names are *Amount-suffixed, diverging from §9.5's bare Commit/BestCase/Pipeline/Closed; the shipped names are authoritative per docs/DECISIONS.md D6, since COMMIT is reserved in T-SQL and Postgres and production is Postgres.",
       "Status": "Approved",
       "QualityRank": 9,
       "ExecutionCostRank": 2,
@@ -45,6 +45,10 @@
       "  CapturedOnOrBefore (date)",
       "    Show the forecast as it stood on or before this timestamp. This is the \"as we saw it then\" filter, distinct from the period filters.",
       "    e.g. 2026-08-01"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:21.231Z",
+      "checksum": "ef041a837a2a0925691c2595a714bef75a3aaee47afdf56edebe566e82895618"
+    }
   }
 ]

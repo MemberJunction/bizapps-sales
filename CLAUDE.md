@@ -24,6 +24,10 @@ where `docs/DECISIONS.md` records a ruling that supersedes it.
   was checked against. Read it before merging feature branches together: twice an integration has been
   reported complete against branch names while the branches had moved on, and the second time it was
   green while missing an entire story's read model. A green suite cannot detect work that never arrived.
+- **`docs/PUBLISHING.md`** — how a release is cut, and the two ways this app can be "published" while
+  still being uninstallable. Read it before touching `metadata/`: MJ never reads `mj-app.json`'s
+  `metadata.directory` at install, so metadata that is not in a `*Metadata_Sync*.sql` migration ships
+  nowhere and every install step still reports success. `pnpm run lint:distribution` is the gate.
 
 > ## ⚠️ KNOWN ISSUE — read before touching the IsA extensions
 >

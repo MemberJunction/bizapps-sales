@@ -4,9 +4,9 @@
       "Name": "Sales: Forecast by Category",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
       "UserQuestion": "What are we calling commit, best case and pipeline for this period?",
-      "Description": "Forecast rollup by ForecastCategoryType (master plan \u00a79.3 measure 3). The three buckets are OVERLAPPING, not a partition \u2014 one category normally sets more than one flag, because commit is the floor of the forecast rather than a slice of it. Adding the three columns together produces a meaningless number; they are separate SUMs for that reason.",
+      "Description": "Forecast rollup by ForecastCategoryType (master plan §9.3 measure 3). The three buckets are OVERLAPPING, not a partition — one category normally sets more than one flag, because commit is the floor of the forecast rather than a slice of it. Adding the three columns together produces a meaningless number; they are separate SUMs for that reason.",
       "SQL": "@file:SQL/forecast-by-category.sql",
-      "TechnicalDescription": "Grain: Deal. Buckets come from ForecastCategoryType.IncludeInCommit / IncludeInBestCase / IncludeInPipeline \u2014 \u00a79.3 says \"never a string comparison\" and this is that requirement. Dates: open deals placed by ExpectedCloseDate, won deals by ActualCloseDate, same window. UncategorizedOpenCount surfaces open deals with no forecast category rather than dropping them silently.",
+      "TechnicalDescription": "Grain: Deal. Buckets come from ForecastCategoryType.IncludeInCommit / IncludeInBestCase / IncludeInPipeline — §9.3 says \"never a string comparison\" and this is that requirement. Dates: open deals placed by ExpectedCloseDate, won deals by ActualCloseDate, same window. UncategorizedOpenCount surfaces open deals with no forecast category rather than dropping them silently.",
       "Status": "Approved",
       "QualityRank": 8,
       "ExecutionCostRank": 2,
@@ -42,6 +42,10 @@
       "  PeriodEnd (date)",
       "    Inclusive end of the window. Omit for no upper bound.",
       "    e.g. 2026-12-31"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:20.139Z",
+      "checksum": "4168368857b38c075e8439cc72d444c0cfcd15d4ced887f670b0429326a37e2d"
+    }
   }
 ]

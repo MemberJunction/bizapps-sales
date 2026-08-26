@@ -4,9 +4,9 @@
       "Name": "Sales: Stage Conversion and Dwell",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
       "UserQuestion": "How do deals move between stages, how long do they sit, and which stages get skipped?",
-      "Description": "Conversion and dwell at the TRANSITION grain (master plan \u00a79.1, \u00a79.3 measure 7). This is the one measure that cannot be answered from Deal at all: the current stage says where a deal is, only the append-only event log says where it has been. Skipped and backward moves fall out for free because rows key on the (From, To) pair rather than on adjacency.",
+      "Description": "Conversion and dwell at the TRANSITION grain (master plan §9.1, §9.3 measure 7). This is the one measure that cannot be answered from Deal at all: the current stage says where a deal is, only the append-only event log says where it has been. Skipped and backward moves fall out for free because rows key on the (From, To) pair rather than on adjacency.",
       "SQL": "@file:SQL/stage-conversion-and-dwell.sql",
-      "TechnicalDescription": "Grain: DealStageEvent. Date dimension: ChangedAt. Dwell comes from the stored DaysInPreviousStage stamp rather than being derived by joining each event to its predecessor \u2014 the importer preserves original ChangedAt values, so the stamps are the authority. AmountAtTransition is the DEPARTING value, so value-weighted conversion reflects what was at stake at that moment rather than what the deal is worth today.",
+      "TechnicalDescription": "Grain: DealStageEvent. Date dimension: ChangedAt. Dwell comes from the stored DaysInPreviousStage stamp rather than being derived by joining each event to its predecessor — the importer preserves original ChangedAt values, so the stamps are the authority. AmountAtTransition is the DEPARTING value, so value-weighted conversion reflects what was at stake at that moment rather than what the deal is worth today.",
       "Status": "Approved",
       "QualityRank": 9,
       "ExecutionCostRank": 3,
@@ -42,6 +42,10 @@
       "  PeriodEnd (date)",
       "    Inclusive end of the window. Omit for no upper bound.",
       "    e.g. 2026-12-31"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:23.266Z",
+      "checksum": "7f49f944b4032afb20195673acd40866300694b88fac9f45a6caf9ac1278d7db"
+    }
   }
 ]

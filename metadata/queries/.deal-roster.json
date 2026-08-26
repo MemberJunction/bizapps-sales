@@ -3,10 +3,10 @@
     "fields": {
       "Name": "Sales: Deal Roster",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
-      "UserQuestion": "Which deals are these \u2014 one row each, with names, amounts and provenance?",
-      "Description": "One row per deal, dimensioned, as a grid source and a drill-through target for every aggregate here. Exists because the first thing anyone does with a number they distrust is ask which deals are in it, and without a roster sharing the same filters that question gets answered by ad-hoc SQL \u2014 which is how a report and its drill-through quietly stop agreeing. Names throughout, per S-US11, with IDs alongside for navigation.",
+      "UserQuestion": "Which deals are these — one row each, with names, amounts and provenance?",
+      "Description": "One row per deal, dimensioned, as a grid source and a drill-through target for every aggregate here. Exists because the first thing anyone does with a number they distrust is ask which deals are in it, and without a roster sharing the same filters that question gets answered by ad-hoc SQL — which is how a report and its drill-through quietly stop agreeing. Names throughout, per S-US11, with IDs alongside for navigation.",
       "SQL": "@file:SQL/deal-roster.sql",
-      "TechnicalDescription": "Grain: Deal. Returns the IsOpen / IsWon / IsLost / IsClosed flags on every row so a consumer can branch on behaviour rather than on the status name it was given for display \u2014 the vocabulary rule reaching one layer past the query. Carries AmountIsComputed so a grid can mark a stated figure instead of presenting it as settled. IsPastExpectedClose is computed against SYSUTCDATETIME because everything stored is UTC. Filtered on expected close for open deals and actual close for closed, so one period filter behaves across a mixed set.",
+      "TechnicalDescription": "Grain: Deal. Returns the IsOpen / IsWon / IsLost / IsClosed flags on every row so a consumer can branch on behaviour rather than on the status name it was given for display — the vocabulary rule reaching one layer past the query. Carries AmountIsComputed so a grid can mark a stated figure instead of presenting it as settled. IsPastExpectedClose is computed against SYSUTCDATETIME because everything stored is UTC. Filtered on expected close for open deals and actual close for closed, so one period filter behaves across a mixed set.",
       "Status": "Approved",
       "QualityRank": 8,
       "ExecutionCostRank": 2,
@@ -43,10 +43,14 @@
       "    Inclusive end of the window. Omit for no upper bound.",
       "    e.g. 2026-12-31",
       "  OwnerEmployeeID (string)",
-      "    One owner. Reads the denormalised Deal.OwnerEmployeeID because this is a display filter, not an attribution measure \u2014 see \"Sales: Bookings by Owner\" for the reconciling version.",
+      "    One owner. Reads the denormalised Deal.OwnerEmployeeID because this is a display filter, not an attribution measure — see \"Sales: Bookings by Owner\" for the reconciling version.",
       "  OpenOnly (string)",
       "    Pass \"true\" for open deals only.",
       "    e.g. true"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:19.299Z",
+      "checksum": "8b4be5b0381ade9d87827e539b1422ca277367dbc8add6fe96b0a6471be0c4ae"
+    }
   }
 ]

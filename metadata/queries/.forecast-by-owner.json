@@ -27,6 +27,10 @@
     "relatedEntities": {},
     "primaryKey": {
       "ID": "5A1E5000-0001-4000-A000-00000000000F"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:20.672Z",
+      "checksum": "29626ef9295dd20ff1e5d226a9a2d7083682780aeca130af6034384cbe87da91"
     }
   }
 ]
