@@ -64,6 +64,22 @@ function readEnv() {
     const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i.exec(line);
     if (m) out[m[1]] = m[2];
   }
+  /**
+   * process.env WINS over the file, and that is the whole point.
+   *
+   * This returned the FILE only. On a multi-database machine .env names one database -- here
+   * MJ_V6_Host, the recording host -- so DB_DATABASE=<other> node cleanup.mjs swept a database
+   * nobody was testing, found nothing, and reported success. Every run left its deals behind on
+   * the database under test and the next run inherited them.
+   *
+   * Measured 2026-08-26: 14 residue deals before, cleanup reports remaining_deals=0, 14 after.
+   * Two identical full suites scored 26/2 then 23/5, differing only in how dirty they started.
+   * lib/db.ts already gets this right via dotenv, and its header says the assertions only mean
+   * something when harness and app share a database. The teardown was the piece not honouring it.
+   */
+  for (const k of ['DB_HOST', 'DB_PORT', 'DB_USERNAME', 'DB_PASSWORD', 'DB_DATABASE']) {
+    if (process.env[k]) out[k] = process.env[k];
+  }
   return out;
 }
 
@@ -209,6 +225,8 @@ DECLARE @dealEntity UNIQUEIDENTIFIER =
  *      the only thing that deletes deals here is this sweep.
  */
 DECLARE @contracts TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
+BEGIN
 INSERT INTO @contracts (ID)
   SELECT DISTINCT c.ID FROM __mj_BizAppsContracts.Contract c
     JOIN @deals d ON d.ID = c.CreatingRecordID
@@ -216,6 +234,7 @@ INSERT INTO @contracts (ID)
   SELECT c.ID FROM __mj_BizAppsContracts.Contract c
    WHERE c.CreatingEntityID = @dealEntity
      AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d WHERE d.ID = c.CreatingRecordID);
+END;
 
 /* TASKS — three routes.
  *
@@ -300,10 +319,14 @@ DELETE al FROM __mj_BizAppsCommon.ActivityLink al JOIN @acts a ON al.ActivityID 
 UPDATE a SET ParentActivityID = NULL FROM __mj_BizAppsCommon.Activity a JOIN @acts x ON x.ID = a.ID WHERE a.ParentActivityID IS NOT NULL;
 DELETE a FROM __mj_BizAppsCommon.Activity a JOIN @acts x ON x.ID = a.ID;
 
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
 DELETE m FROM __mj_BizAppsContracts.ContractTemplateModification m JOIN @contracts c ON m.ContractID = c.ID;
 -- Contracts point at each other two ways; both must be broken before the rows go.
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
 UPDATE c SET ParentContractID = NULL FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID WHERE c.ParentContractID IS NOT NULL;
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
 UPDATE c SET SupersededByContractID = NULL FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID WHERE c.SupersededByContractID IS NOT NULL;
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
 DELETE c FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID;
 
 DELETE ps FROM __mj_BizAppsSales.DealPaymentSchedule ps JOIN @deals d ON ps.DealID = d.ID;
@@ -453,9 +476,12 @@ SELECT 'remaining_tasks=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsTasks.Tas
                              WHERE d.ID = TRY_CONVERT(UNIQUEIDENTIFIER, tl.RecordID)));
 
 /* CONTRACTS -- a deal-created contract whose creating deal no longer exists. The documented class. */
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
+BEGIN
 SELECT 'remaining_contracts=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsContracts.Contract c
  WHERE c.CreatingEntityID = @dealEntity
    AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d WHERE d.ID = c.CreatingRecordID);
+END;
 
 /* ACTIVITIES -- an activity still linked to a Deal row that is gone. */
 SELECT 'remaining_activities=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsCommon.Activity a
@@ -508,7 +534,18 @@ export function cleanup() {
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean)
-      .slice(0, 3)
+      // ERRORS ARRIVE LAST. This took the FIRST three lines, but stdout begins with the
+      // will_delete SELECT rows, so the actual sqlcmd error was sliced off every time and the
+      // warning showed a list of rows it had just failed to delete. Prefer anything that names an
+      // error, and fall back to the TAIL rather than the head.
+      .filter((v) => v.length > 0)
+      .flatMap((v) => v.split(String.fromCharCode(10)))
+      .filter((l) => l.trim().length > 0)
+      .filter((l, _i, all) => {
+        const errs = all.filter((x) => /Msg |error|Invalid|constraint|conflict/i.test(x));
+        return errs.length > 0 ? errs.includes(l) : true;
+      })
+      .slice(-3)
       .join(' ');
     console.warn(
       `  cleanup(${PREFIX}*): SKIPPED — ${detail || (e.message ?? e).toString().split('\n')[0]}`,
