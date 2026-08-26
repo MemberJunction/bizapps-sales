@@ -151,7 +151,7 @@ importers:
         specifier: ^6.1.0-edge.3
         version: 6.1.0-edge.3
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 5.1.0
+        specifier: 5.2.0
         version: link:../CoreEntitiesServer
       zod:
         specifier: ^3.25.76
@@ -218,7 +218,7 @@ importers:
         specifier: ^5.0.0
         version: 5.1.0(@memberjunction/core@6.1.0-edge.3)(@memberjunction/global@6.1.0-edge.3)
       '@mj-biz-apps/sales-entities':
-        specifier: 5.1.0
+        specifier: 5.2.0
         version: link:../Entities
     devDependencies:
       '@angular/compiler':
@@ -252,7 +252,7 @@ importers:
         specifier: ^5.1.0
         version: 5.1.0(@memberjunction/core@6.1.0-edge.3)(@memberjunction/global@6.1.0-edge.3)
       '@mj-biz-apps/sales-entities':
-        specifier: 5.1.0
+        specifier: 5.2.0
         version: link:../Entities
       '@mj-biz-apps/tasks-core':
         specifier: ^1.2.3
@@ -311,13 +311,13 @@ importers:
         specifier: ^5.1.0
         version: 5.1.0(@memberjunction/core@6.1.0-edge.3)(@memberjunction/global@6.1.0-edge.3)
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 5.1.0
+        specifier: 5.2.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: 5.1.0
+        specifier: 5.2.0
         version: link:../Entities
       '@mj-biz-apps/sales-server':
-        specifier: 5.1.0
+        specifier: 5.2.0
         version: link:../Server
     devDependencies:
       '@mj-biz-apps/tasks-entities':
@@ -354,13 +354,13 @@ importers:
         specifier: ^6.1.0-edge.3
         version: 6.1.0-edge.3(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(chokidar@3.6.0)(debug@4.4.3)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@mj-biz-apps/sales-actions':
-        specifier: 5.1.0
+        specifier: 5.2.0
         version: link:../Actions
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 5.1.0
+        specifier: 5.2.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: 5.1.0
+        specifier: 5.2.0
         version: link:../Entities
       class-validator:
         specifier: ^0.14.3
@@ -10265,7 +10265,7 @@ snapshots:
       '@memberjunction/ai': 6.1.0-edge.3
       '@memberjunction/global': 6.1.0-edge.3
       axios: 1.19.0(debug@4.4.3)
-      axios-retry: 4.5.0(axios@1.19.0)
+      axios-retry: 4.5.0(axios@1.19.0(debug@4.4.3))
       env-var: 7.5.0
     transitivePeerDependencies:
       - debug
@@ -10693,7 +10693,7 @@ snapshots:
       '@memberjunction/global': 6.1.0-edge.3
       '@mistralai/mistralai': 1.15.1
       axios: 1.19.0(debug@4.4.3)
-      axios-retry: 4.5.0(axios@1.19.0)
+      axios-retry: 4.5.0(axios@1.19.0(debug@4.4.3))
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -17107,7 +17107,7 @@ snapshots:
 
   aws-ssl-profiles@1.1.2: {}
 
-  axios-retry@4.5.0(axios@1.19.0):
+  axios-retry@4.5.0(axios@1.19.0(debug@4.4.3)):
     dependencies:
       axios: 1.19.0(debug@4.4.3)
       is-retry-allowed: 2.2.0
