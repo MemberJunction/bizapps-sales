@@ -266,15 +266,29 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     /**
-     * The selling company of the ACTIVE deal, from the pipeline first.
+     * The selling company of the ACTIVE deal. THE DEAL'S OWN COLUMN, and nothing else.
      *
      * One expression, used by the picker, by the catalogue load and by `AddLine`'s stamp. It was
      * three: `RefreshProducts` filtered on `deal.CompanyID` while `AddLine` stamped
-     * `CompanyIDFromPipeline ?? deal.CompanyID`, which agree today only because `SelectPipeline`
-     * happens to write both.
+     * `CompanyIDFromPipeline ?? deal.CompanyID`, which agreed only because `SelectPipeline` happened
+     * to write both.
+     *
+     * ── WHY THE PIPELINE IS NO LONGER CONSULTED (issue #29 item 6) ──
+     *
+     * It read `CompanyIDFromPipeline ?? Deal.CompanyID`, which was correct while the server stamped
+     * the company FROM the pipeline: the two could not disagree. #29 reverses that — the user picks
+     * the company, and a pipeline may belong to no company at all. Under those rules the old
+     * expression is actively wrong twice over: a shared pipeline contributes `null` and falls through
+     * to the right answer by luck, and a pipeline still carrying a company would OVERRIDE the answer
+     * the user gave.
+     *
+     * `Deal.CompanyID` is `NOT NULL` and is now the user's answer, so it is the only source that can
+     * be right. Everything that stamps a company — the catalogue filter, deal lines, the embedded
+     * order, the contract at Closed Won — reads this one getter, which is why #29 names it as the
+     * single place to change.
      */
     public get ActiveCompanyID(): string | null {
-        return this.CompanyIDFromPipeline ?? this.Deal?.CompanyID ?? null;
+        return this.Deal?.CompanyID ?? null;
     }
     public readonly Loading = signal(true);
     public readonly Saving = signal(false);
@@ -857,7 +871,7 @@ export class DealWorkspaceComponent implements OnInit {
         // that the browser can also know -- deliberately NOT Status (orders defaults it) and NOT
         // OrderNumber (orders MINTS it; see the note above CanSave).
         if (order && !order.IsSaved) {
-            order.Set('CompanyID', this.CompanyIDFromPipeline ?? this.Deal?.CompanyID ?? null);
+            order.Set('CompanyID', this.ActiveCompanyID);
             order.Set('OrderType', 'Sale');
         }
 
@@ -905,7 +919,7 @@ export class DealWorkspaceComponent implements OnInit {
          * back at the disabled button. `Lookups.Pipelines` carries `CompanyID` for exactly this reason,
          * and it is the same row the server reads.
          */
-        line?.Set('CompanyID', this.CompanyIDFromPipeline ?? this.Deal?.CompanyID ?? null);
+        line?.Set('CompanyID', this.ActiveCompanyID);
 
         this.Touch();
     }

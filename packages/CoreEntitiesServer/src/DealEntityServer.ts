@@ -276,8 +276,24 @@ export class DealEntityServer extends DealEntity {
             return false;
         }
 
+        /**
+         * THE COMPANY IS THE USER’S ANSWER NOW, AND THE PIPELINE IS CHECKED AGAINST IT (issue #29).
+         *
+         * This used to call `stampCompanyFromPipeline()`, which OVERWROTE whatever the caller supplied.
+         * That made the pipeline the only source that could be right, and it is the thing #29 reverses:
+         * the user picks the company first, and a pipeline is offered only if it belongs to that company
+         * or to no company at all. So the write path validates rather than assigns.
+         *
+         * Refusal, not correction, is deliberate. Silently rewriting a caller’s company is how a deal
+         * ends up filed against a company nobody chose, and D5 records that the rollups downstream
+         * depend on `Deal.CompanyID` being the answer to a question, not a side effect.
+         */
+        const companyRefusal = await this.companyPipelineRefusal();
+        if (companyRefusal) {
+            LogError(`DealEntityServer.Save refused: ${companyRefusal}`);
+            return false;
+        }
         try {
-            await this.stampCompanyFromPipeline();
             await this.stampOwnerFromTeam();
         } catch (err) {
             LogError(`DealEntityServer.Save: could not resolve a server-maintained stamp: ${err}`);
@@ -722,11 +738,12 @@ export class DealEntityServer extends DealEntity {
      *
      * ── WHY FIRST SAVE AND NOT NewRecord() ──
      *
-     * `OrderHeader.CompanyID` is NOT NULL, and a deal does not know its company until
-     * `stampCompanyFromPipeline()` has run: the caller supplies a PipelineID and the selling company is
-     * derived from it (D-4). Provisioning in `NewRecord()` would mean inventing a company or building an
-     * order that cannot be inserted. So it happens here, after the stamps, on the one call where
-     * `IsSaved` is still false.
+     * `OrderHeader.CompanyID` is NOT NULL, and the deal's company must therefore be settled before the
+     * order is provisioned. It used to be DERIVED here -- `stampCompanyFromPipeline()` read it off the
+     * pipeline (D-4). Since issue #29 the user supplies it and `companyPipelineRefusal()` only checks it,
+     * so by this point `CompanyID` is either present and consistent with the pipeline, or the save has
+     * already been refused. Provisioning in `NewRecord()` would still mean building an order that cannot
+     * be inserted, so it stays here, on the one call where `IsSaved` is still false.
      *
      * ── WHY THE GUARD IS `IsSaved`, AND NOT `IsSaved || OrderID` ──
      *
@@ -1670,11 +1687,10 @@ export class DealEntityServer extends DealEntity {
      * A missing pipeline is left alone: `Validate()` already refuses a deal without one, and raising a
      * second, vaguer complaint here would just bury the specific message the user needs.
      */
-    private async stampCompanyFromPipeline(): Promise<void> {
+    private async companyPipelineRefusal(): Promise<string | null> {
         if (!this.PipelineID) {
-            return;
+            return null;
         }
-
         const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await viewProvider.RunView<PipelineCompanyRow>(
             {
@@ -1686,16 +1702,40 @@ export class DealEntityServer extends DealEntity {
             this.ContextCurrentUser,
         );
         if (!result.Success) {
-            throw new Error(`DealEntityServer: could not read the pipeline's company: ${result.ErrorMessage}`);
+            return `the pipeline’s company could not be read: ${result.ErrorMessage}`;
         }
 
         const pipeline = (result.Results ?? [])[0];
-        if (!pipeline?.CompanyID) {
-            throw new Error(
-                `DealEntityServer: pipeline ${this.PipelineID} could not be read, so the selling company is unknown.`,
+        if (!pipeline) {
+            return `pipeline ${this.PipelineID} could not be read, so the deal cannot be checked against it`;
+        }
+
+        /**
+         * A COMPANY-LESS PIPELINE IS SHARED, and that is the point of #29 rather than a loophole.
+         *
+         * `NULL` means every company may use it — Blue Cypress companies with identical sales
+         * processes should not each need their own Pipeline and PipelineStage rows. Until the column
+         * is made nullable (issue #29 item 4, gated on Amith’s approval) this branch simply never
+         * fires, and the check below carries the whole behaviour. It is written now so that landing
+         * the schema change is a migration and nothing else.
+         */
+        if (!pipeline.CompanyID) {
+            return null;
+        }
+
+        if (!this.CompanyID) {
+            return 'the deal has no company, and Deal.CompanyID is required';
+        }
+
+        if (String(pipeline.CompanyID).toLowerCase() !== String(this.CompanyID).toLowerCase()) {
+            return (
+                `pipeline ${this.PipelineID} belongs to company ${pipeline.CompanyID}, but this deal is `
+                + `filed against ${this.CompanyID}. Choose a pipeline that belongs to the deal’s company, `
+                + 'or one that belongs to no company.'
             );
         }
-        this.CompanyID = pipeline.CompanyID;
+
+        return null;
     }
 
     /* ── Owner stamp (§5.1) ─────────────────────────────────────────────────── */
