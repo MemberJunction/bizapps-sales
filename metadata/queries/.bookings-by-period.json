@@ -1,0 +1,54 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Bookings by Period",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "What did we book by month, quarter or year — and what did we lose alongside it?",
+      "Description": "Closed-won amount by period (master plan §9.3 measure 4), with losses reported beside it so a rising bookings figure and a falling win rate cannot be mistaken for each other. One row per deal, so no attribution question arises and nothing can be double-counted.",
+      "SQL": "@file:SQL/bookings-by-period.sql",
+      "TechnicalDescription": "Grain: Deal. Date dimension: ActualCloseDate — bookings belong to the period a deal actually closed in, which differs from expected for every deal that slipped. Won/Lost from the IsWon / IsLost flags. Granularity is a Nunjucks branch selecting one of three fixed DATEFROMPARTS expressions, so no caller string reaches a DATEPART argument.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-000000000003"
+    },
+    "_comments": [
+      "PARAMETERS ARE DERIVED BY MJ, NOT DECLARED HERE -- and the authored detail is kept below.",
+      "",
+      "They were declared as relatedEntities['MJ: Query Parameters'], and that made this whole",
+      "directory unseedable on a fresh database. MJ derives parameters from the SQL when the query is",
+      "created; the declared rows then collided with them on the UNIQUE (QueryID, Name) index -- 18",
+      "violations, whole-transaction rollback, 0 of 16 queries landing, byte-identical on a retry.",
+      "That was KI-25, and it cost every fresh install its dashboard.",
+      "",
+      "Removing the declarations lets MJ derive them: names and IsRequired come out identical. Type",
+      "degrades from date to string on the period parameters, which is harmless here because",
+      "QueryForecastSource passes them as ISO date-only STRINGS on purpose -- 'a full timestamp would",
+      "invite a query to compare a date column against an instant'. What would genuinely have been",
+      "lost is the authored Description and SampleValue, so they are preserved verbatim:",
+      "",
+      "  CompanyID (string)",
+      "    Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
+      "    e.g. C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
+      "  PipelineID (string)",
+      "    One pipeline. Omit for all pipelines.",
+      "    e.g. 90111111-0000-4000-A000-000000000001",
+      "  PeriodStart (date)",
+      "    Inclusive start of the window. Omit for no lower bound.",
+      "    e.g. 2026-01-01",
+      "  PeriodEnd (date)",
+      "    Inclusive end of the window. Omit for no upper bound.",
+      "    e.g. 2026-12-31",
+      "  Granularity (string)",
+      "    month (default), quarter, or year. A branch selects one of three fixed expressions; the value never enters SQL text.",
+      "    e.g. quarter"
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:17.123Z",
+      "checksum": "aa42d3458ef752fad9b34bf92b7fbd9a7d8d3cc2b443c3c7e3af71cdb7b4b770"
+    }
+  }
+]

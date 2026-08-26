@@ -1,0 +1,82 @@
+[
+  {
+    "_comments": [
+      "THE FORECAST SNAPSHOT ACTION (#40). Its own file inside metadata/actions/ rather than appended to",
+      "`.sales-actions.json`, and that is the coordination answer rather than untidiness.",
+      "",
+      "`filePattern` is `**/.*.json`, so MetadataSync picks up every dot-json in the directory. Another",
+      "session is building the MJ Queries this reads from and will likely add rows of its own here; two",
+      "sessions appending to one file is a guaranteed merge conflict, while two files in one directory is",
+      "none. Whoever adds the queries should add `.sales-forecast-queries.json` beside this on the same",
+      "principle.",
+      "",
+      "SHAPE MATCHES `Sales.SyncActivities` exactly — Type Custom, CodeApprovalStatus Approved, Status",
+      "Active, params as an `MJ: Action Params` collection with `@parent:ID`. Sales now has two",
+      "hand-written actions and they are deliberately identical in shape.",
+      "",
+      "WHAT IT DOES NOT DECIDE: where the numbers come from. That is the process-wide forecast source",
+      "factory, whose default is NULL — no source, nothing measured, and the Action reports NO_SOURCE. So",
+      "this is safe to ship Active before the queries exist. A forecast row is the case where an invented",
+      "number does the most damage: an activity nobody sent reads as obviously wrong, a plausible commit",
+      "figure does not, and it is indistinguishable from a real one the moment it lands."
+    ],
+    "fields": {
+      "Name": "Capture Forecast Snapshot",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Sales",
+      "Description": "Capture a ForecastSnapshot row per (company, pipeline, owner) for a period, from the forecast queries. Skips a grain already captured today rather than adding a second capture minutes apart — the table is a series, and CapturedAt is what distinguishes real history from a double-run.",
+      "Type": "Custom",
+      "DriverClass": "Sales.CaptureForecastSnapshot",
+      "IconClass": "fa-solid fa-chart-line",
+      "UserPrompt": "Capture the sales forecast snapshot for the current period.",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0000-4000-8000-000000000111"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "PeriodStart",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "First day of the period to measure, inclusive, as YYYY-MM-DD. Omit BOTH this and PeriodEnd for the current calendar month in UTC. Supplying one alone is refused rather than half-filled: a snapshot filed against a period nobody chose is worse than no snapshot, because a forecast series cannot survive a mis-dated row."
+          },
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000112"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.435Z",
+            "checksum": "9d84a73b121b5f08689ebb323e3f570aae064f60a69a7b778e5b64f5b181c4da"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "PeriodEnd",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Last day of the period to measure, inclusive, as YYYY-MM-DD. Must be on or after PeriodStart — CK_ForecastSnapshot_PeriodOrder enforces it, and the job refuses first so the message names the caller rather than the constraint."
+          },
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000113"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.458Z",
+            "checksum": "1eed8177d6cbf89d845709991dd9836d4410a8c669a3f24421b18d31eae0e8b4"
+          }
+        }
+      ]
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:24.406Z",
+      "checksum": "83b5a46af1377f001547859c36e904048a241f9d1213a6afdabaf033a150465f"
+    }
+  }
+]

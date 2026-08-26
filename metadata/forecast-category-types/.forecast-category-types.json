@@ -1,0 +1,97 @@
+[
+  {
+    "fields": {
+      "Code": "OMITTED",
+      "Name": "Omitted",
+      "Description": "Excluded from every forecast bucket. An explicit row rather than a null so that 'the rep deliberately left this out' is distinguishable from 'nobody has categorized it yet'.",
+      "IncludeInCommit": false,
+      "IncludeInBestCase": false,
+      "IncludeInPipeline": false,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "4DAF7153-0001-4E43-A164-8F1DA05C9344"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.012Z",
+      "checksum": "235c92e2f2d2a7976af0d9a8cb45b3fd26934b178af785133b520fced9a363c4"
+    }
+  },
+  {
+    "fields": {
+      "Code": "PIPELINE",
+      "Name": "Pipeline",
+      "Description": "In the pipeline but not forecast. The widest of the three cumulative buckets.",
+      "IncludeInCommit": false,
+      "IncludeInBestCase": false,
+      "IncludeInPipeline": true,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "4DAF7153-0002-4E43-A164-8F1DA05C9344"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.027Z",
+      "checksum": "6c9159006386558cdb4ec3a2b82fa136a42c5b09387fc8c21057fd6809f723a2"
+    }
+  },
+  {
+    "fields": {
+      "Code": "BESTCASE",
+      "Name": "Best Case",
+      "Description": "Upside. THE FLAGS ARE CUMULATIVE ON PURPOSE: best case also counts in pipeline, so a 'total pipeline' measure needs one flag test rather than a union of categories.",
+      "IncludeInCommit": false,
+      "IncludeInBestCase": true,
+      "IncludeInPipeline": true,
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "4DAF7153-0003-4E43-A164-8F1DA05C9344"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.041Z",
+      "checksum": "af86a02a8ad55c110afa0a1d79944b15cc9bb77c3e2fe35a002d849f0b872ce6"
+    }
+  },
+  {
+    "fields": {
+      "Code": "COMMIT",
+      "Name": "Commit",
+      "Description": "The rep is standing behind it. Counts in all three buckets, being the narrowest.",
+      "IncludeInCommit": true,
+      "IncludeInBestCase": true,
+      "IncludeInPipeline": true,
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "4DAF7153-0004-4E43-A164-8F1DA05C9344"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.056Z",
+      "checksum": "d33e2c16ec09662073c53c8b3a353547289cc7391041a26409a025569f5f4a3e"
+    }
+  },
+  {
+    "fields": {
+      "Code": "CLOSED",
+      "Name": "Closed",
+      "Description": "Already concluded, so it belongs to attainment rather than to the forecast — all three Include flags are 0 and ForecastSnapshot.ClosedAmount is its own bucket. Counting closed business inside 'commit' is the classic way a forecast quietly double-reports the quarter.",
+      "IncludeInCommit": false,
+      "IncludeInBestCase": false,
+      "IncludeInPipeline": false,
+      "DisplayRank": 50,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "4DAF7153-0005-4E43-A164-8F1DA05C9344"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.067Z",
+      "checksum": "3731e210a4ade0c7f66d7b99ddd5eb14ff0017b406ec30f0f09b8f5062d42645"
+    }
+  }
+]

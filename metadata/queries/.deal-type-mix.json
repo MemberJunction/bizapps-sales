@@ -1,0 +1,51 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Deal Type Mix",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "How is our business split between new, renewal and expansion motions?",
+      "Description": "Mix by DealType (master plan §9.3 measure 10). Reads the type TABLE, not type names: rows group by DealTypeID and render the name for display only, so a deployment that adds a fourth motion or renames one gets a correct extra row rather than a miscounted one.",
+      "SQL": "@file:SQL/deal-type-mix.sql",
+      "TechnicalDescription": "Grain: Deal. RequiresRenewalSource is the one flag this branches on, and it is the same flag CloseDealOperation uses to route a renewal — so the mix and the routing agree by construction. RenewalsMissingSource surfaces renewal-type deals with no RenewsContractID, which means the routing had nothing to renew against. Dates: actual close for closed deals, expected for open, reported in separate columns so the two are never added.",
+      "Status": "Approved",
+      "QualityRank": 7,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-00000000000B"
+    },
+    "_comments": [
+      "PARAMETERS ARE DERIVED BY MJ, NOT DECLARED HERE -- and the authored detail is kept below.",
+      "",
+      "They were declared as relatedEntities['MJ: Query Parameters'], and that made this whole",
+      "directory unseedable on a fresh database. MJ derives parameters from the SQL when the query is",
+      "created; the declared rows then collided with them on the UNIQUE (QueryID, Name) index -- 18",
+      "violations, whole-transaction rollback, 0 of 16 queries landing, byte-identical on a retry.",
+      "That was KI-25, and it cost every fresh install its dashboard.",
+      "",
+      "Removing the declarations lets MJ derive them: names and IsRequired come out identical. Type",
+      "degrades from date to string on the period parameters, which is harmless here because",
+      "QueryForecastSource passes them as ISO date-only STRINGS on purpose -- 'a full timestamp would",
+      "invite a query to compare a date column against an instant'. What would genuinely have been",
+      "lost is the authored Description and SampleValue, so they are preserved verbatim:",
+      "",
+      "  CompanyID (string)",
+      "    Selling company. Omit for every company. Deal.CompanyID is server-stamped from the pipeline, so it is always present and never needs a fallback.",
+      "    e.g. C0A5E100-0001-4A01-9E11-5B7C3D2F8A01",
+      "  PipelineID (string)",
+      "    One pipeline. Omit for all pipelines.",
+      "    e.g. 90111111-0000-4000-A000-000000000001",
+      "  PeriodStart (date)",
+      "    Inclusive start of the window. Omit for no lower bound.",
+      "    e.g. 2026-01-01",
+      "  PeriodEnd (date)",
+      "    Inclusive end of the window. Omit for no upper bound.",
+      "    e.g. 2026-12-31"
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:19.745Z",
+      "checksum": "a252f23a54094f277415d95a6f8e570791864252339fca1306f32202512b9e2a"
+    }
+  }
+]

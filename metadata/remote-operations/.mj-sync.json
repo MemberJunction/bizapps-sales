@@ -1,0 +1,32 @@
+{
+  "entity": "MJ: Remote Operations",
+  "filePattern": "**/.*.json",
+  "_comment": [
+    "Two operations live here: `Sales.CloseDeal` and `Sales.ReopenDeal`.",
+    "",
+    "A third, `Sales.SaveDeal`, was RETIRED and is deliberately absent. Its entire job was to let a browser",
+    "save a deal together with its lines and payment schedule atomically -- something a client could not do",
+    "while those collections existed only as transient arrays on a SERVER entity subclass. MJ v6's Related",
+    "Record Collections put them on the generated entity instead, so the same graph now exists in the",
+    "browser and persists through `MJ.SaveEntityGraph` in one transaction. The operation had nothing left",
+    "to do.",
+    "",
+    "THE DISTINCTION THAT DECIDES WHAT BELONGS HERE, and it is the whole lesson of that retirement: a",
+    "remote operation is an ATOMIC UNIT OF WORK, not a way to reach the server. Saving a deal is a graph",
+    "the entity layer can express, so it needs no operation. Closing one is not -- it evaluates policy,",
+    "routes to contracts and orders, stamps append-only provenance and bypasses the close lock through an",
+    "audited path, all of which must succeed or fail together. That is why these two survive and SaveDeal",
+    "did not.",
+    "",
+    "Both resolve their CategoryID with @lookup against remote-operation-categories, which is why that",
+    "directory precedes this one in directoryOrder."
+  ],
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".sales-remote-operations.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true
+  }
+}

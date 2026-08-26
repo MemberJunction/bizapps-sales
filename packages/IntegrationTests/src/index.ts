@@ -1,0 +1,98 @@
+/**
+ * @mj-biz-apps/sales-integration-tests — BizApps Sales' integration-check content.
+ *
+ * PRIVATE, never published. Importing this module registers every check bundle on the shared
+ * `IntegrationCheckRegistry` (from `@memberjunction/testing-integration`) as an import side effect —
+ * that is the package's entire runtime job. The MJ testing CLI loads it via `mj.config.cjs`:
+ *
+ *     testing: { checkModules: ['@mj-biz-apps/sales-integration-tests'] }
+ *
+ * BUNDLES. The authoritative count for each is `scripts/expected-check-counts.json`, which the coverage
+ * gate and the runner both read; the ranges here are a map, not a second source of truth.
+ *   save-deal            Saving a deal, its EMBEDDED ORDER, that order's lines and its own children:
+ *                        four tables across two schemas in one transaction, numbering, the
+ *                        explicit-removal semantics of the collections, and the no-pricing guarantee
+ *   close-deal           Sales.CloseDeal / Sales.ReopenDeal / the close lock: routing follows the POLICY
+ *                        rather than any name, and a closed deal refuses a raw save — including one made
+ *                        only against its CHILD COLLECTIONS (CD13)
+ *   product-picker       The rule deciding which of orders' products a line may reference
+ *   close-won-order      The order beside a close: no second order (CO4), and — since D-OS1 — the STAGE
+ *                        is what names the order's status, so CO3 proves the order follows a stage that
+ *                        names one and ignores a stage that does not, and CO5 proves a REFUSED status
+ *                        never blocks the stage change (S-US5/S-US7/S-US8)
+ *   close-won-contract   ONE tripwire (CT0), not a route. CT1-CT4 were retired on 2026-08-20: they named
+ *                        ContractTerm and ContractLine, deleted in contracts' clean-sheet rebuild, and a
+ *                        Contract.Status column that no longer exists -- while being SKIPPED on every
+ *                        host, so four claimed and zero delivered. CT0 asserts contracts is ABSENT and
+ *                        goes red the day that changes, naming what has to be written
+ *   board-move           A stage move appends EXACTLY ONE DealStageEvent, stamped with the values the
+ *                        deal held on the way OUT — the provenance a board drag owes (D-BD2). Its writer
+ *                        shares one transaction with the stage-order writer and the deal counter; see
+ *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters
+ *
+ * ⚠️ EVERY BUNDLE REQUIRES bizapps-orders EXCEPT `close-won-contract`, whose single check needs nothing
+ * at all — it is asserting an absence. save-deal and close-deal require it too. A deal cannot be
+ * saved without it: `DealEntityServer.Save()` provisions the deal's embedded order (S-US4). `mj-app.json`
+ * declares orders a hard dependency, so a host without it is misconfigured rather than minimal.
+ *
+ * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check is `RequiresMutation` except
+ * `close-won-contract.CT0`, which reads metadata and writes nothing — so without that variable the
+ * suite runs ONE check out of forty-four and reports success. That is the vacuous pass this repo's
+ * definition of done calls out, and `assert-check-count.mjs` is what turns it into a failure.
+ *
+ * They are safe to run repeatedly because each one rolls its transaction back; see `fixture.ts`.
+ *
+ * PRECONDITION: the seeds must have been run (`scripts/seed-dev-data.sh`, `scripts/seed-demo-data.sh`).
+ * This suite DISCOVERS its fixture from the seeded rows rather than creating one, so a check failure is
+ * about the operation under test rather than about fixture construction. A missing fixture fails with an
+ * instruction, not a null reference twelve frames deep.
+ *
+ * ── STILL SPECIFIED, NOT YET BUILT ──────────────────────────────────────────────────────────────
+ *
+ * The definition of done named two checks at S1. The second is now BUILT — `close-deal.CD5` proves a
+ * closed deal is immutable at the entity-server level with a direct `BaseEntity.Save()` that is refused
+ * (§7.3, L-17). One remains, and it needs code that does not exist yet, so it is listed rather than
+ * stubbed to keep the gap visible:
+ *   1. `Deal.Amount` for a lined deal equals the `Orders.PreviewOrder` result for the same draft (§6).
+ *      Needs the pricing bridge. The shape of that bridge changed with the rework — the lines now live on
+ *      an order orders already owns and prices, so `save-deal.SD19` covers the per-line half (sales sends
+ *      product and quantity; the price comes back). What is still unasserted is the HEADER roll-up.
+ *
+ * One check is also deliberately WEAKER than it will eventually be: `close-deal.CD7` asserts that a
+ * stubbed downstream reports `Executed: false` with a reason and invents no ID. When orders links, CD7
+ * is the check that should start failing — and that failure is the signal to write the real one.
+ */
+
+// ─── Register the code under test ──────────────────────────────────────────────────────────────
+//
+// `mj test` loads ONLY the modules named in `testing.checkModules` — it has no reason to know about this
+// app's server packages. Without these imports the ClassFactory never sees `DealEntity` or
+// `DealEntityServer`: every save would run against the plain generated entity and the suite would
+// silently measure nothing. Worse than nothing — a check expecting a REFUSAL would still pass, because a
+// save with no rules behind it fails too. So the check package owns the registration.
+import '@mj-biz-apps/sales-server';
+import { LoadBizAppsSalesServer } from '@mj-biz-apps/sales-server';
+
+LoadBizAppsSalesServer();
+
+// ─── The bundles ───────────────────────────────────────────────────────────────────────────────
+import './checks/save-deal.checks.js';
+import './checks/close-deal.checks.js';
+import './checks/product-picker.checks.js';
+import './checks/close-won-order.checks.js';
+import './checks/close-won-contract.checks.js';
+import './checks/board-move.checks.js';
+import './checks/close-won-tasks.checks.js';
+import './checks/activities.checks.js';
+import './checks/forecast.checks.js';
+
+export { SaveDealChecks } from './checks/save-deal.checks.js';
+export { CloseDealChecks } from './checks/close-deal.checks.js';
+export { ProductPickerChecks } from './checks/product-picker.checks.js';
+export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
+export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
+export { BoardMoveChecks } from './checks/board-move.checks.js';
+export { CloseWonTasksChecks } from './checks/close-won-tasks.checks.js';
+export { ActivitiesChecks } from './checks/activities.checks.js';
+export { ForecastChecks } from './checks/forecast.checks.js';
+export * from './fixture.js';

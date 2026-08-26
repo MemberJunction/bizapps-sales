@@ -1,0 +1,37 @@
+{
+  "name": "@mj-biz-apps/sales-entities",
+  "type": "module",
+  "version": "5.1.0",
+  "description": "MJ BizApps Sales Entity Subclasses",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "/dist"
+  ],
+  "scripts": {
+    "start": "ts-node-dev src/index.ts",
+    "build": "tsc && tsc-alias -f",
+    "test": "echo \"No tests configured yet\""
+  },
+  "author": "MemberJunction.com",
+  "license": "BUSL-1.1",
+  "devDependencies": {
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@mj-biz-apps/orders-entities": "^5.0.0",
+    "zod": "~3.24.4"
+  },
+  "peerDependencies": {
+    "@memberjunction/core": "^6.1.0-edge.3",
+    "@memberjunction/global": "^6.1.0-edge.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MemberJunction/bizapps-sales"
+  }
+}

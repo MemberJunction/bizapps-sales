@@ -1,0 +1,157 @@
+name: CI
+
+# WHAT THIS GATE IS, AND WHAT IT DELIBERATELY IS NOT.
+#
+# It runs the two things a hosted runner can honestly check for this app with no environment at all:
+#
+#   1. THE VOCABULARY GREP — a hard gate, and the reason this file exists at all.
+#      Master plan §3: "no server file may contain `Status === 'Won'` or `Stage.Name === 'Closed Won'`.
+#      It reads `DealStatusType.IsWon`. This is enforceable with a grep in CI and worth adding, because
+#      the shortcut is tempting exactly once and permanent thereafter."
+#      Until this workflow existed, that grep was a script nobody ran — the plan claimed an enforcement
+#      that did not exist, which is worse than no rule at all. Now it fails the build.
+#
+#   2. THE BUILD — all 8 turbo tasks, including the Angular Explorer. This is what catches a broken
+#      generated-code import, a package that does not typecheck, or a tsconfig that only worked because
+#      of something stale in a local node_modules.
+#
+# WHAT IT CANNOT COVER, stated plainly rather than faked:
+#
+#   THE EXPLORER UI HARNESS (test-harnesses/playwright) needs a SQL Server with MJ core migrated,
+#   bizapps-common installed, a metadata push, a running MJAPI + MJExplorer, and a ONE-TIME INTERACTIVE
+#   HUMAN LOGIN against a real identity provider. That last item is not something a runner can provide,
+#   and pretending otherwise would produce a red X everybody learns to ignore — which is worse than a
+#   documented manual step. Run it locally before merging:
+#
+#       # Sales has no shells of its own any more — apps/ was retired, because an Open App runs
+#       # INSIDE an MJ host. Start the host's MJAPI + MJExplorer (see docs/QA-GUIDE.md), then:
+#       pnpm run test:explorer:auth      # once, you log in
+#       pnpm run test:explorer
+#
+#   INTEGRATION CHECKS need a live database, so they are not run here either. There are 30 that need
+#   only sales (save-deal SD1-SD16, close-deal CD1-CD14) and 16 more that need a linked sibling —
+#   product-picker PP1-PP4, close-won-handoff CW1-CW4 and close-won-d2c D1-D4 need orders,
+#   close-won-contract CT1-CT4 needs contracts. `test:integration` runs whichever of those this host
+#   can support; scripts/expected-check-counts.json is the source of truth for the numbers.
+#
+#   RUN_MUTATION_TESTS=1 is MANDATORY when you run them locally: the runner contains
+#   `c.RequiresMutation ? RUN_MUTATIONS : true`, so a run without it executes NOTHING and reports
+#   success. Follow the suite with `pnpm run test:coverage-gate`, which turns exactly that into a
+#   failure that names the gap.
+
+on:
+  pull_request:
+  push:
+    branches: [next]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: vocabulary gate + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24 rather than the sibling repo's 22: this is the version the lockfile was produced with
+      # (npm 11 / Node 24) and the version the build is actually developed against. Matching it keeps CI
+      # resolving the same tree a developer gets.
+      # Must precede setup-node: `cache: 'pnpm'` needs pnpm already on PATH. Version comes from
+      # package.json's `packageManager: pnpm@10.33.0`, so CI and every developer resolve one pnpm.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      # postinstall runs scripts/link-local-apps.mjs, which is a clean no-op while .mj-links.json has an
+      # empty `links` map. That changes at S2, when the unpublished siblings get linked — at which point
+      # this step will need a decision, because CI cannot check out private sibling repos.
+      - run: pnpm install --frozen-lockfile
+
+      # ===================================================================================
+      # GATE 1 — the rule the app is built around. Fails the build; not advisory.
+      # ===================================================================================
+      - name: Vocabulary gate (domain vocabulary is DATA, never a string compare)
+        run: pnpm run test:vocabulary-gate
+
+      # ===================================================================================
+      # GATE 1b - RULE ONE, which had no automated defender until now. A per-column money
+      # figure assembled by `cards.reduce(...)` shipped in the board and was caught by
+      # review. A heuristic with an annotated escape hatch beats nothing watching at all.
+      # ===================================================================================
+      - name: Money gate (sales records intent; orders computes the number)
+        run: pnpm run test:money-gate
+
+      # ===================================================================================
+      # GATE 2 — the two pure-function gates, which were NOT in CI until now.
+      #
+      # `test:discount-gate` has existed and been described as a gate since the DealLine retirement, and
+      # this workflow never ran it: it was in `npm run verify` and in nobody's pipeline. A gate that only
+      # runs when somebody remembers is a convention, not a gate.
+      #
+      # `test:validation-gate` is new, and it covers two confirmed defects that no integration check
+      # could reach — every order-line error landing on the wrong pane, and a refused discount not
+      # blocking the save. Both are browser-path code, which is why 98 green checks said nothing.
+      #
+      # ORDERED AFTER THE BUILD, deliberately: both import from `dist`, so running them first would
+      # assert against whatever the last build left behind.
+      # ===================================================================================
+      - name: Build all packages and apps
+        run: pnpm run build
+
+      - name: Discount conversion gate (percent vs fraction, both directions)
+        run: pnpm run test:discount-gate
+
+      - name: Workspace validation gate (pane attribution, and what blocks a save)
+        run: pnpm run test:validation-gate
+
+      # Was unwired AND unable to fail: no sys.exit, and a path hardcoded into another working copy, so it
+      # audited 15 files nobody was shipping and reported clean about them. Both fixed.
+      - name: Query comment-drift gate (a documented column that is not returned)
+        run: python scripts/assert-no-comment-drift.py
+
+      # PLAYWRIGHT STRIPS TYPES RATHER THAN CHECKING THEM, so a spec that calls a function it never
+      # imported ships and fails at RUNTIME, inside a test, frames from the reporting assertion. All 21
+      # specs had never been compiled once; the first run found three real defects in committed code --
+      # a ReferenceError at 90-workspace-tab-state:386 and two missing arguments. Reads SOURCES, never
+      # build output: this harness has none, and a checker pointed at generated output tests the
+      # generator. Runs here even though the specs themselves need a live DB and a human login, because
+      # compiling them needs neither.
+      - name: Spec typecheck gate (Playwright compiles specs without checking them)
+        run: npm run test:spec-gate
+
+      # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
+      # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a
+      # permanent red X asserting nothing. Guarded rather than omitted, so the first real test file
+      # switches this on with no workflow edit.
+      - name: Unit tests (if any exist)
+        run: |
+          if find packages -path '*/src/*' \( -name '*.test.ts' -o -name '*.spec.ts' \) -print -quit | grep -q .; then
+            echo "Test files found — running vitest."
+            npx vitest run
+          else
+            echo "::notice title=No unit tests yet::No *.test.ts / *.spec.ts under packages/*/src. This step self-enables when the first one lands."
+          fi
+
+      # Advisory, matching the sibling repo's judgement. migrations/_README.md requires a changeset on
+      # any PR touching a migration, and that rule sat unenforced through several schema changes there.
+      # A warning is honest about what it is — a reminder in review — rather than a red X on a docs-only
+      # PR that legitimately has no version impact.
+      - name: Changeset present?
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ ! -d .changeset ] || [ -z "$(find .changeset -name '*.md' ! -name 'README.md' -print -quit)" ]; then
+            echo "::warning title=No changeset::This PR carries no changeset. One is required for any change to migrations/ or a published package — run 'npx changeset'."
+          else
+            echo "Changeset present."
+          fi
+
+      - name: State plainly what this gate does not cover
+        if: always()
+        run: |
+          echo "::notice title=Explorer UI CRUD is not run here::test-harnesses/playwright needs a live database, running servers and a one-time human login. Run 'pnpm run test:explorer' locally before merging. Their TYPES are checked here by the spec typecheck gate; nothing RUNS them here — see the comment block at the top of this workflow for why it is not automated."

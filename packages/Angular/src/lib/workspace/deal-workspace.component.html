@@ -1,0 +1,636 @@
+<!--
+  The deal workspace.
+
+  STRUCTURE: `mj-workspace-card` supplies the OUTER strip (open deals) plus the standardized footer;
+  everything inside `[workspaceHeader]` is the persistent customer-context band, and the default slot
+  holds the inner pane tabs and the active pane. See the component header for why there are two
+  tabbing systems.
+
+  Every input calls `Touch()`, which revalidates and marks the tab dirty. One entry point, so a field
+  added later cannot forget to do either.
+
+  THREE BINDINGS HERE ARE DELIBERATELY NOT `[(ngModel)]`:
+
+    · DATE inputs bind `[ngModel]="DateInput(...)"` with a `Set*Date` handler. An `<input type="date">`
+      reads and writes `yyyy-MM-dd` strings while the entity field holds a `Date` — and handing an input
+      a `Date` renders it BLANK, with no error anywhere. See `deal-workspace.dates.ts`.
+    · PIPELINE also decides the selling company and the stage list, so it cannot be a plain field write.
+    · SALES REP writes the deal-team ROSTER, not the column beside it: `OwnerEmployeeID` is a
+      server-maintained stamp derived from whichever team member holds the owner role.
+
+  Row deletes call `RemoveLine` / `RemoveScheduleRow`, which call the collection's `Remove()`. A row that
+  merely disappeared from the array would still exist in the database.
+-->
+@if (Loading()) {
+  <mj-loading></mj-loading>
+} @else {
+  <mj-workspace-card
+    AriaLabel="Deal workspace"
+    NewTabLabel="New deal"
+    [Tabs]="Tabs"
+    [ActiveId]="ActiveId"
+    [ShowFooter]="true"
+    ConfirmLabel="Save deal"
+    ConfirmIcon="fa-solid fa-check"
+    [ConfirmDisabled]="!CanSave"
+    [ConfirmTitle]="SaveBlockedReason"
+    [ConfirmBusy]="Saving()"
+    ConfirmBusyLabel="Saving…"
+    [ShowDraft]="false"
+    DiscardLabel="Discard changes"
+    (TabSelected)="SelectTab($event)"
+    (TabClosed)="CloseTab($event)"
+    (NewTabRequested)="NewDeal()"
+    (TabReordered)="ReorderTabs($event)"
+    (Confirm)="Save()"
+    (Discard)="Discard()">
+
+    <!-- PERSISTENT CUSTOMER CONTEXT. Always visible, on every pane: an AD editing the terms tab must
+         never have to go back to check which account they are quoting. -->
+    <div workspaceHeader class="dw-context">
+      <span class="dw-context__customer" [class.dw-context__customer--empty]="!Deal?.AccountID">
+        <i class="fa-solid fa-building" aria-hidden="true"></i>
+        {{ CustomerName }}
+      </span>
+      @if (CompanyName) {
+        <span class="dw-context__chip" title="The selling company, taken from the pipeline">
+          <i class="fa-solid fa-briefcase" aria-hidden="true"></i> {{ CompanyName }}
+        </span>
+      }
+      @if (Deal?.PipelineID) {
+        <span class="dw-context__chip">{{ NameOf(Lookups.Pipelines, Deal!.PipelineID) }}</span>
+      }
+      @if (Deal?.DealTypeID) {
+        <span class="dw-context__chip">{{ NameOf(Lookups.DealTypes, Deal!.DealTypeID) }}</span>
+      }
+      @if (IsNew) {
+        <span class="dw-context__chip dw-context__chip--new">Unsaved</span>
+      }
+    </div>
+
+    @if (Deal; as deal) {
+      <!-- INNER TABS — panes of THIS deal. Fixed set of five; badges show error counts only, because a
+           warning is not a reason to decorate a tab. -->
+      <nav class="dw-panes" role="tablist" aria-label="Deal sections">
+        @for (pane of Panes; track pane.Key) {
+          <button type="button" class="dw-panes__tab" role="tab"
+                  [class.dw-panes__tab--active]="ActivePane === pane.Key"
+                  [attr.aria-selected]="ActivePane === pane.Key"
+                  (click)="SelectPane(pane.Key)">
+            <i [class]="pane.Icon" aria-hidden="true"></i>
+            {{ pane.Label }}
+            @if (ErrorCount(pane.Key) > 0) {
+              <span class="dw-panes__badge" [attr.aria-label]="ErrorCount(pane.Key) + ' problems'">{{ ErrorCount(pane.Key) }}</span>
+            }
+          </button>
+        }
+      </nav>
+
+      @if (Message) {
+        <p class="dw-msg" [class.dw-msg--error]="MessageIsError" role="status">{{ Message }}</p>
+      }
+
+      <!-- ══════════════════════ THE CLOSE / REOPEN BAR ══════════════════════
+           Closing goes through Sales.CloseDeal, never through the status dropdown: the operation is
+           what routes to an order, stamps the stage event and applies the lock. -->
+      @if (!IsNew) {
+        <div class="dw-close-bar">
+          @if (Lock.IsLocked) {
+            <p class="dw-lock-notice" data-testid="lock-notice">
+              <i class="fa-solid fa-lock" aria-hidden="true"></i> {{ Lock.Notice }}
+            </p>
+            <button type="button" class="dw-btn" data-testid="reopen-open"
+                    (click)="ReopenPanelOpen = !ReopenPanelOpen">
+              <i class="fa-solid fa-lock-open" aria-hidden="true"></i> Reopen deal
+            </button>
+          } @else {
+            <button type="button" class="dw-btn dw-btn--primary" data-testid="close-open"
+                    [disabled]="Closing()" (click)="OpenClosePanel()">
+              <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i> Close deal
+            </button>
+          }
+        </div>
+
+        @if (ReopenPanelOpen && Lock.IsLocked) {
+          <section class="dw-close-panel" data-testid="reopen-panel">
+            <label class="dw-field dw-field--wide">
+              <span class="dw-field__label">Reason for reopening <em>*</em></span>
+              <!-- Required by the operation, and recorded on the stage event: undoing a close has to be
+                   explainable, because a contract or an order was derived from it. -->
+              <input type="text" data-testid="reopen-reason" [(ngModel)]="ReopenReason"
+                     placeholder="e.g. Customer asked to renegotiate the term" />
+            </label>
+            <div class="dw-close-panel__actions">
+              <button type="button" class="dw-btn dw-btn--primary" data-testid="reopen-confirm"
+                      [disabled]="Closing()" (click)="ReopenDeal()">Reopen</button>
+              <button type="button" class="dw-btn" (click)="ReopenPanelOpen = false">Cancel</button>
+            </div>
+          </section>
+        }
+
+        @if (ClosePanelOpen) {
+          <section class="dw-close-panel" data-testid="close-panel">
+            <div class="dw-close-panel__outcome">
+              <button type="button" class="dw-btn" data-testid="close-won"
+                      [class.dw-btn--primary]="CloseOutcome === 'won'"
+                      (click)="CloseOutcome = 'won'">Won</button>
+              <button type="button" class="dw-btn" data-testid="close-lost"
+                      [class.dw-btn--primary]="CloseOutcome === 'lost'"
+                      (click)="CloseOutcome = 'lost'">Lost</button>
+            </div>
+
+            @if (CloseOutcome === 'lost') {
+              <label class="dw-field">
+                <span class="dw-field__label">Loss reason <em>*</em></span>
+                <select data-testid="close-loss-reason" [(ngModel)]="CloseLossReasonID">
+                  <option [ngValue]="null">— choose —</option>
+                  @for (r of Lookups.LossReasons; track r.ID) {
+                    <option [ngValue]="r.ID">{{ r.Name }}</option>
+                  }
+                </select>
+              </label>
+              <!-- Shown only when the CHOSEN REASON's RequiresNotes flag is set — the flag, not the name. -->
+              @if (LossReasonRequiresNotes()) {
+                <label class="dw-field dw-field--wide">
+                  <span class="dw-field__label">Loss notes <em>*</em></span>
+                  <textarea rows="2" data-testid="close-loss-notes" [(ngModel)]="CloseLossNotes"
+                            placeholder="This reason requires an explanation."></textarea>
+                </label>
+              }
+            }
+
+            @if (CloseOutcome) {
+              <label class="dw-field dw-field--wide">
+                <span class="dw-field__label">Notes</span>
+                <textarea rows="2" data-testid="close-notes" [(ngModel)]="CloseNotes"></textarea>
+              </label>
+            }
+
+            <div class="dw-close-panel__actions">
+              <button type="button" class="dw-btn dw-btn--primary" data-testid="close-confirm"
+                      [disabled]="!CloseOutcome || Closing()" (click)="ConfirmClose()">
+                {{ Closing() ? 'Closing…' : 'Close deal' }}
+              </button>
+              <button type="button" class="dw-btn" (click)="CancelClose()">Cancel</button>
+            </div>
+          </section>
+        }
+
+        <!-- WHAT THE CLOSE ACTUALLY DID. Previously visible only in the stage event; a user who closes a
+             deal should be told whether an order exists and what it is called. -->
+        @if (CloseRouting.length) {
+          <section class="dw-routing" data-testid="close-routing">
+            @for (r of CloseRouting; track r.Target) {
+              <p class="dw-routing__row" [class.dw-routing__row--failed]="!r.Executed">
+                <strong>{{ r.Target }}</strong>
+                @if (r.Executed) {
+                  — created{{ r.RecordID && RoutedRecordNumbers[r.RecordID] ? ' · ' + RoutedRecordNumbers[r.RecordID] : '' }}
+                } @else {
+                  — not created: {{ r.Reason || 'no reason given' }}
+                }
+              </p>
+            }
+          </section>
+        }
+      }
+
+      <!-- ══════════════════════════ PARTY INFO ══════════════════════════ -->
+      @if (ActivePane === 'party') {
+        <section class="dw-pane">
+          <div class="dw-grid">
+            <label class="dw-field dw-field--wide">
+              <span class="dw-field__label">Deal name <em>*</em></span>
+              <input type="text" [(ngModel)]="deal.Name" [disabled]="!IsFieldEditable('Name')" (ngModelChange)="Touch()"
+                     placeholder="e.g. Northwind Health — Platform Rollout" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Pipeline <em>*</em></span>
+              <!-- Pipeline is not a plain binding: it decides the selling company AND the stage list. -->
+              <select [ngModel]="deal.PipelineID" [disabled]="!IsFieldEditable('PipelineID')"
+                      (ngModelChange)="SelectPipeline(deal, $event); Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (p of Lookups.Pipelines; track p.ID) {
+                  <option [ngValue]="p.ID">{{ p.Name }}</option>
+                }
+              </select>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Stage</span>
+              <select [ngModel]="deal.PipelineStageID" [disabled]="!IsFieldEditable('PipelineStageID')"
+                      (ngModelChange)="OnStageChange(deal, $event)"
+                      [disabled]="!deal.PipelineID">
+                <option [ngValue]="null">— choose —</option>
+                @for (s of StagesFor(deal.PipelineID); track s.ID) {
+                  <option [ngValue]="s.ID">{{ s.Name }}</option>
+                }
+              </select>
+              <small class="dw-field__hint">Sets probability and forecast category; both stay editable.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Deal type</span>
+              <select [(ngModel)]="deal.DealTypeID" [disabled]="!IsFieldEditable('DealTypeID')" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (t of Lookups.DealTypes; track t.ID) {
+                  <option [ngValue]="t.ID">{{ t.Name }}</option>
+                }
+              </select>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Status</span>
+              <!-- CLOSING STATUSES ARE NOT OFFERED HERE. Picking one used to write the status field and
+                   nothing else — no routing, no order, no stage event — leaving a deal Won with no
+                   provenance. Closing is the close action; this dropdown is for the open lifecycle.
+                   Excluded by FLAG (IsWon/IsLost), so "On Hold" survives and a rename cannot break it. -->
+              <select data-testid="status-select" [(ngModel)]="deal.DealStatusTypeID"
+                      [disabled]="!IsFieldEditable('DealStatusTypeID')" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (s of SelectableStatuses(); track s.ID) {
+                  <option [ngValue]="s.ID">{{ s.Name }}</option>
+                }
+                <!-- The deal's OWN status when it is a closing one, so a closed deal still shows what it is
+                     rather than reading "— choose —". Never selectable: the list above excludes it. -->
+                @if (Lock.IsLocked && Lock.StatusName) {
+                  <option [ngValue]="deal.DealStatusTypeID">{{ Lock.StatusName }}</option>
+                }
+              </select>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Customer</span>
+              <select [(ngModel)]="deal.AccountID" [disabled]="!IsFieldEditable('AccountID')" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (a of Lookups.Accounts; track a.ID) {
+                  <option [ngValue]="a.ID">{{ a.Name }}</option>
+                }
+              </select>
+              <!-- OPEN goes to an Explorer tab: an account outlives the deal and is edited on its own
+                   terms. CREATE opens a slide-in and selects the result back into this field, because
+                   S-US1 says the rep can do it without leaving the deal. Hidden when the field is not
+                   editable, so a locked deal cannot create a record it would then fail to attach. -->
+              <span class="dw-related">
+                @if (deal.AccountID) {
+                  <button type="button" class="dw-linkbtn"
+                          (click)="OpenRelated(AccountEntity, deal.AccountID)">Open account</button>
+                }
+                @if (IsFieldEditable('AccountID')) {
+                  <button type="button" class="dw-linkbtn"
+                          (click)="CreateRelated(AccountEntity, 'AccountID')">New account</button>
+                }
+              </span>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Primary contact</span>
+              <select [(ngModel)]="deal.PrimaryContactID" [disabled]="!IsFieldEditable('PrimaryContactID')" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (c of Lookups.Contacts; track c.ID) {
+                  <option [ngValue]="c.ID">{{ c.Name }}</option>
+                }
+              </select>
+              <!-- Same split as the customer field above: OPEN leaves, CREATE does not. -->
+              <span class="dw-related">
+                @if (deal.PrimaryContactID) {
+                  <button type="button" class="dw-linkbtn"
+                          (click)="OpenRelated(ContactEntity, deal.PrimaryContactID)">Open contact</button>
+                }
+                @if (IsFieldEditable('PrimaryContactID')) {
+                  <button type="button" class="dw-linkbtn"
+                          (click)="CreateRelated(ContactEntity, 'PrimaryContactID')">New contact</button>
+                }
+              </span>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Billing contact</span>
+              <select [(ngModel)]="deal.BillingContactID" [disabled]="!IsFieldEditable('BillingContactID')" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— same as primary —</option>
+                @for (c of Lookups.Contacts; track c.ID) {
+                  <option [ngValue]="c.ID">{{ c.Name }}</option>
+                }
+              </select>
+              <!-- RELATED record: opens as its own Explorer tab, not in this workspace. -->
+              <span class="dw-related">
+                @if (deal.BillingContactID) {
+                  <button type="button" class="dw-linkbtn"
+                          (click)="OpenRelated(ContactEntity, deal.BillingContactID)">Open contact</button>
+                }
+              </span>
+              <!-- Empty is a real answer here, not a missing one — see the column note on
+                   Deal.BillingContactID. -->
+              <small class="dw-field__hint">Leave empty when the invoice goes to the primary contact.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Sales rep (owner)</span>
+              <select [ngModel]="deal.OwnerEmployeeID" (ngModelChange)="OnOwnerChange(deal, $event)">
+                <option [ngValue]="null">— choose —</option>
+                @for (e of Lookups.Employees; track e.ID) {
+                  <option [ngValue]="e.ID">{{ e.Name }}</option>
+                }
+              </select>
+              <!-- Deal.OwnerEmployeeID is a server-maintained stamp; this is the INTENT that makes the
+                   server write the DealTeamMember row it is derived from. -->
+              <small class="dw-field__hint">Recorded as a deal-team member under the owner role.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Execution date</span>
+              <input type="date" [ngModel]="DateInput(deal.ExecutionDate)"
+                     (ngModelChange)="SetDealDate(deal, 'ExecutionDate', $event)" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Start date</span>
+              <input type="date" [ngModel]="DateInput(deal.StartDate)"
+                     (ngModelChange)="SetDealDate(deal, 'StartDate', $event)" />
+              <small class="dw-field__hint">May precede execution — backdated work is allowed.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Expected close</span>
+              <input type="date" [ngModel]="DateInput(deal.ExpectedCloseDate)"
+                     (ngModelChange)="SetDealDate(deal, 'ExpectedCloseDate', $event)" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Term (months)</span>
+              <input type="number" min="0" step="1" [(ngModel)]="deal.TermMonths" (ngModelChange)="Touch()" />
+              <small class="dw-field__hint">Subscription commitment — drives renewal.</small>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Estimated timeline (weeks)</span>
+              <input type="number" min="0" step="1" [(ngModel)]="deal.EstimatedProjectWeeks" (ngModelChange)="Touch()" />
+              <small class="dw-field__hint">SOW estimate — a forecast, not a commitment.</small>
+            </label>
+          </div>
+          <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'party' }"></ng-container>
+        </section>
+      }
+
+      <!-- ══════════════════════════ PRODUCT LINES ══════════════════════════ -->
+      @if (ActivePane === 'lines') {
+        <section class="dw-pane">
+          <!-- THE FIGURES BELOW ARE TRANSCRIBED, NOT CALCULATED. There is deliberately no total row and
+               no auto-fill of Total from gross minus discount: those numbers come off a signed document,
+               and the arithmetic on that page is the customer's. -->
+          @if (Lines.length === 0) {
+            <p class="dw-empty">No lines yet.</p>
+          } @else {
+            <div class="dw-table-scroll">
+              <table class="dw-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Product</th>
+                    <th scope="col" class="dw-num">Qty</th>
+                    <th scope="col" class="dw-num">Unit price</th>
+                    <th scope="col" class="dw-num">Line total</th>
+                    <th scope="col" class="dw-num">Discount %</th>
+                    <th scope="col"><span class="dw-sr">Row actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (line of Lines; track line.ID; let i = $index) {
+                    <tr [class.dw-row--bad]="IssuesForRow('lines', i).length > 0">
+                      <td>
+                        <!-- Identity is Product.ID. The catalogue is already filtered to this deal's
+                             selling company, Active status and today's availability window, so anything
+                             offered here is sellable — see ProductFilterFor in packages/Entities/src,
+                               which is the predicate LoadProducts passes to RunView. -->
+                        <select class="dw-cell-product" [ngModel]="line.ProductID"
+                                (ngModelChange)="OnProductChange(line, $event)"
+                                [title]="ProductLabel(line)">
+                          <!-- KEPT, and it is not a choice: AddLine() never sets ProductID, so
+                               every new line is already in this state and this option is the only
+                               thing that labels it. Removing it would render a blank select on a
+                               row that still cannot be saved. The save is blocked instead --
+                               see UnlinkedLineIssues. -->
+                          <option [ngValue]="null">— choose a product —</option>
+                          @for (p of Products; track p.ID) {
+                            <option [ngValue]="p.ID">{{ p.SKU ? p.Name + ' (' + p.SKU + ')' : p.Name }}</option>
+                          }
+                        </select>
+                        @if (line.ProductID && ProductLabel(line) === '(no longer offered)') {
+                          <!-- Quoted before the product was withdrawn. Saying so beats showing a blank
+                               picker, which reads as "never linked". -->
+                          <small class="dw-field__hint">no longer offered</small>
+                        }
+                      </td>
+                      <td class="dw-num">
+                        <!-- min="1", NOT 0: orders' CK_OrderLine_Quantity is `Quantity <> 0`, so the old
+                             floor presented the one value the database forbids as the recommended one.
+                             Negative IS legal to orders — it is the reversal mechanism (BO-D10) — but a
+                             reversal is not something a deal line expresses, and orders' entity-server
+                             refuses a negative on a non-reversal line. Blocking it here means the rep is
+                             told by the form instead of by a server error. See AddLine(). -->
+                        <input type="number" min="1" step="1" [(ngModel)]="line.Quantity" (ngModelChange)="Touch()" />
+                      </td>
+                      <!-- Priced by orders, never entered here: sales states intent, orders states price. -->
+                      <td class="dw-num dw-readonly">{{ line.UnitPrice }}</td>
+                      <td class="dw-num dw-readonly">{{ line.LineTotalNet ?? '—' }}</td>
+                      <td class="dw-num">
+                            <!-- Percent in, fraction stored. The conversion refuses an ambiguous 0-1
+                                 value rather than guessing -- see SetDiscountPercent.
+                                 step is 0.01 because that is what OrderLine.DiscountPct
+                                 DECIMAL(7,4) can hold: a hundredth of one percent. It was 1, which
+                                 marked every stored sub-percent discount invalid in the control
+                                 itself -- the browser refusing a number the column stores exactly. -->
+                            <input type="number" min="0" max="100" step="0.01"
+                                   [ngModel]="DiscountPercentFor(line)"
+                                   (ngModelChange)="SetDiscountPercent(line, $event)" />
+                            @if (DiscountRefusals.has(line)) {
+                              <span class="dw-field-error">{{ DiscountRefusals.get(line) }}</span>
+                            }
+                          </td>
+                      <td>
+                        <!-- The grid shows what fits; the slide-in shows the rest (service period, term,
+                             product reference, description). Only for a SAVED line -- a line created in
+                             this session has a key but no row, so the form would fail to load it. -->
+                        @if (line.IsSaved) {
+                          <button type="button" class="dw-iconbtn" title="Open the full line detail"
+                                  (click)="OpenLineDetail(line)">
+                            <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
+                          </button>
+                        }
+                        <button type="button" class="dw-iconbtn" title="Remove this line" (click)="RemoveLine(line)">
+                          <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+
+          <button type="button" class="dw-addbtn" (click)="AddLine()"
+                  [disabled]="!CanAddLine" [title]="AddLineBlockedReason ?? 'Add a product line'">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add line
+          </button>
+          @if (AddLineBlockedReason) {
+            <p class="dw-field__hint">{{ AddLineBlockedReason }}</p>
+          }
+          <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'lines' }"></ng-container>
+        </section>
+      }
+
+      <!-- ══════════════════════════ PAYMENT SCHEDULE ══════════════════════════ -->
+      @if (ActivePane === 'schedule') {
+        <section class="dw-pane">
+          <!-- NO ROWS IS THE NORMAL CASE. Standard terms are 100% on execution, so an empty schedule
+               means "standard" rather than "unfinished" — which is why nothing is pre-filled here. -->
+          @if (Schedule.length === 0) {
+            <p class="dw-empty">Standard terms — no instalment schedule.</p>
+          } @else {
+            <div class="dw-table-scroll">
+              <table class="dw-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col" class="dw-num">Amount</th>
+                    <th scope="col">Description</th>
+                    <th scope="col"><span class="dw-sr">Remove</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of Schedule; track row.ID; let i = $index) {
+                    <tr [class.dw-row--bad]="IssuesForRow('schedule', i).length > 0">
+                      <td><input type="date" [ngModel]="DateInput(row.PaymentDate)" (ngModelChange)="SetPaymentDate(row, $event)" /></td>
+                      <td class="dw-num"><input type="number" step="0.01" [(ngModel)]="row.Amount" (ngModelChange)="Touch()" /></td>
+                      <td><input type="text" [(ngModel)]="row.Description" (ngModelChange)="Touch()" placeholder="e.g. 40% on execution" /></td>
+                      <td>
+                        <button type="button" class="dw-iconbtn" title="Remove this instalment" (click)="RemoveScheduleRow(row)">
+                          <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+
+          <button type="button" class="dw-addbtn" (click)="AddScheduleRow()">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add instalment
+          </button>
+          <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'schedule' }"></ng-container>
+        </section>
+      }
+
+      <!-- ══════════════════════════ TERMS ══════════════════════════ -->
+      @if (ActivePane === 'terms') {
+        <section class="dw-pane">
+          <!-- THE STANDARD VALUES ARE PLACEHOLDERS, NOT DEFAULTS. Empty means "use the standard term",
+               whose real value lives on the contracts ContractType. Writing 5 and 90 into every deal
+               would freeze this year's policy into next year's renewals. -->
+          <div class="dw-grid">
+            <label class="dw-field dw-field--check">
+              <input type="checkbox" [(ngModel)]="deal.AutoRenew" (ngModelChange)="Touch()" />
+              <span class="dw-field__label">Auto-renew at end of term</span>
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Annual increase % (override)</span>
+              <input type="number" min="0" max="100" step="0.01"
+                     [(ngModel)]="deal.AnnualIncreasePctOverride" (ngModelChange)="Touch()"
+                     [attr.placeholder]="'standard — ' + StandardAnnualIncreasePct + '%'" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Cancellation notice, days (override)</span>
+              <input type="number" min="0" step="1"
+                     [(ngModel)]="deal.CancellationNoticeDaysOverride" (ngModelChange)="Touch()"
+                     [attr.placeholder]="'standard — ' + StandardCancellationNoticeDays + ' days'" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Payment method</span>
+              <input type="text" [(ngModel)]="deal.PaymentMethod" (ngModelChange)="Touch()" placeholder="ACH" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Probability %</span>
+              <input type="number" min="0" max="100" step="1" [(ngModel)]="deal.Probability" (ngModelChange)="Touch()" />
+            </label>
+
+            <label class="dw-field">
+              <span class="dw-field__label">Forecast category</span>
+              <select [(ngModel)]="deal.ForecastCategoryTypeID" (ngModelChange)="Touch()">
+                <option [ngValue]="null">— choose —</option>
+                @for (f of Lookups.ForecastCategoryTypes; track f.ID) {
+                  <option [ngValue]="f.ID">{{ f.Name }}</option>
+                }
+              </select>
+            </label>
+          </div>
+          <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'terms' }"></ng-container>
+        </section>
+      }
+
+      <!-- ══════════════════════════ VARIANCES ══════════════════════════ -->
+      @if (ActivePane === 'variances') {
+        <section class="dw-pane">
+          <!-- THE FLAG SITS ABOVE THE PROSE, and it is not a summary of it. Finance's review branches
+               on the flag: true means capture each deviation against the template, false means read the
+               document anyway to confirm nothing was negotiated. An empty variances box means nobody
+               wrote anything down, which is a different claim from nothing having happened — so the rep
+               is asked, rather than the answer being inferred from whether they typed a paragraph. -->
+          <label class="dw-field dw-field--check">
+            <input type="checkbox" [(ngModel)]="deal.StandardAgreementModified"
+                   [disabled]="!IsFieldEditable('StandardAgreementModified')" (ngModelChange)="Touch()" />
+            <span class="dw-field__label">Standard agreement modified</span>
+          </label>
+          <small class="dw-field__hint">Copied onto the contract at Closed Won — it is what sends finance to the paper.</small>
+
+          <label class="dw-field dw-field--wide">
+            <span class="dw-field__label">Contract variances</span>
+            <textarea rows="10" [(ngModel)]="deal.ContractVariances" [disabled]="!IsFieldEditable('ContractVariances')" (ngModelChange)="Touch()"
+                      placeholder="e.g. Annual increase capped at 3% for years 2–3. Termination for convenience with 60 days' notice."></textarea>
+          </label>
+          <label class="dw-field dw-field--wide">
+            <span class="dw-field__label">Description / notes</span>
+            <textarea rows="5" [(ngModel)]="deal.Description" [disabled]="!IsFieldEditable('Description')" (ngModelChange)="Touch()"></textarea>
+          </label>
+          <ng-container [ngTemplateOutlet]="paneIssues" [ngTemplateOutletContext]="{ key: 'variances' }"></ng-container>
+        </section>
+      }
+    }
+
+    <!--
+      THE ACTIVITY TIMELINE (S-US9 #119). Deliberately OUTSIDE the pane switch above: it is a record of
+      what happened rather than a part of the draft, so it carries no validation state and belongs to no
+      DealWorkspaceSection. Shown only for a SAVED deal — an unsaved draft has no ID to link an activity
+      to, and offering the button would produce a save that cannot land.
+    -->
+    @if (Deal?.ID) {
+      <mjs-deal-activity-timeline [DealID]="Deal!.ID"></mjs-deal-activity-timeline>
+    }
+
+    <span workspaceFooterNote>
+      @if (SaveBlockedReason) {
+        <span class="dw-blocked">{{ SaveBlockedReason }}</span>
+      }
+    </span>
+  </mj-workspace-card>
+}
+
+<!-- Shared issue list for whichever pane is showing. Warnings render alongside errors, distinguished by
+     class rather than hidden, because "look at this" is worth surfacing where the user already is. -->
+<ng-template #paneIssues let-key="key">
+  @if (IssuesForPane(key).length > 0) {
+    <ul class="dw-issues">
+      @for (issue of IssuesForPane(key); track issue.Message + issue.Field + issue.RowIndex) {
+        <li [class.dw-issues__warn]="issue.Severity === 'warning'">
+          <i [class]="issue.Severity === 'warning' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-exclamation'"
+             aria-hidden="true"></i>
+          {{ issue.Message }}
+        </li>
+      }
+    </ul>
+  }
+</ng-template>
+

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schema.memberjunction.org/codegen-schema-info/v1.json",
+  "description": "Additional schema info consumed by `mj codegen` (CodeGenLib additionalSchemaInfo). Declares IS-A (Table-Per-Type) inheritance relationships EXPLICITLY so CodeGen sets __mj.Entity.ParentID from config, mirrors the parent's fields as virtual fields on the child, and JOINs the parent in the child's base view. The explicit declaration is used instead of CodeGen's schema-shape auto-detection, which can't reliably exclude non-IS-A tables that share the single-PK-is-also-FK shape.",
+  "ISARelationships": [
+    {
+      "_comment": "SalesAccount IS-A Organization (master plan §4.1, L-3). SalesAccount's single PK (ID) is also an FK to __mj_BizAppsCommon.Organization.ID, so the account and the organization ARE the same record — sales adds the CRM attributes (owner, lifecycle stage, territory, tier, ICP fit) without forking identity. ParentEntity must be the parent's ENTITY NAME, not its base table: CodeGen matches by Name OR (BaseTable + SchemaName), and the SchemaName field here names the CHILD's schema, so a cross-schema parent can only be resolved by name. NOTE THE UNDERSCORES — the live registered name is 'MJ_BizApps_Common: Organizations'. Common's archived initial-metadata script shows a dotted 'MJ.BizApps.Common:' prefix from an older convention; using that form silently leaves ParentID null and the IsA never wires (no error, just a child entity with no parent and no mirrored fields).",
+      "ChildEntity": "SalesAccount",
+      "ParentEntity": "MJ_BizApps_Common: Organizations",
+      "SchemaName": "__mj_BizAppsSales"
+    },
+    {
+      "_comment": "SalesContact IS-A Person (same Table-Per-Type shape). NOTE there is deliberately no Lead entity (L-3): a lead is a common.Person sitting at a LifecycleStageType, not a second identity table for humans. ⚠️ common's Person and Organization currently carry AllowMultipleSubtypes=0. Sales is the FIRST app to extend either (accounting extends MJ: Companies; orders extends its own Product/OrderLine), so the disjoint default chains correctly TODAY. It must be flipped to 1 in bizapps-common before ATS or certification extend Person, or the second app silently mis-chains at runtime.",
+      "ChildEntity": "SalesContact",
+      "ParentEntity": "MJ_BizApps_Common: People",
+      "SchemaName": "__mj_BizAppsSales"
+    }
+  ]
+}

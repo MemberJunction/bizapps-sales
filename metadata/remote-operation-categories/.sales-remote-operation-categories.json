@@ -1,0 +1,25 @@
+[
+  {
+    "_comments": [
+      "Categories for the Sales API surface. A category is how a human or an agent browsing the",
+      "operation catalog finds the right operation — 'Sales' alone would eventually be a bag of a dozen.",
+      "",
+      "FIXED UUIDs rather than generated ones, for the same reason orders fixes its own: these are",
+      "referenced by @lookup from the operation rows, so a stable ID means a re-push against a rebuilt",
+      "database resolves to the SAME category instead of quietly creating a duplicate. Given this repo",
+      "rebuilds from zero routinely, a generated ID here would produce a new category on every rebuild."
+    ],
+    "fields": {
+      "Name": "Deal Lifecycle",
+      "Description": "Compose, save and close deals. These are the operations that write a deal and everything hanging off it as one transaction — which is what makes browser-side deal entry possible at all, since line and schedule collections are transient properties on the server entity and cannot cross the entity-save boundary as scalars.",
+      "ParentID": null
+    },
+    "primaryKey": {
+      "ID": "D4F8A162-9C35-4E71-B0A8-3F17C5E2D801"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:09.304Z",
+      "checksum": "d872bb908b2a36b081e3b83fc8a7c7d9933ae43941d5f92ad25be9194bfc8345"
+    }
+  }
+]

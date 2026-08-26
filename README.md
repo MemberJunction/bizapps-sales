@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/MemberJunction/MJ/main/logo.png" alt="MemberJunction" width="120" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/MemberJunction/MJ/raw/main/MJ_logo_dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://github.com/MemberJunction/MJ/raw/main/MJ_logo.webp">
+    <img alt="MemberJunction" src="https://github.com/MemberJunction/MJ/raw/main/MJ_logo.webp" width="220">
+  </picture>
 </p>
 
 <h1 align="center">BizApps Sales</h1>
@@ -55,9 +59,13 @@ billing through recognition — on one schema, with one Person graph, one catalo
 
 > ### 1. The sales app never computes money.
 >
-> It records **intent** — product, quantity, requested discount, term — and asks
+> It records **intent** — product, quantity, requested discount, override price, term — and asks
 > [`bizapps-orders`](https://github.com/MemberJunction/bizapps-orders). No pricing arithmetic, no tax
 > logic, no proration, no total that was not returned by `Orders.PreviewOrder`.
+>
+> **This is not a rule against overriding prices.** Overriding is expected, and it is
+> [modelled in full below](#overriding-a-price-is-an-input-not-an-exception). The rule is against
+> *computing* — see the distinction, because misreading it in either direction causes real damage.
 >
 > ### 2. Domain vocabulary is data, never a `CHECK` constraint.
 >
@@ -65,8 +73,13 @@ billing through recognition — on one schema, with one Person graph, one catalo
 > loss reasons, lead sources and lifecycle stages are all **type tables carrying the behaviour flags
 > the engine branches on**. The engine reads `DealStatusType.IsWon`. It never compares a string.
 
-**What sales must never do:** multiply quantity by price · apply a discount percentage · compute tax
-· prorate a partial period · sum lines into a header total · round anything.
+| ✅ Sales may absolutely | ❌ Sales must never |
+|---|---|
+| Set `OverrideUnitPrice` on a line | Multiply quantity by price |
+| Request a discount (`RequestedDiscountPct`) | **Apply** a discount percentage |
+| Name a term, a service period, a quantity | Prorate a partial period |
+| Choose a `PriceListID` | Compute tax |
+| Display any number orders returned | Sum lines into a header total, or round anything |
 
 Both rules fail the same way — **by accretion.** "Just this one rounding case." "Just this one
 `Status === 'Won'`." So both are enforced by tests that fail, not paragraphs that ask nicely:
@@ -149,7 +162,7 @@ vocabulary **without a migration and without a code change**.
 | Type table | Behaviour flags the engine reads | Seeded with |
 |---|---|---|
 | **`DealStatusType`** | `IsOpen` · `IsClosed` · `IsWon` · `IsLost` · `LocksDeal` | Open, Won, Lost, Abandoned, On Hold |
-| **`DealType`** | `RequiresContract` · `RequiresRenewalSource` · `DefaultPipelineID` | New Business, Renewal, Expansion, Cross-Sell, Partner-Sourced |
+| **`DealType`** | `RequiresContract` · `RequiresRenewalSource` · `DefaultPipelineID` | New, Upsell, Renewal |
 | **`DealRole`** | `IsOwnerRole` · `AllowsMultiplePerDeal` · `DefaultAttributionPct` · `IsQuotaCarrying` | Owner/AE, Sales Engineer, SDR, Exec Sponsor, Partner Manager, CS Lead |
 | **`ForecastCategoryType`** | `IncludeInCommit` · `IncludeInBestCase` · `IncludeInPipeline` · `DisplayRank` | Omitted, Pipeline, Best Case, Commit, Closed |
 | **`LossReason`** | `Category` · `RequiresNotes` · `IsCompetitive` | Price, Product Gap, Competitor, Timing, No Decision, Internal |
@@ -212,14 +225,20 @@ term months · expected/actual close · probability · forecast category · loss
 source · **`ContractID`** · **`RenewsContractID`** · next step.
 
 The three `Amount*` provenance columns are load-bearing. `Amount` is a **cached answer**;
-`AmountSourceHash` fingerprints the `DealLine` set it came from, so the UI can say *"this figure is
-stale, reprice"* instead of showing a number nobody can trace. **Without them, `Amount` becomes a
-hand-edited field within a month and rule #1 quietly dies.**
+`AmountSourceHash` fingerprints `OrderID` and the order total it came from, so the UI can say *"this
+figure is stale, reprice"* instead of showing a number nobody can trace. **Without them, `Amount`
+becomes a hand-edited field within a month and rule #1 quietly dies.**
 
-**`DealLine`** — product · quantity · requested discount · override price · term · service period ·
-plus four **write-only** columns populated *only* from an `Orders.PreviewOrder` response:
-`ResolvedUnitPrice`, `ResolvedExtendedAmount`, `PriceComponentsJSON`, `PricedAt`.
-`PriceComponentsJSON` stores orders' explanation trail, so a rep can answer *"why is it this price"*
+> The hash used to fingerprint a `DealLine` set. `DealLine` is retired, and while the fingerprint still
+> described that table nothing repopulated `Amount` — it did not go blank, it kept whatever it last
+> held, which is the failure mode that survives review. See `DealEntityServer.refreshAmountFromOrder`.
+
+**The lines live on an ORDER, not on the deal.** `Deal.OrderID` points at an `OrderHeader` that
+`DealEntityServer` provisions on the deal's first save, and its `OrderLine` rows carry product ·
+quantity · discount · price. Sales sends product and quantity; orders owns everything else, including
+`UnitPrice` and the line's `CompanyID`.
+
+`OrderLine.PriceComponentsJSON` stores orders' explanation trail, so a rep can answer *"why is it this price"*
 without a support ticket.
 
 **`DealStageEvent`** — immutable transition log, append-only: from/to stage, from/to status, who,
@@ -267,23 +286,73 @@ diverge.
 ## Pricing — the whole mechanism
 
 ```
-DealLine[]  ──map──▶  HydratableLine[]  ──▶  Orders.PreviewOrder  ──▶  priced result
-                                                                          │
-                                       ┌──────────────────────────────────┤
-                                       ▼                                  ▼
-                        DealLine.Resolved* + PriceComponentsJSON     Deal.Amount
-                                                                   + AmountSourceHash
+Deal --OrderID--> OrderHeader --> OrderLine[]   (product + quantity from sales)
+                       |                |
+                       |                +--> orders prices it: UnitPrice, CompanyID,
+                       |                     PriceComponentsJSON
+                       v
+                 TotalGross  --cached-->  Deal.Amount
+                 (orders' own rollup)   + AmountIsComputed + AmountComputedAt
+                                        + AmountSourceHash = sha256(OrderID|total)
 ```
+
+Sales reads ONE number orders already stands behind. There is no multiplication, addition or
+rounding anywhere on this path, and there must never be -- the moment sales sums the lines itself,
+the quote and the invoice can disagree.
 
 On close, **the same draft** goes to `Orders.CreateOrderInState`. The quote and the invoice cannot
 disagree, because they are **the same computation run twice**.
+
+### Overriding a price is an input, not an exception
+
+A rep negotiating a number is the normal case, not a workaround, and orders already models it with a
+full audit and authority trail — `OrderAdjustment` carries `Amount`, a **required** `Reason` when it
+is not a promotion, `AppliedByUserID`, `AuthorizedBySalesAuthorityID` and the `ApprovedByUserID` /
+`ApprovedAt` pair; `SalesAuthority` carries the per-rep caps (`MaxDiscountPct`, `MaxOrderValue`,
+allowed payment terms, allowed product categories).
+
+**The override is an input to the pipeline, never a replacement for it.** Sales sets the price or
+discount it wants on the ORDER LINE; orders honours it and then **still** computes extended amount,
+charges, tax and proration on top. Sales reads back `OrderHeader.TotalGross` and caches it — it does
+not compute any part of it.
+
+> **Units trap, and it is live.** A rep enters a discount as a PERCENTAGE (25); orders stores a
+> FRACTION and bounds it 0-1. Conversion is one place only — see `discount-conversion.ts` and the
+> gate that guards it — and must never be re-derived at a call site.
+
+```
+OrderLine.UnitPrice = 50,000            <- a human decided this
+        |
+        v
+orders prices the line                  <- honours the override, THEN applies
+        |                                  charges + tax + proration on top
+        v
+OrderHeader.TotalGross ----------------> Deal.Amount (cached, with provenance)
+```
+
+Computing `quantity × override` locally would produce **50,000** — quietly dropping tax and charges,
+so the quote and the invoice disagree by an amount nobody can trace. That, and not the human
+judgement, is what the rule exists to prevent.
+
+The same logic covers contracted pricing, which is cleaner still: `ContractPriceResolver` registers
+**inside** orders' `BasePriceResolver` walk, so contracts does not override orders from outside — it
+participates in orders' own computation as a plugin. That is why contracted prices reach ad-hoc
+orders for free.
+
+> **Approval level is data, and it varies by organization.** Exceeding a rep's `SalesAuthority` raises
+> an Approval Request Task routed to an approver role — configured per org, never hardcoded.
+> **Open question:** `SalesAuthority` is a *flat cap per rep*, which expresses single-gate approval
+> well but cannot express an escalation ladder (">20% to the manager, >40% to the CFO") as
+> configuration. If an org needs tiers, that is a threshold→role table belonging in **orders** beside
+> `SalesAuthority` — because ad-hoc order confirm needs it too, not just deals. Not built until
+> confirmed.
 
 **Two clean modes, not a spectrum** *(L-2)*:
 
 | Mode | Shape | When |
 |---|---|---|
 | **Simple deal** | Header only. `Amount` hand-entered, `AmountIsComputed = 0`, no lines, no catalog | Small, B2C-ish, or early-stage where line detail is noise. Closes to nothing, or to a single ad-hoc order |
-| **Priced deal** | `DealLine[]` against real catalog products, priced through orders. Requires a selling `CompanyID` | Everything that will become a contract or a subscription |
+| **Priced deal** | `OrderLine[]` on the embedded order, against real catalog products, priced by orders. Requires a selling `CompanyID` | Everything that will become a contract or a subscription |
 
 `Pipeline.RequiresDealLines` sets the default per pipeline — partner-referral and sponsorship
 pipelines may never carry catalog lines — overridable per deal.
@@ -307,11 +376,16 @@ operation executes it.**
   "ContractTypeCode": "Standard",
   "TermMonths": 12,
   "SubscriptionLinesTo": "Contract",   // Contract | Subscription | None
-  "OneTimeLinesTo": "Order",           // Order | Contract | None
-  "OrderState": "Confirmed",           // Draft | Confirmed
+  "OneTimeLinesTo": "Order",           // Order | Contract | None — DEAD, see below
   "RequireApprovalTaskTypeCode": null
 }
 ```
+
+**`OrderState` used to be a key here and is gone (D-OS1).** What status the deal's order takes is a
+property of the STAGE now — `PipelineStage.OrderStatusOnEntry`, nullable, one of
+`Draft | Quoted | Confirmed | Voided` — so it can speak on every stage change rather than only at the
+moment of a won close. `OneTimeLinesTo` is dead for a different reason: close-won creates no order, so
+there is nothing to route.
 
 A deal can legitimately need **both** a contract (subscription products) *and* a standalone order (a
 services SOW billed once). The policy expresses that rather than forcing a choice. And a deal type
@@ -353,7 +427,7 @@ provenance of a contract and an order, and editing it retroactively falsifies bo
 | After lock | |
 |---|---|
 | Header fields | Frozen, except `Description` and `NextStep` (annotation only, no financial meaning) |
-| `DealLine` rows | Frozen — no insert, update or delete |
+| `OrderLine` rows on the embedded order | Frozen — no insert, update or delete |
 | `DealTeamMember` | Frozen (attribution is now historical fact) |
 | `Activity` links | **Still allowed** — post-close conversations are real and belong on the timeline |
 | Reopening | Only via `Sales.ReopenDeal(DealID, reason)`, which writes a `DealStageEvent`, records the reason, and is gated by an approval task when the pipeline requires it |
@@ -407,9 +481,9 @@ provenance of a contract and an order, and editing it retroactively falsifies bo
       │      │             AmountAtTransition so history           │
       │      │             reconstructs after Amount changes)      │
       │      │                                                     │
-      │      └──► DealLine ──── ProductID ────────────────────────►┘
-      │            Resolved* + PriceComponentsJSON
-      │            ← WRITE-ONLY from Orders.PreviewOrder
+      │      └──► (no deal-line table — the lines live on the embedded ORDER,
+      │            reached through Deal.OrderID; see the pricing section)
+      │
       │
       └──► Activity / ActivityLink   (timeline on contact, account AND deal)
 
@@ -424,8 +498,8 @@ Mirrors orders' **D6/D7** exactly, so nothing has to be re-derived:
 | | Sales | Orders (the model being mirrored) |
 |---|---|---|
 | Attribution / ownership anchor | `Deal.CompanyID` (= `Pipeline.CompanyID`) | `Order.CompanyID` |
-| Revenue ownership | `DealLine` inherits `Product.CompanyID` | `Product.CompanyID` (NOT NULL, source of truth) |
-| Denormalized stamp | `DealLine.CompanyID` at price time | `OrderLine.CompanyID` at save |
+| Revenue ownership | `OrderLine` inherits `Product.CompanyID` | `Product.CompanyID` (NOT NULL, source of truth) |
+| Denormalized stamp | `OrderLine.CompanyID`, stamped by orders at save | `OrderLine.CompanyID` at save |
 
 A cross-company deal therefore materializes into orders with correct per-line company ownership, and
 **each line books its own single-company journal entry** (orders D10) with no extra work here.
@@ -443,7 +517,7 @@ measures** rather than a fixed list of screens.
 | Deal | `Deal` | current pipeline, weighted forecast, win rate, average deal size |
 | Transition | `DealStageEvent` | velocity, stage conversion, dwell time, slippage, skipped stages |
 | Team membership | `DealTeamMember` | per-rep and per-role performance, coverage, involvement |
-| Line | `DealLine` | product mix, attach rate, discount depth |
+| Line | `OrderLine` (via `Deal.OrderID`) | product mix, attach rate, discount depth |
 
 **Dimensions** — Company · Pipeline · Stage · Time (expected close, actual close, transition,
 created — *each answers a different question and every report must say which it uses*) · Employee ·
@@ -509,7 +583,7 @@ A named workstream, not an afterthought.
 |---|---|
 | Company | `common.Organization` + `SalesAccount` |
 | Contact | `common.Person` + `SalesContact` (lifecycle stage → `LifecycleStageType`) |
-| Deal | `Deal` (+ `DealLine` where line items exist) |
+| Deal | `Deal` (+ `OrderLine` on the embedded order, where line items exist) |
 | Deal stage history | `DealStageEvent` — **preserve original timestamps**, do not stamp import time |
 | Deal owner + collaborators | `DealTeamMember` against MJ `Employee`, roles mapped to `DealRole` |
 | Engagements (emails, calls, meetings, notes) | `Activity` + `ActivityLink`, `ActivityDate` = the **original** date |
@@ -594,7 +668,7 @@ bizapps-sales/
 │   └── Angular/                   # @mj-biz-apps/sales-ng
 ├── migrations/                    # T-SQL migrations (source of truth)
 ├── migrations-pg/                 # PG migrations (converter output)
-├── metadata/                      # The nine type tables + pipelines, synced via mj-sync
+├── metadata/                      # The ten type tables, remote operations + the Sales app, synced via mj-sync
 ├── metadata-tests/                # MJ: Tests + Test Suite records
 ├── scripts/                       # rebuild-db.sh, append-codegen.sh, link-local-apps.mjs
 ├── test-harnesses/                # standalone dispatchers
@@ -610,7 +684,7 @@ bizapps-sales/
 |---|---|---|
 | **S0** | Repo bootstrap, `mj-app.json`, ports, CI | In progress |
 | **S1** | Baseline migration + CodeGen: **type tables first**, then identity extensions, pipelines/stages, deal + lines + team + stage events | Not started |
-| **S2** | The pricing bridge — `DealLine` ↔ `Orders.PreviewOrder`, provenance stamping, the enforcement check | Not started |
+| **S2** | The pricing bridge — the embedded `OrderHeader`/`OrderLine`, provenance stamping, the enforcement check | Not started |
 | **S3** | Pipeline board + deal workspace + deal team + activity timeline (**the rep's day**) | Not started |
 | **S4** | `Sales.CloseDeal` + policy evaluation + the close lock + `Contracts.CreateFromDeal` / `RenewTerm` wiring | Not started |
 | **S5** | Dashboards: MJ Queries, forecast snapshots, stage-conversion and velocity | Not started |
@@ -691,11 +765,10 @@ bizapps-sales/
 
 ## License
 
-ISC, consistent with the BizApps line. *(Family-wide licensing is under review; if the BizApps apps
-move to BUSL-1.1, this app follows the family.)*
+Business Source License 1.1 — see [LICENSE](./LICENSE) for details.
 
 ---
 
 <p align="center">
-  Built on <a href="https://github.com/MemberJunction/MJ">MemberJunction</a> — the open-source metadata-driven application platform.
+  Built on <a href="https://github.com/MemberJunction/MJ">MemberJunction</a> — the metadata-driven application platform.
 </p>

@@ -1,0 +1,154 @@
+[
+  {
+    "fields": {
+      "Code": "SUBSCRIBER",
+      "Name": "Subscriber",
+      "Description": "Has given us permission to contact them and nothing more.",
+      "IsMarketingQualified": false,
+      "IsSalesQualified": false,
+      "IsCustomer": false,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "70D2A486-0001-4176-D497-B224D38FC677"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.876Z",
+      "checksum": "f734bd83ffb569b636752c278ce2f1c69e4a9acf2d82d3c5ffcc3bdaff2ceda9"
+    }
+  },
+  {
+    "fields": {
+      "Code": "LEAD",
+      "Name": "Lead",
+      "Description": "Shown some interest. NOTE THIS IS A STAGE, NOT AN ENTITY — a lead is a common.Person carrying this LifecycleStageTypeID. There is deliberately no Lead table: a second identity table for humans fights the Person graph and buys nothing, and MJ already ships duplicate detection and record merge for the messy inbound case.",
+      "IsMarketingQualified": false,
+      "IsSalesQualified": false,
+      "IsCustomer": false,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "70D2A486-0002-4176-D497-B224D38FC677"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.891Z",
+      "checksum": "59b6a1b8ce57e8454083bb71891fec318658f2cf326301463e424d9d0ef1f46a"
+    }
+  },
+  {
+    "fields": {
+      "Code": "MQL",
+      "Name": "MQL",
+      "Description": "Marketing-qualified: fits the profile and has engaged enough to warrant sales attention.",
+      "IsMarketingQualified": true,
+      "IsSalesQualified": false,
+      "IsCustomer": false,
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "70D2A486-0003-4176-D497-B224D38FC677"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.906Z",
+      "checksum": "570d32258a7378e0b04ff53f500485baf4d155f5e1bb10ca709e8738467b7ec5"
+    }
+  },
+  {
+    "fields": {
+      "Code": "SQL",
+      "Name": "SQL",
+      "Description": "Sales-qualified: a rep has spoken to them and confirmed fit, need and timing. Cumulative with MQL, so a funnel measure tests one flag.",
+      "IsMarketingQualified": true,
+      "IsSalesQualified": true,
+      "IsCustomer": false,
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "70D2A486-0004-4176-D497-B224D38FC677"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.926Z",
+      "checksum": "767dd7fa11941091406976b495494e4ebaef532ab2a19d781967f1d5ee4bb02b"
+    }
+  },
+  {
+    "fields": {
+      "Code": "OPPORTUNITY",
+      "Name": "Opportunity",
+      "Description": "An open deal exists against them.",
+      "IsMarketingQualified": true,
+      "IsSalesQualified": true,
+      "IsCustomer": false,
+      "DisplayRank": 50,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "70D2A486-0005-4176-D497-B224D38FC677"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.945Z",
+      "checksum": "2fd51e18598044cb60761bd8101289bf1a635e5dc990d3c51db279509a9e3b68"
+    }
+  },
+  {
+    "fields": {
+      "Code": "CUSTOMER",
+      "Name": "Customer",
+      "Description": "They bought. IsCustomer is the flag every 'existing business' filter reads, rather than a comparison against this row's name.",
+      "IsMarketingQualified": true,
+      "IsSalesQualified": true,
+      "IsCustomer": true,
+      "DisplayRank": 60,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "70D2A486-0006-4176-D497-B224D38FC677"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.965Z",
+      "checksum": "b1fff987e9fe0ab3bb4fdb0fee6e9118442a643b6df6ccde38a102ccafc3a7a0"
+    }
+  },
+  {
+    "fields": {
+      "Code": "EVANGELIST",
+      "Name": "Evangelist",
+      "Description": "A customer who actively refers others. Still IsCustomer — the distinction drives advocacy programmes, not commercial logic.",
+      "IsMarketingQualified": true,
+      "IsSalesQualified": true,
+      "IsCustomer": true,
+      "DisplayRank": 70,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "70D2A486-0007-4176-D497-B224D38FC677"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.984Z",
+      "checksum": "e3cb2ef147c67e648801c0a13bc3a69299ee1a98f0314cf59beab9ac52862653"
+    }
+  },
+  {
+    "fields": {
+      "Code": "DISQUALIFIED",
+      "Name": "Disqualified",
+      "Description": "Not a fit, or asked not to be contacted. A terminal stage rather than a deletion, so the judgement is recorded and not re-made every quarter.",
+      "IsMarketingQualified": false,
+      "IsSalesQualified": false,
+      "IsCustomer": false,
+      "DisplayRank": 80,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "70D2A486-0008-4176-D497-B224D38FC677"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.999Z",
+      "checksum": "90dd7b7f80ed5fc92ec9096d9430f761ebc09fe440bedc8f3c8082baf1939031"
+    }
+  }
+]

@@ -1,0 +1,60 @@
+[
+  {
+    "_comments": [
+      "THE HOURLY ACTIVITY SYNC. MJ's SchedulingEngine is the mechanism — no external cron anywhere in",
+      "this app.",
+      "",
+      "The values below are the ones recorded in D-23, and each of the four non-obvious ones is a choice:",
+      "",
+      "  · JobTypeID  — the seeded `Action` type (ActionScheduledJobDriver). The job does not contain",
+      "    logic; it invokes `Sales.SyncActivities`, which keeps the schedule and the work separable.",
+      "",
+      "  · CronExpression `0 0 * * * *` — SIX fields in this dialect, seconds first, so this is the top of",
+      "    every hour. A five-field reading of the same string would be 'every minute of midnight', which",
+      "    is why the seeded MJ jobs are worth comparing against before editing it.",
+      "",
+      "  · ConcurrencyMode `Skip` — a run overlapping its predecessor would fetch the same window twice.",
+      "    Dedupe would absorb the writes, so the damage is wasted Graph calls rather than duplicate rows,",
+      "    but two runs racing to advance the same watermark can leave it BEHIND where the earlier run got",
+      "    to, which silently re-reads a window on the next pass.",
+      "",
+      "  · MissedRunPolicy `RunOnce` — not `RunAll`. Because there is no date filter on the fetch, catching",
+      "    up ten missed hours would make ten identical requests for the most recent N messages. RunAll",
+      "    would cost ten times as much to achieve exactly what one run achieves.",
+      "",
+      "WHY IT IS SAFE TO SHIP `Active`. The action's default source is an EMPTY fixture, so an hourly run",
+      "reads the connections, applies the rules, calls the filter and writes nothing — reporting",
+      "`NO_CONNECTIONS` until somebody creates an ActivitySyncConnection, and zero-fetched after that until",
+      "somebody swaps the factory for a Graph-backed one. Neither state writes to LastError, so the",
+      "operator surface that exists to make a broken sync visible stays quiet until there is something",
+      "real to say.",
+      "",
+      "OwnerUserID and NotifyUserID are deliberately left NULL: both are nullable, and naming a person here",
+      "would seed one deployment's staff into another's database."
+    ],
+    "fields": {
+      "Name": "Sales — Activity Sync (hourly)",
+      "Description": "Pulls Outlook messages and calendar items for every Active Microsoft365 sync connection and files the relevant ones as Activities against their deal. Writes nothing until a deployment supplies a real source; see the notes in this file.",
+      "JobTypeID": "3B94DD43-E961-4D85-B7F4-B6783D748766",
+      "CronExpression": "0 0 * * * *",
+      "Timezone": "UTC",
+      "Status": "Active",
+      "ConcurrencyMode": "Skip",
+      "MissedRunPolicy": "RunOnce",
+      "RunImmediatelyIfNeverRun": false,
+      "MaxRuntimeMinutes": 20,
+      "NotifyOnSuccess": false,
+      "NotifyOnFailure": false,
+      "NotifyViaEmail": false,
+      "NotifyViaInApp": false,
+      "Configuration": "{\"ActionID\":\"5A1E5000-0000-4000-8000-000000000101\",\"Params\":[{\"ActionParamID\":\"5A1E5000-0000-4000-8000-000000000102\",\"ValueType\":\"Static\",\"Value\":\"100\"}]}"
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0000-4000-8000-000000000201"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:24.523Z",
+      "checksum": "16a63cafc2de9d87c3d034c16bd7c91b56b9eabb5ae28e9ba1b47ce070c75167"
+    }
+  }
+]

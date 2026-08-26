@@ -1,0 +1,285 @@
+/*
+  Sales section styles.
+
+  SEMANTIC TOKENS ONLY — every colour is a `--mj-*` variable, no hex literals, which is what makes the
+  section correct in dark mode without a second stylesheet. Class names deliberately echo contracts'
+  (`.wrap`, `.sechead`, `.kpis`, `.kpi`, `.card`, `.ch`, `.wl`, `.pill`, `.muted`, `.num`) so the two
+  apps are recognisably the same shell and a reader moving between them is not relearning names.
+
+  The page-body-interior above owns scrolling. Nothing here may introduce a second scrolling container —
+  only the wide roster scrolls, horizontally, inside `.tscroll`.
+*/
+
+:host {
+    display: block;
+    height: 100%;
+}
+
+/* The page gutter. `mj-page-body-interior` has Padding off precisely so this owns it. */
+.wrap {
+    padding: 1rem 1.25rem 1.5rem;
+}
+
+/* The workspace brings its own card surface and padding, so it gets the full width. */
+.wrap--flush {
+    padding: 0;
+    height: 100%;
+}
+
+/* `[hidden]` needs help: the host sets display on these, which would otherwise win. */
+[hidden] {
+    display: none !important;
+}
+
+.sechead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.9rem;
+}
+
+.sechead h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--mj-text-primary);
+}
+
+.msg {
+    margin: 0.75rem 1.25rem 0;
+    padding: 0.5rem 0.7rem;
+    border-radius: 4px;
+    border-left: 3px solid var(--mj-status-warning);
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-primary);
+    font-size: 0.85rem;
+}
+
+/* ── KPI strip ─────────────────────────────────────────────────────────────── */
+
+.kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1.1rem;
+}
+
+.kpi {
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 8px;
+    background: var(--mj-bg-surface-card);
+    min-width: 0;
+}
+
+.kpi .l {
+    font-size: 0.74rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--mj-text-muted);
+}
+
+.kpi .v {
+    margin-top: 0.2rem;
+    font-size: 1.4rem;
+    font-weight: 650;
+    color: var(--mj-text-primary);
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+}
+
+.kpi .v.warn {
+    color: var(--mj-status-warning);
+}
+
+.kpi .v.err {
+    color: var(--mj-status-warning);
+}
+
+.kpi .f {
+    margin-top: 0.15rem;
+    font-size: 0.75rem;
+    color: var(--mj-text-secondary);
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────────────── */
+
+.card {
+    border: 1px solid var(--mj-border-default);
+    border-radius: 8px;
+    background: var(--mj-bg-surface-card);
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+
+.ch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid var(--mj-border-default);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--mj-text-primary);
+}
+
+.ch .r {
+    font-weight: 500;
+    font-size: 0.78rem;
+    color: var(--mj-text-muted);
+}
+
+.empty {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.1rem 0.85rem;
+    color: var(--mj-text-muted);
+    font-size: 0.88rem;
+    font-style: italic;
+}
+
+/* ── The roster ────────────────────────────────────────────────────────────── */
+
+/* Horizontal scroll lives HERE. Nine columns will not fit a narrow window, and the page body must
+   never scroll sideways. */
+.tscroll {
+    overflow-x: auto;
+}
+
+.wl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.wl th {
+    text-align: left;
+    padding: 0.45rem 0.7rem;
+    border-bottom: 1px solid var(--mj-border-default);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--mj-text-muted);
+    white-space: nowrap;
+}
+
+.wl td {
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--mj-border-default);
+    color: var(--mj-text-primary);
+    vertical-align: middle;
+}
+
+.wl tbody tr {
+    cursor: pointer;
+}
+
+.wl tbody tr:hover {
+    background: var(--mj-bg-surface-hover);
+}
+
+/* Every row is clickable, so it needs a visible keyboard/hover affordance rather than only a cursor. */
+.wl tbody tr:focus-visible {
+    outline: 2px solid var(--mj-border-focus);
+    outline-offset: -2px;
+}
+
+.wl tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.where {
+    font-weight: 600;
+}
+
+.muted {
+    color: var(--mj-text-secondary);
+}
+
+.num {
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* A deal past its expected close: marked on the row, so it is findable by scanning. */
+.wl tbody tr.slipped td:first-child {
+    box-shadow: inset 3px 0 0 0 var(--mj-status-warning);
+}
+
+/* ── Pills, chips, flags ───────────────────────────────────────────────────── */
+
+.pill {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    color: var(--mj-text-secondary);
+}
+
+.pill.ok {
+    border-color: var(--mj-status-success);
+    color: var(--mj-status-success);
+}
+
+.pill.err {
+    border-color: var(--mj-status-warning-border);
+    color: var(--mj-status-warning);
+}
+
+.pill.open {
+    border-color: var(--mj-brand-primary);
+    color: var(--mj-brand-primary);
+}
+
+.pill.muted {
+    color: var(--mj-text-muted);
+}
+
+/* The deal number beside the name — secondary, so it does not compete with it. */
+.num-chip {
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.35rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--mj-text-muted);
+}
+
+/* A short inline annotation — "past", "stated". Not a status, so it must not look like one. */
+.flag {
+    margin-left: 0.35rem;
+    padding: 0.02rem 0.3rem;
+    border-radius: 3px;
+    background: var(--mj-bg-surface-hover);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--mj-text-muted);
+}
+
+/* A cell that opens a RECORD, inside a row that opens the workspace.
+
+   A <button> rather than an <a>: there is no href — MJ's NavigationService opens an Explorer tab, so a
+   link would be a lie to a screen reader and a broken middle-click to everyone else. The styling makes it
+   read as a link because that is what it behaves like, and the underline-on-hover is what tells you this
+   cell does something different from the rest of the row. */
+.wl .linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--mj-brand-primary);
+  cursor: pointer;
+  text-align: left;
+}
+.wl .linklike:hover,
+.wl .linklike:focus-visible {
+  text-decoration: underline;
+}

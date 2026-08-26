@@ -1,0 +1,141 @@
+[
+  {
+    "_comments": [
+      "S-US9's LOG-ACTIVITY ACTION. Its own file for the same coordination reason as the other two:",
+      "MetadataSync reads every dot-json in the directory, so sessions adding a file each conflict on",
+      "nothing while two appending to one file conflict always.",
+      "",
+      "WHY THIS ROW HAD TO EXIST AT ALL. The deal-activity pane wrote its own reduced copy of the",
+      "activity composition and omitted LoggedByUserID -- NOT NULL with no default on",
+      "__mj_BizAppsCommon.Activity -- so logging an activity from the UI failed at the database with a",
+      "raw constraint error, every time, for the whole life of the feature. It also wrote the activity",
+      "and its link as two independent saves, so a link failure left a committed activity nothing could",
+      "reach.",
+      "",
+      "The fix was not to add the missing field to the pane. It was to give the pane a way to call the",
+      "real composition -- ActivityWriterService, which stamps the field, resolves the deal's parties and",
+      "wraps the whole thing in one transaction -- and delete its copy. This row is that way.",
+      "",
+      "AN ACTION RATHER THAN A REMOTE OPERATION, and that is a constraint. Operation shells are CodeGen",
+      "output and CodeGen is not run here to close a gap (docs/CODEGEN-PARTIAL-RUNS.md records three",
+      "partially-failed runs). An Action needs a metadata row and a @RegisterClass, and is callable from",
+      "the browser through GraphQLActionClient.RunAction -- the same path MJ's own",
+      "interactive-form-apply.service.ts uses.",
+      "",
+      "The four Input params mirror the form. There is deliberately no ParticipantID or LinkTo param: who",
+      "gets attached is the service's decision from the deal, not the browser's to assert."
+    ],
+    "fields": {
+      "Name": "Log Activity",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Sales",
+      "Description": "Log one activity against a deal — a call, meeting, note or email — writing the Activity and its links in a single transaction, with the deal's account and primary contact attached as participants. The canonical composition; the deal workspace calls this rather than writing rows itself.",
+      "Type": "Custom",
+      "DriverClass": "Sales.LogActivity",
+      "IconClass": "fa-solid fa-clock-rotate-left",
+      "UserPrompt": "Log an activity against a deal.",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0000-4000-8000-000000000121"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "DealID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "The deal the activity is about. Always linked, always with role Regarding — it is the anchor every read of a deal's timeline starts from, so an activity without it would be unreachable rather than merely unattributed."
+          },
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000122"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.277Z",
+            "checksum": "2b3e175c35853d458f18ce5810356021502fca943fe22ce4dbed287d7fdc0987"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "TypeCode",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "One of Call, Meeting, Note, Email — the ActivityType Code, never its display Name. Validated against that set rather than passed through, so a bad value is reported as a bad request instead of surfacing as 'no ActivityType with Code X', which reads like a missing seed."
+          },
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000123"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.302Z",
+            "checksum": "f90d934a24691e6ae6a0300abea9814053200c63704a8d8f9d86ba9c6930c8fd"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Title",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "The subject. Activity.Title is NOT NULL, nvarchar(500)."
+          },
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000124"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.325Z",
+            "checksum": "6dc0e5d6f8ccdf9348813865a4856d27adbb178cb540d780be9a832483c9ca30"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Notes",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Free text, stored as Activity.Description."
+          },
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000125"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.349Z",
+            "checksum": "a30e7fc22b823ab26763a7d5e52f3f59ceadd5b95447f053e121667557fbfb8f"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "StartedAt",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "When it happened, ISO-8601. Omit for now. An unparseable value is REFUSED rather than defaulted to the current time: a timeline is ordered by StartedAt, so a silent fallback files the activity at the wrong point with nothing to show it moved."
+          },
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000126"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.372Z",
+            "checksum": "95cf6d9eb81b3debf6c55868083fce33eff37c5d3c3b5ec8305b45c817d56ca5"
+          }
+        }
+      ]
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:24.241Z",
+      "checksum": "96c29b7a750d788272d0b3b26a49b53331bd6a52e74bfd3958fb315ed525b11e"
+    }
+  }
+]

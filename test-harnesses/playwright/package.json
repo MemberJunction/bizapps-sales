@@ -1,0 +1,24 @@
+{
+  "name": "@mj-biz-apps/sales-playwright-harness",
+  "license": "BUSL-1.1",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Explorer GUI harness for bizapps-sales — proves CRUD through the real UI, not just through procs/GraphQL.",
+  "type": "module",
+  "_comment": [
+    "`type: module` IS LOAD-BEARING, not boilerplate. Playwright transpiles TypeScript to CJS unless",
+    "the NEAREST package.json declares ESM — and the repo root does not, because the Angular/MJ",
+    "packages there are built by tsc rather than run directly. Without this file, lib/env.ts fails at",
+    "config-load time with `SyntaxError: Cannot use 'import.meta' outside a module` and no browser ever",
+    "launches. The sibling bizapps-accounting harness carries the same declaration for the same reason.",
+    "",
+    "This directory is deliberately NOT an npm workspace (the root workspaces globs are apps/* and",
+    "packages/*). @playwright/test is a root devDependency and resolves by hoisting; there is nothing",
+    "to install here."
+  ],
+  "scripts": {
+    "test": "playwright test --project crud",
+    "test:auth": "playwright test --project auth-setup",
+    "report": "playwright show-report playwright-report"
+  }
+}

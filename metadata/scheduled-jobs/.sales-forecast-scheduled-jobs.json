@@ -1,0 +1,55 @@
+[
+  {
+    "_comments": [
+      "THE DAILY FORECAST SNAPSHOT (#40). Its own file, for the same coordination reason as",
+      "`.sales-forecast-actions.json`: MetadataSync reads every dot-json in the directory, so two sessions",
+      "adding a file each conflict on nothing.",
+      "",
+      "DAILY, NOT HOURLY, and that is the one value that differs in spirit from the activity sync rather",
+      "than in detail. A forecast snapshot is a measurement of a period, and its whole value is comparing",
+      "one day's answer to the next — 'what did we think on the 1st'. Twenty-four captures a day would be",
+      "twenty-four rows saying almost the same thing, and the series a human reads would be noise. 02:00",
+      "UTC puts it after the close of business in every timezone Blue Cypress sells in, so a day's deals",
+      "are in before the day is measured.",
+      "",
+      "The job is also idempotent within a day by design, not just by cadence: the writer SKIPS a grain",
+      "already captured today rather than adding a second capture. So a manual run, a catch-up run and the",
+      "scheduled run cannot between them turn one day into three data points.",
+      "",
+      "  · ConcurrencyMode `Skip` — two concurrent captures would both read an empty guard and both write.",
+      "  · MissedRunPolicy `RunOnce` — catching up a week of missed days would capture TODAY's numbers seven",
+      "    times and label them as seven days. That is worse than the gap it is trying to fill: a gap is",
+      "    visibly missing, whereas seven identical rows look like a week of flat forecast.",
+      "  · RunImmediatelyIfNeverRun `false` — a first deployment should not capture a period nobody has",
+      "    looked at yet, and there is no source registered to capture from anyway.",
+      "",
+      "WHY IT IS SAFE TO SHIP `Active`: the forecast source factory defaults to NULL, so the run reports",
+      "NO_SOURCE and writes nothing until somebody registers a query-backed source. See the note in",
+      "`.sales-forecast-actions.json` for why an invented forecast number is the worst thing this could do."
+    ],
+    "fields": {
+      "Name": "Sales — Forecast Snapshot (daily)",
+      "Description": "Captures ForecastSnapshot rows for the current period from the sales forecast queries. Writes nothing until a forecast source is registered; skips any grain already captured today.",
+      "JobTypeID": "3B94DD43-E961-4D85-B7F4-B6783D748766",
+      "CronExpression": "0 0 2 * * *",
+      "Timezone": "UTC",
+      "Status": "Active",
+      "ConcurrencyMode": "Skip",
+      "MissedRunPolicy": "RunOnce",
+      "RunImmediatelyIfNeverRun": false,
+      "MaxRuntimeMinutes": 15,
+      "NotifyOnSuccess": false,
+      "NotifyOnFailure": false,
+      "NotifyViaEmail": false,
+      "NotifyViaInApp": false,
+      "Configuration": "{\"ActionID\":\"5A1E5000-0000-4000-8000-000000000111\",\"Params\":[]}"
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0000-4000-8000-000000000202"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:24.502Z",
+      "checksum": "f58246ea23551b0a284515db4a22804284ddfc1db8a83bf084e57c0520725c8c"
+    }
+  }
+]

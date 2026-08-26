@@ -1,0 +1,20 @@
+[
+  {
+    "_comments": [
+      "The hardcoded UUID is deliberate and matches the convention every seeded row here follows: a",
+      "stable ID means pushing twice updates one row rather than creating two, and a deployment that",
+      "renames this company keeps its pipelines pointing at it."
+    ],
+    "fields": {
+      "Name": "Default Company",
+      "Description": "Placeholder selling company created by the bizapps-sales install, because a pipeline cannot exist without one. Rename it, or repoint the seeded pipelines at a real company."
+    },
+    "primaryKey": {
+      "ID": "C0DEFA17-0000-4000-A000-000000000001"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.151Z",
+      "checksum": "9bf262c5382cc55eac8dcf7fc9e39a2d1655882bbd1920a6b746ae91e54a2a56"
+    }
+  }
+]

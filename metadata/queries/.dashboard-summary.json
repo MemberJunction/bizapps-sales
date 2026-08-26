@@ -1,0 +1,43 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Dashboard Summary",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "What are the four dashboard headline figures right now — open pipeline, open deals, deals past their expected close, and wins to date?",
+      "Description": "The four KPI tiles as a single row of scalars. Added because the other thirteen queries do not answer them as scalars: Pipeline Summary is grouped by stage and open-only, Deal Roster carries the past-close flag per row, and Bookings by Period is date-windowed — composing the tiles from those would have moved the SQL to the server and left the aggregation in the browser, which is the half §9.5 is about. Also returns the priced/stated split of the open figure so a tile can say how much of it nobody priced.",
+      "TechnicalDescription": "Grain: Deal, reduced to one row. Every count branches on a DealStatusType FLAG (IsOpen, IsWon) exactly as the component's hasFlag did — this is a mechanism change, not a measure change, and test-harnesses/compare-dashboard-measures.mjs runs both paths over the same data and fails on any disagreement. IsPastExpectedClose compares ExpectedCloseDate against CAST(SYSUTCDATETIME() AS DATE), which removes the client's clock from the comparison; the component had to build a UTC date string by hand to avoid moving the boundary a day for anyone west of Greenwich. No period parameter: these tiles mean 'right now' and 'to date', so a window would change what they mean rather than filter them.",
+      "SQL": "@file:SQL/dashboard-summary.sql",
+      "Status": "Approved",
+      "QualityRank": 9,
+      "ExecutionCostRank": 1,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {},
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-00000000000E"
+    },
+    "_comments": [
+      "NO EXPLICIT `relatedEntities` PARAMETERS, AND THAT IS DELIBERATE.",
+      "",
+      "MJ's push path EXTRACTS query parameters from the Nunjucks template itself and inserts them. So",
+      "declaring the same names here too collides with what it just wrote:",
+      "",
+      "  Violation of UNIQUE KEY constraint 'UQ_QueryParameter_QueryID_Name'.",
+      "  Cannot insert duplicate key in object '__mj.QueryParameter'.",
+      "",
+      "and the whole push aborts and rolls back. That is the same failure the other thirteen query files",
+      "hit on a RE-push -- they carry explicit parameter rows, which land once on a clean database and",
+      "then collide with themselves forever after. Leaving parameters to extraction makes this file",
+      "idempotent: pushing it twice is a no-op rather than a rollback.",
+      "",
+      "The cost is that the generated parameter descriptions are heuristic rather than hand-written (MJ",
+      "tries an LLM first and falls back when no model credentials are configured). Worth it here: a",
+      "parameter called CompanyID on a query called Sales: Dashboard Summary is not the part a reader",
+      "struggles with, and the TechnicalDescription below carries the reasoning that actually matters."
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:17.443Z",
+      "checksum": "ae504302478909af04f210059d46bf2bd35d22c5c2607a506b355d82677df879"
+    }
+  }
+]

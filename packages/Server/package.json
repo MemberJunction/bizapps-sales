@@ -1,0 +1,43 @@
+{
+  "name": "@mj-biz-apps/sales-server",
+  "type": "module",
+  "version": "5.1.0",
+  "description": "BizApps Sales server bootstrap - GraphQL resolvers and class registrations for the deal-pipeline Open App",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "/dist"
+  ],
+  "scripts": {
+    "build": "tsc && tsc-alias -f",
+    "test": "echo \"No tests configured yet\""
+  },
+  "author": "MemberJunction.com",
+  "license": "BUSL-1.1",
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.20.1",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@mj-biz-apps/sales-actions": "5.1.0",
+    "@mj-biz-apps/sales-core-entities-server": "5.1.0",
+    "@mj-biz-apps/sales-entities": "5.1.0",
+    "class-validator": "^0.14.3"
+  },
+  "peerDependencies": {
+    "@memberjunction/actions": "^6.1.0-edge.3",
+    "@memberjunction/actions-base": "^6.1.0-edge.3",
+    "@memberjunction/core": "^6.1.0-edge.3",
+    "@memberjunction/global": "^6.1.0-edge.3",
+    "@memberjunction/server": "^6.1.0-edge.3",
+    "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MemberJunction/bizapps-sales"
+  }
+}

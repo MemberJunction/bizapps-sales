@@ -1,0 +1,423 @@
+[
+  {
+    "_comments": [
+      "A vocabulary type table: a short config record whose children are all \"which records use this\".",
+      "accordion because there are barely a dozen fields, and the usage lists go to More so a config",
+      "record is not dominated by a grid of everything that happens to reference it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Account Types"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.369Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "A vocabulary type table: a short config record whose children are all \"which records use this\".",
+      "accordion because there are barely a dozen fields, and the usage lists go to More so a config",
+      "record is not dominated by a grid of everything that happens to reference it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Buying Role Types"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.399Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "A vocabulary type table: a short config record whose children are all \"which records use this\".",
+      "accordion because there are barely a dozen fields, and the usage lists go to More so a config",
+      "record is not dominated by a grid of everything that happens to reference it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Roles"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.489Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "A vocabulary type table: a short config record whose children are all \"which records use this\".",
+      "accordion because there are barely a dozen fields, and the usage lists go to More so a config",
+      "record is not dominated by a grid of everything that happens to reference it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Status Types"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.429Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "A vocabulary type table: a short config record whose children are all \"which records use this\".",
+      "accordion because there are barely a dozen fields, and the usage lists go to More so a config",
+      "record is not dominated by a grid of everything that happens to reference it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Types"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.459Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "A vocabulary type table: a short config record whose children are all \"which records use this\".",
+      "accordion because there are barely a dozen fields, and the usage lists go to More so a config",
+      "record is not dominated by a grid of everything that happens to reference it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Forecast Category Types"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.519Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "A vocabulary type table: a short config record whose children are all \"which records use this\".",
+      "accordion because there are barely a dozen fields, and the usage lists go to More so a config",
+      "record is not dominated by a grid of everything that happens to reference it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Lead Source Types"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.549Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "A vocabulary type table: a short config record whose children are all \"which records use this\".",
+      "accordion because there are barely a dozen fields, and the usage lists go to More so a config",
+      "record is not dominated by a grid of everything that happens to reference it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Lifecycle Stage Types"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.579Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "A vocabulary type table: a short config record whose children are all \"which records use this\".",
+      "accordion because there are barely a dozen fields, and the usage lists go to More so a config",
+      "record is not dominated by a grid of everything that happens to reference it."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Loss Reasons"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.610Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "A pipeline IS its stages, so those stay first-class; everything else it parents is unbounded.",
+      "RelatedRolePolicy is `smart` here precisely because Deals can run to thousands on one pipeline --",
+      "this is the flood case the ranker exists for, and the one place in Sales it earns its keep."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "smart"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Pipelines"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.635Z",
+      "checksum": "b1e5da9f238870a82ece2638ac0e405f1e9548a3e15649b9ea1ce2b8fac1b1b8"
+    }
+  },
+  {
+    "_comments": [
+      "A stage is a small record whose children are history (stage events in, deals currently sitting).",
+      "Nothing here is edited through the children, so they go to More."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Pipeline Stages"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.907Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "An account has one child that matters and it is the point of the record: its deals. 32 fields is",
+      "enough to want accordion grouping, not enough to need left-nav."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Sales Accounts"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.708Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "THE ONE GENUINELY AMBIGUOUS FORM IN SALES. A contact parents Deals TWICE -- once as primary",
+      "contact, once as billing contact -- and both grids would otherwise render titled \"Deals\", side by",
+      "side, with no way to tell which is which. The disambiguation is per-RELATIONSHIP and lives in",
+      "metadata/entity-relationships/.form-chrome.json; the layout choice here just gives it room."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion",
+            "RelatedRolePolicy": "keep-all-primary"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Sales Contacts"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.739Z",
+      "checksum": "8533672f58f2144c24cab786fc89fb8a8abe6844654b45ca0fb3c806d5b61059"
+    }
+  },
+  {
+    "_comments": [
+      "The join between a deal and a contact. Opened from either side; parents nothing.",
+      "accordion, no related policy needed: there are no children to rank."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Contact Roles"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.826Z",
+      "checksum": "86694cd19e4ef47c4ae5ae785cb0fccc0ca85441af31c3743eb864debd2979a9"
+    }
+  },
+  {
+    "_comments": [
+      "An instalment row on a deal. Read far more often than edited alone.",
+      "accordion, no related policy needed: there are no children to rank."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Payment Schedules"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.768Z",
+      "checksum": "86694cd19e4ef47c4ae5ae785cb0fccc0ca85441af31c3743eb864debd2979a9"
+    }
+  },
+  {
+    "_comments": [
+      "The roster row that carries attribution. Parents nothing.",
+      "accordion, no related policy needed: there are no children to rank."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Team Members"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.798Z",
+      "checksum": "86694cd19e4ef47c4ae5ae785cb0fccc0ca85441af31c3743eb864debd2979a9"
+    }
+  },
+  {
+    "_comments": [
+      "A point-in-time forecast reading. Provenance -- read, not composed.",
+      "accordion, no related policy needed: there are no children to rank."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Forecast Snapshots"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.855Z",
+      "checksum": "86694cd19e4ef47c4ae5ae785cb0fccc0ca85441af31c3743eb864debd2979a9"
+    }
+  },
+  {
+    "_comments": [
+      "Internal numbering state. Four fields, no children, and no reason to browse to it.",
+      "accordion, no related policy needed: there are no children to rank."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "accordion"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Sequences"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:25.883Z",
+      "checksum": "86694cd19e4ef47c4ae5ae785cb0fccc0ca85441af31c3743eb864debd2979a9"
+    }
+  }
+]

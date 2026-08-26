@@ -1,0 +1,36 @@
+[
+  {
+    "_comments": [
+      "NO EXPLICIT `relatedEntities` PARAMETERS -- same reason as .dashboard-summary.json, and the",
+      "reason is a bug rather than a preference. MJ's push EXTRACTS parameters from the Nunjucks",
+      "template and INSERTS them, so declaring them here too violates UQ_QueryParameter_QueryID_Name",
+      "and rolls the whole push back. Dropping the declarations does not fix the underlying defect --",
+      "it moves the same failure from the FIRST push to the SECOND, because extraction re-inserts what",
+      "it inserted last time. The real fix is upstream: parameter persistence should upsert on",
+      "(QueryID, Name). Written up in docs/upstream/MJ-metadatasync-query-parameter-push.md.",
+      "",
+      "The twelve older query files keep their declarations deliberately, so their hand-written",
+      "parameter descriptions survive; they simply cannot be re-pushed until MJ is fixed."
+    ],
+    "fields": {
+      "Name": "Sales: Forecast by Owner",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "What is each owner's commit, best case and pipeline for this period, and what have they closed?",
+      "Description": "The live forecast at OWNER grain — the companion to Sales: Forecast History, which partitions its movement windows by OwnerEmployeeID and so expects owner-grained rows. Sales: Forecast by Category groups by company and pipeline only, so a forecast review could read an owner's history with no current number to compare it against. Added as a companion rather than by widening that query's GROUP BY, because the dashboard consumes it and changing a report's row shape to serve a second consumer is how one breaks the other. ADDITIVITY: every amount and count totals correctly across rows, because the owner stamp puts each deal on exactly one row. The three forecast buckets still overlap with EACH OTHER by design and must never be added together.",
+      "TechnicalDescription": "Grain: Deal, grouped by Deal.OwnerEmployeeID. §9.4 ATTRIBUTION BASIS: the server-maintained owner stamp, NOT a DealTeamMember join — joining the team table would multiply every deal by its team size, so the seeded won deal's 27,480 would land in three owners' commit figures and total 82,440. It also matches capture-forecast-snapshot.sql, which groups by the same stamp, so this query and the history it is compared against slice the world identically. This is deliberately different from Sales: Bookings by Owner, which reads DealTeamMember filtered to DealRole.IsOwnerRole: that is a reconciling revenue figure and must not depend on a denormalised copy, whereas this groups deals BY an owner rather than attributing revenue TO one. Buckets branch on ForecastCategoryType.IncludeInCommit / IncludeInBestCase / IncludeInPipeline — flags, never names. Dates: open deals placed by ExpectedCloseDate, won deals by ActualCloseDate. Unowned deals appear as '(unassigned)' rather than being dropped: forecast nobody is accountable for is what a forecast review most needs to see.",
+      "SQL": "@file:SQL/forecast-by-owner.sql",
+      "Status": "Approved",
+      "QualityRank": 9,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {},
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-00000000000F"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:20.672Z",
+      "checksum": "29626ef9295dd20ff1e5d226a9a2d7083682780aeca130af6034384cbe87da91"
+    }
+  }
+]

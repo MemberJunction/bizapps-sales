@@ -16,9 +16,29 @@ migrations/codegen/
 Schema Files/
 SQL Scripts/generated/
 
+# Generated GraphQL schema dump — MJAPI writes it on boot from live metadata.
+apps/MJAPI/schema.graphql
+
 .env
 
 # mj sync push logs — generated on every push, one file each. Not source.
 metadata/sql_logging/
 metadata-tests/sql_logging/
 test-harnesses/.integration.lock
+
+# Playwright GUI harness.
+#
+# .auth/ IS A CREDENTIAL. `storageState` captures the cookies + localStorage of a real
+# authenticated session — committing it would publish a working bearer token for a real account.
+# Never remove this entry, and never commit the file even "just to share a run".
+test-harnesses/playwright/.auth/
+test-harnesses/playwright/artifacts/
+test-harnesses/playwright/playwright-report/
+test-harnesses/playwright/test-results/
+
+# The coverage gate reads this; it is a run artefact, not source.
+test-harnesses/.integration-log*.txt
+
+# `mj sync push` writes these before it updates a record in place (every directory under
+# metadata/ declares backupBeforeUpdate). Generator output, not source.
+metadata/**/.backups/
