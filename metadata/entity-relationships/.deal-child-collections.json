@@ -18,7 +18,7 @@
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deals&RelatedEntity=MJ_BizApps_Sales: Deal Payment Schedules"
     },
     "sync": {
-      "lastModified": "2026-08-14T19:49:38.002Z",
+      "lastModified": "2026-08-26T00:25:24.607Z",
       "checksum": "cc798952db1210f873c9f21ca3ffa23ec5369b5a8b294aae7c03ac9ce9685fc6"
     }
   },
@@ -37,7 +37,7 @@
       "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deals&RelatedEntity=MJ_BizApps_Sales: Deal Team Members"
     },
     "sync": {
-      "lastModified": "2026-08-14T19:49:38.072Z",
+      "lastModified": "2026-08-26T00:25:24.625Z",
       "checksum": "75df9ca112202413d5d8bd3eb20e93c45be4dc22ffd60466cd13d3dbcbca092e"
     }
   }

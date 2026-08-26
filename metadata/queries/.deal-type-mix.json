@@ -4,9 +4,9 @@
       "Name": "Sales: Deal Type Mix",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
       "UserQuestion": "How is our business split between new, renewal and expansion motions?",
-      "Description": "Mix by DealType (master plan \u00a79.3 measure 10). Reads the type TABLE, not type names: rows group by DealTypeID and render the name for display only, so a deployment that adds a fourth motion or renames one gets a correct extra row rather than a miscounted one.",
+      "Description": "Mix by DealType (master plan §9.3 measure 10). Reads the type TABLE, not type names: rows group by DealTypeID and render the name for display only, so a deployment that adds a fourth motion or renames one gets a correct extra row rather than a miscounted one.",
       "SQL": "@file:SQL/deal-type-mix.sql",
-      "TechnicalDescription": "Grain: Deal. RequiresRenewalSource is the one flag this branches on, and it is the same flag CloseDealOperation uses to route a renewal \u2014 so the mix and the routing agree by construction. RenewalsMissingSource surfaces renewal-type deals with no RenewsContractID, which means the routing had nothing to renew against. Dates: actual close for closed deals, expected for open, reported in separate columns so the two are never added.",
+      "TechnicalDescription": "Grain: Deal. RequiresRenewalSource is the one flag this branches on, and it is the same flag CloseDealOperation uses to route a renewal — so the mix and the routing agree by construction. RenewalsMissingSource surfaces renewal-type deals with no RenewsContractID, which means the routing had nothing to renew against. Dates: actual close for closed deals, expected for open, reported in separate columns so the two are never added.",
       "Status": "Approved",
       "QualityRank": 7,
       "ExecutionCostRank": 2,
@@ -42,6 +42,10 @@
       "  PeriodEnd (date)",
       "    Inclusive end of the window. Omit for no upper bound.",
       "    e.g. 2026-12-31"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:19.745Z",
+      "checksum": "a252f23a54094f277415d95a6f8e570791864252339fca1306f32202512b9e2a"
+    }
   }
 ]

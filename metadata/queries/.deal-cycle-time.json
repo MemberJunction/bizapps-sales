@@ -4,9 +4,9 @@
       "Name": "Sales: Deal Cycle Time",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
       "UserQuestion": "How long do deals take to close, and does that differ for wins and losses?",
-      "Description": "Average and median days to close (master plan \u00a79.3 measure 6), reported separately for wins and losses because they measure different things \u2014 time-to-win is a sales-cycle measure, time-to-lose is a qualification measure, and a team that loses fast is healthier than one that loses slowly.",
+      "Description": "Average and median days to close (master plan §9.3 measure 6), reported separately for wins and losses because they measure different things — time-to-win is a sales-cycle measure, time-to-lose is a qualification measure, and a team that loses fast is healthier than one that loses slowly.",
       "SQL": "@file:SQL/deal-cycle-time.sql",
-      "TechnicalDescription": "Grain: Deal. Window on ActualCloseDate; duration measured from the EARLIEST evidence the deal existed \u2014 its creation stamp or its first DealStageEvent, whichever is earlier. That is not the obvious column and the reason matters: __mj_CreatedAt is when the ROW was written, so imported history (whose ChangedAt values are preserved) would otherwise produce negative cycle times. Measured on demo data: both closed deals close in July against an 18 Aug creation stamp. Median via PERCENTILE_CONT, because one enterprise deal moves a mean far more than a median at these deal counts.",
+      "TechnicalDescription": "Grain: Deal. Window on ActualCloseDate; duration measured from the EARLIEST evidence the deal existed — its creation stamp or its first DealStageEvent, whichever is earlier. That is not the obvious column and the reason matters: __mj_CreatedAt is when the ROW was written, so imported history (whose ChangedAt values are preserved) would otherwise produce negative cycle times. Measured on demo data: both closed deals close in July against an 18 Aug creation stamp. Median via PERCENTILE_CONT, because one enterprise deal moves a mean far more than a median at these deal counts.",
       "Status": "Approved",
       "QualityRank": 7,
       "ExecutionCostRank": 3,
@@ -42,6 +42,10 @@
       "  PeriodEnd (date)",
       "    Inclusive end of the window. Omit for no upper bound.",
       "    e.g. 2026-12-31"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:17.814Z",
+      "checksum": "638f57cae98922f6cc24a1a9b0d3ad0e4dfe2cff57af219aab09fb6db5a76dfe"
+    }
   }
 ]

@@ -41,14 +41,20 @@
     "test:coverage-gate": "node scripts/assert-check-count.mjs",
     "test:vocabulary-gate": "node scripts/assert-no-vocabulary-comparisons.mjs",
     "test:money-gate": "node scripts/assert-no-money-arithmetic.mjs",
-    "verify": "npm run test:vocabulary-gate && npm run test:money-gate && npm run test:drift-gate && npm run test:spec-gate && npm run build && npm run test:discount-gate && npm run test:validation-gate",
+    "verify": "npm run test:vocabulary-gate && npm run test:money-gate && npm run test:drift-gate && npm run lint:distribution && npm run test:spec-gate && npm run build && npm run test:discount-gate && npm run test:validation-gate",
     "test:explorer:auth": "playwright test --config test-harnesses/playwright/playwright.config.ts --project auth-setup",
     "test:explorer": "playwright test --config test-harnesses/playwright/playwright.config.ts --project crud",
     "test:explorer:report": "playwright show-report test-harnesses/playwright/playwright-report",
     "test:discount-gate": "node scripts/assert-discount-conversion.mjs",
     "test:validation-gate": "node scripts/assert-workspace-validation.mjs",
     "test:spec-gate": "node scripts/assert-specs-typecheck.mjs",
-    "test:drift-gate": "python scripts/assert-no-comment-drift.py"
+    "test:drift-gate": "python scripts/assert-no-comment-drift.py",
+    "change": "changeset",
+    "commitpush": "node ci/commit_push.mjs",
+    "mergemain": "node ci/merge_main.mjs",
+    "mergemain:update-lock": "node ci/merge_main_and_update_lock.mjs",
+    "lint:distribution": "node scripts/check-distribution-seed.mjs",
+    "seed:manifest": "node scripts/write-seed-manifest.mjs"
   },
   "repository": {
     "type": "git",
@@ -85,6 +91,7 @@
     "mssql": "^11.0.1",
     "rolldown": "1.0.0-beta.58",
     "rollup": "^4.43.0",
+    "simple-git": "^3.31.1",
     "tsc-alias": "^1.8.16",
     "turbo": "^2.7.3",
     "typescript": "^5.9.3"

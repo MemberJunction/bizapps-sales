@@ -4,7 +4,7 @@
   "name": "mj-bizapps-sales",
   "displayName": "BizApps Sales",
   "description": "Deal pipeline management for MemberJunction — accounts, contacts, pipelines, deals with priced lines, deal teams, stage history and forecasting. Sits at the top of the revenue stack: sales records intent and asks BizApps Orders for every number, so a closed deal becomes a contract and an order in one transaction rather than a notification to re-key it by hand.",
-  "version": "0.1.0",
+  "version": "5.1.0",
   "license": "ISC",
   "icon": "fa-solid fa-chart-line",
   "publisher": {
@@ -15,23 +15,23 @@
   "mjVersionRange": ">=6.1.0-edge.2 <7.0.0",
   "dependencies": {
     "mj-bizapps-common": {
-      "version": ">=1.0.0 <2.0.0",
+      "version": ">=5.33.0 <6.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-common"
     },
     "mj-bizapps-tasks": {
-      "version": ">=1.0.0 <2.0.0",
+      "version": ">=1.2.0 <2.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-tasks"
     },
     "mj-bizapps-accounting": {
-      "version": ">=0.1.0 <1.0.0",
+      "version": ">=0.2.0 <1.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-accounting"
     },
     "mj-bizapps-orders": {
-      "version": ">=0.1.0 <1.0.0",
+      "version": ">=5.1.0 <6.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-orders"
     },
     "mj-bizapps-contracts": {
-      "version": ">=0.1.0 <1.0.0",
+      "version": ">=0.1.1 <1.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-contracts"
     }
   },
@@ -41,7 +41,8 @@
   },
   "migrations": {
     "directory": "migrations",
-    "engine": "skyway"
+    "engine": "skyway",
+    "teardownDirectory": "migrations-teardown"
   },
   "metadata": {
     "directory": "metadata"

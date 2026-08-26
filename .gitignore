@@ -38,3 +38,7 @@ test-harnesses/playwright/test-results/
 
 # The coverage gate reads this; it is a run artefact, not source.
 test-harnesses/.integration-log*.txt
+
+# `mj sync push` writes these before it updates a record in place (every directory under
+# metadata/ declares backupBeforeUpdate). Generator output, not source.
+metadata/**/.backups/

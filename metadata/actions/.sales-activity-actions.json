@@ -51,7 +51,13 @@
             "IsRequired": true,
             "Description": "The deal the activity is about. Always linked, always with role Regarding — it is the anchor every read of a deal's timeline starts from, so an activity without it would be unreachable rather than merely unattributed."
           },
-          "primaryKey": { "ID": "5A1E5000-0000-4000-8000-000000000122" }
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000122"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.277Z",
+            "checksum": "2b3e175c35853d458f18ce5810356021502fca943fe22ce4dbed287d7fdc0987"
+          }
         },
         {
           "fields": {
@@ -63,7 +69,13 @@
             "IsRequired": true,
             "Description": "One of Call, Meeting, Note, Email — the ActivityType Code, never its display Name. Validated against that set rather than passed through, so a bad value is reported as a bad request instead of surfacing as 'no ActivityType with Code X', which reads like a missing seed."
           },
-          "primaryKey": { "ID": "5A1E5000-0000-4000-8000-000000000123" }
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000123"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.302Z",
+            "checksum": "f90d934a24691e6ae6a0300abea9814053200c63704a8d8f9d86ba9c6930c8fd"
+          }
         },
         {
           "fields": {
@@ -75,7 +87,13 @@
             "IsRequired": true,
             "Description": "The subject. Activity.Title is NOT NULL, nvarchar(500)."
           },
-          "primaryKey": { "ID": "5A1E5000-0000-4000-8000-000000000124" }
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000124"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.325Z",
+            "checksum": "6dc0e5d6f8ccdf9348813865a4856d27adbb178cb540d780be9a832483c9ca30"
+          }
         },
         {
           "fields": {
@@ -87,7 +105,13 @@
             "IsRequired": false,
             "Description": "Free text, stored as Activity.Description."
           },
-          "primaryKey": { "ID": "5A1E5000-0000-4000-8000-000000000125" }
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000125"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.349Z",
+            "checksum": "a30e7fc22b823ab26763a7d5e52f3f59ceadd5b95447f053e121667557fbfb8f"
+          }
         },
         {
           "fields": {
@@ -99,9 +123,19 @@
             "IsRequired": false,
             "Description": "When it happened, ISO-8601. Omit for now. An unparseable value is REFUSED rather than defaulted to the current time: a timeline is ordered by StartedAt, so a silent fallback files the activity at the wrong point with nothing to show it moved."
           },
-          "primaryKey": { "ID": "5A1E5000-0000-4000-8000-000000000126" }
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000126"
+          },
+          "sync": {
+            "lastModified": "2026-08-26T00:25:24.372Z",
+            "checksum": "95cf6d9eb81b3debf6c55868083fce33eff37c5d3c3b5ec8305b45c817d56ca5"
+          }
         }
       ]
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:24.241Z",
+      "checksum": "96c29b7a750d788272d0b3b26a49b53331bd6a52e74bfd3958fb315ed525b11e"
     }
   }
 ]

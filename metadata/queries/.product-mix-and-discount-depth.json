@@ -4,9 +4,9 @@
       "Name": "Sales: Product Mix and Discount Depth",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
       "UserQuestion": "What products are we selling, how often do they attach to a deal, and how deep are the discounts?",
-      "Description": "Product mix, attach rate and discount depth at the LINE grain (master plan \u00a79.1, \u00a79.3 measure 11). REBASED FROM DealLine ONTO OrderLine: the embedded-order rework retired DealLine, so lines now live on the order a deal carries. Same grain, same catalog dimension, same measures \u2014 only the source table moved, and it moved closer to the catalog, since OrderLine.ProductID is NOT NULL with a real FK.",
+      "Description": "Product mix, attach rate and discount depth at the LINE grain (master plan §9.1, §9.3 measure 11). REBASED FROM DealLine ONTO OrderLine: the embedded-order rework retired DealLine, so lines now live on the order a deal carries. Same grain, same catalog dimension, same measures — only the source table moved, and it moved closer to the catalog, since OrderLine.ProductID is NOT NULL with a real FK.",
       "SQL": "@file:SQL/product-mix-and-discount-depth.sql",
-      "TechnicalDescription": "Grain: OrderLine, joined via Deal.OrderID. Every money column is READ AS STORED \u2014 UnitPrice, DiscountPct, DiscountAmount, LineTotalNet were written by the orders engine and nothing here recomputes them; AvgDiscountPct is a statistic about stored percentages. Attach rate uses DISTINCT deals as its numerator and denominator, because a product on three lines of one deal has not attached three times. Both discount forms are reported, since a mix of percent- and amount-based discounts makes either alone misleading. Date: the DEAL's actual close, falling back to expected.",
+      "TechnicalDescription": "Grain: OrderLine, joined via Deal.OrderID. Every money column is READ AS STORED — UnitPrice, DiscountPct, DiscountAmount, LineTotalNet were written by the orders engine and nothing here recomputes them; AvgDiscountPct is a statistic about stored percentages. Attach rate uses DISTINCT deals as its numerator and denominator, because a product on three lines of one deal has not attached three times. Both discount forms are reported, since a mix of percent- and amount-based discounts makes either alone misleading. Date: the DEAL's actual close, falling back to expected.",
       "Status": "Approved",
       "QualityRank": 8,
       "ExecutionCostRank": 3,
@@ -43,8 +43,12 @@
       "    Inclusive end of the window. Omit for no upper bound.",
       "    e.g. 2026-12-31",
       "  WonOnly (string)",
-      "    Pass \"true\" to count only won deals \u2014 what was actually sold rather than what is being offered.",
+      "    Pass \"true\" to count only won deals — what was actually sold rather than what is being offered.",
       "    e.g. true"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:22.183Z",
+      "checksum": "41ff36bda20c8c474ccab1777b4e4bc623c5fbeaf60a5ce14ab286de671e0dda"
+    }
   }
 ]

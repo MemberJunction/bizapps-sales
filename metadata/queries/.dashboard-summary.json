@@ -34,6 +34,10 @@
       "tries an LLM first and falls back when no model credentials are configured). Worth it here: a",
       "parameter called CompanyID on a query called Sales: Dashboard Summary is not the part a reader",
       "struggles with, and the TechnicalDescription below carries the reasoning that actually matters."
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:17.443Z",
+      "checksum": "ae504302478909af04f210059d46bf2bd35d22c5c2607a506b355d82677df879"
+    }
   }
 ]

@@ -3,10 +3,10 @@
     "fields": {
       "Name": "Sales: Bookings by Period",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
-      "UserQuestion": "What did we book by month, quarter or year \u2014 and what did we lose alongside it?",
-      "Description": "Closed-won amount by period (master plan \u00a79.3 measure 4), with losses reported beside it so a rising bookings figure and a falling win rate cannot be mistaken for each other. One row per deal, so no attribution question arises and nothing can be double-counted.",
+      "UserQuestion": "What did we book by month, quarter or year — and what did we lose alongside it?",
+      "Description": "Closed-won amount by period (master plan §9.3 measure 4), with losses reported beside it so a rising bookings figure and a falling win rate cannot be mistaken for each other. One row per deal, so no attribution question arises and nothing can be double-counted.",
       "SQL": "@file:SQL/bookings-by-period.sql",
-      "TechnicalDescription": "Grain: Deal. Date dimension: ActualCloseDate \u2014 bookings belong to the period a deal actually closed in, which differs from expected for every deal that slipped. Won/Lost from the IsWon / IsLost flags. Granularity is a Nunjucks branch selecting one of three fixed DATEFROMPARTS expressions, so no caller string reaches a DATEPART argument.",
+      "TechnicalDescription": "Grain: Deal. Date dimension: ActualCloseDate — bookings belong to the period a deal actually closed in, which differs from expected for every deal that slipped. Won/Lost from the IsWon / IsLost flags. Granularity is a Nunjucks branch selecting one of three fixed DATEFROMPARTS expressions, so no caller string reaches a DATEPART argument.",
       "Status": "Approved",
       "QualityRank": 8,
       "ExecutionCostRank": 2,
@@ -45,6 +45,10 @@
       "  Granularity (string)",
       "    month (default), quarter, or year. A branch selects one of three fixed expressions; the value never enters SQL text.",
       "    e.g. quarter"
-    ]
+    ],
+    "sync": {
+      "lastModified": "2026-08-26T00:25:17.123Z",
+      "checksum": "aa42d3458ef752fad9b34bf92b7fbd9a7d8d3cc2b443c3c7e3af71cdb7b4b770"
+    }
   }
 ]
