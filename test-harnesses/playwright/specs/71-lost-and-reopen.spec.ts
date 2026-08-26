@@ -39,6 +39,7 @@
 import { expect, test } from '@playwright/test';
 
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
+import { CanTransition } from '@mj-biz-apps/orders-entities';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AssertBaseline, CloseLost, ComposeDeal, PurgeByPrefix, PurgeDeal, ReopenDeal } from '../lib/deal-flow';
 import { SaveDeal, SelectByLabel } from '../lib/workspace';
@@ -230,14 +231,33 @@ test.describe('closed lost and reopen — what happens to the order', () => {
         ).toBeGreaterThanOrEqual(2);
 
         /**
-         * THE ORDER STAYS VOIDED, and that is correct rather than tolerated: `Voided` is terminal in
-         * orders' own `CanTransition` table. Asserting it pins the fact that sales does not try to
-         * un-void by another route.
+         * ── THE ORDER FOLLOWS ORDERS' RULES, WHICH ARE ASKED RATHER THAN ASSUMED ─────────────────
+         *
+         * This asserted .toBe(Voided) on the grounds that Voided is terminal in orders'
+         * CanTransition table. That was true when written and is not any more: orders now publishes
+         * Voided -> [Draft, Quoted] and Confirmed -> [], inverting which status is the dead end. So
+         * the reopen asks the landing stage for its declared status, orders LEGALLY grants the move,
+         * and this failed accusing sales of inventing a way round a rule that no longer exists.
+         * Measured 2026-08-26: expected Voided, got Quoted.
+         *
+         * The intent still matters -- sales must not move the order anywhere orders would refuse --
+         * so the expectation is DERIVED: read what the stage declares, ask orders whether that move
+         * is legal from Voided, and require exactly that outcome. When orders next rewrites the
+         * table this follows it instead of breaking. close-won-order.CO5 broke identically and was
+         * repaired the same way; close-deal.CD24 was the first of the three.
          */
+        const landing = await QueryOne<{ OrderStatusOnEntry: string | null }>(`
+            SELECT s.OrderStatusOnEntry
+              FROM __mj_BizAppsSales.Deal d
+              JOIN __mj_BizAppsSales.PipelineStage s ON s.ID = d.PipelineStageID
+             WHERE d.ID = '${dealID}'`);
+        const declared = landing?.OrderStatusOnEntry ?? null;
+        const legal = declared !== null && CanTransition('Voided', declared).Allowed;
+        const expectedStatus = legal ? (declared as string) : 'Voided';
         expect(
             String(after!.OrderStatus),
-            'the order stays Voided — terminal in orders, and sales must not invent a way round it',
-        ).toBe('Voided');
+            `the order must land where ORDERS allows: the reopened stage declares ${declared} and CanTransition from Voided says ${legal}`,
+        ).toBe(expectedStatus);
 
         /**
          * ── 4. AND THE SCREEN SAYS SO. THIS IS A TRIPWIRE AND IT IS RED — DN-18 ─────────────────
@@ -275,11 +295,32 @@ test.describe('closed lost and reopen — what happens to the order', () => {
          * both of those went green the day their defect was fixed, without anyone having to remember to
          * come back and re-tighten a spec that had been relaxed to match a bug.
          */
-        await expect(
-            page.locator('.dw-msg:visible, .dw-issues li:visible').filter({ hasText: /order|Voided|could not/i }).first(),
-            'the reopen must SURFACE that the order could not follow — a silent success leaves a working ' +
-                'deal pointing at a voided order with nothing on screen saying so (DN-18)',
-        ).toBeVisible({ timeout: 20_000 });
+        /**
+         * ── THE TRIPWIRE ONLY FIRES WHEN THERE IS SOMETHING TO WARN ABOUT ───────────────────────
+         *
+         * DN-18 is about a SILENT reopen: the deal comes back open while its order stayed behind,
+         * and nothing on screen says so. That is still worth catching. But it presupposes the order
+         * could not follow, and as of orders making Voided non-terminal it now can -- in this flow
+         * it does, which is asserted above. Demanding a warning here would be demanding a warning
+         * about a refusal that did not happen.
+         *
+         * So it is gated on `legal`. If orders ever refuses the move again the tripwire returns on
+         * its own, which is the property specs 78 and 79 have and the reason this was kept red
+         * rather than relaxed. The else-branch is NOT a silent skip: it asserts the outcome that
+         * makes the tripwire inapplicable, so this block can never pass by simply doing nothing.
+         */
+        if (!legal) {
+            await expect(
+                page.locator('.dw-msg:visible, .dw-issues li:visible').filter({ hasText: /order|Voided|could not/i }).first(),
+                'the reopen must SURFACE that the order could not follow — a silent success leaves a working ' +
+                    'deal pointing at a voided order with nothing on screen saying so (DN-18)',
+            ).toBeVisible({ timeout: 20_000 });
+        } else {
+            expect(
+                String(after!.OrderStatus),
+                'orders permits the move, so the order must actually have followed — if it did not, the reopen IS silent and the DN-18 tripwire above should have run instead',
+            ).toBe(expectedStatus);
+        }
 
         expectOnlyKnownErrors(sink, [/Error in BaseEntity\.Load\(MJ_BizApps_Sales:/], 'lost and reopen');
     });
