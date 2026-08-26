@@ -35,7 +35,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { join, dirname, relative } from 'node:path';
+import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
@@ -94,7 +94,17 @@ function collectMetadataFiles(dir, acc = []) {
  * silence it. Stripped for JSON; other files (template .md bodies) hash whole.
  */
 function contentHash(file) {
-    const raw = readFileSync(file, 'utf-8');
+    /**
+     * LINE ENDINGS ARE NORMALISED BEFORE HASHING, and that is not tidiness.
+     *
+     * The manifest is a checked-in artifact compared across machines. Git hands a Windows
+     * checkout CRLF and a macOS/Linux one LF, so hashing the bytes made every non-JSON file
+     * -- the query SQL and the remote-operation type files -- report "changed since the seed
+     * migration was generated" on Windows while being byte-identical in git. JSON files were
+     * unaffected only because they are parsed and re-stringified below, which normalises them
+     * incidentally. That asymmetry is what made this look like a content problem.
+     */
+    const raw = readFileSync(file, 'utf-8').replace(/\r\n/g, '\n');
     if (!file.endsWith('.json')) return createHash('sha256').update(raw).digest('hex');
     let parsed;
     try {
@@ -121,7 +131,14 @@ function contentHash(file) {
 export function buildManifest(repoRoot = REPO_ROOT) {
     const files = {};
     for (const file of collectMetadataFiles(join(repoRoot, 'metadata'))) {
-        files[relative(repoRoot, file)] = contentHash(file);
+        /**
+         * POSIX separators, ALWAYS. The manifest is a checked-in artifact compared across
+         * machines, and `relative()` yields backslashes on Windows -- so a manifest generated on
+         * macOS or CI made every key mismatch here, and the gate reported all 40-odd metadata
+         * files as "was deleted but the seed migration still creates its records" while every one
+         * of them was present. It failed only on Windows, which is why CI stayed green.
+         */
+        files[relative(repoRoot, file).split(sep).join('/')] = contentHash(file);
     }
     return { generatedFrom: 'metadata/', files };
 }
