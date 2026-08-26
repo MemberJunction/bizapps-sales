@@ -118,34 +118,23 @@ module.exports = {
   },
 
   /**
-   * Exclude core (__mj) AND every dependency schema.
-   *
-   * __mj_BizAppsCommon is the one that matters right now: sales takes REAL foreign keys into it
-   * (SalesAccount.ID -> Organization.ID and SalesContact.ID -> Person.ID are the IsA links, which
-   * are hard FKs by construction), but common's ENTITIES ship from its own published packages and
-   * must not be regenerated here. Common's own migrations already registered them in __mj.Entity,
-   * which is what lets the IsA declaration in codegen-schema-info.json resolve its parents.
-   *
-   * The orders/contracts schemas are listed ahead of need: DealLine.ProductID and Deal.ContractID
-   * are SOFT references (no FK — DG-6), so those schemas may legitimately be absent from the
-   * database entirely. Listing them is harmless when absent and correct when present.
+   * Allow-list: CodeGen this app's schema only. Unnamed schemas — core, UP deps,
+   * siblings, never-seen client schemas — are excluded. Do not photograph
+   * consumers into this list. Common/orders/contracts stay out of generation
+   * because they are not named here; their entity classes come from npm.
    */
-  excludeSchemas: [
-    'sys',
-    'staging',
-    'dbo',
-    '__mj',
-    '__mj_BizAppsCommon',
-    '__mj_BizAppsTasks',
-    '__mj_BizAppsAccounting',
-    '__mj_BizAppsOrders',
-    '__mj_BizAppsContracts',
-    // Parity with orders' list. Absent on this host today, so naming them is inert — but a schema
-    // that arrives later would otherwise be silently picked up by SALES' CodeGen and its entities
-    // written into this repo. Naming an absent schema costs nothing; discovering the omission after
-    // an install does not. __mj_UDT is MJ's user-defined-type schema and is never an app's to emit.
-    '__mj_BizAppsIssues', '__mj_BizAppsCommittees', '__mj_BizAppsSecureMessaging', '__mj_UDT',
-  ],
+  includeSchemas: ['__mj_BizAppsSales'],
+  excludeSchemas: [],
+  /**
+   * Schema → npm for peer entity classes this emit does NOT generate.
+   * Core (__mj) always comes from @memberjunction/core-entities.
+   */
+  entityImportPackages: {
+    '__mj_BizAppsCommon': '@mj-biz-apps/common-entities',
+    '__mj_BizAppsTasks': '@mj-biz-apps/tasks-entities',
+    '__mj_BizAppsAccounting': '@mj-biz-apps/accounting-entities',
+    '__mj_BizAppsOrders': '@mj-biz-apps/orders-entities',
+  },
 
   /**
    * Integration testing. `mj test` loads these modules before resolving a
