@@ -337,6 +337,10 @@ DELETE cr FROM __mj_BizAppsSales.DealContactRole cr JOIN @deals d ON cr.DealID =
 /*
  * AUDIT ROWS GO WITH THE RECORDS THEY DESCRIBE.
  *
+ * RecordID IS NOT A BARE UUID. MJ writes it as a composite key -- ID pipe uuid -- on some paths and
+ * bare on others, in the same table. Matching only the bare form cleared 11 rows and left 3, and the
+ * demo tour kept failing on the ones that stayed. Both forms are matched.
+ *
  * RecordChange is written by BaseEntity.Save() and keyed by RecordID as text. Deleting a deal or a
  * pipeline left its audit rows behind pointing at nothing, and Explorer FOLLOWS them: the demo tour
  * loads the referenced record and logs
@@ -351,7 +355,7 @@ DELETE cr FROM __mj_BizAppsSales.DealContactRole cr JOIN @deals d ON cr.DealID =
  * it never touches audit history for records that survive.
  */
 DELETE rc FROM [__mj].RecordChange rc
-  JOIN @deals x ON CAST(x.ID AS NVARCHAR(750)) = rc.RecordID;
+  JOIN @deals x ON rc.RecordID IN (CAST(x.ID AS NVARCHAR(750)), 'ID|' + CAST(x.ID AS NVARCHAR(750)));
 
 DELETE d FROM __mj_BizAppsSales.Deal d JOIN @deals x ON x.ID = d.ID;
 
@@ -370,7 +374,7 @@ DECLARE @pipeIds TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
 INSERT INTO @pipeIds (ID)
   SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
 DELETE rc FROM [__mj].RecordChange rc
-  JOIN @pipeIds x ON CAST(x.ID AS NVARCHAR(750)) = rc.RecordID;
+  JOIN @pipeIds x ON rc.RecordID IN (CAST(x.ID AS NVARCHAR(750)), 'ID|' + CAST(x.ID AS NVARCHAR(750)));
 
 DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
 
