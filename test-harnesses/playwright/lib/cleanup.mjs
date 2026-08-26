@@ -379,6 +379,28 @@ DELETE rc FROM [__mj].RecordChange rc
 DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
 
 /*
+ * AND ANY AUDIT ROW LEFT POINTING AT A SALES RECORD THAT NO LONGER EXISTS.
+ *
+ * The scoped deletes above only cover what THIS sweep removes. Specs also delete their own deals and
+ * pipelines through PurgeDeal, and those rows are already orphaned by the time the sweep runs -- the
+ * name match finds nothing, because the record it would have matched is gone. Explorer still follows
+ * them, and 20-demo-tour still fails on the console error.
+ *
+ * So this is a general orphan clean, restricted to sales entities. It cannot touch history for a
+ * record that still exists, which is the only property that matters.
+ *
+ * RecordID is matched in BOTH forms: MJ writes it bare on some paths and as a composite key on
+ * others, in the same table.
+ */
+DELETE rc FROM [__mj].RecordChange rc
+  JOIN [__mj].Entity e ON e.ID = rc.EntityID
+ WHERE e.Name IN ('MJ_BizApps_Sales: Deals', 'MJ_BizApps_Sales: Pipelines')
+   AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d
+                    WHERE rc.RecordID IN (CAST(d.ID AS NVARCHAR(750)), 'ID|' + CAST(d.ID AS NVARCHAR(750))))
+   AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline p
+                    WHERE rc.RecordID IN (CAST(p.ID AS NVARCHAR(750)), 'ID|' + CAST(p.ID AS NVARCHAR(750))));
+
+/*
  * ── THE RECORD LOG, WHICH IS WHY THIS TABLE KEPT GETTING CLEARED BY HAND ─────────────────────────
  *
  * __mj.UserRecordLog is how Explorer knows which records you last had open, and it is what the app
