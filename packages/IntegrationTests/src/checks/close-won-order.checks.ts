@@ -25,6 +25,7 @@ import { CompositeKey, RunView, type BaseEntity } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import { OrdersIsInstalled, type DealEntityServer } from '@mj-biz-apps/sales-core-entities-server';
 import { SalesCloseDealOperation, type SalesCloseDealInput, type SalesCloseDealOutput } from '@mj-biz-apps/sales-entities';
+import { CanTransition, ORDER_STATUSES } from '@mj-biz-apps/orders-entities';
 
 import { InRolledBackTransaction, ResolveSalesFixture, type SalesFixture } from '../fixture.js';
 import { SeedDealOnPipeline, type SeededOrderDeal } from './close-won-order.fixture.js';
@@ -319,9 +320,37 @@ export const CloseWonOrderChecks: NamedCheck[] = [
                 const f = await ResolveSalesFixture(ctx);
                 const seeded = await seedOrderOnly(ctx, f, 1);
 
-                await forceOrderStatus(ctx, seeded.OrderID, 'Voided');
+                /**
+                 * ── THE REFUSED PAIR IS ASKED OF ORDERS, NOT HARDCODED ──────────────────────────
+                 *
+                 * This used to force `Voided` and target `Quoted`, because `Voided` was terminal in
+                 * orders. It is not any more: orders now publishes
+                 * `Voided: ['Draft','Quoted']` and `Confirmed: []`, so the pair this check depended
+                 * on became a LEGAL move and the check failed asserting orders had not done its job.
+                 * Measured 2026-08-25: expected "Voided", got "Quoted". CD24 and the
+                 * `71-lost-and-reopen` spec broke the same way, from the same cause (KI-27).
+                 *
+                 * The INTENT — a refused order status must not block the stage change — is unchanged
+                 * and still worth pinning. So the pair is derived from orders' own `CanTransition`
+                 * every run. When orders next rewrites the table this check follows it instead of
+                 * breaking, which is the vocabulary-is-data rule applied to behaviour rather than
+                 * just to names.
+                 */
+                const refused = (() => {
+                    for (const from of ORDER_STATUSES) {
+                        for (const to of ORDER_STATUSES) {
+                            if (from !== to && !CanTransition(from, to).Allowed) return { from, to };
+                        }
+                    }
+                    return null;
+                })();
+                Assert(
+                    refused !== null,
+                    'orders refuses NO transition between its own statuses, so this check cannot prove anything -- it would pass by having nothing to refuse',
+                );
+                await forceOrderStatus(ctx, seeded.OrderID, refused!.from);
                 const target = await otherStageOn(ctx, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID);
-                await setStageOrderStatus(ctx, target, 'Quoted');
+                await setStageOrderStatus(ctx, target, refused!.to);
 
                 // The stage change itself must SUCCEED. `moveToStage` asserts that.
                 const deal = await moveToStage(ctx, seeded.DealID, target);
@@ -334,14 +363,14 @@ export const CloseWonOrderChecks: NamedCheck[] = [
                 );
                 AssertEqual(
                     String((await orderRow(ctx, seeded.OrderID)).Status ?? ''),
-                    'Voided',
+                    refused!.from,
                     'and the order was left exactly as it was, not half-moved',
                 );
 
                 const warnings = deal.OrderStatusWarnings;
                 AssertEqual(warnings.length, 1, `exactly one warning was expected, got ${JSON.stringify(warnings)}`);
                 Assert(
-                    warnings[0].includes('Voided'),
+                    warnings[0].includes(refused!.from),
                     `the warning must name the status the order stayed in: '${warnings[0]}'`,
                 );
                 // NOT a search for the word "terminal". The first version of this looked for it and
@@ -350,7 +379,7 @@ export const CloseWonOrderChecks: NamedCheck[] = [
                 // SHAPE a useful warning must have — both statuses named, and the outcome stated —
                 // which stays true however orders words the reason.
                 Assert(
-                    warnings[0].includes('Quoted'),
+                    warnings[0].includes(refused!.to),
                     `the warning must name the status that was ASKED for: '${warnings[0]}'`,
                 );
                 Assert(
