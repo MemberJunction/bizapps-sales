@@ -334,6 +334,25 @@ DELETE tm FROM __mj_BizAppsSales.DealTeamMember tm JOIN @deals d ON tm.DealID = 
 DELETE se FROM __mj_BizAppsSales.DealStageEvent se JOIN @deals d ON se.DealID = d.ID;
 DELETE cr FROM __mj_BizAppsSales.DealContactRole cr JOIN @deals d ON cr.DealID = d.ID;
 
+/*
+ * AUDIT ROWS GO WITH THE RECORDS THEY DESCRIBE.
+ *
+ * RecordChange is written by BaseEntity.Save() and keyed by RecordID as text. Deleting a deal or a
+ * pipeline left its audit rows behind pointing at nothing, and Explorer FOLLOWS them: the demo tour
+ * loads the referenced record and logs
+ *
+ *     Error in BaseEntity.Load(MJ_BizApps_Sales: Pipelines, Key: ID=<gone>)
+ *
+ * which fails 20-demo-tour on console errors, for records this sweep deleted. Measured 2026-08-26:
+ * 4 orphaned pipeline rows and 257 orphaned deal rows after a clean run.
+ *
+ * CLI-2 recorded this as the cause of the orphaned-tab thread and left it open: the sweep should not
+ * delete rows the app still points at. This is that fix, scoped to exactly what the sweep removes --
+ * it never touches audit history for records that survive.
+ */
+DELETE rc FROM [__mj].RecordChange rc
+  JOIN @deals x ON CAST(x.ID AS NVARCHAR(750)) = rc.RecordID;
+
 DELETE d FROM __mj_BizAppsSales.Deal d JOIN @deals x ON x.ID = d.ID;
 
 /*
@@ -346,6 +365,13 @@ INSERT INTO @pipes (ID)
 
 DELETE ps FROM __mj_BizAppsSales.PipelineStage ps
   JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE EXISTS (SELECT 1 FROM @inner WHERE p.Name LIKE P);
+-- Same for pipelines: capture the ids first, drop their audit rows, then the rows themselves.
+DECLARE @pipeIds TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+INSERT INTO @pipeIds (ID)
+  SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
+DELETE rc FROM [__mj].RecordChange rc
+  JOIN @pipeIds x ON CAST(x.ID AS NVARCHAR(750)) = rc.RecordID;
+
 DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
 
 /*
