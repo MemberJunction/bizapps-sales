@@ -81,7 +81,42 @@ if [[ -z "${CONFIRM_DROP:-}" ]]; then
 fi
 DB_DATABASE="$CONFIRM_DROP"
 
-MJ_VERSION="${MJ_CORE_VERSION:-v5.51.0}"
+# THE MJ CORE TAG, READ FROM THE CLI THIS SCRIPT IS ABOUT TO INVOKE -- not hardcoded.
+#
+# The default was v5.51.0 while this workspace runs 6.1.0-edge.4: a MAJOR version apart, chosen once
+# and never revisited. Any host that does not set MJ_CORE_VERSION installs a v5 core and then applies
+# v6-era app migrations on top of it.
+#
+# WHY IT SURVIVED THIS LONG, which is the part worth keeping: `.env` on the machine that actually runs
+# this script sets MJ_CORE_VERSION explicitly, and the block below honours that. So the stale default
+# was masked on the only host anyone tested -- it would have fired for the next person to clone the
+# repo and rebuild without that line, which is precisely a QA machine.
+#
+# Reading the tag from `node_modules/@memberjunction/cli` means the core installed and the CLI that
+# installs it cannot disagree again, including after the next version bump. An explicit MJ_CORE_VERSION
+# still wins, so a deliberate pin is unaffected.
+#
+# THIS DOES NOT FIX THE FROM-EMPTY INSTALL, and must not be read as doing so. Measured 2026-08-27
+# against a scratch database: with the core at v6.1.0-edge.3 the rebuild still dies in COMMON's
+# V202608252150 migration with
+#
+#     Procedure or function spUpdateExistingEntitiesFromSchema has too many arguments specified
+#
+# because common calls that proc with @ExcludedSchemaNames and the core at that tag does not declare
+# it. That is a core-version compatibility problem between common and MJ, not this line -- an earlier
+# note of mine blamed the v5 pin for it and was wrong.
+MJ_CLI_PKG="$ROOT/node_modules/@memberjunction/cli/package.json"
+if [[ -z "${MJ_CORE_VERSION:-}" ]]; then
+    [[ -f "$MJ_CLI_PKG" ]] || {
+        echo "cannot resolve the MJ CLI at $MJ_CLI_PKG -- run pnpm install, or set MJ_CORE_VERSION" >&2
+        exit 1
+    }
+    # The path goes in as an ARGUMENT, not inside the JS string. Git Bash rewrites POSIX paths to
+    # Windows ones for arguments to native programs but not for text inside a quoted script, so
+    # `node -p "require('/c/v6/...')"` fails on Windows with MODULE_NOT_FOUND while this works.
+    MJ_CORE_VERSION="v$(node -e 'console.log(require(process.argv[1]).version)' "$MJ_CLI_PKG")"
+fi
+MJ_VERSION="$MJ_CORE_VERSION"
 MJ="node $ROOT/node_modules/@memberjunction/cli/bin/run.js"
 SQLCMD="sqlcmd -S ${DB_HOST},${DB_PORT:-1433} -U ${DB_USERNAME} -P ${DB_PASSWORD} -C -N o"
 
