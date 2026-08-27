@@ -141,7 +141,7 @@ inserts target `MJ_BizApps_Common: Activity Types`** — a common entity. None t
 
 ## 4. MJ — a tax on every build, for every developer
 
-### 4a. ai-cerebras has not compiled once
+### 4a. ai-cerebras stops `turbo run build` — and the fix is three lines
 
 ```
 src/models/cerebras.ts(249,59): error TS2339: Property 'choices' does not exist on type 'ChatCompletion'
@@ -149,24 +149,66 @@ src/models/cerebras.ts(270,36): error TS2339: Property 'usage'   does not exist 
 src/models/cerebras.ts(296,37): error TS2339: Property 'model'   does not exist on type 'ChatCompletion'
 ```
 
-The build script is `tsc && tsc-alias -f`. `tsc` fails, so **`tsc-alias` never runs**, so `dist` keeps
-extension-less ESM imports:
+**Root cause, found 2026-08-27.** The SDK's exported `ChatCompletion` is a *union*:
 
-```
-export * from './models/cerebras';        -- cerebras, broken
-export * from './models/openAI.js';       -- openai, correct
-```
-
-Node's ESM resolver rejects the first, and it takes down **the MJ CLI and the test harness**, not just
-the AI provider:
-
-```
-Cannot find module '...\Cerebras\dist\models\cerebras'
-imported from ...\Cerebras\dist\index.js
+```ts
+export type ChatCompletion =
+    ChatCompletion.ChatCompletionResponse | ChatCompletion.ChatChunkResponse | ChatCompletion.ErrorChunkResponse
 ```
 
-Every `turbo run build` resets it. We have re-run `npx tsc-alias -f` in that package **seven times
-today**, and it survived 200+ commits of MJ moving.
+Only `ChatCompletionResponse` carries `choices`, `usage` and `model`. `nonStreamingChatCompletion`
+declares its local as the bare union, so all three reads fail. The SDK became a union at some version
+and this code was never updated.
+
+**The fix is to narrow the declaration**, which is correct by construction — the method is
+*non-streaming*, so the non-streaming member is the only reachable one:
+
+```ts
+let chatResponse: ChatCompletion.ChatCompletionResponse;
+chatResponse = (await this.client.chat.completions.create(...)) as ChatCompletion.ChatCompletionResponse;
+```
+
+Applied locally: **`npm run build` exits 0**, and `dist/index.js` now emits `from './models/cerebras.js'`
+with the extension. That last part matters — `tsc-alias` only runs because `tsc` finally succeeded, so
+this **replaces the `npx tsc-alias -f` ritual permanently** rather than patching around it. We had run
+that by hand seven times in one day.
+
+### It is worse than "a tax on every build" — it halts the build
+
+Building `@memberjunction/ng-base-forms` pulls cerebras into the graph. Measured:
+
+```
+Packages in scope: 65
+Failed: @memberjunction/ai-cerebras#build
+run failed: command exited (2)
+```
+
+`ng-base-forms#build` **never ran at all** — zero mentions in the log. One unrelated AI provider stops
+an Angular form library from building, and `--continue` does not help because the dependency is real.
+This is why `accounting-ng` had never been built in our workspace at all.
+
+The same defect class also breaks the **CLI at runtime**, because a failed `tsc` leaves `dist` with
+extension-less ESM imports that Node cannot resolve:
+
+```
+Cannot find module '...Cerebrasdistmodelscerebras' imported from ...Cerebrasdistindex.js
+```
+
+Two further packages shipped the identical unloadable `dist` on 2026-08-27, and each one stopped
+`mj codegen` outright:
+
+```
+Cannot find module 'C:6MJpackagesAIVectorsMemorydistmodelsSimpleVectorService'
+Cannot find module 'C:6MJpackagesAIProvidersOpenRouterdistmodelsopenRouter'
+```
+
+Note that **MJAPI hides this** — it starts with `--experimental-specifier-resolution=node`, which
+resolves extension-less specifiers. The CLI does not pass that flag, so the same `dist` that a running
+server tolerates is fatal to `mj codegen`. That asymmetry is why this can look fine in dev and still
+block every code-generation path.
+
+**What we need:** the three-line narrowing above, plus `tsc; tsc-alias -f` (or a hard build failure)
+so a package can never ship a `dist` that Node cannot load.
 
 ### 4b. Published 6.1.0-edge.3 and next are not the same code
 
@@ -185,6 +227,120 @@ were set, both measured. Our workaround is **306 `pnpm.overrides` entries** mapp
 `@memberjunction/*` package to `workspace:*`.
 
 **What we need:** a version bump on `next` after a publish, so the two are distinguishable.
+
+---
+
+## 5. accounting — the GL Account form omits a required field (orders#112)
+
+QA (Andrew) filed **bizapps-orders#112**: creating a GL Account offers *"no place to specify Company"*,
+then fails on save with `Company cannot be null`. Root-caused and fixed on 2026-08-27, verified in a
+running Explorer against a database with accounting installed.
+
+### The cause: a custom form overrides the generated one
+
+Two components register for the same entity:
+
+```
+packages/Angular/src/lib/custom/GLAccount/gl-account-form.component.ts:36
+    @RegisterClass(BaseFormComponent, 'MJ_BizApps_Accounting: GL Accounts')
+
+packages/Angular/src/lib/generated/.../mjbizappsaccountingglaccount.form.component.ts:7
+    @RegisterClass(BaseFormComponent, 'MJ_BizApps_Accounting: GL Accounts')
+```
+
+The **custom** one wins. Its editable Details panel renders six fields — `Code`, `Name`,
+`AccountType`, `ParentGLAccountID`, `IsActive`, `Description` — and **`CompanyID` is not among
+them**. The generated form does include it; it is simply never displayed. `GLAccount.CompanyID` is
+`NOT NULL` with no default, so the save cannot succeed.
+
+### What made it worse than a missing field
+
+There *is* a control labelled "Company" on the page — in the Chart-of-Accounts toolbar, beside the Type
+and Status filters. It is a tree filter:
+
+```ts
+public async OnCompanyChange(companyID: string): Promise<void> {
+    this.SelectedCompanyID = companyID;
+    await this.loadTree();          // never touches record.CompanyID
+}
+```
+
+A tester finds "Company", sets it, and believes the record is scoped. It changed a tree view.
+
+### The fix (one file, held local pending review)
+
+`gl-account-form.component.html`:
+
+1. `CompanyID` added to the Details panel with `LinkType="Record"` — a record picker, not a GUID box.
+2. Gated `[EditMode]="EditMode && !record.IsSaved"` on `CompanyID`, `Code` and `AccountType`, because
+   `GLAccountEntityServer.LOCKED_IDENTITY_FIELDS` refuses changes to them once `IsSaved` is true
+   (Amith 2026-07-29: *immutable from the moment the record is created*). Without this gate the form
+   offers edits the server always rejects — which `Code` and `AccountType` **already did** before this
+   change.
+3. `[AllowFKCreate]="false"` — the picker otherwise offers to create a *Company* from the GL Account
+   form.
+4. The tree filter relabelled **"Filter by Company"** so the two controls cannot be confused.
+
+**Verified:** create renders the field and saves with `CompanyID` persisted (confirmed in the database,
+then removed); edit renders the three locked fields read-only while `Name`, `Parent Account`,
+`IsActive` and `Description` stay editable.
+
+### A correction worth recording
+
+This was first diagnosed as an MJ CodeGen defect — the form generator suppressing labels on
+single-field sections. **That diagnosis was wrong**, and it survived longer than it should have because
+it carried a real measurement: regenerating accounting's forms genuinely does flip
+`[ShowLabel]="false"` to `"true"` on `CompanyID`. It described a form the application never loads.
+What disproved it was rendering the actual screen, which required item 6 below.
+
+The label defect is real but unrelated, and is recorded separately:
+
+> **MJ CodeGen, latent.** `packages/CodeGenLib/src/Angular/angular-codegen.ts:793` emits
+> `[ShowLabel]="${section.Fields.length > 1 ? 'true' : 'false'}"`, so any section holding exactly one
+> field renders it with no label. Measured 2026-08-27: **107** such fields in MJ's own core forms, 26
+> across the BizApps repos, **0** in Sales. Not urgent, and not the cause of #112.
+
+---
+
+## 6. `mj dev workspace` links resolution without ensuring anything is built
+
+Not a code defect — a gap in the linking story. Reproducing QA's host on 2026-08-27 meant wiring all six
+Open App clients into MJExplorer. Every single obstacle was a stale or absent build artifact, and none
+of them announced itself:
+
+| package | symptom | actual cause |
+|---|---|---|
+| `@memberjunction/ng-base-forms` | `TS4113` on `OnRecordRefreshed` | `dist` 11 minutes behind `src` |
+| `accounting-ng` | never built at all | cerebras halted `turbo run build` (item 4a) |
+| `common-ng` | `does not provide an export named 'OrganizationIdentityComponent'` | `dist` **12 days** stale (Aug 13 vs Aug 25) |
+| `contracts-ng` | — | 15 `src` files newer than `dist` |
+| `orders-ng`, `tasks-ng` | no `dist` | never built |
+
+### The one worth understanding
+
+`orders-ng` **compiled cleanly** against the 12-day-stale `common-ng`. Its build resolves `common-ng`
+through tsconfig paths to *source*, so type-checking saw `OrganizationIdentityComponent`. The dev
+server resolves the *built bundle*, which did not have it. So the package type-checks, ships, and then
+dies at load:
+
+```
+SyntaxError: The requested module '@mj-biz-apps_common-ng.js'
+  does not provide an export named 'OrganizationIdentityComponent'
+```
+
+Same shape as item 4a: **invisible at build time, fatal at load time.** A green build is not evidence
+that the linked packages agree with each other.
+
+### Why it matters beyond our machine
+
+`entity-form-host` does **not** render a generic form when a client package is unwired or unloadable —
+it fails with `No form is registered for "<entity>"`. So an app that was never built is
+indistinguishable from an app that is broken. Any QA report of the form "the X form doesn't work" could
+mean either, and there is no way to tell from the UI.
+
+**What would help:** have `mj dev workspace` (or a `mj dev doctor`) report, per linked package, whether
+`dist` exists and whether any `src` file is newer than it. That single check would have turned four of
+the five rows above into a one-line diagnosis.
 
 ---
 
