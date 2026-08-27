@@ -211,6 +211,28 @@ if [[ -n "$SALES_MIGRATION" ]]; then
     GENERATED_LINES=$(( $(wc -l < "$SALES_MIGRATION") - BANNER_END ))
     if (( GENERATED_LINES > 0 )); then
         printf '  trimming %s lines of generated output (CodeGen will regenerate them)\n' "$GENERATED_LINES"
+
+        # PUT IT BACK IF THIS RUN DOES NOT FINISH.
+        #
+        # The trim is deliberate and the normal flow regenerates it (rebuild -> codegen -> append).
+        # A FAILED run is the problem: the script exits with the baseline gutted -- 34513 lines
+        # deleted from a TRACKED file, sitting in the working tree with nothing saying so. Not
+        # hypothetical: on 2026-08-27 step 7 failed on a missing procedure, reported that error
+        # correctly, and left a second silent one behind for whoever ran git status next.
+        #
+        # Restored from a COPY rather than with a git checkout, so an uncommitted edit above the
+        # banner survives too. On success the copy is removed and the file stays trimmed, which is
+        # what the next step wants.
+        cp "$SALES_MIGRATION" "$SALES_MIGRATION.pre-trim"
+        trap 'rc=$?; if [[ -f "${SALES_MIGRATION:-}.pre-trim" ]]; then
+                  if (( rc != 0 )); then
+                      mv -f "$SALES_MIGRATION.pre-trim" "$SALES_MIGRATION"
+                      echo "  restored the untrimmed baseline - this run did not finish" >&2
+                  else
+                      rm -f "$SALES_MIGRATION.pre-trim"
+                  fi
+              fi' EXIT
+
         head -n "$BANNER_END" "$SALES_MIGRATION" > "$SALES_MIGRATION.tmp"
         mv "$SALES_MIGRATION.tmp" "$SALES_MIGRATION"
         # RECORD WHAT WE TRIMMED, so append-codegen.sh has something to compare against. Its shrink
