@@ -85,7 +85,51 @@ export interface ProductLookup {
      * It is a virtual field on orders' Products view, so it costs nothing but a column.
      */
     Company: string | null;
+
+    /**
+     * Non-null when this product is sold as a subscription — read only for WHETHER it is set, never for
+     * its value. The rule that consumes it lives in `term-start.ts`, with the reasoning.
+     */
+    SubscriptionTypeID: string | null;
 }
+
+/**
+ * The columns the picker reads, as ONE exported list rather than a literal at the call site.
+ *
+ * WHY IT IS SHARED. `SubscriptionTypeID` is not displayed anywhere — it only decides whether a line
+ * offers a term start (#32). Drop it from the query and every product arrives without it, so no line is
+ * a subscription, no term start appears, and NOTHING reports an error: the screen quietly loses a
+ * feature. The integration check that guards against exactly that (`term-start.TS5`) has to read the
+ * same list the picker reads, or it proves only that its own copy still works — which is the drift this
+ * suite already warns about for hardcoded SKUs and re-typed filters.
+ */
+export const PRODUCT_LOOKUP_FIELDS: readonly (keyof ProductLookup)[] = [
+    'ID',
+    'Name',
+    'SKU',
+    // #29: the line's company comes from the product, and the label names the owner so a rep can tell
+    // two same-named products apart. Drop either and the picker stamps undefined or loses the company.
+    'CompanyID',
+    'Company',
+    // #32: decides whether a line offers a term start at all. Drop it and the control silently vanishes
+    // from every line — which is what `term-start.TS5` exists to catch.
+    'SubscriptionTypeID',
+];
+
+/**
+ * EVERY member of `ProductLookup`, asserted at compile time.
+ *
+ * The list above is what the picker's query asks for, and omitting a field does not fail to compile —
+ * `keyof ProductLookup` types the array without requiring completeness. That is not hypothetical: when
+ * #32 was rebased onto #29 this constant produced NO merge conflict, because `next` had never carried
+ * it, so git took #32's four-field version whole and silently dropped the two fields #29 had added.
+ * Nothing would have failed until a rep noticed a line booking to the wrong company.
+ *
+ * This makes the next such omission a build error instead.
+ */
+type MissingFromLookupFields = Exclude<keyof ProductLookup, (typeof PRODUCT_LOOKUP_FIELDS)[number]>;
+const _everyLookupFieldIsRequested: MissingFromLookupFields extends never ? true : never = true;
+void _everyLookupFieldIsRequested;
 
 /**
  * The filter that decides what a rep may select, as of `asOf`.

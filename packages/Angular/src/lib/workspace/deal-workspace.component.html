@@ -390,6 +390,7 @@
                     <th scope="col" class="dw-num">Unit price</th>
                     <th scope="col" class="dw-num">Line total</th>
                     <th scope="col" class="dw-num">Discount %</th>
+                    <th scope="col">Term start</th>
                     <th scope="col"><span class="dw-sr">Row actions</span></th>
                   </tr>
                 </thead>
@@ -447,6 +448,32 @@
                               <span class="dw-field-error">{{ DiscountRefusals.get(line) }}</span>
                             }
                           </td>
+                      <td>
+                        <!-- TERM START (#32). Subscription lines only, and "subscription" is orders'
+                             own test — the product carries a SubscriptionTypeID, which is what decides
+                             whether confirm builds a term for this line. See ShowTermStart.
+
+                             The input shows the ORDER DATE as a default until a value is stored, and
+                             the hint underneath says which of the two is on screen: an inherited
+                             default and a deliberately-chosen date look identical in a date control,
+                             and they behave differently the moment the order date moves. -->
+                        @if (ShowTermStart(line)) {
+                          <div class="dw-termstart">
+                            <input type="date" [ngModel]="TermStartInput(line)"
+                                   (ngModelChange)="SetTermStart(line, $event)" />
+                            @if (HasExplicitTermStart(line)) {
+                              <button type="button" class="dw-iconbtn" title="Reset to the order date"
+                                      (click)="ResetTermStart(line)">
+                                <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+                                <span class="dw-sr">Reset term start to the order date</span>
+                              </button>
+                            }
+                          </div>
+                          @if (!HasExplicitTermStart(line)) {
+                            <small class="dw-field__hint">order date</small>
+                          }
+                        }
+                      </td>
                       <td>
                         <!-- The grid shows what fits; the slide-in shows the rest (service period, term,
                              product reference, description). Only for a SAVED line -- a line created in

@@ -55,7 +55,8 @@
     ],
     "close-won-tasks": { "count": 16, "requires": "tasks", "ids": "WT1-WT16" },
     "activities": { "count": 21, "requires": "common", "ids": "AC1-AC14, AC16, AC18-AC23" },
-    "forecast": { "count": 13, "requires": null, "ids": "FS1-FS13" }
+    "forecast": { "count": 13, "requires": null, "ids": "FS1-FS13" },
+    "term-start": { "count": 6, "requires": "orders", "ids": "TS1-TS6 — the term start a deal states for a subscription line (#32). TS1-TS4 are pure rule checks; TS5 reads the catalogue; TS6 round-trips OrderLine.ServicePeriodStart through a deal save." }
   },
   "probes": {
     "orders": "@mj-biz-apps/orders-entities",

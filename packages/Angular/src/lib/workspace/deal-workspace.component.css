@@ -339,6 +339,23 @@
     color: var(--mj-status-warning);
 }
 
+/* ── Term start (#32) ─────────────────────────────────────────────────────── */
+
+/*
+ * The date and its reset sit on one line, laid out with a gap rather than a margin on the button, so
+ * the row keeps its height whether or not the reset is rendered — it appears only once a term start is
+ * stored, and a margin-based layout would nudge the whole row when it did.
+ */
+.dw-termstart {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.dw-termstart input {
+    min-width: 8.5rem;
+}
+
 /* ── Issue list ───────────────────────────────────────────────────────────── */
 
 .dw-issues {

@@ -84,7 +84,14 @@ import { DealWorkspaceService } from './deal-workspace.service';
 import { FromDateInput, ToDateInput } from './deal-workspace.dates';
 /** S-US9's timeline — standalone, so importing it is the whole cost. */
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
-import type { ProductLookup } from '@mj-biz-apps/sales-entities';
+import {
+    EffectiveTermStart,
+    ShouldOfferTermStart,
+    // Aliased because this component exposes a same-named method to the template; without the alias the
+    // call inside that method reads as recursion to anyone skimming it.
+    HasExplicitTermStart as StoresOwnTermStart,
+    type ProductLookup,
+} from '@mj-biz-apps/sales-entities';
 import {
     EmptyValidation,
     DiscountRefusalIssues,
@@ -1047,6 +1054,69 @@ export class DealWorkspaceComponent implements OnInit {
         this.Touch();
     }
 
+    // ── Term start on subscription lines (#32) ─────────────────────────────────
+
+    /**
+     * The order date every term start defaults to, read LIVE off the embedded order.
+     *
+     * Deliberately a getter and not a value copied onto each line at load. #32 requires that a line with
+     * no explicit term start follows the order date when the order date changes; a copy taken once would
+     * freeze at whatever the date was when the deal opened and then quietly disagree with the order.
+     *
+     * Null only while the deal has no embedded order — an unsaved deal, where there are no lines either.
+     */
+    public get OrderDate(): Date | null {
+        return this.Deal?.OrderID_Object?.OrderDate ?? null;
+    }
+
+    /**
+     * Whether this line shows a term start at all — the rule is {@link ShouldOfferTermStart}, which is
+     * where the reasoning lives and where the checks assert it.
+     */
+    public ShowTermStart(line: OrderLineEntity): boolean {
+        return ShouldOfferTermStart(!!line.ProductID, this.ProductFor(line), line.ServicePeriodStart);
+    }
+
+    /**
+     * The `yyyy-MM-dd` the term-start input binds to: the stored value, or the order date as a DEFAULT
+     * that is displayed and never written. See {@link EffectiveTermStart}.
+     */
+    public TermStartInput(line: OrderLineEntity): string | null {
+        return ToDateInput(EffectiveTermStart(line.ServicePeriodStart, this.OrderDate));
+    }
+
+    /** True when the line carries its own term start rather than showing the order date. */
+    public HasExplicitTermStart(line: OrderLineEntity): boolean {
+        return StoresOwnTermStart(line.ServicePeriodStart);
+    }
+
+    /**
+     * Records an explicit term start on the line.
+     *
+     * `ServicePeriodEnd` is deliberately NOT set: the term end is computed by orders at confirm from the
+     * subscription's own rules, and a value guessed here would either be overwritten (harmless but
+     * misleading on screen) or honoured (wrong, because sales does not know the cadence).
+     */
+    public SetTermStart(line: OrderLineEntity, value: string): void {
+        line.ServicePeriodStart = FromDateInput(value);
+        this.Touch();
+    }
+
+    /**
+     * Clears the stored term start so the field follows the order date again.
+     *
+     * Guarded on there being something to clear so the button cannot mark a clean deal dirty — the
+     * control is only rendered when {@link HasExplicitTermStart}, and this keeps that true in code as
+     * well as in the template.
+     */
+    public ResetTermStart(line: OrderLineEntity): void {
+        if (!line.ServicePeriodStart) {
+            return;
+        }
+        line.ServicePeriodStart = null;
+        this.Touch();
+    }
+
     // ── Display helpers ────────────────────────────────────────────────────────
 
     /**
@@ -1659,7 +1729,7 @@ export class DealWorkspaceComponent implements OnInit {
         if (!line.ProductID) {
             return '';
         }
-        const hit = this.Products.find((x) => x.ID === line.ProductID);
+        const hit = this.ProductFor(line);
         if (hit) {
             return hit.SKU ? `${hit.Name} (${hit.SKU})` : hit.Name;
         }
@@ -1675,6 +1745,17 @@ export class DealWorkspaceComponent implements OnInit {
          * claim, and it disappears on its own once the catalogue arrives.
          */
         return this.Products.length ? '(no longer offered)' : '…';
+    }
+
+    /**
+     * The catalogue row a line points at, or null when the product is no longer offered.
+     *
+     * One lookup shared by the label and the term-start test, so the two can never disagree about
+     * whether a line's product is known — a line reading "(no longer offered)" while still being
+     * treated as a catalogue subscription would be exactly that disagreement.
+     */
+    private ProductFor(line: OrderLineEntity): ProductLookup | null {
+        return this.Products.find((x) => x.ID === line.ProductID) ?? null;
     }
 
     /**
