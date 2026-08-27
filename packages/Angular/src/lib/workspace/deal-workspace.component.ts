@@ -244,10 +244,7 @@ export class DealWorkspaceComponent implements OnInit {
      * represented. The worst case is an EMPTY picker -- visible, and the failure mode
      * `RefreshProducts` already chose deliberately -- rather than a wrong one.
      */
-    private Catalogue: { CompanyID: string | null; Items: ProductLookup[] } = {
-        CompanyID: null,
-        Items: [],
-    };
+    private Catalogue: ProductLookup[] = [];
 
     /**
      * The products the ACTIVE deal may reference.
@@ -257,12 +254,11 @@ export class DealWorkspaceComponent implements OnInit {
      * construction" -- is now true by construction rather than by coincidence of call order.
      */
     public get Products(): ProductLookup[] {
-        // NO_PRODUCTS rather than a fresh `[]`: this getter runs on every change-detection pass, and a
-        // new array identity each time would have the template's @for tear down and rebuild the picker
-        // continuously while the catalogue is mismatched.
-        return this.Catalogue.CompanyID === this.ActiveCompanyID
-            ? this.Catalogue.Items
-            : (NO_PRODUCTS as ProductLookup[]);
+        // A STABLE identity, not a fresh `[]`: this getter runs on every change-detection pass, and a
+        // new array each time would have the template's @for tear down and rebuild the picker
+        // continuously. The catalogue is no longer per-company (#29), so there is nothing to match on --
+        // it is either loaded or it is the frozen empty.
+        return this.Catalogue.length ? this.Catalogue : (NO_PRODUCTS as ProductLookup[]);
     }
 
     /**
@@ -905,7 +901,11 @@ export class DealWorkspaceComponent implements OnInit {
          * back at the disabled button. `Lookups.Pipelines` carries `CompanyID` for exactly this reason,
          * and it is the same row the server reads.
          */
-        line?.Set('CompanyID', this.CompanyIDFromPipeline ?? this.Deal?.CompanyID ?? null);
+        // NOT stamped here any more (#29). The picker no longer filters by company, so the deal's
+        // company is not the line's company -- the PRODUCT's is, and no product is chosen yet at this
+        // point. `OnProductChange` sets it at the moment the rep picks one, which is also the moment
+        // `ProductID` gets set; both columns are NOT NULL, so the line is incomplete until then either
+        // way and this introduces no new window where Save is disabled for an invisible reason.
 
         this.Touch();
     }
@@ -1614,11 +1614,10 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     private async RefreshProducts(): Promise<void> {
-        const company = this.ActiveCompanyID;
-        const items = company ? await this.service.LoadProducts(company) : [];
-        // Tagged on assignment. If the active deal changed while this was in flight, the getter will
-        // decline to show it rather than presenting another company's catalogue as this one's.
-        this.Catalogue = { CompanyID: company, Items: items };
+        // No company argument since #29 -- the catalogue is every Active, currently-available product
+        // from every company, so there is nothing deal-specific to key it on and nothing to invalidate
+        // when the active deal changes.
+        this.Catalogue = await this.service.LoadProducts();
         this.cdr.detectChanges();
     }
 
@@ -1660,6 +1659,26 @@ export class DealWorkspaceComponent implements OnInit {
             return;
         }
         line.ProductID = productID;
+
+        /**
+         * THE LINE'S COMPANY COMES FROM THE PRODUCT (#29).
+         *
+         * Orders' `OrderLineEntityServer` overwrites `CompanyID` from the product at save, so the value
+         * that lands is correct either way. Setting it here is about the BROWSER: `CanSave` is gated on
+         * `deal.Validate()`, which runs client-side where that server subclass does not exist, and
+         * `OrderLine.CompanyID` is NOT NULL. Left unset, the rep gets a disabled Save reading
+         * "Company ID cannot be null" against a form that looks complete -- the same defect found in the
+         * Explorer pass on 2026-08-20, which the old pipeline stamp existed to prevent.
+         *
+         * If the product is not in the catalogue the field is left alone rather than cleared: the server
+         * will still stamp it correctly, and blanking a value we cannot improve on would turn a display
+         * gap into a validation failure.
+         */
+        const product = this.Catalogue.find((p) => p.ID === productID);
+        if (product) {
+            line.Set('CompanyID', product.CompanyID);
+        }
+
         this.Touch();
     }
 

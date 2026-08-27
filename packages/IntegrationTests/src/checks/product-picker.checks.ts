@@ -35,12 +35,12 @@ import { InRolledBackTransaction, ResolveSalesFixture } from '../fixture.js';
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
 /** Runs the picker's own filter — the real one, not a re-typed copy. */
-async function offered(ctx: Ctx, companyID: string, asOf: Date): Promise<string[]> {
+async function offered(ctx: Ctx, asOf: Date): Promise<string[]> {
     const rv = new RunView();
     const r = await rv.RunView<{ ID: string; Name: string }>(
         {
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(companyID, asOf),
+            ExtraFilter: ProductFilterFor(asOf),
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             Fields: ['ID', 'Name'],
@@ -77,12 +77,13 @@ export const ProductPickerChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
-                const company = await sellingCompany(ctx);
-                const names = await offered(ctx, company, TODAY);
+                const names = await offered(ctx, TODAY);
                 const catalogue = await all(ctx);
 
-                // Every non-Active product for this company must be absent.
-                const mine = catalogue.filter((x) => x.CompanyID.toLowerCase() === company.toLowerCase());
+                // Every non-Active product must be absent, from ANY company. Since #29 removed the
+                // company clause the catalogue spans all of them, so scoping this to one company would
+                // now test less than it used to rather than the same thing.
+                const mine = catalogue;
                 for (const p of mine) {
                     if (p.Status !== 'Active') { // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to one of Sales' ten type tables. It is a CHECK-constrained enum in another app's schema with no flag table behind it, so there is no flag to read instead — and the whole point of this check is that the picker filters on exactly these literals.
                         Assert(
@@ -100,25 +101,43 @@ export const ProductPickerChecks: NamedCheck[] = [
     },
     {
         Id: 'product-picker.PP2',
-        Name: 'PP2: another company products are NEVER offered — the cross-tenant leak',
+        Name: 'PP2: products from OTHER companies ARE offered — a deal is not limited to its own company',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const company = await sellingCompany(ctx);
-                const names = await offered(ctx, company, TODAY);
+                const names = await offered(ctx, TODAY);
                 const catalogue = await all(ctx);
 
                 /**
-                 * THE MOST CONSEQUENTIAL OF THE THREE CONDITIONS. A missing status or window clause
-                 * offers something unsellable, which a human notices. A missing company clause shows one
-                 * tenant another tenant's catalogue, which nobody notices, and which is a data leak
-                 * rather than a mistake.
+                 * THIS CHECK USED TO ASSERT THE OPPOSITE, and the reversal is the point of issue #29.
+                 *
+                 * It read "another company's products are NEVER offered — the cross-tenant leak", on the
+                 * reasoning that showing one company another's catalogue is a data leak. That framing was
+                 * wrong for Blue Cypress: every deal is a Blue Cypress deal and company ownership lives at
+                 * the PRODUCT (Johanna Snider, Sales channel, 2026-08-26). With both pipelines owned by
+                 * Blue Cypress the old rule made every Betty and Sidecar product unsellable.
+                 *
+                 * There is no tenancy boundary being crossed. `DECISIONS.md` D5 has always said a deal
+                 * lives in one company's pipeline while its LINES carry their own company, taken from the
+                 * product — so the old clause contradicted D5 and this one agrees with it.
                  */
                 const foreign = catalogue.filter((x) => x.CompanyID.toLowerCase() !== company.toLowerCase());
                 Assert(foreign.length > 0, 'the seed must contain another company product, or this proves nothing');
 
-                for (const p of foreign) {
-                    Assert(!names.includes(p.Name), `'${p.Name}' belongs to another company and must not be offered`);
+                const sellableForeign = foreign.filter(
+                    (x) => x.Status === 'Active', // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to Sales
+                );
+                Assert(
+                    sellableForeign.length > 0,
+                    'the seed must contain an ACTIVE product owned by another company, or this proves nothing',
+                );
+
+                for (const p of sellableForeign) {
+                    Assert(
+                        names.includes(p.Name),
+                        `'${p.Name}' is Active and owned by another company, so it must be offered (#29)`,
+                    );
                 }
             }),
     },
@@ -129,7 +148,7 @@ export const ProductPickerChecks: NamedCheck[] = [
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const company = await sellingCompany(ctx);
-                const names = await offered(ctx, company, TODAY);
+                const names = await offered(ctx, TODAY);
 
                 // Seeded specifically for this: Active, but the window closed / has not opened.
                 Assert(
@@ -161,8 +180,8 @@ export const ProductPickerChecks: NamedCheck[] = [
                  * one quoted next year do not see the same catalogue, and the picker must not pretend
                  * otherwise.
                  */
-                const during2025 = await offered(ctx, company, new Date('2025-06-01T00:00:00Z'));
-                const during2027 = await offered(ctx, company, new Date('2027-08-01T00:00:00Z'));
+                const during2025 = await offered(ctx, new Date('2025-06-01T00:00:00Z'));
+                const during2027 = await offered(ctx, new Date('2027-08-01T00:00:00Z'));
 
                 Assert(
                     during2025.includes('Expired Promo Bundle'),

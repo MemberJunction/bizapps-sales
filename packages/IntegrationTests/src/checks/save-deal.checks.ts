@@ -245,7 +245,7 @@ async function sellableProducts(
     const r = await new RunView().RunView<{ ID: string }>(
         {
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(companyID, new Date()),
+            ExtraFilter: ProductFilterFor(new Date()),
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             Fields: ['ID'],

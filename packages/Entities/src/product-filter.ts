@@ -17,16 +17,25 @@
  * at all. So a name- or SKU-matching resolver can be a SUGGESTION a human confirms, never an identity
  * mechanism, and `DealLine.ProductID` stores the ID.
  *
- * ── THE THREE CONDITIONS ────────────────────────────────────────────────────────────────────────
+ * ── THE CONDITIONS ────────────────────────────────────────────────────────────────────────
  *
- * 1. **CompanyID.** Products are per-company. Without this clause a rep on one tenant's pipeline can
- *    select another tenant's product — the most consequential of the three, because it is a data leak
- *    rather than a mistake. The company comes from the DEAL'S PIPELINE, which is the same source the
- *    server stamps `Deal.CompanyID` from, so the picker and the server cannot disagree.
- * 2. **Status = 'Active'.** `Draft` is not sellable yet; `Discontinued` and `EOL` are not sellable any
+ * There used to be a THIRD condition, and removing it was a business decision rather than a tidy-up.
+ *
+ * The filter began with `CompanyID = <the deal's company>`, on the reasoning that products are
+ * per-company and a rep on one company's pipeline selecting another's product would be a data leak.
+ * That reading was wrong for Blue Cypress: every deal is a Blue Cypress deal, and company ownership
+ * lives at the PRODUCT rather than at the deal (Johanna Snider, Sales channel, 2026-08-26; issue #29).
+ * With both pipelines owned by Blue Cypress the clause made every non-Blue-Cypress product unsellable,
+ * so an Account Director could not put a Betty or Sidecar product on a deal at all.
+ *
+ * It is not a tenancy boundary being relaxed, because there was never one here to relax. `DECISIONS.md`
+ * D5 already says a deal lives in ONE company's pipeline while its lines carry their OWN company, taken
+ * from the product. The clause contradicted D5; the picker now agrees with it.
+ *
+ * 1. **Status = 'Active'.** `Draft` is not sellable yet; `Discontinued` and `EOL` are not sellable any
  *    more. Compared as a literal because it is orders' own CHECK-constrained vocabulary, not this app's
  *    — the Sales vocabulary rule governs Sales' type tables, and this column belongs to another app.
- * 3. **The availability window.** `AvailableFrom` / `AvailableTo` are nullable and open-ended on either
+ * 2. **The availability window.** `AvailableFrom` / `AvailableTo` are nullable and open-ended on either
  *    side, so the test is "not yet started" and "already ended" rather than a range containment. Both
  *    NULL means always available, which is the common case.
  *
@@ -53,6 +62,16 @@ export interface ProductLookup {
     ID: string;
     Name: string;
     SKU: string | null;
+    /**
+     * The company that OWNS this product, and so the company its revenue books to.
+     *
+     * Carried because the picker no longer filters on company, which means a line's company can no
+     * longer be inferred from the deal — it has to come from the product the rep actually chose.
+     * `OnProductChange` stamps it. Orders' `OrderLineEntityServer` overwrites it from the product at
+     * save regardless; this makes the BROWSER agree with that rather than guess, which matters because
+     * `deal.Validate()` runs client-side where that server subclass does not exist.
+     */
+    CompanyID: string;
 }
 
 /**
@@ -62,16 +81,12 @@ export interface ProductLookup {
  * the comment explaining each. The date is passed in rather than read from the clock inside so the
  * behaviour is testable at a chosen instant.
  *
- * @param companyID - The selling company, from the deal's pipeline.
  * @param asOf - The date the availability window is judged against. UTC, because everything stored is.
  */
-export function ProductFilterFor(companyID: string, asOf: Date): string {
+export function ProductFilterFor(asOf: Date): string {
     const day = `${asOf.getUTCFullYear()}-${String(asOf.getUTCMonth() + 1).padStart(2, '0')}-${String(asOf.getUTCDate()).padStart(2, '0')}`;
-    // Single-quote escaping: a company ID is a GUID from our own metadata rather than user input, but
-    // the filter is still concatenated SQL and the habit is what keeps it safe when a caller changes.
-    const company = companyID.replace(/'/g, "''");
     return (
-        `CompanyID = '${company}' AND Status = 'Active' ` +
+        `Status = 'Active' ` +
         `AND (AvailableFrom IS NULL OR AvailableFrom <= '${day}') ` +
         `AND (AvailableTo IS NULL OR AvailableTo >= '${day}')`
     );

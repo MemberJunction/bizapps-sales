@@ -399,11 +399,7 @@ export class DealWorkspaceService {
      * nothing and let the rest of the line editor keep working. The consequence — a rep unable to select
      * a product — is visible, whereas a half-loaded catalogue silently missing rows is not.
      */
-    public async LoadProducts(companyID: string | null, asOf: Date = new Date()): Promise<ProductLookup[]> {
-        if (!companyID) {
-            return [];
-        }
-
+    public async LoadProducts(asOf: Date = new Date()): Promise<ProductLookup[]> {
         /**
          * ORDERS MAY NOT BE PRESENT AT ALL, and that is a supported state rather than an error.
          *
@@ -425,10 +421,10 @@ export class DealWorkspaceService {
         const rv = new RunView();
         const result = await rv.RunView<ProductLookup>({
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(companyID, asOf),
+            ExtraFilter: ProductFilterFor(asOf),
             OrderBy: 'Name ASC',
             ResultType: 'simple',
-            Fields: ['ID', 'Name', 'SKU'],
+            Fields: ['ID', 'Name', 'SKU', 'CompanyID'],
         });
         return result?.Success ? (result.Results ?? []) : [];
     }
