@@ -845,7 +845,50 @@ export class DealWorkspaceComponent implements OnInit {
         // that, so an agent or an importer gets an order too. This stays for the UNSAVED deal: a rep
         // can add lines before the first save, and there is no order yet to add them to. Idempotent,
         // so on a saved deal it simply returns the peer that already exists.
-        const order = this.Deal?.OrderID_EnsureObject();
+        /**
+         * ── NEVER MINT AN ORDER WHEN `OrderID` ALREADY NAMES ONE (DN-17, reopened 2026-08-27) ──
+         *
+         * `OrderID_EnsureObject()` mints a new peer whenever the embedded record is not EXPOSED — and
+         * "not exposed" is not the same as "no order". A deal created in this session has a real
+         * `OrderID` (the server provisions one on first save) while its peer is still unexposed, because
+         * `EmbeddedRecord.LoadEager()` returns silently when it cannot resolve the row and leaves
+         * `exposed` false. Calling `Ensure()` in that state overwrites `Deal.OrderID` with a brand-new
+         * order and orphans the real one.
+         *
+         * Measured on the recording host: 78 of 85 `OrderHeader` rows had no deal pointing at them, and a
+         * single deal produced ORD-000455 then ORD-000456 on consecutive saves. The rep sees a line
+         * "vanish" — it was written correctly, to an order the deal had just walked away from — and
+         * anything holding the previous OrderID (a report, a contract handoff, an external system) is
+         * silently pointing at an abandoned order. Nothing errors, because nothing failed.
+         *
+         * `DealEntity.Save()` already tries to close this by hydrating the peer after a save (DN-17), and
+         * on this path that hydration returns null: instrumented 2026-08-27,
+         * `loadObject returned=null peerAfter=false` for an order that demonstrably exists. Why
+         * `InnerLoad` cannot resolve it belongs to MJ's `EmbeddedRecord`, not here.
+         *
+         * What belongs HERE is refusing to fork the data. Minting a second order is never the right
+         * answer to "I could not read the first one", so:
+         *   · peer already exposed        → use it
+         *   · FK set but peer unexposed   → try to hydrate; if that fails, REFUSE and say so
+         *   · no FK at all                → genuinely no order yet, mint one (the unsaved-deal case)
+         *
+         * A visible refusal the rep can act on beats a silent duplicate nobody discovers until the
+         * invoice is wrong.
+         */
+        let order = this.Deal?.OrderID_Object ?? null;
+        if (!order && this.Deal?.OrderID) {
+            order = (await this.Deal.OrderID_LoadObject()) ?? null;
+            if (!order) {
+                this.Fail(
+                    'This deal’s order could not be loaded, so a line cannot be added to it yet. '
+                    + 'Reopen the deal and try again — adding one now would create a second order.',
+                );
+                return;
+            }
+        }
+        if (!order) {
+            order = this.Deal?.OrderID_EnsureObject() ?? null;
+        }
 
         // The HEADER needs the same treatment as the line below, and for the same reason: an order that
         // exists only in memory has had nothing stamped, `OrderHeader.CompanyID` is NOT NULL, and
