@@ -69,7 +69,19 @@ ROOT="$PWD"
 #
 # This is deliberately not a blocklist of protected names. A blocklist protects the hosts someone
 # thought of; naming the target protects every database including the ones added next week.
+# THE CALLER'S MJ_CORE_VERSION SURVIVES THE .env, which it did not before.
+#
+# `. ./.env` assigns unconditionally, so a value exported on the command line was silently
+# replaced by the one in the file. `MJ_CORE_VERSION=v6.1.0-edge.4 scripts/rebuild-db.sh` then
+# migrated to edge.3 and said so in its own banner -- which is the worst version of this, because
+# the run LOOKS like the experiment you asked for. Found while trying to test whether a newer core
+# clears the common failure; the answer was neither yes nor no, it was "you did not test that".
+#
+# Scoped to this one variable on purpose. DB_DATABASE is deliberately taken from .env and then
+# replaced by CONFIRM_DROP below, and that ordering must not change.
+_caller_mj_core_version="${MJ_CORE_VERSION:-}"
 set -a; . ./.env; set +a
+[[ -n "$_caller_mj_core_version" ]] && MJ_CORE_VERSION="$_caller_mj_core_version"
 
 if [[ -z "${CONFIRM_DROP:-}" ]]; then
     printf '\033[1mrebuild-db.sh refuses to guess which database to drop.\033[0m\n' >&2
