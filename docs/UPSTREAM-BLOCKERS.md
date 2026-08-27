@@ -14,7 +14,7 @@ leave it standing.
 
 | suite | result |
 |---|---|
-| Integration (138 checks, 2026-08-27) | **137 passed / 1 failed** — CD24 only, a tripwire on orders' `OrderHeader.Status` vocabulary |
+| Integration (2026-08-27) | **137 passed / 1 failed of 138** — CD24 only, a tripwire on orders' `OrderHeader.Status` vocabulary. Measured on `feature/issue-32-term-start`, which adds the 6-check `term-start` bundle; `next` itself registers 132. |
 | Playwright (31 tests) | **26 passed / 2 failed / 3 skipped** |
 | Metadata drift (both directions) | **0** |
 | Dangling `RelatedEntityID` references | **0** |
