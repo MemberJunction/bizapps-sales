@@ -44,15 +44,34 @@ export interface SeededOrderDeal {
     ExpectedQuantities: number[];
 }
 
-/** Sellable products, chosen by the PICKER's own rule so the fixture cannot drift from it. */
+/**
+ * Sellable products for ONE company, for seeding.
+ *
+ * ── WHY THIS STILL SCOPES BY COMPANY WHEN THE PICKER NO LONGER DOES ──
+ *
+ * It used to get the scoping for free: `ProductFilterFor` carried a `CompanyID` clause, so "the
+ * picker's rule" and "this company's products" were the same query. Issue #29 removed that clause, and
+ * for a moment this function kept calling the picker's rule and silently became company-BLIND — it
+ * takes `found.slice(0, count)` off an alphabetical list, so the close-won and close-deal bundles
+ * would have started seeding lines that reference OTHER companies' products.
+ *
+ * Those checks passed anyway, which is the danger: roughly twenty of them would have gone on being
+ * green while exercising a different scenario than the one they were written for. Nothing about
+ * close-won is supposed to vary by whose product is on the line.
+ *
+ * So the company clause moved HERE, where it is a deliberate property of the fixture rather than an
+ * accident of the picker's rule. Cross-company selection is a real behaviour and it is tested — by PP5
+ * below, on purpose, rather than leaking into every other bundle.
+ */
 async function sellableProducts(ctx: Ctx, companyID: string, count: number): Promise<{ ID: string; Name: string }[]> {
     if (count === 0) {
         return [];
     }
+    const scoped = `CompanyID = '${companyID.replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())})`;
     const r = await new RunView().RunView<{ ID: string; Name: string }>(
         {
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(new Date()),
+            ExtraFilter: scoped,
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             Fields: ['ID', 'Name'],

@@ -30,7 +30,11 @@ import {
 } from '@memberjunction/testing-integration';
 import { E_ORDERS_PRODUCT, ProductFilterFor } from '@mj-biz-apps/sales-entities';
 
-import { InRolledBackTransaction, ResolveSalesFixture } from '../fixture.js';
+import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture } from '../fixture.js';
+import { type DealEntity } from '@mj-biz-apps/sales-entities';
+
+/** Sales' Deals entity. Declared locally, as close-won-order.fixture.ts does — it is not re-exported. */
+const E_DEAL = 'MJ_BizApps_Sales: Deals';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -203,6 +207,102 @@ export const ProductPickerChecks: NamedCheck[] = [
             }),
     },
 ];
+
+
+/**
+ * PP5 — the ACCEPTANCE CRITERION the filter checks cannot reach.
+ *
+ * PP1-PP4 prove what the picker OFFERS. They say nothing about what happens when a rep actually puts a
+ * foreign-company product on a deal, which is the half of #29 that touches money: the line has to book
+ * revenue to the PRODUCT's company, not the deal's, or an intercompany settlement is mis-aimed.
+ *
+ * Deliberately asserted through the entity layer rather than the browser. `OnProductChange` stamps
+ * `CompanyID` client-side so `deal.Validate()` can pass, but orders' `OrderLineEntityServer` is the
+ * authority and overwrites it at save. This check pins the AUTHORITY. If the client stamp and the
+ * server ever disagree, this is what still holds.
+ */
+ProductPickerChecks.push({
+    Id: 'product-picker.PP5',
+    Name: "PP5: a line's company comes from its PRODUCT, not from the deal — cross-company deals book correctly",
+    RequiresMutation: true,
+    Fn: async (ctx) =>
+        InRolledBackTransaction(ctx, async () => {
+            const f = await ResolveSalesFixture(ctx);
+            const catalogue = await all(ctx);
+
+            const foreign = catalogue.find(
+                (x) =>
+                    x.CompanyID.toLowerCase() !== f.PipelineCompanyID.toLowerCase() &&
+                    x.Status === 'Active', // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to Sales
+            );
+            Assert(
+                !!foreign,
+                'the seed must contain an ACTIVE product owned by another company, or this check proves nothing',
+            );
+
+            const ids = await new RunView().RunView<{ ID: string; CompanyID: string }>(
+                {
+                    EntityName: E_ORDERS_PRODUCT,
+                    ExtraFilter: `Name = '${foreign!.Name.replace(/'/g, "''")}'`,
+                    ResultType: 'simple',
+                    Fields: ['ID', 'CompanyID'],
+                },
+                ctx.User,
+            );
+            Assert(ids.Success && (ids.Results ?? []).length > 0, "setup: the foreign product's ID could not be read");
+            const product = (ids.Results ?? [])[0];
+
+            const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+            deal.NewRecord();
+            deal.Name = `PP5 cross-company ${Math.abs(Date.now() % 100000)}`;
+            deal.PipelineID = f.PipelineID;
+            deal.PipelineStageID = f.StageID;
+            deal.DealTypeID = f.DealTypeID;
+            deal.DealStatusTypeID = f.OpenStatusID;
+            deal.AccountID = f.AccountID;
+            deal.CompanyID = f.PipelineCompanyID;
+            deal.TermMonths = 12;
+            Assert(
+                await deal.Save(),
+                `setup: the deal could not be saved — ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+            );
+
+            const order = deal.OrderID_Object;
+            Assert(!!order, 'setup: the deal saved without an embedded order');
+
+            // NO CompanyID set here, deliberately -- the point is what the server derives from the product.
+            const line = await order!.Lines.Create();
+            line.ProductID = product.ID;
+            line.Quantity = 1;
+            Assert(
+                await deal.Save(),
+                `the line could not be saved — ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+            );
+
+            const saved = await new RunView().RunView<{ CompanyID: string; ProductID: string }>(
+                {
+                    EntityName: 'MJ_BizApps_Orders: Order Lines',
+                    ExtraFilter: `OrderHeaderID = '${order!.ID}'`,
+                    ResultType: 'simple',
+                    Fields: ['CompanyID', 'ProductID'],
+                },
+                ctx.User,
+            );
+            Assert(saved.Success, `reading the saved line failed — ${saved.ErrorMessage}`);
+            const rows = saved.Results ?? [];
+            AssertEqual(rows.length, 1, 'exactly one line should have been written');
+
+            AssertEqual(
+                rows[0].CompanyID.toLowerCase(),
+                product.CompanyID.toLowerCase(),
+                "the line must book to the PRODUCT's company",
+            );
+            Assert(
+                rows[0].CompanyID.toLowerCase() !== f.PipelineCompanyID.toLowerCase(),
+                'the line took the DEAL\'s company — the whole point of #29 is that it should not',
+            );
+        }),
+});
 
 for (const check of ProductPickerChecks) {
     IntegrationCheckRegistry.Instance.Register(check);
