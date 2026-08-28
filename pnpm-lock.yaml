@@ -133,6 +133,9 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.1.10(@types/node@22.20.1)(jsdom@26.1.0)(vite@7.3.0(@types/node@22.20.1)(jiti@2.7.0)(less@4.4.2)(sass@1.97.1)(terser@5.44.1))
 
   packages/Actions:
     dependencies:
@@ -10269,7 +10272,7 @@ snapshots:
       '@memberjunction/ai': 6.1.0-edge.3
       '@memberjunction/global': 6.1.0-edge.3
       axios: 1.19.0(debug@4.4.3)
-      axios-retry: 4.5.0(axios@1.19.0(debug@4.4.3))
+      axios-retry: 4.5.0(axios@1.19.0)
       env-var: 7.5.0
     transitivePeerDependencies:
       - debug
@@ -10697,7 +10700,7 @@ snapshots:
       '@memberjunction/global': 6.1.0-edge.3
       '@mistralai/mistralai': 1.15.1
       axios: 1.19.0(debug@4.4.3)
-      axios-retry: 4.5.0(axios@1.19.0(debug@4.4.3))
+      axios-retry: 4.5.0(axios@1.19.0)
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -17111,7 +17114,7 @@ snapshots:
 
   aws-ssl-profiles@1.1.2: {}
 
-  axios-retry@4.5.0(axios@1.19.0(debug@4.4.3)):
+  axios-retry@4.5.0(axios@1.19.0):
     dependencies:
       axios: 1.19.0(debug@4.4.3)
       is-retry-allowed: 2.2.0
