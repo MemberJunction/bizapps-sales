@@ -50,6 +50,7 @@ import {
     type DealEntity,
     type mjBizAppsSalesDealEntity,
 } from '@mj-biz-apps/sales-entities';
+import { IsBooked, ORDER_STATUSES } from '@mj-biz-apps/orders-entities';
 import {
     DEFAULT_DUE_IN_DAYS,
     OrdersIsInstalled,
@@ -1693,7 +1694,45 @@ export const CloseDealChecks: NamedCheck[] = [
                  * Rather than delete the intent, it is INVERTED: pin the collapse. If orders ever re-expands the
                  * lifecycle this fails and names the assertion to restore — the only way a check removed because
                  * of a design change survives that design change being undone.
+                 *
+                 * ── WHAT THE PIN READS, AND WHY IT MOVED OFF THE CHECK CONSTRAINT ──────────────────
+                 *
+                 * It used to read `CK_OrderHeader_Status` out of `sys.check_constraints` and fail if the
+                 * definition still mentioned Posted or Fulfilled. That conflated TWO different facts, and
+                 * on 2026-08-28 it reported the wrong one: it announced "orders has RE-EXPANDED" against a
+                 * host whose orders migrations simply stopped at V202608141800, ten days short of the
+                 * V202608241300 collapse. Orders had not re-expanded anything; the DATABASE was stale.
+                 *
+                 * A check that names the wrong cause is worse than one that stays silent — the message is
+                 * what the next person acts on, and this one sent them to restore an assertion that was
+                 * already correctly absent.
+                 *
+                 * So the two facts are now separated and each is asserted where it actually lives:
+                 *
+                 *   THE DESIGN lives in orders' CODE. `IsBooked` is the thing the removed Posted step was
+                 *   defending, so the pin reads `IsBooked` directly against orders' own `ORDER_STATUSES`.
+                 *   One booked status means the equality shortcut IS the design and the step stays gone;
+                 *   more than one means it must come back. This travels with the linked package, so it is
+                 *   true of the orders being tested rather than of whatever the host was last migrated to.
+                 *
+                 *   THE HOST'S CURRENCY lives in the database, and is a separate failure with a separate
+                 *   remedy. A constraint permitting statuses orders' code does not know means migrations
+                 *   are outstanding, and the message says so instead of blaming a design change.
                  */
+                const bookedStatuses = ORDER_STATUSES.filter((s) => IsBooked(s));
+                Assert(
+                    bookedStatuses.length > 0,
+                    'CD24: orders recognises NO booked status, so half A cannot mean what it claims — '
+                        + `ORDER_STATUSES = ${JSON.stringify(ORDER_STATUSES)}`,
+                );
+                Assert(
+                    bookedStatuses.length === 1,
+                    `orders now recognises ${bookedStatuses.length} BOOKED statuses (${bookedStatuses.join(', ')}), `
+                        + 'so the lifecycle has re-expanded. Restore the "advance past Confirmed" assertion '
+                        + 'removed here — with more than one booked status, IsBooked can be narrowed to an '
+                        + 'equality test again and nothing else in this check would catch it.',
+                );
+
                 const statusRule = await TxOne<{ definition: string }>(
                     ctx,
                     `SELECT cc.definition FROM sys.check_constraints cc
@@ -1704,15 +1743,22 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
                 Assert(
                     /Confirmed/.test(statusRule?.definition ?? ''),
-                    'CD24: could not read the OrderHeader Status rule, so the pin below would pass vacuously — '
-                        + `got ${JSON.stringify(statusRule)}`,
+                    'CD24: could not read the OrderHeader Status rule, so the host check below would pass '
+                        + `vacuously — got ${JSON.stringify(statusRule)}`,
                 );
+                /**
+                 * The literals the constraint actually permits, compared against what orders' code knows.
+                 * Extracted rather than pattern-matched for specific words so a status nobody predicted is
+                 * caught too — the previous version only looked for Posted and Fulfilled by name.
+                 */
+                const permitted = [...statusRule.definition.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+                const unknown = permitted.filter((s) => !(ORDER_STATUSES as readonly string[]).includes(s));
                 Assert(
-                    !/Posted|Fulfilled/.test(statusRule.definition),
-                    'orders has RE-EXPANDED OrderHeader.Status past Confirmed '
-                        + `(${statusRule.definition}). Restore the "advance past Confirmed" assertion removed `
-                        + 'here — with more than one booked status, IsBooked can be narrowed to an equality '
-                        + 'test again and nothing else in this check would catch it.',
+                    unknown.length === 0,
+                    `this host's CK_OrderHeader_Status permits ${JSON.stringify(unknown)}, which orders' code `
+                        + `does not list in ORDER_STATUSES (${JSON.stringify(ORDER_STATUSES)}). The DATABASE is `
+                        + 'behind orders\' migrations — apply them — rather than orders having re-expanded the '
+                        + 'lifecycle. Do NOT restore the "advance past Confirmed" assertion for this.',
                 );
 
                 /* ── HALF B: confirmed-then-voided does NOT refuse ───────────────────────────── */
