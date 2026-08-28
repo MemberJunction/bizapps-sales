@@ -532,10 +532,15 @@ const registry = IntegrationCheckRegistry.Instance;
 /**
  * The default run ADAPTS to what this host has linked.
  *
- * `save-deal` and `close-deal` always run — they need nothing but sales. The rest declare a `requires`
- * in the manifest and are included only when that app actually loaded above, which is what makes a
- * single `test:integration` mean "everything this host can prove": 30 checks standalone, 46 fully
- * linked.
+ * Every bundle declares a `requires` in the manifest and is included only when that app actually
+ * loaded above, which is what makes a single `test:integration` mean "everything this host can prove".
+ * Only `forecast` requires nothing.
+ *
+ * This paragraph used to say "`save-deal` and `close-deal` always run — they need nothing but sales",
+ * which the manifest has contradicted for some time: both declare `"requires": "orders"`, and both
+ * genuinely need it — a deal embeds an order, so save-deal cannot write one and CD24 cannot read
+ * `OrderHeader` without orders present. The claim mattered because it is the thing you would consult
+ * before adding an import to either file, and it would have told you the wrong answer.
  *
  * This replaced a hardcoded two-bundle list. That list was correct when orders could not be linked at
  * all, but it had become the reason a fully-linked host still ran only the default gate — the

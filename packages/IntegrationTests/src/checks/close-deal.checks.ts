@@ -1679,6 +1679,72 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
                 AssertEqual(Number(stillClosed.n), 0, 'and the deal was not reopened behind the refusal');
 
+
+                /* ── HALF B: confirmed-then-voided does NOT refuse ───────────────────────────── */
+                const voidedDeal = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, startStage, 'CD24 voided order allows',
+                );
+                Assert(
+                    (await close(ctx, { DealID: voidedDeal, DealStatusTypeID: f.WonStatusID })).Success,
+                    'setup: the second close must succeed too',
+                );
+
+                const voidedOrder = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT o.ID FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${voidedDeal}'`,
+                );
+                /**
+                 * CONFIRMED FIRST, THEN VOIDED -- and `ConfirmedAt` is left standing, because that is
+                 * exactly what a real confirm-then-void leaves behind. It is what makes this half a
+                 * test of `IsBooked` rather than of the timestamp.
+                 */
+                await TxExec(
+                    ctx,
+                    `UPDATE ${ORDERS_SCHEMA}.OrderHeader
+                        SET Status = 'Voided', ConfirmedAt = SYSDATETIMEOFFSET()
+                      WHERE ID = '${voidedOrder.ID}'`,
+                    'CD24: confirm then void the order',
+                );
+                const carried = await TxOne<{ ConfirmedAt: string | null; Status: string }>(
+                    ctx,
+                    `SELECT ConfirmedAt, Status FROM ${ORDERS_SCHEMA}.OrderHeader WHERE ID = '${voidedOrder.ID}'`,
+                );
+                Assert(
+                    !!carried.ConfirmedAt,
+                    'setup: the voided order must still carry ConfirmedAt, or half B proves nothing',
+                );
+                AssertEqual(String(carried.Status), 'Voided', 'setup: and it must be Voided');
+
+                const allowed = await reopen(
+                    ctx, { DealID: voidedDeal, Reason: 'CD24: reopening behind a voided order.' },
+                );
+                Assert(
+                    allowed.Success,
+                    'a reopen behind a CONFIRMED-THEN-VOIDED order must be ALLOWED — the reversal is its '
+                        + `own record, so that ledger is settled. Got ${JSON.stringify(allowed.Issues)}`,
+                );
+                const reopened = await TxOne<{ n: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS n FROM ${SALES_SCHEMA}.Deal d
+                       JOIN ${SALES_SCHEMA}.DealStatusType st ON st.ID = d.DealStatusTypeID
+                      WHERE d.ID = '${voidedDeal}' AND st.IsOpen = 1`,
+                );
+                AssertEqual(Number(reopened.n), 1, 'and the deal really is open again');
+
+                /**
+                 * ── THE PINS RUN LAST, AND THAT ORDERING IS LOAD-BEARING ────────────────────────
+                 *
+                 * They used to sit between the halves, where a stale host aborted the check before half
+                 * B ever ran. That is the worst possible placement: the DN-20 protection silently stops
+                 * working on exactly the hosts that are behind, and the check still reports red, so
+                 * nothing looks wrong. Proven on 2026-08-28 — with the refusal mutated to the
+                 * `ConfirmedAt IS NOT NULL` shortcut this check exists to catch, CD24 failed on the host
+                 * message and never reached the half that catches it.
+                 *
+                 * Behaviour first, environment second. A stale host now still gets the full DN-20
+                 * verdict, and only then hears that its migrations are outstanding.
+                 */
                 /**
                  * ── THE `Posted` STEP THAT USED TO BE HERE IS GONE, AND ITS ABSENCE IS NOW ASSERTED ──
                  *
@@ -1760,58 +1826,6 @@ export const CloseDealChecks: NamedCheck[] = [
                         + 'behind orders\' migrations — apply them — rather than orders having re-expanded the '
                         + 'lifecycle. Do NOT restore the "advance past Confirmed" assertion for this.',
                 );
-
-                /* ── HALF B: confirmed-then-voided does NOT refuse ───────────────────────────── */
-                const voidedDeal = await openDeal(
-                    ctx, f, f.OrderOnlyPolicyPipelineID, startStage, 'CD24 voided order allows',
-                );
-                Assert(
-                    (await close(ctx, { DealID: voidedDeal, DealStatusTypeID: f.WonStatusID })).Success,
-                    'setup: the second close must succeed too',
-                );
-
-                const voidedOrder = await TxOne<{ ID: string }>(
-                    ctx,
-                    `SELECT o.ID FROM ${ORDERS_SCHEMA}.OrderHeader o
-                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${voidedDeal}'`,
-                );
-                /**
-                 * CONFIRMED FIRST, THEN VOIDED -- and `ConfirmedAt` is left standing, because that is
-                 * exactly what a real confirm-then-void leaves behind. It is what makes this half a
-                 * test of `IsBooked` rather than of the timestamp.
-                 */
-                await TxExec(
-                    ctx,
-                    `UPDATE ${ORDERS_SCHEMA}.OrderHeader
-                        SET Status = 'Voided', ConfirmedAt = SYSDATETIMEOFFSET()
-                      WHERE ID = '${voidedOrder.ID}'`,
-                    'CD24: confirm then void the order',
-                );
-                const carried = await TxOne<{ ConfirmedAt: string | null; Status: string }>(
-                    ctx,
-                    `SELECT ConfirmedAt, Status FROM ${ORDERS_SCHEMA}.OrderHeader WHERE ID = '${voidedOrder.ID}'`,
-                );
-                Assert(
-                    !!carried.ConfirmedAt,
-                    'setup: the voided order must still carry ConfirmedAt, or half B proves nothing',
-                );
-                AssertEqual(String(carried.Status), 'Voided', 'setup: and it must be Voided');
-
-                const allowed = await reopen(
-                    ctx, { DealID: voidedDeal, Reason: 'CD24: reopening behind a voided order.' },
-                );
-                Assert(
-                    allowed.Success,
-                    'a reopen behind a CONFIRMED-THEN-VOIDED order must be ALLOWED — the reversal is its '
-                        + `own record, so that ledger is settled. Got ${JSON.stringify(allowed.Issues)}`,
-                );
-                const reopened = await TxOne<{ n: number }>(
-                    ctx,
-                    `SELECT COUNT(*) AS n FROM ${SALES_SCHEMA}.Deal d
-                       JOIN ${SALES_SCHEMA}.DealStatusType st ON st.ID = d.DealStatusTypeID
-                      WHERE d.ID = '${voidedDeal}' AND st.IsOpen = 1`,
-                );
-                AssertEqual(Number(reopened.n), 1, 'and the deal really is open again');
             }),
     },
     {

@@ -36,10 +36,16 @@ import { RegisterClass } from '@memberjunction/global';
  * ORDERS' OWN PREDICATE, imported rather than restated -- the same reason
  * `DealEntityServer` imports `CanTransition` from this module.
  *
- * `IsBooked` is `Confirmed | Posted | Fulfilled`, and orders documents it as "journal entries
- * exist and the receivable is real". Writing `status === 'Confirmed'` here instead would be a
- * vocabulary string-comparison against ANOTHER APP'S words -- exactly what the vocabulary gate
- * exists to catch -- and it would also be wrong twice over. See the refusal below.
+ * `IsBooked` means "journal entries exist and the receivable is real". It USED to be
+ * `Confirmed | Posted | Fulfilled`; orders collapsed the lifecycle in V202608241300 -- fulfillment
+ * moved to its own `FulfillmentStatus` column -- so today it recognises `Confirmed` alone.
+ *
+ * That collapse is exactly why the import still matters rather than less. Writing
+ * `status === 'Confirmed'` here would be a vocabulary string-comparison against ANOTHER APP'S words --
+ * what the vocabulary gate exists to catch -- and it would silently stop being correct the moment
+ * orders re-expands, which the shape of its own history says it may. Importing the predicate means
+ * this file follows that change instead of having to notice it. CD24 pins the same fact from the
+ * other side. See the refusal below.
  */
 import { IsBooked } from '@mj-biz-apps/orders-entities';
 import {
