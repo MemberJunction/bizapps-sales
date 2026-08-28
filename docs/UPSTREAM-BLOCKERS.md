@@ -137,6 +137,67 @@ migration then applies cleanly.
 Its header says *"Scoped CodeGen emit for `__mj_BizAppsOrders`"*, but **all five of its `EntityField`
 inserts target `MJ_BizApps_Common: Activity Types`** — a common entity. None target an orders entity.
 
+### Also blocking: `V202608251540` guards by ID where the unique index is on (EntityID, Name)
+
+A second migration in the same chain fails on an established host, for a different reason. Applying
+orders' pending migrations to `MJ_V6_Host` on 2026-08-28 got four in before this one stopped it:
+
+```
+OK:     V202608182055__Cleanup_Product_Successor_Hierarchy_Fields.sql
+OK:     V202608210130__Checkout_Widget_And_Sessions.sql
+OK:     V202608221235__ProductType_Configuration.sql
+OK:     V202608241300__OrderHeader_Status_And_Fulfillment.sql
+FAILED: V202608251540__CodeGen_Heal_PricingDriverClass_And_SPs.sql
+        batch 11/250 (lines 669-742)
+        Cannot insert duplicate key row in object '__mj.EntityField' with unique index
+        'UQ_EntityField_EntityID_Name'. The duplicate key value is
+        (b090a662-a97a-4748-b109-2fa716c14651, MaxQuantityPerLine).
+```
+
+**The file is inconsistent with itself.** Line 222 guards the same kind of insert correctly:
+
+```sql
+IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField]
+               WHERE ID = '2874eadb-...' OR (EntityID = 'B35DD5C3-...' AND Name = 'MaxQuantityPerLine'))
+```
+
+The "IS-A parent field" inserts further down guard on the ID **alone**:
+
+```sql
+IF NOT EXISTS (SELECT 1 FROM [__mj].[EntityField] WHERE [ID] = '8eae6de6-0a09-4ed8-a1e0-c4ecc5bc0038')
+```
+
+The unique index is on `(EntityID, Name)`, not on `ID`. So on any host where the field already exists
+under a different ID, the guard passes and the INSERT violates the index.
+
+**Measured on this host:**
+
+| | ID |
+|---|---|
+| `MaxQuantityPerLine` on `MJ_BizApps_Orders: Event Products` (present) | `67D86A82-DD79-453F-943C-61A0F8B1BC04` |
+| what the guard looks for | `8eae6de6-0a09-4ed8-a1e0-c4ecc5bc0038` |
+
+The file's own comment shows the collision was anticipated — `-- skipped
+spUpdateExistingEntityFieldsFromSchema: collides with explicit EntityField inserts in this file` —
+but disabling the schema-sync proc does not help when the explicit inserts collide with rows that are
+already there.
+
+**What we need:** the ID-only guards widened to `ID = '...' OR (EntityID = '...' AND Name = '...')`,
+matching the form already used at line 222 of the same file.
+
+**Why it matters beyond a failed migration.** The chain cannot be applied partially and left. The four
+that did apply drop `OrderHeader.PaymentStatus`, and `spRecalcOrderHeaderTotals` still referenced it
+because the heal that regenerates the procs is the migration that failed. Sales' suite went from
+**132/1 to 57/76**; the host was restored from backup. Anyone applying this chain should expect to
+restore, not to fix forward.
+
+**What the chain would fix, once it applies.** `V202608182055` deletes the stale `Root*` hierarchy
+`EntityField` rows — it is orders' own fix for the drift behind the `Cannot query field
+"RootSuccessorProductID"` GraphQL 400s that block our Playwright specs, and it took this host from 8
+such rows to 2 before the rollback. `V202608241300` collapses `CK_OrderHeader_Status` to
+`Draft | Quoted | Confirmed | Voided`, which is what CD24 is currently red about.
+
+
 ---
 
 ## 4. MJ — a tax on every build, for every developer
