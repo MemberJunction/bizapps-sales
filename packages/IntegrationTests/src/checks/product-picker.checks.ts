@@ -313,6 +313,6 @@ IntegrationCheckRegistry.Instance.RegisterLifecycle('product-picker', {
         // Nothing to create: the stand-in catalogue is seeded with the host, like the rest of the fixture.
     },
     Teardown: async () => {
-        // Nothing to sweep: these checks only read.
+        // Nothing to sweep: PP1-PP4 only read, and PP5 writes inside a rolled-back transaction.
     },
 });
