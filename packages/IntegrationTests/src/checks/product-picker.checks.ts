@@ -65,11 +65,30 @@ async function offered(ctx: Ctx, asOf: Date): Promise<string[]> {
 }
 
 /** Everything in the catalogue, regardless of the rule — the denominator. */
-async function all(ctx: Ctx): Promise<{ ID: string; Name: string; Status: string; CompanyID: string }[]> {
+interface CatalogueRow {
+    ID: string;
+    Name: string;
+    Status: string;
+    CompanyID: string;
+    AvailableFrom: string | null;
+    AvailableTo: string | null;
+}
+
+async function all(ctx: Ctx): Promise<CatalogueRow[]> {
     const rv = new RunView();
-    const r = await rv.RunView<{ ID: string; Name: string; Status: string; CompanyID: string }>(
-        // `ID` so callers can compare identities; `Name` is for MESSAGES only, never for matching.
-        { EntityName: E_ORDERS_PRODUCT, ResultType: 'simple', Fields: ['ID', 'Name', 'Status', 'CompanyID'] },
+    const r = await rv.RunView<CatalogueRow>(
+        /**
+         * `ID` so callers can compare identities; `Name` is for MESSAGES only, never for matching.
+         *
+         * The WINDOW columns are here so a check can work out for itself which products ought to be
+         * offered, rather than asking the picker and then asserting the picker's own answer back at it.
+         * PP2 did the latter for a while and its loop could not fail.
+         */
+        {
+            EntityName: E_ORDERS_PRODUCT,
+            ResultType: 'simple',
+            Fields: ['ID', 'Name', 'Status', 'CompanyID', 'AvailableFrom', 'AvailableTo'],
+        },
         ctx.User,
     );
     Assert(r.Success, `reading the catalogue failed — ${r.ErrorMessage}`);
@@ -160,15 +179,28 @@ export const ProductPickerChecks: NamedCheck[] = [
                 Assert(foreign.length > 0, 'the seed must contain another company product, or this proves nothing');
 
                 /**
-                 * ACTIVE **AND IN-WINDOW**. This used to demand every Active foreign product be offered,
-                 * which is a rule strictly stronger than the filter under test — the filter also applies
-                 * the availability window. It passed only because both seeded foreign products happen to
-                 * have NULL windows. Seed an Active-but-expired foreign product and PP2 goes red against
-                 * a perfectly correct picker, while PP3 simultaneously demands that same row be absent.
+                 * ── THE EXPECTATION IS COMPUTED, NOT BORROWED FROM THE ANSWER ────────────────────
+                 *
+                 * Two mistakes were made here in turn, and the second was worse.
+                 *
+                 * First this demanded every ACTIVE foreign product be offered — a rule stronger than the
+                 * filter under test, which also applies the availability window. It passed only because
+                 * both seeded foreign products have NULL windows.
+                 *
+                 * Then the window was added by filtering on `names.includes(...)` — the picker's own
+                 * output — and the loop below went on asserting that same predicate. It could no longer
+                 * fail. Reverting #29 entirely would still turn PP2 red, but on the anti-vacuity guard,
+                 * whose message sends the reader to the seed script while the picker regression ships.
+                 *
+                 * So the expectation comes from the CATALOGUE's own columns. Active, and today inside its
+                 * availability window, is what `ProductFilterFor` claims to mean; deriving it here and
+                 * comparing against `names` is a real assertion about the picker.
                  */
+                const day = TODAY.toISOString().slice(0, 10);
                 const sellableForeign = foreign.filter(
                     (x) => x.Status === 'Active' // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to Sales
-                        && names.includes(String(x.ID).toLowerCase()),
+                        && (!x.AvailableFrom || String(x.AvailableFrom).slice(0, 10) <= day)
+                        && (!x.AvailableTo || String(x.AvailableTo).slice(0, 10) >= day),
                 );
                 Assert(
                     sellableForeign.length > 0,

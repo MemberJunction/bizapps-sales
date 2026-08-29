@@ -132,15 +132,29 @@ describe('#29 — a line is never invalid for a reason the form cannot show', ()
      * No check caught this: the integration suite writes lines server-side where the stamp exists, and
      * every unit fixture seeded `CompanyID` by hand. It took a line-by-line audit. This is the guard.
      */
-    function addLineHarness() {
+    function addLineHarness(orderSaved = true) {
         const stamped: Record<string, unknown> = {};
+        const onOrder: Record<string, unknown> = {};
         const line = { Set: (f: string, v: unknown) => { stamped[f] = v; } };
-        const order = { Set: () => undefined, Lines: { Create: async () => line }, IsSaved: true };
+        /**
+         * The order's `Set` RECORDS, and `IsSaved` is a parameter.
+         *
+         * Both used to be inert — a no-op `Set` and a hardcoded `IsSaved: true` — so the branch that
+         * stamps the ORDER's own company never executed and its writes were discarded either way.
+         * Measured: deleting `order.Set('CompanyID', ...)` from `AddLine` left the suite green, which
+         * is the same defect class this whole describe block exists for. `OrderHeader.CompanyID` is
+         * NOT NULL too, and `deal.Validate()` fans out into it.
+         */
+        const order = {
+            Set: (f: string, v: unknown) => { onOrder[f] = v; },
+            Lines: { Create: async () => line },
+            IsSaved: orderSaved,
+        };
         const c = Object.create(DealWorkspaceComponent.prototype) as DealWorkspaceComponent;
         Object.defineProperty(c, 'Deal', { value: { OrderID_EnsureObject: () => order }, configurable: true });
         Object.defineProperty(c, 'ActiveCompanyID', { value: SELLING_CO, configurable: true });
         (c as unknown as { Touch(): void }).Touch = () => undefined;
-        return { c, stamped };
+        return { c, stamped, onOrder };
     }
 
     it('AL1: a newly added line carries a company, so Save is never blocked on an invisible field', async () => {
@@ -150,6 +164,18 @@ describe('#29 — a line is never invalid for a reason the form cannot show', ()
             stamped['CompanyID'],
             'a null here is the "Company ID cannot be null" defect, on a form with no company control',
         ).toBe(SELLING_CO);
+    });
+
+    it('AL4: an unsaved embedded order is stamped too, not just the line', async () => {
+        /**
+         * `OrderHeader.CompanyID` is NOT NULL, and `deal.Validate()` validates the embedded order along
+         * with the deal — so an unstamped order blocks Save for exactly the same unactionable reason an
+         * unstamped line did. The harness above used to hardcode `IsSaved: true`, so this branch never
+         * ran and deleting its stamp changed nothing anyone could see.
+         */
+        const { c, onOrder } = addLineHarness(false);
+        await c.AddLine();
+        expect(onOrder['CompanyID'], 'the order carries a company before it is first saved').toBe(SELLING_CO);
     });
 
     it('AL2: and that company is a PLACEHOLDER the product later overrides', async () => {
@@ -202,10 +228,16 @@ describe('#29 — ProductLabel resolves names across the whole catalogue', () =>
          * the product on the line.
          */
         const c = componentWith([]);
+        /**
+         * `.toBe`, not `.not.toBe`. A negative assertion here is satisfied by the empty string too —
+         * measured: changing the ellipsis to `''` left the whole suite green — and blank is the state
+         * PL4's own comment identifies as separately wrong, because it reads as "no product chosen",
+         * which is a different and recoverable thing.
+         */
         expect(
             c.ProductLabel(lineWith({ ProductID: 'P-1' })),
-            'an empty catalogue means we do not know, not that the product was withdrawn',
-        ).not.toBe('(no longer offered)');
+            'an empty catalogue means we do not know yet — not withdrawn, and not unset either',
+        ).toBe('…');
     });
 
     it('PL3: falls back to the bare name when the product has no SKU', () => {

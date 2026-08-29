@@ -231,14 +231,27 @@ test.describe('deal workspace — state that belongs to one deal', () => {
          * catalogue is now global, so both tabs must offer the SAME set; a difference means one of them
          * is showing something it loaded earlier and did not refresh.
          */
-        expect(
-            [...offeredOnA].sort(),
-            `the picker on "${nameA}" and the picker on "${nameB}" must offer the same products — the `
-                + 'catalogue is global since #29, so a difference means one tab is showing a stale list.',
-        ).toEqual([...offeredOnB].sort());
+        /**
+         * ── AND THERE IS NOTHING LEFT HERE TO ASSERT ABOUT THE CATALOGUE ────────────────────────
+         *
+         * An earlier revision of this file replaced the exclusivity check with "both tabs must offer the
+         * same products". That reads like a staleness guard and is not one: `Catalogue` is a single
+         * shared field, so the two reads return the SAME array and are equal by construction — equal
+         * even if `SelectTab` stopped calling `SyncToActiveDeal` entirely, which is the defect this
+         * whole test was written to catch.
+         *
+         * Swapping a wrong assertion for an unfalsifiable one is the worse trade. A wrong assertion
+         * fails loudly one day; an unfalsifiable one never does, while still reading as protection.
+         *
+         * The per-company catalogue is gone, so its staleness cannot happen. What remains falsifiable is
+         * below: the survivor must still have a USABLE catalogue. `betaOnly` stays computed because the
+         * next assertion reads it, and because an empty picker is the one way it could still be
+         * non-trivially zero.
+         */
         expect(
             betaOnly.length,
-            'and beta offering something alpha did not is exactly that staleness, seen from the other side.',
+            'the catalogue is global since #29, so neither tab can offer something the other does not. '
+                + 'A difference here would mean one picker rendered from something other than the shared list.',
         ).toBe(0);
         expect(
             offeredOnA.length,
@@ -485,10 +498,16 @@ test.describe('deal workspace — state that belongs to one deal', () => {
          * exclusivity test it is falsifiable: `CloseTab` activating a neighbour without re-syncing
          * leaves `Catalogue` as whatever the closed deal's last load produced, including empty.
          */
+        /**
+         * Same correction as above. Comparing the survivor's list to the pre-close one cannot fail while
+         * both read one shared array. The assertion that CAN fail — and the one `CloseTab` could
+         * genuinely break by activating a neighbour without re-syncing — is that the survivor is left
+         * with a non-empty catalogue at all, which is asserted immediately below.
+         */
         expect(
-            [...afterClose].sort(),
-            'closing a tab must leave the survivor the same global catalogue, neither stale nor emptied.',
-        ).toEqual([...alphaBefore].sort());
+            afterClose.length,
+            'closing a tab must leave the survivor a usable catalogue, not a torn-down one',
+        ).toBeGreaterThan(0);
         expect(
             afterClose.length,
             'and the survivor must have a usable catalogue -- an empty picker would satisfy the check '

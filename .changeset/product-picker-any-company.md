@@ -21,7 +21,8 @@ form, and nothing type-checks `.mjs` — the GUID bound to `asOf` and they died 
 `asOf.getUTCFullYear is not a function`. All three are updated in this PR, and each now spells out its own
 company clause, since wanting products for ONE company is a real need the shared rule no longer expresses.
 
-`ProductLookup` additionally carries `CompanyID`, which is additive — a line's company can no longer be
+`ProductLookup` additionally carries `CompanyID` and `Company` (the owning company's NAME, so the
+picker can distinguish two same-named products from different companies) — both additive — a line's company can no longer be
 inferred from the deal, so it has to come from the product the rep actually chose.
 
 **Why.** With both pipelines owned by Blue Cypress, that clause made every Betty and Sidecar product

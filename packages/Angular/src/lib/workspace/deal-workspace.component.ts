@@ -220,7 +220,6 @@ export class DealWorkspaceComponent implements OnInit {
 
     public Lookups: DealWorkspaceLookups = EmptyLookups();
 
-    /**
      /**
       * The loaded catalogue — every company's sellable products, not one company's.
       *
@@ -1646,6 +1645,16 @@ export class DealWorkspaceComponent implements OnInit {
         return p.Company ? `${base} — ${p.Company}` : base;
     }
 
+    /**
+     * The label a LINE shows for the product it references.
+     *
+     * Resolved from the loaded catalogue rather than stored on the line, so a renamed product reads
+     * correctly next time the deal is opened.
+     *
+     * Distinct from `ProductOptionLabel`, which labels a CHOICE in the picker and therefore names the
+     * owning company. This one describes a line that already has a product, where the row shows the
+     * company in its own right.
+     */
     public ProductLabel(line: OrderLineEntity): string {
         if (!line.ProductID) {
             return '';

@@ -385,7 +385,7 @@ of an app boundary, where this app cannot enforce it.
 | Criterion | Verdict | Evidence |
 |---|---|---|
 | Adding a line creates an order line; editing or removing updates or removes it | **partially met** | Add `save-deal.SD1`; edit `SD14`. **Remove is dropped** — KI-20, cause in orders. `SD6` holds the tripwire. |
-| The picker offers only active, in-window products of the deal's selling company | **met** | `product-picker.PP1` (active), `PP2` (the cross-tenant leak), `PP3` (window at both ends, NULL means always), `PP4` (evaluated *as of* a date, so the same catalogue answers differently in time). |
+| The picker offers active, in-window products from ANY company — **changed by #29** | **met** | `product-picker.PP1` (active), `PP2` (products from other companies ARE offered — this check was INVERTED by #29 and now proves the opposite of what this row used to claim), `PP3` (window at both ends, NULL means always), `PP4` (evaluated *as of* a date), `PP5` (a line books to its product's company, not the deal's). The company clause was removed on 2026-08-26 per Johanna Snider; `DECISIONS.md` D5 records the ratification, and a deal now lives in one company's pipeline while its lines carry their own company. |
 | No price field is enterable by the rep | **met** | `deal-workspace.component.html:411-412` renders `UnitPrice` read-only. **`save-deal.SD19`** is the real proof: sales sends product and quantity, and everything else on the line comes back from orders. |
 | No deal-level line-item records exist anywhere | **met** | E2. |
 
