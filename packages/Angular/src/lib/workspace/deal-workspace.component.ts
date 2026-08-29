@@ -86,6 +86,7 @@ import { FromDateInput, ToDateInput } from './deal-workspace.dates';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import {
     EffectiveTermStart,
+    IsSubscriptionProduct,
     ShouldOfferTermStart,
     // Aliased because this component exposes a same-named method to the template; without the alias the
     // call inside that method reads as recursion to anyone skimming it.
@@ -1808,8 +1809,34 @@ export class DealWorkspaceComponent implements OnInit {
          * the real value from the product at save either way; the only job here is to never leave the
          * browser holding a null it cannot show the rep how to fix.
          */
-        const product = this.Catalogue.find((p) => p.ID === productID);
-        line.Set('CompanyID', product?.CompanyID ?? this.ActiveCompanyID);
+         * A TERM START BELONGS TO THE PRODUCT THAT WAS CHOSEN, so re-picking discards it.
+         *
+         * Nothing downstream reconciles this column with the line's product: `OrderLineEntity` and
+         * `OrderLineEntityServer` never mention `ServicePeriodStart`, and orders' subscription
+         * materialisation only visits lines carrying a `SubscriptionTypeID`. So a term start left on a
+         * line whose product is no longer a subscription is written once and then never read, never
+         * cleared, and — before the matching fix in `ShouldOfferTermStart` — never visible either.
+         *
+         * It is not merely untidy. Orders' confirm bails out of stamping an event line's own service
+         * period with `if (line.ServicePeriodStart || line.ServicePeriodEnd) return;`, and revenue
+         * recognition then throws for want of one. Switching a subscription line to an event ticket
+         * produced a failed confirm that named nothing the rep had done.
+         *
+         * ONLY WHEN THE PRODUCT IS KNOWN. An unknown product means the catalogue has not loaded or the
+         * product was withdrawn, and neither is evidence that the rep's date is wrong — discarding it
+         * on a transient empty catalogue would be its own defect. `ShouldOfferTermStart` keeps such a
+         * value visible so it can be cleared deliberately.
+         */
+        /**
+         * ONE LOOKUP, TWO CONSEQUENCES. #29 needs the chosen product to stamp the line's company;
+         * #32 needs it to decide whether a stored term start still means anything. Both branches
+         * wrote their own lookup — the same query, since `line.ProductID` is assigned just above.
+         */
+        const chosen = this.ProductFor(line);
+        line.Set('CompanyID', chosen?.CompanyID ?? this.ActiveCompanyID);
+        if (chosen && !IsSubscriptionProduct(chosen)) {
+            line.ServicePeriodStart = null;
+        }
 
         this.Touch();
     }

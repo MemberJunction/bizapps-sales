@@ -79,7 +79,34 @@ export function ShouldOfferTermStart(
     if (!hasProduct) {
         return false;
     }
-    return product ? IsSubscriptionProduct(product) : !!stored;
+    /**
+     * A STORED VALUE IS OFFERED REGARDLESS OF THE PRODUCT, and that ordering is the fix.
+     *
+     * This used to read `product ? IsSubscriptionProduct(product) : !!stored`, so the `stored` fallback
+     * applied only when the product was UNKNOWN. When the product was known and was not a subscription
+     * the answer was `false` no matter what was stored — the exact outcome this function's docstring
+     * says it prevents: "the value stays in the database, still governs the term, and has no control on
+     * screen to see or clear it".
+     *
+     * It is reachable in one click. A rep sets a term start on a subscription line, then re-picks that
+     * row's product as a one-time item. Nothing on either side reconciles the column —
+     * `OrderLineEntity` and `OrderLineEntityServer` never mention `ServicePeriodStart`, and orders'
+     * subscription materialisation only visits lines carrying a `SubscriptionTypeID` — so the value is
+     * written once and then never read, never cleared, and never seen.
+     *
+     * Worse than invisible: orders' confirm bails out of stamping an event line's own service period
+     * with `if (line.ServicePeriodStart || line.ServicePeriodEnd) return;`, and revenue recognition
+     * then throws for want of a service period. A stranded value turns into a failed confirm naming
+     * nothing the rep did.
+     *
+     * `OnProductChange` now clears the column when the newly chosen product is known and is not a
+     * subscription, which stops the stranding at its source. This is the second half: anything stranded
+     * by another route stays visible and clearable rather than silently governing a term.
+     */
+    if (HasExplicitTermStart(stored)) {
+        return true;
+    }
+    return product ? IsSubscriptionProduct(product) : false;
 }
 
 /**
@@ -97,8 +124,41 @@ export function ShouldOfferTermStart(
  * here — but `||` would also swallow `''`, which is a legitimately-cleared field that must fall back to
  * the order date rather than render blank.
  */
+/**
+ * Is this `DateLike` absent for our purposes?
+ *
+ * Absent means null, undefined, a blank or whitespace-only string, or a Date that does not parse. The
+ * three predicates in this module disagreed about that before — `??` passed `''` through while `!!`
+ * rejected it, so one function said "no term start" while another rendered the empty string — and a
+ * shared test is what stops them drifting again.
+ */
+function IsEmptyDateLike(value: DateLike): boolean {
+    if (value === null || value === undefined) {
+        return true;
+    }
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime());
+    }
+    return String(value).trim().length === 0;
+}
+
 export function EffectiveTermStart(stored: DateLike, orderDate: DateLike): DateLike {
-    return stored ?? orderDate ?? null;
+    /**
+     * ── `??` WAS THE WRONG OPERATOR, AND THE COMMENT ABOVE SAYS SO ────────────────────────────
+     *
+     * The reasoning above argues that a cleared field "must fall back to the order date rather than
+     * render blank". `??` only falls back on null and undefined; `'' ?? orderDate` is `''`. So the
+     * code implemented precisely the outcome the comment rejects, and `DateLike` explicitly admits
+     * `string` — a cleared `<input type="date">` reports exactly `''`.
+     *
+     * What the rep saw: a blank date box captioned "order date", with no reset button, because
+     * `HasExplicitTermStart('')` is false while `EffectiveTermStart('')` returned the empty string.
+     *
+     * An emptiness test rather than `||`, because `||` would also swallow a legitimate falsy that is
+     * not empty — and being explicit here is cheaper than re-deriving which falsy values `DateLike`
+     * can hold.
+     */
+    return IsEmptyDateLike(stored) ? (orderDate ?? null) : stored;
 }
 
 /**
@@ -109,5 +169,13 @@ export function EffectiveTermStart(stored: DateLike, orderDate: DateLike): DateL
  * screen and behave differently the moment the order date moves.
  */
 export function HasExplicitTermStart(stored: DateLike): boolean {
-    return !!stored;
+    /**
+     * An UNPARSEABLE value is not an explicit term start.
+     *
+     * `!!new Date('nonsense')` is true, and the formatter applies `getUTCFullYear()` with no NaN guard,
+     * so the field rendered "NaN-NaN-NaN" — which `<input type="date">` rejects and shows blank. The
+     * app then believed the line carried a deliberate term start: reset button shown, hint suppressed,
+     * and no fallback to the order date.
+     */
+    return !IsEmptyDateLike(stored);
 }

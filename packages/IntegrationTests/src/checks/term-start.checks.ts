@@ -169,6 +169,52 @@ export const TermStartChecks: NamedCheck[] = [
                 false,
                 'a line with no product chosen offers nothing',
             );
+            /**
+             * ── THE INPUT THAT ACTUALLY EXERCISES THE GUARD ──────────────────────────────────────
+             *
+             * The assertion above cannot fail. With nothing stored, both branches of this function
+             * return false, so `hasProduct` never decides the answer — measured by deleting the guard
+             * outright and watching all six checks stay green. The parameter could have been dropped
+             * from the contract and nothing here would have noticed.
+             *
+             * A line with NO product but a stored term start is the case that separates them: the guard
+             * says "nothing to offer a term start against", and without it the stored value would put
+             * the control on a row that references no product at all.
+             */
+            AssertEqual(
+                ShouldOfferTermStart(false, null, CHOSEN),
+                false,
+                'no product means no term start, even when the line still carries a stored value',
+            );
+
+            /**
+             * ── A STORED VALUE IS NEVER HIDDEN, WHATEVER THE PRODUCT TURNS OUT TO BE ─────────────
+             *
+             * The worst defect this bundle missed. The rule used to read
+             * `product ? IsSubscriptionProduct(product) : !!stored`, so the stored fallback applied only
+             * when the product was UNKNOWN. Give it a KNOWN one-time product with a value stored and it
+             * returned false — the control vanished while the column kept governing the line.
+             *
+             * One click reaches it: set a term start on a subscription line, then re-pick that row's
+             * product as a one-time item. Nothing downstream reconciles the column — orders' entity and
+             * entity-server never mention `ServicePeriodStart`, and its subscription materialisation
+             * only visits lines carrying a `SubscriptionTypeID`.
+             *
+             * And it is not merely invisible. Orders' confirm bails out of stamping an event line's own
+             * service period with `if (line.ServicePeriodStart || line.ServicePeriodEnd) return;`, and
+             * revenue recognition then throws for want of one — a failed confirm naming nothing the rep
+             * did, over a field they could not see.
+             */
+            AssertEqual(
+                ShouldOfferTermStart(true, oneTimeProduct, CHOSEN),
+                true,
+                'a stored term start stays visible on a one-time product, so it can be seen and cleared',
+            );
+            AssertEqual(
+                ShouldOfferTermStart(true, oneTimeProduct, null),
+                false,
+                'but a one-time product with nothing stored still offers nothing — requirement 3 holds',
+            );
         },
     },
     {
@@ -222,11 +268,45 @@ export const TermStartChecks: NamedCheck[] = [
                 'an explicit term start does NOT move when the order date does — the point of the feature',
             );
 
-            // Cleared: back to following the order date. This is what "reset to order date" produces.
+            /**
+             * ── CLEARED, IN EVERY SHAPE A CLEARED FIELD ARRIVES IN ────────────────────────────────
+             *
+             * This block used to repeat the `null` case verbatim — the same call and the same
+             * expectation as fifteen lines above, with only the message changed — while claiming to
+             * cover a CLEARED field. A cleared `<input type="date">` reports `''`, not null, and `''`
+             * was the one shape never passed to this function.
+             *
+             * That gap is exactly why the `??`-versus-`||` bug shipped: the two operators differ ONLY
+             * on `''`, so swapping them left all six checks green. Measured, not reasoned.
+             */
+            for (const cleared of [null, undefined, '', '   ']) {
+                AssertEqual(
+                    shown(EffectiveTermStart(cleared, MOVED_ORDER_DATE)),
+                    '2026-09-15',
+                    `a cleared term start (${JSON.stringify(cleared)}) returns the field to the order date, `
+                        + 'rather than rendering blank under an "order date" caption',
+                );
+                AssertEqual(
+                    HasExplicitTermStart(cleared),
+                    false,
+                    `and ${JSON.stringify(cleared)} does not read as a deliberate choice`,
+                );
+            }
+
+            /**
+             * An UNPARSEABLE date is not an explicit term start either. `!!new Date('nonsense')` is
+             * true, and the formatter has no NaN guard, so this rendered "NaN-NaN-NaN" — which the date
+             * input rejects and shows blank — while the app believed the line carried a chosen date.
+             */
             AssertEqual(
-                shown(EffectiveTermStart(null, MOVED_ORDER_DATE)),
+                HasExplicitTermStart(new Date('nonsense')),
+                false,
+                'an unparseable date is absent, not a term start',
+            );
+            AssertEqual(
+                shown(EffectiveTermStart(new Date('nonsense'), MOVED_ORDER_DATE)),
                 '2026-09-15',
-                'clearing the stored value returns the field to the order date',
+                'and it falls back to the order date rather than rendering NaN',
             );
 
             AssertEqual(HasExplicitTermStart(CHOSEN), true, 'a stored value reads as explicit');
