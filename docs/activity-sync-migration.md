@@ -65,9 +65,17 @@ no way to verify the replacement. So the order is fixed:
 5. Integration checks AC1–AC13 split: the generic ones move to Common, the deal-specific ones stay
    here and cover the extension.
 
-## Before step 3, confirm one guess
+## Entity name — confirmed
 
-The registration row's entity name is predicted, not verified — Common's CodeGen has not run, so
-`MJ_BizApps_Common: Activity Sync Extensions` is inferred from the sibling naming
-(`MJ_BizApps_Common: Activities`). Check the generated entity name before writing the metadata
-file, rather than assuming this is right.
+`MJ_BizApps_Common: Activity Sync Extensions` (ID `37aca09a-df6e-4a81-a519-690b425884ed`), verified
+by CodeGen against bizapps-common#93 on a fresh database. The guess was right, so the registration
+metadata can be written against that name once Common publishes.
+
+The rest of the new Common entities, for reference:
+
+- `MJ_BizApps_Common: Activity Sync Provider Types`
+- `MJ_BizApps_Common: Activity Sync Rule Sets`
+- `MJ_BizApps_Common: Activity Sync Connection Rule Sets`
+- `MJ_BizApps_Common: Activity Sync Exclusions`
+- `MJ_BizApps_Common: Activity Sync Runs`
+- `MJ_BizApps_Common: Activity Sync Run Details`
