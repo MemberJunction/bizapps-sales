@@ -47,6 +47,14 @@ Two properties worth keeping when this is finished:
 been through CodeGen in Common. **This branch does not build**, deliberately: it exists so the
 shape can be reviewed before the engine lands, and so the work is not lost.
 
+**The dependency is deliberately NOT declared in `packages/CoreEntitiesServer/package.json` yet.**
+Declaring an unpublished, non-workspace package does not merely fail the build — it fails
+`pnpm install`, so the whole repo becomes un-installable and no other work can proceed in that
+checkout. A branch nobody can install is worse than one that does not compile. So the import in
+`DealLinkerExtension.ts` is unresolved on purpose: `pnpm install` succeeds, the vocabulary gate
+runs and can actually check this code, and the only failure left is the honest one — a missing
+module. Add the dependency at step 2 below, when there is something for it to resolve to.
+
 Deleting the working ingest before its replacement is published would leave this repo broken with
 no way to verify the replacement. So the order is fixed:
 
