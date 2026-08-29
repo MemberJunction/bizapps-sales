@@ -1099,7 +1099,25 @@ export class DealWorkspaceComponent implements OnInit {
      * misleading on screen) or honoured (wrong, because sales does not know the cadence).
      */
     public SetTermStart(line: OrderLineEntity, value: string): void {
-        line.ServicePeriodStart = FromDateInput(value);
+        /**
+         * AN EMPTY VALUE IS A PARTIAL EDIT, NOT A CLEAR — and treating it as a clear lost the rep's date.
+         *
+         * `<input type="date">` reports `''` for ANY incomplete value, not only for a deliberate clear.
+         * Backspace the year segment to retype it and the control emits `''` on the way through. This
+         * used to write null immediately, and because the binding is one-way the next change-detection
+         * pass refilled the box with the order date — so the stored value was gone, the deal was dirty,
+         * and the field still looked populated. Nothing on screen said anything had happened.
+         *
+         * Clearing stays available and stays explicit: `ResetTermStart` is the affordance for it, it is
+         * labelled, and it is the one place a clear is unambiguous. Note that method already guards
+         * against a redundant write for the same reason this one now does; the far more frequent path
+         * was the unguarded one.
+         */
+        const parsed = FromDateInput(value);
+        if (parsed === null) {
+            return;
+        }
+        line.ServicePeriodStart = parsed;
         this.Touch();
     }
 

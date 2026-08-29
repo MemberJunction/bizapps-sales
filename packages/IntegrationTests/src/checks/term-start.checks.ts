@@ -104,7 +104,16 @@ async function sellableProduct(ctx: Ctx, companyID: string): Promise<string> {
     const r = await new RunView().RunView<{ ID: string }>(
         {
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(companyID, new Date()),
+            /**
+             * A SUBSCRIPTION product, not merely a sellable one.
+             *
+             * This used to take the first row by `Name ASC`, which is subscription-blind — measured on
+             * the seeded host, that is "Platform — Premium Seat" with a NULL `SubscriptionTypeID`, and
+             * the one subscription product sorts second and was never used. So the only check that
+             * exercises the database write path made its persistence claim about a line that would not
+             * render the control at all.
+             */
+            ExtraFilter: `(${ProductFilterFor(companyID, new Date())}) AND SubscriptionTypeID IS NOT NULL`,
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             Fields: ['ID'],
@@ -113,7 +122,11 @@ async function sellableProduct(ctx: Ctx, companyID: string): Promise<string> {
     );
     Assert(r.Success, `reading the catalogue failed — ${r.ErrorMessage}`);
     const id = (r.Results ?? [])[0]?.ID;
-    Assert(!!id, 'the catalogue offered no sellable product for this company — the fixture is not seeded');
+    Assert(
+        !!id,
+        'the catalogue offered no SUBSCRIPTION product for this company, so the persistence check would '
+            + 'be made about a line that never shows a term start. Seed one — see scripts/dev/seed-orders-catalog.sql.',
+    );
     return id;
 }
 
@@ -228,9 +241,12 @@ export const TermStartChecks: NamedCheck[] = [
              * reads the column through a path returning `''` rather than `null`. The failure is total and
              * silent — a term start on every line, including one-time ones.
              */
-            for (const empty of ['', '   ', null, undefined]) {
+            // Typed, so the cast this used to carry is unnecessary — CLAUDE.md forbids reaching for
+            // `unknown` as a lazy alternative, and the only member that did not fit was `undefined`.
+            const empties: readonly (string | null | undefined)[] = ['', '   ', null, undefined];
+            for (const empty of empties) {
                 AssertEqual(
-                    IsSubscriptionProduct({ SubscriptionTypeID: empty as unknown as string | null }),
+                    IsSubscriptionProduct({ SubscriptionTypeID: empty ?? null }),
                     false,
                     `an empty SubscriptionTypeID (${JSON.stringify(empty)}) must not read as a subscription`,
                 );
