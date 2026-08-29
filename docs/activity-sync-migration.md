@@ -67,9 +67,10 @@ no way to verify the replacement. So the order is fixed:
 
 ## Entity name — confirmed
 
-`MJ_BizApps_Common: Activity Sync Extensions` (ID `37aca09a-df6e-4a81-a519-690b425884ed`), verified
-by CodeGen against bizapps-common#93 on a fresh database. The guess was right, so the registration
-metadata can be written against that name once Common publishes.
+`MJ_BizApps_Common: Activity Sync Extensions` (ID `c7e5ece1-f347-4bc9-ac53-e2f33577b449`), verified
+by a single CodeGen pass on bizapps-common#93 (`V202608291500` applied end-to-end on a fresh
+database). The name guess was right; use this ID when writing the registration row once Common
+publishes. The previous ID `37aca09a-…` was from an earlier generate and does not ship.
 
 The rest of the new Common entities, for reference:
 
