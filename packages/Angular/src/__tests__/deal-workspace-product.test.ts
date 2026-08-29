@@ -28,14 +28,14 @@ import { DealWorkspaceComponent } from '../lib/workspace/deal-workspace.componen
  * logic — so a change to either method reaches these tests.
  */
 
-type Product = { ID: string; Name: string; SKU: string | null; CompanyID: string };
+type Product = { ID: string; Name: string; SKU: string | null; CompanyID: string; Company: string | null };
 
 const SELLING_CO = 'CO-BLUE-CYPRESS';
 const OTHER_CO = 'CO-ANOTHER-ENTITY';
 
-const WIDGET: Product = { ID: 'P-1', Name: 'Widget', SKU: 'W-100', CompanyID: SELLING_CO };
-const FOREIGN: Product = { ID: 'P-2', Name: 'Foreign Service', SKU: 'F-200', CompanyID: OTHER_CO };
-const NO_SKU: Product = { ID: 'P-3', Name: 'Bare Product', SKU: null, CompanyID: SELLING_CO };
+const WIDGET: Product = { ID: 'P-1', Name: 'Widget', SKU: 'W-100', CompanyID: SELLING_CO, Company: 'Blue Cypress' };
+const FOREIGN: Product = { ID: 'P-2', Name: 'Foreign Service', SKU: 'F-200', CompanyID: OTHER_CO, Company: 'Betty' };
+const NO_SKU: Product = { ID: 'P-3', Name: 'Bare Product', SKU: null, CompanyID: SELLING_CO, Company: 'Blue Cypress' };
 
 /** A component with a catalogue and a recording `Touch`, and nothing else it does not need. */
 function componentWith(catalogue: Product[]) {
@@ -82,6 +82,39 @@ function lineWith(fields: Record<string, unknown> = {}) {
 function touched(c: unknown): number {
     return (c as { Touched: number }).Touched;
 }
+
+describe('#29 — the picker names each product\'s owner', () => {
+    /**
+     * Before #29 the catalogue was scoped to one company, so name-plus-SKU identified a product to a
+     * reader. It does not any more. Two companies can each sell an "Onboarding Fee", and `SKU` is
+     * nullable with only a FILTERED unique index, so a rep faced two identical rows — and which one
+     * they picked decided whose books the revenue landed in.
+     */
+    const c = () => componentWith([]);
+
+    it('OL1: shows the owning company alongside the product', () => {
+        expect(c().ProductOptionLabel(WIDGET)).toBe('Widget (W-100) — Blue Cypress');
+    });
+
+    it('OL2: two same-named, SKU-less products from different companies are distinguishable', () => {
+        const a = { ID: 'x', Name: 'Onboarding Fee', SKU: null, CompanyID: SELLING_CO, Company: 'Blue Cypress' };
+        const b = { ID: 'y', Name: 'Onboarding Fee', SKU: null, CompanyID: OTHER_CO, Company: 'Betty' };
+        expect(
+            c().ProductOptionLabel(a),
+            'identical labels here mean the rep is guessing which company they are selling for',
+        ).not.toBe(c().ProductOptionLabel(b));
+    });
+
+    it('OL3: keeps the SKU, which is what separates two products WITHIN a company', () => {
+        expect(c().ProductOptionLabel(WIDGET)).toContain('(W-100)');
+    });
+
+    it('OL4: falls back to the bare name when the view returns no company', () => {
+        // `Company` is a virtual field; a caller that forgets it in Fields gets null rather than a crash.
+        const orphan = { ID: 'z', Name: 'Orphan', SKU: null, CompanyID: SELLING_CO, Company: null };
+        expect(c().ProductOptionLabel(orphan)).toBe('Orphan');
+    });
+});
 
 describe('#29 — a line is never invalid for a reason the form cannot show', () => {
     /**

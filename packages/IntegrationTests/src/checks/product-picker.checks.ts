@@ -1,5 +1,5 @@
 /**
- * @fileoverview `product-picker` — PP1–PP4. The rule deciding which of orders' products a deal line may
+ * @fileoverview `product-picker` — PP1–PP5. The rule deciding which of orders' products a deal line may
  * reference, checked against a live database.
  *
  * WHY THIS BUNDLE IS SMALL AND STILL WORTH HAVING. The picker is one `RunView` filter, and a filter is

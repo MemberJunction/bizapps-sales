@@ -72,6 +72,19 @@ export interface ProductLookup {
      * `deal.Validate()` runs client-side where that server subclass does not exist.
      */
     CompanyID: string;
+
+    /**
+     * The owning company's NAME, for display only — never for matching.
+     *
+     * The picker spans every company since #29, so `Name` alone no longer identifies a product to a
+     * reader. Two companies can each sell an "Onboarding Fee", and `SKU` is nullable with only a
+     * FILTERED unique index, so neither field disambiguates them. Without the company on the label a
+     * rep chooses between two identical-looking rows, and the choice decides which company's books the
+     * revenue lands in.
+     *
+     * It is a virtual field on orders' Products view, so it costs nothing but a column.
+     */
+    Company: string | null;
 }
 
 /**

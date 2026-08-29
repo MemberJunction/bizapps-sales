@@ -388,12 +388,13 @@ export class DealWorkspaceService {
     }
 
     /**
-     * The products a rep may put on a line, for one selling company.
+     The products a rep may put on a line — from EVERY company, since #29.
      *
-     * SEPARATE FROM `LoadLookups`, deliberately. The other pickers are session-wide and load once; this
-     * one depends on the DEAL'S company, so it is fetched when a deal opens and again if its pipeline
-     * changes. Folding it into the session lookups would either fetch every company's catalogue or
-     * silently show the first deal's.
+     * SEPARATE FROM `LoadLookups`, though the original reason has expired. It used to depend on the
+     * deal's company, so it had to be refetched when a deal opened or its pipeline changed. The
+     * catalogue is now session-wide like the other lookups, and folding it in would be a fair
+     * simplification — one worth making deliberately rather than as a side effect of #29, since it
+     * changes when the fetch happens for every caller.
      *
      * Returns an empty list on failure rather than throwing: a picker that cannot load should offer
      * nothing and let the rest of the line editor keep working. The consequence — a rep unable to select
@@ -424,7 +425,8 @@ export class DealWorkspaceService {
             ExtraFilter: ProductFilterFor(asOf),
             OrderBy: 'Name ASC',
             ResultType: 'simple',
-            Fields: ['ID', 'Name', 'SKU', 'CompanyID'],
+            // `Company` is the owning company's NAME, and the picker label needs it: see ProductLookup.
+            Fields: ['ID', 'Name', 'SKU', 'CompanyID', 'Company'],
         });
         return result?.Success ? (result.Results ?? []) : [];
     }

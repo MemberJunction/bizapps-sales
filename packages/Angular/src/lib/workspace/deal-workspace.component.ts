@@ -221,29 +221,22 @@ export class DealWorkspaceComponent implements OnInit {
     public Lookups: DealWorkspaceLookups = EmptyLookups();
 
     /**
-     * The loaded catalogue, TAGGED WITH THE COMPANY IT IS ABOUT.
-     *
-     * ── WHY THE TAG, AND NOT JUST A REFRESH IN ONE MORE PLACE ───────────────────────────────────
-     *
-     * This was a bare `ProductLookup[]`, and it held whatever the LAST deal to load had put there --
-     * the same sentence `SelectTab` already carried about `Lock`, applied to a second field. Open a
-     * deal for company A, open one for company B, switch back, and the picker still offered company
-     * B's catalogue. `AddLine` then stamped `CompanyID` from the ACTIVE deal's pipeline, so the line
-     * carried company A against a company-B product. `OrderLine`'s foreign key is to `Product`, not
-     * to company, so nothing refused it.
-     *
-     * The tab-switch gap could have been closed by adding one more `RefreshProducts()` call beside
-     * the `RefreshLock()` in `SelectTab`. That is exactly the fix that produced this bug: the lock
-     * was repaired one method at a time, and two of its own paths were missed in the process
-     * (`NewDeal` never cleared it, `CloseTab` never re-resolved it). A per-deal value reached
-     * through a shared field will keep growing new stale paths as long as correctness depends on
-     * remembering to call something.
-     *
-     * So the value states what it describes and the getter below refuses to hand it to the wrong
-     * deal. Staleness stops being a thing to remember and becomes a thing that cannot be
-     * represented. The worst case is an EMPTY picker -- visible, and the failure mode
-     * `RefreshProducts` already chose deliberately -- rather than a wrong one.
-     */
+     /**
+      * The loaded catalogue — every company's sellable products, not one company's.
+      *
+      * ── THIS FIELD USED TO CARRY A COMPANY TAG, AND THE TAG IS GONE ────────────────────────────
+      *
+      * It was `{ CompanyID, Items }`, and the getter below refused to hand it to a deal belonging to
+      * a different company — a real bug fix, for a real defect: open a deal for company A, open one
+      * for B, switch back, and the picker still offered B's list.
+      *
+      * #29 dissolved that bug class rather than fixing it again. The catalogue is no longer
+      * per-company, so there is no wrong company to hand it to. What survives is a different
+      * staleness: this field is shared across tabs and `RefreshProducts` overwrites it wholesale, so
+      * a single failed load empties it for every open deal at once. `LoadProducts` reports that
+      * rather than swallowing it, and `ProductLabel` refuses to call a product withdrawn on the
+      * strength of an empty list.
+      */
     private Catalogue: ProductLookup[] = [];
 
     /**
@@ -1635,6 +1628,24 @@ export class DealWorkspaceComponent implements OnInit {
      * since it was quoted — still shows its ID rather than silently reading as unset, because "this line
      * references something you can no longer sell" is a fact the rep needs.
      */
+    /**
+     * How one product reads in the picker.
+     *
+     * ── THE COMPANY IS ON THE LABEL, AND IT HAS TO BE ─────────────────────────────────────────────
+     *
+     * Before #29 the catalogue was scoped to one company, so name-plus-SKU identified a product to a
+     * reader. It does not any more. Two companies can each sell an "Onboarding Fee", and `SKU` is
+     * nullable with only a FILTERED unique index, so neither field separates them — the rep would be
+     * choosing between two identical rows, and that choice decides which company's books the revenue
+     * lands in. Showing the owner is the difference between a decision and a guess.
+     *
+     * SKU stays where it is, since it is what disambiguates two products WITHIN a company.
+     */
+    public ProductOptionLabel(p: ProductLookup): string {
+        const base = p.SKU ? `${p.Name} (${p.SKU})` : p.Name;
+        return p.Company ? `${base} — ${p.Company}` : base;
+    }
+
     public ProductLabel(line: OrderLineEntity): string {
         if (!line.ProductID) {
             return '';
