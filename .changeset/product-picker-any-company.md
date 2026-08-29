@@ -5,10 +5,21 @@
 
 A deal may carry any company's product, and the line takes its company from the product (#29).
 
+**All six `@mj-biz-apps/*` packages move to 6.0.0 together.** `.changeset/config.json` declares them
+`fixed`, so a major anywhere moves the group — the `minor` below is what `sales-ng` would warrant on its
+own, not what it will ship. `sales-actions`, `sales-core-entities-server` and `sales-server` are
+unchanged by this PR and go along for the ride. Approved by Robert Kihm on 2026-08-29: moving Sales to v6
+brings it in line with the MJ major version, and there is leeway before LTS.
+
 **Breaking, `sales-entities`.** `ProductFilterFor(companyID, asOf)` is now `ProductFilterFor(asOf)`.
 The `CompanyID = <the deal's company>` clause is gone; `Status = 'Active'` and the availability
-window stay. Callers drop the first argument — there is no behavioural shim, because a filter that
-silently ignored a company you passed it would be worse than one that refuses to compile.
+window stay. Callers drop the first argument. There is no behavioural shim: a filter that silently ignored a company
+you passed it would be worse than one that fails.
+
+Note the failure is not always a compile error. Three `.mjs` harnesses in this repo called the two-argument
+form, and nothing type-checks `.mjs` — the GUID bound to `asOf` and they died at runtime on
+`asOf.getUTCFullYear is not a function`. All three are updated in this PR, and each now spells out its own
+company clause, since wanting products for ONE company is a real need the shared rule no longer expresses.
 
 `ProductLookup` additionally carries `CompanyID`, which is additive — a line's company can no longer be
 inferred from the deal, so it has to come from the product the rep actually chose.

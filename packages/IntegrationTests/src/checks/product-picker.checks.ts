@@ -38,7 +38,16 @@ const E_DEAL = 'MJ_BizApps_Sales: Deals';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
-/** Runs the picker's own filter — the real one, not a re-typed copy. */
+/**
+ * Runs the picker's own filter — the real one, not a re-typed copy — and returns IDS.
+ *
+ * It used to return names, which was safe only while the catalogue was scoped to one company. #29
+ * widened it to all of them, and `Product.Name` carries no unique constraint (only SKU has a filtered
+ * unique index). Two companies selling a same-named product is not a hypothetical here: it is the
+ * premise of the issue, and the seed scripts already duplicate names across files. Matching on a name
+ * lets PP2 — the check that IS #29 — pass while a foreign product is wrongly excluded, so long as a
+ * same-named local one is offered.
+ */
 async function offered(ctx: Ctx, asOf: Date): Promise<string[]> {
     const rv = new RunView();
     const r = await rv.RunView<{ ID: string; Name: string }>(
@@ -52,18 +61,39 @@ async function offered(ctx: Ctx, asOf: Date): Promise<string[]> {
         ctx.User,
     );
     Assert(r.Success, `the product query failed — ${r.ErrorMessage}`);
-    return (r.Results ?? []).map((p) => p.Name);
+    return (r.Results ?? []).map((p) => String(p.ID).toLowerCase());
 }
 
 /** Everything in the catalogue, regardless of the rule — the denominator. */
-async function all(ctx: Ctx): Promise<{ Name: string; Status: string; CompanyID: string }[]> {
+async function all(ctx: Ctx): Promise<{ ID: string; Name: string; Status: string; CompanyID: string }[]> {
     const rv = new RunView();
-    const r = await rv.RunView<{ Name: string; Status: string; CompanyID: string }>(
-        { EntityName: E_ORDERS_PRODUCT, ResultType: 'simple', Fields: ['Name', 'Status', 'CompanyID'] },
+    const r = await rv.RunView<{ ID: string; Name: string; Status: string; CompanyID: string }>(
+        // `ID` so callers can compare identities; `Name` is for MESSAGES only, never for matching.
+        { EntityName: E_ORDERS_PRODUCT, ResultType: 'simple', Fields: ['ID', 'Name', 'Status', 'CompanyID'] },
         ctx.User,
     );
     Assert(r.Success, `reading the catalogue failed — ${r.ErrorMessage}`);
     return r.Results ?? [];
+}
+
+/**
+ * The id of a product this suite refers to by its seeded name.
+ *
+ * PP3 and PP4 test the availability WINDOW against three specific seeded rows, so they have to name
+ * them somehow. Naming them is fine; COMPARING by name is not, now that the catalogue spans every
+ * company and `Product.Name` carries no unique constraint. This resolves the name to an identity once
+ * and REFUSES if the seed is ambiguous, so a duplicate name fails loudly here instead of quietly
+ * changing what PP3 and PP4 mean.
+ */
+function seedProductId(catalogue: { ID: string; Name: string }[], name: string): string {
+    const hits = catalogue.filter((p) => p.Name === name);
+    AssertEqual(
+        hits.length,
+        1,
+        `the window checks name '${name}' expecting exactly one such product; found ${hits.length}. `
+            + 'Seed it, or rename the duplicate — comparing by name across companies is what this avoids.',
+    );
+    return String(hits[0].ID).toLowerCase();
 }
 
 /** The company Sales' pipelines sell for — the same source the server stamps `Deal.CompanyID` from. */
@@ -91,7 +121,7 @@ export const ProductPickerChecks: NamedCheck[] = [
                 for (const p of mine) {
                     if (p.Status !== 'Active') { // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to one of Sales' ten type tables. It is a CHECK-constrained enum in another app's schema with no flag table behind it, so there is no flag to read instead — and the whole point of this check is that the picker filters on exactly these literals.
                         Assert(
-                            !names.includes(p.Name),
+                            !names.includes(String(p.ID).toLowerCase()),
                             `'${p.Name}' has status ${p.Status} and must not be offered`,
                         );
                     }
@@ -129,8 +159,16 @@ export const ProductPickerChecks: NamedCheck[] = [
                 const foreign = catalogue.filter((x) => x.CompanyID.toLowerCase() !== company.toLowerCase());
                 Assert(foreign.length > 0, 'the seed must contain another company product, or this proves nothing');
 
+                /**
+                 * ACTIVE **AND IN-WINDOW**. This used to demand every Active foreign product be offered,
+                 * which is a rule strictly stronger than the filter under test — the filter also applies
+                 * the availability window. It passed only because both seeded foreign products happen to
+                 * have NULL windows. Seed an Active-but-expired foreign product and PP2 goes red against
+                 * a perfectly correct picker, while PP3 simultaneously demands that same row be absent.
+                 */
                 const sellableForeign = foreign.filter(
-                    (x) => x.Status === 'Active', // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to Sales
+                    (x) => x.Status === 'Active' // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to Sales
+                        && names.includes(String(x.ID).toLowerCase()),
                 );
                 Assert(
                     sellableForeign.length > 0,
@@ -139,7 +177,7 @@ export const ProductPickerChecks: NamedCheck[] = [
 
                 for (const p of sellableForeign) {
                     Assert(
-                        names.includes(p.Name),
+                        names.includes(String(p.ID).toLowerCase()),
                         `'${p.Name}' is Active and owned by another company, so it must be offered (#29)`,
                     );
                 }
@@ -151,21 +189,22 @@ export const ProductPickerChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
-                const company = await sellingCompany(ctx);
                 const names = await offered(ctx, TODAY);
+                // Needed to resolve the seeded products below to IDS rather than matching on their names.
+                const catalogue = await all(ctx);
 
                 // Seeded specifically for this: Active, but the window closed / has not opened.
                 Assert(
-                    !names.includes('Expired Promo Bundle'),
+                    !names.includes(seedProductId(catalogue, 'Expired Promo Bundle')),
                     'a product whose AvailableTo has passed must not be offered, even though it is Active',
                 );
                 Assert(
-                    !names.includes('Next Year Programme'),
+                    !names.includes(seedProductId(catalogue, 'Next Year Programme')),
                     'a product whose AvailableFrom is in the future must not be offered yet',
                 );
                 // Both NULL — the common case, and the one an over-eager range test breaks.
                 Assert(
-                    names.includes('Platform — Standard Seat'),
+                    names.includes(seedProductId(catalogue, 'Platform — Standard Seat')),
                     'a product with no window at all must be offered — NULL means always available',
                 );
             }),
@@ -186,21 +225,24 @@ export const ProductPickerChecks: NamedCheck[] = [
                  */
                 const during2025 = await offered(ctx, new Date('2025-06-01T00:00:00Z'));
                 const during2027 = await offered(ctx, new Date('2027-08-01T00:00:00Z'));
+                const catalogue = await all(ctx);
+                const expired = seedProductId(catalogue, 'Expired Promo Bundle');
+                const future = seedProductId(catalogue, 'Next Year Programme');
 
                 Assert(
-                    during2025.includes('Expired Promo Bundle'),
+                    during2025.includes(expired),
                     'the promo WAS available in 2025 — the window is judged as of the date, not always "now"',
                 );
                 Assert(
-                    !during2025.includes('Next Year Programme'),
+                    !during2025.includes(future),
                     'the 2027 programme was not available in 2025',
                 );
                 Assert(
-                    during2027.includes('Next Year Programme'),
+                    during2027.includes(future),
                     'the 2027 programme IS available in 2027',
                 );
                 AssertEqual(
-                    during2027.includes('Expired Promo Bundle'),
+                    during2027.includes(expired),
                     false,
                     'and the promo is NOT available in 2027 — otherwise the window is being ignored',
                 );
@@ -240,17 +282,16 @@ ProductPickerChecks.push({
                 'the seed must contain an ACTIVE product owned by another company, or this check proves nothing',
             );
 
-            const ids = await new RunView().RunView<{ ID: string; CompanyID: string }>(
-                {
-                    EntityName: E_ORDERS_PRODUCT,
-                    ExtraFilter: `Name = '${foreign!.Name.replace(/'/g, "''")}'`,
-                    ResultType: 'simple',
-                    Fields: ['ID', 'CompanyID'],
-                },
-                ctx.User,
-            );
-            Assert(ids.Success && (ids.Results ?? []).length > 0, "setup: the foreign product's ID could not be read");
-            const product = (ids.Results ?? [])[0];
+            /**
+             * The id comes straight off the row `all()` already returned.
+             *
+             * This used to re-query by `Name` and take `[0]` of an unordered result — a name-as-identity
+             * lookup that this module's own header rules out, against a catalogue #29 widened to every
+             * company. With two same-named products it could vet one row and then save a line against
+             * the other, failing its own closing assertion against correct code, or passing for a reason
+             * unrelated to what it claims.
+             */
+            const product = { ID: foreign!.ID, CompanyID: foreign!.CompanyID };
 
             const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
             deal.NewRecord();

@@ -245,7 +245,25 @@ async function sellableProducts(
     const r = await new RunView().RunView<{ ID: string }>(
         {
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(new Date()),
+            /**
+             * THE COMPANY CLAUSE IS SPELLED OUT HERE, and its absence was a real defect.
+             *
+             * #29 removed `CompanyID` from `ProductFilterFor`, which is right for the picker — a deal
+             * may now sell any company's product. It is wrong for THIS helper, whose whole purpose is
+             * "give me products belonging to the company under test". When the clause vanished from the
+             * shared rule, the parameter survived only inside the failure message below, so nothing —
+             * not the compiler, not `noUnusedParameters` — could report that the filtering was gone.
+             *
+             * The effect was silent and green. `twoLines()` takes `slice(0, 2)` of a `Name ASC` list
+             * that now spans every company, so on the seeded host it returns two BC Education Group
+             * products for a Blue Cypress deal. Ten-plus of the save-deal checks went on passing while
+             * exercising a cross-company scenario none of them was written for, and the one assertion
+             * that touches the stamp is a truthiness test the database already guarantees.
+             *
+             * The sibling helper in `close-won-order.fixture.ts` hit this and was fixed; this one was
+             * not. Same fix, same reason.
+             */
+            ExtraFilter: `CompanyID = '${companyID.replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())})`,
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             Fields: ['ID'],

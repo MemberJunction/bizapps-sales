@@ -77,8 +77,11 @@ test.describe('#29 — products from another company are sellable on a deal', ()
             FROM __mj_BizAppsOrders.Product
             WHERE Status = 'Active'
               AND CompanyID <> '${ownCompany}'
-              AND (AvailableFrom IS NULL OR AvailableFrom <= GETUTCDATE())
-              AND (AvailableTo   IS NULL OR AvailableTo   >= GETUTCDATE())
+              -- CAST to DATE, not GETUTCDATE(): Available* are DATE columns, so SQL Server widens
+              -- them to midnight, and a product available through today is excluded from 00:00:01
+              -- onward. The spec would then report a seed problem against a picker that works.
+            AND (AvailableFrom IS NULL OR AvailableFrom <= CAST(SYSUTCDATETIME() AS DATE))
+              AND (AvailableTo   IS NULL OR AvailableTo   >= CAST(SYSUTCDATETIME() AS DATE))
             ORDER BY Name
         `);
         expect(

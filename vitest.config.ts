@@ -18,7 +18,20 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
     test: {
-        include: ['packages/*/src/**/*.test.ts'],
+        /**
+         * BOTH SUFFIXES, because three files disagreed about what a unit test is and the gap was silent.
+         *
+         * CI enables its unit step when it finds a .test.ts OR a .spec.ts under a package source tree,
+         * while this glob matched only the first. Measured: a `probe-collect.spec.ts` containing a
+         * deliberately failing assertion turned CI's step ON, vitest collected the other file, reported
+         * everything green and exited 0 — the failing test never ran and nothing said so.
+         *
+         * Playwright's specs live under test-harnesses/, not a package source tree, so widening here does
+         * not pull them in. `packages/Angular/tsconfig.json` should exclude `*.spec.ts` alongside
+         * `*.test.ts` for the same reason — otherwise ngc compiles one into `dist` and publishes it with
+         * a runtime `vitest` import.
+         */
+        include: ['packages/*/src/**/*.test.ts', 'packages/*/src/**/*.spec.ts'],
         passWithNoTests: false,
         server: {
             deps: {
