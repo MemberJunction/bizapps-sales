@@ -45,6 +45,13 @@ function componentWith(catalogue: Product[]) {
         Touched: number;
     };
     c.Catalogue = catalogue;
+    /**
+     * `ActiveCompanyID` is a getter on the prototype reading `Deal` and `Lookups`, both of which are
+     * getters too — so they cannot be assigned. Shadowing the one the code actually calls keeps the test
+     * coupled to the contract (`OnProductChange` falls back to the active company) rather than to the
+     * two hops it currently takes to compute it.
+     */
+    Object.defineProperty(c, 'ActiveCompanyID', { value: SELLING_CO, configurable: true });
     c.Touched = 0;
     c.Touch = () => {
         c.Touched++;
@@ -76,17 +83,96 @@ function touched(c: unknown): number {
     return (c as { Touched: number }).Touched;
 }
 
+describe('#29 — a line is never invalid for a reason the form cannot show', () => {
+    /**
+     * ── THE DEFECT THIS EXISTS FOR ────────────────────────────────────────────────────────────────
+     *
+     * #29 deleted `AddLine`'s `CompanyID` stamp, reasoning that the line's company is the PRODUCT's and
+     * no product is chosen yet. `OrderLine.CompanyID` is NOT NULL and `CanSave` gates on
+     * `deal.Validate()`, which runs in the browser — so a freshly added line was invalid immediately,
+     * and `SaveBlockedReason` surfaced the raw entity error ahead of the friendly one. The rep read
+     * "Company ID cannot be null" against a form with no company control anywhere on it.
+     *
+     * The disabled Save is CORRECT while no product is chosen — "Choose a product for this line" is the
+     * right message. What was wrong is that a second, unactionable error preceded it.
+     *
+     * No check caught this: the integration suite writes lines server-side where the stamp exists, and
+     * every unit fixture seeded `CompanyID` by hand. It took a line-by-line audit. This is the guard.
+     */
+    function addLineHarness() {
+        const stamped: Record<string, unknown> = {};
+        const line = { Set: (f: string, v: unknown) => { stamped[f] = v; } };
+        const order = { Set: () => undefined, Lines: { Create: async () => line }, IsSaved: true };
+        const c = Object.create(DealWorkspaceComponent.prototype) as DealWorkspaceComponent;
+        Object.defineProperty(c, 'Deal', { value: { OrderID_EnsureObject: () => order }, configurable: true });
+        Object.defineProperty(c, 'ActiveCompanyID', { value: SELLING_CO, configurable: true });
+        (c as unknown as { Touch(): void }).Touch = () => undefined;
+        return { c, stamped };
+    }
+
+    it('AL1: a newly added line carries a company, so Save is never blocked on an invisible field', async () => {
+        const { c, stamped } = addLineHarness();
+        await c.AddLine();
+        expect(
+            stamped['CompanyID'],
+            'a null here is the "Company ID cannot be null" defect, on a form with no company control',
+        ).toBe(SELLING_CO);
+    });
+
+    it('AL2: and that company is a PLACEHOLDER the product later overrides', async () => {
+        // The stamp must not re-assert the pre-#29 claim that the deal's company IS the line's. It is a
+        // stand-in that keeps the line valid; picking a product replaces it with the product's company.
+        const { c, stamped } = addLineHarness();
+        await c.AddLine();
+        expect(stamped['CompanyID']).toBe(SELLING_CO);
+
+        const picker = componentWith([WIDGET, FOREIGN]);
+        const line = lineWith({ CompanyID: SELLING_CO });
+        picker.OnProductChange(line, 'P-2');
+        expect(line.Get('CompanyID'), 'the product wins over the placeholder').toBe(OTHER_CO);
+    });
+});
+
+describe('#29 — the picker list keeps a stable identity when it is empty', () => {
+    it('AL3: an unloaded catalogue returns the SAME array each read, not a fresh one', () => {
+        /**
+         * The frozen-empty constant exists so Angular's `@for` does not tear down and rebuild the picker
+         * on every change-detection pass. An audit measured that replacing it with a fresh `[]` per call
+         * — the exact regression it prevents — left the suite green, because nothing ever read `Products`
+         * with an empty catalogue.
+         */
+        const c = componentWith([]);
+        expect(c.Products, 'two reads must be the same array object').toBe(c.Products);
+        expect(c.Products).toHaveLength(0);
+    });
+});
+
 describe('#29 — ProductLabel resolves names across the whole catalogue', () => {
     it('PL1: shows name and SKU for a product that is still offered', () => {
         const c = componentWith([WIDGET, FOREIGN]);
         expect(c.ProductLabel(lineWith({ ProductID: 'P-1' }))).toBe('Widget (W-100)');
     });
 
-    it('PL2: shows a FOREIGN-company product by name, not as unknown — the point of #29', () => {
-        // Before #29 the catalogue was filtered to the deal's company, so a line booked against another
-        // company's product read as "(no longer offered)" even though it was perfectly sellable.
-        const c = componentWith([WIDGET, FOREIGN]);
-        expect(c.ProductLabel(lineWith({ ProductID: 'P-2' }))).toBe('Foreign Service (F-200)');
+    it('PL2: an UNLOADED catalogue does not claim a valid product was withdrawn', () => {
+        /**
+         * ── WHAT THIS CHECK USED TO BE, AND WHY IT WAS WORTHLESS ──────────────────────────────
+         *
+         * It rendered a foreign-company product and asserted the label came back — billed as "the point
+         * of #29". An audit measured it: setting the fixture's foreign product to the SELLING company,
+         * so nothing about it was foreign at all, left the check green. `ProductLabel` and the
+         * `Products` getter read no `CompanyID` anywhere, and `ProductLabel` is byte-identical to the
+         * version before #29. There was no mutation that failed it without also failing PL1.
+         *
+         * The real hazard in this method is the one below. `Products` returns a frozen empty whenever
+         * `Catalogue` is empty, and empty has three causes: not loaded yet, load failed, and genuinely
+         * no products. `ProductLabel` collapses all three into a positive, specific, FALSE claim about
+         * the product on the line.
+         */
+        const c = componentWith([]);
+        expect(
+            c.ProductLabel(lineWith({ ProductID: 'P-1' })),
+            'an empty catalogue means we do not know, not that the product was withdrawn',
+        ).not.toBe('(no longer offered)');
     });
 
     it('PL3: falls back to the bare name when the product has no SKU', () => {
@@ -150,15 +236,36 @@ describe("#29 — OnProductChange stamps the line's company from the PRODUCT", (
         expect(touched(c)).toBe(0);
     });
 
-    it('PC5: an unknown product sets the ID but leaves the company alone rather than blanking it', () => {
-        // The server still stamps `CompanyID` from the product at save, so a value we cannot improve on
-        // is better left than cleared -- blanking it would turn a display gap into a NOT NULL failure
-        // that disables Save.
+    it('PC5: an unknown product falls back to a company rather than leaving the line unsaveable', () => {
+        /**
+         * ── THIS CHECK USED TO PASS WITH THE ENTIRE FIX DELETED ───────────────────────────────
+         *
+         * It seeded `CompanyID` by hand and asserted the value was still there afterwards, which cannot
+         * distinguish "the code deliberately declined to write" from "the code does not exist". An audit
+         * measured it: removing the whole stamp block from `OnProductChange` killed PC1, PC2 and PC3 and
+         * left this one green.
+         *
+         * It now starts from NULL, which is the state a real line is in, and asserts the line ends up
+         * saveable. A product can be missing from the catalogue for reasons unrelated to the product --
+         * a refresh resolving empty while the picker is open -- and leaving null there is unrecoverable,
+         * because re-selecting the same option emits no change event.
+         */
         const c = componentWith([WIDGET]);
-        const line = lineWith({ CompanyID: SELLING_CO });
+        const line = lineWith({ CompanyID: null });
         c.OnProductChange(line, 'P-GONE');
         expect(line.ProductID).toBe('P-GONE');
-        expect(line.Get('CompanyID')).toBe(SELLING_CO);
+        expect(
+            line.Get('CompanyID'),
+            'a null company here is a line the rep can only escape by deleting it',
+        ).toBe(SELLING_CO);
+    });
+
+    it('PC7: a known product still wins over the fallback', () => {
+        // Guards the fallback from swallowing the real rule: the product's company must take priority.
+        const c = componentWith([WIDGET, FOREIGN]);
+        const line = lineWith({ CompanyID: null });
+        c.OnProductChange(line, 'P-2');
+        expect(line.Get('CompanyID')).toBe(OTHER_CO);
     });
 
     it('PC6: a real selection marks the deal dirty', () => {

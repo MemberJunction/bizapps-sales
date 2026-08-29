@@ -853,7 +853,8 @@ export class DealWorkspaceComponent implements OnInit {
         // that the browser can also know -- deliberately NOT Status (orders defaults it) and NOT
         // OrderNumber (orders MINTS it; see the note above CanSave).
         if (order && !order.IsSaved) {
-            order.Set('CompanyID', this.CompanyIDFromPipeline ?? this.Deal?.CompanyID ?? null);
+            // `ActiveCompanyID` IS this expression; repeating it inline meant two places to change.
+            order.Set('CompanyID', this.ActiveCompanyID);
             order.Set('OrderType', 'Sale');
         }
 
@@ -880,32 +881,37 @@ export class DealWorkspaceComponent implements OnInit {
         line?.Set('Quantity', 1);
 
         /**
-         * `CompanyID` IS SET HERE, AND WITHOUT IT THE SAVE BUTTON NEVER ENABLES.
+         * A PLACEHOLDER COMPANY, WRITTEN SO THE FORM IS NOT INVALID BEFORE A PRODUCT EXISTS.
          *
-         * `OrderLine.CompanyID` is NOT NULL with no default, and orders stamps it from the product in
-         * `OrderLineEntityServer` -- a SERVER class. `CanSave` is gated on `deal.Validate()`, which runs
-         * in the BROWSER, where that subclass does not exist and nothing has stamped anything. So a
-         * freshly added line is permanently invalid, `Validation.IsValid` stays false, and the rep sees a
-         * disabled Save reading "Company ID cannot be null" against a form where every field they can
-         * reach is filled. Found in the Explorer pass on 2026-08-20, on a deal that saved perfectly well
-         * through the entity layer -- which is exactly why an API-level check could not see it.
+         * `OrderLine.CompanyID` is NOT NULL with no default, and orders stamps the real value from the
+         * product in `OrderLineEntityServer` -- a SERVER class. `CanSave` is gated on `deal.Validate()`,
+         * which runs in the BROWSER, where that subclass does not exist. So a line with no company is
+         * invalid the moment it appears, and `SaveBlockedReason` surfaces the raw entity error ahead of
+         * the friendly one: the rep reads "Company ID cannot be null" against a form that exposes no
+         * company control at all. Found in the Explorer pass on 2026-08-20.
          *
-         * Supplying the company is not this app duplicating a rule it does not own. The picker filters
-         * products by THIS company (`ProductFilterFor`), so a selectable product's company and the
-         * deal's are the same value by construction, and the server will stamp the same thing. If that
-         * ever stops being true, the picker is what broke.
+         * ── WHY THIS IS BACK, HAVING BEEN REMOVED BY #29 ──────────────────────────────────────────
          *
-         * It comes from the PIPELINE LOOKUP, not from `Deal.CompanyID`. On an unsaved deal that field is
-         * still null -- the server derives it from the pipeline in `stampCompanyFromPipeline()` (D-4), so
-         * it does not exist until the first save, and a rep adding a line before saving would be right
-         * back at the disabled button. `Lookups.Pipelines` carries `CompanyID` for exactly this reason,
-         * and it is the same row the server reads.
+         * #29 deleted this stamp on the reasoning that the line's company is the PRODUCT's, and no
+         * product is chosen yet -- and left a comment claiming that introduced "no new window where Save
+         * is disabled for an invisible reason". An audit disproved that. The defect was never the
+         * disabled state, which is correct while `ProductID` is unset; it was the REASON TEXT. Before
+         * #29 a fresh line produced one entity error, for `ProductID`, which `UnlinkedLineIssues`
+         * translates into "Choose a product for this line." After #29 it produced two, and the extra one
+         * names a column the rep cannot see, act on, or fill.
+         *
+         * ── IT IS A PLACEHOLDER, AND THE DISTINCTION MATTERS ──────────────────────────────────────
+         *
+         * This is NOT the pre-#29 claim that the deal's company IS the line's. It is not. The picker
+         * spans every company now, so this value is a stand-in that keeps the line valid until the rep
+         * chooses, at which point `OnProductChange` overwrites it with the product's company and the
+         * server overwrites it again at save. Nothing downstream reads it in between.
+         *
+         * It comes from `ActiveCompanyID` -- the pipeline lookup first, because on an unsaved deal
+         * `Deal.CompanyID` is still null until `stampCompanyFromPipeline()` runs server-side (D-4), and
+         * a rep adding a line before the first save would otherwise be right back at the disabled button.
          */
-        // NOT stamped here any more (#29). The picker no longer filters by company, so the deal's
-        // company is not the line's company -- the PRODUCT's is, and no product is chosen yet at this
-        // point. `OnProductChange` sets it at the moment the rep picks one, which is also the moment
-        // `ProductID` gets set; both columns are NOT NULL, so the line is incomplete until then either
-        // way and this introduces no new window where Save is disabled for an invisible reason.
+        line?.Set('CompanyID', this.ActiveCompanyID);
 
         this.Touch();
     }
@@ -1634,7 +1640,21 @@ export class DealWorkspaceComponent implements OnInit {
             return '';
         }
         const hit = this.Products.find((x) => x.ID === line.ProductID);
-        return hit ? (hit.SKU ? `${hit.Name} (${hit.SKU})` : hit.Name) : '(no longer offered)';
+        if (hit) {
+            return hit.SKU ? `${hit.Name} (${hit.SKU})` : hit.Name;
+        }
+        /**
+         * AN EMPTY CATALOGUE IS "WE DO NOT KNOW", NOT "WITHDRAWN".
+         *
+         * The catalogue is empty in three distinct situations — not loaded yet, load failed, and no
+         * products exist — and only the last makes "(no longer offered)" a true statement. Saying it in
+         * the other two tells a rep that a product they can still sell has been discontinued, and one
+         * failed `LoadProducts` round-trip is enough to say it about every line on every open tab.
+         *
+         * An ellipsis is the honest answer while the answer is unknown: it reads as pending, it is not a
+         * claim, and it disappears on its own once the catalogue arrives.
+         */
+        return this.Products.length ? '(no longer offered)' : '…';
     }
 
     /**
@@ -1674,10 +1694,21 @@ export class DealWorkspaceComponent implements OnInit {
          * will still stamp it correctly, and blanking a value we cannot improve on would turn a display
          * gap into a validation failure.
          */
+        /**
+         * THE FALLBACK IS NOT OPTIONAL, and the earlier version of this that "left the field alone"
+         * assumed the line already had a company. Once `AddLine` stops stamping, it does not.
+         *
+         * A product can be missing from the catalogue for reasons that have nothing to do with the
+         * product: an in-flight `RefreshProducts` resolving with an empty list while the picker is open
+         * is enough. Leaving `CompanyID` null there produces a permanently unsaveable line, because
+         * re-selecting the SAME option emits no `ngModelChange` -- the only way out is deleting the row.
+         *
+         * So an unknown product falls back to the same placeholder `AddLine` uses. The server derives
+         * the real value from the product at save either way; the only job here is to never leave the
+         * browser holding a null it cannot show the rep how to fix.
+         */
         const product = this.Catalogue.find((p) => p.ID === productID);
-        if (product) {
-            line.Set('CompanyID', product.CompanyID);
-        }
+        line.Set('CompanyID', product?.CompanyID ?? this.ActiveCompanyID);
 
         this.Touch();
     }
