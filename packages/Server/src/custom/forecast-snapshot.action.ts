@@ -1,8 +1,7 @@
 /**
  * @fileoverview `Sales.CaptureForecastSnapshot` — the daily snapshot Action (#40).
  *
- * Second instance of the shape `Sales.SyncActivities` established: read the params, call the job with
- * whatever source factory is registered, report tallies as outputs, never throw at the caller.
+ * Read the params, call the snapshot job, report tallies as outputs, never throw at the caller.
  *
  * @module @mj-biz-apps/sales-server
  */
@@ -112,7 +111,7 @@ export class CaptureForecastSnapshotAction extends BaseAction {
     }
 }
 
-/** Anti-tree-shaking anchor — see the note on `LoadSyncActivitiesAction`. */
+/** Anti-tree-shaking anchor — `@RegisterClass` is a side effect of import. */
 export function LoadCaptureForecastSnapshotAction(): void {
     void CaptureForecastSnapshotAction;
 }

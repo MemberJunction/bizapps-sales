@@ -54,7 +54,7 @@
       "should be able to find the reasoning rather than re-derive it."
     ],
     "close-won-tasks": { "count": 16, "requires": "tasks", "ids": "WT1-WT16" },
-    "activities": { "count": 23, "requires": "common", "ids": "AC1-AC22" },
+    "activities": { "count": 21, "requires": "common", "ids": "AC1-AC14, AC16, AC18-AC23" },
     "forecast": { "count": 13, "requires": null, "ids": "FS1-FS13" }
   },
   "probes": {

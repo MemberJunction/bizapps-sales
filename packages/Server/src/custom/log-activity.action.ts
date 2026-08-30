@@ -173,7 +173,7 @@ export class LogActivityAction extends BaseAction {
     }
 }
 
-/** Anti-tree-shaking anchor — see the note on `LoadSyncActivitiesAction`. */
+/** Anti-tree-shaking anchor — `@RegisterClass` is a side effect of import. */
 export function LoadLogActivityAction(): void {
     void LogActivityAction;
 }
