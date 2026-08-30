@@ -69,9 +69,8 @@ export * from './CloseWonTaskService.js';
 /**
  * ACTIVITIES (S-US9 #119, S-US10 #120).
  *
- * Manual logging and the deal timeline stay here. Ingest moved to Common's ActivitySyncEngine;
- * sales' remaining half is `Sales.DealLinker` (in-stream) plus the thin hourly job that drives
- * the engine.
+ * Manual logging and the deal timeline stay here. Ingest is Common's ActivitySyncEngine.
+ * Sales' remaining half is `Sales.DealLinker`, invoked in-stream when Common writes.
  */
 /**
  * THE VOCABULARY MOVED TO `sales-entities`, and is re-exported here so no consumer changed.
@@ -90,7 +89,6 @@ export * from './activities/ActivityWriterService.js';
 export * from './activities/ActivityReader.js';
 export * from './activities/DealMatcher.js';
 export * from './activities/DealLinkerExtension.js';
-export * from './activities/ActivitySyncJob.js';
 export {
     ActivitySyncEngine,
     FixtureActivitySyncProvider,

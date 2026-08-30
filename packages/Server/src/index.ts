@@ -17,8 +17,6 @@ import { LoadSalesDealEntities } from '@mj-biz-apps/sales-entities';
 // Record Collections now, so no hand-rolled tree lives here any more. The close lock lands at S4.
 import '@mj-biz-apps/sales-core-entities-server';
 import { LoadSalesCoreEntitiesServer } from '@mj-biz-apps/sales-core-entities-server';
-/** Sales' first hand-written Action. Anchored below for the same reason the entities are. */
-import { LoadSyncActivitiesAction } from './custom/sync-activities.action.js';
 import { LoadCaptureForecastSnapshotAction } from './custom/forecast-snapshot.action.js';
 import { LoadLogActivityAction } from './custom/log-activity.action.js';
 
@@ -63,12 +61,6 @@ export function LoadBizAppsSalesServer(): void {
     // and deal numbering plus the owner stamp silently stop applying.
     LoadSalesCoreEntitiesServer();
 
-    /**
-     * THE ACTION, and it needs the same anchoring as the entity classes for the same reason: its
-     * `@RegisterClass` runs as a side effect of the import, so a tree-shaken import leaves
-     * `Sales.SyncActivities` present in metadata, scheduled, firing, and resolving to nothing.
-     */
-    LoadSyncActivitiesAction();
     LoadCaptureForecastSnapshotAction();
     LoadLogActivityAction();
 
@@ -76,7 +68,6 @@ export function LoadBizAppsSalesServer(): void {
     void CLASS_REGISTRATIONS;
 }
 
-export { SyncActivitiesAction, LoadSyncActivitiesAction } from './custom/sync-activities.action.js';
 export {
     CaptureForecastSnapshotAction,
     LoadCaptureForecastSnapshotAction,

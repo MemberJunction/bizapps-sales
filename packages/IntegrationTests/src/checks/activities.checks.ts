@@ -3,7 +3,8 @@
  *
  * AC1–AC5 cover sales' remaining write/read: `ActivityWriterService` (manual log) and
  * `ActivityReader` (deal timeline). AC6+ drive Common's ActivitySyncEngine with a fixture
- * provider; `Sales.DealLinker` runs in-stream. Graph live fetch is asserted refused.
+ * provider so `Sales.DealLinker` runs in-stream. Graph live fetch is asserted refused.
+ * There is no Sales.SyncActivities — Common owns the trigger.
  *
  * ⚠️ **REQUIRES bizapps-common**, and refuses to run without it rather than passing vacuously.
  *
@@ -13,14 +14,11 @@ import { RunView, type IMetadataProvider, type UserInfo } from '@memberjunction/
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import {
     ActivitySyncEngine,
-    ActivitySyncJob,
-    CurrentActivitySourceFactory,
     FixtureActivitySyncProvider,
     IdentityResolver,
     LIVE_GRAPH_REFUSAL,
     MSGraphActivitySyncProvider,
     MSGraphCalendarSyncProvider,
-    SetActivitySourceFactory,
     ActivityReader,
     ActivityWriterService,
     type IdentityResolution,
@@ -48,9 +46,6 @@ const E_ORGANIZATION = 'MJ_BizApps_Common: Organizations';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 
 /** A fixed address, so a leaked row is traceable to this bundle rather than mistaken for real mail. */
-/** The seeded hourly job, from `metadata/scheduled-jobs/`. Fixed there, so it is fixed here. */
-const ID_SYNC_JOB = '5A1E5000-0000-4000-8000-000000000201';
-
 const FIXTURE_ADDRESS = 'ac-fixture-contact@example.invalid';
 const STRANGER_ADDRESS = 'ac-fixture-stranger@example.invalid';
 
@@ -990,48 +985,8 @@ export const ActivitiesChecks: NamedCheck[] = [
             }),
     },
     {
-        Id: 'activities.AC15',
-        Name: 'AC15: the seeded ScheduledJob points at the seeded Action, hourly, Skip/RunOnce',
-        RequiresMutation: false,
-        Fn: async (ctx) => {
-            /**
-             * METADATA INTEGRITY, not behaviour. The chain is Category -> Action -> Param -> ScheduledJob,
-             * and its one silent failure mode is a `Configuration.ActionID` that points at nothing: the job
-             * fires on time, resolves no action, and does nothing with no error. Reading it back is the only
-             * way to know the four rows agree.
-             */
-            const jobs = await rows(ctx, 'MJ: Scheduled Jobs', `ID = '${ID_SYNC_JOB}'`);
-            if (jobs.length === 0) {
-                Assert(
-                    false,
-                    'the activity-sync ScheduledJob is not in this database. Run `mj sync push --dir metadata`; '
-                        + 'the row is seeded from metadata/scheduled-jobs/.',
-                );
-                return;
-            }
-            const job = jobs[0];
-
-            AssertEqual(String(job['CronExpression']), '0 0 * * * *', 'hourly, six-field (seconds first)');
-            AssertEqual(String(job['Status']), 'Active', 'Active — it is meant to be firing');
-            AssertEqual(String(job['ConcurrencyMode']), 'Skip', 'overlapping runs would race the watermark');
-            AssertEqual(String(job['MissedRunPolicy']), 'RunOnce', 'catching up N hours would fetch the same window N times');
-
-            const config = JSON.parse(String(job['Configuration'] ?? '{}')) as { ActionID?: string };
-            Assert(!!config.ActionID, 'the job Configuration must name an ActionID');
-
-            const actions = await rows(ctx, 'MJ: Actions', `ID = '${config.ActionID}'`);
-            AssertEqual(
-                actions.length,
-                1,
-                'and that ActionID must resolve to a real Action — a dangling one fires and does nothing',
-            );
-            AssertEqual(String(actions[0]['DriverClass']), 'Sales.SyncActivities', 'to THIS action');
-            AssertEqual(String(actions[0]['Status']), 'Active', 'which must itself be Active');
-        },
-    },
-    {
         Id: 'activities.AC16',
-        Name: 'AC16: the Action drives the whole chain — swapping the factory is the only change',
+        Name: 'AC16: an email and a meeting through the engine both land on the deal via DealLinker',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -1040,120 +995,27 @@ export const ActivitiesChecks: NamedCheck[] = [
                 await giveContactAnAddress(ctx, deal.ContactID);
                 const connectionID = await makeConnection(ctx, null);
 
-                const actions = await rows(ctx, 'MJ: Actions', `DriverClass = 'Sales.SyncActivities'`);
-                Assert(
-                    actions.length === 1,
-                    'setup: the Sales.SyncActivities action row is missing — run `mj sync push --dir metadata`',
-                );
-
-                /**
-                 * THE CLAIM: everything downstream of the seam is already wired, and a real credential
-                 * changes ONE thing. So this substitutes a populated fixture through the same setter a
-                 * deployment would use for a Graph source, runs the Action, and asserts activities land.
-                 *
-                 * The default factory returns two EMPTY fixtures, which is why the seeded hourly job is safe
-                 * to ship Active — the run is real and writes nothing.
-                 */
-                const previous = SetActivitySourceFactory(() => [
+                const mail = await runSync(
+                    ctx,
+                    connectionID,
                     new FixtureActivitySyncProvider([item({ ExternalID: 'ac16-mail' })], 'Message'),
+                );
+                const meeting = await runSync(
+                    ctx,
+                    connectionID,
                     new FixtureActivitySyncProvider(
                         [item({ ExternalID: 'ac16-event', TypeCode: 'Meeting', Direction: 'Internal' })],
                         'Calendar',
                     ),
-                ]);
-                try {
-                    const job = new ActivitySyncJob();
-                    const result = await job.Run(
-                        CurrentActivitySourceFactory(),
-                        ProviderOf(ctx),
-                        ctx.User,
-                        50,
-                    );
-
-                    Assert(result.Success, `the job failed — ${result.Issues.join(' | ')}`);
-                    /**
-                     * SCOPED TO THIS CHECK'S OWN CONNECTION, not to how many exist on the host.
-                     *
-                     * These asserted "exactly one connection was attempted" and "exactly two runs",
-                     * which was a true statement about a host that had no real sync connection and a
-                     * weaker one about the requirement. A live connection was created on this host at
-                     * 01:49 for the demo, so the job legitimately attempts two — and the check went red
-                     * for a reason that has nothing to do with what it tests. Filter, do not count.
-                     */
-                    Assert(
-                        result.ConnectionsAttempted >= 1,
-                        `the job must read at least this check's connection — got ${result.ConnectionsAttempted}`,
-                    );
-                    const mine = result.Runs.filter((r) => r.ConnectionID === connectionID);
-                    AssertEqual(mine.length, 2, 'and BOTH surfaces ran against THIS connection');
-                    Assert(
-                        mine.some((r) => r.Surface === 'Message') && mine.some((r) => r.Surface === 'Calendar'),
-                        'one run per surface on this connection, each labelled',
-                    );
-                    Assert(
-                        result.Runs.some((r) => r.Surface === 'Message') &&
-                            result.Runs.some((r) => r.Surface === 'Calendar'),
-                        'one run per surface, each labelled',
-                    );
-
-                    const written = result.Runs.reduce((n, r) => n + r.Result.Included, 0);
-                    AssertEqual(written, 2, 'an email and a meeting were both filed');
-                    AssertEqual(
-                        await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac16-'),
-                        2,
-                        'and both are on the deal timeline',
-                    );
-                } finally {
-                    SetActivitySourceFactory(previous);
-                }
-            }),
-    },
-    {
-        Id: 'activities.AC17',
-        Name: 'AC17: the DEFAULT factory writes nothing — which is why the hourly job ships Active',
-        RequiresMutation: true,
-        Fn: async (ctx) =>
-            InRolledBackTransaction(ctx, async () => {
-                requireCommon(ctx);
-                const deal = await openDeal(ctx);
-                await giveContactAnAddress(ctx, deal.ContactID);
-                const connectionID = await makeConnection(ctx, null);
-                Assert(!!connectionID, 'setup: a connection is needed, so this is not passing by absence');
-
-                /**
-                 * The default is deliberately two EMPTY fixtures. If somebody replaces it with a populated
-                 * one — or with a Graph source — this check goes red, which is the point: the seeded hourly
-                 * job is only safe to ship Active because the default reads nothing.
-                 */
-                const before = (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length;
-                const result = await new ActivitySyncJob().Run(
-                    CurrentActivitySourceFactory(),
-                    ProviderOf(ctx),
-                    ctx.User,
                 );
-
-                Assert(result.Success, `the default run must succeed — ${result.Issues.join(' | ')}`);
-                Assert(
-                    result.ConnectionsAttempted >= 1,
-                    // Scoped, for the reason AC16 records: a real connection now exists on this host.
-                    `the job must read at least this check's connection — got ${result.ConnectionsAttempted}`,
-                );
-                const mineRuns = result.Runs.filter((r) => r.ConnectionID === connectionID);
-                AssertEqual(mineRuns.length, 2, 'and ran both surfaces against THIS connection');
+                Assert(mail.Success, `the mail run failed — ${mail.Issues.join(' | ')}`);
+                Assert(meeting.Success, `the calendar run failed — ${meeting.Issues.join(' | ')}`);
+                AssertEqual(mail.Included, 1, 'the email was filed');
+                AssertEqual(meeting.Included, 1, 'the meeting was filed');
                 AssertEqual(
-                    mineRuns.reduce((n, r) => n + r.Result.Fetched, 0),
-                    0,
-                    'fetching nothing',
-                );
-                AssertEqual(
-                    (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length,
-                    before,
-                    'and writing nothing — an hourly run against this default cannot invent data',
-                );
-                AssertEqual(
-                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac17-'),
-                    0,
-                    'nor touch the deal',
+                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac16-'),
+                    2,
+                    'Sales.DealLinker attributed both to the open deal, in-stream',
                 );
             }),
     },
