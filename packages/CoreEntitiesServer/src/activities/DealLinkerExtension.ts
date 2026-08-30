@@ -41,8 +41,7 @@ import {
 } from '@mj-biz-apps/common-activity-sync';
 
 import { E_ACTIVITY_LINK, E_DEAL } from '@mj-biz-apps/sales-entities';
-import { DealMatcher } from './DealMatcher.js';
-import type { KnownAddress } from './RelevanceFilter.js';
+import { DealMatcher, type KnownAddress } from './DealMatcher.js';
 
 @RegisterClass(BaseActivitySyncExtension, 'Sales.DealLinker')
 export class DealLinkerExtension extends BaseActivitySyncExtension {

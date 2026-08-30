@@ -10,10 +10,10 @@
  *
  * ── WHAT IT DOES, AND WHAT IT DELIBERATELY DOES NOT DECIDE ──────────────────────────────────────
  *
- * It calls `ActivitySyncJob.Run()` with whatever source factory is currently registered, and reports the
- * tallies. It does NOT choose the source: that is `CurrentActivitySourceFactory()`, whose default is an
- * empty fixture, and swapping it is the single change a scoped mailbox credential requires. An action
- * that picked its own source would put that decision behind a metadata row nobody reads.
+ * It calls `ActivitySyncJob.Run()`, which loops Active-or-Error connections and hands each surface
+ * to Common's `ActivitySyncEngine`. It does NOT choose the source: that is
+ * `CurrentActivitySourceFactory()`, whose default is two empty fixtures, and swapping it is the
+ * single change a scoped mailbox credential requires.
  *
  * @module @mj-biz-apps/sales-server
  */
@@ -84,19 +84,20 @@ export class SyncActivitiesAction extends BaseAction {
         const totals = result.Runs.reduce(
             (sum, run) => ({
                 Fetched: sum.Fetched + run.Result.Fetched,
-                Relevant: sum.Relevant + run.Result.Relevant,
-                Written: sum.Written + run.Result.Written,
+                Written: sum.Written + run.Result.Included,
                 Duplicates: sum.Duplicates + run.Result.Duplicates,
-                Unattributed: sum.Unattributed + run.Result.Unattributed,
+                Excluded: sum.Excluded + run.Result.Excluded,
+                Failed: sum.Failed + run.Result.Failed,
             }),
-            { Fetched: 0, Relevant: 0, Written: 0, Duplicates: 0, Unattributed: 0 },
+            { Fetched: 0, Written: 0, Duplicates: 0, Excluded: 0, Failed: 0 },
         );
 
         setOutput(params, 'ConnectionsAttempted', result.ConnectionsAttempted);
         setOutput(params, 'Fetched', totals.Fetched);
         setOutput(params, 'Written', totals.Written);
         setOutput(params, 'Duplicates', totals.Duplicates);
-        setOutput(params, 'Unattributed', totals.Unattributed);
+        setOutput(params, 'Excluded', totals.Excluded);
+        setOutput(params, 'Failed', totals.Failed);
         setOutput(params, 'Issues', JSON.stringify(result.Issues));
 
         /**
@@ -120,8 +121,8 @@ export class SyncActivitiesAction extends BaseAction {
             ResultCode: result.Success ? 'SUCCESS' : 'PARTIAL',
             Message:
                 `${result.ConnectionsAttempted} connection(s): fetched ${totals.Fetched}, `
-                + `relevant ${totals.Relevant}, written ${totals.Written}, `
-                + `duplicates ${totals.Duplicates}, unattributed ${totals.Unattributed}.`
+                + `written ${totals.Written}, duplicates ${totals.Duplicates}, `
+                + `excluded ${totals.Excluded}, failed ${totals.Failed}.`
                 + (result.Issues.length ? ` Issues: ${result.Issues.join(' | ')}` : ''),
         };
     }

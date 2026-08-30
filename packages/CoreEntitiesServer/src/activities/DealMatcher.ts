@@ -18,12 +18,18 @@ import { RunView, type UserInfo } from '@memberjunction/core';
 
 import { escapeSql } from './ActivityWriterService.js';
 import { E_DEAL, E_DEAL_STATUS_TYPE } from '@mj-biz-apps/sales-entities';
-import type { KnownAddress } from './RelevanceFilter.js';
+
+/** A party Common already resolved — matching here is by record ID, never by re-deriving the address. */
+export interface KnownAddress {
+    Address: string;
+    PersonID: string | null;
+    OrganizationID: string | null;
+}
 
 /**
  * What `MatchOpenDeals` returns.
  *
- * `ReadFailed` for the same reason `RelevanceFilter` needs `LookupFailed`: no matches and a failed read
+ * `ReadFailed` for the same reason Common's identity resolver uses `LookupFailed`: no matches and a failed read
  * produced the identical value, so a database blip was filed as "involves a known contact but matches
  * no open deal" — an item reported as seen-and-unattributed when it had not been looked at.
  */
