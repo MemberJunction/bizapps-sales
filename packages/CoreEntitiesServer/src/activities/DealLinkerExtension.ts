@@ -2,10 +2,9 @@
  * @fileoverview `Sales.DealLinker` — sales' half of the Activity Sync Engine, as a registered
  * extension rather than a stage of an ingest sales owns.
  *
- * ⚠️ DRAFT. This does not compile yet: `@mj-biz-apps/common-activity-sync` is unpublished, and the
- * `ActivitySyncExtension` entity it registers against has not been through CodeGen in
- * bizapps-common. It is here so the shape is agreed before the engine lands, not because it runs.
- * See MemberJunction/bizapps-common#93 and that repo's `plans/activity-sync-engine.md` §8.
+ * Common's engine is on `next` (bizapps-common#93). Local M5 links
+ * `@mj-biz-apps/common-activity-sync`; publish of common + sales together is release work.
+ * See MemberJunction/bizapps-common `plans/activity-sync-engine.md` §8.
  *
  * ── WHAT CHANGED, AND WHAT DELIBERATELY DID NOT ──────────────────────────────────────────────
  *
@@ -133,7 +132,7 @@ export class DealLinkerExtension extends BaseActivitySyncExtension {
         row.NewRecord();
         row.ActivityID = context.Activity.ID;
         row.Role = 'Regarding';
-        row.Sequence = context.Links.length;
+        row.Sequence = context.Links.length + 1;
         // The XOR: the resolved pair is set and the identity pair is explicitly nulled.
         row.EntityID = dealEntityID;
         row.RecordID = dealID;

@@ -1,6 +1,8 @@
 # Activity ingest → the Common Activity Sync Engine
 
-**Status:** draft, blocked on bizapps-common. **Nothing has been deleted from this repo yet.**
+**Status:** common#93 is on `next`. This PR declares `@mj-biz-apps/common-activity-sync` and
+registers `Sales.DealLinker`. Old ingest under `src/activities/` stays until the replacement is
+the live path. **Nothing has been deleted from this repo yet.**
 
 Sales owns a working activity ingest in `packages/CoreEntitiesServer/src/activities/`. It writes
 into **bizapps-common's** entities (`Activity`, `ActivityLink`) and is driven by **Common's**
@@ -43,17 +45,10 @@ Two properties worth keeping when this is finished:
 
 ## Why nothing is deleted yet
 
-`@mj-biz-apps/common-activity-sync` is unpublished, and the `ActivitySyncExtension` entity has not
-been through CodeGen in Common. **This branch does not build**, deliberately: it exists so the
-shape can be reviewed before the engine lands, and so the work is not lost.
-
-**The dependency is deliberately NOT declared in `packages/CoreEntitiesServer/package.json` yet.**
-Declaring an unpublished, non-workspace package does not merely fail the build — it fails
-`pnpm install`, so the whole repo becomes un-installable and no other work can proceed in that
-checkout. A branch nobody can install is worse than one that does not compile. So the import in
-`DealLinkerExtension.ts` is unresolved on purpose: `pnpm install` succeeds, the vocabulary gate
-runs and can actually check this code, and the only failure left is the honest one — a missing
-module. Add the dependency at step 2 below, when there is something for it to resolve to.
+Common#93 merged to `next`. `@mj-biz-apps/common-activity-sync` is declared in
+`packages/CoreEntitiesServer/package.json` at `5.36.0`. Local M5 links the workspace package;
+npm publish of common + sales together is release work. Sales-only CI will not resolve the
+module until that publish. The registration row is `metadata/activity-sync-extensions/`.
 
 Deleting the working ingest before its replacement is published would leave this repo broken with
 no way to verify the replacement. So the order is fixed:

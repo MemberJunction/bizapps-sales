@@ -97,6 +97,7 @@ export * from './activities/MSGraphActivitySource.js';
 export * from './activities/MSGraphCalendarSource.js';
 export * from './activities/RelevanceFilter.js';
 export * from './activities/DealMatcher.js';
+export * from './activities/DealLinkerExtension.js';
 export * from './activities/ActivityIngestService.js';
 export * from './activities/ActivitySyncJob.js';
 
@@ -112,6 +113,7 @@ export * from './forecast/ForecastSnapshotJob.js';
 
 import { DealEntityServer } from './DealEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
+import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 
 /**
  * Anchor for the server-side entity subclasses, called from the sales-server bootstrap.
@@ -124,7 +126,7 @@ import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js
  */
 export function LoadSalesCoreEntitiesServer(): void {
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, CloseDealOperation, ReopenDealOperation];
+    const anchors: unknown[] = [DealEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }
