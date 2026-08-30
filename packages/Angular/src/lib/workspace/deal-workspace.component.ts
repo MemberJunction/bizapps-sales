@@ -1827,6 +1827,7 @@ export class DealWorkspaceComponent implements OnInit {
          * the real value from the product at save either way; the only job here is to never leave the
          * browser holding a null it cannot show the rep how to fix.
          */
+        /**
          * A TERM START BELONGS TO THE PRODUCT THAT WAS CHOSEN, so re-picking discards it.
          *
          * Nothing downstream reconciles this column with the line's product: `OrderLineEntity` and

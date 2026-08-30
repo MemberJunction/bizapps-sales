@@ -103,7 +103,7 @@ export interface ProductLookup {
  * same list the picker reads, or it proves only that its own copy still works — which is the drift this
  * suite already warns about for hardcoded SKUs and re-typed filters.
  */
-export const PRODUCT_LOOKUP_FIELDS: readonly (keyof ProductLookup)[] = [
+export const PRODUCT_LOOKUP_FIELDS = [
     'ID',
     'Name',
     'SKU',
@@ -114,7 +114,15 @@ export const PRODUCT_LOOKUP_FIELDS: readonly (keyof ProductLookup)[] = [
     // #32: decides whether a line offers a term start at all. Drop it and the control silently vanishes
     // from every line — which is what `term-start.TS5` exists to catch.
     'SubscriptionTypeID',
-];
+    /**
+     * `as const satisfies` rather than a type ANNOTATION, and the difference is the whole point.
+     *
+     * Annotating this `readonly (keyof ProductLookup)[]` widens `[number]` to `keyof ProductLookup`,
+     * which makes the completeness check below `Exclude<K, K>` — always `never`, always true. Measured:
+     * with the annotation, dropping 'CompanyID' still compiled. `satisfies` checks each member against
+     * the interface without discarding the literal types.
+     */
+] as const satisfies readonly (keyof ProductLookup)[];
 
 /**
  * EVERY member of `ProductLookup`, asserted at compile time.

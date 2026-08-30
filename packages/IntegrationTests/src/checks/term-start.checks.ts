@@ -113,7 +113,11 @@ async function sellableProduct(ctx: Ctx, companyID: string): Promise<string> {
              * exercises the database write path made its persistence claim about a line that would not
              * render the control at all.
              */
-            ExtraFilter: `(${ProductFilterFor(companyID, new Date())}) AND SubscriptionTypeID IS NOT NULL`,
+            // The company clause is explicit since #29 removed it from the shared rule: this fixture
+            // wants a subscription product belonging to the company under test, which the picker's
+            // filter no longer expresses on its own.
+            ExtraFilter: `CompanyID = '${companyID.replace(/'/g, "''")}' `
+                + `AND (${ProductFilterFor(new Date())}) AND SubscriptionTypeID IS NOT NULL`,
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             Fields: ['ID'],
@@ -377,7 +381,9 @@ export const TermStartChecks: NamedCheck[] = [
             const r = await new RunView().RunView<Record<string, unknown>>(
                 {
                     EntityName: E_ORDERS_PRODUCT,
-                    ExtraFilter: ProductFilterFor(f.PipelineCompanyID, new Date()),
+                    // Explicit company clause — see the note in sellableProduct above.
+                    ExtraFilter: `CompanyID = '${f.PipelineCompanyID.replace(/'/g, "''")}' `
+                        + `AND (${ProductFilterFor(new Date())})`,
                     OrderBy: 'Name ASC',
                     ResultType: 'simple',
                     // THE PICKER'S OWN LIST, not a copy of it. A re-typed list would keep this check
