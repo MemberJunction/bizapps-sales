@@ -126,6 +126,43 @@ const MUTATIONS = [
     { id: 'M-TS4', file: TSF, expect: ['TS3'],
       from: '    return !IsEmptyDateLike(stored);', to: '    return !!stored;' },
 
+    // ── THE TWO THAT WERE MISSING, AND THE TWO THAT DELIBERATELY STAY MISSING ────────────────────
+    //
+    // #32 shipped six checks. M-TS1..M-TS4 above proved TS1 and TS3 can fail; TS2 and TS4 had
+    // NOTHING, so these two close that. TS5 and TS6 get none, and that is a finding rather than an
+    // oversight:
+    //
+    //   TS5 -- its natural mutation is dropping 'SubscriptionTypeID' from PRODUCT_LOOKUP_FIELDS.
+    //          MEASURED: that no longer compiles. The completeness guard in product-filter.ts turns
+    //          it into "error TS2322: Type 'true' is not assignable to type 'never'", so this driver
+    //          would report a BUILD FAILURE, not a caught mutation. The guard is strictly stronger
+    //          than a mutation -- it fires on every build, with no database and no suite run. TS5
+    //          still earns its keep by proving the column is READABLE at runtime, which no type
+    //          system can know.
+    //
+    //   TS6 -- MEASURED: outside the Angular component, no sales source touches ServicePeriodStart;
+    //          the write path is MJ's save graph and orders' entities. Any mutation breaking TS6
+    //          would take a dozen SD* checks with it, so nothing would attribute to TS6.
+    //
+    // Inventing a mutation for either, to make a coverage count look complete, is exactly the
+    // vacuous proof this harness exists to prevent.
+    { id: 'M-TS5', file: TSF, expect: ['TS2'],
+      from: "    return !!product && String(product.SubscriptionTypeID ?? '').trim().length > 0;",
+      to: '    return !!product && product.SubscriptionTypeID != null;',
+      note: "the '' != null trap -- an empty-string id reads as a subscription, so EVERY line offers a term start" },
+    { id: 'M-TS6', file: TSF, expect: ['TS4'],
+      from: '    if (HasExplicitTermStart(stored)) {\n        return true;\n    }\n    return product ? IsSubscriptionProduct(product) : false;',
+      to: '    return product ? IsSubscriptionProduct(product) : false;',
+      note: 'drops the stored short-circuit, so a WITHDRAWN product hides a term start the rep already set' },
+    //
+    // M-TS6 ALSO FELLS TS1, AND THAT IS STRUCTURAL RATHER THAN SLOPPY AIM. Measured:
+    // failed=CD24,TS1,TS4. TS1 asserts `ShouldOfferTermStart(true, oneTimeProduct, CHOSEN) === true`
+    // -- a stored term start stays visible on a KNOWN one-time product -- and TS4 asserts the same
+    // for an UNKNOWN one. Both rest on the single `if (HasExplicitTermStart(stored)) return true;`,
+    // so no mutation can reach TS4's case without passing through TS1's. There is no narrower
+    // version to write; do not go looking for one. What M-TS6 adds over M-TS3 is TS4, which nothing
+    // else in this catalogue touches.
+
     { id: 'M-PP3', file: PF, expect: ['PP3', 'PP4'],
       from: "AND (AvailableTo IS NULL OR AvailableTo >= '${day}')",
       to: "AND (AvailableTo IS NULL OR AvailableTo >= '1900-01-01')" },
