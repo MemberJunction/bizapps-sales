@@ -128,7 +128,7 @@ tree. `close-won-handoff` and `close-won-d2c` are **deliberately retired** (`2a9
 |---|---|---|
 | `save-deal` | 22 | orders |
 | `close-deal` | 14 | orders |
-| `product-picker` | 4 | orders |
+| `product-picker` | 5 | orders |
 | `close-won-order` | 5 | orders |
 | `close-won-contract` | 4 | contracts |
 | `board-move` | 4 | orders |

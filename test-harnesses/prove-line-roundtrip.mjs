@@ -31,7 +31,7 @@ console.log(`\n  ${DB_DATABASE} — deal ${seed.DealNumber}, order ${seed.OrderI
 // a sellable product for this deal's company
 const { ProductFilterFor } = await import('../packages/Entities/dist/product-filter.js');
 const pr = await new RunView().RunView({ EntityName:'MJ_BizApps_Orders: Products',
-  ExtraFilter: ProductFilterFor(seed.CompanyID, new Date()), OrderBy:'Name ASC', ResultType:'simple', Fields:['ID','Name'] }, user);
+  ExtraFilter: `CompanyID = '${String(seed.CompanyID).replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())})`, OrderBy:'Name ASC', ResultType:'simple', Fields:['ID','Name'] }, user);
 const product = (pr.Results ?? [])[0];
 ck(!!product, 'a sellable product exists for the deal company', product?.Name);
 if (!product) { process.exit(1); }

@@ -190,7 +190,7 @@ gate is what catches a run that was complete but covered the wrong bundles.
 | Bundle | Checks | Requires |
 |---|---|---|
 | `save-deal` (SD1–SD16) + `close-deal` (CD1–CD14) | **30** | — (the default gate) |
-| `product-picker` (PP1–PP4) | 4 | orders linked |
+| `product-picker` (PP1–PP5) | 5 | orders linked |
 | `close-won-handoff` (CW1–CW4) | 4 | orders linked |
 | `close-won-d2c` (D1–D4) | 4 | orders linked |
 | `close-won-contract` (CT1–CT4) | 4 | contracts linked |

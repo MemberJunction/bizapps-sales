@@ -132,7 +132,7 @@ const account = await one('MJ_BizApps_Sales: Sales Accounts', 'IsActive = 1', ['
 
 // ── 2. The picker's own filter, against orders' catalogue ───────────────────
 const productsView = await new RunView().RunView(
-    { EntityName: E_ORDERS_PRODUCT, ExtraFilter: ProductFilterFor(pipeline.CompanyID, new Date()), OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+    { EntityName: E_ORDERS_PRODUCT, ExtraFilter: `CompanyID = '${String(pipeline.CompanyID).replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())})`, OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
     user,
 );
 const products = productsView.Success ? (productsView.Results ?? []) : [];
