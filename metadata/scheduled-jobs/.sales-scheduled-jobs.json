@@ -1,0 +1,16 @@
+[
+  {
+    "_comments": [
+      "TOMBSTONE. Sales — Activity Sync (hourly) invoked Sales.SyncActivities. Common owns",
+      "the trigger now. deleteRecord removes the job from hosts that still have the",
+      "V202608251930 seed."
+    ],
+    "primaryKey": {
+      "ID": "5A1E5000-0000-4000-8000-000000000201"
+    },
+    "deleteRecord": {
+      "delete": true,
+      "deletedAt": "2026-08-30T17:28:43.439Z"
+    }
+  }
+]

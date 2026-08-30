@@ -1,12 +1,13 @@
 {
   "generatedFrom": "metadata/",
   "files": {
-    "metadata/.mj-sync.json": "ffc2cfa4e34ab56050c83a6a79b48293fc92c545aab518f5f78d22c7ddcab00c",
+    "metadata/.mj-sync.json": "5289ef9b02c48a85ac06d44b5257385d157ec4c776590f334d1f94e2ec9b913e",
     "metadata/account-types/.account-types.json": "c663318ad08b2afdeac016594863f4fa4e58a257846c24987c6ee72571fc4f8b",
     "metadata/account-types/.mj-sync.json": "d0353d8ea30a7b6b5931d61c24c36d924ef74d5893f90a3f9ec77ac2817e4e80",
     "metadata/action-categories/.mj-sync.json": "33dfce53af64a12a78e54f2134cb00223a126b555765fde20eb430f0d21a2713",
     "metadata/action-categories/.sales-action-categories.json": "3dba082285ee691bb6421d2049fe392a44b2af09db30c77ee90e8913216ce2c6",
     "metadata/actions/.mj-sync.json": "c6e5d4821c0fe44fcc94505251c7fc17650eccb5b6aa5ba6b7cdd9a84d9398c6",
+    "metadata/actions/.sales-actions.json": "fdcf55d412f2f7fdd02b82ddb24732a51a368d57ca61152c85137919aecd42a0",
     "metadata/actions/.sales-activity-actions.json": "b300561e3aed331e7000f2bc13f0def50986304e2d7229ee517836e12cf642b3",
     "metadata/actions/.sales-forecast-actions.json": "eb393acbfc061ba88ef9738fe0f7a14a88f82c77f743b9a92f9c94f4ae1fbb74",
     "metadata/activity-sync-extensions/.activity-sync-extensions.json": "f6a7a3c8607c0c5e9823c9772975374dd80f1afdad0c0194ae506c8574404999",
@@ -81,6 +82,7 @@
     "metadata/remote-operations/types/sales-close-deal.output.ts": "9ee79bd1c412877dc0941937b25e3b40098aaf924662c581dc05449fd5731ad9",
     "metadata/scheduled-jobs/.mj-sync.json": "0114c85d0c1808e975f706c5f2c26c008b281fd902cfff9b917743df962f7070",
     "metadata/scheduled-jobs/.sales-forecast-scheduled-jobs.json": "c385e22e47c45ecfcb8fcdedda3e58c9e7590a3d477f1dee2d060733c40db8ea",
+    "metadata/scheduled-jobs/.sales-scheduled-jobs.json": "0534839d69d43710d4b3706f5cac63ca6a9a9adc69dd8515ed8d91265da1d0ac",
     "metadata/task-types/.mj-sync.json": "60442bc01ae137482c346672462add0fc01db5dd5df2e841b181a4adab4e7f33",
     "metadata/task-types/.task-types.json": "30b12e33c18165b729e3658b64bf9a915d675e894887bae4dcdf361830a4bda4"
   }
