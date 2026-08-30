@@ -53,7 +53,8 @@
     "commitpush": "node ci/commit_push.mjs",
     "mergemain": "node ci/merge_main.mjs",
     "mergemain:update-lock": "node ci/merge_main_and_update_lock.mjs",
-    "lint:distribution": "node scripts/check-distribution-seed.mjs"
+    "lint:distribution": "node scripts/check-distribution-seed.mjs",
+    "check:release-seed": "node scripts/check-release-seed-coverage.mjs"
   },
   "repository": {
     "type": "git",

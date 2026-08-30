@@ -91,12 +91,15 @@ This follows MJ (`MJ/metadata/CLAUDE.md` §1b and §10):
 3. **Do not hand-author per-PR sync migrations.** They duplicate the release step, produce many
    small files instead of one per build, and drift from the real push output.
 
-`lint:distribution` is not a currency gate. Nothing in CI currently proves that a metadata record
-has a matching seed statement. That hole is known and accepted the same way bizapps-caliber and
-bizapps-accounting document it: **the guard is the release process, not a PR gate.** The property
-that matters is "can a stranger install this app from migrations alone and get a working one?" —
-answered by a clean install from migrations, once per release, asserting that a sample of records
-declared in `metadata/` are present afterward (`scripts/rebuild-db.sh` / bootstrap-clean-db).
+`lint:distribution` is not a currency gate. The cheap, no-database proof that a metadata
+primaryKey has a matching seed statement is `pnpm run check:release-seed` — it walks every
+`primaryKey.ID` under `metadata/` and checks it appears in some `migrations/*.sql`. **It is a
+release-readiness check, not a PR gate:** it should be loud when you cut a release and silent
+the rest of the time. Do not add it to `verify` or the distribution-gate workflow.
+
+The property that still matters at install is "can a stranger install this app from migrations
+alone and get a working one?" — answered by a clean install from migrations, once per release
+(`scripts/rebuild-db.sh` / bootstrap-clean-db).
 
 The seed must be generated against a host where **this app's metadata has never been pushed**, so
 that every statement the generator emits is a `spCreate*` rather than an `spUpdate*`. Pushing to a
@@ -124,21 +127,15 @@ DB_DATABASE=$DB pnpm exec mj sync push --dir metadata --ci
 #    Sibling schemas (`__mj_BizAppsTasks`, `__mj_BizAppsOrders`) stay literal — `mj app install`
 #    supplies only `${mjSchema}` and `${flyway:defaultSchema}`, and neither of those is theirs.
 
-# 4. Placeholders only — there is no hash manifest to bump.
+# 4. Placeholders, then the release-readiness UUID check (not a PR gate).
 pnpm run lint:distribution
+pnpm run check:release-seed
 ```
 
-### Pending for the next release seed
-
-These records are in `metadata/` and in **no** migration on `next`. The next consolidated
-Metadata_Sync must carry them:
-
-| Record | ID | Path |
-|---|---|---|
-| `Sales.DealLinker` extension | `A7C4E2B1-5D83-4F0A-9C1E-6B8D2F4A90C3` | `metadata/activity-sync-extensions/.activity-sync-extensions.json` |
-| `Sales.SyncActivities` action tombstone | `5A1E5000-0000-4000-8000-000000000101` | `metadata/actions/.sales-actions.json` |
-| Limit ActionParam tombstone | `5A1E5000-0000-4000-8000-000000000102` | same file, relatedEntities |
-| Hourly job tombstone | `5A1E5000-0000-4000-8000-000000000201` | `metadata/scheduled-jobs/.sales-scheduled-jobs.json` |
+`check:release-seed` currently fails on this tree for the records the next Metadata_Sync must
+pick up (DealLinker `A7C4E2B1-…`, the Sales.SyncActivities tombstones `5A1E5000-…101/102/201`).
+That is expected until the release push. Do not "fix" it by editing the table in this file —
+the script is the list.
 
 ### Two things to check before you trust the result
 
