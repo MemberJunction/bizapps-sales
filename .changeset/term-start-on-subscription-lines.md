@@ -14,14 +14,24 @@ not show the field.
 `EffectiveTermStart`, `HasExplicitTermStart` — as pure rules with no Angular dependency, so the
 integration suite can check them without standing up a component. `ProductLookup` gains
 `SubscriptionTypeID`, and `PRODUCT_LOOKUP_FIELDS` is exported so the picker's query and the check that
-guards it read one list rather than two copies.
+guards it read one list rather than two copies. That constant now carries an `as const satisfies`
+completeness check against `keyof ProductLookup`, because rebasing this branch onto #29 showed how the
+list fails: it produced no merge conflict at all — `next` had never carried the constant — so git took
+this branch's version whole and silently dropped the two fields #29 had added. Nothing would have
+failed until a line booked to the wrong company.
 
 **A note on the bump level.** `SubscriptionTypeID` is a REQUIRED member of the exported `ProductLookup`
-interface, so strictly any external code constructing one stops compiling. Declared `minor` rather than
-`major` because no consumer of this type exists outside this repository — verified across
-`bizapps-orders`, `bizapps-accounting`, `bizapps-contracts`, `bizapps-common`, `bizapps-tasks` and MJ —
-and because `.changeset/config.json` declares these packages `fixed`, so the level here only decides
-whether the group's next number is a major or a minor. Worth a maintainer's eye rather than assuming.
+interface, so strictly any external code constructing one stops compiling. It is declared `minor` here
+anyway, and the reason is that the level makes no difference to what ships: #29's changeset is still
+pending in this same release, it declares `major`, and `.changeset/config.json` groups all six packages
+as `fixed` — so everything moves to **6.0.0 together** and this interface change goes out under a major
+either way.
+
+Were it deciding the number on its own, `minor` would still be the call: no consumer of this type exists
+outside this repository — verified across `bizapps-orders`, `bizapps-accounting`, `bizapps-contracts`,
+`bizapps-common`, `bizapps-tasks` and MJ — and Robert Kihm confirmed on 2026-08-29 that there is leeway
+on major/minor before LTS. Recorded rather than assumed, because the next required member added to this
+interface may not have a major already travelling with it.
 
 **This field has no effect until bizapps-orders#121 lands, and that is worse than it sounds.** Orders
 today overwrites `ServicePeriodStart` at confirm from `SubscriptionBehavior.ComputeStartDate`, whose
