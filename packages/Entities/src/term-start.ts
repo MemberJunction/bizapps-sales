@@ -60,7 +60,12 @@ export function IsSubscriptionProduct(
  *
  * · **No product chosen** — nothing to say. A line with no `ProductID` cannot be a subscription, and it
  *   already blocks the save on its own account (`UnlinkedLineIssues`).
- * · **Product in the catalogue** — orders' predicate decides, and that is #32's requirement 3 exactly.
+ * · **Product in the catalogue** — orders' predicate decides, and that is #32's requirement 3 exactly,
+ *   BUT ONLY WHEN NOTHING IS STORED. A stored value short-circuits every case here: a term start that
+ *   exists is always offered, whatever the product turns out to be, so it can be seen and cleared
+ *   rather than governing the line invisibly. That ordering is the fix in the body below, and this
+ *   list described the rule before it — long enough that the next reader implementing requirement 3
+ *   elsewhere would have copied the stranding bug back in.
  * · **Product NOT in the catalogue** — quoted before it was withdrawn; `ProductLabel` renders it as
  *   "(no longer offered)". The lookup cannot say whether it was a subscription, and answering `false`
  *   would HIDE a term start the rep had already set: the value stays in the database, still governs the

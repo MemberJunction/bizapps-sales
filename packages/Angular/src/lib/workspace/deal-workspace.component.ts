@@ -1113,11 +1113,23 @@ export class DealWorkspaceComponent implements OnInit {
          * against a redundant write for the same reason this one now does; the far more frequent path
          * was the unguarded one.
          */
-        const parsed = FromDateInput(value);
-        if (parsed === null) {
-            return;
-        }
-        line.ServicePeriodStart = parsed;
+        /**
+         * AN EMPTY VALUE IS WRITTEN THROUGH, and the guard that used to sit here was a mistake.
+         *
+         * `<input type="date">` reports `''` for any incomplete value, so backspacing a segment to
+         * retype it looks identical to a deliberate clear. The guard refused to write on `''` to protect
+         * the stored date from a partial edit. An audit showed what that actually produced: the handler
+         * returned without writing AND without `Touch()`, the one-way binding saw no change so the box
+         * was never refilled, and the row sat there blank while `HasExplicitTermStart` still reported a
+         * stored value — hint suppressed, reset button showing, deal not dirty. Saving kept the old date.
+         * A user who pressed Delete was told nothing had happened, incorrectly.
+         *
+         * Writing through is honest in both cases. A deliberate clear does what it says. A partial edit
+         * falls back to the order date, WHICH THE USER SEES — the hint changes, the reset button
+         * disappears — and they simply type the date they were reaching for. A visible, recoverable
+         * consequence beats an invisible wrong state.
+         */
+        line.ServicePeriodStart = FromDateInput(value);
         this.Touch();
     }
 
@@ -1144,7 +1156,27 @@ export class DealWorkspaceComponent implements OnInit {
          * The date input is the natural destination: it is the control the reset just acted on, it stays
          * in the DOM, and it is where the user looks to see the result.
          */
-        focusAfter?.focus();
+        /**
+         * WHERE FOCUS GOES DEPENDS ON WHETHER THE CONTROL SURVIVES THE RESET.
+         *
+         * The first version of this focused the date input unconditionally, with a comment claiming it
+         * "stays in the DOM". That is true only for a subscription line. The input lives inside
+         * `@if (ShowTermStart(line))`, and on a ONE-TIME product the control is rendered solely because
+         * a value is stored — so clearing it tears down the whole cell, input included, and focus falls
+         * to `<body>` exactly as before. The fix worked only for the case it was tested against, which
+         * was not the case it was written for.
+         *
+         * So: keep focus on the input when the control will still be there, and otherwise hand it to the
+         * row's product select, which always is. Reading `ShouldOfferTermStart` here rather than
+         * guessing means the two cannot disagree.
+         */
+        const stillShown = ShouldOfferTermStart(!!line.ProductID, this.ProductFor(line), line.ServicePeriodStart);
+        if (stillShown) {
+            focusAfter?.focus();
+        } else {
+            const row = focusAfter?.closest('tr');
+            row?.querySelector<HTMLSelectElement>('select')?.focus();
+        }
         this.Touch();
     }
 
@@ -1840,7 +1872,12 @@ export class DealWorkspaceComponent implements OnInit {
          * browser holding a null it cannot show the rep how to fix.
          */
         /**
-         * A TERM START BELONGS TO THE PRODUCT THAT WAS CHOSEN, so re-picking discards it.
+         * A TERM START IS DISCARDED WHEN THE NEW PRODUCT CANNOT CARRY ONE.
+         *
+         * Not on every re-pick: a subscription-to-subscription change KEEPS the date, on the reasoning
+         * that the rep chose it deliberately and both products can honour it. That is a judgement rather
+         * than an obvious truth — the new product may have a different cadence — and it is written down
+         * here so the next reader can disagree with it rather than discover it.
          *
          * Nothing downstream reconciles this column with the line's product: `OrderLineEntity` and
          * `OrderLineEntityServer` never mention `ServicePeriodStart`, and orders' subscription

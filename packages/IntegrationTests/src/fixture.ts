@@ -152,7 +152,12 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
     }
 
     const pipeline = await one<{ ID: string; CompanyID: string }>(
-        ctx, E_PIPELINE, 'IsActive = 1', ['ID', 'CompanyID'], 'active pipeline',
+        // ORDERED, per this helper's own rule: "every caller that takes the first of several rows
+        // should pass it". It mattered less when checks only needed A pipeline. #32's TS5 and TS6 both
+        // need the fixture's company to own a product with a SubscriptionTypeID, and on the seeded host
+        // exactly one of the two active pipelines' companies does — so unordered, they pass or fail by
+        // luck of plan choice.
+        ctx, E_PIPELINE, 'IsActive = 1', ['ID', 'CompanyID'], 'active pipeline', 'Name ASC',
     );
     const stage = await one<{ ID: string }>(
         ctx, E_STAGE, `PipelineID = '${pipeline.ID}' AND IsActive = 1`, ['ID'], 'stage on that pipeline',

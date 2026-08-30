@@ -49,6 +49,7 @@ import {
     PRODUCT_LOOKUP_FIELDS,
     HasExplicitTermStart,
     IsSubscriptionProduct,
+    type ProductLookup,
     ProductFilterFor,
     ShouldOfferTermStart,
     type DealEntity,
@@ -250,7 +251,14 @@ export const TermStartChecks: NamedCheck[] = [
             const empties: readonly (string | null | undefined)[] = ['', '   ', null, undefined];
             for (const empty of empties) {
                 AssertEqual(
-                    IsSubscriptionProduct({ SubscriptionTypeID: empty ?? null }),
+                    /**
+                     * The object is typed, not the value coerced. `empty ?? null` collapsed `undefined`
+                     * to `null` BEFORE the call, so this loop ran `null` twice while printing a message
+                     * claiming it had checked `undefined` — and `undefined` is the shape that matters,
+                     * because it is what a RunView row missing the column produces. That is the whole
+                     * premise of TS5 and of the PRODUCT_LOOKUP_FIELDS guard.
+                     */
+                    IsSubscriptionProduct({ SubscriptionTypeID: empty } as Pick<ProductLookup, 'SubscriptionTypeID'>),
                     false,
                     `an empty SubscriptionTypeID (${JSON.stringify(empty)}) must not read as a subscription`,
                 );
