@@ -399,6 +399,28 @@ export const TermStartChecks: NamedCheck[] = [
             );
             const rows = r.Results ?? [];
             Assert(rows.length > 0, 'the catalogue offered nothing for this company — the fixture is not seeded');
+
+            /**
+             * ── AND AT LEAST ONE PRODUCT MUST ACTUALLY BE A SUBSCRIPTION ─────────────────────────
+             *
+             * The per-row check below proves the COLUMN is being requested. It does not prove the data
+             * can ever make the control appear, and those are different failures with the same symptom.
+             *
+             * An all-NULL catalogue is exactly the state this repo was in before `168bbae`: every
+             * product came back with `SubscriptionTypeID` null, `IsSubscriptionProduct` was false
+             * everywhere, and the term start never rendered on any line. TS5 stayed green through all of
+             * it, spec 82 `test.skip`ped itself for want of a subscription product, and the seed script
+             * PRINTed a note instead of failing. Three layers of silence over one regression.
+             */
+            const subscriptions = rows.filter(
+                (row) => String(row['SubscriptionTypeID'] ?? '').trim().length > 0,
+            );
+            Assert(
+                subscriptions.length > 0,
+                'no product in this company\'s catalogue carries a SubscriptionTypeID, so the term start '
+                    + 'cannot appear on ANY line — which is the exact state #32 was invisible in. Seed one; '
+                    + 'see scripts/dev/seed-orders-catalog.sql.',
+            );
             for (const row of rows) {
                 Assert(
                     Object.prototype.hasOwnProperty.call(row, 'SubscriptionTypeID'),

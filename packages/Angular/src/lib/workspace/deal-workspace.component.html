@@ -459,11 +459,17 @@
                              and they behave differently the moment the order date moves. -->
                         @if (ShowTermStart(line)) {
                           <div class="dw-termstart">
-                            <input type="date" [ngModel]="TermStartInput(line)"
+                            <input #termStartInput type="date" [ngModel]="TermStartInput(line)"
                                    (ngModelChange)="SetTermStart(line, $event)" />
                             @if (HasExplicitTermStart(line)) {
+                              <!--
+                                The input is passed in so focus has somewhere to go. This button lives
+                                inside @if (HasExplicitTermStart(line)), and resetting makes that false —
+                                so activating it removes the focused element and a keyboard user lands on
+                                <body>, starting their next Tab from the top of the page.
+                              -->
                               <button type="button" class="dw-iconbtn" title="Reset to the order date"
-                                      (click)="ResetTermStart(line)">
+                                      (click)="ResetTermStart(line, termStartInput)">
                                 <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
                                 <span class="dw-sr">Reset term start to the order date</span>
                               </button>

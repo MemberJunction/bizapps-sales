@@ -63,6 +63,7 @@ const REPO = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '
 const DES = 'packages/CoreEntitiesServer/src/DealEntityServer.ts';
 const CDO = 'packages/CoreEntitiesServer/src/CloseDealOperation.ts';
 const PF = 'packages/Entities/src/product-filter.ts';
+const TSF = 'packages/Entities/src/term-start.ts';
 const DE = 'packages/Entities/src/deal-entity.ts';
 const SEQ = 'packages/CoreEntitiesServer/src/SequenceService.ts';
 const CWT = 'packages/CoreEntitiesServer/src/CloseWonTaskService.ts';
@@ -96,10 +97,35 @@ const QFS = 'packages/CoreEntitiesServer/src/forecast/QueryForecastSource.ts';
  * anchor that has drifted is reported as a skip rather than guessed at.
  */
 const MUTATIONS = [
+    // ── #29 CHANGED `ProductFilterFor` AND BOTH OF THESE SILENTLY STOPPED RUNNING ──────────────
+    //
+    // M-PP1 anchored on "AND Status = 'Active' " — the AND disappeared when the company clause that
+    // preceded it was removed. M-PP2 anchored on the company clause itself, which no longer exists at
+    // all. Both reported SKIP, which reads like ordinary anchor drift rather than "the mutation you
+    // rely on has not run since August". Measured before repair: "anchor appears 0 times".
     { id: 'M-PP1', file: PF, expect: ['PP1'],
-      from: "AND Status = 'Active' ", to: "AND Status <> 'not-a-status' " },
+      from: "`Status = 'Active' ` +", to: "`Status <> 'not-a-status' ` +" },
+    // M-PP2 is INVERTED by #29: the defect is no longer a missing company clause, it is a PRESENT one.
+    // Re-adding it must fail PP2 and only PP2 — a wider break would mean PP2 is riding on a neighbour.
     { id: 'M-PP2', file: PF, expect: ['PP2'],
-      from: "`CompanyID = '${company}' AND Status", to: '`Status' },
+      from: "`Status = 'Active' ` +",
+      to: "`CompanyID = 'C0A5E100-0001-4A01-9E11-5B7C3D2F8A01' AND Status = 'Active' ` +" },
+    // ── #32's term start ────────────────────────────────────────────────────────────────────────
+    //
+    // Two of these are the mutations that SURVIVED the original suite, found by a separate audit: the
+    // `hasProduct` guard could be deleted outright, and `??` could be swapped for `||`, both leaving
+    // six checks green. Registering them here is what stops that recurring silently.
+    { id: 'M-TS1', file: TSF, expect: ['TS1'],
+      from: '    if (!hasProduct) {\n        return false;\n    }\n', to: '' },
+    { id: 'M-TS2', file: TSF, expect: ['TS3'],
+      from: '    return IsEmptyDateLike(stored) ? (orderDate ?? null) : stored;',
+      to: '    return stored ?? orderDate ?? null;' },
+    { id: 'M-TS3', file: TSF, expect: ['TS1'],
+      from: '    if (HasExplicitTermStart(stored)) {\n        return true;\n    }\n    return product ? IsSubscriptionProduct(product) : false;',
+      to: '    return product ? IsSubscriptionProduct(product) : !!stored;' },
+    { id: 'M-TS4', file: TSF, expect: ['TS3'],
+      from: '    return !IsEmptyDateLike(stored);', to: '    return !!stored;' },
+
     { id: 'M-PP3', file: PF, expect: ['PP3', 'PP4'],
       from: "AND (AvailableTo IS NULL OR AvailableTo >= '${day}')",
       to: "AND (AvailableTo IS NULL OR AvailableTo >= '1900-01-01')" },

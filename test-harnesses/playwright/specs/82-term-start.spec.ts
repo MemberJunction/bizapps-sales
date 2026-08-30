@@ -39,9 +39,25 @@ interface Product extends Record<string, unknown> { ID: string; Name: string; Su
 const CHOSEN = '2026-09-01';
 
 /** The `yyyy-MM-dd` a date input holds, or null when the cell renders no input at all. */
+/**
+ * Whether the cell renders a term-start control at all.
+ *
+ * Separate from its VALUE, because requirement 3 is "no field", not "an empty field" — and
+ * `dateValue` alone could not tell those apart: it returned null both when the input was absent and
+ * when it was present but blank. Moving the `@if` from around the control to merely blanking it would
+ * have broken requirement 3 while this spec stayed green.
+ */
+async function hasDateControl(cell: Locator): Promise<boolean> {
+    return (await cell.locator('input[type="date"]').count()) > 0;
+}
+
+/** The control's value. Throws if there is no control — ask `hasDateControl` first. */
 async function dateValue(cell: Locator): Promise<string | null> {
     const input = cell.locator('input[type="date"]');
-    return (await input.count()) === 0 ? null : (await input.inputValue()) || null;
+    if ((await input.count()) === 0) {
+        throw new Error('no term-start control in this cell — use hasDateControl to assert its absence');
+    }
+    return (await input.inputValue()) || null;
 }
 
 /** The 0-based index of a column, found by its header so a reorder cannot silently move the assertions. */
@@ -163,9 +179,10 @@ test.describe('a subscription line states its term start', () => {
 
         /** ROW 2 — THE ONE-TIME LINE. Requirement 3: no field at all, not a disabled or empty one. */
         expect(
-            await dateValue(rowCell(page, 1, col)),
-            'a non-subscription line must not offer a term start',
-        ).toBeNull();
+            await hasDateControl(rowCell(page, 1, col)),
+            'a non-subscription line must not offer a term start — NO control, which is what requirement 3 '
+                + 'says. An empty control would satisfy a value assertion while breaking the requirement.',
+        ).toBe(false);
 
         // ── Typing a term start switches the field from inherited to stored. ──
         await rowCell(page, 0, col).locator('input[type="date"]').fill(CHOSEN);

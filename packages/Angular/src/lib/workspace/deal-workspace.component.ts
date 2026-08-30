@@ -1128,11 +1128,23 @@ export class DealWorkspaceComponent implements OnInit {
      * control is only rendered when {@link HasExplicitTermStart}, and this keeps that true in code as
      * well as in the template.
      */
-    public ResetTermStart(line: OrderLineEntity): void {
+    public ResetTermStart(line: OrderLineEntity, focusAfter?: HTMLElement): void {
         if (!line.ServicePeriodStart) {
             return;
         }
         line.ServicePeriodStart = null;
+        /**
+         * FOCUS HAS TO GO SOMEWHERE, because this button is about to remove itself.
+         *
+         * It renders inside `@if (HasExplicitTermStart(line))`, and clearing the stored value makes
+         * that false — so on the next change-detection pass the focused element leaves the DOM and the
+         * browser drops focus to `<body>`. A keyboard user on row 7 of a twelve-line grid presses Enter
+         * and their next Tab starts again from the page chrome.
+         *
+         * The date input is the natural destination: it is the control the reset just acted on, it stays
+         * in the DOM, and it is where the user looks to see the result.
+         */
+        focusAfter?.focus();
         this.Touch();
     }
 
