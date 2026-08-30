@@ -92,6 +92,12 @@ export class DealLinkerExtension extends BaseActivitySyncExtension {
          * FailurePolicy Abort on the registration.
          */
         for (const match of result.Matches) {
+            if (context.Signal?.aborted) {
+                throw new Error(
+                    `Sales.DealLinker timed out while linking activity ${context.Activity.ID}; ` +
+                        'remaining deals were not attributed.',
+                );
+            }
             await this.addRegardingLink(context, match.DealID, dealEntityID);
         }
     }
