@@ -1,0 +1,30 @@
+[
+  {
+    "_comments": [
+      "TOMBSTONE. Sales.SyncActivities was the hourly ingest trigger. Ingest now lives in",
+      "Common (Common.SyncActivities / ActivitySyncEngine). Sales keeps DealLinker only.",
+      "deleteRecord removes the action (and its Limit param) from hosts that still have the",
+      "V202608251930 seed."
+    ],
+    "primaryKey": {
+      "ID": "5A1E5000-0000-4000-8000-000000000101"
+    },
+    "deleteRecord": {
+      "delete": true,
+      "deletedAt": "2026-08-30T17:28:43.430Z"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000102"
+          },
+          "deleteRecord": {
+            "delete": true,
+            "deletedAt": "2026-08-30T17:28:42.608Z"
+          }
+        }
+      ]
+    }
+  }
+]
