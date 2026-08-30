@@ -140,6 +140,15 @@ journal entry with no extra work here.
 either way** — if they disagree with the commercial shape, that is a reporting-semantics conversation,
 not a migration.
 
+**Ratified 2026-08-26, and the picker now matches it.** Johanna Snider confirmed the commercial
+shape in the Sales channel: every deal is a Blue Cypress deal, and company ownership lives at the
+PRODUCT. `Pipeline.CompanyID` stays required and no schema changed — but issue #29 found that the
+product picker contradicted the second half of this decision. `ProductFilterFor` carried a
+`CompanyID = <the deal's company>` clause, so with both pipelines owned by Blue Cypress no Betty or
+Sidecar product could be put on a deal at all. The clause is removed. A deal header still carries one
+company from its pipeline, exactly as above; each line now genuinely takes its own company from the
+product, which is what this decision always said.
+
 ---
 
 ### D6 — `ForecastSnapshot` column names: keep the `*Amount` suffix

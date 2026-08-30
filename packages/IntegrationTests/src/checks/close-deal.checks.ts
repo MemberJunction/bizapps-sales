@@ -38,8 +38,6 @@ import {
 } from '@memberjunction/testing-integration';
 import {
     DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
-    E_ORDERS_PRODUCT,
-    ProductFilterFor,
     StubDownstreamSeam,
     SalesCloseDealOperation,
     SalesReopenDealOperation,

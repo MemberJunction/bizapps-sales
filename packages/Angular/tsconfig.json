@@ -19,6 +19,7 @@
     "node_modules",
     "**/__tests__/**",
     "**/*.test.ts",
-    "**/*.dom.test.ts"
+    "**/*.dom.test.ts",
+    "**/*.spec.ts"
   ]
 }

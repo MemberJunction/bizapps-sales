@@ -397,10 +397,11 @@
                   @for (line of Lines; track line.ID; let i = $index) {
                     <tr [class.dw-row--bad]="IssuesForRow('lines', i).length > 0">
                       <td>
-                        <!-- Identity is Product.ID. The catalogue is already filtered to this deal's
-                             selling company, Active status and today's availability window, so anything
-                             offered here is sellable — see ProductFilterFor in packages/Entities/src,
-                               which is the predicate LoadProducts passes to RunView. -->
+                        <!-- Identity is Product.ID. The catalogue is filtered to Active status and today's
+                             availability window — NOT to a company, since #29: a deal may sell any company's
+                             product, and the LINE takes its company from whichever is chosen. That is why each
+                             option names its owner; see ProductOptionLabel. The predicate is ProductFilterFor
+                             in packages/Entities/src, which is what LoadProducts passes to RunView. -->
                         <select class="dw-cell-product" [ngModel]="line.ProductID"
                                 (ngModelChange)="OnProductChange(line, $event)"
                                 [title]="ProductLabel(line)">
@@ -411,7 +412,7 @@
                                see UnlinkedLineIssues. -->
                           <option [ngValue]="null">— choose a product —</option>
                           @for (p of Products; track p.ID) {
-                            <option [ngValue]="p.ID">{{ p.SKU ? p.Name + ' (' + p.SKU + ')' : p.Name }}</option>
+                            <option [ngValue]="p.ID">{{ ProductOptionLabel(p) }}</option>
                           }
                         </select>
                         @if (line.ProductID && ProductLabel(line) === '(no longer offered)') {

@@ -220,34 +220,23 @@ export class DealWorkspaceComponent implements OnInit {
 
     public Lookups: DealWorkspaceLookups = EmptyLookups();
 
-    /**
-     * The loaded catalogue, TAGGED WITH THE COMPANY IT IS ABOUT.
-     *
-     * ── WHY THE TAG, AND NOT JUST A REFRESH IN ONE MORE PLACE ───────────────────────────────────
-     *
-     * This was a bare `ProductLookup[]`, and it held whatever the LAST deal to load had put there --
-     * the same sentence `SelectTab` already carried about `Lock`, applied to a second field. Open a
-     * deal for company A, open one for company B, switch back, and the picker still offered company
-     * B's catalogue. `AddLine` then stamped `CompanyID` from the ACTIVE deal's pipeline, so the line
-     * carried company A against a company-B product. `OrderLine`'s foreign key is to `Product`, not
-     * to company, so nothing refused it.
-     *
-     * The tab-switch gap could have been closed by adding one more `RefreshProducts()` call beside
-     * the `RefreshLock()` in `SelectTab`. That is exactly the fix that produced this bug: the lock
-     * was repaired one method at a time, and two of its own paths were missed in the process
-     * (`NewDeal` never cleared it, `CloseTab` never re-resolved it). A per-deal value reached
-     * through a shared field will keep growing new stale paths as long as correctness depends on
-     * remembering to call something.
-     *
-     * So the value states what it describes and the getter below refuses to hand it to the wrong
-     * deal. Staleness stops being a thing to remember and becomes a thing that cannot be
-     * represented. The worst case is an EMPTY picker -- visible, and the failure mode
-     * `RefreshProducts` already chose deliberately -- rather than a wrong one.
-     */
-    private Catalogue: { CompanyID: string | null; Items: ProductLookup[] } = {
-        CompanyID: null,
-        Items: [],
-    };
+     /**
+      * The loaded catalogue — every company's sellable products, not one company's.
+      *
+      * ── THIS FIELD USED TO CARRY A COMPANY TAG, AND THE TAG IS GONE ────────────────────────────
+      *
+      * It was `{ CompanyID, Items }`, and the getter below refused to hand it to a deal belonging to
+      * a different company — a real bug fix, for a real defect: open a deal for company A, open one
+      * for B, switch back, and the picker still offered B's list.
+      *
+      * #29 dissolved that bug class rather than fixing it again. The catalogue is no longer
+      * per-company, so there is no wrong company to hand it to. What survives is a different
+      * staleness: this field is shared across tabs and `RefreshProducts` overwrites it wholesale, so
+      * a single failed load empties it for every open deal at once. `LoadProducts` reports that
+      * rather than swallowing it, and `ProductLabel` refuses to call a product withdrawn on the
+      * strength of an empty list.
+      */
+    private Catalogue: ProductLookup[] = [];
 
     /**
      * The products the ACTIVE deal may reference.
@@ -257,12 +246,11 @@ export class DealWorkspaceComponent implements OnInit {
      * construction" -- is now true by construction rather than by coincidence of call order.
      */
     public get Products(): ProductLookup[] {
-        // NO_PRODUCTS rather than a fresh `[]`: this getter runs on every change-detection pass, and a
-        // new array identity each time would have the template's @for tear down and rebuild the picker
-        // continuously while the catalogue is mismatched.
-        return this.Catalogue.CompanyID === this.ActiveCompanyID
-            ? this.Catalogue.Items
-            : (NO_PRODUCTS as ProductLookup[]);
+        // A STABLE identity, not a fresh `[]`: this getter runs on every change-detection pass, and a
+        // new array each time would have the template's @for tear down and rebuild the picker
+        // continuously. The catalogue is no longer per-company (#29), so there is nothing to match on --
+        // it is either loaded or it is the frozen empty.
+        return this.Catalogue.length ? this.Catalogue : (NO_PRODUCTS as ProductLookup[]);
     }
 
     /**
@@ -857,7 +845,8 @@ export class DealWorkspaceComponent implements OnInit {
         // that the browser can also know -- deliberately NOT Status (orders defaults it) and NOT
         // OrderNumber (orders MINTS it; see the note above CanSave).
         if (order && !order.IsSaved) {
-            order.Set('CompanyID', this.CompanyIDFromPipeline ?? this.Deal?.CompanyID ?? null);
+            // `ActiveCompanyID` IS this expression; repeating it inline meant two places to change.
+            order.Set('CompanyID', this.ActiveCompanyID);
             order.Set('OrderType', 'Sale');
         }
 
@@ -884,28 +873,37 @@ export class DealWorkspaceComponent implements OnInit {
         line?.Set('Quantity', 1);
 
         /**
-         * `CompanyID` IS SET HERE, AND WITHOUT IT THE SAVE BUTTON NEVER ENABLES.
+         * A PLACEHOLDER COMPANY, WRITTEN SO THE FORM IS NOT INVALID BEFORE A PRODUCT EXISTS.
          *
-         * `OrderLine.CompanyID` is NOT NULL with no default, and orders stamps it from the product in
-         * `OrderLineEntityServer` -- a SERVER class. `CanSave` is gated on `deal.Validate()`, which runs
-         * in the BROWSER, where that subclass does not exist and nothing has stamped anything. So a
-         * freshly added line is permanently invalid, `Validation.IsValid` stays false, and the rep sees a
-         * disabled Save reading "Company ID cannot be null" against a form where every field they can
-         * reach is filled. Found in the Explorer pass on 2026-08-20, on a deal that saved perfectly well
-         * through the entity layer -- which is exactly why an API-level check could not see it.
+         * `OrderLine.CompanyID` is NOT NULL with no default, and orders stamps the real value from the
+         * product in `OrderLineEntityServer` -- a SERVER class. `CanSave` is gated on `deal.Validate()`,
+         * which runs in the BROWSER, where that subclass does not exist. So a line with no company is
+         * invalid the moment it appears, and `SaveBlockedReason` surfaces the raw entity error ahead of
+         * the friendly one: the rep reads "Company ID cannot be null" against a form that exposes no
+         * company control at all. Found in the Explorer pass on 2026-08-20.
          *
-         * Supplying the company is not this app duplicating a rule it does not own. The picker filters
-         * products by THIS company (`ProductFilterFor`), so a selectable product's company and the
-         * deal's are the same value by construction, and the server will stamp the same thing. If that
-         * ever stops being true, the picker is what broke.
+         * ── WHY THIS IS BACK, HAVING BEEN REMOVED BY #29 ──────────────────────────────────────────
          *
-         * It comes from the PIPELINE LOOKUP, not from `Deal.CompanyID`. On an unsaved deal that field is
-         * still null -- the server derives it from the pipeline in `stampCompanyFromPipeline()` (D-4), so
-         * it does not exist until the first save, and a rep adding a line before saving would be right
-         * back at the disabled button. `Lookups.Pipelines` carries `CompanyID` for exactly this reason,
-         * and it is the same row the server reads.
+         * #29 deleted this stamp on the reasoning that the line's company is the PRODUCT's, and no
+         * product is chosen yet -- and left a comment claiming that introduced "no new window where Save
+         * is disabled for an invisible reason". An audit disproved that. The defect was never the
+         * disabled state, which is correct while `ProductID` is unset; it was the REASON TEXT. Before
+         * #29 a fresh line produced one entity error, for `ProductID`, which `UnlinkedLineIssues`
+         * translates into "Choose a product for this line." After #29 it produced two, and the extra one
+         * names a column the rep cannot see, act on, or fill.
+         *
+         * ── IT IS A PLACEHOLDER, AND THE DISTINCTION MATTERS ──────────────────────────────────────
+         *
+         * This is NOT the pre-#29 claim that the deal's company IS the line's. It is not. The picker
+         * spans every company now, so this value is a stand-in that keeps the line valid until the rep
+         * chooses, at which point `OnProductChange` overwrites it with the product's company and the
+         * server overwrites it again at save. Nothing downstream reads it in between.
+         *
+         * It comes from `ActiveCompanyID` -- the pipeline lookup first, because on an unsaved deal
+         * `Deal.CompanyID` is still null until `stampCompanyFromPipeline()` runs server-side (D-4), and
+         * a rep adding a line before the first save would otherwise be right back at the disabled button.
          */
-        line?.Set('CompanyID', this.CompanyIDFromPipeline ?? this.Deal?.CompanyID ?? null);
+        line?.Set('CompanyID', this.ActiveCompanyID);
 
         this.Touch();
     }
@@ -1614,11 +1612,10 @@ export class DealWorkspaceComponent implements OnInit {
     }
 
     private async RefreshProducts(): Promise<void> {
-        const company = this.ActiveCompanyID;
-        const items = company ? await this.service.LoadProducts(company) : [];
-        // Tagged on assignment. If the active deal changed while this was in flight, the getter will
-        // decline to show it rather than presenting another company's catalogue as this one's.
-        this.Catalogue = { CompanyID: company, Items: items };
+        // No company argument since #29 -- the catalogue is every Active, currently-available product
+        // from every company, so there is nothing deal-specific to key it on and nothing to invalidate
+        // when the active deal changes.
+        this.Catalogue = await this.service.LoadProducts();
         this.cdr.detectChanges();
     }
 
@@ -1630,12 +1627,54 @@ export class DealWorkspaceComponent implements OnInit {
      * since it was quoted — still shows its ID rather than silently reading as unset, because "this line
      * references something you can no longer sell" is a fact the rep needs.
      */
+    /**
+     * How one product reads in the picker.
+     *
+     * ── THE COMPANY IS ON THE LABEL, AND IT HAS TO BE ─────────────────────────────────────────────
+     *
+     * Before #29 the catalogue was scoped to one company, so name-plus-SKU identified a product to a
+     * reader. It does not any more. Two companies can each sell an "Onboarding Fee", and `SKU` is
+     * nullable with only a FILTERED unique index, so neither field separates them — the rep would be
+     * choosing between two identical rows, and that choice decides which company's books the revenue
+     * lands in. Showing the owner is the difference between a decision and a guess.
+     *
+     * SKU stays where it is, since it is what disambiguates two products WITHIN a company.
+     */
+    public ProductOptionLabel(p: ProductLookup): string {
+        const base = p.SKU ? `${p.Name} (${p.SKU})` : p.Name;
+        return p.Company ? `${base} — ${p.Company}` : base;
+    }
+
+    /**
+     * The label a LINE shows for the product it references.
+     *
+     * Resolved from the loaded catalogue rather than stored on the line, so a renamed product reads
+     * correctly next time the deal is opened.
+     *
+     * Distinct from `ProductOptionLabel`, which labels a CHOICE in the picker and therefore names the
+     * owning company. This one describes a line that already has a product, where the row shows the
+     * company in its own right.
+     */
     public ProductLabel(line: OrderLineEntity): string {
         if (!line.ProductID) {
             return '';
         }
         const hit = this.Products.find((x) => x.ID === line.ProductID);
-        return hit ? (hit.SKU ? `${hit.Name} (${hit.SKU})` : hit.Name) : '(no longer offered)';
+        if (hit) {
+            return hit.SKU ? `${hit.Name} (${hit.SKU})` : hit.Name;
+        }
+        /**
+         * AN EMPTY CATALOGUE IS "WE DO NOT KNOW", NOT "WITHDRAWN".
+         *
+         * The catalogue is empty in three distinct situations — not loaded yet, load failed, and no
+         * products exist — and only the last makes "(no longer offered)" a true statement. Saying it in
+         * the other two tells a rep that a product they can still sell has been discontinued, and one
+         * failed `LoadProducts` round-trip is enough to say it about every line on every open tab.
+         *
+         * An ellipsis is the honest answer while the answer is unknown: it reads as pending, it is not a
+         * claim, and it disappears on its own once the catalogue arrives.
+         */
+        return this.Products.length ? '(no longer offered)' : '…';
     }
 
     /**
@@ -1660,6 +1699,37 @@ export class DealWorkspaceComponent implements OnInit {
             return;
         }
         line.ProductID = productID;
+
+        /**
+         * THE LINE'S COMPANY COMES FROM THE PRODUCT (#29).
+         *
+         * Orders' `OrderLineEntityServer` overwrites `CompanyID` from the product at save, so the value
+         * that lands is correct either way. Setting it here is about the BROWSER: `CanSave` is gated on
+         * `deal.Validate()`, which runs client-side where that server subclass does not exist, and
+         * `OrderLine.CompanyID` is NOT NULL. Left unset, the rep gets a disabled Save reading
+         * "Company ID cannot be null" against a form that looks complete -- the same defect found in the
+         * Explorer pass on 2026-08-20, which the old pipeline stamp existed to prevent.
+         *
+         * If the product is not in the catalogue the field is left alone rather than cleared: the server
+         * will still stamp it correctly, and blanking a value we cannot improve on would turn a display
+         * gap into a validation failure.
+         */
+        /**
+         * THE FALLBACK IS NOT OPTIONAL, and the earlier version of this that "left the field alone"
+         * assumed the line already had a company. Once `AddLine` stops stamping, it does not.
+         *
+         * A product can be missing from the catalogue for reasons that have nothing to do with the
+         * product: an in-flight `RefreshProducts` resolving with an empty list while the picker is open
+         * is enough. Leaving `CompanyID` null there produces a permanently unsaveable line, because
+         * re-selecting the SAME option emits no `ngModelChange` -- the only way out is deleting the row.
+         *
+         * So an unknown product falls back to the same placeholder `AddLine` uses. The server derives
+         * the real value from the product at save either way; the only job here is to never leave the
+         * browser holding a null it cannot show the rep how to fix.
+         */
+        const product = this.Catalogue.find((p) => p.ID === productID);
+        line.Set('CompanyID', product?.CompanyID ?? this.ActiveCompanyID);
+
         this.Touch();
     }
 
