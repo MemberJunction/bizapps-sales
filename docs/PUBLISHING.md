@@ -16,7 +16,7 @@ missing:
 |---|---|---|---|
 | 1 | The five `@mj-biz-apps/sales-*` packages on npm | `changeset publish`, in `publish.yml` | MJAPI and MJExplorer have no code to load |
 | 2 | A **`vX.Y.Z` git tag** whose tree carries `mj-app.json` at that version | `ci/commit_push.mjs`, in `publish.yml` | `ResolveDependencyVersion` finds no candidate and the install fails at resolution |
-| 3 | A **metadata seed migration** under `migrations/` | a human, once per metadata change — see below | the app installs with every table and no data; every step reports success |
+| 3 | A **metadata seed migration** under `migrations/` | the build engineer, once per release — see below | the app installs with every table and no data; every step reports success |
 
 Number 2 is the one that is easy to get wrong from this repo's history. Before the release
 plumbing landed, the packages were published by hand and changesets was configured **without**
@@ -28,9 +28,10 @@ produce one tag for the whole app.
 
 Number 3 is the one that is easy to get wrong *silently*. `mj-app.json`'s `metadata.directory` is
 documentation — MJ's manifest schema says the install engine never reads it. **Seeding happens
-exclusively through `migrations/`.** `npm run lint:distribution` is the gate that enforces it and
-`.github/workflows/distribution-gate.yml` runs it on every push and PR that touches `metadata/`,
-`migrations/`, `migrations-teardown/` or `mj-app.json`.
+exclusively through `migrations/`**, generated at release, not in the PR that added the JSON.
+`npm run lint:distribution` checks only that shipped SQL uses placeholders `mj app install` can
+resolve (Skyway leaves unknown `${...}` as literal strings). It does **not** prove the seed
+contains a given metadata record — that proof is a clean install from migrations, once per release.
 
 ---
 
@@ -77,10 +78,25 @@ gh api repos/MemberJunction/bizapps-sales/tags --jq '.[].name' | head -3   # vX.
 
 ---
 
-## Regenerating the metadata seed — the part with a wrong way to do it
+## Regenerating the metadata seed — release work, not a PR
 
-**Do this whenever anything under `metadata/` changes.** The gate will tell you; it cannot do it
-for you, because it needs a database.
+This follows MJ (`MJ/metadata/CLAUDE.md` §1b and §10):
+
+1. **PRs contribute declarative JSON only** — fields, `@lookup` / `@file` / `@parent`, and a
+   `primaryKey` UUID from `uuidgen`. No `sync` block (the release push writes that back). No
+   `*__Metadata_Sync.sql` in the PR.
+2. **The build engineer generates ONE consolidated Metadata_Sync per release**, by running
+   `mj sync push` against a clean database at the last released version. Naming is
+   `V<YYYYMMDDHHMM>__v<X.Y>.x__Metadata_Sync.sql`.
+3. **Do not hand-author per-PR sync migrations.** They duplicate the release step, produce many
+   small files instead of one per build, and drift from the real push output.
+
+`lint:distribution` is not a currency gate. Nothing in CI currently proves that a metadata record
+has a matching seed statement. That hole is known and accepted the same way bizapps-caliber and
+bizapps-accounting document it: **the guard is the release process, not a PR gate.** The property
+that matters is "can a stranger install this app from migrations alone and get a working one?" —
+answered by a clean install from migrations, once per release, asserting that a sample of records
+declared in `metadata/` are present afterward (`scripts/rebuild-db.sh` / bootstrap-clean-db).
 
 The seed must be generated against a host where **this app's metadata has never been pushed**, so
 that every statement the generator emits is a `spCreate*` rather than an `spUpdate*`. Pushing to a
@@ -101,17 +117,28 @@ DB_DATABASE=$DB pnpm run mj:migrate
 DB_DATABASE=$DB pnpm exec mj sync push --dir metadata --ci
 #    -> metadata/sql_logging/push_<timestamp>.sql
 
-# 3. Turn that log into a migration. ONE substitution and ONE hand edit; both are documented in the
-#    header of the current seed, which is the template:
+# 3. Turn that log into the release Metadata_Sync. ONE substitution and ONE hand edit; both are
+#    documented in the header of the current seed, which is the template:
 #      * `[__mj].` -> `[${mjSchema}].` everywhere (SP calls AND the JOINs inside seeded query SQL)
 #      * re-apply the `IF NOT EXISTS` guard on the single `spCreateCompany` call
 #    Sibling schemas (`__mj_BizAppsTasks`, `__mj_BizAppsOrders`) stay literal — `mj app install`
 #    supplies only `${mjSchema}` and `${flyway:defaultSchema}`, and neither of those is theirs.
 
-# 4. Record what it was generated from, or the gate cannot tell whether it is current.
-pnpm run seed:manifest
+# 4. Placeholders only — there is no hash manifest to bump.
 pnpm run lint:distribution
 ```
+
+### Pending for the next release seed
+
+These records are in `metadata/` and in **no** migration on `next`. The next consolidated
+Metadata_Sync must carry them:
+
+| Record | ID | Path |
+|---|---|---|
+| `Sales.DealLinker` extension | `A7C4E2B1-5D83-4F0A-9C1E-6B8D2F4A90C3` | `metadata/activity-sync-extensions/.activity-sync-extensions.json` |
+| `Sales.SyncActivities` action tombstone | `5A1E5000-0000-4000-8000-000000000101` | `metadata/actions/.sales-actions.json` |
+| Limit ActionParam tombstone | `5A1E5000-0000-4000-8000-000000000102` | same file, relatedEntities |
+| Hourly job tombstone | `5A1E5000-0000-4000-8000-000000000201` | `metadata/scheduled-jobs/.sales-scheduled-jobs.json` |
 
 ### Two things to check before you trust the result
 

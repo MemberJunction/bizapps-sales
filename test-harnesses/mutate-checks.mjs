@@ -690,9 +690,11 @@ const MUTATIONS = [
 
     // ══ activities · AC1-AC22 ═════════════════════════════════════════════════════════════════
     //
-    // The ingest is a four-stage pipeline behind a source seam -- fetch, filter for relevance, match a
-    // deal, write -- and every mutant below breaks exactly one stage. Naming follows the check family
-    // it targets, as M-CD*/M-CT* do, so a red assertion and the mutant that felled it share a prefix.
+    // Engine-owned checks (AC6, AC7, AC11, AC14, AC18–AC22) moved to
+    // `@mj-biz-apps/common-activity-sync`. Mutating sales source cannot reach them; the in-place
+    // driver is not a cross-repo harness. Common carries the mutants for that behaviour. What
+    // remains here is sales' half: party-entity identity (AC3) and writer idempotency (AC8/AC13).
+    // AC15 is metadata integrity (seeded job → action) and has no product-code branch to mutate.
 
     // Idempotency. The ingest re-reads a window on every run by design (D-17: GetMessages has no date
     // filter), so without the external-key lookup a second sync duplicates every activity it already

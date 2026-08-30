@@ -55,10 +55,10 @@ jobs:
         run: ./.github/scripts/validate-package-repository.sh
 
       # Node stdlib only, so it needs nothing installed. Runs here as well as in
-      # distribution-gate.yml because that workflow is paths-filtered and this one is the release:
-      # a dispatch from a branch that touched no metadata would otherwise publish a stale seed, and
-      # an Open App whose seed is stale installs cleanly and comes up empty.
-      - name: Distribution gate (the metadata seed is present and current)
+      # distribution-gate.yml because that workflow is paths-filtered and this one is the release.
+      # Checks placeholders only — seed currency is the build engineer's Metadata_Sync, not a
+      # hash manifest (MJ/metadata/CLAUDE.md §1b).
+      - name: Distribution gate (shipped SQL placeholders)
         run: node scripts/check-distribution-seed.mjs
 
       - name: Configure git credentials

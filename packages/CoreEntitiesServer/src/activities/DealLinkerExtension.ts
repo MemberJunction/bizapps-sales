@@ -81,6 +81,16 @@ export class DealLinkerExtension extends BaseActivitySyncExtension {
         }
 
         const dealEntityID = this.resolveDealEntityID(context);
+        /**
+         * Partial attribution under Skip is the stated choice, not a side effect.
+         *
+         * Links save one by one inside the open write transaction. If the second of three
+         * matched deals fails, the first link is already in `context.Links` and Skip lets
+         * the activity commit with that partial Regarding set. Rolling the activity back
+         * because one deal link failed would hide the message from every deal — worse than
+         * an incomplete set. A deployment that would rather lose the activity sets
+         * FailurePolicy Abort on the registration.
+         */
         for (const match of result.Matches) {
             await this.addRegardingLink(context, match.DealID, dealEntityID);
         }
@@ -150,5 +160,5 @@ export class DealLinkerExtension extends BaseActivitySyncExtension {
 
 /** Anti-tree-shaking anchor — registration is a side effect of import. */
 export function LoadDealLinkerExtension(): void {
-    // intentionally empty
+    void DealLinkerExtension;
 }
