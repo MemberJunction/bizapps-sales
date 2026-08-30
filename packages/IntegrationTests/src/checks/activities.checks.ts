@@ -112,7 +112,7 @@ async function openDeal(ctx: Ctx): Promise<DealFixture> {
  * check would pass for the wrong reason — a filter that rejects everything looks identical to a filter
  * that works. Creating the row is what makes the positive case testable.
  *
- * The `ContactType` is chosen arbitrarily and that is sound: `RelevanceFilter` matches on `Value` alone
+ * The `ContactType` is chosen arbitrarily and that is sound: identity matching is on `Value` alone
  * and never reads the type. Picking "the Email one" by name would be a vocabulary comparison in service
  * of a value nothing reads.
  */
@@ -1286,7 +1286,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                 const connectionID = await makeConnection(ctx, null);
 
                 /**
-                 * THE GAP MUTATION FOUND. Reverting `RelevanceFilter`'s `failed: true` to `false` killed no
+                 * THE GAP MUTATION FOUND. Reverting identity lookup's `LookupFailed: true` to `false` killed no
                  * check: AC20 forces a failed WRITE, and nothing could force a failed READ. So the branch
                  * that holds the watermark when a contact-method lookup blips was untested — the branch that
                  * stops a transient error discarding a batch of real mail permanently, since D-17 means

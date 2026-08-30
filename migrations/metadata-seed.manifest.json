@@ -1,15 +1,16 @@
 {
   "generatedFrom": "metadata/",
   "files": {
-    "metadata/.mj-sync.json": "12d06e9ad68dda1cebc4e66e980a990e0b62fa32a2fa2a7aa506d4da55d9d52c",
+    "metadata/.mj-sync.json": "ffc2cfa4e34ab56050c83a6a79b48293fc92c545aab518f5f78d22c7ddcab00c",
     "metadata/account-types/.account-types.json": "c663318ad08b2afdeac016594863f4fa4e58a257846c24987c6ee72571fc4f8b",
     "metadata/account-types/.mj-sync.json": "d0353d8ea30a7b6b5931d61c24c36d924ef74d5893f90a3f9ec77ac2817e4e80",
     "metadata/action-categories/.mj-sync.json": "33dfce53af64a12a78e54f2134cb00223a126b555765fde20eb430f0d21a2713",
     "metadata/action-categories/.sales-action-categories.json": "3dba082285ee691bb6421d2049fe392a44b2af09db30c77ee90e8913216ce2c6",
     "metadata/actions/.mj-sync.json": "c6e5d4821c0fe44fcc94505251c7fc17650eccb5b6aa5ba6b7cdd9a84d9398c6",
-    "metadata/actions/.sales-actions.json": "92e4241ed6f86c187df9e442689458caa40c6d2d9f1a2ac15c609be15f678c9b",
     "metadata/actions/.sales-activity-actions.json": "b300561e3aed331e7000f2bc13f0def50986304e2d7229ee517836e12cf642b3",
-    "metadata/actions/.sales-forecast-actions.json": "bf5949a9cd065c442a9cbe83dd70c1cb89bea03057d30cce29168745f51469ab",
+    "metadata/actions/.sales-forecast-actions.json": "eb393acbfc061ba88ef9738fe0f7a14a88f82c77f743b9a92f9c94f4ae1fbb74",
+    "metadata/activity-sync-extensions/.activity-sync-extensions.json": "f6a7a3c8607c0c5e9823c9772975374dd80f1afdad0c0194ae506c8574404999",
+    "metadata/activity-sync-extensions/.mj-sync.json": "7e8207cdd9aa2f504fb95badf121d09574a8d875dba68eb54df99afc84ae288e",
     "metadata/applications/.bizapps-sales-application.json": "ff34da692427e7349e7184e3ce64564b2f8b1e89b34f14de772245b37a247ae2",
     "metadata/applications/.mj-sync.json": "7877cd8da8447d6a39d6c93e46f35c3730998bd8dd4b64f53431665caef16f19",
     "metadata/buying-role-types/.buying-role-types.json": "9c82b0e94ab78c637567dee8551d7e2a0268178cb6043fc0a5be93feda056d0a",
@@ -80,7 +81,6 @@
     "metadata/remote-operations/types/sales-close-deal.output.ts": "9ee79bd1c412877dc0941937b25e3b40098aaf924662c581dc05449fd5731ad9",
     "metadata/scheduled-jobs/.mj-sync.json": "0114c85d0c1808e975f706c5f2c26c008b281fd902cfff9b917743df962f7070",
     "metadata/scheduled-jobs/.sales-forecast-scheduled-jobs.json": "c385e22e47c45ecfcb8fcdedda3e58c9e7590a3d477f1dee2d060733c40db8ea",
-    "metadata/scheduled-jobs/.sales-scheduled-jobs.json": "173091e6230381714787897f4596e2f5695f86e2a9e2a0c6fc8c82073b63a126",
     "metadata/task-types/.mj-sync.json": "60442bc01ae137482c346672462add0fc01db5dd5df2e841b181a4adab4e7f33",
     "metadata/task-types/.task-types.json": "30b12e33c18165b729e3658b64bf9a915d675e894887bae4dcdf361830a4bda4"
   }

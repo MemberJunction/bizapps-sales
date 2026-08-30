@@ -83,15 +83,7 @@ const LCS = 'packages/CoreEntitiesServer/src/LiveContractsSeam.ts';
  * inherited their claim from that commit's title rather than from this file, which is the mechanism
  * worth remembering -- a title is not a test, and neither is a commit message.
  */
-const AIS = 'packages/CoreEntitiesServer/src/activities/ActivityIngestService.ts';
-const AR = 'packages/CoreEntitiesServer/src/activities/ActivityReader.ts';
-const DM = 'packages/CoreEntitiesServer/src/activities/DealMatcher.ts';
-const ASJ = 'packages/CoreEntitiesServer/src/activities/ActivitySyncJob.ts';
 const AWS = 'packages/CoreEntitiesServer/src/activities/ActivityWriterService.ts';
-const RF = 'packages/CoreEntitiesServer/src/activities/RelevanceFilter.ts';
-const MGC = 'packages/CoreEntitiesServer/src/activities/MSGraphCalendarSource.ts';
-const MGA = 'packages/CoreEntitiesServer/src/activities/MSGraphActivitySource.ts';
-const FAS = 'packages/CoreEntitiesServer/src/activities/FixtureActivitySource.ts';
 const AV = 'packages/Entities/src/activities/activity-vocabulary.ts';
 const FSJ = 'packages/CoreEntitiesServer/src/forecast/ForecastSnapshotJob.ts';
 const QFS = 'packages/CoreEntitiesServer/src/forecast/QueryForecastSource.ts';
@@ -718,111 +710,6 @@ const MUTATIONS = [
       from: "export const E_PERSON = 'MJ_BizApps_Common: People';",
       to: "export const E_PERSON = 'MJ_BizApps_Sales: Sales Contacts';",
       note: 'contact links land under the sales child instead of the common parent' },
-
-    // Relevance fails OPEN: every fetched item is judged relevant, so a tenant-wide mailbox read files
-    // the entire tenant's mail against deals.
-    { id: 'M-AC3', file: RF, expect: ['AC6', 'AC7'],
-      from: '            return { Item: item, IsRelevant: matches.length > 0, Matches: matches, Unmatched: unmatched };',
-      to: '            return { Item: item, IsRelevant: true, Matches: matches, Unmatched: unmatched };',
-      note: 'nothing is irrelevant, which is how a mailbox read becomes a data-protection incident' },
-
-    // A STANDING MISS, kept rather than removed -- same shape as M-AP2 above.
-    //
-    // This reverts `RelevanceFilter.lookup`'s failure report from `failed: true` to `failed: false`, so
-    // a ContactMethod read that BLIPPED is filed as "nothing was relevant". The watermark then advances
-    // over a batch of real mail that can never be fetched again, because GetMessages has no date filter
-    // to re-fetch it with (D-17).
-    //
-    // Nothing in this repository can kill it, and that is a measured conclusion rather than an untried
-    // one. Provoking a real `RunView` failure against a registered entity means revoking a permission,
-    // dropping a view or killing the connection -- none available inside a rolled-back transaction, and
-    // all of which would take the rest of the suite with them. AC22 covers the CONSEQUENCE by INJECTING
-    // a filter that reports a failed lookup, which is why AC22 cannot fall to this mutant: it never
-    // calls the real `lookup` at all.
-    //
-    // So the handling is proven and the reporting is not. `expect` names AC22 deliberately, so this
-    // reports MISS on every run and the gap stays visible instead of being implied by an absence.
-    { id: 'M-AC4', file: RF, expect: ['AC22'],
-      from: '            return { known, failed: true };',
-      to: '            return { known, failed: false };',
-      note: 'A STANDING MISS. A failed contact-method read is reported as a successful one, so a transient error is filed as a batch of irrelevant mail and the watermark advances over it permanently. AC22 asserts the HANDLING through an injected filter and therefore cannot fall to this mutant; killing it would need a real read failure, which cannot be provoked without breaking the database for every other check. Retained so the gap is stated rather than absent' },
-
-    // A cancelled meeting is an activity that DID NOT HAPPEN. Storing it Completed makes "did we meet
-    // them" unanswerable from the record (D-25).
-    { id: 'M-AC5', file: AIS, expect: ['AC18'],
-      from: "                    Status: item.Cancelled ? 'Cancelled' : 'Completed',",
-      to: "                    Status: 'Completed',",
-      note: 'a cancelled meeting is recorded as one that took place' },
-
-    // The watermark must not pass items that were never written. Failed and discarded are different
-    // facts, and only one of them is safe to advance over.
-    { id: 'M-AC6', file: AIS, expect: ['AC20'],
-      from: '            if (batch.HighWatermark && result.Failed === 0) {',
-      to: '            if (batch.HighWatermark) {',
-      note: 'the watermark advances past items whose write failed, so they are lost silently' },
-
-        /**
-         * -- AIMED AT AC22'S CONSUMER, BECAUSE AC22 INJECTS ITS COLLABORATOR ------------------------
-         *
-         * AC22 was the only check in the suite no mutation could fell, which made it read like the
-         * strongest vacuous-pass candidate in the campaign. It is the opposite: six assertions, and it
-         * pins the distinction the branch exists for -- `Failed: 2`, not `Irrelevant: 2`, because a
-         * failed lookup means the items were never JUDGED, which is a different fact from being judged
-         * irrelevant.
-         *
-         * It was unreachable because it substitutes its collaborator: it subclasses `RelevanceFilter`
-         * inline and overrides `Apply` outright, so every mutation of the real filter is invisible to
-         * it. Its docblock says so deliberately -- it is the one check that injects rather than drives,
-         * to reach a branch no arrangement of real data can produce.
-         *
-         * So this aims at the CONSUMER of that signal instead. `result.Failed += allowed.length` is the
-         * line that holds the watermark: `Success` is `Failed === 0`, and the watermark only moves on a
-         * successful run. Booking the batch as Irrelevant instead makes a transient database blip look
-         * exactly like a mailbox of personal mail -- the original defect, restored in one token.
-         *
-         * THE IRONY IS WORTH RECORDING: AC22 exists because a mutation found this gap, and it had since
-         * become unreachable by the same tool. A check that cannot be falsified is indistinguishable
-         * from one that asserts nothing, however good it is -- so the fix is a mutation that can reach
-         * it, not a rewrite of a check that was right all along.
-         */
-        { id: 'M-AC11', file: AIS, expect: ['AC22'],
-          from: '                result.Failed += allowed.length;',
-          to: '                result.Irrelevant += allowed.length;',
-          note: 'a failed lookup is booked as an irrelevant batch -- what used to discard real mail' },
-
-    // And that the run SAYS it failed. Without this the scheduled job reports success over a sync that
-    // wrote nothing, which is the state the source seam exists to keep distinguishable.
-    { id: 'M-AC7', file: AIS, expect: ['AC20'],
-      from: '            result.Success = result.Failed === 0;',
-      to: '            result.Success = true;',
-      note: 'a sync with failures in it reports success' },
-
-    // THE FIXTURE'S OWN SEMANTICS, which is the mutant that matters most in this bundle.
-    //
-    // A calendar's watermark is the INGEST INSTANT, not the newest event start -- a meeting booked for
-    // next year would otherwise push the watermark into the future and every event created afterwards
-    // for an earlier date would never be seen again. The fixture mirrors that rule on purpose. When it
-    // did NOT, `AC14` asserted the broken value and passed for a day: a fixture that reproduces a bug
-    // cannot detect it.
-    { id: 'M-AC8', file: FAS, expect: ['AC14', 'AC19'],
-      from: "        const watermark = this.Kind === 'Calendar'\n            ? this.fetchedAt\n            : new Date(Math.max(...eligible.map((i) => i.StartedAt.getTime())));",
-      to: '        const watermark = new Date(Math.max(...eligible.map((i) => i.StartedAt.getTime())));',
-      note: 'the fixture stops mirroring each surface real rule and reports a calendar watermark from the event start' },
-
-    // The same rule in the REAL Graph source, which for a day was upheld only by the fixture. AC21
-    // drives this class with a stub fetcher, because no arrangement of fixture data can reach it.
-    { id: 'M-AC9', file: MGC, expect: ['AC21'],
-      from: '                HighWatermark: items.length ? fetchedAt : null,',
-      to: '                HighWatermark: items.length ? new Date(Math.max(...items.map((i) => i.StartedAt.getTime()))) : null,',
-      note: 'was M-CAL-WATERMARK. The live calendar source reports the newest event start as its watermark, so one meeting booked far ahead blinds the sync from then on' },
-
-    // The tenant gate. Mail.Read under app-only auth reads EVERY mailbox in the tenant until an Exchange
-    // Application Access Policy scopes it, and no such policy has been applied. Default-false is the
-    // only thing standing between wiring this class up and reading the whole tenant.
-    { id: 'M-AC10', file: MGA, expect: ['AC11'],
-      from: '        if (!this.AllowLiveFetch) {',
-      to: '        if (false) {',
-      note: 'the tenant-admin gate is removed and a live fetch is attempted by default' },
 
     // ══ forecast · FS1-FS13 ══════════════════════════════════════════════════════════════════
 

@@ -69,7 +69,7 @@ CREATE TABLE #SalesDoomed (
 INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     -- Actions (ActionParam.ActionID is NOT NULL, so the 8 params follow automatically) and their
     -- category. ActionCategory's own dependents are all nullable, so nothing else is dragged in.
-    ('${mjSchema}', 'Action',                  '5A1E5000-0000-4000-8000-000000000101', 0),  -- Sync Activities
+    ('${mjSchema}', 'Action',                  '5A1E5000-0000-4000-8000-000000000101', 0),  -- Sync Activities (retired; kept so a host that stopped before the retire migration still uninstalls)
     ('${mjSchema}', 'Action',                  '5A1E5000-0000-4000-8000-000000000111', 0),  -- Capture Forecast Snapshot
     ('${mjSchema}', 'Action',                  '5A1E5000-0000-4000-8000-000000000121', 0),  -- Log Activity
     ('${mjSchema}', 'ActionCategory',          '5A1E5000-0000-4000-8000-000000000001', 0),  -- Sales
@@ -101,7 +101,8 @@ INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'RemoteOperation',         'D4F8A162-0003-4E71-B0A8-3F17C5E2D802', 0),  -- Reopen Deal
     ('${mjSchema}', 'RemoteOperationCategory', 'D4F8A162-9C35-4E71-B0A8-3F17C5E2D801', 0),  -- Deal Lifecycle
     -- Scheduled jobs. `ScheduledJobRun.ScheduledJobID` is NOT NULL, so the run history follows.
-    ('${mjSchema}', 'ScheduledJob',            '5A1E5000-0000-4000-8000-000000000201', 0),  -- Sales -- Activity Sync (hourly)
+    ('${mjSchema}', 'ScheduledJob',            '5A1E5000-0000-4000-8000-000000000201', 0),  -- Sales -- Activity Sync (hourly) (retired; same reason as the Action row)
+    ('__mj_BizAppsCommon', 'ActivitySyncExtension', 'A7C4E2B1-5D83-4F0A-9C1E-6B8D2F4A90C3', 0),  -- Sales.DealLinker
     ('${mjSchema}', 'ScheduledJob',            '5A1E5000-0000-4000-8000-000000000202', 0),  -- Sales -- Forecast Snapshot (daily)
     -- bizapps-tasks task types. NOT in our schema and not in core -- the seed reaches into a
     -- SIBLING app's schema, which is why that schema appears in the walk below. See the
