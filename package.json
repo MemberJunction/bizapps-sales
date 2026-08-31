@@ -54,7 +54,7 @@
     "mergemain": "node ci/merge_main.mjs",
     "mergemain:update-lock": "node ci/merge_main_and_update_lock.mjs",
     "lint:distribution": "node scripts/check-distribution-seed.mjs",
-    "seed:manifest": "node scripts/write-seed-manifest.mjs"
+    "check:release-seed": "node scripts/check-release-seed-coverage.mjs"
   },
   "repository": {
     "type": "git",
