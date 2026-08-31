@@ -50,7 +50,7 @@
               @if (column.IsClosing) {
                 <i class="fa-solid fa-lock db-col__lock"
                    aria-hidden="true"
-                   title="Arriving here closes and locks the deal — close it from the workspace."></i>
+                   title="Arriving here closes and locks the deal — close it from the deal form."></i>
               }
             </span>
             <span class="db-col__meta">
@@ -166,7 +166,7 @@
 
             @if (column.Cards.length === 0) {
               <p class="db-col__empty">
-                @if (column.IsClosing) { Close deals from the workspace. } @else { Nothing here. }
+                @if (column.IsClosing) { Close deals from the deal form. } @else { Nothing here. }
               </p>
             }
           </div>

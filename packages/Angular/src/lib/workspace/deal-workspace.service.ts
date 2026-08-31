@@ -109,6 +109,16 @@ export interface DealRosterRow {
     /** Open, and its expected close date has gone by. Computed against the SERVER's UTC date. */
     IsPastExpectedClose: boolean;
     /**
+     * ForecastCategoryType flags from `Sales: Deal Roster`. The dashboard slices the stacked bar
+     * from these — never from the category NAME.
+     */
+    IncludeInCommit: boolean;
+    IncludeInBestCase: boolean;
+    /** Amount × Probability / 100, computed in the roster query. Display only — not a price. */
+    WeightedAmount: number | null;
+    /** PipelineStage.DisplayOrder, for the funnel. */
+    StageOrder: number | null;
+    /**
      * The currency `Amount` is denominated in. NULL means UNKNOWN, not "the display default" -- it is
      * unpopulated on every deal today. A consumer must not total a set containing more than one
      * distinct value; the board refuses to.
@@ -384,7 +394,31 @@ export class DealWorkspaceService {
             IsLost: bool(d['IsLost']),
             IsClosed: bool(d['IsClosed']),
             IsPastExpectedClose: bool(d['IsPastExpectedClose']),
+            IncludeInCommit: bool(d['IncludeInCommit']),
+            IncludeInBestCase: bool(d['IncludeInBestCase']),
+            WeightedAmount: num(d['WeightedAmount']),
+            StageOrder: num(d['StageOrder']),
         }));
+    }
+
+    /**
+     * Run a published Sales MJ Query by name. Empty array on failure — the dashboard degrades a
+     * missing chart rather than taking the page down, and says so via the caller's empty state.
+     */
+    public async RunNamedQuery(
+        name: string,
+        parameters?: Record<string, string>,
+    ): Promise<Record<string, unknown>[]> {
+        const result = await new RunQuery().RunQuery({
+            QueryName: name,
+            CategoryPath: 'Sales',
+            ...(parameters ? { Parameters: parameters } : {}),
+        });
+        if (!result?.Success) {
+            LogError(`Sales query '${name}' failed - ${result?.ErrorMessage ?? 'unknown error'}`);
+            return [];
+        }
+        return (result.Results ?? []) as Record<string, unknown>[];
     }
 
     /**

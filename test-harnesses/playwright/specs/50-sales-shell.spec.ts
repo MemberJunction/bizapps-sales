@@ -1,6 +1,6 @@
 /**
  * PHASE 2 DEFINITION OF DONE #1 — `/app/sales` has the family's general layout, and the roster opens a
- * deal into the workspace.
+ * deal as an Explorer record tab.
  *
  * WHAT THIS IS FOR. Phase 1 shipped a workspace that could CREATE a deal but nothing that could OPEN
  * one, so edit mode was unreachable through the UI. This spec covers the surface that closes that gap,
@@ -10,9 +10,9 @@
  *      registered under that exact key AND survives tree-shaking. When it does not, Explorer mounts a
  *      BLANK TAB with no error in the console, no failed request, and nothing in the server log — which
  *      is the single most misleading failure in this stack.
- *   2. **A row actually opens the workspace.** Row click → load a draft → switch page is three separate
- *      things that can each no-op. Contracts records that its version was once a bare `return` on load
- *      failure, indistinguishable from a dead control.
+ *   2. **A row actually opens an Explorer record.** Row click is `OpenEntityRecord`, not an in-rail
+ *      workspace. Contracts records that its version was once a bare `return` on load failure,
+ *      indistinguishable from a dead control.
  *
  * It also asserts the structural pieces the layout brief is about — the MJ page chrome, the left rail,
  * and all three rail items — because "matches the general layout" is otherwise an opinion.
@@ -27,7 +27,7 @@ import { captureConsoleErrors, expectOnlyKnownErrors, KNOWN_POST_DELETE_ERRORS, 
 const SALES_APP = '/app/sales';
 
 /** The rail, by visible label — the IA declared in `nav/sales-nav.model.ts`. */
-const RAIL_ITEMS = ['Dashboard', 'All deals', 'Workspace'] as const;
+const RAIL_ITEMS = ['Dashboard', 'All deals', 'Board'] as const;
 
 /**
  * One rail item, located the way `mj-left-nav` actually renders it: a BUTTON whose accessible name is
@@ -42,7 +42,7 @@ function railItem(page: import('@playwright/test').Page, label: string) {
 }
 
 test.describe('sales shell — Phase 2 layout', () => {
-  test('the Deals section renders the family layout and its roster opens the workspace', async ({ page }) => {
+  test('the Deals section renders the family layout and its roster opens an Explorer record', async ({ page }) => {
     test.setTimeout(300_000);
     const sink = captureConsoleErrors(page);
 
@@ -125,41 +125,29 @@ test.describe('sales shell — Phase 2 layout', () => {
       await shot(page, '50-04-roster');
     });
 
-    // ── 5. A row opens the workspace ────────────────────────────────────────
-    await test.step('clicking a row opens that deal in the workspace', async () => {
+    // ── 5. A row opens an Explorer record tab ───────────────────────────────
+    await test.step('clicking a row opens that deal as an Explorer record', async () => {
       await page.locator('.wrap--list .wl tbody tr').first().click();
       await page.waitForTimeout(8000);
 
-      // The workspace is now the visible page…
-      const workspace = page.locator('mjs-deal-workspace');
-      await expect(workspace, 'the workspace must be showing').toBeVisible({ timeout: 40_000 });
+      await expect(
+        page.locator('mjs-deal-workspace'),
+        'the in-rail workspace must not be the destination',
+      ).toHaveCount(0);
 
-      // …and it is showing THAT deal, not a blank one. The deal-name field is the proof: a fresh
-      // workspace opens an empty draft, so a populated name means a draft was loaded.
-      const nameInput = page.locator('.dw-field', { hasText: 'Deal name' }).first().locator('input').first();
-      await expect(nameInput, 'the deal name field must be present').toBeVisible({ timeout: 20_000 });
-      const value = (await nameInput.inputValue()).trim();
-      expect(value.length, 'the workspace must have LOADED the clicked deal, not opened a blank draft').toBeGreaterThan(0);
-
-      await shot(page, '50-05-opened-in-workspace');
+      const form = page.locator('mjs-deal-form, gen-mjbizappssalesdeal-form').first();
+      await expect(form, 'Explorer must mount the deal form').toBeVisible({ timeout: 40_000 });
+      await shot(page, '50-05-opened-as-record');
     });
 
-    // ── 6. Open documents survive leaving the page ──────────────────────────
-    await test.step('the open deal survives switching pages and back', async () => {
-      /**
-       * This is why the workspace is hidden rather than `@if`-ed. The open-documents strip lives inside
-       * the workspace component, so destroying it on page change would throw away every open deal — and
-       * the failure would look like "the app forgot what I was doing", which nobody reports as a bug.
-       */
-      await railItem(page, 'All deals').click();
-      await page.waitForTimeout(2000);
-      await railItem(page, 'Workspace').click();
-      await page.waitForTimeout(3000);
-
-      const nameInput = page.locator('.dw-field', { hasText: 'Deal name' }).first().locator('input').first();
-      const value = (await nameInput.inputValue()).trim();
-      expect(value.length, 'the previously opened deal must still be open after a page round trip').toBeGreaterThan(0);
-      await shot(page, '50-06-state-survived');
+    await test.step('the Sales section is still reachable after opening a record', async () => {
+      const dealsTab = page.getByRole('button', { name: /^Deals/i }).first();
+      if (await dealsTab.count()) {
+        await dealsTab.click();
+        await page.waitForTimeout(1500);
+      }
+      await expect(page.locator('mjs-sales-section'), 'the Sales section must still exist').toBeAttached();
+      await shot(page, '50-06-section-still-there');
     });
 
     // ── 7. The keystone ─────────────────────────────────────────────────────

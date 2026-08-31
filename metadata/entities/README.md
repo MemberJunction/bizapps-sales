@@ -30,16 +30,15 @@ once the host has those migrations, and verify in the Explorer rather than assum
 `metadata/entity-relationships/.form-chrome.json` sets `inclusion` (`Primary` | `More` | `None`) and
 `FormRole` per relationship.
 
-**Nineteen of the twenty-two Sales entities are configured here.** Layout is metadata; it does not belong
-in a component. The three that are absent — `Deals`, `Deal Lines`, `Deal Stage Events` — have
-hand-authored form components because *behaviour* required it (the close lock, and fields the server owns),
-and their layout stays at the generated default **by decision, not by omission**.
+**Twenty of the twenty-two Sales entities are configured here.** Layout is metadata; it does not belong
+in a component. `Deal Lines` and `Deal Stage Events` stay at the generated default because they are
+child records opened from a parent, not composing surfaces. `Deals` is first-class: `Layout: left-nav`.
 
-**Ruled 2026-08-16: the Deal form stays a contextual record view, and gets no `left-nav` entry.** The deal
-**workspace** is the composing surface — where lines are added, products picked and the roster edited. A
-Deal form promoted to `left-nav` would read as a second place to build a deal, and two surfaces that must
-agree forever is exactly the cost this split exists to avoid. The form's job is to show one record in
-context and refuse the edits the server would refuse.
+**Ruled 2026-08-31: the Deal form is the deal.** The in-app workspace tab is retired (same antipattern
+Orders and Accounting already left). Opening a deal is `NavigationService.OpenEntityRecord`. The form
+gets People/Org chrome: persistent hero, Overview, organized sections, left-nav. `DealFormPolicy`
+forces `Layout: 'left-nav'` so the rail appears even before this Configuration row is pushed. The
+close lock still lives on the priority-2 form class because that is behaviour, not layout.
 
 ## The two things worth knowing before editing
 

@@ -399,7 +399,7 @@ test.describe('pipeline board — a drag writes three things, and never closes a
                 + 'message a prevented drop never produces',
         ).toBeVisible();
         await expect(lockHint).toHaveAttribute('title', /closes and locks/i);
-        await expect(lockHint).toHaveAttribute('title', /workspace/i);
+        await expect(lockHint).toHaveAttribute('title', /form/i);
 
         // And no transient message either, because nothing was dropped.
         await expect(
