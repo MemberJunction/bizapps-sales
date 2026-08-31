@@ -1,0 +1,51 @@
+[
+  {
+    "_comments": [
+      "DefaultInView is what mj-entity-viewer shows when no UserView.GridState is bound.",
+      "CodeGen left only Name on. The pipeline, inspect strip, and All Deals all need the same",
+      "working set: who, where, how much, when, whose."
+    ],
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=DealNumber" }
+  },
+  {
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=Account" }
+  },
+  {
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=Pipeline" }
+  },
+  {
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=PipelineStage" }
+  },
+  {
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=DealStatusType" }
+  },
+  {
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=Amount" }
+  },
+  {
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=Probability" }
+  },
+  {
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ExpectedCloseDate" }
+  },
+  {
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=OwnerEmployee" }
+  },
+  {
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ForecastCategoryType" }
+  },
+  {
+    "fields": { "DefaultInView": true },
+    "primaryKey": { "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=NextStep" }
+  }
+]

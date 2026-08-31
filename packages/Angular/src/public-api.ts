@@ -39,13 +39,34 @@ import { MJSSalesSectionComponent, SalesDealsSectionResource } from './lib/secti
  * PER-ENTITY FORMS (#89 P3). Each registers at explicit priority 2 against the same key its generated
  * form uses, so the custom one wins by declared precedence rather than by bundler import order.
  *
- * Only three entities have one, and only because BEHAVIOUR — not layout — required it: the close lock,
- * and the server-owned fields on lines and stage events. Everything else about how these forms look is
- * metadata (`metadata/entities/.form-chrome.json`), which is where layout belongs.
+ * Only two entities have a form *class* replacement, and only because BEHAVIOUR required it: the close
+ * lock, and the server-owned fields on stage events. Layout is panels + chrome (left-nav, Overview,
+ * organized sections) contributed onto the generated Deal form.
  */
 import './lib/custom/custom-forms.module';
 import { DealFormComponentExtended } from './lib/custom/deal-form.component';
 import { DealStageEventFormComponentExtended } from './lib/custom/deal-stage-event-form.component';
+import { MJSDealHeroPanel } from './lib/form-panels/deal-hero.panel';
+import { DealFormPolicy } from './lib/form-panels/deal-form.policy';
+import {
+    MJSDealActivityPanel,
+    MJSDealBuyingTeamPanel,
+    MJSDealClosePanel,
+    MJSDealCommercialPanel,
+    MJSDealHistoryPanel,
+    MJSDealLinesPanel,
+    MJSDealMotionPanel,
+    MJSDealOverviewPanel,
+    MJSDealPartyPanel,
+    MJSDealPipelinePanel,
+    MJSDealSchedulePanel,
+    MJSDealTeamGridPanel,
+} from './lib/form-panels/deal-form.panels';
+import {
+    MJSOrganizationDealsPanel,
+    MJSPersonDealTeamPanel,
+    MJSPersonDealsPanel,
+} from './lib/form-panels/party-deals.panels';
 
 // Re-export for consumers
 export { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
@@ -72,8 +93,31 @@ export { DealWorkspaceComponent } from './lib/workspace/deal-workspace.component
 
 // The board. Exported for reuse and no more: it needs no resource shim and no anchor, because the section
 // imports it directly as a standalone component rather than resolving it through the ClassFactory.
+export { MJSDealHeroPanel } from './lib/form-panels/deal-hero.panel';
+export { DealFormPolicy } from './lib/form-panels/deal-form.policy';
+export {
+    MJSDealOverviewPanel,
+    MJSDealPipelinePanel,
+    MJSDealPartyPanel,
+    MJSDealCommercialPanel,
+    MJSDealLinesPanel,
+    MJSDealMotionPanel,
+    MJSDealClosePanel,
+    MJSDealTeamGridPanel,
+    MJSDealBuyingTeamPanel,
+    MJSDealActivityPanel,
+    MJSDealHistoryPanel,
+    MJSDealSchedulePanel,
+} from './lib/form-panels/deal-form.panels';
+export {
+    MJSOrganizationDealsPanel,
+    MJSPersonDealsPanel,
+    MJSPersonDealTeamPanel,
+} from './lib/form-panels/party-deals.panels';
+export * from './lib/data/entity-names';
 export { DealBoardComponent } from './lib/board/deal-board.component';
 export type { BoardColumn } from './lib/board/deal-board.component';
+export * from './lib/pages/dashboard-inspect';
 export { DealWorkspaceService } from './lib/workspace/deal-workspace.service';
 export type { DealSaveOutcome, DealRosterRow } from './lib/workspace/deal-workspace.service';
 export * from './lib/workspace/deal-workspace.types';
@@ -101,6 +145,23 @@ export function LoadBizAppsSalesClient(): void {
     // The symptom would be a Deal form that lets you edit a locked deal — a missing guard, not an error.
     void DealFormComponentExtended;
     void DealStageEventFormComponentExtended;
+    void MJSDealHeroPanel;
+    void DealFormPolicy;
+    void MJSDealOverviewPanel;
+    void MJSDealPipelinePanel;
+    void MJSDealPartyPanel;
+    void MJSDealCommercialPanel;
+    void MJSDealLinesPanel;
+    void MJSDealMotionPanel;
+    void MJSDealClosePanel;
+    void MJSDealTeamGridPanel;
+    void MJSDealBuyingTeamPanel;
+    void MJSDealActivityPanel;
+    void MJSDealHistoryPanel;
+    void MJSDealSchedulePanel;
+    void MJSOrganizationDealsPanel;
+    void MJSPersonDealsPanel;
+    void MJSPersonDealTeamPanel;
 
     void CLASS_REGISTRATIONS;
     void MJSSalesSectionComponent;

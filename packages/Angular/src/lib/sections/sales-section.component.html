@@ -48,165 +48,194 @@
           } @else {
             <div class="kpis">
               @for (kpi of Kpis; track kpi.Label) {
-                <div class="kpi">
+                <button type="button" class="kpi" (click)="kpi.Filter && SetInspect(kpi.Filter)"
+                        [class.kpi--on]="kpi.Filter === InspectFilter">
                   <div class="l">{{ kpi.Label }}</div>
                   <div class="v" [class.warn]="kpi.Tone === 'warn'" [class.err]="kpi.Tone === 'err'">{{ kpi.Value }}</div>
                   <div class="f">{{ kpi.Footnote }}</div>
-                </div>
+                </button>
               }
             </div>
 
             <div class="card">
               <div class="ch">
-                Closing soonest
-                <span class="r">{{ ClosingSoon.length }} shown</span>
+                Forecast stack
+                <span class="r">Closed + Commit + Best Case incremental + remainder · flags are cumulative</span>
               </div>
-              @if (!ClosingSoon.length) {
-                <div class="empty">No open deals with an expected close date.</div>
-              } @else {
-                <div class="tscroll">
-                  <table class="wl">
-                    <thead>
-                      <tr>
-                        <th scope="col">Deal</th>
-                        <th scope="col">Customer</th>
-                        <th scope="col">Stage</th>
-                        <th scope="col" class="num">Amount</th>
-                        <th scope="col">Expected close</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (d of ClosingSoon; track d.ID) {
-                        <tr (click)="OpenDeal(d)" [title]="'Open ' + d.Name + ' in the workspace'"
-                            [class.slipped]="IsSlipped(d)">
-                          <td class="where">{{ d.Name }}</td>
-                          <td class="muted">
-                              <!-- The account opens as its OWN Explorer tab, not in the workspace. Only
-                                   offered when the deal actually has one — AccountID is nullable by
-                                   design. stopPropagation lives in OpenCustomer: this sits inside a row
-                                   that opens the deal. -->
-                              @if (d.AccountID) {
-                                <button type="button" class="linklike" (click)="OpenCustomer(d, $event)"
-                                        [title]="'Open ' + d.CustomerName + ' as a record'">{{ d.CustomerName }}</button>
-                              } @else {
-                                {{ d.CustomerName }}
-                              }
-                            </td>
-                          <td class="muted">{{ d.PipelineStage || '—' }}</td>
-                          <td class="num">
-                            {{ Money(d.Amount) }}
-                            <!-- The SAME marker the roster below carries. It was missing here, which
-                                 meant the one table a user lands on first was the one that did not say
-                                 where its figures came from. -->
-                            @if (d.Amount !== null && !d.AmountIsComputed) {
-                              <span class="flag" title="Entered by hand — not priced by the orders engine">stated</span>
-                            }
-                          </td>
-                          <td class="muted">
-                            {{ d.ExpectedCloseDate ? (d.ExpectedCloseDate | date: 'mediumDate' : 'UTC') : '—' }}
-                            @if (IsSlipped(d)) { <span class="flag">past</span> }
-                          </td>
-                        </tr>
+              <div class="stack-pad">
+                @if (Stack.Total <= 0) {
+                  <div class="empty">No amounts to stack yet.</div>
+                } @else {
+                  <div class="stack" role="img" [attr.aria-label]="'Forecast stack totaling ' + Money(Stack.Total)">
+                    @if (Stack.Closed > 0) {
+                      <span class="stack__seg stack__seg--closed" [style.width]="StackPct(Stack.Closed)"
+                            (click)="SetInspect('won')" title="Won">{{ Money(Stack.Closed) }}</span>
+                    }
+                    @if (Stack.Commit > 0) {
+                      <span class="stack__seg stack__seg--commit" [style.width]="StackPct(Stack.Commit)"
+                            (click)="SetInspect('commit')" title="Commit">{{ Money(Stack.Commit) }}</span>
+                    }
+                    @if (Stack.BestOnly > 0) {
+                      <span class="stack__seg stack__seg--best" [style.width]="StackPct(Stack.BestOnly)"
+                            (click)="SetInspect('best')" title="Best Case only">{{ Money(Stack.BestOnly) }}</span>
+                    }
+                    @if (Stack.PipeOnly > 0) {
+                      <span class="stack__seg stack__seg--pipe" [style.width]="StackPct(Stack.PipeOnly)"
+                            (click)="SetInspect('pipe')" title="Pipeline remainder">{{ Money(Stack.PipeOnly) }}</span>
+                    }
+                  </div>
+                  <div class="legend">
+                    <span><i class="swatch swatch--closed"></i>Won {{ Money(Stack.Closed) }}</span>
+                    <span><i class="swatch swatch--commit"></i>Commit {{ Money(Stack.Commit) }}</span>
+                    <span><i class="swatch swatch--best"></i>Best Case only {{ Money(Stack.BestOnly) }}</span>
+                    <span><i class="swatch swatch--pipe"></i>Remainder {{ Money(Stack.PipeOnly) }}</span>
+                    <span class="muted">Weighted open {{ Money(Weighted) }}</span>
+                  </div>
+                }
+              </div>
+            </div>
+
+            <div class="dash-split">
+              <div class="card">
+                <div class="ch">Stage mix <span class="r">open deals · current stage</span></div>
+                <div class="funnel-pad">
+                  @if (!Funnel.length) {
+                    <div class="empty">No open deals in a stage.</div>
+                  } @else {
+                    <div class="funnel">
+                      @for (col of Funnel; track col.Label) {
+                        <div class="funnel__col">
+                          <div class="funnel__n">{{ col.Count }}</div>
+                          <div class="funnel__bar" [style.height]="FunnelHeight(col.Count)"></div>
+                          <div class="funnel__lab">{{ col.Label }}</div>
+                        </div>
                       }
-                    </tbody>
-                  </table>
+                    </div>
+                  }
+                </div>
+              </div>
+              <div class="card">
+                <div class="ch">Needs a person <span class="r">filters Inspect</span></div>
+                <div class="queues">
+                  <button type="button" class="queue" (click)="SetInspect('slipped')">
+                    <span class="qico"><i class="fa-solid fa-calendar-xmark" aria-hidden="true"></i></span>
+                    <span class="qbody"><b>Close date slipped</b><span class="muted">Open, ExpectedCloseDate already past</span></span>
+                    <span class="qcount">{{ SlippedDeals.length }}</span>
+                  </button>
+                  <button type="button" class="queue" (click)="SetInspect('noowner')">
+                    <span class="qico"><i class="fa-solid fa-user-slash" aria-hidden="true"></i></span>
+                    <span class="qbody"><b>No owner</b><span class="muted">DealRole.IsOwnerRole empty</span></span>
+                    <span class="qcount">{{ SilentCount }}</span>
+                  </button>
+                  <button type="button" class="queue" (click)="SetInspect('commit')">
+                    <span class="qico"><i class="fa-solid fa-flag" aria-hidden="true"></i></span>
+                    <span class="qbody"><b>Commit this period</b><span class="muted">IncludeInCommit, still open</span></span>
+                    <span class="qcount">{{ CommitCount }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="ch">Close-date buckets <span class="r">open deals</span></div>
+              <div class="buckets">
+                @for (b of Buckets; track b.Key) {
+                  <button type="button" class="bucket" [class.bucket--warn]="b.Tone === 'warn'"
+                          [class.bucket--on]="InspectFilter === b.Key" (click)="SetInspect(b.Key)">
+                    <div class="l">{{ b.Label }}</div>
+                    <div class="v">{{ Money(b.Amount) }}</div>
+                    <div class="f">{{ b.Count }} {{ b.Count === 1 ? 'deal' : 'deals' }}</div>
+                  </button>
+                }
+              </div>
+            </div>
+
+            <div class="dash-split">
+              <div class="card">
+                <div class="ch">Commit by owner <span class="r">IncludeInCommit $</span></div>
+                <div class="barlist">
+                  @if (!Owners.length) {
+                    <div class="empty">No commit deals.</div>
+                  } @else {
+                    @for (o of Owners; track o.Name) {
+                      <div class="barrow">
+                        <b>{{ o.Name }}</b>
+                        <div class="track"><div class="fill" [style.width]="OwnerPct(o.Amount)"></div></div>
+                        <span class="num">{{ Money(o.Amount) }}</span>
+                      </div>
+                    }
+                  }
+                </div>
+              </div>
+              <div class="card">
+                <div class="ch">Win rate <span class="r">closed deals · count and value</span></div>
+                <div class="winrate">
+                  <div class="kpi">
+                    <div class="l">By count</div>
+                    <div class="v">{{ Pct(WinRateByCount) }}</div>
+                    <div class="f">{{ WinWonCount }} won / {{ WinClosedCount }} closed</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="l">By value</div>
+                    <div class="v">{{ Pct(WinRateByValue) }}</div>
+                    <div class="f">Won $ over closed $</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="ch">
+                Inspect
+                <span class="r">{{ InspectLabel }} · {{ InspectRows.length }} shown</span>
+              </div>
+              @if (InspectFilter !== 'closing') {
+                <div class="filter-bar">
+                  <span class="muted">{{ InspectLabel }}</span>
+                  <button type="button" class="linklike" (click)="SetInspect('closing')">Clear</button>
                 </div>
               }
+              <div class="mjs-viewer-host">
+                @if (DealEntityInfo) {
+                  <mj-entity-viewer
+                    [Entity]="DealEntityInfo"
+                    [ViewEntity]="InspectView"
+                    (RecordOpened)="OnInspectOpened($event)">
+                  </mj-entity-viewer>
+                } @else {
+                  <div class="empty">Deal entity metadata is not loaded.</div>
+                }
+              </div>
             </div>
           }
         </div>
 
         <!-- ═════════════════════════ ALL DEALS ═════════════════════════ -->
         <div class="wrap wrap--list" [hidden]="Page !== 'list'">
-          <div class="sechead"><h2>All deals</h2></div>
+          <div class="sechead">
+            <h2>All deals</h2>
+            <span class="r">Every deal, with the same columns as Inspect — grid, cards, or timeline</span>
+          </div>
 
           @if (Loading) {
             <mj-loading></mj-loading>
-          } @else {
-            <div class="card">
-              <div class="ch">
-                Deals
-                <span class="r">{{ Deals.length }} total</span>
-              </div>
-
-              @if (!Deals.length) {
-                <!-- A first-run database genuinely has no deals, so this is a starting point rather than
-                     an error state — it offers the action instead of just reporting emptiness. -->
-                <div class="empty">
-                  No deals yet.
-                  <button type="button" mjButton variant="primary" (click)="StartPrimary()">
-                    <i class="fa-solid fa-plus" aria-hidden="true"></i> New deal
-                  </button>
-                </div>
-              } @else {
-                <div class="tscroll">
-                  <table class="wl">
-                    <thead>
-                      <tr>
-                        <th scope="col">Deal</th>
-                        <th scope="col">Customer</th>
-                        <th scope="col">Pipeline</th>
-                        <th scope="col">Stage</th>
-                        <th scope="col">Status</th>
-                        <th scope="col" class="num">Amount</th>
-                        <th scope="col" class="num">Prob</th>
-                        <th scope="col">Expected close</th>
-                        <th scope="col">Owner</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <!-- EVERY ROW OPENS THE WORKSPACE. This is the affordance Phase 1 was missing: the
-                           workspace could create a deal but nothing could open one. -->
-                      @for (d of Deals; track d.ID) {
-                        <tr (click)="OpenDeal(d)" [title]="'Open ' + d.Name + ' in the workspace'"
-                            [class.slipped]="IsSlipped(d)">
-                          <td class="where">
-                            {{ d.Name }}
-                            @if (d.DealNumber) { <span class="num-chip">{{ d.DealNumber }}</span> }
-                          </td>
-                          <td class="muted">
-                              <!-- The account opens as its OWN Explorer tab, not in the workspace. Only
-                                   offered when the deal actually has one — AccountID is nullable by
-                                   design. stopPropagation lives in OpenCustomer: this sits inside a row
-                                   that opens the deal. -->
-                              @if (d.AccountID) {
-                                <button type="button" class="linklike" (click)="OpenCustomer(d, $event)"
-                                        [title]="'Open ' + d.CustomerName + ' as a record'">{{ d.CustomerName }}</button>
-                              } @else {
-                                {{ d.CustomerName }}
-                              }
-                            </td>
-                          <td class="muted">{{ d.Pipeline || '—' }}</td>
-                          <td class="muted">{{ d.PipelineStage || '—' }}</td>
-                          <td><span class="pill" [class]="StatusTone(d)">{{ d.DealStatusType || '—' }}</span></td>
-                          <td class="num">
-                            {{ Money(d.Amount) }}
-                            <!-- Provenance, visible. A hand-entered amount and a PreviewOrder answer are
-                                 different kinds of fact, and the grid is where that difference matters. -->
-                            @if (d.Amount !== null && !d.AmountIsComputed) {
-                              <span class="flag" title="Entered by hand — not priced by the orders engine">stated</span>
-                            }
-                          </td>
-                          <td class="num muted">{{ d.Probability !== null ? d.Probability + '%' : '—' }}</td>
-                          <td class="muted">
-                            {{ d.ExpectedCloseDate ? (d.ExpectedCloseDate | date: 'mediumDate' : 'UTC') : '—' }}
-                            @if (IsSlipped(d)) { <span class="flag">past</span> }
-                          </td>
-                          <td class="muted">{{ d.OwnerEmployee || '—' }}</td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                </div>
-              }
+          } @else if (DealEntityInfo) {
+            <div class="mjs-viewer-host mjs-viewer-host--page">
+              <mj-entity-viewer
+                [Entity]="DealEntityInfo"
+                [ViewEntity]="AllDealsView"
+                (RecordOpened)="OnAllDealsOpened($event)">
+              </mj-entity-viewer>
             </div>
+          } @else {
+            <div class="empty">Deal entity metadata is not loaded.</div>
           }
         </div>
 
         <!-- ═════════════════════════ BOARD ═════════════════════════ -->
-        <!-- Rendered with @if rather than [hidden]: unlike the workspace it holds no unsaved state, so
-             there is nothing to lose by tearing it down, and a hidden board with a horizontal scroller
-             is a layout hazard on the pages that are showing. -->
+        <!-- Rendered with @if rather than [hidden]: the board holds no unsaved state, so there is
+             nothing to lose by tearing it down, and a hidden board with a horizontal scroller is a
+             layout hazard on the pages that are showing. -->
         <div class="wrap wrap--board" [hidden]="Page !== 'board'">
           <div class="sechead"><h2>Board</h2></div>
 
@@ -221,14 +250,6 @@
               (DealOpened)="OpenDeal($event)"
               (StageMoved)="Refresh()"></mjs-deal-board>
           }
-        </div>
-
-        <!-- ═════════════════════════ WORKSPACE ═════════════════════════ -->
-        <!-- MOUNTED ONCE, HIDDEN WHEN ANOTHER PAGE SHOWS. The open-documents strip lives inside this
-             component, so destroying it would throw away every open deal — switching to the list and
-             back has to keep your drafts. See the component header. -->
-        <div class="wrap wrap--flush wrap--workspace" [hidden]="!ShowWorkspace">
-          <mjs-deal-workspace></mjs-deal-workspace>
         </div>
 
       </mj-page-body-interior>

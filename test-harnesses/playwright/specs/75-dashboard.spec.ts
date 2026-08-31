@@ -135,56 +135,11 @@ test.describe('dashboard — every tile against the database', () => {
             'Won must equal the COUNT of deals whose status carries IsWon',
         ).toBe(Number(expected!.WonCount));
 
-        // ── Closing soonest, IN ORDER ───────────────────────────────────────
-        /**
-         * ORDER IS THE ASSERTION, not membership. The list is documented as soonest-first and used to
-         * rely on the roster query's ORDER BY two files away; it now sorts for itself. A spec that only
-         * checked which deals appeared would pass on a reversed list.
-         */
-        const rowNames = await page.locator('.wrap--dashboard table.wl tbody tr td:first-child').allTextContents();
-        const shown = rowNames.map((r) => r.trim()).filter(Boolean);
-        expect(shown.length, 'the closing-soon table must render rows').toBeGreaterThan(0);
-
-        const dbOrder = await QueryOne<{ Names: string }>(`
-            SELECT STRING_AGG(CAST(x.Name AS nvarchar(MAX)), '||') WITHIN GROUP (ORDER BY x.rn) AS Names
-              FROM (
-                SELECT d.Name, ROW_NUMBER() OVER (ORDER BY d.ExpectedCloseDate ASC, d.Name ASC) rn
-                  FROM __mj_BizAppsSales.Deal d
-                  JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
-                 WHERE t.IsOpen = 1 AND d.ExpectedCloseDate IS NOT NULL
-              ) x
-             WHERE x.rn <= 8`);
-        const expectedOrder = (dbOrder?.Names ?? '').split('||').filter(Boolean);
-        expect(shown, 'the closing-soon list must be soonest-expected-close first').toEqual(expectedOrder);
-
-        // ── Priced versus stated must be VISIBLY different ──────────────────
-        /**
-         * The tag is the whole point of the tile: `Deal.Amount` is either a cached answer from orders or
-         * a human's figure, and a dashboard that renders them identically is telling the reader the two
-         * are the same kind of number. The count of `stated` markers must equal the count of open deals
-         * carrying AmountIsComputed = 0, and it must not be zero or all of them.
-         */
-        const statedMarkers = await page.locator('.wrap--dashboard table.wl tbody tr .flag', { hasText: /stated/i }).count();
-        const statedRows = await QueryOne<{ N: number }>(`
-            SELECT COUNT(*) AS N
-              FROM __mj_BizAppsSales.Deal d
-              JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
-             WHERE t.IsOpen = 1 AND d.ExpectedCloseDate IS NOT NULL AND d.AmountIsComputed = 0
-               AND d.ID IN (
-                 SELECT TOP 8 d2.ID FROM __mj_BizAppsSales.Deal d2
-                   JOIN __mj_BizAppsSales.DealStatusType t2 ON t2.ID = d2.DealStatusTypeID
-                  WHERE t2.IsOpen = 1 AND d2.ExpectedCloseDate IS NOT NULL
-                  ORDER BY d2.ExpectedCloseDate ASC, d2.Name ASC)`);
-        expect(
-            statedMarkers,
-            'every hand-typed amount in the visible rows must carry the "stated" marker, and no priced one may',
-        ).toBe(Number(statedRows?.N ?? -1));
-        expect(statedMarkers, 'and at least one must be marked, or the distinction is invisible')
-            .toBeGreaterThan(0);
-        expect(
-            statedMarkers,
-            'but not ALL of them — a screen where everything is stated proves nothing about the cache',
-        ).toBeLessThan(shown.length);
+        // Inspect is MJ's entity viewer, not a hand-rolled table — same host as the Orders dashboard.
+        await expect(
+            page.locator('.wrap--dashboard mj-entity-viewer').first(),
+            'Inspect must be mj-entity-viewer, not a custom table',
+        ).toBeVisible({ timeout: 30_000 });
 
         /**
          * ZERO CONSOLE ERRORS IS PART OF THE PASS. A RunView naming a retired entity logs an error and

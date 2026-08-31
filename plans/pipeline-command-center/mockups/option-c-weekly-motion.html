@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sales — Option C · Weekly motion</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="chrome.css" />
+</head>
+<body>
+<div class="app">
+  <div class="thesis">
+    <b>Thesis:</b> The dashboard is the Monday forecast-call briefing — won, lost, slipped, pulled, silent — plus an analyst panel.
+    Same job as sitting in a room with the pipeline. Click still <code>OpenEntityRecord</code>.
+    Best for a small leadership team.
+    <b>Tradeoff:</b> weak as a working surface for 40 open deals; the board and list still have to exist as rails.
+  </div>
+  <header class="topnav">
+    <div class="brand"><span class="mark">MJ</span> Sales <span class="app-label">Open App</span></div>
+    <div class="tabs" id="tabs"><button class="tab is-on" type="button"><i class="fa-solid fa-handshake"></i> Deals</button></div>
+    <div class="top-right"><span class="chip">week of 25 Aug</span><span class="avatar">AK</span></div>
+  </header>
+  <div class="shell">
+    <nav class="rail">
+      <div class="rail-g">Deals</div>
+      <button class="nav is-on" type="button"><i class="fa-solid fa-newspaper"></i> This week</button>
+      <button class="nav" type="button"><i class="fa-solid fa-diagram-project"></i> Board</button>
+      <button class="nav" type="button"><i class="fa-solid fa-table-list"></i> All deals</button>
+    </nav>
+    <div class="main">
+      <div class="page-h">
+        <div>
+          <h1>Week of 25 Aug</h1>
+          <div class="sub">Commit moved +$92k. Four deals went quiet. Two close dates walked into last week.</div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" type="button" onclick="openRec('new')">New deal</button>
+        </div>
+      </div>
+      <div class="content" style="display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start">
+        <div>
+          <div class="kpis">
+            <div class="kpi good"><div class="l">Won</div><div class="v">+$180k</div><div class="f">2 deals · Hub + annual software</div></div>
+            <div class="kpi bad"><div class="l">Lost</div><div class="v">−$180k</div><div class="f">1 deal · incumbent, timing</div></div>
+            <div class="kpi warn"><div class="l">Slipped</div><div class="v">−$241k</div><div class="f">ASAE booth, HH AV</div></div>
+            <div class="kpi"><div class="l">New</div><div class="v">+$36k</div><div class="f">DigitalNow add-on</div></div>
+          </div>
+          <div class="card">
+            <div class="ch">Motion log <span>RecordChange + DealStageEvent + Common activity</span></div>
+            <div class="pad timeline">
+              <div class="d">Sun 31</div>
+              <div class="ev"><b>Plant 2 ERP</b> still in Proposal, 24 days. Next step empty.
+                <button class="btn ghost" type="button" onclick="openRec('1820')">Open</button></div>
+              <div class="d">Fri 29</div>
+              <div class="ev"><b>HH Venue retainer</b> emailed redlines. Still Commit.
+                <button class="btn ghost" type="button" onclick="openRec('1847')">Open</button></div>
+              <div class="d">Thu 28</div>
+              <div class="ev"><b>ASAE booth</b> close date moved 12 Aug → still open. No activity 11 days.
+                <button class="btn ghost" type="button" onclick="openRec('1842')">Open</button></div>
+              <div class="d">Wed 27</div>
+              <div class="ev"><b>Innovation Hub deposit</b> marked Signed. $84k booked.</div>
+              <div class="d">Tue 26</div>
+              <div class="ev"><b>Incumbent displacement</b> Lost · timing. $180k out of commit.</div>
+              <div class="d">Mon 25</div>
+              <div class="ev">DigitalNow add-on created after the kickoff. $36k Pipeline, closes 4 Sep.</div>
+            </div>
+          </div>
+        </div>
+        <aside class="card">
+          <div class="ch">Analyst</div>
+          <div class="pad">
+            <p class="muted" style="margin:0 0 12px;font-size:13px">
+              Commit is $2.14M against last August’s $1.92M booked, so the floor looks fine — until you take the two slipped event deals out.
+              If ASAE does not move this week, September Commit cannot catch without pulling October.
+              Plant 2 is the only Commit deal stuck in Proposal; that’s a coaching conversation, not a forecast edit.
+            </p>
+            <button class="btn" type="button" style="width:100%;margin-bottom:8px">Ask: who should I call today?</button>
+            <button class="btn ghost" type="button" style="width:100%">Ask: what slipped since the 1st?</button>
+            <p class="tiny" style="margin:12px 0 0">The panel is agent context over the same queries as Option A. It does not invent a second forecast.</p>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+function openRec(id) {
+  const toast = document.getElementById('toast');
+  toast.textContent = id === 'new'
+    ? 'OpenNewEntityRecord("MJ_BizApps_Sales: Deals")'
+    : 'OpenEntityRecord("MJ_BizApps_Sales: Deals", DEAL-' + id + ')';
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2400);
+  const tabs = document.getElementById('tabs');
+  const t = document.createElement('button');
+  t.className = 'tab is-on';
+  t.innerHTML = (id === 'new' ? 'New deal' : 'DEAL-' + id) + ' <span class="x">×</span>';
+  [...tabs.querySelectorAll('.tab')].forEach(x => x.classList.remove('is-on'));
+  tabs.appendChild(t);
+}
+</script>
+</body>
+</html>

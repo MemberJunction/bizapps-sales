@@ -67,15 +67,14 @@ export const SALES_SECTIONS: SalesSection[] = [
 /**
  * Deals — find one, open one, write one.
  *
- * `workspace` is listed in the rail even though rows open it directly, because it is also how you start
- * a deal from nothing: a rail item is the only affordance that does not require having found a record
- * first.
+ * Records are Explorer tabs (`OpenEntityRecord` / `OpenNewEntityRecord`), not a rail page. New deal
+ * is the header primary. There is no Workspace rail — that nested document strip was the antipattern
+ * orders already left.
  */
 export const DEALS_SUB_PAGES: SalesSubPage[] = [
     { Id: 'dashboard', Label: 'Dashboard', Icon: 'fa-solid fa-gauge-high', Description: 'What is moving, what has stalled' },
     { Id: 'list', Label: 'All deals', Icon: 'fa-solid fa-table-list' },
     { Id: 'board', Label: 'Board', Icon: 'fa-solid fa-diagram-project', Description: 'Move deals through the pipeline' },
-    { Id: 'workspace', Label: 'Workspace', Icon: 'fa-solid fa-layer-group', Description: 'Open, edit and create' },
 ];
 
 /** The rail for a section id. An unknown id gives an empty rail rather than throwing. */
@@ -163,7 +162,7 @@ export function PrimaryActionFor(pageId: string): SalesPrimaryAction | null {
     switch (pageId) {
         case 'dashboard':
         case 'list':
-        case 'workspace':
+        case 'board':
             return { Label: 'New deal', Icon: 'fa-solid fa-plus' };
         default:
             return null;

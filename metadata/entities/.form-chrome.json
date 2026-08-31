@@ -1,6 +1,31 @@
 [
   {
     "_comments": [
+      "The Deal form IS the deal. Workspace-era ruling (accordion, no left-nav) is retired.",
+      "left-nav because Overview + organized field groups + related teams/history exceed the auto",
+      "threshold, and an AE/exec scans the rail the same way they scan People and Organizations.",
+      "DealFormPolicy also forces Layout left-nav so the rail appears before this row is pushed."
+    ],
+    "fields": {
+      "Configuration": {
+        "UI": {
+          "Form": {
+            "Layout": "left-nav",
+            "RelatedRolePolicy": "smart"
+          }
+        }
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deals"
+    },
+    "sync": {
+      "lastModified": "2026-08-31T00:00:00.000Z",
+      "checksum": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  {
+    "_comments": [
       "A vocabulary type table: a short config record whose children are all \"which records use this\".",
       "accordion because there are barely a dozen fields, and the usage lists go to More so a config",
       "record is not dominated by a grid of everything that happens to reference it."
