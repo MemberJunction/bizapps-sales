@@ -36,7 +36,7 @@ export type DateLike = Date | string | null | undefined;
  *
  * ── THE PREDICATE IS ORDERS', NOT OURS ──
  *
- * `OrderEntityServer.materializeSubscriptions` selects the lines it will build subscriptions for with
+ * `OrderEntityServer.subscriptionLines` selects the lines that will receive subscriptions with
  * `ID IN (...) AND SubscriptionTypeID IS NOT NULL` against this same column. Matching it exactly means
  * a line offering a term start is exactly a line that will receive a term at confirm. Any other test —
  * a product-type string, a name convention — could drift from that and offer a term start on a line

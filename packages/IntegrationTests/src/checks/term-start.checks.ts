@@ -156,8 +156,8 @@ export const TermStartChecks: NamedCheck[] = [
         RequiresMutation: true,
         Fn: async () => {
             /**
-             * The predicate has to be ORDERS'. `materializeSubscriptions` picks the lines it builds terms
-             * for with `SubscriptionTypeID IS NOT NULL`; if this app used any other test, the field would
+             * The predicate has to be ORDERS'. `subscriptionLines` picks the lines that receive terms
+             * with `SubscriptionTypeID IS NOT NULL`; if this app used any other test, the field would
              * appear on lines that never receive a term (a promise the confirm does not keep) or hide on
              * lines that do (a term the rep could not set).
              */
