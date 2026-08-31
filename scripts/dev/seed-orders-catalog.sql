@@ -42,7 +42,7 @@ IF @ptype IS NULL OR @revrec IS NULL
 
     WHICH type does not matter here and is deliberately not chosen by Code. The deal workspace only
     asks whether a product HAS a SubscriptionTypeID -- that is orders' own test for which lines get a
-    term (`materializeSubscriptions`) -- and the type's StartMode only decides what confirm does with
+    term (`subscriptionLines`) -- and the type's StartMode only decides what confirm does with
     the date, which is orders' side of the boundary.
 
     A WARNING rather than a THROW when none exists, unlike @ptype and @revrec above. Those two are
