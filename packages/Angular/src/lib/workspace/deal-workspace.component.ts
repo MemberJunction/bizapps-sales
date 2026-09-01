@@ -1100,20 +1100,6 @@ export class DealWorkspaceComponent implements OnInit {
      */
     public SetTermStart(line: OrderLineEntity, value: string): void {
         /**
-         * AN EMPTY VALUE IS A PARTIAL EDIT, NOT A CLEAR — and treating it as a clear lost the rep's date.
-         *
-         * `<input type="date">` reports `''` for ANY incomplete value, not only for a deliberate clear.
-         * Backspace the year segment to retype it and the control emits `''` on the way through. This
-         * used to write null immediately, and because the binding is one-way the next change-detection
-         * pass refilled the box with the order date — so the stored value was gone, the deal was dirty,
-         * and the field still looked populated. Nothing on screen said anything had happened.
-         *
-         * Clearing stays available and stays explicit: `ResetTermStart` is the affordance for it, it is
-         * labelled, and it is the one place a clear is unambiguous. Note that method already guards
-         * against a redundant write for the same reason this one now does; the far more frequent path
-         * was the unguarded one.
-         */
-        /**
          * AN EMPTY VALUE IS WRITTEN THROUGH, and the guard that used to sit here was a mistake.
          *
          * `<input type="date">` reports `''` for any incomplete value, so backspacing a segment to
@@ -1129,7 +1115,21 @@ export class DealWorkspaceComponent implements OnInit {
          * disappears — and they simply type the date they were reaching for. A visible, recoverable
          * consequence beats an invisible wrong state.
          */
-        line.ServicePeriodStart = FromDateInput(value);
+        const next = FromDateInput(value);
+
+        // NULL OVER NULL IS NOT A CHANGE. Backspacing a field that is only SHOWING the order date
+        // emits '' on the way through, which parses to null over an already-null column — no edit,
+        // but `Touch()` still marked the deal dirty and lit Save on a form nobody had altered.
+        //
+        // Narrow on purpose: it compares only the both-absent case rather than the two dates. A
+        // broader equality guard here is what produced the TC1 bug — the write is the behaviour this
+        // method exists for, and the last guard that tried to be clever about skipping it lost the
+        // rep's date. This one cannot, because in the case it skips there is nothing to lose.
+        if (next === null && line.ServicePeriodStart == null) {
+            return;
+        }
+
+        line.ServicePeriodStart = next;
         this.Touch();
     }
 
@@ -1141,21 +1141,15 @@ export class DealWorkspaceComponent implements OnInit {
      * well as in the template.
      */
     public ResetTermStart(line: OrderLineEntity, focusAfter?: HTMLElement): void {
-        if (!line.ServicePeriodStart) {
+        // EITHER date is something to clear. Guarding on the start alone meant a line holding only
+        // an end date returned early and kept it — and worse, the reset then reported success while
+        // the field showed the order-date hint, so the row read as inheriting while the record still
+        // held an explicit half-open period.
+        if (!line.ServicePeriodStart && !line.ServicePeriodEnd) {
             return;
         }
         line.ServicePeriodStart = null;
-        /**
-         * FOCUS HAS TO GO SOMEWHERE, because this button is about to remove itself.
-         *
-         * It renders inside `@if (HasExplicitTermStart(line))`, and clearing the stored value makes
-         * that false — so on the next change-detection pass the focused element leaves the DOM and the
-         * browser drops focus to `<body>`. A keyboard user on row 7 of a twelve-line grid presses Enter
-         * and their next Tab starts again from the page chrome.
-         *
-         * The date input is the natural destination: it is the control the reset just acted on, it stays
-         * in the DOM, and it is where the user looks to see the result.
-         */
+        line.ServicePeriodEnd = null;
         /**
          * WHERE FOCUS GOES DEPENDS ON WHETHER THE CONTROL SURVIVES THE RESET.
          *
@@ -1170,12 +1164,16 @@ export class DealWorkspaceComponent implements OnInit {
          * row's product select, which always is. Reading `ShouldOfferTermStart` here rather than
          * guessing means the two cannot disagree.
          */
-        const stillShown = ShouldOfferTermStart(!!line.ProductID, this.ProductFor(line), line.ServicePeriodStart);
-        if (stillShown) {
+        // Calls ShowTermStart rather than restating its body. The two answered the same question in
+        // two places, which is the drift this file has already been bitten by twice.
+        if (this.ShowTermStart(line)) {
             focusAfter?.focus();
         } else {
+            // The PRODUCT cell by class, not the row's first `select`. A bare tag lookup depends on
+            // column order, so adding or reordering a select-bearing cell would silently move focus
+            // somewhere else — and the failure is invisible to anyone not using a keyboard.
             const row = focusAfter?.closest('tr');
-            row?.querySelector<HTMLSelectElement>('select')?.focus();
+            row?.querySelector<HTMLSelectElement>('select.dw-cell-product')?.focus();
         }
         this.Touch();
     }
@@ -1845,20 +1843,6 @@ export class DealWorkspaceComponent implements OnInit {
         line.ProductID = productID;
 
         /**
-         * THE LINE'S COMPANY COMES FROM THE PRODUCT (#29).
-         *
-         * Orders' `OrderLineEntityServer` overwrites `CompanyID` from the product at save, so the value
-         * that lands is correct either way. Setting it here is about the BROWSER: `CanSave` is gated on
-         * `deal.Validate()`, which runs client-side where that server subclass does not exist, and
-         * `OrderLine.CompanyID` is NOT NULL. Left unset, the rep gets a disabled Save reading
-         * "Company ID cannot be null" against a form that looks complete -- the same defect found in the
-         * Explorer pass on 2026-08-20, which the old pipeline stamp existed to prevent.
-         *
-         * If the product is not in the catalogue the field is left alone rather than cleared: the server
-         * will still stamp it correctly, and blanking a value we cannot improve on would turn a display
-         * gap into a validation failure.
-         */
-        /**
          * THE FALLBACK IS NOT OPTIONAL, and the earlier version of this that "left the field alone"
          * assumed the line already had a company. Once `AddLine` stops stamping, it does not.
          *
@@ -1903,7 +1887,14 @@ export class DealWorkspaceComponent implements OnInit {
         const chosen = this.ProductFor(line);
         line.Set('CompanyID', chosen?.CompanyID ?? this.ActiveCompanyID);
         if (chosen && !IsSubscriptionProduct(chosen)) {
+            // BOTH, because the guard above is `Start || End`. Clearing only the start left an end
+            // date stranded on a line whose product can no longer carry a term, and a leftover end
+            // defeats that guard exactly as well as a leftover start does — so the event-ticket
+            // failure described above still happened, just via the other half of the condition.
+            // Nothing in sales writes ServicePeriodEnd, but orders does: its generated order-line
+            // form edits it directly, and a confirm stamps both. Either is enough to arrive here.
             line.ServicePeriodStart = null;
+            line.ServicePeriodEnd = null;
         }
 
         this.Touch();

@@ -115,21 +115,6 @@ export function ShouldOfferTermStart(
 }
 
 /**
- * The date the control DISPLAYS: the stored term start, or the order date as a default.
- *
- * ── THE DEFAULT IS DISPLAYED, NEVER WRITTEN ──
- *
- * This is the whole of #32's behaviour, and the two acceptance criteria that look like opposites are
- * one rule seen twice: with nothing stored the field follows the order date, and the moment a value is
- * stored it stops following. Writing the default onto the line at load would collapse both into "always
- * frozen", would make every line dirty just by opening the deal, and would leave "reset to order date"
- * with nothing to distinguish it from setting today's date by hand.
- *
- * `??` and not `||` on purpose: the operand is a `Date`, and a falsy-but-real value is not possible
- * here — but `||` would also swallow `''`, which is a legitimately-cleared field that must fall back to
- * the order date rather than render blank.
- */
-/**
  * Is this `DateLike` absent for our purposes?
  *
  * Absent means null, undefined, a blank or whitespace-only string, or a Date that does not parse. The
@@ -147,22 +132,30 @@ function IsEmptyDateLike(value: DateLike): boolean {
     return String(value).trim().length === 0;
 }
 
+/**
+ * The date the control DISPLAYS: the stored term start, or the order date as a default.
+ *
+ * ── THE DEFAULT IS DISPLAYED, NEVER WRITTEN ──
+ *
+ * This is the whole of #32's behaviour, and the two acceptance criteria that look like opposites are
+ * one rule seen twice: with nothing stored the field follows the order date, and the moment a value is
+ * stored it stops following. Writing the default onto the line at load would collapse both into "always
+ * frozen", would make every line dirty just by opening the deal, and would leave "reset to order date"
+ * with nothing to distinguish it from setting today's date by hand.
+ *
+ * ── EMPTINESS, NOT NULLISHNESS ──
+ *
+ * The fallback triggers on {@link IsEmptyDateLike}, deliberately, and NOT on `??`. This read
+ * `stored ?? orderDate` once, which meant it fell back on null and undefined only — and `'' ?? x` is
+ * `''`. `DateLike` explicitly admits `string`, and a cleared `<input type="date">` reports exactly
+ * `''`, so the code produced the outcome the paragraph above rejects: a blank date box captioned
+ * "order date", with no reset button, because `HasExplicitTermStart('')` is false while
+ * `EffectiveTermStart('')` returned the empty string.
+ *
+ * `||` would have fixed that case and taken a legitimate falsy with it. An explicit emptiness test is
+ * cheaper to read than re-deriving which falsy values `DateLike` can hold.
+ */
 export function EffectiveTermStart(stored: DateLike, orderDate: DateLike): DateLike {
-    /**
-     * ── `??` WAS THE WRONG OPERATOR, AND THE COMMENT ABOVE SAYS SO ────────────────────────────
-     *
-     * The reasoning above argues that a cleared field "must fall back to the order date rather than
-     * render blank". `??` only falls back on null and undefined; `'' ?? orderDate` is `''`. So the
-     * code implemented precisely the outcome the comment rejects, and `DateLike` explicitly admits
-     * `string` — a cleared `<input type="date">` reports exactly `''`.
-     *
-     * What the rep saw: a blank date box captioned "order date", with no reset button, because
-     * `HasExplicitTermStart('')` is false while `EffectiveTermStart('')` returned the empty string.
-     *
-     * An emptiness test rather than `||`, because `||` would also swallow a legitimate falsy that is
-     * not empty — and being explicit here is cheaper than re-deriving which falsy values `DateLike`
-     * can hold.
-     */
     return IsEmptyDateLike(stored) ? (orderDate ?? null) : stored;
 }
 

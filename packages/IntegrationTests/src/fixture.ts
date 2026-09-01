@@ -160,7 +160,22 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
         ctx, E_PIPELINE, 'IsActive = 1', ['ID', 'CompanyID'], 'active pipeline', 'Name ASC',
     );
     const stage = await one<{ ID: string }>(
-        ctx, E_STAGE, `PipelineID = '${pipeline.ID}' AND IsActive = 1`, ['ID'], 'stage on that pipeline',
+        // ORDERED AND FILTERED, for a sharper version of the reason the pipeline lookup above is.
+        // Unordered, this took the first of the pipeline's active stages, and on the seeded host that
+        // set includes `Signed` (OrderStatusOnEntry = Quoted) and `Lost` (Voided). A plan that
+        // returned either would have every seeded deal born on a closing stage, quoting or voiding the
+        // embedded order before a check touched it — and the failure would read as a bug in whatever
+        // check ran first.
+        //
+        // `OrderStatusOnEntry IS NULL` is the precise property wanted: a stage that does not act on
+        // the order on entry. Both active pipelines on the seeded host have two such stages, so the
+        // filter narrows rather than empties; DisplayOrder then picks the earliest deterministically.
+        ctx,
+        E_STAGE,
+        `PipelineID = '${pipeline.ID}' AND IsActive = 1 AND OrderStatusOnEntry IS NULL`,
+        ['ID'],
+        'open stage on that pipeline (one that does not act on the order)',
+        'DisplayOrder ASC, Name ASC',
     );
     const dealType = await one<{ ID: string }>(ctx, E_DEAL_TYPE, 'IsActive = 1', ['ID'], 'deal type');
     const openStatus = await one<{ ID: string }>(
