@@ -30,6 +30,16 @@
  * parties with no `Regarding` link, which is the honest description of it. That is S-US10, and it
  * is only expressible because `CK_ActivityLink_Target` has an unresolved-identity half.
  *
+ * ── DEAL PARTIES ARE SNAPSHOTTED, NOT RE-DERIVED LATER ────────────────────────────────────
+ *
+ * Ingest already links whoever was ON THE MESSAGE (email → ContactMethod → Person XOR Org).
+ * That is not enough for a Person/Org reverse timeline, and it is not enough as history:
+ * the deal's primary contact can change, and a person can change employer. So for every
+ * matched deal this extension also writes `LoggedFor` links to that deal's `AccountID`
+ * (Organization) and `PrimaryContactID` (Person) as they stood at ingest time. Shared-PK
+ * IsA means those IDs are used verbatim under Common's entity names. A party already
+ * linked from the message (any role) is not duplicated.
+ *
  * @module @mj-biz-apps/sales-core-entities-server
  */
 import { LogError } from '@memberjunction/core';
@@ -40,8 +50,8 @@ import {
     type ActivityWriteContext,
 } from '@mj-biz-apps/common-activity-sync';
 
-import { E_ACTIVITY_LINK, E_DEAL } from '@mj-biz-apps/sales-entities';
-import { DealMatcher, type KnownAddress } from './DealMatcher.js';
+import { E_ACTIVITY_LINK, E_DEAL, E_ORGANIZATION, E_PERSON } from '@mj-biz-apps/sales-entities';
+import { DealMatcher, type DealMatch, type KnownAddress } from './DealMatcher.js';
 
 @RegisterClass(BaseActivitySyncExtension, 'Sales.DealLinker')
 export class DealLinkerExtension extends BaseActivitySyncExtension {
@@ -80,7 +90,7 @@ export class DealLinkerExtension extends BaseActivitySyncExtension {
             );
         }
 
-        const dealEntityID = this.resolveDealEntityID(context);
+        const dealEntityID = this.resolveEntityID(context, E_DEAL);
         /**
          * Partial attribution under Skip is the stated choice, not a side effect.
          *
@@ -91,6 +101,9 @@ export class DealLinkerExtension extends BaseActivitySyncExtension {
          * an incomplete set. A deployment that would rather lose the activity sets
          * FailurePolicy Abort on the registration.
          */
+        const personEntityID = this.resolveEntityID(context, E_PERSON);
+        const orgEntityID = this.resolveEntityID(context, E_ORGANIZATION);
+
         for (const match of result.Matches) {
             if (context.Signal?.aborted) {
                 throw new Error(
@@ -99,6 +112,27 @@ export class DealLinkerExtension extends BaseActivitySyncExtension {
                 );
             }
             await this.addRegardingLink(context, match.DealID, dealEntityID);
+            await this.snapshotDealParties(context, match, personEntityID, orgEntityID);
+        }
+    }
+
+    /**
+     * Persist the deal's account and primary contact as they were when this activity was filed.
+     * Role `LoggedFor` (not From/To): these people may not have been on the message; they were
+     * on the deal. Skip a party already linked from ingest (any role) — the reverse lookup
+     * is by EntityID+RecordID, so a second LoggedFor row would not add reachability.
+     */
+    private async snapshotDealParties(
+        context: ActivityWriteContext,
+        match: DealMatch,
+        personEntityID: string,
+        orgEntityID: string,
+    ): Promise<void> {
+        if (match.PrimaryContactID) {
+            await this.addPartyLink(context, personEntityID, match.PrimaryContactID, 'LoggedFor');
+        }
+        if (match.AccountID) {
+            await this.addPartyLink(context, orgEntityID, match.AccountID, 'LoggedFor');
         }
     }
 
@@ -117,12 +151,12 @@ export class DealLinkerExtension extends BaseActivitySyncExtension {
         }));
     }
 
-    /** The `MJ: Entities` ID for Deals, which `ActivityLink.EntityID` points at. */
-    private resolveDealEntityID(context: ActivityWriteContext): string {
-        const entity = context.Provider.Entities.find((e) => e.Name === E_DEAL);
+    /** The `MJ: Entities` ID for a name, which `ActivityLink.EntityID` points at. */
+    private resolveEntityID(context: ActivityWriteContext, entityName: string): string {
+        const entity = context.Provider.Entities.find((e) => e.Name === entityName);
         if (!entity) {
-            LogError(`Sales.DealLinker: entity "${E_DEAL}" is not registered in this host's metadata.`);
-            throw new Error(`Sales.DealLinker: entity "${E_DEAL}" not found — cannot link an activity.`);
+            LogError(`Sales.DealLinker: entity "${entityName}" is not registered in this host's metadata.`);
+            throw new Error(`Sales.DealLinker: entity "${entityName}" not found — cannot link an activity.`);
         }
         return entity.ID;
     }
@@ -140,23 +174,53 @@ export class DealLinkerExtension extends BaseActivitySyncExtension {
         dealID: string,
         dealEntityID: string,
     ): Promise<void> {
+        await this.addResolvedLink(context, dealEntityID, dealID, 'Regarding');
+    }
+
+    private alreadyLinked(context: ActivityWriteContext, entityID: string, recordID: string): boolean {
+        const want = recordID.toLowerCase();
+        return context.Links.some(
+            (link) =>
+                (link.EntityID ?? '').toLowerCase() === entityID.toLowerCase() &&
+                (link.RecordID ?? '').toLowerCase() === want,
+        );
+    }
+
+    private async addPartyLink(
+        context: ActivityWriteContext,
+        entityID: string,
+        recordID: string,
+        role: 'LoggedFor',
+    ): Promise<void> {
+        if (this.alreadyLinked(context, entityID, recordID)) {
+            return;
+        }
+        await this.addResolvedLink(context, entityID, recordID, role);
+    }
+
+    private async addResolvedLink(
+        context: ActivityWriteContext,
+        entityID: string,
+        recordID: string,
+        role: 'Regarding' | 'LoggedFor',
+    ): Promise<void> {
         const row = await context.Provider.GetEntityObject<mjBizAppsCommonActivityLinkEntity>(
             E_ACTIVITY_LINK,
             context.ContextUser,
         );
         row.NewRecord();
         row.ActivityID = context.Activity.ID;
-        row.Role = 'Regarding';
+        row.Role = role;
         row.Sequence = context.Links.length + 1;
         // The XOR: the resolved pair is set and the identity pair is explicitly nulled.
-        row.EntityID = dealEntityID;
-        row.RecordID = dealID;
+        row.EntityID = entityID;
+        row.RecordID = recordID;
         row.IdentityKind = null;
         row.IdentityValue = null;
 
         if (!(await row.Save())) {
             throw new Error(
-                `Sales.DealLinker failed to link activity ${context.Activity.ID} to deal ${dealID}: ` +
+                `Sales.DealLinker failed to link activity ${context.Activity.ID} as ${role} to ${recordID}: ` +
                     `${row.LatestResult?.CompleteMessage ?? 'unknown'}`,
             );
         }
