@@ -106,7 +106,17 @@ const MUTATIONS = [
     { id: 'M-PP1', file: PF, expect: ['PP1'],
       from: "`Status = 'Active' ` +", to: "`Status <> 'not-a-status' ` +" },
     // M-PP2 is INVERTED by #29: the defect is no longer a missing company clause, it is a PRESENT one.
-    // Re-adding it must fail PP2 and only PP2 — a wider break would mean PP2 is riding on a neighbour.
+    //
+    // THIS DOES NOT PROVE 'PP2 AND ONLY PP2', AND IT USED TO SAY IT DID. `expect` is checked as a
+    // SUBSET of the failures, so a mutation is credited the moment its named check falls, however
+    // much else fell with it — the harness structurally cannot see collateral, and no comment here
+    // can make it. Worse, this particular mutation almost certainly does have collateral: pinning the
+    // catalogue to one hard-coded company starves every check that needs a product to exist, which
+    // includes TS5, TS6 and the SD/CW families.
+    //
+    // Left registered because it still does the one job a mutation must do — it proves PP2 can fail.
+    // What it cannot do is localise the blame, and saying so is cheaper than a reader trusting the
+    // old claim and concluding PP2 is independent of its neighbours when nothing here established it.
     { id: 'M-PP2', file: PF, expect: ['PP2'],
       from: "`Status = 'Active' ` +",
       to: "`CompanyID = 'C0A5E100-0001-4A01-9E11-5B7C3D2F8A01' AND Status = 'Active' ` +" },
