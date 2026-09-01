@@ -82,8 +82,9 @@ prorate a partial period · sum lines into a header total · round anything.
 
 - `DealLine.ResolvedUnitPrice` / `ResolvedExtendedAmount` / `PriceComponentsJSON` / `PricedAt` are
   **write-only** — populated from a PreviewOrder response, never computed locally, never hand-edited.
-- `Deal.Amount` is a **cached answer** with provenance: `AmountIsComputed`, `AmountComputedAt`,
-  `AmountSourceHash`. The hash fingerprints the line set, so the UI can say *"stale, reprice"*.
+- `Deal.Amount` is a **cached copy of `OrderHeader.TotalGross`** with provenance: `AmountIsComputed`,
+  `AmountComputedAt`, `AmountSourceHash`. Lined deals always take the order total (sales never sums
+  lines). A typed figure survives only on a header-only deal.
 - An override price (`DealLine.OverrideUnitPrice`) is an **input** to the engine, never a replacement.
 - On close, the same draft goes to `Orders.CreateOrderInState`. The quote and the invoice cannot
   disagree, because they are the same computation run twice.

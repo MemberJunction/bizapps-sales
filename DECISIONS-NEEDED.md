@@ -646,6 +646,11 @@ equivalent:
    the UI can still say *"stale, reprice"*;
 3. it stays a human's estimate and the board stops summing it, showing an order-derived total instead.
 
+**Decided (shape 2, 2026-08-31).** Lined deals cache `OrderHeader.TotalGross` onto `Deal.Amount` —
+same job as that header total, copied not summed. A typed figure survives only while the order has
+no priced total (`save-deal.SD21` / `SD22` / `SD41`). Seeded `AmountIsComputed = 0` rows with lines
+will reconcile on the next save.
+
 ---
 
 ## D-3 · `Pipeline.RequiresDealLines` survived a table that did not
