@@ -44,6 +44,9 @@ export interface DealMatch {
     Basis: 'PrimaryContact' | 'Account';
     /** The matched party. Same ID as the common Person/Organization (shared-PK IsA). */
     PartyID: string;
+    /** Deal header at match time — snapshotted onto the activity so later contact/org changes do not rewrite history. */
+    AccountID: string | null;
+    PrimaryContactID: string | null;
 }
 
 /** One row of the candidate read. */
@@ -148,9 +151,21 @@ export class DealMatcher {
              * attribution can be explained rather than merely asserted.
              */
             if (contact && personSet.has(contact)) {
-                found.push({ DealID: deal.ID, Basis: 'PrimaryContact', PartyID: contact });
+                found.push({
+                    DealID: deal.ID,
+                    Basis: 'PrimaryContact',
+                    PartyID: contact,
+                    AccountID: account,
+                    PrimaryContactID: contact,
+                });
             } else if (account && orgSet.has(account)) {
-                found.push({ DealID: deal.ID, Basis: 'Account', PartyID: account });
+                found.push({
+                    DealID: deal.ID,
+                    Basis: 'Account',
+                    PartyID: account,
+                    AccountID: account,
+                    PrimaryContactID: contact,
+                });
             }
         }
         return { Matches: found, ReadFailed: false };
