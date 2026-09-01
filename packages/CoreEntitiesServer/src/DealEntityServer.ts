@@ -342,7 +342,9 @@ export class DealEntityServer extends DealEntity {
          * every unrelated deal save would be a read per keystroke for a guarantee the hash already gives.
          */
         const order = this.OrderID_Object;
-        const amountMayHaveMoved = !!order && (order.Dirty || order.Lines.Dirty);
+        // Lined deals (`AmountIsComputed`) re-read TotalGross on every save so a line edit made
+        // through the related grid still lands on the header the next time the deal is saved.
+        const amountMayHaveMoved = !!order && (order.Dirty || order.Lines.Dirty || this.AmountIsComputed === true);
 
         // The stage's forecast defaults, on the same trigger as the three above. Read here, applied
         // inside the scope, for the same reason the others are: work that might not be needed should not
@@ -1322,28 +1324,22 @@ export class DealEntityServer extends DealEntity {
      * row is already written in this transaction, and re-entering `Save()` would re-run the close lock,
      * the stamps and the stage-event planner for a three-column cache refresh.
      *
-     * ── THE PROVENANCE RULE, WHICH IS THE PART TO GET RIGHT ──
+     * ── THE PROVENANCE RULE ──
      *
-     * `AmountIsComputed = 0` means a human typed this figure and is owed no explanation (L-2, the SIMPLE
-     * deal). Such an amount is NEVER overwritten. But the column defaults to 0, so "0" alone cannot mean
-     * hand-typed — a brand-new deal has never been touched by anyone. The distinction is whether an
-     * amount is actually THERE:
+     * Same as `OrderHeader.TotalGross`: once the order has a priced total, the deal header IS that
+     * number. A human's typed figure is the simple / header-only deal (no priced lines). Lined deals
+     * are always a cache of `TotalGross` — leaving a typed figure in place while lines sat underneath
+     * is how the board summed a pipeline that disagreed with the order (D-2).
      *
-     *   | `AmountIsComputed` | `Amount` | what it means | what happens |
-     *   |---|---|---|---|
-     *   | 1 | anything | a cache | refreshed |
-     *   | 0 | NULL | nobody has said | filled, and marked computed |
-     *   | 0 | a number | **a human typed it** | **left alone, always** |
+     *   | `TotalGross` | what happens |
+     *   |---|---|
+     *   | a finite number | `Amount` refreshed, marked computed |
+     *   | NULL (no lines) | left alone — a typed figure stays a typed figure |
      *
-     * And a `TotalGross` of NULL means the order has no priced lines, so there is no answer to cache —
-     * that leaves the amount alone too, rather than writing a zero that would read as "priced at nil".
+     * Sales never sums lines itself. It copies the one number orders already stands behind.
      */
     private async refreshAmountFromOrder(): Promise<void> {
         if (!this.OrderID) {
-            return;
-        }
-        // A hand-typed figure. Not ours, ever.
-        if (this.AmountIsComputed === false && this.Amount !== null && this.Amount !== undefined) {
             return;
         }
 

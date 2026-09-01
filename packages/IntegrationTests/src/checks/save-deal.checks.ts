@@ -1117,25 +1117,51 @@ export const SaveDealChecks: NamedCheck[] = [
     },
     {
         Id: 'save-deal.SD22',
-        Name: 'SD22: a HAND-TYPED amount is never overwritten by a computed one',
+        Name: 'SD22: a HAND-TYPED amount survives only while the order has no priced total',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 /**
-                 * L-2's SIMPLE DEAL, and the rule that keeps the provenance columns honest.
-                 *
-                 * `AmountIsComputed = 0` means a human typed the figure and is owed no explanation — the
-                 * D2C motion works exactly this way, `RequiresDealLines = 0` and the amount entered by
-                 * hand. A cache refresh that overwrote it would silently replace somebody's negotiated
-                 * number with an order total, and they would find out from a report.
-                 *
-                 * The trap: the column DEFAULTS to 0, so "0" alone cannot mean hand-typed. What
-                 * distinguishes them is whether an amount is actually there. SD21 covers the NULL case
-                 * (filled, and marked computed); this covers the typed one.
+                 * L-2's SIMPLE DEAL. No lines, no TotalGross, the figure a person typed is the amount.
+                 * Lined deals are SD41 — the header is then OrderHeader.TotalGross, like GrandTotal.
                  */
                 const f = await ResolveSalesFixture(ctx);
                 const deal = await newDeal(ctx, f, (d) => {
                     d.Name = 'SD22 hand-typed';
+                    d.Amount = 250000;
+                    d.AmountIsComputed = false;
+                });
+                await saveOk(deal, 'the save');
+
+                const lines = await orderLines(ctx, String(deal.OrderID), ['ID']);
+                AssertEqual(lines.length, 0, 'setup: this is the header-only deal');
+
+                const stored = await TxOne<{ Amount: number; AmountIsComputed: boolean; AmountSourceHash: string | null }>(
+                    ctx,
+                    `SELECT Amount, AmountIsComputed, AmountSourceHash FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
+                );
+                AssertEqual(Number(stored.Amount), 250000, 'the typed figure survived on a deal with no priced lines');
+                Assert(stored.AmountIsComputed === false, 'and it is still marked hand-typed');
+                Assert(
+                    stored.AmountSourceHash === null || stored.AmountSourceHash === undefined,
+                    'with no source fingerprint, because it came from a person and not a computation',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD41',
+        Name: 'SD41: a lined deal\'s Amount is the order TotalGross, even if a person typed a figure first',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE HEADER ROLL-UP, same job as OrderHeader.TotalGross. Once there are priced lines,
+                 * Deal.Amount is a cache of that total — sales copies, it does not sum. A leftover
+                 * typed figure is how the board used to report a pipeline that disagreed with the order.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const deal = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD41 lined overwrites typed';
                     d.Amount = 250000;
                     d.AmountIsComputed = false;
                 });
@@ -1145,15 +1171,19 @@ export const SaveDealChecks: NamedCheck[] = [
                 const total = await orderTotal(ctx, deal.OrderID as string);
                 Assert(total !== null && Number(total) !== 250000, `the order total must DIFFER from the typed figure, got ${total}`);
 
-                const stored = await TxOne<{ Amount: number; AmountIsComputed: boolean; AmountSourceHash: string | null }>(
+                const stored = await TxOne<{ Amount: number; AmountIsComputed: boolean; AmountSourceHash: string }>(
                     ctx,
                     `SELECT Amount, AmountIsComputed, AmountSourceHash FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
                 );
-                AssertEqual(Number(stored.Amount), 250000, 'the typed figure survived a save that had every reason to overwrite it');
-                Assert(stored.AmountIsComputed === false, 'and it is still marked hand-typed');
+                AssertEqual(
+                    Number(stored.Amount),
+                    Number(total),
+                    'Deal.Amount equals OrderHeader.TotalGross — the typed figure does not survive lines',
+                );
+                Assert(stored.AmountIsComputed === true, 'and it is marked COMPUTED');
                 Assert(
-                    stored.AmountSourceHash === null || stored.AmountSourceHash === undefined,
-                    'with no source fingerprint, because it came from a person and not a computation',
+                    !!stored.AmountSourceHash && stored.AmountSourceHash.length === 64,
+                    `the source fingerprint is stamped, got '${stored.AmountSourceHash}'`,
                 );
             }),
     },
