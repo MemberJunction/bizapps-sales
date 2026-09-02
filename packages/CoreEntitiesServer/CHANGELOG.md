@@ -1,5 +1,14 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.0.0
+
+### Patch Changes
+
+- 2b6c4ca: When DealLinker attributes an activity to a deal, also snapshot the deal's Account (Organization) and Primary Contact (Person) as `LoggedFor` links. Reverse lookup on Person/Org survives a later contact or employer change.
+- 6d46c4a: Lined deals cache `OrderHeader.TotalGross` onto `Deal.Amount` (sales copies, never sums). A typed figure survives only on a header-only deal.
+- Updated dependencies [c2d8e5a]
+  - @mj-biz-apps/sales-entities@6.0.0
+
 ## 5.2.0
 
 ### Minor Changes

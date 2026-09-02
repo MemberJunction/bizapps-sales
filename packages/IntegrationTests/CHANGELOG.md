@@ -1,5 +1,17 @@
 # @mj-biz-apps/sales-integration-tests
 
+## 6.0.0
+
+### Patch Changes
+
+- 6d46c4a: Lined deals cache `OrderHeader.TotalGross` onto `Deal.Amount` (sales copies, never sums). A typed figure survives only on a header-only deal.
+- Updated dependencies [2b6c4ca]
+- Updated dependencies [6d46c4a]
+- Updated dependencies [c2d8e5a]
+  - @mj-biz-apps/sales-core-entities-server@6.0.0
+  - @mj-biz-apps/sales-entities@6.0.0
+  - @mj-biz-apps/sales-server@6.0.0
+
 ## 5.2.0
 
 ### Patch Changes

@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/sales-actions",
   "type": "module",
-  "version": "5.2.0",
+  "version": "6.0.0",
   "description": "Action subclasses for BizApps Sales — the CodeGen-maintained generated set.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -23,7 +23,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@mj-biz-apps/sales-core-entities-server": "5.2.0",
+    "@mj-biz-apps/sales-core-entities-server": "6.0.0",
     "zod": "~3.24.4"
   },
   "peerDependencies": {
