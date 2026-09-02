@@ -202,7 +202,7 @@ export function OwnerCoverage(deals: readonly DealRosterRow[]): OwnerBar[] {
     }
     return [...map.entries()]
         .map(([Name, Amount]) => ({ Name, Amount }))
-        .sort((a, b) => b.Amount - a.Amount);
+        .sort((a, b) => b.Amount - a.Amount); // money-grep-allow: comparator only — the subtraction yields a sort order, never a money value that is stored or shown
 }
 
 export function WeightedOpen(deals: readonly DealRosterRow[]): number {
