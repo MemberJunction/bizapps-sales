@@ -64,6 +64,22 @@ function readEnv() {
     const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i.exec(line);
     if (m) out[m[1]] = m[2];
   }
+  /**
+   * process.env WINS over the file, and that is the whole point.
+   *
+   * This returned the FILE only. On a multi-database machine .env names one database -- here
+   * MJ_V6_Host, the recording host -- so DB_DATABASE=<other> node cleanup.mjs swept a database
+   * nobody was testing, found nothing, and reported success. Every run left its deals behind on
+   * the database under test and the next run inherited them.
+   *
+   * Measured 2026-08-26: 14 residue deals before, cleanup reports remaining_deals=0, 14 after.
+   * Two identical full suites scored 26/2 then 23/5, differing only in how dirty they started.
+   * lib/db.ts already gets this right via dotenv, and its header says the assertions only mean
+   * something when harness and app share a database. The teardown was the piece not honouring it.
+   */
+  for (const k of ['DB_HOST', 'DB_PORT', 'DB_USERNAME', 'DB_PASSWORD', 'DB_DATABASE']) {
+    if (process.env[k]) out[k] = process.env[k];
+  }
   return out;
 }
 
@@ -209,6 +225,8 @@ DECLARE @dealEntity UNIQUEIDENTIFIER =
  *      the only thing that deletes deals here is this sweep.
  */
 DECLARE @contracts TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
+BEGIN
 INSERT INTO @contracts (ID)
   SELECT DISTINCT c.ID FROM __mj_BizAppsContracts.Contract c
     JOIN @deals d ON d.ID = c.CreatingRecordID
@@ -216,6 +234,7 @@ INSERT INTO @contracts (ID)
   SELECT c.ID FROM __mj_BizAppsContracts.Contract c
    WHERE c.CreatingEntityID = @dealEntity
      AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d WHERE d.ID = c.CreatingRecordID);
+END;
 
 /* TASKS — three routes.
  *
@@ -300,16 +319,43 @@ DELETE al FROM __mj_BizAppsCommon.ActivityLink al JOIN @acts a ON al.ActivityID 
 UPDATE a SET ParentActivityID = NULL FROM __mj_BizAppsCommon.Activity a JOIN @acts x ON x.ID = a.ID WHERE a.ParentActivityID IS NOT NULL;
 DELETE a FROM __mj_BizAppsCommon.Activity a JOIN @acts x ON x.ID = a.ID;
 
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
 DELETE m FROM __mj_BizAppsContracts.ContractTemplateModification m JOIN @contracts c ON m.ContractID = c.ID;
 -- Contracts point at each other two ways; both must be broken before the rows go.
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
 UPDATE c SET ParentContractID = NULL FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID WHERE c.ParentContractID IS NOT NULL;
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
 UPDATE c SET SupersededByContractID = NULL FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID WHERE c.SupersededByContractID IS NOT NULL;
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
 DELETE c FROM __mj_BizAppsContracts.Contract c JOIN @contracts x ON x.ID = c.ID;
 
 DELETE ps FROM __mj_BizAppsSales.DealPaymentSchedule ps JOIN @deals d ON ps.DealID = d.ID;
 DELETE tm FROM __mj_BizAppsSales.DealTeamMember tm JOIN @deals d ON tm.DealID = d.ID;
 DELETE se FROM __mj_BizAppsSales.DealStageEvent se JOIN @deals d ON se.DealID = d.ID;
 DELETE cr FROM __mj_BizAppsSales.DealContactRole cr JOIN @deals d ON cr.DealID = d.ID;
+
+/*
+ * AUDIT ROWS GO WITH THE RECORDS THEY DESCRIBE.
+ *
+ * RecordID IS NOT A BARE UUID. MJ writes it as a composite key -- ID pipe uuid -- on some paths and
+ * bare on others, in the same table. Matching only the bare form cleared 11 rows and left 3, and the
+ * demo tour kept failing on the ones that stayed. Both forms are matched.
+ *
+ * RecordChange is written by BaseEntity.Save() and keyed by RecordID as text. Deleting a deal or a
+ * pipeline left its audit rows behind pointing at nothing, and Explorer FOLLOWS them: the demo tour
+ * loads the referenced record and logs
+ *
+ *     Error in BaseEntity.Load(MJ_BizApps_Sales: Pipelines, Key: ID=<gone>)
+ *
+ * which fails 20-demo-tour on console errors, for records this sweep deleted. Measured 2026-08-26:
+ * 4 orphaned pipeline rows and 257 orphaned deal rows after a clean run.
+ *
+ * CLI-2 recorded this as the cause of the orphaned-tab thread and left it open: the sweep should not
+ * delete rows the app still points at. This is that fix, scoped to exactly what the sweep removes --
+ * it never touches audit history for records that survive.
+ */
+DELETE rc FROM [__mj].RecordChange rc
+  JOIN @deals x ON rc.RecordID IN (CAST(x.ID AS NVARCHAR(750)), 'ID|' + CAST(x.ID AS NVARCHAR(750)));
 
 DELETE d FROM __mj_BizAppsSales.Deal d JOIN @deals x ON x.ID = d.ID;
 
@@ -323,7 +369,36 @@ INSERT INTO @pipes (ID)
 
 DELETE ps FROM __mj_BizAppsSales.PipelineStage ps
   JOIN __mj_BizAppsSales.Pipeline p ON ps.PipelineID = p.ID WHERE EXISTS (SELECT 1 FROM @inner WHERE p.Name LIKE P);
+-- Same for pipelines: capture the ids first, drop their audit rows, then the rows themselves.
+DECLARE @pipeIds TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
+INSERT INTO @pipeIds (ID)
+  SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
+DELETE rc FROM [__mj].RecordChange rc
+  JOIN @pipeIds x ON rc.RecordID IN (CAST(x.ID AS NVARCHAR(750)), 'ID|' + CAST(x.ID AS NVARCHAR(750)));
+
 DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
+
+/*
+ * AND ANY AUDIT ROW LEFT POINTING AT A SALES RECORD THAT NO LONGER EXISTS.
+ *
+ * The scoped deletes above only cover what THIS sweep removes. Specs also delete their own deals and
+ * pipelines through PurgeDeal, and those rows are already orphaned by the time the sweep runs -- the
+ * name match finds nothing, because the record it would have matched is gone. Explorer still follows
+ * them, and 20-demo-tour still fails on the console error.
+ *
+ * So this is a general orphan clean, restricted to sales entities. It cannot touch history for a
+ * record that still exists, which is the only property that matters.
+ *
+ * RecordID is matched in BOTH forms: MJ writes it bare on some paths and as a composite key on
+ * others, in the same table.
+ */
+DELETE rc FROM [__mj].RecordChange rc
+  JOIN [__mj].Entity e ON e.ID = rc.EntityID
+ WHERE e.Name IN ('MJ_BizApps_Sales: Deals', 'MJ_BizApps_Sales: Pipelines')
+   AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d
+                    WHERE rc.RecordID IN (CAST(d.ID AS NVARCHAR(750)), 'ID|' + CAST(d.ID AS NVARCHAR(750))))
+   AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline p
+                    WHERE rc.RecordID IN (CAST(p.ID AS NVARCHAR(750)), 'ID|' + CAST(p.ID AS NVARCHAR(750))));
 
 /*
  * ── THE RECORD LOG, WHICH IS WHY THIS TABLE KEPT GETTING CLEARED BY HAND ─────────────────────────
@@ -453,9 +528,12 @@ SELECT 'remaining_tasks=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsTasks.Tas
                              WHERE d.ID = TRY_CONVERT(UNIQUEIDENTIFIER, tl.RecordID)));
 
 /* CONTRACTS -- a deal-created contract whose creating deal no longer exists. The documented class. */
+IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
+BEGIN
 SELECT 'remaining_contracts=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsContracts.Contract c
  WHERE c.CreatingEntityID = @dealEntity
    AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d WHERE d.ID = c.CreatingRecordID);
+END;
 
 /* ACTIVITIES -- an activity still linked to a Deal row that is gone. */
 SELECT 'remaining_activities=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsCommon.Activity a
@@ -508,7 +586,18 @@ export function cleanup() {
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean)
-      .slice(0, 3)
+      // ERRORS ARRIVE LAST. This took the FIRST three lines, but stdout begins with the
+      // will_delete SELECT rows, so the actual sqlcmd error was sliced off every time and the
+      // warning showed a list of rows it had just failed to delete. Prefer anything that names an
+      // error, and fall back to the TAIL rather than the head.
+      .filter((v) => v.length > 0)
+      .flatMap((v) => v.split(String.fromCharCode(10)))
+      .filter((l) => l.trim().length > 0)
+      .filter((l, _i, all) => {
+        const errs = all.filter((x) => /Msg |error|Invalid|constraint|conflict/i.test(x));
+        return errs.length > 0 ? errs.includes(l) : true;
+      })
+      .slice(-3)
       .join(' ');
     console.warn(
       `  cleanup(${PREFIX}*): SKIPPED — ${detail || (e.message ?? e).toString().split('\n')[0]}`,

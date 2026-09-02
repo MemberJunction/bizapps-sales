@@ -47,16 +47,12 @@
  * about the operation under test rather than about fixture construction. A missing fixture fails with an
  * instruction, not a null reference twelve frames deep.
  *
- * ── STILL SPECIFIED, NOT YET BUILT ──────────────────────────────────────────────────────────────
+ * ── HEADER ROLL-UP ─────────────────────────────────────────────────────────────────────────────
  *
- * The definition of done named two checks at S1. The second is now BUILT — `close-deal.CD5` proves a
- * closed deal is immutable at the entity-server level with a direct `BaseEntity.Save()` that is refused
- * (§7.3, L-17). One remains, and it needs code that does not exist yet, so it is listed rather than
- * stubbed to keep the gap visible:
- *   1. `Deal.Amount` for a lined deal equals the `Orders.PreviewOrder` result for the same draft (§6).
- *      Needs the pricing bridge. The shape of that bridge changed with the rework — the lines now live on
- *      an order orders already owns and prices, so `save-deal.SD19` covers the per-line half (sales sends
- *      product and quantity; the price comes back). What is still unasserted is the HEADER roll-up.
+ * `save-deal.SD21` / `SD41`: `Deal.Amount` equals `OrderHeader.TotalGross` for a lined deal (sales
+ * copies the number orders already stands behind; it never sums lines). `SD22` is the simple deal:
+ * a typed figure survives only while the order has no priced total. `SD28` pins NULL TotalGross
+ * leaving Amount untouched.
  *
  * One check is also deliberately WEAKER than it will eventually be: `close-deal.CD7` asserts that a
  * stubbed downstream reports `Executed: false` with a reason and invents no ID. When orders links, CD7

@@ -53,8 +53,11 @@ const account = await one('MJ_BizApps_Sales: Sales Accounts', 'IsActive = 1', ['
 // dies with `provider.QuoteSchemaAndView is not a function` -- an MJ skew between this checkout and the
 // installed core, unrelated to what is being measured here. The picker's rule is still the source of the
 // filter, so the harness cannot drift from it.
+// COMPANY SCOPING IS EXPLICIT NOW. #29 removed the clause from `ProductFilterFor`, which is right for
+// the picker — a deal may sell any company's product — but this harness wants a product belonging to a
+// PARTICULAR company, so it says so itself rather than relying on a rule that no longer means that.
 const products = (await pool.request().query(
-    `SELECT ID FROM __mj_BizAppsOrders.Product WHERE ${ProductFilterFor(pipe.CompanyID, new Date())} ORDER BY Name`
+    `SELECT ID FROM __mj_BizAppsOrders.Product WHERE CompanyID = '${String(pipe.CompanyID).replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())}) ORDER BY Name`
 )).recordset;
 if (products.length < 2) { console.error('    PRECONDITION: need 2 sellable products'); process.exit(2); }
 

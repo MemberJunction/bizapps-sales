@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sales — Option A · Pipeline command center</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="chrome.css" />
+</head>
+<body>
+<div class="app">
+  <div class="thesis">
+    <b>Thesis:</b> Clari-style pipeline inspection inside Explorer chrome.
+    A deal is never hosted here — click is <code>NavigationService.OpenEntityRecord</code>, which becomes an Explorer tab (try it).
+    Forecast buckets use the cumulative flags already on <code>ForecastCategoryType</code> (Commit ⊂ Best Case ⊂ Pipeline), not name matching.
+    Best for a VP / AD answering “is September real?”
+    <b>Tradeoff:</b> denser than a list; Quota is v2 (D-3) so the comparison line is last-period booked, not a quota table.
+  </div>
+  <header class="topnav">
+    <div class="brand"><span class="mark">MJ</span> Sales <span class="app-label">Open App</span></div>
+    <div class="tabs" id="tabs">
+      <button class="tab is-on" type="button" data-tab="app" onclick="showApp()"><i class="fa-solid fa-handshake"></i> Deals</button>
+    </div>
+    <div class="top-right">
+      <span class="chip">as of 31 Aug 2026</span>
+      <span class="avatar">AK</span>
+    </div>
+  </header>
+  <div class="shell">
+    <nav class="rail" id="rail">
+      <div class="rail-g">Deals</div>
+      <button class="nav is-on" type="button"><i class="fa-solid fa-gauge-high"></i> Dashboard</button>
+      <button class="nav" type="button"><i class="fa-solid fa-diagram-project"></i> Board</button>
+      <button class="nav" type="button"><i class="fa-solid fa-table-list"></i> All deals<span class="badge">3</span></button>
+      <p class="hint">No Workspace rail. New deal and every row call Explorer. The board stays a view of the same deals.</p>
+    </nav>
+    <div class="main">
+      <div id="dash">
+        <div class="page-h">
+          <div>
+            <h1>Pipeline command</h1>
+            <div class="sub">September close · Blue Cypress Partners + Harbor House · queries already exist — this page just wasn’t using them.</div>
+          </div>
+          <div class="actions">
+            <div class="seg" id="co">
+              <button class="is-on" type="button" data-co="all">Combined</button>
+              <button type="button" data-co="bcp">BCP</button>
+              <button type="button" data-co="hh">Harbor House</button>
+            </div>
+            <button class="btn" type="button"><i class="fa-solid fa-arrow-rotate-right"></i></button>
+            <button class="btn primary" type="button" onclick="openNew()"><i class="fa-solid fa-plus"></i> New deal</button>
+          </div>
+        </div>
+        <div class="content">
+          <div class="card mb">
+            <div class="ch">September forecast <span>Closed + Commit + Best Case incremental + Pipeline incremental · flags are cumulative, so we slice for the bar</span></div>
+            <div class="pad">
+              <div class="stack" title="Click a segment to inspect">
+                <span class="closed" style="width:6%" onclick="setFilter('won')">$180k</span>
+                <span class="commit" style="width:44%" onclick="setFilter('commit')">$2.14M</span>
+                <span class="best" style="width:18%" onclick="setFilter('best')">+$0.91M</span>
+                <span class="pipe" style="width:32%" onclick="setFilter('pipe')">+$1.59M</span>
+              </div>
+              <div class="legend">
+                <span><i style="background:var(--mj-fc-closed)"></i>Closed won $180k (ActualCloseDate in period)</span>
+                <span><i style="background:var(--mj-fc-commit)"></i>Commit $2.14M</span>
+                <span><i style="background:var(--mj-fc-best)"></i>Best Case only $0.91M</span>
+                <span><i style="background:var(--mj-fc-pipe)"></i>Pipeline only $1.59M</span>
+                <span class="muted">Last Aug booked $1.92M — commit is ahead of that floor. No Quota table until v2.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="kpis">
+            <button class="kpi good" type="button" onclick="setFilter('won')">
+              <div class="l">Booked MTD</div>
+              <div class="v">$180k</div>
+              <div class="f">2 won · ActualCloseDate · vs $1.92M Aug</div>
+            </button>
+            <button class="kpi" type="button" onclick="setFilter('commit')">
+              <div class="l">Commit</div>
+              <div class="v">$2.14M</div>
+              <div class="f">IncludeInCommit · 4 open deals</div>
+            </button>
+            <button class="kpi" type="button" onclick="setFilter('wtd')">
+              <div class="l">Weighted open</div>
+              <div class="v">$1.61M</div>
+              <div class="f">Amount × Probability · open only</div>
+            </button>
+            <button class="kpi warn" type="button" onclick="setFilter('slipped')">
+              <div class="l">Slipped</div>
+              <div class="v">$376k</div>
+              <div class="f">3 open · ExpectedCloseDate already past</div>
+            </button>
+          </div>
+
+          <div class="card mb">
+            <div class="ch">Forecast waterfall · Aug 1 snapshot → today <span>Sales: Forecast History + RecordChange slippage · click a step</span></div>
+            <div class="pad">
+              <div class="wf">
+                <button class="step" type="button" onclick="setFilter('all')"><div class="l">Start commit</div><div class="v">$2.41M</div></button>
+                <button class="step up" type="button" onclick="setFilter('new')"><div class="l">+ New</div><div class="v">+$418k</div></button>
+                <button class="step up" type="button" onclick="setFilter('pulled')"><div class="l">+ Pulled in</div><div class="v">+$92k</div></button>
+                <button class="step down" type="button" onclick="setFilter('slipped')"><div class="l">− Slipped out</div><div class="v">−$321k</div></button>
+                <button class="step down" type="button" onclick="setFilter('lost')"><div class="l">− Lost</div><div class="v">−$180k</div></button>
+                <button class="step up" type="button" onclick="setFilter('won')"><div class="l">+ Won</div><div class="v">+$180k</div></button>
+                <button class="step" type="button" onclick="setFilter('commit')"><div class="l">Ending commit</div><div class="v">$2.60M</div></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="card">
+              <div class="ch">Stage conversion · B2B <span>Sales: Stage Conversion and Dwell · win-from-here</span></div>
+              <div class="pad">
+                <div class="funnel">
+                  <div class="col"><div class="n">42</div><div class="bar" style="height:100%;background:var(--mj-color-brand-200)"></div><div class="lab">Discovery<br><span class="conv">→ 43%</span></div></div>
+                  <div class="col"><div class="n">18</div><div class="bar" style="height:62%;background:var(--mj-color-brand-300)"></div><div class="lab">Qualify<br><span class="conv">→ 61%</span></div></div>
+                  <div class="col"><div class="n">11</div><div class="bar" style="height:44%;background:var(--mj-color-brand-500)"></div><div class="lab">Proposal<br><span class="conv">→ 55%</span></div></div>
+                  <div class="col"><div class="n">6</div><div class="bar" style="height:28%;background:var(--mj-color-brand-700)"></div><div class="lab">Negotiation<br><span class="conv">→ 78%</span></div></div>
+                  <div class="col"><div class="n">4</div><div class="bar" style="height:18%;background:var(--mj-fc-closed)"></div><div class="lab">Signed</div></div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ch">Needs a person <span>click filters Inspect</span></div>
+              <div class="pad">
+                <button class="queue" type="button" onclick="setFilter('silent')"><span class="qico"><i class="fa-solid fa-clock"></i></span><div><b>Silent 7+ days</b><div class="tiny">Last activity from Common Activity Sync</div></div><span class="qcount">4</span></button>
+                <button class="queue" type="button" onclick="setFilter('slipped')"><span class="qico" style="color:var(--mj-status-warning)"><i class="fa-solid fa-calendar-xmark"></i></span><div><b>Close date slipped</b><div class="tiny">Open, ExpectedCloseDate &lt; today</div></div><span class="qcount">3</span></button>
+                <button class="queue" type="button" onclick="setFilter('stuck')"><span class="qico" style="color:var(--mj-status-error)"><i class="fa-solid fa-hourglass-end"></i></span><div><b>Stuck in stage &gt; 21d</b><div class="tiny">Proposal is the graveyard</div></div><span class="qcount">2</span></button>
+                <button class="queue" type="button" onclick="setFilter('noowner')"><span class="qico"><i class="fa-solid fa-user-slash"></i></span><div><b>No owner</b><div class="tiny">DealRole.IsOwnerRole empty</div></div><span class="qcount">1</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card mb">
+            <div class="ch">Close-date buckets <span>open deals only · click to inspect</span></div>
+            <div class="pad">
+              <div class="buckets">
+                <button class="bucket bad" type="button" onclick="setFilter('slipped')"><div class="l">Already past</div><div class="v">$376k</div><div class="tiny">3 deals</div></button>
+                <button class="bucket" type="button" onclick="setFilter('week')"><div class="l">This week</div><div class="v">$36k</div><div class="tiny">1 deal · 1–6 Sep</div></button>
+                <button class="bucket" type="button" onclick="setFilter('month')"><div class="l">Rest of Sep</div><div class="v">$742k</div><div class="tiny">4 deals</div></button>
+                <button class="bucket" type="button" onclick="setFilter('oct')"><div class="l">October</div><div class="v">$268k</div><div class="tiny">2 deals</div></button>
+                <button class="bucket" type="button" onclick="setFilter('later')"><div class="l">Later / none</div><div class="v">$48k</div><div class="tiny">1 deal</div></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="card">
+              <div class="ch">Coverage by owner <span>Sales: Forecast by Owner · Commit $</span></div>
+              <div class="pad">
+                <div class="barlist">
+                  <div class="barrow"><b>Amith</b><div class="track"><div class="fill" style="width:78%"></div></div><span class="num">$650k</span></div>
+                  <div class="barrow"><b>Josue</b><div class="track"><div class="fill" style="width:32%"></div></div><span class="num">$275k</span></div>
+                  <div class="barrow"><b>Jeremy</b><div class="track"><div class="fill" style="width:18%"></div></div><span class="num">$186k</span></div>
+                  <div class="barrow"><b>Unowned</b><div class="track"><div class="fill" style="width:8%;background:var(--mj-status-error)"></div></div><span class="num">$60k</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ch">Win rate <span>by count AND by value · closed only</span></div>
+              <div class="pad">
+                <div class="kpis" style="grid-template-columns:1fr 1fr;margin:0">
+                  <div class="kpi good"><div class="l">By count</div><div class="v">67%</div><div class="f">2 won / 3 closed</div></div>
+                  <div class="kpi"><div class="l">By value</div><div class="v">50%</div><div class="f">$180k won / $360k closed</div></div>
+                </div>
+                <p class="tiny" style="margin:10px 0 0">A 67% win rate hiding a 50% value rate is the classic “we win small, lose large.” Both numbers, always.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:12px">
+            <div class="ch">
+              Inspect
+              <span id="insp-label">all open + just-closed this period · click a row → Explorer record tab</span>
+            </div>
+            <div class="filter-bar pad" style="padding-bottom:0" id="filter-bar" hidden>
+              <span class="chip" id="filter-chip"></span>
+              <button class="clear" type="button" onclick="setFilter('all')">Clear</button>
+            </div>
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th>Deal</th><th>Account</th><th>Owner</th><th>Stage</th><th>Forecast</th>
+                  <th class="num">Amount</th><th class="num">Weighted</th><th>Close</th><th>Last activity</th>
+                </tr>
+              </thead>
+              <tbody id="insp"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="record" hidden>
+        <div class="page-h">
+          <div>
+            <h1 id="rec-title">Deal</h1>
+            <div class="sub" id="rec-sub">Explorer record tab · generated form + deal-form close-lock overlay</div>
+          </div>
+          <div class="actions">
+            <button class="btn" type="button" onclick="showApp()">Back to Deals</button>
+            <button class="btn primary" type="button"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+          </div>
+        </div>
+        <div class="content">
+          <div class="call" id="rec-call"></div>
+          <div class="form">
+            <div class="form-grid" id="rec-fields"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const DEALS = [
+  {id:'1847', name:'HH Venue retainer 2027', acct:'Harbor House Events', owner:'Amith', stage:'Negotiation', fc:'COMMIT', amount:240000, wtd:180000, close:'28 Sep', last:'Email yesterday', next:'Countersign retainer', tags:['commit','month'], co:'hh'},
+  {id:'1842', name:'ASAE booth + digitalNow', acct:'ASAE', owner:'Jeremy', stage:'Proposal', fc:'BESTCASE', amount:186000, wtd:113460, close:'12 Aug', last:'Silent 11d', next:'Re-engage champion', tags:['best','slipped','silent','stuck'], co:'bcp'},
+  {id:'1838', name:'Leadership Summit sponsorship', acct:'Blue Cypress Partners', owner:'Josue', stage:'Qualification', fc:'PIPELINE', amount:92000, wtd:27600, close:'30 Sep', last:'Meeting 3d ago', next:'Send deck', tags:['pipe','month'], co:'bcp'},
+  {id:'1820', name:'ERP expansion — Plant 2', acct:'Blue Cypress Partners', owner:'Amith', stage:'Proposal', fc:'COMMIT', amount:410000, wtd:250100, close:'22 Sep', last:'Stuck 24d in stage', next:'Security review', tags:['commit','stuck','month'], co:'bcp'},
+  {id:'1860', name:'CESSE booth inquiry', acct:'CESSE', owner:'Jeremy', stage:'Discovery', fc:'PIPELINE', amount:48000, wtd:7200, close:'18 Oct', last:'Call today', next:'Qualify budget', tags:['pipe','oct'], co:'hh'},
+  {id:'1810', name:'Innovation Hub deposit', acct:'Harbor House Events', owner:'Amith', stage:'Signed', fc:'CLOSED', amount:84000, wtd:84000, close:'8 Aug', last:'Won 8 Aug', next:'', tags:['won'], co:'hh'},
+  {id:'1855', name:'Plant 4 discovery', acct:'Blue Cypress Partners', owner:'—', stage:'Discovery', fc:'PIPELINE', amount:60000, wtd:6000, close:'—', last:'Created, never owned', next:'Assign AE', tags:['pipe','noowner','later'], co:'bcp'},
+  {id:'1831', name:'HH AV upgrade', acct:'Harbor House Events', owner:'Josue', stage:'Negotiation', fc:'COMMIT', amount:55000, wtd:42900, close:'22 Aug', last:'Silent 9d', next:'Paper the change order', tags:['commit','slipped','silent'], co:'hh'},
+  {id:'1828', name:'Plant 3 discovery', acct:'Blue Cypress Partners', owner:'Josue', stage:'Qualification', fc:'BESTCASE', amount:220000, wtd:88000, close:'15 Oct', last:'Meeting 2d ago', next:'Intro SE', tags:['best','oct'], co:'bcp'},
+  {id:'1818', name:'Incumbent displacement', acct:'Blue Cypress Partners', owner:'Amith', stage:'Lost', fc:'OMITTED', amount:180000, wtd:0, close:'17 Aug', last:'Lost · timing', next:'', tags:['lost'], co:'bcp'},
+  {id:'1849', name:'DigitalNow add-on', acct:'ASAE', owner:'Jeremy', stage:'Proposal', fc:'PIPELINE', amount:36000, wtd:14400, close:'4 Sep', last:'Email 2d ago', next:'Confirm booth size', tags:['pipe','week','new'], co:'bcp'},
+  {id:'1802', name:'Annual software', acct:'Blue Cypress Partners', owner:'Amith', stage:'Signed', fc:'CLOSED', amount:96000, wtd:96000, close:'4 Aug', last:'Won 4 Aug', next:'', tags:['won'], co:'bcp'},
+  {id:'1833', name:'HH F&B minimum 2027', acct:'Harbor House Events', owner:'Josue', stage:'Discovery', fc:'PIPELINE', amount:72000, wtd:10800, close:'12 Oct', last:'Silent 14d', next:'', tags:['pipe','silent','pulled'], co:'hh'},
+];
+
+const FC = {COMMIT:'commit', BESTCASE:'best', PIPELINE:'pipe', CLOSED:'closed', OMITTED:'pipe'};
+const money = n => '$' + (n >= 1e6 ? (n/1e6).toFixed(2)+'M' : n >= 1000 ? Math.round(n/1000)+'k' : n);
+let filter = 'all';
+
+function match(d) {
+  if (filter === 'all') return d.fc !== 'OMITTED' || d.tags.includes('lost');
+  if (filter === 'wtd') return d.fc !== 'CLOSED' && d.fc !== 'OMITTED';
+  if (filter === 'commit') return d.fc === 'COMMIT';
+  if (filter === 'best') return d.fc === 'BESTCASE' || d.fc === 'COMMIT';
+  if (filter === 'pipe') return d.fc === 'PIPELINE' || d.fc === 'BESTCASE' || d.fc === 'COMMIT';
+  return d.tags.includes(filter);
+}
+
+function setFilter(key) {
+  filter = key;
+  const labels = {
+    all:'all open + just-closed this period · click a row → Explorer record tab',
+    commit:'IncludeInCommit', best:'IncludeInBestCase (includes Commit)', pipe:'IncludeInPipeline',
+    slipped:'ExpectedCloseDate < today, still open', silent:'no Common activity in 7 days',
+    stuck:'Days in stage > 21', noowner:'no IsOwnerRole', won:'IsWon this period',
+    lost:'IsLost this period', week:'close 1–6 Sep', month:'close rest of September',
+    oct:'close in October', later:'later or no date', new:'created this period',
+    pulled:'close date moved earlier', wtd:'open deals with probability'
+  };
+  document.getElementById('insp-label').textContent = labels[key] || key;
+  const bar = document.getElementById('filter-bar');
+  bar.hidden = key === 'all';
+  document.getElementById('filter-chip').textContent = labels[key] || key;
+  render();
+}
+
+function render() {
+  const rows = DEALS.filter(match);
+  document.getElementById('insp').innerHTML = rows.map(d => `
+    <tr onclick="openDeal('${d.id}')">
+      <td><b>${d.name}</b><div class="tiny">DEAL-${d.id}</div></td>
+      <td class="muted">${d.acct}</td>
+      <td class="muted">${d.owner}</td>
+      <td>${d.stage}</td>
+      <td><span class="pill ${FC[d.fc]}">${d.fc === 'BESTCASE' ? 'Best Case' : d.fc[0]+d.fc.slice(1).toLowerCase()}</span></td>
+      <td class="num">${d.amount.toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0})}</td>
+      <td class="num">${d.wtd.toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0})}</td>
+      <td>${d.close}${d.tags.includes('slipped') ? ' <span class="pill past">slipped</span>' : ''}</td>
+      <td class="muted">${d.last}</td>
+    </tr>`).join('') || `<tr><td colspan="9" class="muted">Nothing in this slice.</td></tr>`;
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+function addTab(id, label, icon) {
+  const tabs = document.getElementById('tabs');
+  [...tabs.querySelectorAll('.tab')].forEach(x => x.classList.remove('is-on'));
+  let existing = tabs.querySelector(`[data-tab="${id}"]`);
+  if (!existing) {
+    existing = document.createElement('button');
+    existing.className = 'tab';
+    existing.dataset.tab = id;
+    existing.innerHTML = `<i class="fa-solid ${icon}"></i> ${label} <span class="x" data-close="${id}">×</span>`;
+    existing.addEventListener('click', (e) => {
+      if (e.target.dataset.close) { closeTab(id); e.stopPropagation(); return; }
+      if (id === 'app') showApp();
+      else if (id === 'new') openNew();
+      else openDeal(id);
+    });
+    tabs.appendChild(existing);
+  }
+  existing.classList.add('is-on');
+}
+
+function closeTab(id) {
+  const tabs = document.getElementById('tabs');
+  const el = tabs.querySelector(`[data-tab="${id}"]`);
+  if (el) el.remove();
+  showApp();
+}
+
+function showApp() {
+  [...document.querySelectorAll('#tabs .tab')].forEach(x => x.classList.toggle('is-on', x.dataset.tab === 'app'));
+  document.getElementById('rail').style.display = '';
+  document.getElementById('dash').hidden = false;
+  document.getElementById('record').hidden = true;
+}
+
+function openNew() {
+  addTab('new', 'New deal', 'fa-solid fa-file-circle-plus');
+  document.getElementById('rail').style.display = 'none';
+  document.getElementById('dash').hidden = true;
+  document.getElementById('record').hidden = false;
+  document.getElementById('rec-title').textContent = 'New deal';
+  document.getElementById('rec-sub').textContent = 'Explorer new-record tab';
+  document.getElementById('rec-call').innerHTML = `<b>NavigationService.OpenNewEntityRecord("MJ_BizApps_Sales: Deals")</b><br>This is Explorer’s record tab — not an in-rail workspace. Custom form panels still render here.`;
+  document.getElementById('rec-fields').innerHTML = ['Name','Account','Pipeline','Stage','Forecast category','Expected close','Owner'].map(l =>
+    `<div class="fld"><label>${l}</label><div class="val muted">empty — generated form</div></div>`).join('');
+  toast('OpenNewEntityRecord("MJ_BizApps_Sales: Deals")');
+}
+
+function openDeal(id) {
+  if (id === 'new') return openNew();
+  const d = DEALS.find(x => x.id === id);
+  if (!d) return;
+  addTab(id, d.name, 'fa-solid fa-file-lines');
+  document.getElementById('rail').style.display = 'none';
+  document.getElementById('dash').hidden = true;
+  document.getElementById('record').hidden = false;
+  document.getElementById('rec-title').textContent = d.name;
+  document.getElementById('rec-sub').textContent = `DEAL-${d.id} · ${d.acct}`;
+  document.getElementById('rec-call').innerHTML =
+    `<b>NavigationService.OpenEntityRecord("MJ_BizApps_Sales: Deals", CompositeKey.FromID(${d.id}))</b><br>
+     Explorer owns this tab. The deal form (close-lock + stale-amount overlay) is what renders — the nested workspace strip does not.`;
+  const fields = [
+    ['Account', d.acct], ['Owner', d.owner], ['Stage', d.stage], ['Forecast', d.fc],
+    ['Amount', d.amount.toLocaleString('en-US',{style:'currency',currency:'USD'})],
+    ['Weighted', d.wtd.toLocaleString('en-US',{style:'currency',currency:'USD'})],
+    ['Expected close', d.close], ['Next step', d.next || '—'],
+  ];
+  document.getElementById('rec-fields').innerHTML = fields.map(([l,v]) =>
+    `<div class="fld"><label>${l}</label><div class="val">${v}</div></div>`).join('');
+  toast(`OpenEntityRecord("MJ_BizApps_Sales: Deals", DEAL-${d.id})`);
+}
+
+render();
+</script>
+</body>
+</html>

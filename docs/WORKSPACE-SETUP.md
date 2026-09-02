@@ -767,8 +767,8 @@ pnpm exec turbo run build --filter "@mj-biz-apps/orders-core-entities-server..."
 
 cd C:\ws\bizapps-sales
 RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs                     # 30/30
-RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs product-picker      #  4/4
-RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs close-won-handoff   #  4/4
+RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs product-picker      #  5/5
+RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs close-won-handoff   #  5/5
 # RUN_MUTATION_TESTS=1 node test-harnesses/smoke-close-won.mjs               # ⚠ SEE BELOW -- 5/11
 ```
 

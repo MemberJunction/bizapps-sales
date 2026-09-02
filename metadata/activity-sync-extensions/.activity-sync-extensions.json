@@ -1,0 +1,22 @@
+[
+  {
+    "_comments": [
+      "Sales.DealLinker — sales' half of the Activity Sync Engine.",
+      "DriverClass matches @RegisterClass(BaseActivitySyncExtension, 'Sales.DealLinker').",
+      "FailurePolicy Skip: a matcher/read failure must not roll back the Activity.",
+      "Connection and provider type left null so this row applies to every mailbox."
+    ],
+    "fields": {
+      "Name": "Sales.DealLinker",
+      "Description": "Inside the Activity write transaction, link matched open deals as Regarding. DealMatcher stays in sales; Common never learns what a deal is.",
+      "DriverClass": "Sales.DealLinker",
+      "Sequence": 10,
+      "FailurePolicy": "Skip",
+      "TimeoutMS": 5000,
+      "IsEnabled": true
+    },
+    "primaryKey": {
+      "ID": "a7c4e2b1-5d83-4f0a-9c1e-6b8d2f4a90c3"
+    }
+  }
+]

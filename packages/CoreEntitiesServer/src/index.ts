@@ -67,12 +67,10 @@ export * from './LiveContractsSeam.js';
 export * from './CloseWonTaskService.js';
 
 /**
- * ACTIVITIES AND THE OUTLOOK INGEST (S-US9 #119, S-US10 #120).
+ * ACTIVITIES (S-US9 #119, S-US10 #120).
  *
- * Exported as a block because they are one feature: the writer is what the workspace pane and the
- * ingest both call, and `IActivitySource` is the seam that makes the ingest testable without a mailbox.
- * The Graph source is exported too, deliberately -- it is complete, and hiding it would make it look
- * unwritten rather than ungated.
+ * Manual logging and the deal timeline stay here. Ingest is Common's ActivitySyncEngine.
+ * Sales' remaining half is `Sales.DealLinker`, invoked in-stream when Common writes.
  */
 /**
  * THE VOCABULARY MOVED TO `sales-entities`, and is re-exported here so no consumer changed.
@@ -89,29 +87,35 @@ export * from './CloseWonTaskService.js';
 export * from '@mj-biz-apps/sales-entities';
 export * from './activities/ActivityWriterService.js';
 export * from './activities/ActivityReader.js';
-export * from './activities/ActivitySource.js';
-export * from './activities/FixtureActivitySource.js';
-export * from './activities/GraphMessageMapper.js';
-export * from './activities/ImportedGraphActivitySource.js';
-export * from './activities/MSGraphActivitySource.js';
-export * from './activities/MSGraphCalendarSource.js';
-export * from './activities/RelevanceFilter.js';
 export * from './activities/DealMatcher.js';
-export * from './activities/ActivityIngestService.js';
-export * from './activities/ActivitySyncJob.js';
+export * from './activities/DealLinkerExtension.js';
+export {
+    ActivitySyncEngine,
+    FixtureActivitySyncProvider,
+    IdentityResolver,
+    LIVE_GRAPH_REFUSAL,
+    MSGraphActivitySyncProvider,
+    MSGraphCalendarSyncProvider,
+} from '@mj-biz-apps/common-activity-sync';
+export type {
+    IdentityResolution,
+    ItemParticipant,
+    NormalizedItem,
+} from '@mj-biz-apps/common-activity-sync';
 
 /**
- * FORECAST SNAPSHOTS (#40). The same three parts as the activity sync -- a seam, a factory whose default
- * reads nothing, and an entry point a scheduled Action calls -- because sales has no other precedent for
- * a scheduled job and a second one matching the first is worth more than any variation.
+ * FORECAST SNAPSHOTS (#40). A seam, a factory whose default reads nothing, and an Action a
+ * scheduled job calls.
  */
 export * from './forecast/ForecastSource.js';
 export * from './forecast/FixtureForecastSource.js';
 export * from './forecast/QueryForecastSource.js';
 export * from './forecast/ForecastSnapshotJob.js';
 
+import { LoadActivitySyncEngine } from '@mj-biz-apps/common-activity-sync';
 import { DealEntityServer } from './DealEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
+import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 
 /**
  * Anchor for the server-side entity subclasses, called from the sales-server bootstrap.
@@ -123,8 +127,9 @@ import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js
  * quietly stops applying. Touching the symbols here is what keeps the imports alive.
  */
 export function LoadSalesCoreEntitiesServer(): void {
+    LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, CloseDealOperation, ReopenDealOperation];
+    const anchors: unknown[] = [DealEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }

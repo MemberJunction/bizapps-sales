@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Revenue-stack dashboards — pick a direction</title>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="chrome.css" />
+  <style>
+    .cmp { width: 100%; border-collapse: collapse; font-size: 13px; margin: 18px 0 28px; }
+    .cmp th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--mj-text-muted); padding: 8px; border-bottom: 1px solid var(--mj-border-default); }
+    .cmp td { padding: 10px 8px; border-bottom: 1px solid var(--mj-border-subtle); vertical-align: top; }
+    .arch { background: var(--mj-bg-surface); border: 1px solid var(--mj-border-default); border-radius: 12px; padding: 16px 18px; margin: 16px 0; }
+    .arch h3 { margin: 0 0 8px; font-size: 14px; }
+  </style>
+</head>
+<body>
+<div class="gallery">
+  <h1>Sales + Contracts dashboards</h1>
+  <p class="muted">Full-resolution HTML, MJ light tokens, Explorer chrome. Click around — deal/contract clicks add an Explorer tab and toast the real <code>NavigationService</code> call. Nothing here is built yet.</p>
+
+  <div class="arch">
+    <h3>What we found in code</h3>
+    <p><b>Orders</b> (the pattern): rail pages are jobs (dashboard, list, fulfillment). A record is <code>NavigationService.OpenEntityRecord</code> / <code>OpenNewEntityRecord</code>. The orders dashboard may switch <i>views</i> with <code>mj-tab-nav</code>, but it does not host open orders in a nested document strip. Header comment: “New/existing orders open as Explorer record tabs via NavigationService, not as rail pages.”</p>
+    <p><b>Sales</b> (the antipattern): <code>sales-nav.model.ts</code> puts <b>Workspace</b> on the Deals rail. Dashboard and list rows call <code>OpenDeal</code> into <code>mjs-deal-workspace</code>, which keeps its own open-documents strip <i>and</i> inner panes. Nested tabs: Explorer → workspace strip → deal panes. Accounts correctly use <code>OpenEntityRecord</code>. The dashboard itself is four KPIs + a “closing soonest” table — the §9 queries (forecast by category, slippage, conversion, win rate, forecast history) already exist and are unused here.</p>
+    <p style="margin-bottom:0"><b>Contracts:</b> Marcelo did <b>not</b> repeat the workspace. Rails are dashboard / all contracts / renewals / awaiting / modifications. Grids use <code>mj-explorer-entity-data-grid</code> and <code>OpenEntityRecord</code>. The miss is the dashboard: five count pills and a manifesto card. Architecturally correct, operationally thin.</p>
+  </div>
+
+  <h2>Sales — pick a philosophy</h2>
+  <table class="cmp">
+    <thead><tr><th>Option</th><th>Thesis</th><th>Best for</th><th>Risk</th></tr></thead>
+    <tbody>
+      <tr><td><b>A · Command center</b></td><td>Pipeline inspection: stacked forecast, waterfall, conversion, buckets, click-to-inspect.</td><td>VP / AD, “is the month real?”</td><td>Denser. Quota is v2 so the floor is last-period booked.</td></tr>
+      <tr><td><b>B · Living board</b></td><td>Kanban is home. Forecast is a ribbon. Cards carry stall/silence/forecast class.</td><td>AEs living in stages</td><td>Weak as an exec answer until you read the ribbon.</td></tr>
+      <tr><td><b>C · Weekly motion</b></td><td>Monday forecast-call narrative + analyst.</td><td>Small leadership team</td><td>Not a working surface for 40 open deals.</td></tr>
+    </tbody>
+  </table>
+
+  <a class="opt rec" href="option-a-command-center.html">
+    <h2>A · Pipeline command center <span class="rec-pill">recommended</span></h2>
+    <p class="muted">Stacked Closed / Commit / Best Case / Pipeline (cumulative flags sliced for the bar). Waterfall from ForecastSnapshot. Stage conversion. Close-date buckets. Attention queues wired to Activity Sync. Inspect grid filters from every click. Deal click = Explorer tab, no workspace rail.</p>
+  </a>
+  <a class="opt" href="option-b-living-board.html">
+    <h2>B · Living board as home</h2>
+    <p class="muted">Kanban is the dashboard. Forecast is a ribbon. Cards show stall and last activity. Still OpenEntityRecord. Signed column is not a drop target — close from the form so the lock and contract policy run once.</p>
+  </a>
+  <a class="opt" href="option-c-weekly-motion.html">
+    <h2>C · Weekly motion</h2>
+    <p class="muted">Monday briefing: won / lost / slipped / new + motion log + analyst. Thin as a working surface; board and list still required.</p>
+  </a>
+
+  <h2>Contracts — pick a philosophy</h2>
+  <p class="muted">Files live in the contracts repo. Same chrome, no money.</p>
+  <table class="cmp">
+    <thead><tr><th>Option</th><th>Thesis</th><th>Best for</th><th>Risk</th></tr></thead>
+    <tbody>
+      <tr><td><b>A · Obligation command</b></td><td>90-day calendar + four derived-column tiles + hot list.</td><td>Legal/ops who owns paper</td><td>No ARR — by design (plan §1).</td></tr>
+      <tr><td><b>B · Decision inbox</b></td><td>One ranked queue of verbs.</td><td>A single owner working the list</td><td>No 90-day shape.</td></tr>
+      <tr><td><b>C · Portfolio map</b></td><td>Company → counterparty → contract tree.</td><td>Account-shaped thinking</td><td>Slow for “what is due this week.”</td></tr>
+    </tbody>
+  </table>
+
+  <a class="opt rec" href="../../../../bizapps-contracts/plans/obligation-command/mockups/option-a-renewal-command.html">
+    <h2>A · Obligation command <span class="rec-pill">recommended</span></h2>
+    <p class="muted">90-day notice/expiry calendar, four derived-column queues, hot list. Click = Explorer contract tab. Tiles and worklists cannot disagree.</p>
+  </a>
+  <a class="opt" href="../../../../bizapps-contracts/plans/obligation-command/mockups/option-b-decision-inbox.html">
+    <h2>B · Decision inbox</h2>
+    <p class="muted">One ranked queue of verbs (attach paper, send notice, wait). Great for a single owner; weak portfolio shape.</p>
+  </a>
+  <a class="opt" href="../../../../bizapps-contracts/plans/obligation-command/mockups/option-c-portfolio.html">
+    <h2>C · Portfolio map</h2>
+    <p class="muted">Company → counterparty → contract tree. Health is paper/notice. Slow for “what is due this week.”</p>
+  </a>
+
+  <p class="muted" style="margin-top:36px">I’d lean <b>Sales A + Contracts A</b>. Hybrids are fair: A’s inspect grid with B’s board as the rail page (not the home), C’s analyst as a side panel later. Do not keep the Workspace rail in any of them.</p>
+</div>
+</body>
+</html>

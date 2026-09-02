@@ -78,7 +78,10 @@
     "action-categories",
     "actions",
     "scheduled-jobs",
+    "activity-sync-extensions",
     "applications",
+    "entity-fields",
+    "user-views",
     "entity-relationships"
   ],
   "sqlLogging": {

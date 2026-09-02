@@ -68,10 +68,12 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
     template: `
         <section class="dat">
             <header class="dat__head">
-                <h3 class="dat__title">
-                    <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
-                    Activity
-                </h3>
+                @if (!ComposeOnly) {
+                    <h3 class="dat__title">
+                        <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
+                        Activity
+                    </h3>
+                }
                 @if (!Adding) {
                     <button type="button" class="dat__add" (click)="StartAdd()" [disabled]="!DealID">
                         <i class="fa-solid fa-plus" aria-hidden="true"></i> Log activity
@@ -119,11 +121,11 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
                 </form>
             }
 
-            @if (Loading) {
+            @if (!ComposeOnly && Loading) {
                 <mj-loading></mj-loading>
-            } @else if (Rows.length === 0) {
+            } @else if (!ComposeOnly && Rows.length === 0) {
                 <p class="dat__empty">Nothing logged on this deal yet.</p>
-            } @else {
+            } @else if (!ComposeOnly) {
                 <ol class="dat__list">
                     @for (row of Rows; track row.ID) {
                         <li class="dat__item">
@@ -211,11 +213,19 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
 export class DealActivityTimelineComponent {
     private readonly cdr = inject(ChangeDetectorRef);
 
+    /**
+     * When true, only the compose form is shown — the list is owned by `mj-entity-viewer`
+     * on the Deal form Activity section.
+     */
+    @Input() public ComposeOnly = false;
+
     /** Setting this loads the timeline. Null means no deal is open, so there is nothing to show. */
     @Input()
     public set DealID(value: string | null) {
         this.dealID = value;
-        void this.Load();
+        queueMicrotask(() => {
+            if (!this.ComposeOnly) void this.Load();
+        });
     }
     public get DealID(): string | null {
         return this.dealID;
@@ -400,6 +410,11 @@ export class DealActivityTimelineComponent {
 
     /** Newest first, by when it HAPPENED rather than when it was filed. */
     public async Load(): Promise<void> {
+        if (this.ComposeOnly) {
+            this.Rows = [];
+            this.cdr.detectChanges();
+            return;
+        }
         if (!this.dealID) {
             this.Rows = [];
             this.cdr.detectChanges();

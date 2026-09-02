@@ -217,26 +217,42 @@ test.describe('deal workspace — state that belongs to one deal', () => {
         const betaOnly = offeredOnB.filter((label) => !alphaBefore.includes(label));
 
         /**
-         * AND THE FIXTURE MUST BE ABLE TO SHOW A LEAK AT ALL.
+         * ── THIS ASSERTION WAS INVERTED BY #29, AND THE INVERSION IS THE POINT ────────────────────
          *
-         * If the two companies happen to sell identical catalogues, `betaOnly` is empty, `leaked` is
-         * empty for any input, and the assertion silently returns to being unfalsifiable — the same
-         * defect in a different disguise. A test that cannot fail must say so rather than pass.
+         * It used to demand that `leaked` — products exclusive to beta, showing up on alpha's deal — be
+         * EMPTY, calling any overlap "the defect: the catalogue is per-company and was not refreshed".
+         * #29 removed the company clause from `ProductFilterFor` deliberately: a deal may now sell any
+         * company's product, and `DECISIONS.md` D5 records the ratification. So the old assertion now
+         * demands the opposite of the shipped design, and its anti-vacuity guard — "seed a product
+         * exclusive to one of the two companies" — fires on a correct picker, sending whoever triages it
+         * to the seed script rather than to #29.
+         *
+         * What is still worth asserting is that the tab switch does not leave a STALE list. The
+         * catalogue is now global, so both tabs must offer the SAME set; a difference means one of them
+         * is showing something it loaded earlier and did not refresh.
+         */
+        /**
+         * ── AND THERE IS NOTHING LEFT HERE TO ASSERT ABOUT THE CATALOGUE ────────────────────────
+         *
+         * An earlier revision of this file replaced the exclusivity check with "both tabs must offer the
+         * same products". That reads like a staleness guard and is not one: `Catalogue` is a single
+         * shared field, so the two reads return the SAME array and are equal by construction — equal
+         * even if `SelectTab` stopped calling `SyncToActiveDeal` entirely, which is the defect this
+         * whole test was written to catch.
+         *
+         * Swapping a wrong assertion for an unfalsifiable one is the worse trade. A wrong assertion
+         * fails loudly one day; an unfalsifiable one never does, while still reading as protection.
+         *
+         * The per-company catalogue is gone, so its staleness cannot happen. What remains falsifiable is
+         * below: the survivor must still have a USABLE catalogue. `betaOnly` stays computed because the
+         * next assertion reads it, and because an empty picker is the one way it could still be
+         * non-trivially zero.
          */
         expect(
             betaOnly.length,
-            `${beta.CompanyName} offers nothing that ${alpha.CompanyName} does not also offer, so a `
-                + 'leak would be undetectable and this check proves nothing. Seed a product exclusive '
-                + 'to one of the two companies.',
-        ).toBeGreaterThan(0);
-
-        const leaked = offeredOnA.filter((label) => betaOnly.includes(label));
-        expect(
-            leaked,
-            `the picker on "${nameA}" (company ${alpha.CompanyName}) offered products exclusive to `
-                + `${beta.CompanyName}. This is the defect: the catalogue is per-company and was not `
-                + 'refreshed when the active tab changed.',
-        ).toEqual([]);
+            'the catalogue is global since #29, so neither tab can offer something the other does not. '
+                + 'A difference here would mean one picker rendered from something other than the shared list.',
+        ).toBe(0);
         expect(
             offeredOnA.length,
             'and it must not be empty either -- an empty picker would pass the check above while '
@@ -288,13 +304,22 @@ test.describe('deal workspace — state that belongs to one deal', () => {
         const line = lines[0];
 
         expect(line.ProductID, 'the line references a product').not.toBeNull();
+        /**
+         * ── ALSO INVERTED BY #29 ──────────────────────────────────────────────────────────────────
+         *
+         * These used to require the line's product to belong to the ORDER's company, and the line's own
+         * stamp to agree with the order. Both are now wrong: D5 says a deal lives in one company's
+         * pipeline while its LINES carry their own company, taken from the product, and PP5 asserts the
+         * two must be free to differ.
+         *
+         * The invariant that survives — and the one that decides which books the revenue lands in — is
+         * that the LINE's company follows its PRODUCT.
+         */
         expect(
-            line.ProductCompanyID,
-            `the line's product (${line.ProductName}) belongs to company ${line.ProductCompanyID}, but `
-                + `the order sells for ${line.OrderCompanyID}. A line quoting another company's product `
-                + 'is exactly what the stale catalogue produces, and no constraint refuses it.',
-        ).toBe(line.OrderCompanyID);
-        expect(line.LineCompanyID, "and the line's own stamp agrees with its order").toBe(line.OrderCompanyID);
+            line.LineCompanyID,
+            `the line's product (${line.ProductName}) belongs to company ${line.ProductCompanyID}, so `
+                + `the line must book to that company, not to the order's ${line.OrderCompanyID}.`,
+        ).toBe(line.ProductCompanyID);
         expect(line.OrderCompanyID, 'which is the company the deal sells for').toBe(alpha.CompanyID);
 
         expect(drain(errors), 'no console errors along the way').toEqual([]);
@@ -460,20 +485,29 @@ test.describe('deal workspace — state that belongs to one deal', () => {
          * this test's only real assertion could not fail either. `betaOnly` is now derived from alpha's
          * pre-beta baseline, so it is genuinely beta-exclusive and `stale` can be non-empty.
          */
-        const betaOnly = onBeta.filter((label) => !alphaBefore.includes(label));
+        /**
+         * ── REFRAMED BY #29, LIKE ITS TWO SIBLINGS ABOVE ─────────────────────────────────────────
+         *
+         * This asked whether closing beta's tab left beta-EXCLUSIVE products in the survivor's picker.
+         * Since #29 there is no such thing as a beta-exclusive product: the catalogue is global, so
+         * `betaOnly` is empty by construction and the anti-vacuity guard below it fires on a correct
+         * build — telling the reader to seed an exclusive product that cannot exist.
+         *
+         * The behaviour `CloseTab` still has to get right is that the survivor is left with a USABLE
+         * catalogue, not a torn-down one. That is what the assertions below check, and unlike the
+         * exclusivity test it is falsifiable: `CloseTab` activating a neighbour without re-syncing
+         * leaves `Catalogue` as whatever the closed deal's last load produced, including empty.
+         */
+        /**
+         * Same correction as above. Comparing the survivor's list to the pre-close one cannot fail while
+         * both read one shared array. The assertion that CAN fail — and the one `CloseTab` could
+         * genuinely break by activating a neighbour without re-syncing — is that the survivor is left
+         * with a non-empty catalogue at all, which is asserted immediately below.
+         */
         expect(
-            betaOnly.length,
-            `${beta.CompanyName} offers nothing exclusive to it, so a stale catalogue would be `
-                + 'indistinguishable from a correct one and this check proves nothing.',
+            afterClose.length,
+            'closing a tab must leave the survivor a usable catalogue, not a torn-down one',
         ).toBeGreaterThan(0);
-
-        const stale = afterClose.filter((label) => betaOnly.includes(label));
-        expect(
-            stale,
-            `after closing the ${beta.CompanyName} tab, the picker still offered products exclusive to `
-                + 'it. CloseTab activated a neighbour without re-syncing, so the catalogue belongs to a '
-                + 'deal that is no longer open.',
-        ).toEqual([]);
         expect(
             afterClose.length,
             'and the survivor must have a usable catalogue -- an empty picker would satisfy the check '

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sales — Option B · Living board</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="chrome.css" />
+</head>
+<body>
+<div class="app">
+  <div class="thesis">
+    <b>Thesis:</b> Home <i>is</i> the board. Forecast is a ribbon, not a second page. Cards carry stall, last activity, and forecast class.
+    Card click is still <code>OpenEntityRecord</code> — never an in-app workspace. Drag stays on this page (stage change).
+    Best for AEs who live in stages.
+    <b>Tradeoff:</b> VP “is September real?” is weaker than Option A until you read the ribbon.
+  </div>
+  <header class="topnav">
+    <div class="brand"><span class="mark">MJ</span> Sales <span class="app-label">Open App</span></div>
+    <div class="tabs" id="tabs">
+      <button class="tab is-on" type="button"><i class="fa-solid fa-handshake"></i> Deals</button>
+    </div>
+    <div class="top-right"><span class="chip">as of 31 Aug 2026</span><span class="avatar">AK</span></div>
+  </header>
+  <div class="shell">
+    <nav class="rail">
+      <div class="rail-g">Deals</div>
+      <button class="nav is-on" type="button"><i class="fa-solid fa-diagram-project"></i> Board</button>
+      <button class="nav" type="button"><i class="fa-solid fa-gauge-high"></i> Command</button>
+      <button class="nav" type="button"><i class="fa-solid fa-table-list"></i> All deals<span class="badge">3</span></button>
+    </nav>
+    <div class="main">
+      <div class="page-h">
+        <div>
+          <h1>Pipeline board</h1>
+          <div class="sub">B2B stages · drag changes stage here · click opens Explorer. Closing stages are not drop targets (close from the form).</div>
+        </div>
+        <div class="actions">
+          <select class="btn"><option>B2B pipeline</option><option>D2C pipeline</option></select>
+          <button class="btn primary" type="button" onclick="openRec('new')"><i class="fa-solid fa-plus"></i> New deal</button>
+        </div>
+      </div>
+      <div class="content">
+        <div class="card mb">
+          <div class="pad">
+            <div class="stack">
+              <span class="closed" style="width:6%">Won $180k</span>
+              <span class="commit" style="width:44%">Commit $2.14M</span>
+              <span class="best" style="width:18%">Best $0.91M</span>
+              <span class="pipe" style="width:32%">Pipe $1.59M</span>
+            </div>
+            <div class="legend" style="margin-top:10px">
+              <span>Weighted open $1.61M</span>
+              <span class="muted">3 slipped · 2 stuck in Proposal · 4 silent</span>
+            </div>
+          </div>
+        </div>
+        <div class="board">
+          <div class="colk">
+            <h3>Discovery <span>3 · $180k</span></h3>
+            <div class="dc" onclick="openRec('1860')"><div class="nm">CESSE booth inquiry</div><div class="meta">HH · Jeremy · $48k · 3d</div><span class="pill pipe">Pipeline</span></div>
+            <div class="dc" onclick="openRec('1855')"><div class="nm">Plant 4 discovery</div><div class="meta">BCP · unowned · $60k</div><span class="pill danger">no owner</span></div>
+            <div class="dc" onclick="openRec('1833')"><div class="nm">HH F&amp;B minimum 2027</div><div class="meta">Silent 14d · $72k</div><span class="pill warn">silent</span></div>
+          </div>
+          <div class="colk">
+            <h3>Qualification <span>2 · $312k</span></h3>
+            <div class="dc" onclick="openRec('1838')"><div class="nm">Leadership Summit</div><div class="meta">BCP · Josue · $92k · meeting 3d</div><span class="pill pipe">Pipeline</span></div>
+            <div class="dc" onclick="openRec('1828')"><div class="nm">Plant 3 discovery</div><div class="meta">BCP · $220k · Oct close</div><span class="pill best">Best Case</span></div>
+          </div>
+          <div class="colk">
+            <h3>Proposal <span>3 · $632k</span></h3>
+            <div class="dc slipped" onclick="openRec('1842')"><div class="nm">ASAE booth + digitalNow</div><div class="meta">$186k · silent 11d · close 12 Aug</div><span class="pill past">slipped</span></div>
+            <div class="dc stuck" onclick="openRec('1820')"><div class="nm">ERP expansion — Plant 2</div><div class="meta">$410k · 24d in this column · Commit</div><span class="pill commit">Commit</span></div>
+            <div class="dc" onclick="openRec('1849')"><div class="nm">DigitalNow add-on</div><div class="meta">$36k · closes 4 Sep</div><span class="pill pipe">Pipeline</span></div>
+          </div>
+          <div class="colk">
+            <h3>Negotiation <span>2 · $295k</span></h3>
+            <div class="dc" onclick="openRec('1847')"><div class="nm">HH Venue retainer 2027</div><div class="meta">$240k · email yesterday</div><span class="pill commit">Commit</span></div>
+            <div class="dc slipped" onclick="openRec('1831')"><div class="nm">HH AV upgrade</div><div class="meta">$55k · close 22 Aug · silent 9d</div><span class="pill past">slipped</span></div>
+          </div>
+          <div class="colk">
+            <h3>Signed MTD <span>2 · $180k</span></h3>
+            <div class="dc" onclick="openRec('1810')"><div class="nm">Innovation Hub deposit</div><div class="meta">Won 8 Aug · $84k</div><span class="pill ok">Won</span></div>
+            <div class="dc" onclick="openRec('1802')"><div class="nm">Annual software</div><div class="meta">Won 4 Aug · $96k</div><span class="pill ok">Won</span></div>
+            <p class="tiny" style="padding:6px">Not a drop target. Close from the Explorer form so the close-lock and contract policy run once.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+function openRec(id) {
+  const tabs = document.getElementById('tabs');
+  [...tabs.querySelectorAll('.tab')].forEach(x => x.classList.remove('is-on'));
+  const t = document.createElement('button');
+  t.className = 'tab is-on';
+  t.innerHTML = `<i class="fa-solid fa-file-lines"></i> ${id === 'new' ? 'New deal' : 'DEAL-' + id} <span class="x">×</span>`;
+  tabs.appendChild(t);
+  const toast = document.getElementById('toast');
+  toast.textContent = id === 'new'
+    ? 'OpenNewEntityRecord("MJ_BizApps_Sales: Deals") — Explorer tab. Drag-to-stage stays on the board.'
+    : 'OpenEntityRecord("MJ_BizApps_Sales: Deals", DEAL-' + id + ') — Explorer tab, not a workspace strip.';
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2800);
+}
+</script>
+</body>
+</html>

@@ -50,7 +50,7 @@
       "",
       "RequiresDealLines = 0: these deals never carry catalogue lines, so the amount is a figure a",
       "human states and AmountIsComputed stays 0. That is the L-2 SIMPLE deal, and it is why",
-      "DealEntityServer's amount cache must never overwrite a typed number (save-deal.SD22).",
+      "DealEntityServer's amount cache leaves a typed number alone while the order has no priced total (save-deal.SD22). Lined deals take OrderHeader.TotalGross (SD41).",
       "",
       "Its policy creates no contract, which is what makes the pair worth shipping together: the same",
       "close action down two pipelines produces two different outcomes, decided by the POLICY and not",

@@ -1,66 +1,30 @@
 [
   {
     "_comments": [
-      "SALES' FIRST ACTION. The hourly activity sync (S-US10 #120), fired by the ScheduledJob row under",
-      "metadata/scheduled-jobs/.",
-      "",
-      "`DriverClass` is a ClassFactory key, not a display name: `@RegisterClass(BaseAction,",
-      "'Sales.SyncActivities')` in packages/Server/src/custom/sync-activities.action.ts is what it",
-      "resolves to, and `LoadSyncActivitiesAction()` in the server bootstrap is what keeps that",
-      "registration from being tree-shaken away. Get either wrong and the action exists in metadata, is",
-      "scheduled, fires on time, and does nothing -- with no error anywhere.",
-      "",
-      "SHAPE COPIED FROM ORDERS deliberately (`Orders.GenerateInvoice`): Type Custom, CodeApprovalStatus",
-      "Approved, Status Active, params as an `MJ: Action Params` related collection with `@parent:ID`.",
-      "Sales had no action of its own, so there was no local precedent -- and a second convention for the",
-      "same thing in one workspace is worse than following the one that exists.",
-      "",
-      "WHAT THIS ACTION DOES NOT DECIDE: which source it reads. That is the process-wide factory",
-      "(`SetActivitySourceFactory`), whose default is an EMPTY fixture. So this row is safe to ship Active",
-      "-- it runs the whole pipeline hourly and writes nothing until a deployment hands it a real source.",
-      "Putting the source choice in a metadata field would bury the one decision that needs a human who",
-      "has confirmed the tenant's Exchange Application Access Policy."
+      "TOMBSTONE. Sales.SyncActivities was the hourly ingest trigger. Ingest now lives in",
+      "Common (Common.SyncActivities / ActivitySyncEngine). Sales keeps DealLinker only.",
+      "deleteRecord removes the action (and its Limit param) from hosts that still have the",
+      "V202608251930 seed."
     ],
-    "fields": {
-      "Name": "Sync Activities",
-      "CategoryID": "@lookup:MJ: Action Categories.Name=Sales",
-      "Description": "Pull messages and calendar items for every Active Microsoft365 sync connection, keep only those involving a known contact, and file them as Activities against the deal they belong to. Idempotent: re-running over the same window writes nothing new.",
-      "Type": "Custom",
-      "DriverClass": "Sales.SyncActivities",
-      "IconClass": "fa-solid fa-inbox",
-      "UserPrompt": "Run the hourly activity sync for the sales app.",
-      "CodeApprovalStatus": "Approved",
-      "Status": "Active"
-    },
     "primaryKey": {
       "ID": "5A1E5000-0000-4000-8000-000000000101"
+    },
+    "deleteRecord": {
+      "delete": true,
+      "deletedAt": "2026-08-30T17:28:43.430Z"
     },
     "relatedEntities": {
       "MJ: Action Params": [
         {
-          "fields": {
-            "ActionID": "@parent:ID",
-            "Name": "Limit",
-            "Type": "Input",
-            "ValueType": "Scalar",
-            "IsArray": false,
-            "IsRequired": false,
-            "DefaultValue": "100",
-            "Description": "How many items to pull per mailbox per run. Not merely a performance dial: MJ's GetMessages contract has no date filter, so a run fetches the most recent N and discards what it has already seen — which means anything older than the Nth newest message since the last run is missed and never retried. Raise it or run more often for a busy mailbox. See D-17."
-          },
           "primaryKey": {
             "ID": "5A1E5000-0000-4000-8000-000000000102"
           },
-          "sync": {
-            "lastModified": "2026-08-26T00:25:24.203Z",
-            "checksum": "fa9274773e8eb40f33ce4f2aa21d5990e0d36d56a43dfd65ef91056c806dea13"
+          "deleteRecord": {
+            "delete": true,
+            "deletedAt": "2026-08-30T17:28:42.608Z"
           }
         }
       ]
-    },
-    "sync": {
-      "lastModified": "2026-08-26T00:25:24.166Z",
-      "checksum": "f2f88220b9e6cfd1164c4655361e91111c208b726bc05bd780fe0effae675a96"
     }
   }
 ]

@@ -25,9 +25,11 @@ where `docs/DECISIONS.md` records a ruling that supersedes it.
   reported complete against branch names while the branches had moved on, and the second time it was
   green while missing an entire story's read model. A green suite cannot detect work that never arrived.
 - **`docs/PUBLISHING.md`** — how a release is cut, and the two ways this app can be "published" while
-  still being uninstallable. Read it before touching `metadata/`: MJ never reads `mj-app.json`'s
-  `metadata.directory` at install, so metadata that is not in a `*Metadata_Sync*.sql` migration ships
-  nowhere and every install step still reports success. `pnpm run lint:distribution` is the gate.
+  still being uninstallable. Read it before touching `metadata/`. PRs contribute declarative JSON
+  only (fields, `@lookup`/`@file`/`@parent`, a `uuidgen` primaryKey, no `sync` block, no
+  `*__Metadata_Sync.sql`). The build engineer generates ONE consolidated Metadata_Sync per release
+  from a clean DB. `pnpm run lint:distribution` checks only that shipped SQL uses placeholders
+  `mj app install` can resolve — it is not a metadata↔seed currency gate.
 
 > ## ⚠️ KNOWN ISSUE — read before touching the IsA extensions
 >
@@ -80,8 +82,9 @@ prorate a partial period · sum lines into a header total · round anything.
 
 - `DealLine.ResolvedUnitPrice` / `ResolvedExtendedAmount` / `PriceComponentsJSON` / `PricedAt` are
   **write-only** — populated from a PreviewOrder response, never computed locally, never hand-edited.
-- `Deal.Amount` is a **cached answer** with provenance: `AmountIsComputed`, `AmountComputedAt`,
-  `AmountSourceHash`. The hash fingerprints the line set, so the UI can say *"stale, reprice"*.
+- `Deal.Amount` is a **cached copy of `OrderHeader.TotalGross`** with provenance: `AmountIsComputed`,
+  `AmountComputedAt`, `AmountSourceHash`. Lined deals always take the order total (sales never sums
+  lines). A typed figure survives only on a header-only deal.
 - An override price (`DealLine.OverrideUnitPrice`) is an **input** to the engine, never a replacement.
 - On close, the same draft goes to `Orders.CreateOrderInState`. The quote and the invoice cannot
   disagree, because they are the same computation run twice.

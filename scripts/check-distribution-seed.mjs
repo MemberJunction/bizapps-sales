@@ -1,27 +1,16 @@
 #!/usr/bin/env node
 /**
- * Distribution gate — can a stranger install this app and get a working one?
+ * Distribution gate — placeholders `mj app install` cannot resolve.
  *
- * Ported from bizapps-forms, where both failures below were live and both were invisible from
- * inside: everything built, every test passed, and the app worked perfectly on the machine that
- * had run `mj sync push` by hand. Sales shipped in exactly that state until the seed migration
- * landed — 22 metadata directories, none of which reached an installed host.
+ * MJ and this app agree that `mj-app.json`'s `metadata.directory` is a dev-time pointer: the
+ * install engine NEVER reads it, and seeding happens exclusively through `migrations/` generated
+ * by the build engineer at release (`mj sync push` against a clean DB). PRs contribute
+ * declarative JSON only. There is no per-PR Metadata_Sync, no hash manifest, and no CI gate
+ * pretending a file list is current with the seed. The guard that metadata reached a host is
+ * the release process — a clean install from migrations — not a proxy in every PR.
  *
- * CHECK 1 — THE METADATA SEED EXISTS AND IS CURRENT.
- *   `mj-app.json`'s `metadata.directory` is documentation: MJ's manifest schema says the install
- *   engine NEVER reads it, and seeding happens exclusively through `migrations/`. So metadata that
- *   has not been pushed into a `*Metadata_Sync*.sql` migration ships nowhere. Sales' 22 directories
- *   — the two seeded pipelines and their stages, ten type tables, 15 queries, the actions, the
- *   remote operations and the application itself — went a whole build without one.
+ * What this file still checks, because MJ has no equivalent and the failure is silent:
  *
- *   Currency is checked against a manifest of content hashes rather than by diffing git: a hash
- *   manifest answers the question that actually matters ("is the shipped seed current with the
- *   metadata?") rather than a proxy ("did both change in the same pull request?"), and it works on
- *   any checkout, including the shallow clones CI hands you.
- *
- *   Regenerate both together:  npm run seed:manifest   (after regenerating the seed migration)
- *
- * CHECK 2 — NO UNRESOLVABLE PLACEHOLDERS IN SHIPPED SQL.
  *   `mj migrate` builds Skyway's placeholder map from THIS repo's mj.config.cjs, but
  *   `mj app install` builds it from the HOST's (MJCLI's open-app-context.ts ->
  *   openApps.migrationPlaceholders). Only `${flyway:defaultSchema}` and `${mjSchema}` are supplied
@@ -34,10 +23,9 @@
  * without an install step.
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
@@ -48,129 +36,6 @@ const REPO_ROOT = join(__dirname, '..');
  * heard of us.
  */
 const INSTALL_SUPPLIED_PLACEHOLDERS = new Set(['flyway:defaultSchema', 'mjSchema']);
-
-/**
- * `metadata/sql_logging/` holds the raw generator output that BECOMES the seed migration, and
- * `.backups/` is what `mj sync push` writes before it updates a record in place (every directory
- * under `metadata/` declares `backupBeforeUpdate`). Both are gitignored, both are left on disk by
- * a local run, and neither is source — hashing either would make the gate fire on the very push
- * that regenerated the seed.
- */
-const METADATA_IGNORED_DIRS = new Set(['sql_logging', '.backups']);
-
-/**
- * `README.md` under `metadata/` is documentation for humans, never record content, so editing one
- * cannot make the shipped seed stale. Record bodies that DO live in files are pulled in by
- * `@file:` references (`metadata/queries/SQL/*.sql`) and are still hashed — only the name
- * `README.md` is exempt. Without this the gate fires on a documentation edit and teaches people
- * that regenerating the manifest is how you make it quiet, which is precisely the habit that would
- * let a real drift through.
- */
-const METADATA_IGNORED_FILES = new Set(['README.md']);
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Every file under `metadata/`, repo-relative and sorted, excluding generator output. */
-function collectMetadataFiles(dir, acc = []) {
-    for (const name of readdirSync(dir).sort()) {
-        const full = join(dir, name);
-        if (statSync(full).isDirectory()) {
-            if (!METADATA_IGNORED_DIRS.has(name)) collectMetadataFiles(full, acc);
-        } else if (!METADATA_IGNORED_FILES.has(name)) {
-            acc.push(full);
-        }
-    }
-    return acc;
-}
-
-/**
- * Hash of a metadata file's MEANING, not its bytes.
- *
- * `mj sync push` writes a `sync` block (lastModified + checksum) back into each record after a
- * push. Those are bookkeeping about the push, not content — hashing them would make the gate fire
- * on the very push that regenerated the seed, which trains people to regenerate the manifest to
- * silence it. Stripped for JSON; other files (template .md bodies) hash whole.
- */
-function contentHash(file) {
-    const raw = readFileSync(file, 'utf-8');
-    if (!file.endsWith('.json')) return createHash('sha256').update(raw).digest('hex');
-    let parsed;
-    try {
-        parsed = JSON.parse(raw);
-    } catch {
-        // Unparseable JSON is a real problem, but not this gate's problem to diagnose — hash the
-        // bytes so it still registers as a change rather than being silently skipped.
-        return createHash('sha256').update(raw).digest('hex');
-    }
-    const strip = (node) => {
-        if (Array.isArray(node)) return node.map(strip);
-        if (node && typeof node === 'object') {
-            return Object.fromEntries(
-                Object.entries(node)
-                    .filter(([k]) => k !== 'sync')
-                    .map(([k, v]) => [k, strip(v)]),
-            );
-        }
-        return node;
-    };
-    return createHash('sha256').update(JSON.stringify(strip(parsed))).digest('hex');
-}
-
-export function buildManifest(repoRoot = REPO_ROOT) {
-    const files = {};
-    for (const file of collectMetadataFiles(join(repoRoot, 'metadata'))) {
-        files[relative(repoRoot, file)] = contentHash(file);
-    }
-    return { generatedFrom: 'metadata/', files };
-}
-
-// ---------------------------------------------------------------------------
-// CHECK 1 — the seed migration exists and matches the metadata it was generated from
-// ---------------------------------------------------------------------------
-
-function checkSeedMigration(repoRoot, violations) {
-    const MIGRATIONS_DIR = join(repoRoot, 'migrations');
-    const MANIFEST_PATH = join(MIGRATIONS_DIR, 'metadata-seed.manifest.json');
-    const seeds = readdirSync(MIGRATIONS_DIR).filter((f) => /Metadata_Sync.*\.sql$/i.test(f));
-    if (seeds.length === 0) {
-        violations.push(
-            'No `*Metadata_Sync*.sql` migration in migrations/. Everything under metadata/ ships ' +
-                'NOWHERE: MJ never reads mj-app.json\'s metadata.directory at install. Generate one with ' +
-                '`mj sync push --dir metadata` against a database whose Sales metadata is empty.',
-        );
-        return;
-    }
-
-    if (!existsSync(MANIFEST_PATH)) {
-        violations.push(
-            `Seed migration(s) present (${seeds.join(', ')}) but ${relative(repoRoot, MANIFEST_PATH)} is ` +
-                'missing, so nothing can tell whether they are current. Run `npm run seed:manifest`.',
-        );
-        return;
-    }
-
-    const recorded = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8')).files ?? {};
-    const current = buildManifest(repoRoot).files;
-
-    for (const [file, hash] of Object.entries(current)) {
-        if (!(file in recorded)) {
-            violations.push(`${file} is new metadata that no seed migration ships. Regenerate the seed, then \`npm run seed:manifest\`.`);
-        } else if (recorded[file] !== hash) {
-            violations.push(`${file} changed since the seed migration was generated, so the change ships nowhere. Regenerate the seed, then \`npm run seed:manifest\`.`);
-        }
-    }
-    for (const file of Object.keys(recorded)) {
-        if (!(file in current)) {
-            violations.push(`${file} was deleted but the seed migration still creates its records. Regenerate the seed, then \`npm run seed:manifest\`.`);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// CHECK 2 — shipped SQL uses only placeholders the install engine supplies
-// ---------------------------------------------------------------------------
 
 function checkPlaceholders(repoRoot, violations) {
     const dirs = [join(repoRoot, 'migrations'), join(repoRoot, 'migrations-teardown')];
@@ -197,14 +62,9 @@ function checkPlaceholders(repoRoot, violations) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Entry point. Skipped when imported (by seed:manifest, which reuses buildManifest).
-// ---------------------------------------------------------------------------
-
-/** Runs both checks against a repo root and returns the violations found. */
+/** Runs the placeholder check against a repo root and returns the violations found. */
 export function runChecks(repoRoot = REPO_ROOT) {
     const violations = [];
-    checkSeedMigration(repoRoot, violations);
     checkPlaceholders(repoRoot, violations);
     return violations;
 }
@@ -213,10 +73,10 @@ if (process.argv[1] && process.argv[1].endsWith('check-distribution-seed.mjs')) 
     const violations = runChecks();
 
     if (violations.length > 0) {
-        console.error('\n❌ Distribution gate failed — this app would not install correctly on someone else\'s database:\n');
+        console.error('\n❌ Distribution gate failed — shipped SQL uses a placeholder `mj app install` cannot resolve:\n');
         for (const v of violations) console.error(`  • ${v}`);
         console.error('');
         process.exit(1);
     }
-    console.log('✅ Distribution gate passed — metadata seed is present and current; shipped SQL uses only install-supplied placeholders.');
+    console.log('✅ Distribution gate passed — shipped SQL uses only install-supplied placeholders.');
 }

@@ -21,22 +21,17 @@
  * container and is named in that rule's `:not()` list precisely so it keeps `display:block`,
  * `flex:1 1 auto`, `overflow-y:auto`. ONE of them wraps every page, so all three scroll identically.
  *
- * ── WHY THE WORKSPACE IS HIDDEN, NOT `@if`-ed ───────────────────────────────────────────────────
+ * ── RECORDS ARE EXPLORER TABS ───────────────────────────────────────────────────────────────────
  *
- * The open-documents strip lives INSIDE `mjs-deal-workspace` (a deliberate divergence from contracts,
- * which hoists the card to its section). That makes the workspace self-contained — but it also means
- * destroying the component destroys every open deal. So the workspace is mounted once and hidden with
- * `[hidden]` when another page is showing: switching to the list and back keeps your drafts, which is
- * the whole point of an open-documents strip. Contracts gets the same outcome by holding drafts in the
- * section instead; both are valid, and this is the one that does not re-plumb a verified component.
+ * A deal click is `NavigationService.OpenEntityRecord`, a new deal is `OpenNewEntityRecord`. Explorer
+ * owns the tab. There is no in-rail workspace — that nested document strip was the antipattern
+ * orders already left. The custom deal form (close-lock + stale-amount) is what those tabs render.
  *
  * ── WHAT IS MJ'S AND WHAT IS OURS ───────────────────────────────────────────────────────────────
  *
- * Chrome is MJ page primitives; buttons are `mjButton`; loading is `mj-loading`. Hand-built is only the
- * KPI strip and the roster table — the roster is a table rather than `mj-explorer-entity-data-grid`
- * because a row here must open the DEAL WORKSPACE, and the grid's row activation opens an Explorer
- * record tab. Colour, spacing and radius come from `--mj-*` tokens throughout, so this tracks the host
- * theme and is correct in dark mode without a second stylesheet.
+ * Chrome is MJ page primitives; buttons are `mjButton`; loading is `mj-loading`. The roster is still
+ * a table rather than `mj-explorer-entity-data-grid` because this pass keeps the existing list
+ * surface and only changes where a row GOES. Colour, spacing and radius come from `--mj-*` tokens.
  *
  * THIS FILE COMPUTES NO PRICING. The dashboard sums `Deal.Amount` across deals, which is a reporting
  * rollup of figures that are already answers (master plan §9 defines the forecast measures the same
@@ -45,12 +40,15 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, ViewChild, inject } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CompositeKey } from '@memberjunction/core';
+import { CompositeKey, Metadata, type EntityInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
+import { EntityViewerModule, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
+import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
+import { LoadDealPipelineView, DealInListWhere } from '../pages/deal-views';
 import type { ResourceData } from '@memberjunction/core-entities';
 import {
     MJButtonDirective,
@@ -73,13 +71,26 @@ import {
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
 import { DealBoardComponent, DEFAULT_DISPLAY_CURRENCY } from '../board/deal-board.component';
-import { DealWorkspaceComponent } from '../workspace/deal-workspace.component';
 import {
     DealWorkspaceService,
     type DealDashboardSummary,
     type DealRosterRow,
 } from '../workspace/deal-workspace.service';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
+import {
+    CloseBuckets,
+    ClosingSoon,
+    FilterInspect,
+    ForecastSlices,
+    OwnerCoverage,
+    StageFunnel,
+    TodayUtc,
+    WeightedOpen,
+    type CloseBucket,
+    type FunnelStage,
+    type InspectKey,
+    type OwnerBar,
+} from '../pages/dashboard-inspect';
 
 /**
  * The account entity, for opening a customer as its own Explorer tab.
@@ -89,6 +100,7 @@ import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace
  * exists. Explorer resolves the parent chain from there.
  */
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
+const E_DEAL = 'MJ_BizApps_Sales: Deals';
 
 /** One KPI tile. `Tone` drives colour only — no behaviour hangs off it. */
 interface SalesKpi {
@@ -96,29 +108,7 @@ interface SalesKpi {
     Value: string;
     Footnote: string;
     Tone?: 'warn' | 'err';
-}
-
-/**
- * The UTC date part of a value that may be an ISO string OR a `Date`.
- *
- * MJ v6 CHANGED THIS UNDER US. On v5 a `RunView` with `ResultType: 'simple'` handed back the raw
- * database shape, so a DATE column arrived as an ISO string and `.slice(0, 10)` was safe. On v6 the
- * same read can hand back a real `Date`, and the old code died with
- * `TypeError: d.ExpectedCloseDate.slice is not a function` — which took the whole Sales dashboard down
- * with it, because the getter runs during render.
- *
- * Accepting BOTH is deliberate rather than picking one: the value's type now depends on how the row was
- * fetched, and a KPI getter is the wrong place to care. Compared as a UTC date-only string because
- * everything stored is UTC — local-time getters would move the boundary by a day west of Greenwich.
- *
- * See bizapps-accounting docs/ui-architecture.md on `ResultType: 'entity_object'` vs `'simple'`; this is
- * the same hazard, and orders shipped it wrong for months.
- */
-function UtcDatePart(value: string | Date): string {
-    if (value instanceof Date) {
-        return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`;
-    }
-    return String(value).slice(0, 10);
+    Filter?: InspectKey;
 }
 
 @Component({
@@ -134,8 +124,8 @@ function UtcDatePart(value: string | Date): string {
         MJLeftNavComponent,
         MJLeftNavContentComponent,
         MJButtonDirective,
-        DealWorkspaceComponent,
         DealBoardComponent,
+        EntityViewerModule,
     ],
     changeDetection: ChangeDetectionStrategy.OnPush,
     templateUrl: './sales-section.component.html',
@@ -148,23 +138,24 @@ export class MJSSalesSectionComponent implements OnInit {
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
     /**
-     * Opens a RECORD as its own Explorer tab.
-     *
-     * Used for the SECONDARY surface only — the account behind a deal. A deal itself never comes through
-     * here: {@link OpenDeal} puts it in the workspace, because editing a deal with its lines and terms is
-     * what this app is for, and a generated record form is a worse place to do it. The distinction is the
-     * whole point of wiring this in narrowly rather than routing every row through it.
+     * Opens a RECORD as its own Explorer tab — deals AND accounts.
      */
     private readonly nav = inject(NavigationService);
-
-    /** The workspace is mounted once and hidden — see the file header. */
-    @ViewChild(DealWorkspaceComponent) private workspace?: DealWorkspaceComponent;
 
     public Page = '';
     public Loading = true;
     public Deals: DealRosterRow[] = [];
     /** Set when the roster could not be read, or a row could not be opened. Shown verbatim. */
     public Message = '';
+    /** Which slice the inspect grid is showing. Default is closing-soonest (the DB-oracle spec). */
+    public InspectFilter: InspectKey = 'closing';
+    public WinRateByCount: number | null = null;
+    public WinRateByValue: number | null = null;
+    public WinClosedCount = 0;
+    public WinWonCount = 0;
+    public DealEntityInfo: EntityInfo | null = null;
+    public InspectView: MJUserViewEntityExtended | null = null;
+    public AllDealsView: MJUserViewEntityExtended | null = null;
 
 
     /**
@@ -215,12 +206,9 @@ export class MJSSalesSectionComponent implements OnInit {
         this.cdr.detectChanges();
     }
 
-    /** The header's primary verb. Every page's primary is "New deal", so it always lands here. */
+    /** The header's primary verb. Opens a new Explorer record tab — never an in-rail workspace. */
     public StartPrimary(): void {
-        this.Page = 'workspace';
-        this.cdr.detectChanges();
-        this.workspace?.NewDeal();
-        this.cdr.detectChanges();
+        this.nav.OpenNewEntityRecord(E_DEAL);
     }
 
     // ── Data ───────────────────────────────────────────────────────────────────
@@ -229,19 +217,24 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Loading = true;
         this.cdr.detectChanges();
 
-        const [roster, lookups, summary] = await Promise.all([
+        const [roster, lookups, summary, winRate] = await Promise.all([
             this.service.LoadRoster(),
             // Still needed: the BOARD renders from these, and StatusTone reads them for the roster
             // pill. The KPI tiles no longer do -- their flags are applied server-side by the query.
             this.service.LoadLookups(),
             // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
             this.service.LoadDashboardSummary(),
+            this.service.RunNamedQuery('Sales: Win Rate by Count and Value'),
         ]);
         this.Deals = roster;
         this.summary = summary;
         this.Pipelines = lookups.Pipelines;
         this.Stages = lookups.Stages;
         this.DealStatusTypes = lookups.DealStatusTypes;
+        this.applyWinRate(winRate);
+        this.DealEntityInfo = new Metadata().Entities.find((e) => e.Name === E_DEAL) ?? null;
+        await this.refreshInspectView();
+        await this.refreshAllDealsView();
         this.Loading = false;
         if (!roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
@@ -250,46 +243,24 @@ export class MJSSalesSectionComponent implements OnInit {
         this.cdr.detectChanges();
     }
 
-    // ── Rows → the workspace ───────────────────────────────────────────────────
-
     /**
-     * Opens a deal in the workspace, switching to that page first.
+     * Opens a deal as an Explorer record tab.
      *
-     * The order matters: the page has to be showing before `OpenDeal` runs, or the workspace's own
-     * loading state is invisible and a slow read looks like a dead click.
-     *
-     * A failure SAYS SO and re-reads the roster. Contracts records that this was once a bare `return`,
-     * which was indistinguishable from a broken control — and the likeliest cause is the least obvious
-     * one: the deal was deleted by someone else since this list loaded.
+     * `OpenEntityRecord` is the orders/contracts pattern. The custom deal form (close-lock + stale
+     * amount) is what that tab renders. A missing ID is not a click we can honour.
      */
-    public async OpenDeal(row: DealRosterRow): Promise<void> {
-        this.Page = 'workspace';
-        this.Message = '';
-        this.cdr.detectChanges();
-
-        if (!this.workspace) {
-            this.Message = 'The workspace is not available on this screen.';
-            this.cdr.detectChanges();
+    public OpenDeal(row: DealRosterRow): void {
+        if (!row.ID) {
             return;
         }
-
-        const opened = await this.workspace.OpenDeal(row.ID);
-        if (!opened) {
-            this.Message =
-                `${row.DealNumber ?? row.Name} could not be opened. It may have been deleted since this ` +
-                `page loaded — the list has been refreshed.`;
-            await this.Refresh();
-            return;
-        }
-        this.cdr.detectChanges();
+        this.nav.OpenEntityRecord(E_DEAL, CompositeKey.FromID(row.ID));
     }
 
     /**
      * Opens the CUSTOMER behind a deal as its own Explorer tab.
      *
      * `stopPropagation` is load-bearing, not defensive: this cell sits inside a row whose click handler
-     * opens the deal in the workspace. Without it a click here would do BOTH — open the account tab and
-     * switch the page underneath it — which reads as the app losing your place.
+     * opens the deal. Without it a click here would do BOTH.
      *
      * A row with no account is not a failure. `AccountID` is nullable by design (an early-stage
      * opportunity legitimately has no account yet), so the affordance simply is not offered — see the
@@ -362,22 +333,26 @@ export class MJSSalesSectionComponent implements OnInit {
                 // Dashboard's summary figures, with the board branch's provenance suffix. Both halves
                 // are kept: the currency-correct total, and the caveat about who produced it.
                 Footnote: `across ${s.OpenCount} open ${s.OpenCount === 1 ? 'deal' : 'deals'}${statedNote}`,
+                Filter: 'pipe',
             },
             {
                 Label: 'Open deals',
                 Value: String(s.OpenCount),
                 Footnote: `of ${s.TotalCount} total`,
+                Filter: 'pipe',
             },
             {
                 Label: 'Past expected close',
                 Value: String(s.PastExpectedCloseCount),
                 Footnote: 'still open, close date gone',
                 Tone: s.PastExpectedCloseCount ? 'warn' : undefined,
+                Filter: 'slipped',
             },
             {
                 Label: 'Won',
                 Value: String(s.WonCount),
                 Footnote: 'closed won to date',
+                Filter: 'won',
             },
         ];
     }
@@ -420,10 +395,154 @@ export class MJSSalesSectionComponent implements OnInit {
      * has to work around.
      */
     public get ClosingSoon(): DealRosterRow[] {
-        return this.Deals.filter((d) => d.IsOpen && !!d.ExpectedCloseDate)
-            .slice()
-            .sort((a, b) => UtcDatePart(a.ExpectedCloseDate!).localeCompare(UtcDatePart(b.ExpectedCloseDate!)))
-            .slice(0, 8);
+        return ClosingSoon(this.Deals, 8);
+    }
+
+    public get InspectRows(): DealRosterRow[] {
+        return FilterInspect(this.Deals, this.InspectFilter, TodayUtc());
+    }
+
+    public get InspectLabel(): string {
+        switch (this.InspectFilter) {
+            case 'closing':
+                return 'Closing soonest · click a deal → Explorer tab';
+            case 'commit':
+                return 'IncludeInCommit, still open';
+            case 'best':
+                return 'IncludeInBestCase (includes Commit)';
+            case 'pipe':
+                return 'Open pipeline';
+            case 'slipped':
+                return 'ExpectedCloseDate already past, still open';
+            case 'noowner':
+                return 'Open, no owner';
+            case 'won':
+                return 'IsWon';
+            case 'week':
+                return 'Expected close in the next 7 days';
+            case 'month':
+                return 'Expected close later this month';
+            case 'later':
+                return 'Later, or no close date';
+            default:
+                return '';
+        }
+    }
+
+    public SetInspect(key: InspectKey): void {
+        this.InspectFilter = key;
+        void this.refreshInspectView().then(() => this.cdr.detectChanges());
+    }
+
+    public OnInspectOpened(event: RecordOpenedEvent): void {
+        const id = (event.compositeKey?.GetValueByFieldName('ID') ?? event.record?.['ID']) as string | undefined;
+        if (id) {
+            this.nav.OpenEntityRecord(E_DEAL, CompositeKey.FromID(id));
+        }
+    }
+
+    private async refreshInspectView(): Promise<void> {
+        if (!this.DealEntityInfo) {
+            this.InspectView = null;
+            return;
+        }
+        const where = DealInListWhere(this.InspectRows.map((d) => d.ID));
+        this.InspectView = await LoadDealPipelineView(this.DealEntityInfo, where);
+    }
+
+    private async refreshAllDealsView(): Promise<void> {
+        if (!this.DealEntityInfo) {
+            this.AllDealsView = null;
+            return;
+        }
+        this.AllDealsView = await LoadDealPipelineView(this.DealEntityInfo);
+    }
+
+    public OnAllDealsOpened(event: RecordOpenedEvent): void {
+        this.OnInspectOpened(event);
+    }
+
+    public get Stack(): { Closed: number; Commit: number; BestOnly: number; PipeOnly: number; Total: number } {
+        const s = ForecastSlices(this.Deals);
+        const Total = s.Closed + s.Commit + s.BestOnly + s.PipeOnly;
+        return { ...s, Total };
+    }
+
+    public StackPct(part: number): string {
+        const t = this.Stack.Total;
+        if (t <= 0 || part <= 0) return '0%';
+        return `${Math.max(2, Math.round((part / t) * 100))}%`;
+    }
+
+    public get Funnel(): FunnelStage[] {
+        return StageFunnel(this.Deals);
+    }
+
+    public FunnelHeight(count: number): string {
+        const max = Math.max(1, ...this.Funnel.map((s) => s.Count));
+        return `${Math.max(8, Math.round((count / max) * 100))}%`;
+    }
+
+    public get Buckets(): CloseBucket[] {
+        return CloseBuckets(this.Deals, TodayUtc());
+    }
+
+    public get Owners(): OwnerBar[] {
+        return OwnerCoverage(this.Deals);
+    }
+
+    public OwnerPct(amount: number): string {
+        const max = Math.max(1, ...this.Owners.map((o) => o.Amount));
+        return `${Math.round((amount / max) * 100)}%`; // money-grep-allow: ratio of two stored amounts rendered as a bar width percentage — the result is a CSS length, not a money figure
+    }
+
+    public get Weighted(): number {
+        return WeightedOpen(this.Deals);
+    }
+
+    public get SilentCount(): number {
+        // Last-activity from Common is not on the roster yet. Unowned + slipped + stuck-less
+        // "needs a person" queues that we CAN answer without inventing a second activity query.
+        return this.Deals.filter((d) => d.IsOpen && !d.OwnerEmployee).length;
+    }
+
+    public get CommitCount(): number {
+        return this.Deals.filter((d) => d.IsOpen && d.IncludeInCommit).length;
+    }
+
+    public ForecastPill(row: DealRosterRow): string {
+        if (row.IsWon) return 'closed';
+        if (row.IncludeInCommit) return 'commit';
+        if (row.IncludeInBestCase) return 'best';
+        return 'pipe';
+    }
+
+    public ForecastLabel(row: DealRosterRow): string {
+        if (row.IsWon) return 'Closed';
+        if (row.IncludeInCommit) return 'Commit';
+        if (row.IncludeInBestCase) return 'Best Case';
+        return row.ForecastCategoryType || 'Pipeline';
+    }
+
+    private applyWinRate(rows: Record<string, unknown>[]): void {
+        const num = (v: unknown): number => {
+            const n = Number(v);
+            return Number.isFinite(n) ? n : 0;
+        };
+        let closed = 0;
+        let won = 0;
+        let closedAmt = 0;
+        let wonAmt = 0;
+        for (const r of rows) {
+            closed += num(r['ClosedCount']);
+            won += num(r['WonCount']);
+            closedAmt += num(r['WonAmount']) + num(r['LostAmount']);
+            wonAmt += num(r['WonAmount']);
+        }
+        this.WinClosedCount = closed;
+        this.WinWonCount = won;
+        this.WinRateByCount = closed > 0 ? won / closed : null;
+        this.WinRateByValue = closedAmt > 0 ? wonAmt / closedAmt : null;
     }
 
     // ── Display helpers ────────────────────────────────────────────────────────
@@ -484,9 +603,9 @@ export class MJSSalesSectionComponent implements OnInit {
         return this.SlippedDeals.some((d) => d.ID === row.ID);
     }
 
-    /** Whether the workspace should be visible. Mounted either way — see the file header. */
-    public get ShowWorkspace(): boolean {
-        return this.Page === 'workspace';
+    public Pct(value: number | null): string {
+        if (value === null || !Number.isFinite(value)) return '—';
+        return `${Math.round(value * 100)}%`;
     }
 }
 

@@ -136,7 +136,7 @@ export class DealBoardComponent {
     @Input() public Stages: StageLookup[] = [];
     @Input() public DealStatusTypes: DealStatusLookup[] = [];
 
-    /** A card was clicked — the section opens it in the workspace, exactly as a roster row does. */
+    /** A card was clicked — the section opens it as an Explorer record tab. */
     @Output() public readonly DealOpened = new EventEmitter<DealRosterRow>();
     /** A move persisted; the section re-reads the roster so every page sees the new stage. */
     @Output() public readonly StageMoved = new EventEmitter<void>();

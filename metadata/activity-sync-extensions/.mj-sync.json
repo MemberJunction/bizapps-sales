@@ -1,0 +1,12 @@
+{
+  "entity": "MJ_BizApps_Common: Activity Sync Extensions",
+  "filePattern": "**/.*.json",
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".activity-sync-extensions.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true
+  }
+}

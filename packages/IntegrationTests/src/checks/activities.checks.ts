@@ -1,37 +1,28 @@
 /**
- * @fileoverview `activities` — AC1–AC11. S-US9 (#119) and the ingest pipeline behind S-US10 (#120).
+ * @fileoverview `activities` — AC1–AC23. S-US9 (#119) and S-US10 (#120).
  *
- * Every assertion reads what COMMON wrote, through common's entities, rather than trusting the result
- * object a service returned. A writer that reports `Success: true` and writes nothing is the failure
- * these exist for.
- *
- * ── WHAT THESE PROVE, AND THE ONE THING THEY CANNOT ─────────────────────────────────────────────
- *
- * The ingest is written against `IActivitySource`, so a fixture source hands over exactly the type the
- * Graph source hands over. That means these checks drive the REAL filter, the REAL deal matcher, the REAL
- * writer and the REAL dedupe — not a parallel path. The single claim left unproven is whether Graph's
- * payload maps onto `NormalizedItem` correctly, which lives in `MSGraphActivitySource.mapMessage` and
- * needs a scoped mailbox to settle.
+ * AC1–AC5 cover sales' remaining write/read: `ActivityWriterService` (manual log) and
+ * `ActivityReader` (deal timeline). AC6+ drive Common's ActivitySyncEngine with a fixture
+ * provider so `Sales.DealLinker` runs in-stream. Graph live fetch is asserted refused.
+ * There is no Sales.SyncActivities — Common owns the trigger.
  *
  * ⚠️ **REQUIRES bizapps-common**, and refuses to run without it rather than passing vacuously.
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
-import { RunView, type IMetadataProvider } from '@memberjunction/core';
+import { RunView, type IMetadataProvider, type UserInfo } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import {
-    ActivityIngestService,
-    ActivitySyncJob,
-    BuildContactMethodFilter,
-    CurrentActivitySourceFactory,
-    SetActivitySourceFactory,
+    ActivitySyncEngine,
+    FixtureActivitySyncProvider,
+    IdentityResolver,
+    LIVE_GRAPH_REFUSAL,
+    MSGraphActivitySyncProvider,
+    MSGraphCalendarSyncProvider,
     ActivityReader,
     ActivityWriterService,
-    FixtureActivitySource,
-    MSGraphActivitySource,
-    MSGraphCalendarSource,
-    RelevanceFilter,
-    type RelevanceResult,
+    type IdentityResolution,
+    type ItemParticipant,
     type NormalizedItem,
 } from '@mj-biz-apps/sales-core-entities-server';
 import type {
@@ -55,9 +46,6 @@ const E_ORGANIZATION = 'MJ_BizApps_Common: Organizations';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 
 /** A fixed address, so a leaked row is traceable to this bundle rather than mistaken for real mail. */
-/** The seeded hourly job, from `metadata/scheduled-jobs/`. Fixed there, so it is fixed here. */
-const ID_SYNC_JOB = '5A1E5000-0000-4000-8000-000000000201';
-
 const FIXTURE_ADDRESS = 'ac-fixture-contact@example.invalid';
 const STRANGER_ADDRESS = 'ac-fixture-stranger@example.invalid';
 
@@ -124,7 +112,7 @@ async function openDeal(ctx: Ctx): Promise<DealFixture> {
  * check would pass for the wrong reason — a filter that rejects everything looks identical to a filter
  * that works. Creating the row is what makes the positive case testable.
  *
- * The `ContactType` is chosen arbitrarily and that is sound: `RelevanceFilter` matches on `Value` alone
+ * The `ContactType` is chosen arbitrarily and that is sound: identity matching is on `Value` alone
  * and never reads the type. Picking "the Email one" by name would be a vocabulary comparison in service
  * of a value nothing reads.
  */
@@ -176,8 +164,8 @@ function item(overrides: Partial<NormalizedItem> = {}): NormalizedItem {
         Location: null,
         Direction: 'Inbound',
         Participants: [
-            { Address: FIXTURE_ADDRESS, Name: 'Fixture Contact', Role: 'From' },
-            { Address: STRANGER_ADDRESS, Name: null, Role: 'To' },
+            { Address: FIXTURE_ADDRESS, Name: 'Fixture Contact', Role: 'From', IdentityKind: 'Email' },
+            { Address: STRANGER_ADDRESS, Name: null, Role: 'To', IdentityKind: 'Email' },
         ],
         Cancelled: false,
         Raw: { fixture: true },
@@ -206,7 +194,22 @@ async function hideActivityType(ctx: Ctx, code: string): Promise<void> {
 
 const writer = new ActivityWriterService();
 const reader = new ActivityReader();
-const ingest = new ActivityIngestService();
+
+async function runSync(
+    ctx: Ctx,
+    connectionID: string,
+    source: FixtureActivitySyncProvider,
+    limit = 100,
+    engine: ActivitySyncEngine = new ActivitySyncEngine(),
+) {
+    return engine.Run(
+        connectionID,
+        { DryRun: false, TriggerType: 'Manual', Limit: limit },
+        ProviderOf(ctx),
+        ctx.User,
+        source,
+    );
+}
 
 /** How many activities exist for a deal right now — the count idempotency is asserted against. */
 /**
@@ -489,41 +492,39 @@ export const ActivitiesChecks: NamedCheck[] = [
                 requireCommon(ctx);
                 const deal = await openDeal(ctx);
                 await giveContactAnAddress(ctx, deal.ContactID);
+                const connectionID = await makeConnection(ctx, null);
 
-                const filtered = await new RelevanceFilter().Apply(
-                    [
+                const run = await runSync(
+                    ctx,
+                    connectionID,
+                    new FixtureActivitySyncProvider([
                         item({ ExternalID: 'ac6-known' }),
                         item({
                             ExternalID: 'ac6-unknown',
                             Participants: [
-                                { Address: 'someone@example.invalid', Name: null, Role: 'From' },
-                                { Address: STRANGER_ADDRESS, Name: null, Role: 'To' },
+                                { Address: 'someone@example.invalid', Name: null, Role: 'From', IdentityKind: 'Email' },
+                                { Address: STRANGER_ADDRESS, Name: null, Role: 'To', IdentityKind: 'Email' },
                             ],
                         }),
-                    ],
-                    ctx.User,
+                    ]),
                 );
 
-                Assert(filtered.LookupFailed === false, 'the contact-method lookup itself must have worked');
-                const verdicts = filtered.Verdicts;
-                const known = verdicts.find((v) => v.Item.ExternalID === 'ac6-known');
-                const unknown = verdicts.find((v) => v.Item.ExternalID === 'ac6-unknown');
-                Assert(!!known?.IsRelevant, 'an item involving a stored contact method IS relevant');
-                AssertEqual(known!.Matches.length, 1, 'exactly the one address that matched');
+                Assert(run.Success, `the run failed — ${run.Issues.join(' | ')}`);
+                AssertEqual(run.Included, 1, 'an item involving a stored contact method IS captured');
                 AssertEqual(
-                    String(known!.Matches[0].PersonID).toLowerCase(),
-                    deal.ContactID.toLowerCase(),
-                    'and it resolved to the person behind it',
-                );
-                Assert(
-                    known!.Unmatched.includes(STRANGER_ADDRESS),
-                    'while the unknown co-recipient is reported as unmatched rather than dropped',
-                );
-
-                Assert(
-                    unknown!.IsRelevant === false,
-                    'an item involving NOBODY known is not relevant — and both fixtures share the '
+                    run.Excluded,
+                    1,
+                    'an item involving NOBODY known is discarded — both fixtures share the '
                         + 'example.invalid domain, so a domain rule would have captured this one too',
+                );
+                const [known] = await rows(ctx, E_ACTIVITY, "ExternalID = 'ac6-known'");
+                Assert(!!known, 'the known-contact item was written');
+                const [unknown] = await rows(ctx, E_ACTIVITY, "ExternalID = 'ac6-unknown'");
+                Assert(!unknown, 'the unknown-domain-mate was not written');
+                AssertEqual(
+                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac6-'),
+                    1,
+                    'and Sales.DealLinker attributed the known item to the open deal',
                 );
             }),
     },
@@ -539,14 +540,13 @@ export const ActivitiesChecks: NamedCheck[] = [
                 const connectionID = await makeConnection(ctx, null);
                 const before = (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length;
 
-                const source = new FixtureActivitySource([item({ ExternalID: 'ac7-a' }), item({ ExternalID: 'ac7-b' })]);
-                const run = await ingest.RunSync(connectionID, source, ProviderOf(ctx), ctx.User);
+                const source = new FixtureActivitySyncProvider([item({ ExternalID: 'ac7-a' }), item({ ExternalID: 'ac7-b' })]);
+                const run = await runSync(ctx, connectionID, source);
 
                 Assert(run.Success, `the run failed — ${run.Issues.join(' | ')}`);
                 AssertEqual(run.Fetched, 2, 'both items were fetched');
-                AssertEqual(run.Relevant, 0, 'and neither was relevant');
-                AssertEqual(run.Irrelevant, 2, 'both were discarded by the filter');
-                AssertEqual(run.Written, 0, 'and nothing was written');
+                AssertEqual(run.Excluded, 2, 'both were discarded by KnownParticipant');
+                AssertEqual(run.Included, 0, 'and nothing was written');
 
                 const after = (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length;
                 AssertEqual(after, before, 'the Activity table did not move — personal mail never lands');
@@ -570,9 +570,9 @@ export const ActivitiesChecks: NamedCheck[] = [
 
                 const batch = [item({ ExternalID: 'ac8-msg-1' }), item({ ExternalID: 'ac8-msg-2', Subject: 'Second' })];
 
-                const first = await ingest.RunSync(connectionID, new FixtureActivitySource(batch), ProviderOf(ctx), ctx.User);
+                const first = await runSync(ctx, connectionID, new FixtureActivitySyncProvider(batch));
                 Assert(first.Success, `first run failed — ${first.Issues.join(' | ')}`);
-                AssertEqual(first.Written, 2, 'the first run writes both items');
+                AssertEqual(first.Included, 2, 'the first run writes both items');
                 AssertEqual(first.Duplicates, 0, 'and finds no duplicates');
 
                 const countAfterFirst = await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac8-');
@@ -591,10 +591,10 @@ export const ActivitiesChecks: NamedCheck[] = [
                 reset.LastSyncAt = null;
                 Assert(await reset.Save(), 'setup: the watermark would not reset');
 
-                const second = await ingest.RunSync(connectionID, new FixtureActivitySource(batch), ProviderOf(ctx), ctx.User);
+                const second = await runSync(ctx, connectionID, new FixtureActivitySyncProvider(batch));
                 Assert(second.Success, `second run failed — ${second.Issues.join(' | ')}`);
                 AssertEqual(second.Fetched, 2, 'the source re-delivered both items');
-                AssertEqual(second.Written, 0, 'and NOTHING new was written');
+                AssertEqual(second.Included, 0, 'and NOTHING new was written');
                 AssertEqual(second.Duplicates, 2, 'both were recognised as already present');
 
                 AssertEqual(
@@ -621,7 +621,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                     item({ ExternalID: 'ac9-new', StartedAt: newest }),
                 ];
 
-                const first = await ingest.RunSync(connectionID, new FixtureActivitySource(batch), ProviderOf(ctx), ctx.User);
+                const first = await runSync(ctx, connectionID, new FixtureActivitySyncProvider(batch));
                 Assert(first.Success, `first run failed — ${first.Issues.join(' | ')}`);
                 Assert(!!first.WatermarkAdvancedTo, 'the watermark must advance on a successful run');
                 AssertEqual(
@@ -634,8 +634,8 @@ export const ActivitiesChecks: NamedCheck[] = [
                 Assert(!!stored['LastSyncAt'], 'and it is persisted on the connection row');
 
                 // A second run with the watermark in place: the source has nothing newer to give.
-                const source = new FixtureActivitySource(batch);
-                const second = await ingest.RunSync(connectionID, source, ProviderOf(ctx), ctx.User);
+                const source = new FixtureActivitySyncProvider(batch);
+                const second = await runSync(ctx, connectionID, source);
                 Assert(second.Success, `second run failed — ${second.Issues.join(' | ')}`);
                 AssertEqual(second.Fetched, 0, 'nothing was re-fetched — the watermark was passed down');
                 AssertEqual(
@@ -647,7 +647,7 @@ export const ActivitiesChecks: NamedCheck[] = [
     },
     {
         Id: 'activities.AC10',
-        Name: 'AC10: a known contact on no open deal is reported, not filed and not invented',
+        Name: 'AC10: a known contact on no open deal is filed against the person, with no Regarding',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -687,27 +687,41 @@ export const ActivitiesChecks: NamedCheck[] = [
                     "setup: every Person on this host is a party to an open deal, so the no-match case "
                         + "cannot be constructed here",
                 );
-                await giveContactAnAddress(ctx, String(candidates[0]["ID"]));
-                const before = (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length;
-                const run = await ingest.RunSync(
+                const personID = String(candidates[0]["ID"]);
+                await giveContactAnAddress(ctx, personID);
+                const peopleBefore = (await rows(ctx, E_PERSON, 'ID IS NOT NULL')).length;
+                const run = await runSync(
+                    ctx,
                     connectionID,
-                    new FixtureActivitySource([item({ ExternalID: 'ac10-msg' })]),
-                    ProviderOf(ctx),
-                    ctx.User,
+                    new FixtureActivitySyncProvider([item({ ExternalID: 'ac10-msg' })]),
                 );
 
                 Assert(run.Success, `the run failed — ${run.Issues.join(' | ')}`);
-                AssertEqual(run.Relevant, 1, 'the item IS relevant — a known contact is on it');
-                AssertEqual(run.Unattributed, 1, 'but it matched no open deal');
-                AssertEqual(run.Written, 0, 'so nothing was filed against a deal');
-                AssertEqual(
-                    (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length,
-                    before,
-                    'and no activity row was invented to hold it',
+                AssertEqual(run.Included, 1, 'the item IS captured — a known contact is on it');
+                const [activity] = await rows(ctx, E_ACTIVITY, "ExternalID = 'ac10-msg'");
+                Assert(!!activity, 'an activity row was written against the parties');
+                const links = await rows(ctx, E_ACTIVITY_LINK, `ActivityID = '${activity['ID']}'`);
+                Assert(
+                    links.some(
+                        (l) =>
+                            String(l['EntityID']).toLowerCase() === entityID(ctx, E_PERSON).toLowerCase() &&
+                            String(l['RecordID']).toLowerCase() === personID.toLowerCase(),
+                    ),
+                    'the known person is linked',
                 );
                 Assert(
-                    run.Issues.some((i) => i.includes('matches no open deal')),
-                    `the run must SAY the item went unattributed — got ${JSON.stringify(run.Issues)}`,
+                    !links.some((l) => String(l['Role']) === 'Regarding'),
+                    'and there is no Regarding — Sales.DealLinker enriches, it never invents a deal',
+                );
+                AssertEqual(
+                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac10-'),
+                    0,
+                    'the open deal on this host did not gain a timeline entry it does not own',
+                );
+                AssertEqual(
+                    (await rows(ctx, E_PERSON, 'ID IS NOT NULL')).length,
+                    peopleBefore,
+                    'and no Person was invented',
                 );
             }),
     },
@@ -721,22 +735,11 @@ export const ActivitiesChecks: NamedCheck[] = [
              * mailbox in the tenant until an Exchange Application Access Policy scopes it. This check
              * exists so that removing the default-off gate breaks a test rather than reading a tenant.
              */
-            const fetcher = {
-                calls: 0,
-                async GetMessages() {
-                    this.calls++;
-                    return { Success: true, Messages: [] };
-                },
-            };
-            const source = new MSGraphActivitySource(fetcher);
+            const source = new MSGraphActivitySyncProvider(false);
             const batch = await source.Fetch({ Mailbox: 'anyone@example.invalid', Since: null, Limit: 10 });
 
-            AssertEqual(fetcher.calls, 0, 'the provider must NOT be called while the gate is closed');
-            AssertEqual(batch.Items.length, 0, 'and no items are returned');
-            Assert(
-                batch.Issues.some((i) => i.includes('Application Access Policy')),
-                `the refusal must name the tenant policy, not a missing credential — got ${JSON.stringify(batch.Issues)}`,
-            );
+            AssertEqual(batch.Items.length, 0, 'no items are returned');
+            AssertEqual(batch.Issues[0], LIVE_GRAPH_REFUSAL, 'the refusal names the tenant policy');
             Assert(source.IsLive, 'the Graph source still declares itself LIVE — the gate is not a fixture');
         },
     },
@@ -780,37 +783,28 @@ export const ActivitiesChecks: NamedCheck[] = [
                  * be in the QUERY, which is the only difference visible from here and the whole point of
                  * D-19.
                  */
-                const filter = BuildContactMethodFilter([mixedCase]);
-                Assert(
-                    filter.includes('LOWER(Value)'),
-                    `the filter must fold case in SQL, not rely on the collation — got ${filter}`,
-                );
-                Assert(
-                    filter.includes(FIXTURE_ADDRESS.toLowerCase()),
-                    'and the compared literal must be lower-cased too, or the fold only works one side',
-                );
-
-                const filtered = await new RelevanceFilter().Apply(
-                    [
+                const connectionID = await makeConnection(ctx, null);
+                const run = await runSync(
+                    ctx,
+                    connectionID,
+                    new FixtureActivitySyncProvider([
                         item({
                             ExternalID: 'ac12-mixed',
-                            Participants: [{ Address: mixedCase, Name: null, Role: 'From' }],
+                            Participants: [{ Address: mixedCase, Name: null, Role: 'From', IdentityKind: 'Email' }],
                         }),
-                    ],
-                    ctx.User,
+                    ]),
                 );
-
-                Assert(filtered.LookupFailed === false, 'the lookup must have run');
-                const verdicts = filtered.Verdicts;
-                Assert(
-                    verdicts[0].IsRelevant,
+                Assert(run.Success, `the run failed — ${run.Issues.join(' | ')}`);
+                AssertEqual(
+                    run.Included,
+                    1,
                     'a mixed-case address MUST match a lower-case stored value. If this fails on Postgres '
                         + 'and passes on SQL Server, the collation is doing the work and the query is not.',
                 );
                 AssertEqual(
-                    String(verdicts[0].Matches[0].PersonID).toLowerCase(),
-                    deal.ContactID.toLowerCase(),
-                    'and it resolves to the person behind it',
+                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac12-'),
+                    1,
+                    'and it resolved to the person behind the stored method, so DealLinker found the deal',
                 );
             }),
     },
@@ -835,15 +829,15 @@ export const ActivitiesChecks: NamedCheck[] = [
                     EndedAt: new Date('2026-08-19T15:00:00.000Z'),
                     Location: 'Room 4 / Teams',
                     Participants: [
-                        { Address: FIXTURE_ADDRESS, Name: 'Fixture Contact', Role: 'Organizer' },
-                        { Address: STRANGER_ADDRESS, Name: null, Role: 'Attendee' },
+                        { Address: FIXTURE_ADDRESS, Name: 'Fixture Contact', Role: 'Organizer', IdentityKind: 'Email' },
+                        { Address: STRANGER_ADDRESS, Name: null, Role: 'Attendee', IdentityKind: 'Email' },
                     ],
                 });
 
-                const source = new FixtureActivitySource([meeting], 'Calendar');
-                const run = await ingest.RunSync(connectionID, source, ProviderOf(ctx), ctx.User);
+                const source = new FixtureActivitySyncProvider([meeting], 'Calendar');
+                const run = await runSync(ctx, connectionID, source);
                 Assert(run.Success, `the calendar run failed — ${run.Issues.join(' | ')}`);
-                AssertEqual(run.Written, 1, 'the meeting was filed');
+                AssertEqual(run.Included, 1, 'the meeting was filed');
 
                 const links = await rows(
                     ctx,
@@ -913,13 +907,12 @@ export const ActivitiesChecks: NamedCheck[] = [
                 reset.Settings = null;
                 Assert(await reset.Save(), 'setup: the calendar watermark would not clear');
 
-                const again = await ingest.RunSync(
+                const again = await runSync(
+                    ctx,
                     connectionID,
-                    new FixtureActivitySource([meeting], 'Calendar'),
-                    ProviderOf(ctx),
-                    ctx.User,
+                    new FixtureActivitySyncProvider([meeting], 'Calendar'),
                 );
-                AssertEqual(again.Written, 0, 'the same event re-read writes nothing');
+                AssertEqual(again.Included, 0, 'the same event re-read writes nothing');
                 AssertEqual(again.Duplicates, 1, 'it is recognised by (SourceSystem, ExternalID)');
             }),
     },
@@ -951,24 +944,23 @@ export const ActivitiesChecks: NamedCheck[] = [
                     StartedAt: new Date('2026-08-19T09:00:00.000Z'),
                 });
 
-                const mail = await ingest.RunSync(
+                const mail = await runSync(
+                    ctx,
                     connectionID,
-                    new FixtureActivitySource([newEmail], 'Message'),
-                    ProviderOf(ctx),
-                    ctx.User,
+                    new FixtureActivitySyncProvider([newEmail], 'Message'),
                 );
                 Assert(mail.Success, `the mail run failed — ${mail.Issues.join(' | ')}`);
-                AssertEqual(mail.Written, 1, 'the email was filed');
+                AssertEqual(mail.Included, 1, 'the email was filed');
 
-                const calendarSource = new FixtureActivitySource([olderMeeting], 'Calendar');
-                const cal = await ingest.RunSync(connectionID, calendarSource, ProviderOf(ctx), ctx.User);
+                const calendarSource = new FixtureActivitySyncProvider([olderMeeting], 'Calendar');
+                const cal = await runSync(ctx, connectionID, calendarSource);
                 Assert(cal.Success, `the calendar run failed — ${cal.Issues.join(' | ')}`);
                 AssertEqual(
                     calendarSource.Calls[0].Since,
                     null,
                     'the calendar was asked from ITS OWN watermark, which is unset — not from the mail one',
                 );
-                AssertEqual(cal.Written, 1, 'so the older meeting was still ingested');
+                AssertEqual(cal.Included, 1, 'so the older meeting was still ingested');
 
                 const [connection] = await rows(ctx, E_SYNC_CONNECTION, `ID = '${connectionID}'`);
                 Assert(!!connection['LastSyncAt'], 'the MESSAGE watermark is on the column');
@@ -977,7 +969,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                  * THE CALENDAR WATERMARK IS INGEST TIME, NOT THE MEETING'S START.
                  *
                  * This assertion used to expect `olderMeeting.StartedAt` — it was written against the
-                 * defect and passed because `FixtureActivitySource` reproduced it. A fixture that
+                 * defect and passed because `FixtureActivitySyncProvider` reproduced it. A fixture that
                  * repeats a bug cannot detect it, which is how a broken calendar watermark survived
                  * eighteen checks.
                  */
@@ -993,48 +985,8 @@ export const ActivitiesChecks: NamedCheck[] = [
             }),
     },
     {
-        Id: 'activities.AC15',
-        Name: 'AC15: the seeded ScheduledJob points at the seeded Action, hourly, Skip/RunOnce',
-        RequiresMutation: false,
-        Fn: async (ctx) => {
-            /**
-             * METADATA INTEGRITY, not behaviour. The chain is Category -> Action -> Param -> ScheduledJob,
-             * and its one silent failure mode is a `Configuration.ActionID` that points at nothing: the job
-             * fires on time, resolves no action, and does nothing with no error. Reading it back is the only
-             * way to know the four rows agree.
-             */
-            const jobs = await rows(ctx, 'MJ: Scheduled Jobs', `ID = '${ID_SYNC_JOB}'`);
-            if (jobs.length === 0) {
-                Assert(
-                    false,
-                    'the activity-sync ScheduledJob is not in this database. Run `mj sync push --dir metadata`; '
-                        + 'the row is seeded from metadata/scheduled-jobs/.',
-                );
-                return;
-            }
-            const job = jobs[0];
-
-            AssertEqual(String(job['CronExpression']), '0 0 * * * *', 'hourly, six-field (seconds first)');
-            AssertEqual(String(job['Status']), 'Active', 'Active — it is meant to be firing');
-            AssertEqual(String(job['ConcurrencyMode']), 'Skip', 'overlapping runs would race the watermark');
-            AssertEqual(String(job['MissedRunPolicy']), 'RunOnce', 'catching up N hours would fetch the same window N times');
-
-            const config = JSON.parse(String(job['Configuration'] ?? '{}')) as { ActionID?: string };
-            Assert(!!config.ActionID, 'the job Configuration must name an ActionID');
-
-            const actions = await rows(ctx, 'MJ: Actions', `ID = '${config.ActionID}'`);
-            AssertEqual(
-                actions.length,
-                1,
-                'and that ActionID must resolve to a real Action — a dangling one fires and does nothing',
-            );
-            AssertEqual(String(actions[0]['DriverClass']), 'Sales.SyncActivities', 'to THIS action');
-            AssertEqual(String(actions[0]['Status']), 'Active', 'which must itself be Active');
-        },
-    },
-    {
         Id: 'activities.AC16',
-        Name: 'AC16: the Action drives the whole chain — swapping the factory is the only change',
+        Name: 'AC16: an email and a meeting through the engine both land on the deal via DealLinker',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -1043,120 +995,27 @@ export const ActivitiesChecks: NamedCheck[] = [
                 await giveContactAnAddress(ctx, deal.ContactID);
                 const connectionID = await makeConnection(ctx, null);
 
-                const actions = await rows(ctx, 'MJ: Actions', `DriverClass = 'Sales.SyncActivities'`);
-                Assert(
-                    actions.length === 1,
-                    'setup: the Sales.SyncActivities action row is missing — run `mj sync push --dir metadata`',
+                const mail = await runSync(
+                    ctx,
+                    connectionID,
+                    new FixtureActivitySyncProvider([item({ ExternalID: 'ac16-mail' })], 'Message'),
                 );
-
-                /**
-                 * THE CLAIM: everything downstream of the seam is already wired, and a real credential
-                 * changes ONE thing. So this substitutes a populated fixture through the same setter a
-                 * deployment would use for a Graph source, runs the Action, and asserts activities land.
-                 *
-                 * The default factory returns two EMPTY fixtures, which is why the seeded hourly job is safe
-                 * to ship Active — the run is real and writes nothing.
-                 */
-                const previous = SetActivitySourceFactory(() => [
-                    new FixtureActivitySource([item({ ExternalID: 'ac16-mail' })], 'Message'),
-                    new FixtureActivitySource(
+                const meeting = await runSync(
+                    ctx,
+                    connectionID,
+                    new FixtureActivitySyncProvider(
                         [item({ ExternalID: 'ac16-event', TypeCode: 'Meeting', Direction: 'Internal' })],
                         'Calendar',
                     ),
-                ]);
-                try {
-                    const job = new ActivitySyncJob();
-                    const result = await job.Run(
-                        CurrentActivitySourceFactory(),
-                        ProviderOf(ctx),
-                        ctx.User,
-                        50,
-                    );
-
-                    Assert(result.Success, `the job failed — ${result.Issues.join(' | ')}`);
-                    /**
-                     * SCOPED TO THIS CHECK'S OWN CONNECTION, not to how many exist on the host.
-                     *
-                     * These asserted "exactly one connection was attempted" and "exactly two runs",
-                     * which was a true statement about a host that had no real sync connection and a
-                     * weaker one about the requirement. A live connection was created on this host at
-                     * 01:49 for the demo, so the job legitimately attempts two — and the check went red
-                     * for a reason that has nothing to do with what it tests. Filter, do not count.
-                     */
-                    Assert(
-                        result.ConnectionsAttempted >= 1,
-                        `the job must read at least this check's connection — got ${result.ConnectionsAttempted}`,
-                    );
-                    const mine = result.Runs.filter((r) => r.ConnectionID === connectionID);
-                    AssertEqual(mine.length, 2, 'and BOTH surfaces ran against THIS connection');
-                    Assert(
-                        mine.some((r) => r.Surface === 'Message') && mine.some((r) => r.Surface === 'Calendar'),
-                        'one run per surface on this connection, each labelled',
-                    );
-                    Assert(
-                        result.Runs.some((r) => r.Surface === 'Message') &&
-                            result.Runs.some((r) => r.Surface === 'Calendar'),
-                        'one run per surface, each labelled',
-                    );
-
-                    const written = result.Runs.reduce((n, r) => n + r.Result.Written, 0);
-                    AssertEqual(written, 2, 'an email and a meeting were both filed');
-                    AssertEqual(
-                        await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac16-'),
-                        2,
-                        'and both are on the deal timeline',
-                    );
-                } finally {
-                    SetActivitySourceFactory(previous);
-                }
-            }),
-    },
-    {
-        Id: 'activities.AC17',
-        Name: 'AC17: the DEFAULT factory writes nothing — which is why the hourly job ships Active',
-        RequiresMutation: true,
-        Fn: async (ctx) =>
-            InRolledBackTransaction(ctx, async () => {
-                requireCommon(ctx);
-                const deal = await openDeal(ctx);
-                await giveContactAnAddress(ctx, deal.ContactID);
-                const connectionID = await makeConnection(ctx, null);
-                Assert(!!connectionID, 'setup: a connection is needed, so this is not passing by absence');
-
-                /**
-                 * The default is deliberately two EMPTY fixtures. If somebody replaces it with a populated
-                 * one — or with a Graph source — this check goes red, which is the point: the seeded hourly
-                 * job is only safe to ship Active because the default reads nothing.
-                 */
-                const before = (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length;
-                const result = await new ActivitySyncJob().Run(
-                    CurrentActivitySourceFactory(),
-                    ProviderOf(ctx),
-                    ctx.User,
                 );
-
-                Assert(result.Success, `the default run must succeed — ${result.Issues.join(' | ')}`);
-                Assert(
-                    result.ConnectionsAttempted >= 1,
-                    // Scoped, for the reason AC16 records: a real connection now exists on this host.
-                    `the job must read at least this check's connection — got ${result.ConnectionsAttempted}`,
-                );
-                const mineRuns = result.Runs.filter((r) => r.ConnectionID === connectionID);
-                AssertEqual(mineRuns.length, 2, 'and ran both surfaces against THIS connection');
+                Assert(mail.Success, `the mail run failed — ${mail.Issues.join(' | ')}`);
+                Assert(meeting.Success, `the calendar run failed — ${meeting.Issues.join(' | ')}`);
+                AssertEqual(mail.Included, 1, 'the email was filed');
+                AssertEqual(meeting.Included, 1, 'the meeting was filed');
                 AssertEqual(
-                    mineRuns.reduce((n, r) => n + r.Result.Fetched, 0),
-                    0,
-                    'fetching nothing',
-                );
-                AssertEqual(
-                    (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length,
-                    before,
-                    'and writing nothing — an hourly run against this default cannot invent data',
-                );
-                AssertEqual(
-                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac17-'),
-                    0,
-                    'nor touch the deal',
+                    await activityCountForDeal(ctx, deal.DealID, ProviderOf(ctx), 'ac16-'),
+                    2,
+                    'Sales.DealLinker attributed both to the open deal, in-stream',
                 );
             }),
     },
@@ -1186,14 +1045,13 @@ export const ActivitiesChecks: NamedCheck[] = [
                     StartedAt: new Date('2026-08-18T10:00:00.000Z'),
                 });
 
-                const run = await ingest.RunSync(
+                const run = await runSync(
+                    ctx,
                     connectionID,
-                    new FixtureActivitySource([held, cancelled], 'Calendar'),
-                    ProviderOf(ctx),
-                    ctx.User,
+                    new FixtureActivitySyncProvider([held, cancelled], 'Calendar'),
                 );
                 Assert(run.Success, `the run failed — ${run.Issues.join(' | ')}`);
-                AssertEqual(run.Written, 2, 'both meetings were filed — a cancellation is still a fact');
+                AssertEqual(run.Included, 2, 'both meetings were filed — a cancellation is still a fact');
 
                 const [off] = await rows(ctx, E_ACTIVITY, `ExternalID = 'ac18-cancelled'`);
                 const [on] = await rows(ctx, E_ACTIVITY, `ExternalID = 'ac18-held'`);
@@ -1205,7 +1063,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                     'a meeting that did not happen is NOT a completed activity — CK_Activity_Status already '
                         + 'allows Cancelled, so nothing had to be invented',
                 );
-                AssertEqual(String(on['Status']), 'Completed', 'and one that did happen still reads Completed');
+                AssertEqual(String(on['Status']), 'Logged', 'and one that did happen is Logged — synced, not completed');
                 Assert(
                     off['Outcome'] === null,
                     'Outcome stays NULL: the nearest seeded value is NoShow, which means a meeting went ahead '
@@ -1237,7 +1095,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                  * happening to be close to it.
                  */
                 const farFuture = new Date(Date.UTC(2031, 11, 1, 10, 0, 0));
-                const source = new FixtureActivitySource(
+                const source = new FixtureActivitySyncProvider(
                     [
                         item({
                             ExternalID: 'ac19-future-meeting',
@@ -1250,9 +1108,9 @@ export const ActivitiesChecks: NamedCheck[] = [
                     'Calendar',
                 );
 
-                const run = await ingest.RunSync(connectionID, source, ProviderOf(ctx), ctx.User);
+                const run = await runSync(ctx, connectionID, source);
                 Assert(run.Success, `the run failed — ${run.Issues.join(' | ')}`);
-                AssertEqual(run.Written, 1, 'the future meeting is still ingested — it is a real event');
+                AssertEqual(run.Included, 1, 'the future meeting is still ingested — it is a real event');
 
                 Assert(
                     !!run.WatermarkAdvancedTo,
@@ -1275,7 +1133,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                  * AND THE CONSEQUENCE, PROVED RATHER THAN ARGUED: a meeting for an earlier date, created
                  * after that watermark, still comes through. Under the defect this second run saw nothing.
                  */
-                const nextSource = new FixtureActivitySource(
+                const nextSource = new FixtureActivitySyncProvider(
                     [
                         item({
                             ExternalID: 'ac19-earlier-meeting',
@@ -1289,10 +1147,10 @@ export const ActivitiesChecks: NamedCheck[] = [
                 );
                 nextSource.fetchedAt = new Date(source.fetchedAt.getTime() + 60_000);
 
-                const second = await ingest.RunSync(connectionID, nextSource, ProviderOf(ctx), ctx.User);
+                const second = await runSync(ctx, connectionID, nextSource);
                 Assert(second.Success, `the second run failed — ${second.Issues.join(' | ')}`);
                 AssertEqual(
-                    second.Written,
+                    second.Included,
                     1,
                     'a meeting for an EARLIER date, created after the watermark, must still be ingested',
                 );
@@ -1321,12 +1179,11 @@ export const ActivitiesChecks: NamedCheck[] = [
                  */
                 await hideActivityType(ctx, 'Email');
 
-                const source = new FixtureActivitySource([item({ ExternalID: 'ac20-will-fail' })]);
-                const run = await ingest.RunSync(connectionID, source, ProviderOf(ctx), ctx.User);
+                const source = new FixtureActivitySyncProvider([item({ ExternalID: 'ac20-will-fail' })]);
+                const run = await runSync(ctx, connectionID, source);
 
                 AssertEqual(run.Fetched, 1, 'the item was fetched');
-                AssertEqual(run.Relevant, 1, 'and judged relevant');
-                AssertEqual(run.Written, 0, 'but not written');
+                AssertEqual(run.Included, 0, 'but not written');
                 AssertEqual(run.Failed, 1, 'and counted as FAILED, not discarded');
                 Assert(
                     run.Success === false,
@@ -1355,7 +1212,7 @@ export const ActivitiesChecks: NamedCheck[] = [
             /**
              * THE GAP THIS CLOSES, found by mutation rather than by reading.
              *
-             * AC14 and AC19 both drive `FixtureActivitySource`, so reverting the watermark rule in
+             * AC14 and AC19 both drive `FixtureActivitySyncProvider`, so reverting the watermark rule in
              * `MSGraphCalendarSource` killed neither of them — the Graph source was never instantiated by
              * any check. A guarantee that only the fixture upholds is not a guarantee.
              *
@@ -1385,7 +1242,7 @@ export const ActivitiesChecks: NamedCheck[] = [
             };
 
             const before = Date.now();
-            const source = new MSGraphCalendarSource(fetcher, true);
+            const source = new MSGraphCalendarSyncProvider(true, fetcher);
             const batch = await source.Fetch({
                 Mailbox: 'ac21@example.invalid',
                 Since: null,
@@ -1429,7 +1286,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                 const connectionID = await makeConnection(ctx, null);
 
                 /**
-                 * THE GAP MUTATION FOUND. Reverting `RelevanceFilter`'s `failed: true` to `false` killed no
+                 * THE GAP MUTATION FOUND. Reverting identity lookup's `LookupFailed: true` to `false` killed no
                  * check: AC20 forces a failed WRITE, and nothing could force a failed READ. So the branch
                  * that holds the watermark when a contact-method lookup blips was untested — the branch that
                  * stops a transient error discarding a batch of real mail permanently, since D-17 means
@@ -1440,31 +1297,22 @@ export const ActivitiesChecks: NamedCheck[] = [
                  * collaborator rather than driving the real one, and it does so to reach a branch no
                  * arrangement of real data can produce.
                  */
-                class FailingFilter extends RelevanceFilter {
-                    public override async Apply(items: NormalizedItem[]): Promise<RelevanceResult> {
-                        return {
-                            Verdicts: items.map((item) => ({
-                                Item: item,
-                                IsRelevant: false,
-                                Matches: [],
-                                Unmatched: [],
-                            })),
-                            LookupFailed: true,
-                        };
+                class FailingResolver extends IdentityResolver {
+                    public override async Resolve(
+                        _participants: readonly ItemParticipant[],
+                        _contextUser: UserInfo,
+                    ): Promise<IdentityResolution> {
+                        return { Resolved: [], Unresolved: [], Known: new Map(), LookupFailed: true };
                     }
                 }
 
-                const ingestWithFailingLookup = new ActivityIngestService(
-                    new ActivityWriterService(),
-                    new FailingFilter(),
-                );
-
                 const before = (await rows(ctx, E_ACTIVITY, 'ID IS NOT NULL')).length;
-                const run = await ingestWithFailingLookup.RunSync(
+                const run = await runSync(
+                    ctx,
                     connectionID,
-                    new FixtureActivitySource([item({ ExternalID: 'ac22-a' }), item({ ExternalID: 'ac22-b' })]),
-                    ProviderOf(ctx),
-                    ctx.User,
+                    new FixtureActivitySyncProvider([item({ ExternalID: 'ac22-a' }), item({ ExternalID: 'ac22-b' })]),
+                    100,
+                    new ActivitySyncEngine(new FailingResolver()),
                 );
 
                 AssertEqual(run.Fetched, 2, 'both items were fetched');
@@ -1474,8 +1322,8 @@ export const ActivitiesChecks: NamedCheck[] = [
                     'and both counted as FAILED — a failed lookup means they were never judged, which is a '
                         + 'different fact from being judged irrelevant',
                 );
-                AssertEqual(run.Irrelevant, 0, 'they must NOT be reported as irrelevant');
-                AssertEqual(run.Written, 0, 'nothing was written');
+                AssertEqual(run.Included, 0, 'nothing was written');
+                AssertEqual(run.Excluded, 0, 'they must NOT be reported as excluded');
                 Assert(run.Success === false, 'and the run is not a success');
                 AssertEqual(
                     run.WatermarkAdvancedTo,
@@ -1525,7 +1373,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                 const connectionID = await makeConnection(ctx, null);
 
                 // Put the connection in the state a previous failure would have left it in.
-                await ingest.RunSync(connectionID, new FixtureActivitySource([]), ProviderOf(ctx), ctx.User);
+                await runSync(ctx, connectionID, new FixtureActivitySyncProvider([]));
                 const conn = await ProviderOf(ctx).GetEntityObject<mjBizAppsCommonActivitySyncConnectionEntity>(
                     E_SYNC_CONNECTION, ctx.User,
                 );
@@ -1535,9 +1383,10 @@ export const ActivitiesChecks: NamedCheck[] = [
                 Assert(await conn.Save(), `setup: could not put the connection in Error -- ${conn.LatestResult?.CompleteMessage}`);
 
                 await hideActivityType(ctx, 'Email');
-                const run = await ingest.RunSync(
-                    connectionID, new FixtureActivitySource([item({ ExternalID: 'ac23-will-fail' })]),
-                    ProviderOf(ctx), ctx.User,
+                const run = await runSync(
+                    ctx,
+                    connectionID,
+                    new FixtureActivitySyncProvider([item({ ExternalID: 'ac23-will-fail' })]),
                 );
                 AssertEqual(run.Failed, 1, 'setup: the write must fail, or this proves nothing');
                 Assert(!run.Success, 'setup: and the run must report failure');

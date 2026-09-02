@@ -393,7 +393,22 @@ export async function PurgeDeal(dealID: string, orderID: string | null): Promise
         DELETE tk FROM __mj_BizAppsTasks.Task tk JOIN @tasks t ON tk.ID = t.ID;`);
 
     // The contract the close created, found by its provenance pair rather than by name.
-    await QueryAll(`DELETE FROM __mj_BizAppsContracts.Contract WHERE CreatingRecordID = '${dealID}'`);
+    //
+    // ── GUARDED, BECAUSE MOST HOSTS DO NOT HAVE CONTRACTS ───────────────────────────────────────
+    //
+    // bizapps-contracts does not install on a fresh database (KI-13), so on every host but
+    // MJ_V6_Repro this table does not exist. Unguarded, this threw
+    //     RequestError: Invalid object name '__mj_BizAppsContracts.Contract'
+    // out of TEARDOWN, which Playwright reports against whichever spec was finishing -- so six
+    // specs that had done nothing wrong failed with an error naming a table none of them touch.
+    // Measured 2026-08-26: it accounted for 6 of 10 failures in a full run.
+    //
+    // The integration suite already refuses to pretend here ("bizapps-contracts is NOT installed
+    // on this host, so these checks cannot prove anything"). This is the same honesty in the
+    // teardown path: skip the cleanup that cannot apply, and leave the assertions to say so.
+    await QueryAll(`
+        IF OBJECT_ID('__mj_BizAppsContracts.Contract', 'U') IS NOT NULL
+            DELETE FROM __mj_BizAppsContracts.Contract WHERE CreatingRecordID = '${dealID}'`);
 
     await QueryAll(`UPDATE __mj_BizAppsSales.Deal SET OrderID = NULL WHERE ID = '${dealID}'`);
     await QueryAll(`DELETE FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'`);

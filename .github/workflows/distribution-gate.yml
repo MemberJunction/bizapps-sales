@@ -1,11 +1,10 @@
 name: Distribution Gate
 
-# Catches the two ways this app can ship something that works here and nowhere else:
-# metadata that never made it into a seed migration (MJ never reads mj-app.json's
-# metadata.directory at install), and SQL carrying a placeholder `mj app install` cannot resolve
-# (Skyway leaves unknown ones untouched, so they ship as literal strings rather than erroring).
-# The reasoning lives in scripts/check-distribution-seed.mjs and in the header of
-# migrations/V202608251930__v5.2.x__Metadata_Sync.sql. Ported from bizapps-forms.
+# Catches SQL carrying a placeholder `mj app install` cannot resolve (Skyway leaves unknown
+# ones untouched, so they ship as literal strings rather than erroring). Metadata currency is
+# not gated here: PRs contribute JSON only, and the build engineer generates one consolidated
+# Metadata_Sync per release. Reasoning: scripts/check-distribution-seed.mjs, docs/PUBLISHING.md,
+# MJ/metadata/CLAUDE.md §1b and §10.
 
 on:
   workflow_dispatch:
@@ -19,7 +18,6 @@ on:
       - 'migrations-teardown/**'
       - 'mj-app.json'
       - 'scripts/check-distribution-seed.mjs'
-      - 'scripts/write-seed-manifest.mjs'
       - '.github/workflows/distribution-gate.yml'
   pull_request:
     branches: [next, main]
@@ -29,7 +27,6 @@ on:
       - 'migrations-teardown/**'
       - 'mj-app.json'
       - 'scripts/check-distribution-seed.mjs'
-      - 'scripts/write-seed-manifest.mjs'
       - '.github/workflows/distribution-gate.yml'
 
 jobs:
@@ -44,7 +41,7 @@ jobs:
 
       # No `npm ci`: the gate is Node stdlib only, deliberately, so a dependency problem can never
       # be the reason nobody finds out the app does not install.
-      - name: Check the distribution seed and shipped placeholders
+      - name: Check shipped SQL placeholders
         run: npm run lint:distribution
 
       - name: Check the gate itself still fires
