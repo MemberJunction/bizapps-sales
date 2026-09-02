@@ -163,6 +163,20 @@
     color: var(--mj-text-muted);
 }
 
+/*
+ * The same slot as a hint, in the warning colour, because it sits in the same `<small>` position
+ * under a field and should not resize the row when it appears.
+ *
+ * THIS CLASS WAS ALREADY IN USE AND HAD NO RULE. `DiscountRefusals` has rendered a
+ * `.dw-field-error` span since it was written, and with nothing matching it the refusal text came
+ * out as ordinary body copy — the message was present and did not read as a problem. So this fixes
+ * that too, rather than adding a second class beside a broken one.
+ */
+.dw-field-error {
+    font-size: 0.74rem;
+    color: var(--mj-status-warning);
+}
+
 .dw-field input,
 .dw-field select,
 .dw-field textarea {

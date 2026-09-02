@@ -81,7 +81,7 @@ import {
     RoundDiscountPercent,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from './deal-workspace.service';
-import { FromDateInput, ToDateInput } from './deal-workspace.dates';
+import { FromDateInput, IsUnrenderableDate, ToDateInput } from './deal-workspace.dates';
 /** S-US9's timeline — standalone, so importing it is the whole cost. */
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import {
@@ -1043,6 +1043,18 @@ export class DealWorkspaceComponent implements OnInit {
      */
     public DateInput(value: string | Date | null): string | null {
         return ToDateInput(value);
+    }
+
+    /**
+     * Whether this field holds a value the element cannot show, so the template can SAY so.
+     *
+     * `DateInput` above now returns null for an unreadable value rather than `NaN-NaN-NaN`, which stops
+     * the element being handed garbage — but null and "unreadable" render identically, as an empty box.
+     * Without this the fix would only have changed WHY the field looks empty, not the fact that a rep
+     * cannot tell a date that was never set from one that is corrupt and about to be overwritten.
+     */
+    public DateIsUnrenderable(value: string | Date | null): boolean {
+        return IsUnrenderableDate(value);
     }
 
     public SetDealDate(deal: DealEntity, field: DealDateField, value: string): void {

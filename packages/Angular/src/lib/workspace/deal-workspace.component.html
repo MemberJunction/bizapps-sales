@@ -341,12 +341,18 @@
               <span class="dw-field__label">Execution date</span>
               <input type="date" [ngModel]="DateInput(deal.ExecutionDate)"
                      (ngModelChange)="SetDealDate(deal, 'ExecutionDate', $event)" />
+              @if (DateIsUnrenderable(deal.ExecutionDate)) {
+                <small class="dw-field-error">A stored value here could not be read as a date. Saving will replace it.</small>
+              }
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Start date</span>
               <input type="date" [ngModel]="DateInput(deal.StartDate)"
                      (ngModelChange)="SetDealDate(deal, 'StartDate', $event)" />
+              @if (DateIsUnrenderable(deal.StartDate)) {
+                <small class="dw-field-error">A stored value here could not be read as a date. Saving will replace it.</small>
+              }
               <small class="dw-field__hint">May precede execution — backdated work is allowed.</small>
             </label>
 
@@ -354,6 +360,9 @@
               <span class="dw-field__label">Expected close</span>
               <input type="date" [ngModel]="DateInput(deal.ExpectedCloseDate)"
                      (ngModelChange)="SetDealDate(deal, 'ExpectedCloseDate', $event)" />
+              @if (DateIsUnrenderable(deal.ExpectedCloseDate)) {
+                <small class="dw-field-error">A stored value here could not be read as a date. Saving will replace it.</small>
+              }
             </label>
 
             <label class="dw-field">
@@ -533,7 +542,10 @@
                 <tbody>
                   @for (row of Schedule; track row.ID; let i = $index) {
                     <tr [class.dw-row--bad]="IssuesForRow('schedule', i).length > 0">
-                      <td><input type="date" [ngModel]="DateInput(row.PaymentDate)" (ngModelChange)="SetPaymentDate(row, $event)" /></td>
+                      <td><input type="date" [ngModel]="DateInput(row.PaymentDate)" (ngModelChange)="SetPaymentDate(row, $event)" />
+                        @if (DateIsUnrenderable(row.PaymentDate)) {
+                          <small class="dw-field-error">A stored value here could not be read as a date. Saving will replace it.</small>
+                        }</td>
                       <td class="dw-num"><input type="number" step="0.01" [(ngModel)]="row.Amount" (ngModelChange)="Touch()" /></td>
                       <td><input type="text" [(ngModel)]="row.Description" (ngModelChange)="Touch()" placeholder="e.g. 40% on execution" /></td>
                       <td>
