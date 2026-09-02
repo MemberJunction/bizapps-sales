@@ -17,14 +17,14 @@
   "author": "MemberJunction.com",
   "license": "BUSL-1.1",
   "devDependencies": {
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18",
+    "@mj-biz-apps/tasks-entities": "^1.4.1",
     "@types/node": "^22.10.2",
-    "@mj-biz-apps/tasks-entities": "^1.2.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@mj-biz-apps/common-entities": "^5.34.0",
-    "@mj-biz-apps/orders-entities": "^5.1.0",
+    "@mj-biz-apps/common-entities": "^5.37.0",
+    "@mj-biz-apps/orders-entities": "^5.2.1",
     "@mj-biz-apps/sales-core-entities-server": "5.2.0",
     "@mj-biz-apps/sales-entities": "5.2.0",
     "@mj-biz-apps/sales-server": "5.2.0"

@@ -24,12 +24,12 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@mj-biz-apps/common-activity-sync": "5.36.0",
-    "@mj-biz-apps/common-entities": "^5.34.0",
-    "@mj-biz-apps/orders-entities": "^5.1.0",
+    "@mj-biz-apps/common-activity-sync": "^5.37.0",
+    "@mj-biz-apps/common-entities": "^5.37.0",
+    "@mj-biz-apps/orders-entities": "^5.2.1",
     "@mj-biz-apps/sales-entities": "5.2.0",
-    "@mj-biz-apps/tasks-core": "^1.2.3",
-    "@mj-biz-apps/tasks-entities": "^1.2.3"
+    "@mj-biz-apps/tasks-core": "^1.4.1",
+    "@mj-biz-apps/tasks-entities": "^1.4.1"
   },
   "peerDependencies": {
     "@memberjunction/core": "^6.1.0-edge.3",
