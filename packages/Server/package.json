@@ -29,12 +29,12 @@
     "class-validator": "^0.14.3"
   },
   "peerDependencies": {
-    "@memberjunction/actions": "^6.1.0-edge.3",
-    "@memberjunction/actions-base": "^6.1.0-edge.3",
-    "@memberjunction/core": "^6.1.0-edge.3",
-    "@memberjunction/global": "^6.1.0-edge.3",
-    "@memberjunction/server": "^6.1.0-edge.3",
-    "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.3"
+    "@memberjunction/actions": "^6.1.0-edge.5",
+    "@memberjunction/actions-base": "^6.1.0-edge.5",
+    "@memberjunction/core": "^6.1.0-edge.5",
+    "@memberjunction/global": "^6.1.0-edge.5",
+    "@memberjunction/server": "^6.1.0-edge.5",
+    "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.5"
   },
   "repository": {
     "type": "git",
