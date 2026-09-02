@@ -4,7 +4,7 @@
   "name": "mj-bizapps-sales",
   "displayName": "BizApps Sales",
   "description": "Deal pipeline management for MemberJunction — accounts, contacts, pipelines, deals with priced lines, deal teams, stage history and forecasting. Sits at the top of the revenue stack: sales records intent and asks BizApps Orders for every number, so a closed deal becomes a contract and an order in one transaction rather than a notification to re-key it by hand.",
-  "version": "6.0.0",
+  "version": "6.1.0",
   "license": "ISC",
   "icon": "fa-solid fa-chart-line",
   "publisher": {
@@ -12,7 +12,7 @@
     "url": "https://memberjunction.com"
   },
   "repository": "https://github.com/MemberJunction/bizapps-sales",
-  "mjVersionRange": ">=6.1.0-edge.3 <7.0.0",
+  "mjVersionRange": ">=6.1.0-edge.5 <7.0.0",
   "dependencies": {
     "mj-bizapps-common": {
       "version": ">=5.37.0 <6.0.0",

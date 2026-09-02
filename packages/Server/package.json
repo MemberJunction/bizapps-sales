@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/sales-server",
   "type": "module",
-  "version": "6.0.0",
+  "version": "6.1.0",
   "description": "BizApps Sales server bootstrap - GraphQL resolvers and class registrations for the deal-pipeline Open App",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -23,9 +23,9 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@mj-biz-apps/sales-actions": "6.0.0",
-    "@mj-biz-apps/sales-core-entities-server": "6.0.0",
-    "@mj-biz-apps/sales-entities": "6.0.0",
+    "@mj-biz-apps/sales-actions": "6.1.0",
+    "@mj-biz-apps/sales-core-entities-server": "6.1.0",
+    "@mj-biz-apps/sales-entities": "6.1.0",
     "class-validator": "^0.14.3"
   },
   "peerDependencies": {
