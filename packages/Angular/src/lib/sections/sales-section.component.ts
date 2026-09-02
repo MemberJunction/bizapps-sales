@@ -493,7 +493,7 @@ export class MJSSalesSectionComponent implements OnInit {
 
     public OwnerPct(amount: number): string {
         const max = Math.max(1, ...this.Owners.map((o) => o.Amount));
-        return `${Math.round((amount / max) * 100)}%`;
+        return `${Math.round((amount / max) * 100)}%`; // money-grep-allow: ratio of two stored amounts rendered as a bar width percentage — the result is a CSS length, not a money figure
     }
 
     public get Weighted(): number {
