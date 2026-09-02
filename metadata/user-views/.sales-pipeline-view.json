@@ -14,7 +14,11 @@
       "GridState": "{\"sortSettings\":[{\"field\":\"ExpectedCloseDate\",\"dir\":\"asc\"}],\"columnSettings\":[{\"Name\":\"Name\",\"DisplayName\":\"Deal\",\"orderIndex\":0,\"width\":260,\"pinned\":\"left\"},{\"Name\":\"DealNumber\",\"DisplayName\":\"Number\",\"orderIndex\":1,\"width\":120},{\"Name\":\"Account\",\"DisplayName\":\"Customer\",\"orderIndex\":2,\"width\":180},{\"Name\":\"Pipeline\",\"DisplayName\":\"Pipeline\",\"orderIndex\":3,\"width\":140},{\"Name\":\"PipelineStage\",\"DisplayName\":\"Stage\",\"orderIndex\":4,\"width\":130},{\"Name\":\"DealStatusType\",\"DisplayName\":\"Status\",\"orderIndex\":5,\"width\":110,\"format\":{\"type\":\"text\",\"conditionalRules\":[{\"condition\":\"contains\",\"value\":\"Won\",\"style\":{\"color\":\"#047857\",\"backgroundColor\":\"#d1fae5\",\"bold\":true}},{\"condition\":\"contains\",\"value\":\"Lost\",\"style\":{\"color\":\"#b45309\",\"backgroundColor\":\"#fef3c7\"}},{\"condition\":\"equals\",\"value\":\"Open\",\"style\":{\"color\":\"#1d4ed8\",\"backgroundColor\":\"#dbeafe\"}}]}},{\"Name\":\"Amount\",\"DisplayName\":\"Amount\",\"orderIndex\":6,\"width\":120,\"format\":{\"type\":\"currency\",\"currencyCode\":\"USD\",\"decimals\":0,\"align\":\"right\"}},{\"Name\":\"Probability\",\"DisplayName\":\"Prob\",\"orderIndex\":7,\"width\":80,\"format\":{\"type\":\"number\",\"decimals\":0,\"align\":\"right\"}},{\"Name\":\"ExpectedCloseDate\",\"DisplayName\":\"Close\",\"orderIndex\":8,\"width\":120,\"format\":{\"type\":\"date\",\"dateFormat\":\"medium\"}},{\"Name\":\"OwnerEmployee\",\"DisplayName\":\"Owner\",\"orderIndex\":9,\"width\":140},{\"Name\":\"ForecastCategoryType\",\"DisplayName\":\"Forecast\",\"orderIndex\":10,\"width\":130},{\"Name\":\"NextStep\",\"DisplayName\":\"Next step\",\"orderIndex\":11,\"width\":200}]}"
     },
     "primaryKey": {
-      "ID": "a11dea15-0001-4e71-b0a8-3f17c5e2d803"
+      "ID": "A11DEA15-0001-4E71-B0A8-3F17C5E2D803"
+    },
+    "sync": {
+      "lastModified": "2026-09-02T05:11:44.227Z",
+      "checksum": "dabc625f2f912910fddcc36d1ba3c610141487705ed25a245cadaff5a8acb3af"
     }
   }
 ]
