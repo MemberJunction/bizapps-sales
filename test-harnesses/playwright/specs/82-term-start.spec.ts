@@ -138,8 +138,13 @@ test.describe('a subscription line states its term start', () => {
         const products = await QueryAll<Product>(
             `SELECT ID, Name, SubscriptionTypeID FROM __mj_BizAppsOrders.Product
               WHERE Status = 'Active' AND CompanyID = '${order!.CompanyID}'
-                AND (AvailableFrom IS NULL OR AvailableFrom <= GETUTCDATE())
-                AND (AvailableTo   IS NULL OR AvailableTo   >= GETUTCDATE())`,
+                -- CAST TO date, DELIBERATELY. Both columns are typed date; GETUTCDATE() carries a TIME,
+                -- so AvailableTo >= GETUTCDATE() compares midnight against the current instant and is
+                -- FALSE for every moment of the day but the first. A product available THROUGH today was
+                -- dropped from this list, and the test then SKIPPED itself saying this host has no
+                -- subscription product, rather than failing. A green run that silently tested nothing.
+                AND (AvailableFrom IS NULL OR AvailableFrom <= CAST(GETUTCDATE() AS date))
+                AND (AvailableTo   IS NULL OR AvailableTo   >= CAST(GETUTCDATE() AS date))`,
         );
         const subscription = products.find((p) => !!p.SubscriptionTypeID);
         const oneTime = products.find((p) => !p.SubscriptionTypeID);
