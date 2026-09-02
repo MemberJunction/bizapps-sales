@@ -126,6 +126,6 @@
     }
   },
   "dependencies": {
-    "@mj-biz-apps/orders-entities": "^5.1.0"
+    "@mj-biz-apps/orders-entities": "^5.2.1"
   }
 }
