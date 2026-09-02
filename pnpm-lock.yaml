@@ -92,10 +92,10 @@ importers:
         specifier: 6.1.0-edge.3
         version: 6.1.0-edge.3(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@mj-biz-apps/sales-integration-tests':
-        specifier: ^5.0.0
+        specifier: ^6.0.0
         version: link:packages/IntegrationTests
       '@mj-biz-apps/sales-server':
-        specifier: ^5.0.0
+        specifier: ^6.0.0
         version: link:packages/Server
       '@playwright/test':
         specifier: ^1.50.0
@@ -158,7 +158,7 @@ importers:
         specifier: ^6.1.0-edge.3
         version: 6.1.0-edge.3
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 5.2.0
+        specifier: 6.0.0
         version: link:../CoreEntitiesServer
       zod:
         specifier: ^3.25.76
@@ -225,7 +225,7 @@ importers:
         specifier: ^5.2.1
         version: 5.2.1(@memberjunction/core@6.1.0-edge.3)(@memberjunction/global@6.1.0-edge.3)
       '@mj-biz-apps/sales-entities':
-        specifier: 5.2.0
+        specifier: 6.0.0
         version: link:../Entities
     devDependencies:
       '@angular/compiler':
@@ -262,7 +262,7 @@ importers:
         specifier: ^5.2.1
         version: 5.2.1(@memberjunction/core@6.1.0-edge.3)(@memberjunction/global@6.1.0-edge.3)
       '@mj-biz-apps/sales-entities':
-        specifier: 5.2.0
+        specifier: 6.0.0
         version: link:../Entities
       '@mj-biz-apps/tasks-core':
         specifier: ^1.4.1
@@ -321,13 +321,13 @@ importers:
         specifier: ^5.2.1
         version: 5.2.1(@memberjunction/core@6.1.0-edge.3)(@memberjunction/global@6.1.0-edge.3)
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 5.2.0
+        specifier: 6.0.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: 5.2.0
+        specifier: 6.0.0
         version: link:../Entities
       '@mj-biz-apps/sales-server':
-        specifier: 5.2.0
+        specifier: 6.0.0
         version: link:../Server
     devDependencies:
       '@mj-biz-apps/tasks-entities':
@@ -364,13 +364,13 @@ importers:
         specifier: ^6.1.0-edge.3
         version: 6.1.0-edge.3(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(chokidar@3.6.0)(debug@4.4.3)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@mj-biz-apps/sales-actions':
-        specifier: 5.2.0
+        specifier: 6.0.0
         version: link:../Actions
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 5.2.0
+        specifier: 6.0.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: 5.2.0
+        specifier: 6.0.0
         version: link:../Entities
       class-validator:
         specifier: ^0.14.3
