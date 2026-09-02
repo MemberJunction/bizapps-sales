@@ -33,7 +33,7 @@ import {
     ProjectValidation,
     type DealWorkspaceValidation,
 } from './deal-workspace.validation';
-import { E_ORDERS_PRODUCT, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
+import { E_ORDERS_PRODUCT, PRODUCT_LOOKUP_FIELDS, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
 
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
@@ -459,8 +459,8 @@ export class DealWorkspaceService {
             ExtraFilter: ProductFilterFor(asOf),
             OrderBy: 'Name ASC',
             ResultType: 'simple',
-            // `Company` is the owning company's NAME, and the picker label needs it: see ProductLookup.
-            Fields: ['ID', 'Name', 'SKU', 'CompanyID', 'Company'],
+            // Shared with the check that guards it, so the two cannot drift — see PRODUCT_LOOKUP_FIELDS.
+            Fields: [...PRODUCT_LOOKUP_FIELDS],
         });
         return result?.Success ? (result.Results ?? []) : [];
     }

@@ -81,10 +81,12 @@ import './checks/board-move.checks.js';
 import './checks/close-won-tasks.checks.js';
 import './checks/activities.checks.js';
 import './checks/forecast.checks.js';
+import './checks/term-start.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
 export { ProductPickerChecks } from './checks/product-picker.checks.js';
+export { TermStartChecks } from './checks/term-start.checks.js';
 export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
 export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
 export { BoardMoveChecks } from './checks/board-move.checks.js';
