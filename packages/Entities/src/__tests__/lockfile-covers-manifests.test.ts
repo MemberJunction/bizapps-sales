@@ -20,10 +20,22 @@
  * vitest starts. Its value is entirely LOCAL — `pnpm run test:unit` names the problem, in a sentence,
  * on the machine that can still fix it cheaply. Do not read a green CI as this test having passed.
  *
- * Scope: `dependencies` and `devDependencies` only. `peerDependencies` are deliberately excluded —
- * pnpm does not install a peer into the declaring package's importer, so a peer legitimately has no
- * importer entry. That distinction is the whole reason a naive "every name in the lockfile" check
- * would produce noise and get deleted.
+ * Scope: `dependencies`, `devDependencies` AND `peerDependencies`.
+ *
+ * PEERS WERE EXCLUDED HERE AND THAT WAS WRONG. The original note argued pnpm does not install a peer
+ * into the declaring package's importer, so a peer legitimately has no importer entry. That is not
+ * true under this workspace's `.npmrc`, which sets `auto-install-peers=true`: measured 2026-09-03,
+ * all 37 peerDependencies across these packages HAVE an importer entry, with no exceptions.
+ *
+ * The exclusion was not academic. It is precisely the case that broke `bizapps-common#98` — two
+ * peerDependencies were added to `packages/Server/package.json`, the lockfile was not refreshed, and
+ * CI died on `ERR_PNPM_OUTDATED_LOCKFILE`. The check that exists to pre-empt that error would have
+ * skipped the very fields that caused it.
+ *
+ * IF THIS EVER GOES NOISY, read it before deleting it: a peer with no importer entry means
+ * `auto-install-peers` is no longer in effect for the install that produced the lockfile. That is a
+ * real change in how this repo resolves dependencies, and the right response is to confirm the
+ * setting rather than to narrow this assertion back.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -94,12 +106,17 @@ describe('pnpm-lock.yaml covers every declared dependency', () => {
     });
 
     for (const { importer, path } of manifests()) {
-        it(`${importer}: every dependency and devDependency is locked`, () => {
+        it(`${importer}: every dependency, devDependency and peerDependency is locked`, () => {
             const pkg = JSON.parse(readFileSync(path, 'utf8')) as {
                 dependencies?: Record<string, string>;
                 devDependencies?: Record<string, string>;
+                peerDependencies?: Record<string, string>;
             };
-            const declared = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})];
+            const declared = [
+                ...Object.keys(pkg.dependencies ?? {}),
+                ...Object.keys(pkg.devDependencies ?? {}),
+                ...Object.keys(pkg.peerDependencies ?? {}),
+            ];
             const locked = importers.get(importer);
 
             expect(locked, `lockfile has no importer entry for "${importer}"`).toBeDefined();
