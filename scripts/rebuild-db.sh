@@ -69,7 +69,19 @@ ROOT="$PWD"
 #
 # This is deliberately not a blocklist of protected names. A blocklist protects the hosts someone
 # thought of; naming the target protects every database including the ones added next week.
+# THE CALLER'S MJ_CORE_VERSION SURVIVES THE .env, which it did not before.
+#
+# `. ./.env` assigns unconditionally, so a value exported on the command line was silently
+# replaced by the one in the file. `MJ_CORE_VERSION=v6.1.0-edge.4 scripts/rebuild-db.sh` then
+# migrated to edge.3 and said so in its own banner -- which is the worst version of this, because
+# the run LOOKS like the experiment you asked for. Found while trying to test whether a newer core
+# clears the common failure; the answer was neither yes nor no, it was "you did not test that".
+#
+# Scoped to this one variable on purpose. DB_DATABASE is deliberately taken from .env and then
+# replaced by CONFIRM_DROP below, and that ordering must not change.
+_caller_mj_core_version="${MJ_CORE_VERSION:-}"
 set -a; . ./.env; set +a
+[[ -n "$_caller_mj_core_version" ]] && MJ_CORE_VERSION="$_caller_mj_core_version"
 
 if [[ -z "${CONFIRM_DROP:-}" ]]; then
     printf '\033[1mrebuild-db.sh refuses to guess which database to drop.\033[0m\n' >&2
@@ -81,7 +93,42 @@ if [[ -z "${CONFIRM_DROP:-}" ]]; then
 fi
 DB_DATABASE="$CONFIRM_DROP"
 
-MJ_VERSION="${MJ_CORE_VERSION:-v5.51.0}"
+# THE MJ CORE TAG, READ FROM THE CLI THIS SCRIPT IS ABOUT TO INVOKE -- not hardcoded.
+#
+# The default was v5.51.0 while this workspace runs 6.1.0-edge.4: a MAJOR version apart, chosen once
+# and never revisited. Any host that does not set MJ_CORE_VERSION installs a v5 core and then applies
+# v6-era app migrations on top of it.
+#
+# WHY IT SURVIVED THIS LONG, which is the part worth keeping: `.env` on the machine that actually runs
+# this script sets MJ_CORE_VERSION explicitly, and the block below honours that. So the stale default
+# was masked on the only host anyone tested -- it would have fired for the next person to clone the
+# repo and rebuild without that line, which is precisely a QA machine.
+#
+# Reading the tag from `node_modules/@memberjunction/cli` means the core installed and the CLI that
+# installs it cannot disagree again, including after the next version bump. An explicit MJ_CORE_VERSION
+# still wins, so a deliberate pin is unaffected.
+#
+# THIS DOES NOT FIX THE FROM-EMPTY INSTALL, and must not be read as doing so. Measured 2026-08-27
+# against a scratch database: with the core at v6.1.0-edge.3 the rebuild still dies in COMMON's
+# V202608252150 migration with
+#
+#     Procedure or function spUpdateExistingEntitiesFromSchema has too many arguments specified
+#
+# because common calls that proc with @ExcludedSchemaNames and the core at that tag does not declare
+# it. That is a core-version compatibility problem between common and MJ, not this line -- an earlier
+# note of mine blamed the v5 pin for it and was wrong.
+MJ_CLI_PKG="$ROOT/node_modules/@memberjunction/cli/package.json"
+if [[ -z "${MJ_CORE_VERSION:-}" ]]; then
+    [[ -f "$MJ_CLI_PKG" ]] || {
+        echo "cannot resolve the MJ CLI at $MJ_CLI_PKG -- run pnpm install, or set MJ_CORE_VERSION" >&2
+        exit 1
+    }
+    # The path goes in as an ARGUMENT, not inside the JS string. Git Bash rewrites POSIX paths to
+    # Windows ones for arguments to native programs but not for text inside a quoted script, so
+    # `node -p "require('/c/v6/...')"` fails on Windows with MODULE_NOT_FOUND while this works.
+    MJ_CORE_VERSION="v$(node -e 'console.log(require(process.argv[1]).version)' "$MJ_CLI_PKG")"
+fi
+MJ_VERSION="$MJ_CORE_VERSION"
 MJ="node $ROOT/node_modules/@memberjunction/cli/bin/run.js"
 SQLCMD="sqlcmd -S ${DB_HOST},${DB_PORT:-1433} -U ${DB_USERNAME} -P ${DB_PASSWORD} -C -N o"
 
@@ -164,6 +211,28 @@ if [[ -n "$SALES_MIGRATION" ]]; then
     GENERATED_LINES=$(( $(wc -l < "$SALES_MIGRATION") - BANNER_END ))
     if (( GENERATED_LINES > 0 )); then
         printf '  trimming %s lines of generated output (CodeGen will regenerate them)\n' "$GENERATED_LINES"
+
+        # PUT IT BACK IF THIS RUN DOES NOT FINISH.
+        #
+        # The trim is deliberate and the normal flow regenerates it (rebuild -> codegen -> append).
+        # A FAILED run is the problem: the script exits with the baseline gutted -- 34513 lines
+        # deleted from a TRACKED file, sitting in the working tree with nothing saying so. Not
+        # hypothetical: on 2026-08-27 step 7 failed on a missing procedure, reported that error
+        # correctly, and left a second silent one behind for whoever ran git status next.
+        #
+        # Restored from a COPY rather than with a git checkout, so an uncommitted edit above the
+        # banner survives too. On success the copy is removed and the file stays trimmed, which is
+        # what the next step wants.
+        cp "$SALES_MIGRATION" "$SALES_MIGRATION.pre-trim"
+        trap 'rc=$?; if [[ -f "${SALES_MIGRATION:-}.pre-trim" ]]; then
+                  if (( rc != 0 )); then
+                      mv -f "$SALES_MIGRATION.pre-trim" "$SALES_MIGRATION"
+                      echo "  restored the untrimmed baseline - this run did not finish" >&2
+                  else
+                      rm -f "$SALES_MIGRATION.pre-trim"
+                  fi
+              fi' EXIT
+
         head -n "$BANNER_END" "$SALES_MIGRATION" > "$SALES_MIGRATION.tmp"
         mv "$SALES_MIGRATION.tmp" "$SALES_MIGRATION"
         # RECORD WHAT WE TRIMMED, so append-codegen.sh has something to compare against. Its shrink
