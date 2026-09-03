@@ -32,6 +32,7 @@ export * from './downstream-seams';
  * all apply the same one.
  */
 export * from './product-filter';
+export * from './term-start';
 
 /**
  * The close lock's field rule, shared by `DealEntityServer.Save()` and the Explorer Deal form so the

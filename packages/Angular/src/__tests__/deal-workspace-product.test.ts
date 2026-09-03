@@ -28,7 +28,15 @@ import { DealWorkspaceComponent } from '../lib/workspace/deal-workspace.componen
  * logic — so a change to either method reaches these tests.
  */
 
-type Product = { ID: string; Name: string; SKU: string | null; CompanyID: string; Company: string | null };
+import type { ProductLookup } from '@mj-biz-apps/sales-entities';
+
+/**
+ * DERIVED, not restated. The local shape omitted `SubscriptionTypeID` while the literals below set
+ * it — a TS2353 excess-property error that stayed latent only because `__tests__` is excluded from
+ * every typecheck today. Aliasing the real interface means the next field added to `ProductLookup`
+ * cannot drift away from the fixtures that stand in for it.
+ */
+type Product = ProductLookup;
 
 const SELLING_CO = 'CO-BLUE-CYPRESS';
 const OTHER_CO = 'CO-ANOTHER-ENTITY';
@@ -61,13 +69,29 @@ function componentWith(catalogue: Product[]) {
 
 /** A line that records `Set` the way `BaseEntity` would, so the stamp is observable. */
 function lineWith(fields: Record<string, unknown> = {}) {
-    const store: Record<string, unknown> = { ProductID: null, CompanyID: null, ...fields };
+    const store: Record<string, unknown> = { ProductID: null, CompanyID: null, ServicePeriodStart: null, ...fields };
     return {
         get ProductID() {
             return store['ProductID'] as string | null;
         },
         set ProductID(v: string | null) {
             store['ProductID'] = v;
+        },
+        // A REAL property, because #32 writes it directly rather than through Set() — a plain field on
+        // the stub would let the component assign it while every read still returned undefined.
+        get ServicePeriodStart() {
+            return store['ServicePeriodStart'] ?? null;
+        },
+        set ServicePeriodStart(v: unknown) {
+            store['ServicePeriodStart'] = v;
+        },
+        // Declared for the same reason as the start: the cleanup paths write it directly, and a
+        // plain field would let the component assign it while every read still returned undefined.
+        get ServicePeriodEnd() {
+            return store['ServicePeriodEnd'] ?? null;
+        },
+        set ServicePeriodEnd(v: unknown) {
+            store['ServicePeriodEnd'] = v;
         },
         Set(field: string, value: unknown) {
             store[field] = value;
@@ -82,6 +106,198 @@ function lineWith(fields: Record<string, unknown> = {}) {
 function touched(c: unknown): number {
     return (c as { Touched: number }).Touched;
 }
+
+describe('#32 — the term start on a line, in the component', () => {
+    /**
+     * ── WHY THESE EXIST ───────────────────────────────────────────────────────────────────────────
+     *
+     * An audit measured that all three of #32's component behaviours survived deletion with the entire
+     * suite green: the empty-value handling in `SetTermStart`, the clearing in `OnProductChange`, and
+     * the focus hand-off in `ResetTermStart`. The pure rules in `term-start.ts` are well covered by
+     * TS1-TS6, but those run against the functions, not against the component that calls them — and the
+     * integration tier is component-free by construction, while spec 82 is typechecked and never run.
+     * This tier is the only one that can see any of it.
+     */
+    const SUBSCRIPTION: Product = {
+        ID: 'P-SUB', Name: 'Platform Seat', SKU: 'PLAT-STD', CompanyID: SELLING_CO,
+        Company: 'Blue Cypress', SubscriptionTypeID: 'sub-annual',
+    };
+    const ONE_TIME: Product = {
+        ID: 'P-ONE', Name: 'Onboarding', SKU: 'ONB-1', CompanyID: SELLING_CO,
+        Company: 'Blue Cypress', SubscriptionTypeID: null,
+    };
+
+    function panelWith(catalogue: Product[]) {
+        const c = componentWith(catalogue);
+        (c as { Touch(): void }).Touch = () => undefined;
+        return c;
+    }
+
+    it('TC1: clearing the date writes null through, rather than silently keeping the old value', () => {
+        /**
+         * A guard here once refused to write on an empty value, to protect a stored date from a partial
+         * edit. It produced something worse: the handler returned without writing and without marking the
+         * deal dirty, the one-way binding never refilled the box, and the row reported a stored value
+         * while showing nothing. Saving kept the date the user thought they had deleted.
+         */
+        const c = panelWith([SUBSCRIPTION]);
+        const line = lineWith({ ProductID: 'P-SUB', ServicePeriodStart: '2026-09-01' });
+        c.SetTermStart(line, '');
+        expect(
+            line.ServicePeriodStart,
+            'an empty value must reach the model, so the field can fall back to the order date',
+        ).toBeNull();
+    });
+
+    it('TC2: a real date is written through unchanged', () => {
+        const c = panelWith([SUBSCRIPTION]);
+        const line = lineWith({ ProductID: 'P-SUB', ServicePeriodStart: null });
+        c.SetTermStart(line, '2026-09-01');
+        expect(line.ServicePeriodStart).not.toBeNull();
+    });
+
+    it('TC3: re-picking to a ONE-TIME product clears a stored term start', () => {
+        /**
+         * The stranding defect. Nothing downstream reconciles this column with the line's product, and
+         * orders' confirm then refuses to stamp an event line's own service period — so a term start
+         * left on a one-time line becomes a failed confirm naming nothing the rep did.
+         */
+        const c = panelWith([SUBSCRIPTION, ONE_TIME]);
+        const line = lineWith({ ProductID: 'P-SUB', ServicePeriodStart: '2026-09-01' });
+        c.OnProductChange(line, 'P-ONE');
+        expect(
+            line.ServicePeriodStart,
+            'a one-time product cannot carry a term start, so it must not keep one',
+        ).toBeNull();
+    });
+
+    describe('TC3b: the term END is cleared alongside the start', () => {
+        /**
+         * ANDREW'S REVIEW, 2026-09-01. A subscription line has TWO dates and the cleanup handled one.
+         *
+         * The comment on `OnProductChange` already named the mechanism — orders bails out of stamping
+         * an event line's own service period with `if (line.ServicePeriodStart || line.ServicePeriodEnd)
+         * return;` — and then the code cleared only the START. A leftover END satisfies that condition
+         * exactly as well, so the event-ticket failure the clearing exists to prevent still happened,
+         * via the other half of a guard the comment quotes in full.
+         *
+         * Sales never writes `ServicePeriodEnd` itself, which is why this went unnoticed. It arrives
+         * from orders: the generated order-line form edits the column directly, and a confirm stamps
+         * both dates. Either is enough to put a line in this state before it is re-picked.
+         */
+        it('clears BOTH when the new product cannot carry a term', () => {
+            const c = panelWith([SUBSCRIPTION, ONE_TIME]);
+            const line = lineWith({
+                ProductID: 'P-SUB',
+                ServicePeriodStart: '2026-09-01',
+                ServicePeriodEnd: '2027-08-31',
+            });
+            c.OnProductChange(line, 'P-ONE');
+            expect(line.ServicePeriodStart).toBeNull();
+            expect(
+                line.ServicePeriodEnd,
+                'a stranded end date defeats the same guard a stranded start does',
+            ).toBeNull();
+        });
+
+        it('clears BOTH on an explicit reset', () => {
+            const c = panelWith([SUBSCRIPTION]);
+            const line = lineWith({
+                ProductID: 'P-SUB',
+                ServicePeriodStart: '2026-09-01',
+                ServicePeriodEnd: '2027-08-31',
+            });
+            c.ResetTermStart(line);
+            expect(line.ServicePeriodStart).toBeNull();
+            expect(line.ServicePeriodEnd).toBeNull();
+        });
+
+        it('resets a line holding ONLY an end date, rather than returning early', () => {
+            // The guard was `if (!line.ServicePeriodStart) return;`, so this line kept its end date
+            // AND reported success — the row then showed the order-date hint, reading as inherited
+            // while the record still held an explicit half-open period.
+            const c = panelWith([SUBSCRIPTION]);
+            const line = lineWith({ ProductID: 'P-SUB', ServicePeriodEnd: '2027-08-31' });
+            c.ResetTermStart(line);
+            expect(line.ServicePeriodEnd).toBeNull();
+        });
+
+        it('leaves BOTH alone when the new product is another subscription', () => {
+            // The TC4 judgement extends to the end date: if the start survives a
+            // subscription-to-subscription re-pick, clearing the end would produce a half-open
+            // period that no rep asked for.
+            const c = panelWith([SUBSCRIPTION, { ...SUBSCRIPTION, ID: 'P-SUB2', Name: 'Other Seat' }]);
+            const line = lineWith({
+                ProductID: 'P-SUB',
+                ServicePeriodStart: '2026-09-01',
+                ServicePeriodEnd: '2027-08-31',
+            });
+            c.OnProductChange(line, 'P-SUB2');
+            expect(line.ServicePeriodStart).toBe('2026-09-01');
+            expect(line.ServicePeriodEnd).toBe('2027-08-31');
+        });
+
+        it('leaves BOTH alone when the product is UNKNOWN', () => {
+            const c = panelWith([]);
+            const line = lineWith({
+                ProductID: 'P-SUB',
+                ServicePeriodStart: '2026-09-01',
+                ServicePeriodEnd: '2027-08-31',
+            });
+            c.OnProductChange(line, 'P-GONE');
+            expect(line.ServicePeriodEnd).toBe('2027-08-31');
+        });
+    });
+
+    it('TC4: re-picking to another SUBSCRIPTION keeps it — a deliberate choice, not an oversight', () => {
+        const c = panelWith([SUBSCRIPTION, { ...SUBSCRIPTION, ID: 'P-SUB2', Name: 'Other Seat' }]);
+        const line = lineWith({ ProductID: 'P-SUB', ServicePeriodStart: '2026-09-01' });
+        c.OnProductChange(line, 'P-SUB2');
+        expect(
+            line.ServicePeriodStart,
+            'both products can honour the date the rep chose',
+        ).toBe('2026-09-01');
+    });
+
+    it('TC5: an UNKNOWN product leaves a stored term start alone', () => {
+        // An empty or failed catalogue is not evidence the rep's date is wrong. ShouldOfferTermStart
+        // keeps such a value visible so it can be cleared deliberately.
+        const c = panelWith([]);
+        const line = lineWith({ ProductID: 'P-SUB', ServicePeriodStart: '2026-09-01' });
+        c.OnProductChange(line, 'P-GONE');
+        expect(line.ServicePeriodStart).toBe('2026-09-01');
+    });
+
+    it('TC6: reset clears the value and keeps focus on the input when the control survives', () => {
+        const c = panelWith([SUBSCRIPTION]);
+        const line = lineWith({ ProductID: 'P-SUB', ServicePeriodStart: '2026-09-01' });
+        let focused = 0;
+        const input = { focus: () => { focused++; }, closest: () => null } as unknown as HTMLElement;
+        c.ResetTermStart(line, input);
+        expect(line.ServicePeriodStart).toBeNull();
+        expect(focused, 'a subscription line still shows the control, so focus stays on it').toBe(1);
+    });
+
+    it('TC7: reset moves focus OFF the input when clearing removes the control', () => {
+        /**
+         * The case the first version of the focus fix got wrong. On a one-time product the control is
+         * rendered only because a value is stored, so clearing tears down the whole cell — focusing the
+         * input would drop the user on `<body>`, which is what the fix was meant to prevent.
+         */
+        const c = panelWith([ONE_TIME]);
+        const line = lineWith({ ProductID: 'P-ONE', ServicePeriodStart: '2026-09-01' });
+        let inputFocused = 0;
+        let fallbackFocused = 0;
+        const fallback = { focus: () => { fallbackFocused++; } };
+        const input = {
+            focus: () => { inputFocused++; },
+            closest: () => ({ querySelector: () => fallback }),
+        } as unknown as HTMLElement;
+        c.ResetTermStart(line, input);
+        expect(inputFocused, 'the input is about to be removed, so focusing it strands the user').toBe(0);
+        expect(fallbackFocused, 'focus goes to a control that survives').toBe(1);
+    });
+});
 
 describe('#29 — the picker names each product\'s owner', () => {
     /**
@@ -153,7 +369,7 @@ describe('#29 — a line is never invalid for a reason the form cannot show', ()
         const c = Object.create(DealWorkspaceComponent.prototype) as DealWorkspaceComponent;
         Object.defineProperty(c, 'Deal', { value: { OrderID_EnsureObject: () => order }, configurable: true });
         Object.defineProperty(c, 'ActiveCompanyID', { value: SELLING_CO, configurable: true });
-        (c as unknown as { Touch(): void }).Touch = () => undefined;
+        (c as { Touch(): void }).Touch = () => undefined;
         return { c, stamped, onOrder };
     }
 

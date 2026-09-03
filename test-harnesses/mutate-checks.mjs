@@ -63,6 +63,7 @@ const REPO = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '
 const DES = 'packages/CoreEntitiesServer/src/DealEntityServer.ts';
 const CDO = 'packages/CoreEntitiesServer/src/CloseDealOperation.ts';
 const PF = 'packages/Entities/src/product-filter.ts';
+const TSF = 'packages/Entities/src/term-start.ts';
 const DE = 'packages/Entities/src/deal-entity.ts';
 const SEQ = 'packages/CoreEntitiesServer/src/SequenceService.ts';
 const CWT = 'packages/CoreEntitiesServer/src/CloseWonTaskService.ts';
@@ -96,10 +97,82 @@ const QFS = 'packages/CoreEntitiesServer/src/forecast/QueryForecastSource.ts';
  * anchor that has drifted is reported as a skip rather than guessed at.
  */
 const MUTATIONS = [
+    // ── #29 CHANGED `ProductFilterFor` AND BOTH OF THESE SILENTLY STOPPED RUNNING ──────────────
+    //
+    // M-PP1 anchored on "AND Status = 'Active' " — the AND disappeared when the company clause that
+    // preceded it was removed. M-PP2 anchored on the company clause itself, which no longer exists at
+    // all. Both reported SKIP, which reads like ordinary anchor drift rather than "the mutation you
+    // rely on has not run since August". Measured before repair: "anchor appears 0 times".
     { id: 'M-PP1', file: PF, expect: ['PP1'],
-      from: "AND Status = 'Active' ", to: "AND Status <> 'not-a-status' " },
+      from: "`Status = 'Active' ` +", to: "`Status <> 'not-a-status' ` +" },
+    // M-PP2 is INVERTED by #29: the defect is no longer a missing company clause, it is a PRESENT one.
+    //
+    // THIS DOES NOT PROVE 'PP2 AND ONLY PP2', AND IT USED TO SAY IT DID. `expect` is checked as a
+    // SUBSET of the failures, so a mutation is credited the moment its named check falls, however
+    // much else fell with it — the harness structurally cannot see collateral, and no comment here
+    // can make it. Worse, this particular mutation almost certainly does have collateral: pinning the
+    // catalogue to one hard-coded company starves every check that needs a product to exist, which
+    // includes TS5, TS6 and the SD/CW families.
+    //
+    // Left registered because it still does the one job a mutation must do — it proves PP2 can fail.
+    // What it cannot do is localise the blame, and saying so is cheaper than a reader trusting the
+    // old claim and concluding PP2 is independent of its neighbours when nothing here established it.
     { id: 'M-PP2', file: PF, expect: ['PP2'],
-      from: "`CompanyID = '${company}' AND Status", to: '`Status' },
+      from: "`Status = 'Active' ` +",
+      to: "`CompanyID = 'C0A5E100-0001-4A01-9E11-5B7C3D2F8A01' AND Status = 'Active' ` +" },
+    // ── #32's term start ────────────────────────────────────────────────────────────────────────
+    //
+    // Two of these are the mutations that SURVIVED the original suite, found by a separate audit: the
+    // `hasProduct` guard could be deleted outright, and `??` could be swapped for `||`, both leaving
+    // six checks green. Registering them here is what stops that recurring silently.
+    { id: 'M-TS1', file: TSF, expect: ['TS1'],
+      from: '    if (!hasProduct) {\n        return false;\n    }\n', to: '' },
+    { id: 'M-TS2', file: TSF, expect: ['TS3'],
+      from: '    return IsEmptyDateLike(stored) ? (orderDate ?? null) : stored;',
+      to: '    return stored ?? orderDate ?? null;' },
+    { id: 'M-TS3', file: TSF, expect: ['TS1'],
+      from: '    if (HasExplicitTermStart(stored)) {\n        return true;\n    }\n    return product ? IsSubscriptionProduct(product) : false;',
+      to: '    return product ? IsSubscriptionProduct(product) : !!stored;' },
+    { id: 'M-TS4', file: TSF, expect: ['TS3'],
+      from: '    return !IsEmptyDateLike(stored);', to: '    return !!stored;' },
+
+    // ── THE TWO THAT WERE MISSING, AND THE TWO THAT DELIBERATELY STAY MISSING ────────────────────
+    //
+    // #32 shipped six checks. M-TS1..M-TS4 above proved TS1 and TS3 can fail; TS2 and TS4 had
+    // NOTHING, so these two close that. TS5 and TS6 get none, and that is a finding rather than an
+    // oversight:
+    //
+    //   TS5 -- its natural mutation is dropping 'SubscriptionTypeID' from PRODUCT_LOOKUP_FIELDS.
+    //          MEASURED: that no longer compiles. The completeness guard in product-filter.ts turns
+    //          it into "error TS2322: Type 'true' is not assignable to type 'never'", so this driver
+    //          would report a BUILD FAILURE, not a caught mutation. The guard is strictly stronger
+    //          than a mutation -- it fires on every build, with no database and no suite run. TS5
+    //          still earns its keep by proving the column is READABLE at runtime, which no type
+    //          system can know.
+    //
+    //   TS6 -- MEASURED: outside the Angular component, no sales source touches ServicePeriodStart;
+    //          the write path is MJ's save graph and orders' entities. Any mutation breaking TS6
+    //          would take a dozen SD* checks with it, so nothing would attribute to TS6.
+    //
+    // Inventing a mutation for either, to make a coverage count look complete, is exactly the
+    // vacuous proof this harness exists to prevent.
+    { id: 'M-TS5', file: TSF, expect: ['TS2'],
+      from: "    return !!product && String(product.SubscriptionTypeID ?? '').trim().length > 0;",
+      to: '    return !!product && product.SubscriptionTypeID != null;',
+      note: "the '' != null trap -- an empty-string id reads as a subscription, so EVERY line offers a term start" },
+    { id: 'M-TS6', file: TSF, expect: ['TS4'],
+      from: '    if (HasExplicitTermStart(stored)) {\n        return true;\n    }\n    return product ? IsSubscriptionProduct(product) : false;',
+      to: '    return product ? IsSubscriptionProduct(product) : false;',
+      note: 'drops the stored short-circuit, so a WITHDRAWN product hides a term start the rep already set' },
+    //
+    // M-TS6 ALSO FELLS TS1, AND THAT IS STRUCTURAL RATHER THAN SLOPPY AIM. Measured:
+    // failed=CD24,TS1,TS4. TS1 asserts `ShouldOfferTermStart(true, oneTimeProduct, CHOSEN) === true`
+    // -- a stored term start stays visible on a KNOWN one-time product -- and TS4 asserts the same
+    // for an UNKNOWN one. Both rest on the single `if (HasExplicitTermStart(stored)) return true;`,
+    // so no mutation can reach TS4's case without passing through TS1's. There is no narrower
+    // version to write; do not go looking for one. What M-TS6 adds over M-TS3 is TS4, which nothing
+    // else in this catalogue touches.
+
     { id: 'M-PP3', file: PF, expect: ['PP3', 'PP4'],
       from: "AND (AvailableTo IS NULL OR AvailableTo >= '${day}')",
       to: "AND (AvailableTo IS NULL OR AvailableTo >= '1900-01-01')" },
