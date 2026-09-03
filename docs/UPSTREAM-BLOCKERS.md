@@ -1,20 +1,26 @@
 # Upstream blockers — what BizApps Sales needs from the other apps
 
-**Measured 2026-08-26** against every repo at `origin/next`, in a joined pnpm workspace at `C:\v6`.
-Nothing here is a Sales defect. Everything was reproduced, and each reproduction is written down so it
-can be checked rather than believed.
+**Measured 2026-08-26** against every repo at `origin/next`, in a joined pnpm workspace at `C:\v6`,
+and **re-measured 2026-08-27** for items 2 and 3. Everything was reproduced, and each reproduction is
+written down so it can be checked rather than believed.
+
+Items 2 and 3 are now **closed**: both were core-version symptoms and both pass at MJ
+`v6.1.0-edge.4`. With those gone, the one thing still blocking a from-empty install is in THIS
+repo — see "And what the fresh install fails on NOW", under item 3. This doc used to open by
+saying nothing here is a Sales defect; that is no longer true, and it would be convenient to
+leave it standing.
 
 ## Where Sales stands, for context
 
 | suite | result |
 |---|---|
-| Integration (132 checks) | **127 passed / 5 failed** |
+| Integration (2026-08-27) | **137 passed / 1 failed of 138** — CD24 only, a tripwire on orders' `OrderHeader.Status` vocabulary. Measured on `feature/issue-32-term-start`, which adds the 6-check `term-start` bundle; `next` itself registers 132. |
 | Playwright (31 tests) | **26 passed / 2 failed / 3 skipped** |
 | Metadata drift (both directions) | **0** |
 | Dangling `RelatedEntityID` references | **0** |
 
-**All 5 integration failures and 1 of the 2 Playwright failures are item 1 below.** The other
-Playwright failure is ours and is being fixed separately.
+The Playwright row is as of 2026-08-26 and has NOT been re-measured; the integration row has.
+**The 5 integration failures that row used to record were item 1 below**, and they are gone.
 
 ---
 
@@ -79,7 +85,32 @@ hardcoded-entity-UUID defect is gone.
 
 ---
 
-## 2. common — blocks every fresh install
+## 2. common — ✅ RESOLVED at MJ core v6.1.0-edge.4 (was: blocks every fresh install)
+
+> **STATUS 2026-08-27 — RESOLVED BY THE CORE VERSION, NOT BY A CHANGE TO COMMON.** Measured against a
+> scratch database (`CONFIRM_DROP=MJ_V6_PinCheck scripts/rebuild-db.sh`), twice, changing only the MJ
+> core tag:
+>
+> | MJ core | common |
+> |---|---|
+> | `v6.1.0-edge.3` | **fails** — `V202608252150` dies at batch 1/110: `Procedure or function spUpdateExistingEntitiesFromSchema has too many arguments specified` |
+> | `v6.1.0-edge.4` | **19 migrations applied, clean** |
+>
+> The original defect below — an unguarded `sp_refreshview` of an ORDERS view inside a COMMON
+> migration — is also gone: that file no longer calls `sp_refreshview` at all, and no remaining call in
+> common's migrations names `BizAppsOrders`.
+>
+> So there is nothing left to ask of common. What remains is OURS: this repo pins MJ at `edge.3` in
+> `package.json`, `mj-app.json` and the runbooks, and `.env` pins `MJ_CORE_VERSION=v6.1.0-edge.3`.
+> Moving that pin to `edge.4` is a repo-wide decision (it touches CI and publishing), which is why it is
+> recorded here rather than done quietly.
+>
+> An earlier note of mine blamed `rebuild-db.sh`'s hardcoded `v5.51.0` default for this failure. That
+> was wrong — `.env` overrode the default on every host that ran it, so the v5 default was never
+> actually used. The default was still wrong and is fixed separately; it was not this.
+
+<details><summary>The original report, kept because the reasoning is still the record</summary>
+
 
 `migrations/V202608252150__v5.35.x__CodeGen_Scoped_SQL_Objects.sql`, final statements:
 
@@ -103,9 +134,21 @@ line of the same file.
 **Invisible to incremental installs** — anyone whose database already has orders never sees it. Only a
 from-empty build does, which is exactly what QA does first.
 
+</details>
+
 ---
 
-## 3. orders — blocks every fresh install
+## 3. orders — ✅ NOT REPRODUCIBLE at MJ core v6.1.0-edge.4 (was: blocks every fresh install)
+
+> **STATUS 2026-08-27 — ALSO PASSES AT `v6.1.0-edge.4`.** In the same scratch rebuild, with common
+> through, orders applied **15 migrations clean**, as did tasks (6) and accounting (5). The
+> `UQ_EntityField_EntityID_Sequence` collision below did not occur.
+>
+> Not proof that the line-331 call is harmless — it is proof that on this core, from empty, it does not
+> fire. The ask below is still worth making; it is no longer blocking.
+
+<details><summary>The original report</summary>
+
 
 `migrations/V202608252200__v0.1.x__CodeGen_Scoped_SQL_Objects.sql` fails from empty with:
 
@@ -136,6 +179,25 @@ migration then applies cleanly.
 
 Its header says *"Scoped CodeGen emit for `__mj_BizAppsOrders`"*, but **all five of its `EntityField`
 inserts target `MJ_BizApps_Common: Activity Types`** — a common entity. None target an orders entity.
+
+</details>
+
+### And what the fresh install fails on NOW — which is ours
+
+With the core at `edge.4`, steps 2-6 all pass and step 7 fails in **this repo**:
+
+```
+7/7  bizapps-sales (hand-authored DDL only)
+Failed at batch 1/475 (lines 1-121):
+Could not find stored procedure '__mj_BizAppsSales.spCreateDealStatusType'.
+Batches applied before the failure: 0
+```
+
+The sales baseline seeds its type tables through CodeGen'd stored procedures inside the same migration
+that creates them, and on a genuinely empty database the seed runs before the procedure exists. Nothing
+upstream is involved. Recorded here rather than in KNOWN-ISSUES because this doc is what a reader
+consults to answer "can QA build from empty yet", and the honest answer is now "not because of common
+or orders".
 
 ---
 
