@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/sales-core-entities-server",
   "type": "module",
-  "version": "6.2.0",
+  "version": "6.3.0",
   "description": "Server-side entity subclasses for BizApps Sales — the close lock (L-17), the OwnerEmployeeID denormalized stamp, and deal lifecycle hooks.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,7 +27,7 @@
     "@mj-biz-apps/common-activity-sync": "^5.37.0",
     "@mj-biz-apps/common-entities": "^5.37.0",
     "@mj-biz-apps/orders-entities": "^5.2.1",
-    "@mj-biz-apps/sales-entities": "6.2.0",
+    "@mj-biz-apps/sales-entities": "6.3.0",
     "@mj-biz-apps/tasks-core": "^1.4.1",
     "@mj-biz-apps/tasks-entities": "^1.4.1"
   },
