@@ -78,6 +78,20 @@ function money(n: number | null | undefined): string {
                     <i [class]="Collapsed ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-up'"></i>
                 </button>
             </div>
+            <!-- OUTSIDE the collapsed region, deliberately. Collapsing hides the BRIEFING - the
+                 account/owner/stage stats - not the control that names the record. The Pipeline
+                 panel used to carry a second Name box, so a collapsed header still left somewhere
+                 to type; removing that duplicate (bc-aidp-next-golive#189) made this the only one.
+                 Collapsed is a persisted per-user setting, so anyone who had ever collapsed the
+                 header would otherwise have had no way to name a deal at all. -->
+            @if (EditMode) {
+                <div class="mjs-deal-hero__edit">
+                    <div class="mjs-deal-hero__field">
+                        <mj-form-field [Record]="Record" [ShowLabel]="true" FieldName="Name"
+                            Type="textbox" [EditMode]="EditMode" [FormContext]="FormContext"></mj-form-field>
+                    </div>
+                </div>
+            }
             @if (!Collapsed) {
                 <div class="mjs-deal-hero__summary">
                     <div class="mjs-deal-hero__stat">
@@ -128,14 +142,6 @@ function money(n: number | null | undefined): string {
                         @if (Record.NextStepDate) {
                             <span class="mjs-deal-hero__next-when">{{ Record.NextStepDate | date: 'd MMM y' }}</span>
                         }
-                    </div>
-                }
-                @if (EditMode) {
-                    <div class="mjs-deal-hero__edit">
-                        <div class="mjs-deal-hero__field">
-                            <mj-form-field [Record]="Record" [ShowLabel]="true" FieldName="Name"
-                                Type="textbox" [EditMode]="EditMode" [FormContext]="FormContext"></mj-form-field>
-                        </div>
                     </div>
                 }
                 @if (LockNotice) { <div class="mjs-flag">{{ LockNotice }}</div> }
