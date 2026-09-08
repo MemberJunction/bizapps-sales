@@ -1,5 +1,7 @@
 # @mj-biz-apps/sales-entities
 
+## 6.3.2
+
 ## 6.3.1
 
 ### Patch Changes
