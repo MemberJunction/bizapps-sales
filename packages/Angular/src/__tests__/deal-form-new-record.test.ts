@@ -1,5 +1,8 @@
 import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import { MJSDealOverviewPanel, MJSDealPipelinePanel } from '../lib/form-panels/deal-form.panels';
 
@@ -95,6 +98,25 @@ describe('#188 — an unsaved deal is not a deal that failed an audit', () => {
 describe('#189 / #190 — the Pipeline panel does not repeat the hero', () => {
     const fieldNames = () =>
         new MJSDealPipelinePanel().Fields.map((f) => f.name);
+
+    /**
+     * The hero has to render it UNCONDITIONALLY in edit mode, which is why this reads the template
+     * rather than the field list. Removing the Pipeline duplicate made the hero's the only Name
+     * input on the form; the hero's editor sat inside the collapsed-only region, and Collapsed is a
+     * persisted per-user setting, so anyone who had ever collapsed the header would have been left
+     * with a form that shows the deal's name as static text and no way to change it.
+     */
+    it('keeps the hero Name editor out of the collapsed-only region', () => {
+        const source = readFileSync(
+            join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'form-panels', 'deal-hero.panel.ts'),
+            'utf8',
+        );
+        const nameEditor = source.indexOf('FieldName="Name"');
+        const collapsedOnly = source.indexOf('@if (!Collapsed) {');
+        expect(nameEditor).toBeGreaterThan(-1);
+        expect(collapsedOnly).toBeGreaterThan(-1);
+        expect(nameEditor).toBeLessThan(collapsedOnly);
+    });
 
     it('does not list Name, which the hero renders editable in edit mode', () => {
         expect(fieldNames()).not.toContain('Name');
