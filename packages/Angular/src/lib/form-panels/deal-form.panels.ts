@@ -340,7 +340,17 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-pipeline',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 90, contributionKey: 'pipeline' },
+    // `leadsWhenUnsaved` opens a NEW deal here rather than on Overview (bc-aidp-next-golive#188).
+    //
+    // INERT UNTIL MJ#4217 SHIPS, AND NOTHING WILL SAY SO. `FormPanelRegistrationMetadata` extends
+    // `Record<string, unknown>`, so this key type-checks against the PUBLISHED base-forms package
+    // exactly as it does against the branch that adds the reader. It compiles, it looks configured,
+    // and a new deal keeps opening on Overview until a release carries MJ#4217. Declared here now so
+    // the opt-in lands with the rest of the #188 work rather than being forgotten a release later.
+    // Overview is an exec briefing and stays the lead for a SAVED deal, which is what it is for;
+    // on a record with no data it is a page of blanks the user has to look past to find where
+    // typing starts. This is the first panel that asks for anything.
+    metadata: { entity: E, slot: 'after-fields', sortKey: 90, contributionKey: 'pipeline', leadsWhenUnsaved: true },
 })
 @Component({
     selector: 'mjs-deal-pipeline-panel',
