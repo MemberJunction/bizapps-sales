@@ -304,6 +304,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     public get Health(): string[] {
         const out: string[] = [];
         if (!this.Record) return out;
+        // A deal nobody has saved yet has not FAILED to have an owner, a next step or an account --
+        // nobody has had the chance to give it one. Auditing a record the user is still filling in
+        // reports the absence of work that has not started, which is why a brand-new deal opened on a
+        // wall of warnings. The briefing stays quiet until there is something to brief on.
+        if (!this.Record.IsSaved) return out;
         const days = daysFrom(this.Record.ExpectedCloseDate);
         if (days !== null && days < 0 && !this.Record.ActualCloseDate) {
             out.push('Expected close is already past — re-date or close it.');
@@ -365,8 +370,10 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
 })
 export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
     public readonly Fields: DealFieldSpec[] = [
-        { name: 'Name', type: 'textbox' },
-        { name: 'DealNumber', type: 'textbox' },
+        // Name and DealNumber are deliberately NOT here. The hero directly above this panel already
+        // renders Name as an editable field in edit mode, and shows DealNumber beneath the title once
+        // the server has assigned one. Listing them again gave the form two inputs bound to the same
+        // column, and offered an empty textbox for a value the user does not get to choose.
         { name: 'PipelineID', type: 'textbox', link: 'Record' },
         { name: 'PipelineStageID', type: 'textbox', link: 'Record' },
         { name: 'DealTypeID', type: 'textbox', link: 'Record' },
