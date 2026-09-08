@@ -1,5 +1,17 @@
 # @mj-biz-apps/sales-entities
 
+## 6.3.1
+
+### Patch Changes
+
+- d40fd69: License declarations now agree on BUSL-1.1 everywhere.
+
+  The Open App manifest (`mj-app.json`) declared `"license": "ISC"` and the README badge
+  advertised ISC, while `LICENSE` and every `package.json` declared BUSL-1.1. The manifest is
+  what an MJ deployment reads on install and the badge is the first thing a reader sees, so
+  between them they were the repo's loudest license statement — and the wrong one. The badge
+  now links to `LICENSE`.
+
 ## 6.3.0
 
 ### Minor Changes

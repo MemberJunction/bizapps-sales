@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/sales-integration-tests",
   "type": "module",
-  "version": "6.3.0",
+  "version": "6.3.1",
   "private": true,
   "description": "Integration check bundles for BizApps Sales, dispatched by `mj test` via MJ's testing framework.",
   "main": "dist/index.js",
@@ -25,9 +25,9 @@
   "dependencies": {
     "@mj-biz-apps/common-entities": "^5.37.0",
     "@mj-biz-apps/orders-entities": "^5.2.1",
-    "@mj-biz-apps/sales-core-entities-server": "6.3.0",
-    "@mj-biz-apps/sales-entities": "6.3.0",
-    "@mj-biz-apps/sales-server": "6.3.0"
+    "@mj-biz-apps/sales-core-entities-server": "6.3.1",
+    "@mj-biz-apps/sales-entities": "6.3.1",
+    "@mj-biz-apps/sales-server": "6.3.1"
   },
   "peerDependencies": {
     "@memberjunction/core": "^6.1.0-edge.5",
