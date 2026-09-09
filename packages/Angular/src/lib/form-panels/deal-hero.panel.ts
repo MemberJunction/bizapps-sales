@@ -53,7 +53,12 @@ function money(n: number | null | undefined): string {
                     <div class="mjs-deal-hero__title-row">
                         <h1 class="mjs-deal-hero__name">{{ Title }}</h1>
                     </div>
-                    @if (Record.DealNumber && !Collapsed) {
+                    <!-- Not collapsed-gated, for the same reason the Name editor is not: the
+                         Pipeline panel used to carry a Deal Number box, so a collapsed header still
+                         showed the number somewhere. Removing that duplicate
+                         (bc-aidp-next-golive#190) made this the only place it appears, and Collapsed
+                         is a persisted per-user setting. The number is identity, not briefing. -->
+                    @if (Record.DealNumber) {
                         <div class="mjs-deal-hero__aka">{{ Record.DealNumber }}</div>
                     }
                     <div class="mjs-deal-hero__badges">
