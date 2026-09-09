@@ -163,6 +163,17 @@
     color: var(--mj-text-muted);
 }
 
+/*
+ * A stored date the input cannot render (#185). Deliberately NOT muted like a hint: the whole
+ * problem is that a corrupt value and an empty field look identical, so this has to read as a
+ * statement about the record rather than as guidance about the control.
+ */
+.dw-field__warning {
+    font-size: 0.74rem;
+    color: var(--mj-status-warning);
+    font-weight: 500;
+}
+
 .dw-field input,
 .dw-field select,
 .dw-field textarea {
