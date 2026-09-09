@@ -19,11 +19,16 @@
  * `CloseWonPolicy.CreateContract` **flag** — the same policy the close operation already reads. A B2B
  * pipeline is not "the one called B2B"; it is the one whose policy says it creates a contract.
  *
- * ── IT IS NOT WIRED INTO THE CLOSE ──────────────────────────────────────────────────────────────────
+ * ── IT IS WIRED INTO THE CLOSE ──────────────────────────────────────────────────────────────────
  *
- * Deliberately. `Sales.CloseDeal` is mid-rework for the embedded-order redesign, and wiring a new call
- * into a file being restructured is how two changes become one debugging session. The caller passes IDs;
- * this service creates records. Wiring lands after that rework.
+ * `CloseDealOperation` calls `CreateCloseWonTasks` inside its `IsWon` branch, after the save and the
+ * routing loop, passing the deal, the order provisioned during the save, the pipeline, and the
+ * `ContractID` the contract seam minted.
+ *
+ * This header used to say the opposite, and said so correctly at the time: the service was written
+ * while `Sales.CloseDeal` was mid-rework for the embedded-order redesign, and was deliberately left
+ * unwired until that landed. Both halves are done now. A header still claiming otherwise would tell
+ * the next reader this feature is inert when it is the live path.
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */

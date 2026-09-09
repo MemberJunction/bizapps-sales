@@ -1,5 +1,11 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.3.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.3.2
+
 ## 6.3.1
 
 ### Patch Changes
