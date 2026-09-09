@@ -8,7 +8,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectorRef, Component, ViewEncapsulation, inject } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, RunView } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
@@ -17,6 +17,38 @@ import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
 import { DealEntity, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 
+
+/**
+ * Should the cursor be placed in the hero Name field?
+ *
+ * Pure and exported so the rules can be pinned without a DOM. The component owns only the two
+ * things that genuinely need one: finding the input, and calling focus on it.
+ *
+ * bc-aidp-next-golive#188 asks for the cursor to land in Name when a NEW deal opens. Each clause
+ * here is a way that would go wrong:
+ *
+ *  - a SAVED record must never have focus taken: it would fight anyone navigating by keyboard and
+ *    move the caret out from under a reader who had already chosen where to be;
+ *  - READ mode has no input to focus at all;
+ *  - it happens ONCE per record, so a re-render does not yank the cursor back mid-sentence;
+ *  - and if focus already reached another field, the user got there first and keeping it is worth
+ *    more than the help.
+ */
+export function ShouldPlaceCursorInName(state: {
+    HasRecord: boolean;
+    IsSaved: boolean;
+    EditMode: boolean;
+    RecordKey: string;
+    AlreadyPlacedFor: string | null;
+    FocusAlreadyElsewhere: boolean;
+}): boolean {
+    if (!state.HasRecord) return false;
+    if (state.IsSaved) return false;
+    if (!state.EditMode) return false;
+    if (state.AlreadyPlacedFor === state.RecordKey) return false;
+    if (state.FocusAlreadyElsewhere) return false;
+    return true;
+}
 const E_ORDER_LINE = MJS_FOREIGN_ENTITIES.OrderLine;
 const COLLAPSE_SETTING = 'mj.identityHeader.collapsed.deal';
 
@@ -288,8 +320,11 @@ function money(n: number | null | undefined): string {
         }
     `],
 })
-export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> {
+export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit {
     private readonly cdr = inject(ChangeDetectorRef);
+    private readonly host = inject(ElementRef<HTMLElement>);
+    /** The record the cursor has already been placed for, so it is never taken twice. */
+    private focusedFor: string | null = null;
     public Collapsed = false;
     public IsLocked = false;
     public LockNotice: string | null = null;
@@ -305,6 +340,68 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> {
 
     public override OnRecordRefreshed(_record: DealEntity): void {
         void this.refreshNotices();
+        this.focusNameOnNewRecord();
+    }
+
+    public ngAfterViewInit(): void {
+        this.focusNameOnNewRecord();
+    }
+
+    /**
+     * Put the cursor in Name when a NEW deal opens (bc-aidp-next-golive#188).
+     *
+     * The report is explicit: clicking New Deal should open the form with focus in the name box
+     * rather than leaving the user to notice where typing starts. Name lives in this hero rather
+     * than in any panel, so this is the only component that can do it.
+     *
+     * ONLY FOR AN UNSAVED RECORD, AND ONLY ONCE. Taking focus when someone opens an EXISTING deal
+     * would fight anyone navigating by keyboard and move the caret out from under a reader who had
+     * already chosen where to be. A new record has exactly one sensible first field; a saved one
+     * does not.
+     *
+     * It also declines if focus has already reached another field — a fast typist can get there
+     * before the view settles, and taking it back is worse than not helping at all.
+     *
+     * It reaches into the DOM because `mj-form-field` exposes no focus API. The alternative is a
+     * change to MJ and another release for a cursor position.
+     */
+    private focusNameOnNewRecord(): void {
+        const record = this.Record;
+        const key = record?.ID || 'new';
+
+        // Cheap pre-check on what is knowable without the DOM, so the common case costs nothing.
+        if (!ShouldPlaceCursorInName({
+            HasRecord: !!record,
+            IsSaved: !!record?.IsSaved,
+            EditMode: this.EditMode,
+            RecordKey: key,
+            AlreadyPlacedFor: this.focusedFor,
+            FocusAlreadyElsewhere: false,
+        })) return;
+
+        // After the current turn, so `mj-form-field` has rendered the input this looks for.
+        setTimeout(() => {
+            const el = this.host.nativeElement as HTMLElement;
+            const input = el.querySelector<HTMLInputElement>('.mjs-deal-hero__field input');
+            if (!input || input.disabled || input.readOnly) return;
+
+            const active = document.activeElement;
+            const elsewhere = active instanceof HTMLElement
+                && !el.contains(active)
+                && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName);
+
+            if (!ShouldPlaceCursorInName({
+                HasRecord: !!this.Record,
+                IsSaved: !!this.Record?.IsSaved,
+                EditMode: this.EditMode,
+                RecordKey: key,
+                AlreadyPlacedFor: this.focusedFor,
+                FocusAlreadyElsewhere: elsewhere,
+            })) return;
+
+            this.focusedFor = key;
+            input.focus();
+        });
     }
 
     public ToggleCollapsed(): void {
