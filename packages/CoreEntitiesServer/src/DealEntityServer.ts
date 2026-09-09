@@ -62,6 +62,8 @@ import {
     DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
     DealEntity,
     type mjBizAppsSalesDealStageEventEntity,
+    IsBareCloseWrite,
+    type StatusTransitionFacts,
 } from '@mj-biz-apps/sales-entities';
 
 import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
@@ -261,6 +263,36 @@ export class DealEntityServer extends DealEntity {
                 LogError(`DealEntityServer.Save refused: ${refusal}`);
                 return false;
             }
+        }
+
+        /**
+         * A BARE STATUS WRITE MUST NOT CLOSE A DEAL (bc-aidp-next-golive#205).
+         *
+         * The close lock above reads the PERSISTED status, so it cannot see this: moving Open -> Won is
+         * a save on an unlocked deal and passed straight through. The deal came out locked, and none of
+         * the close ran — no stage event, no contract, no finance tasks, and for a Lost deal no loss
+         * reason and an order still live. Worse, the lock then refused `DealStatusTypeID` on every later
+         * save, so the deal could not be reopened either. A field edit on a form had produced a state
+         * no operation could have produced and none could undo.
+         *
+         * WHAT SEPARATES THIS FROM A REAL CLOSE is the declared transition, which `Sales.CloseDeal`
+         * already sets and a form write has no way to set. So this needs no new flag: it asks whether
+         * anybody announced a transition, which is the same question `stampClose` asks downstream.
+         *
+         * IT RUNS BEFORE THE TRANSACTION, and that placement is what makes it precise. The server
+         * derives a status from the stage later, inside the transaction (`applyStageOrderStatus`), so at
+         * THIS point a dirty status can only have come from the caller. Checking here refuses the write
+         * somebody made and never the one this class is about to make itself.
+         *
+         * Refusing rather than closing is deliberate, and is the narrower of the two readings of #205 —
+         * see the issue for the open question about whether the entity should instead RUN the close.
+         * Refusing is correct under either: a status write that reaches the database without the close
+         * having run is the defect, whoever ends up running it.
+         */
+        const bareClose = await this.bareCloseRefusal();
+        if (bareClose) {
+            LogError(`DealEntityServer.Save refused: ${bareClose}`);
+            return false;
         }
 
         /**
@@ -1572,6 +1604,47 @@ export class DealEntityServer extends DealEntity {
      * database, so it passes, and only saves made once the deal is ALREADY closed are refused. Reading
      * the current value instead would make a deal impossible to close.
      */
+    /**
+     * The refusal for a status write that would lock the deal without closing it.
+     *
+     * Null in every ordinary case, including the three that look similar and are not:
+     *
+     *   · a DECLARED transition — `Sales.CloseDeal` announced itself, so the close is running;
+     *   · LEAVING a locking status — that is a reopen, and the close lock already refuses a bare one,
+     *     with a message that names `Sales.ReopenDeal`;
+     *   · a status that does not lock — ordinary pipeline movement, which is most saves.
+     *
+     * Creation is excluded too: a deal born closed has no transition to have run, and the opening
+     * default (`needsStatusDefault`) would otherwise be read as one.
+     */
+    private async bareCloseRefusal(): Promise<string | null> {
+        const field = this.GetFieldByName('DealStatusTypeID');
+        const target = this.DealStatusTypeID;
+        // The cheap half first, so an ordinary save costs no status lookups at all — this runs on
+        // every save, and most saves do not touch the status.
+        if (!this.IsSaved || this._declaredTransition || !field?.Dirty || !target) {
+            return null;
+        }
+        const priorID = (field.OldValue as string | null) ?? null;
+        const facts: StatusTransitionFacts = {
+            IsSaved: true,
+            HasDeclaredTransition: false,
+            StatusIsDirty: true,
+            TargetLocks: await this.statusLocksDeal(target),
+            PriorLocks: priorID ? await this.statusLocksDeal(priorID) : null,
+        };
+        if (!IsBareCloseWrite(facts)) {
+            return null;
+        }
+        return (
+            'this status closes the deal, and closing it needs the close to actually run — the stage ' +
+            'event, the contract and the finance tasks for a won deal, the loss reason and the voided ' +
+            'order for a lost one. Setting DealStatusTypeID on its own would lock the deal without any ' +
+            'of that, and the lock would then refuse the status field, so it could not be undone. Close ' +
+            'it through Sales.CloseDeal.'
+        );
+    }
+
     private async checkCloseLock(): Promise<string | null> {
         const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
         if (!persistedStatusID) {

@@ -113,3 +113,50 @@ export async function ResolveDealLockState(
             'the deal, which records a reason.',
     };
 }
+
+/**
+ * What a save knows about a status change, before deciding whether it is a bare close.
+ *
+ * Resolved by the caller because two of these need a database read; the decision itself does not, and
+ * that is the point of separating them.
+ */
+export interface StatusTransitionFacts {
+    /** False on creation — a deal born closed has no transition to have run. */
+    IsSaved: boolean;
+    /** True when `Sales.CloseDeal` (or a reopen) announced itself via `DeclareTransition`. */
+    HasDeclaredTransition: boolean;
+    /** True when the caller set `DealStatusTypeID` on this save. */
+    StatusIsDirty: boolean;
+    /** Whether the status being moved INTO carries `LocksDeal`. */
+    TargetLocks: boolean;
+    /** Whether the status being moved OUT OF carries it. Null when there was none. */
+    PriorLocks: boolean | null;
+}
+
+/**
+ * Is this save about to lock a deal without the close having run? (bc-aidp-next-golive#205)
+ *
+ * THE DEFECT IT NAMES. The close lock reads the PERSISTED status, so Open -> Won is a save on an
+ * unlocked deal and passes straight through it. The deal ends up locked with none of the close having
+ * happened — no stage event, no contract, no finance tasks, no loss reason, an order still live — and
+ * the lock then refuses `DealStatusTypeID` on every later save, so it cannot be undone either.
+ *
+ * WHAT MAKES A CLOSE LEGITIMATE is the declared transition. `Sales.CloseDeal` calls `stampClose`
+ * immediately before saving, and that declares one; a form writing a field has no way to. So this
+ * needs no new flag on the entity, and it cannot be spoofed by a caller that does not know about it.
+ *
+ * LEAVING a locking status is deliberately NOT this function's business. That is a reopen, and the
+ * close lock already refuses a bare one with a message that names `Sales.ReopenDeal` — two refusals
+ * for the same edit would be one too many, and the other one is better worded for it.
+ *
+ * Pure, so the decision can be pinned without a deal, a status table or a save.
+ */
+export function IsBareCloseWrite(facts: StatusTransitionFacts): boolean {
+    if (!facts.IsSaved || facts.HasDeclaredTransition || !facts.StatusIsDirty) {
+        return false;
+    }
+    if (facts.PriorLocks === true) {
+        return false; // a reopen attempt; the close lock owns that refusal
+    }
+    return facts.TargetLocks;
+}
