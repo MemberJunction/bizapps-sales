@@ -1834,6 +1834,65 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-deal.CD26',
+        Name: 'CD26: a BARE status write to Won is refused, and the real close still succeeds',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205, first half. Setting Deal Status to Won on the form locked the deal and ran
+                 * NONE of the close: no stage event, no contract, no finance tasks. The close lock could
+                 * not catch it, because the lock reads the PERSISTED status and Open -> Won is a save on
+                 * a deal that is not locked yet. The lock then engaged on the NEXT save and refused the
+                 * status field, so the deal could not be reopened either.
+                 *
+                 * WHY THIS IS AN INTEGRATION CHECK AND NOT A UNIT TEST. The rule itself is pure and is
+                 * unit-tested (`IsBareCloseWrite`, 8 cases). What those cannot reach is the wiring the
+                 * rule depends on: that `Fields.Dirty` and `OldValue` say what the entity thinks they
+                 * say across a real load-edit-save, and that the refusal happens before the transaction
+                 * rather than after a partial write. Only a real save exercises that.
+                 *
+                 * BOTH HALVES MATTER. A version that simply refused every status write would pass the
+                 * first assertion and break every close in the product, so the same deal is then closed
+                 * for real through the operation and must succeed.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD26 bare status write',
+                );
+
+                // Exactly what the Pipeline panel did: load, set the status, save. No operation.
+                const md = new Metadata();
+                const bare = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await bare.Load(dealID), 'the open deal loads');
+                bare.DealStatusTypeID = f.WonStatusID;
+                const bareSaved = await bare.Save();
+
+                Assert(
+                    bareSaved === false,
+                    'a status write that would lock the deal without closing it must be refused',
+                );
+
+                // And the refusal has to have kept the row open — a refusal that still wrote the status
+                // would leave exactly the locked-but-not-closed deal this exists to prevent.
+                const row = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.OpenStatusID).toLowerCase(),
+                    'the deal must still be open after the refused write',
+                );
+                Assert(row.ClosedAt === null, 'and nothing may have stamped a close');
+
+                // The other half: the real route is untouched.
+                const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(out.Success, `the real close must still succeed: ${JSON.stringify(out.Issues)}`);
+                Assert(out.Locked, 'and it locks the deal, as the won status carries LocksDeal');
+            }),
+    },
 ];
 
 for (const check of CloseDealChecks) {
