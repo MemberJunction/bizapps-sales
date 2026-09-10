@@ -81,7 +81,7 @@ import {
     RoundDiscountPercent,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from './deal-workspace.service';
-import { FromDateInput, ToDateInput } from './deal-workspace.dates';
+import { FromDateInput, IsUnparseableDate, ToDateInput } from './deal-workspace.dates';
 /** S-US9's timeline — standalone, so importing it is the whole cost. */
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import {
@@ -1043,6 +1043,17 @@ export class DealWorkspaceComponent implements OnInit {
      */
     public DateInput(value: string | Date | null): string | null {
         return ToDateInput(value);
+    }
+
+    /**
+     * Whether this field holds something that will render as an empty box.
+     *
+     * The template shows a warning on true. Without it the corrupt case and the ordinary "no date"
+     * case are the same empty input, which is how a bad stored value could be overwritten by a save
+     * that looked like it was filling in a blank.
+     */
+    public DateIsCorrupt(value: string | Date | null): boolean {
+        return IsUnparseableDate(value);
     }
 
     public SetDealDate(deal: DealEntity, field: DealDateField, value: string): void {

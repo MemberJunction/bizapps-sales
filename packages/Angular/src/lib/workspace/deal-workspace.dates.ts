@@ -23,21 +23,66 @@
 /**
  * The `yyyy-MM-dd` an `<input type="date">` binds to, from either shape a field can hold.
  *
+ * NEVER RETURNS SOMETHING THE INPUT CANNOT RENDER. This is the guard `FromDateInput` has always had
+ * and this direction did not, and the asymmetry was the bug: an `Invalid Date` fell through the UTC
+ * getters as `NaN-NaN-NaN`, and a string that was not a date fell through the slice unchanged. The
+ * element rejects both and shows an EMPTY BOX — so a record holding a corrupt value looked exactly
+ * like a record holding no value, and a save could overwrite it with nothing to say it had happened.
+ *
+ * Returning null does not make that visible on its own; nothing can, because the element has no way
+ * to display a value it cannot parse. {@link IsUnparseableDate} is the other half, and the caller is
+ * expected to show something next to the field when it is true.
+ *
+ * THE STRING BRANCH STILL SLICES rather than parsing and reformatting, deliberately. A stored
+ * `2026-09-30T23:00:00-05:00` is the 30th as written; parsing it and formatting with UTC getters
+ * would render the 1st. The slice takes the date as written, so the test is only whether the value
+ * BEGINS with a date — anything else is not a date this boundary can honestly narrow.
+ *
  * @param value - A `Date`, an ISO string, or null.
- * @returns The date part, or null — which an input renders as empty, correctly this time.
+ * @returns A `yyyy-MM-dd` string, or null for absent AND for unparseable.
  */
 export function ToDateInput(value: string | Date | null | undefined): string | null {
     if (!value) {
         return null;
     }
     if (value instanceof Date) {
+        if (Number.isNaN(value.getTime())) {
+            return null;
+        }
         const y = value.getUTCFullYear();
         const m = String(value.getUTCMonth() + 1).padStart(2, '0');
         const d = String(value.getUTCDate()).padStart(2, '0');
         return `${y}-${m}-${d}`;
     }
-    const s = String(value);
-    return s.length >= 10 ? s.slice(0, 10) : s;
+    const s = String(value).trim();
+    // `2026-9-3` is a real date and is REJECTED here on purpose: the element accepts zero-padded
+    // `yyyy-MM-dd` only, so passing it through unchanged renders blank exactly like a corrupt value.
+    // Better to be told the stored value is not in the shape this boundary reads.
+    return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+}
+
+/**
+ * Is this value present, but not something a date input can show?
+ *
+ * DEFINED IN TERMS OF {@link ToDateInput} rather than repeating its rules. `term-start.ts` records
+ * what happens otherwise: three predicates in one module disagreed about what "absent" meant, so one
+ * function said "no term start" while another rendered the empty string. A predicate that asks the
+ * formatter cannot drift from it.
+ *
+ * Absent is not corrupt. Null, undefined and a blank string are all ordinary "no date" and return
+ * false — the field is legitimately empty and there is nothing to warn about.
+ *
+ * @param value - The stored value, in whichever shape the row was fetched as.
+ * @returns True only when the record holds something that will render as an empty box.
+ */
+export function IsUnparseableDate(value: string | Date | null | undefined): boolean {
+    if (value === null || value === undefined) {
+        return false;
+    }
+    if (!(value instanceof Date) && String(value).trim().length === 0) {
+        return false;
+    }
+    return ToDateInput(value) === null;
 }
 
 /**
