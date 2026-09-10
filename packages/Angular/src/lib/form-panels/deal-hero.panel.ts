@@ -338,9 +338,14 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         await this.refreshNotices();
     }
 
+    /**
+     * No focus attempt here, deliberately. `OnRecordRefreshed` fires after the parent form reloads
+     * the record FROM THE DATABASE, so the record is saved by definition — and the first rule in
+     * `ShouldPlaceCursorInName` declines saved records. Calling it here could never place a cursor;
+     * `ngAfterViewInit` is the one that does the work.
+     */
     public override OnRecordRefreshed(_record: DealEntity): void {
         void this.refreshNotices();
-        this.focusNameOnNewRecord();
     }
 
     public ngAfterViewInit(): void {
