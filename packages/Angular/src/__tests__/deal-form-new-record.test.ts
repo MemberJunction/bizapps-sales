@@ -100,22 +100,50 @@ describe('#189 / #190 — the Pipeline panel does not repeat the hero', () => {
         new MJSDealPipelinePanel().Fields.map((f) => f.name);
 
     /**
-     * The hero has to render it UNCONDITIONALLY in edit mode, which is why this reads the template
-     * rather than the field list. Removing the Pipeline duplicate made the hero's the only Name
-     * input on the form; the hero's editor sat inside the collapsed-only region, and Collapsed is a
-     * persisted per-user setting, so anyone who had ever collapsed the header would have been left
-     * with a form that shows the deal's name as static text and no way to change it.
+     * Both of the record's identifying fields have to survive a COLLAPSED header, which is why this
+     * reads the template rather than a field list. Removing the Pipeline duplicates made the hero the
+     * only place either one appears, and Collapsed is a persisted per-user setting — so gating them
+     * on it would leave anyone who had ever collapsed the header with no way to name a deal and no
+     * sight of its number.
+     *
+     * It extracts the collapsed-only block and asserts what is NOT in it, rather than comparing string
+     * offsets, so reformatting the template does not fail it for the wrong reason.
      */
-    it('keeps the hero Name editor out of the collapsed-only region', () => {
+    it('keeps Name and Deal Number out of the collapsed-only region', () => {
         const source = readFileSync(
             join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'form-panels', 'deal-hero.panel.ts'),
             'utf8',
         );
-        const nameEditor = source.indexOf('FieldName="Name"');
-        const collapsedOnly = source.indexOf('@if (!Collapsed) {');
-        expect(nameEditor).toBeGreaterThan(-1);
-        expect(collapsedOnly).toBeGreaterThan(-1);
-        expect(nameEditor).toBeLessThan(collapsedOnly);
+
+        const open = source.indexOf('@if (!Collapsed) {');
+        expect(open).toBeGreaterThan(-1);
+
+        // Walk braces from the block opener to find where the collapsed-only region ends.
+        let depth = 0;
+        let close = open;
+        for (let i = source.indexOf('{', open); i < source.length; i++) {
+            if (source[i] === '{') depth++;
+            else if (source[i] === '}') {
+                depth--;
+                if (depth === 0) { close = i; break; }
+            }
+        }
+        expect(close).toBeGreaterThan(open);
+
+        const collapsedOnly = source.slice(open, close);
+        expect(collapsedOnly).not.toContain('FieldName="Name"');
+        expect(collapsedOnly).not.toContain('Record.DealNumber');
+
+        // Deal Number is not gated by the BLOCK, it carries its own inline condition — so the block
+        // check above cannot see it, and would pass with the defect present. Assert the condition
+        // itself never mentions Collapsed.
+        const numberGate = source.match(/@if \(Record\.DealNumber[^)]*\)/);
+        expect(numberGate).not.toBeNull();
+        expect(numberGate![0]).not.toContain('Collapsed');
+
+        // ...and both are still present somewhere in the template.
+        expect(source).toContain('FieldName="Name"');
+        expect(source).toContain('Record.DealNumber');
     });
 
     it('does not list Name, which the hero renders editable in edit mode', () => {
