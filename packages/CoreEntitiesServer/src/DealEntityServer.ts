@@ -1820,10 +1820,8 @@ export class DealEntityServer extends DealEntity {
             return null;   // nobody supplied it. The common case.
         }
         return (
-            'Deal.OwnerEmployeeID is a server-maintained stamp derived from the DealTeamMember holding ' +
-            'the owner role, and cannot be set directly — a save that changed it without the roster ' +
-            'would leave the column and the team disagreeing about who owns the deal. Use ' +
-            'DealEntity.SetOwner(employeeID), which edits the roster and lets the stamp follow.'
+            'The owner is set from the deal team. Change the Owner role on the Internal team panel ' +
+            'instead.'
         );
     }
 

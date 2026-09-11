@@ -71,9 +71,9 @@ describe('#188 — an unsaved deal is not a deal that failed an audit', () => {
             deal({ IsSaved: true, OwnerEmployeeID: null, NextStep: null, AccountID: null }),
         );
         expect(panel.Health).toEqual([
-            'No owner. Assign an AE.',
-            'No next step. Forecast without a next step is a wish.',
-            'No account. Early is fine; Qualify should have one.',
+            'No owner assigned.',
+            'No next step recorded.',
+            'No account selected.',
         ]);
     });
 

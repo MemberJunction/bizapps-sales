@@ -112,7 +112,7 @@ const FIELD_STYLES = `
                 } @else if (Record.IsSaved) {
                     <div class="mjs-ov-ok">
                         <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
-                        Nothing is asking for a person on this deal.
+                        Nothing needs attention on this deal.
                     </div>
                 }
 
@@ -130,7 +130,7 @@ const FIELD_STYLES = `
                     <div class="mjs-ov-kpi">
                         <div class="l">Forecast</div>
                         <div class="v">{{ G('ForecastCategoryType') || '—' }}</div>
-                        <div class="s">{{ G('DealStatusType') || 'No status' }}</div>
+                        <div class="s">{{ G('DealStatusType') || 'No status set' }}</div>
                     </div>
                     <div class="mjs-ov-kpi" [attr.data-tone]="CloseClock.tone">
                         <div class="l">Close</div>
@@ -156,7 +156,7 @@ const FIELD_STYLES = `
                                 <div class="v">
                                     @if (Record.OwnerEmployeeID && G('OwnerEmployee')) {
                                         <button type="button" class="mjs-ov-link" (click)="OpenOwner($event)">{{ G('OwnerEmployee') }}</button>
-                                    } @else { {{ G('OwnerEmployee') || 'Unowned' }} }
+                                    } @else { {{ G('OwnerEmployee') || 'No owner' }} }
                                 </div>
                             </div>
                             <div><div class="l">Stage</div><div class="v">{{ G('PipelineStage') || '—' }}</div></div>
@@ -186,7 +186,7 @@ const FIELD_STYLES = `
                                 </div>
                             }
                         } @else {
-                            <p class="mjs-ov-empty">No next step. An AE would put one here — forecast without a next step is a wish.</p>
+                            <p class="mjs-ov-empty">No next step recorded.</p>
                         }
                     </article>
                 </div>
@@ -269,8 +269,8 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return p == null ? '—' : `${p}%`;
     }
     public get Provenance(): string {
-        if (this.Record?.Amount == null) return 'no figure yet';
-        return this.Record.AmountIsComputed ? 'Orders priced' : 'Stated by a person';
+        if (this.Record?.Amount == null) return 'No amount yet';
+        return this.Record.AmountIsComputed ? 'Priced by Orders' : 'Entered manually';
     }
     public DateLabel(d: Date | string | null | undefined): string {
         if (!d) return '—';
@@ -287,7 +287,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     public get CloseClock(): { label: string; tone: 'success' | 'warning' | 'muted' } {
         const n = daysFrom(this.Record?.ExpectedCloseDate);
         if (this.Record?.ActualCloseDate) return { label: 'Closed', tone: 'success' };
-        if (n === null) return { label: 'Undated', tone: 'muted' };
+        if (n === null) return { label: 'No close date', tone: 'muted' };
         if (n < 0) return { label: `${Math.abs(n)}d past`, tone: 'warning' };
         if (n === 0) return { label: 'Today', tone: 'warning' };
         if (n <= 14) return { label: `${n}d`, tone: 'warning' };
@@ -311,14 +311,14 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         if (!this.Record.IsSaved) return out;
         const days = daysFrom(this.Record.ExpectedCloseDate);
         if (days !== null && days < 0 && !this.Record.ActualCloseDate) {
-            out.push('Expected close is already past — re-date or close it.');
+            out.push('The expected close date has passed. Update the date or close the deal.');
         }
-        if (!this.Record.OwnerEmployeeID) out.push('No owner. Assign an AE.');
-        if (!this.Record.NextStep) out.push('No next step. Forecast without a next step is a wish.');
-        if (this.NextStepOverdue) out.push('The next step date is overdue.');
-        if (!this.Record.AccountID) out.push('No account. Early is fine; Qualify should have one.');
+        if (!this.Record.OwnerEmployeeID) out.push('No owner assigned.');
+        if (!this.Record.NextStep) out.push('No next step recorded.');
+        if (this.NextStepOverdue) out.push('The next step is overdue.');
+        if (!this.Record.AccountID) out.push('No account selected.');
         if (this.Record.Amount != null && this.Record.Probability == null) {
-            out.push('Amount with no probability — weighted pipeline is unknown.');
+            out.push('The deal has an amount but no probability, so it cannot be weighted.');
         }
         return out;
     }
@@ -501,7 +501,7 @@ export class MJSDealCommercialPanel extends BaseFormPanel<DealEntity> {
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
             } @else if (Record.IsSaved) {
-                <p class="mjs-deal-empty">This deal has no order yet, so there are no lines to show. Save a new deal and Sales mints a Draft order for the products.</p>
+                <p class="mjs-deal-empty">Save the deal to add products.</p>
             }
         </mj-collapsible-panel>
     `,
