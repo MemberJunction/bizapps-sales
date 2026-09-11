@@ -34,7 +34,12 @@ import { Component } from '@angular/core';
 import { RunView } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
-import { DEAL_FIELDS_EDITABLE_WHILE_LOCKED, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
+import {
+    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
+    IsBareCloseWrite,
+    LoadLockingDealStatusIDs,
+    ResolveDealLockState,
+} from '@mj-biz-apps/sales-entities';
 import type { ValidationResult } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
@@ -60,9 +65,19 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     /** Set when `Deal.Amount` predates its line set. Null when the amount is trustworthy or absent. */
     public StaleAmountNotice: string | null = null;
 
+    /**
+     * The statuses that would CLOSE this deal, loaded once so `Validate()` can judge synchronously.
+     *
+     * Interim for bc-aidp-next-golive#205: until the entity runs the close on a status change, picking
+     * Won or Lost here writes a status the server refuses, and the refusal only reaches the log -- the
+     * tester sees a bare "Error saving record". This turns that into a sentence that says what to do.
+     */
+    private lockingStatusIDs: ReadonlySet<string> = new Set<string>();
+
     public override async ngOnInit(): Promise<void> {
         await super.ngOnInit();
         await this.resolveCloseLock();
+        this.lockingStatusIDs = await LoadLockingDealStatusIDs();
         await this.resolveAmountFreshness();
         this.cdr?.detectChanges();
     }
@@ -140,7 +155,57 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     public override Validate(): ValidationResult {
         const result = super.Validate();
-        if (!this.IsLocked || !this.record) {
+        if (!this.record) {
+            return result;
+        }
+
+        /**
+         * PICKING A CLOSING STATUS IS NOT HOW A DEAL IS CLOSED (bc-aidp-next-golive#205).
+         *
+         * The server already refuses this, and that refusal is the one that matters — it covers the
+         * form, an import, an agent and a raw save alike. What it cannot do is reach the screen: it
+         * goes to the log, so the tester sees "Error saving record" and no reason. This says the same
+         * thing where the person is standing.
+         *
+         * Judged against the SET the server reads, not against `IsWon || IsLost`, so the two cannot
+         * come to different answers about the same status.
+         *
+         * Interim. When the entity runs the close on this transition, this block goes and the status
+         * field becomes a legitimate way to close a deal.
+         */
+        const statusField = this.record.GetFieldByName('DealStatusTypeID');
+        const target = String(statusField?.Value ?? '').toLowerCase();
+        /**
+         * THE SAME PREDICATE THE SERVER USES, not a second one that agrees today.
+         *
+         * `IsBareCloseWrite` is what `DealEntityServer` asks before refusing, so asking it here means
+         * the form cannot reach a different verdict than the save will. A form never declares a
+         * transition -- only `Sales.CloseDeal` does -- so that fact is false by construction, and
+         * creation is excluded on both sides for the same reason: a deal born closed has no
+         * transition to have run.
+         */
+        if (
+            IsBareCloseWrite({
+                IsSaved: !!this.record.IsSaved,
+                HasDeclaredTransition: false,
+                StatusIsDirty: !!statusField?.Dirty,
+                TargetLocks: !!target && this.lockingStatusIDs.has(target),
+                PriorLocks: this.IsLocked,
+            })
+        ) {
+            result.Success = false;
+            result.Errors.push({
+                Source: 'DealStatusTypeID',
+                Message:
+                    'This status closes the deal. Use the Close action so the contract, the finance ' +
+                    'tasks and the stage history are created with it.',
+                Value: statusField?.Value ?? null,
+                Type: 'Failure',
+            });
+            return result;
+        }
+
+        if (!this.IsLocked) {
             return result;
         }
 

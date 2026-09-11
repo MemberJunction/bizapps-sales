@@ -160,3 +160,38 @@ export function IsBareCloseWrite(facts: StatusTransitionFacts): boolean {
     }
     return facts.TargetLocks;
 }
+
+/**
+ * The ids of every status that LOCKS a deal.
+ *
+ * WHY A SET AND NOT A SECOND `ResolveDealLockState` CALL. That one answers "is this deal locked?" for
+ * the PERSISTED status, asynchronously, and a form's `Validate()` is synchronous — it cannot await a
+ * lookup while the user is pressing Save. So a surface that needs to judge a status the user has just
+ * PICKED loads this once when it opens and answers from memory afterwards.
+ *
+ * BY FLAG, never by name, and `LocksDeal` specifically rather than `IsWon || IsLost`. Those coincide
+ * on today's data — Won, Lost and Abandoned all carry both — but `LocksDeal` is the flag the server's
+ * refusal reads, and a surface that filtered on a different one would eventually offer a status the
+ * server then refuses. That is the exact failure this module was created to prevent.
+ *
+ * Inactive statuses are excluded: they cannot be picked, so carrying them would only make the set
+ * disagree with what a control can actually offer.
+ */
+export async function LoadLockingDealStatusIDs(contextUser?: UserInfo): Promise<ReadonlySet<string>> {
+    const result = await new RunView().RunView<{ ID: string }>(
+        {
+            EntityName: E_DEAL_STATUS_TYPE,
+            ExtraFilter: 'LocksDeal = 1 AND IsActive = 1',
+            ResultType: 'simple',
+            Fields: ['ID'],
+        },
+        contextUser,
+    );
+    if (!result?.Success) {
+        // An empty set means "nothing is known to lock", so the caller refuses nothing. The server
+        // still refuses, which is the guard that matters; going the other way and refusing everything
+        // because a lookup failed would break saves that are perfectly legal.
+        return new Set<string>();
+    }
+    return new Set((result.Results ?? []).map((r) => String(r.ID).toLowerCase()));
+}
