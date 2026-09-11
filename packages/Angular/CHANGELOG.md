@@ -1,5 +1,54 @@
 # @mj-biz-apps/sales-ng
 
+## 6.3.3
+
+### Patch Changes
+
+- 8df0584: Deal hero: drop a focus call that could never fire.
+
+  `OnRecordRefreshed` fires after the parent form reloads the record from the database, so the record
+  is saved by definition — and the first rule in `ShouldPlaceCursorInName` declines saved records. The
+  call was unreachable. `ngAfterViewInit` is the one that places the cursor.
+
+- 2647a12: Deal hero: put the cursor in Name when a new deal opens (#188).
+
+  bc-aidp-next-golive#188 asks for three things. Two shipped already — a new deal no longer opens on a
+  wall of validation warnings, and the deal number and name are no longer duplicated. This is the
+  third: clicking New Deal now leaves the cursor in the name box rather than leaving the user to work
+  out where typing starts.
+
+  Name lives in the hero rather than in any panel, so the hero is the only component that can do it.
+  Focus is taken only for an UNSAVED record, only in edit mode, only once per record, and never when
+  the user has already reached another field — taking it on a saved record would fight anyone
+  navigating by keyboard, and taking it twice would yank the caret back mid-sentence.
+
+  The decision is a pure exported predicate so those rules are pinned by tests; the component keeps
+  only the two lines that genuinely need a DOM.
+
+- 6c2c6aa: Deal hero: show the deal number on a collapsed header too (#190).
+
+  The hero's deal number was gated on the header being expanded. The deal-form UAT batch removed the
+  Pipeline panel's Deal Number box, which made the hero the only place the number appears anywhere on
+  the record form — and the header's collapsed state is a persisted per-user setting, sticky across
+  sessions and across every deal. So anyone who had ever collapsed the header saw no deal number at
+  all, which is the opposite of what #190 asks for.
+
+  Collapsing hides the briefing — account, owner, stage, next step — not the fields that identify the
+  record. Same reasoning already applied to the Name editor in the UAT batch.
+
+- 0fb6903: Deal form: a new deal opens on Pipeline, where typing starts (#188).
+
+  Declares `leadsWhenUnsaved` on the Deal Pipeline panel, so clicking New Deal opens the panel that
+  asks for something rather than Overview. Overview is an exec briefing and stays the lead for a saved
+  deal, which is what it is for; on a record with no data it is a page of blanks the user has to look
+  past to find where to begin.
+
+  This is the last of the three things bc-aidp-next-golive#188 asked for. It does nothing until a
+  MemberJunction release carries the reader for the setting — see the PR for why nothing will report
+  that in the meantime.
+
+  - @mj-biz-apps/sales-entities@6.3.3
+
 ## 6.3.2
 
 ### Patch Changes
