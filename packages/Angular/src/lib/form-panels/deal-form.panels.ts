@@ -13,11 +13,14 @@
  */
 import { ChangeDetectorRef, Component, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { CompositeKey, Metadata, RunView, type EntityInfo } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
 import { EntityViewerModule, type AfterDataLoadEventArgs, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
-import { DealEntity } from '@mj-biz-apps/sales-entities';
+import { DealEntity, LoadDealStatusOptions,
+    type DealStatusOption,
+} from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import { SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
@@ -361,7 +364,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     selector: 'mjs-deal-pipeline-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, BaseFormsModule],
+    imports: [CommonModule, FormsModule, BaseFormsModule],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="pipeline" SectionName="Pipeline" Icon="fa-solid fa-diagram-project"
@@ -374,11 +377,92 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
+
+                <!-- STATUS IS NOT A GENERIC FIELD HERE, and the reason is the whole of golive#205.
+                     MJ's <mj-form-field> renders a foreign key as an unfiltered dropdown off the related
+                     entity, so it offered Won and Lost — and picking one wrote the status without any of
+                     the close running. The deal workspace has never offered them; this brings the form
+                     into line with it rather than the other way round. One door, and it is the audited
+                     one. -->
+                <div class="mjs-field">
+                    <div class="mj-forms-field">
+                        <label class="mj-forms-field-label">Status</label>
+                        @if (EditMode) {
+                            <select [ngModel]="Record.DealStatusTypeID"
+                                    (ngModelChange)="SetStatus($event)"
+                                    [disabled]="!StatusIsEditable">
+                                <option [ngValue]="null">— choose —</option>
+                                @for (s of SelectableStatuses; track s.ID) {
+                                    <option [ngValue]="s.ID">{{ s.Name }}</option>
+                                }
+                                <!-- The deal's OWN status when it is a closing one, so a closed deal reads
+                                     "Won" rather than "— choose —". Never selectable: the list excludes it. -->
+                                @if (CurrentStatusIsClosing) {
+                                    <option [ngValue]="Record.DealStatusTypeID" disabled>{{ CurrentStatusName }}</option>
+                                }
+                            </select>
+                            @if (CurrentStatusIsClosing) {
+                                <small class="dw-field__hint">Closed. Reopen the deal to change this.</small>
+                            } @else {
+                                <small class="dw-field__hint">Use the Close action to win or lose a deal.</small>
+                            }
+                        } @else {
+                            <div class="mj-forms-field-value">{{ CurrentStatusName || '—' }}</div>
+                        }
+                    </div>
+                </div>
             </div>
         </mj-collapsible-panel>
     `,
 })
 export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
+    /** Every active status, loaded once. Filtered for display; see SelectableStatuses. */
+    private statuses: DealStatusOption[] = [];
+
+    public async ngOnInit(): Promise<void> {
+        // BaseFormPanel declares no lifecycle hook, so there is nothing to chain to. Angular calls this
+        // on the component regardless of whether the base class has one.
+        this.statuses = await LoadDealStatusOptions();
+    }
+
+    /**
+     * The statuses a user may pick DIRECTLY — the non-locking ones.
+     *
+     * By FLAG, never by name, and `LocksDeal` specifically: that is the flag the server's refusal
+     * reads, so this control and the save cannot disagree about which statuses are pickable. The deal
+     * workspace filters the same way for the same reason.
+     */
+    public get SelectableStatuses(): DealStatusOption[] {
+        return this.statuses.filter((s) => !s.LocksDeal);
+    }
+
+    /** The display name of whatever status the deal currently holds. */
+    public get CurrentStatusName(): string {
+        const id = String(this.Record?.DealStatusTypeID ?? '');
+        return this.statuses.find((s) => s.ID.toLowerCase() === id.toLowerCase())?.Name ?? '';
+    }
+
+    /** True when the deal already sits in a closing status, so the control is showing a frozen value. */
+    public get CurrentStatusIsClosing(): boolean {
+        const id = String(this.Record?.DealStatusTypeID ?? '');
+        return this.statuses.some((s) => s.ID.toLowerCase() === id.toLowerCase() && s.LocksDeal);
+    }
+
+    /**
+     * A closed deal's status is not editable here. Reopening is the audited way back, and offering the
+     * field would be the mirror of the defect this change closes: a status write that unlocks a deal
+     * without the reopen having run.
+     */
+    public get StatusIsEditable(): boolean {
+        return !this.CurrentStatusIsClosing;
+    }
+
+    public SetStatus(id: string | null): void {
+        if (this.Record) {
+            this.Record.DealStatusTypeID = id as never;
+        }
+    }
+
     public readonly Fields: DealFieldSpec[] = [
         // Name and DealNumber are deliberately NOT here. The hero directly above this panel already
         // renders Name as an editable field in edit mode, and shows DealNumber beneath the title once
@@ -387,7 +471,6 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
         { name: 'PipelineID', type: 'textbox', link: 'Record' },
         { name: 'PipelineStageID', type: 'textbox', link: 'Record' },
         { name: 'DealTypeID', type: 'textbox', link: 'Record' },
-        { name: 'DealStatusTypeID', type: 'textbox', link: 'Record' },
         { name: 'ForecastCategoryTypeID', type: 'textbox', link: 'Record' },
         { name: 'Probability', type: 'number' },
     ];
