@@ -537,6 +537,39 @@ export const CloseDealChecks: NamedCheck[] = [
                 const f = await ResolveSalesFixture(ctx);
                 const md = new Metadata();
 
+                /**
+                 * A TYPE-APPROPRIATE VALUE PER FIELD, and this used to be one string for all of them.
+                 *
+                 * That held while the set was Description and NextStep. #206 item 3 added a date and
+                 * three ids, and `Set(field, 'CD14 touched ...')` on a datetime or a uniqueidentifier
+                 * fails for reasons that have nothing to do with the lock — which would read as "the
+                 * server refused an editable field" and send the next person hunting the wrong bug.
+                 *
+                 * The two ids that carry a foreign key are filled from the real table, so the save is
+                 * refused by the LOCK or not at all, never by referential integrity.
+                 */
+                const leadSource = await TxOne<{ ID: string }>(
+                    ctx, `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.LeadSourceType ORDER BY ID`,
+                );
+                const contact = await TxOne<{ ID: string }>(
+                    ctx, `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.SalesContact ORDER BY ID`,
+                );
+                const valueFor = (field: string): unknown => {
+                    switch (field) {
+                        case 'NextStepDate':
+                            return new Date('2026-01-15T00:00:00.000Z');
+                        case 'LeadSourceTypeID':
+                            return leadSource.ID;
+                        case 'BillingContactID':
+                            return contact.ID;
+                        case 'CampaignID':
+                            // No FK constraint on this column, so any id is referentially fine.
+                            return '11111111-2222-4333-8444-555555555555';
+                        default:
+                            return `CD14 touched ${field}`;
+                    }
+                };
+
                 for (const field of DEAL_FIELDS_EDITABLE_WHILE_LOCKED) {
                     const dealID = await openDeal(
                         ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, `CD14 ${field}`,
@@ -548,7 +581,14 @@ export const CloseDealChecks: NamedCheck[] = [
 
                     const deal = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
                     Assert(await deal.Load(dealID), `the closed deal loads for ${field}`);
-                    deal.Set(field, `CD14 touched ${field}`);
+                    deal.Set(field, valueFor(field));
+                    // Without this, a value that happened to match what was already stored would leave
+                    // the record clean, the save would succeed having written nothing, and the field
+                    // would look carved-out when nothing had been tested.
+                    Assert(
+                        deal.GetFieldByName(field)?.Dirty === true,
+                        `CD14 did not actually change '${field}', so saving proves nothing about it`,
+                    );
                     Assert(
                         await deal.Save(),
                         `'${field}' is in DEAL_FIELDS_EDITABLE_WHILE_LOCKED but the server REFUSED it — ` +
@@ -872,7 +912,7 @@ export const CloseDealChecks: NamedCheck[] = [
     },
     {
         Id: 'close-deal.CD13',
-        Name: 'CD13: the lock covers the CHILD COLLECTIONS too — and the closing transition may still carry them',
+        Name: 'CD13: bookkeeping collections stay editable on a closed deal, and the header does not',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -919,40 +959,55 @@ export const CloseDealChecks: NamedCheck[] = [
                 Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
                 Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
 
-                const before = await instalments(ctx, dealID);
-
-                // ── HALF TWO: a REMOVAL on the closed deal is refused ──────────────────────────────
+                /**
+                 * ── HALF TWO: THE PAYMENT SCHEDULE IS NOW EDITABLE ON A CLOSED DEAL ──────────────
+                 *
+                 * This half asserted the opposite until bc-aidp-next-golive#206 item 2, and the reversal
+                 * is deliberate rather than a relaxation of the lock. Correcting a schedule or
+                 * reassigning a rep after a close is BOOKKEEPING; it does not change what was agreed,
+                 * which is what the lock protects. The lines are a different matter and stay frozen —
+                 * they are what the contract and the order were derived from.
+                 *
+                 * The allow-list in `DealEntityServer` names what is PERMITTED, not what is frozen, so a
+                 * collection added later is still refused by default. That is the property the original
+                 * "freeze every companion" rule was written for, and losing it was the real risk in this
+                 * change.
+                 */
                 const locked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
                 Assert(await locked.Load(dealID), 'the closed deal loads');
                 await locked.LoadRelatedRecords('PaymentSchedule');
                 AssertEqual(locked.PaymentSchedule.Count, 2, 'both instalments came back');
 
-                locked.PaymentSchedule.Remove(locked.PaymentSchedule.Items[1]);
-                AssertEqual(
-                    await locked.Save(),
-                    false,
-                    'removing an instalment from a CLOSED deal must be refused — the header is untouched, so only ' +
-                        'the collection check can catch this',
-                );
-
-                AssertEqual(
-                    (await instalments(ctx, dealID)).length,
-                    before.length,
-                    'and the refusal kept the instalment in the database',
-                );
-
-                // ── HALF TWO (b): an EDIT on the closed deal is refused too ────────────────────────
-                const edited = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
-                Assert(await edited.Load(dealID), 'the closed deal loads again');
-                await edited.LoadRelatedRecords('PaymentSchedule');
-                const target = edited.PaymentSchedule.Items[0];
+                const target = locked.PaymentSchedule.Items[0];
                 target.Amount = 99900;
-                AssertEqual(await edited.Save(), false, 'editing an instalment on a CLOSED deal must be refused');
+                Assert(
+                    await locked.Save(),
+                    `the payment schedule must stay editable on a closed deal — ${locked.LatestResult?.CompleteMessage ?? ''}`,
+                );
 
                 const finalRow = await TxOne<{ Amount: number }>(
                     ctx, `SELECT Amount FROM ${SALES_SCHEMA}.DealPaymentSchedule WHERE ID = '${target.ID}'`,
                 );
-                AssertEqual(Number(finalRow.Amount), 41000, 'the stored amount is still the pre-close value');
+                AssertEqual(Number(finalRow.Amount), 99900, 'and the edit actually landed');
+
+                // ── HALF THREE: the HEADER is still frozen, so this is a carve-out and not a hole ──
+                // Without this, a version that simply stopped checking collections at all would pass
+                // everything above.
+                const header = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await header.Load(dealID), 'the closed deal loads again');
+                header.Name = 'CD13 should not be allowed to rename a closed deal';
+                AssertEqual(
+                    await header.Save(),
+                    false,
+                    'the header lock must still hold — permitting a collection is not permitting the deal',
+                );
+
+                /**
+                 * NOT COVERED HERE: that `Lines` is still refused. The fixture deal is provisioned with a
+                 * Draft order carrying no lines, so there is nothing to remove, and adding one needs the
+                 * product fixture this bundle does not build. The order-line guard is #206 item 1 and
+                 * lands with its own check — flagged rather than left to look covered.
+                 */
             }),
     },
     {

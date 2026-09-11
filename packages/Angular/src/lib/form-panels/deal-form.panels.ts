@@ -129,7 +129,7 @@ const FIELD_STYLES = `
                     </div>
                     <div class="mjs-ov-kpi">
                         <div class="l">Forecast</div>
-                        <div class="v">{{ G('ForecastCategoryType') || '—' }}</div>
+                        <div class="v">{{ ForecastHeadline }}</div>
                         <div class="s">{{ G('DealStatusType') || 'No status' }}</div>
                     </div>
                     <div class="mjs-ov-kpi" [attr.data-tone]="CloseClock.tone">
@@ -185,7 +185,7 @@ const FIELD_STYLES = `
                                     @if (NextStepOverdue) { · overdue }
                                 </div>
                             }
-                        } @else {
+                        } @else if (!IsClosed) {
                             <p class="mjs-ov-empty">No next step. An AE would put one here — forecast without a next step is a wish.</p>
                         }
                     </article>
@@ -279,13 +279,40 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     public get CloseLabel(): string { return this.DateLabel(this.Record?.ExpectedCloseDate); }
     public get DaysToCloseLabel(): string {
         const n = daysFrom(this.Record?.ExpectedCloseDate);
+        if (this.IsClosed) return this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
         if (n === null) return '—';
         if (n < 0) return `${Math.abs(n)}d past`;
         if (n === 0) return 'today';
         return `${n}d`;
     }
+    /**
+     * Has this deal been closed? (bc-aidp-next-golive#206 item 4)
+     *
+     * Read off the CLOSE STAMPS rather than the status flags, because the stamps are what the server
+     * writes when the close actually runs, and a panel that keyed on the status would call a deal
+     * closed before any of the close had happened. Either stamp counts: `ClosedAt` is the instant,
+     * `ActualCloseDate` the day, and a legacy row may carry only one.
+     */
+    public get IsClosed(): boolean {
+        return !!(this.Record?.ClosedAt ?? this.Record?.ActualCloseDate);
+    }
+
+    /**
+     * The Forecast tile's headline: the OUTCOME once a deal is closed, the forecast category while it
+     * is open. A forecast is a statement about a deal that might still move; Won is not a forecast.
+     */
+    public get ForecastHeadline(): string {
+        if (this.IsClosed) return String(this.Record?.Get?.('DealStatusType') ?? '') || '—';
+        return String(this.Record?.Get?.('ForecastCategoryType') ?? '') || '—';
+    }
+
     public get CloseClock(): { label: string; tone: 'success' | 'warning' | 'muted' } {
         const n = daysFrom(this.Record?.ExpectedCloseDate);
+        // A closed deal shows WHEN it closed. Counting days against an expected date it already met
+        // (or missed) is advice on a decision nobody can take any more.
+        if (this.IsClosed) {
+            return { label: this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt), tone: 'success' };
+        }
         if (this.Record?.ActualCloseDate) return { label: 'Closed', tone: 'success' };
         if (n === null) return { label: 'Undated', tone: 'muted' };
         if (n < 0) return { label: `${Math.abs(n)}d past`, tone: 'warning' };
@@ -298,6 +325,8 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return m ? `${m} mo` : '—';
     }
     public get NextStepOverdue(): boolean {
+        // Nothing is overdue on a deal that is finished.
+        if (this.IsClosed) return false;
         const n = daysFrom(this.Record?.NextStepDate);
         return n !== null && n < 0;
     }
@@ -309,6 +338,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         // reports the absence of work that has not started, which is why a brand-new deal opened on a
         // wall of warnings. The briefing stays quiet until there is something to brief on.
         if (!this.Record.IsSaved) return out;
+        // A closed deal is not coached. Every line below asks someone to do something about a deal
+        // that is finished -- re-date it, assign it, give it a next step -- and none of it applies.
+        if (this.IsClosed) return out;
         const days = daysFrom(this.Record.ExpectedCloseDate);
         if (days !== null && days < 0 && !this.Record.ActualCloseDate) {
             out.push('Expected close is already past — re-date or close it.');
@@ -799,6 +831,8 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
                     [NewRecordValues]="FormComponent.NewRecordValues(Entity, 'DealID')"
                     [AllowLoad]="FormComponent.IsSectionExpanded('stage-history')"
                     [ShowToolbar]="true"
+                    [ShowNewButton]="false"
+                    [ShowDeleteButton]="false"
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
@@ -806,6 +840,16 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
+/**
+ * READ-ONLY ON EVERY DEAL, open or closed (bc-aidp-next-golive#206 item 5).
+ *
+ * These rows are written by the server as part of each save -- they are the deal's audit trail, and a
+ * hand-typed one is a lie about what happened. The toolbar stays for search and export; only the two
+ * write affordances go.
+ *
+ * `ShowDeleteButton` already defaults to false. It is set anyway, because a default is not a decision
+ * and this panel should not quietly grow a delete button if that default ever changes.
+ */
 export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealStageEvent;
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
