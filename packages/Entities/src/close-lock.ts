@@ -36,8 +36,28 @@ import { RunView, type UserInfo } from '@memberjunction/core';
  * stop describing what the server does.
  */
 export const DEAL_FIELDS_EDITABLE_WHILE_LOCKED: ReadonlySet<string> = new Set<string>([
+    // Commentary. A closed deal still gets notes, and forcing a reopen to add one would corrupt the
+    // reopen record with administrative noise.
     'Description',
+    // Follow-up. NextStepDate is here because leaving one of the pair open and the other frozen makes
+    // no sense -- a next step nobody may date is half a field.
     'NextStep',
+    'NextStepDate',
+    // Attribution and bookkeeping. Nothing downstream reads these, and they are routinely corrected
+    // after the fact: the contract takes the PRIMARY contact, not the billing one, and Lead Source and
+    // Campaign exist for reporting.
+    'BillingContactID',
+    'LeadSourceTypeID',
+    'CampaignID',
+    // Why a deal was lost, elaborated after the fact. LossReasonID stays FROZEN on purpose -- the close
+    // event records which reason was chosen, and rewriting it would make that event dishonest. Notes
+    // are the channel for corrections.
+    //
+    // Not conditioned on the deal being Lost, which the spec asks for. The set is a flat membership
+    // test shared by the form and the server, and a conditional member would need both to evaluate the
+    // same condition -- the exact drift this module exists to prevent. Loss notes on a Won deal are
+    // harmless; a form and a server disagreeing about whether a field is editable is not.
+    'LossNotes',
 ]);
 
 /**

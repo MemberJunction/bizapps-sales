@@ -1582,6 +1582,20 @@ export class DealEntityServer extends DealEntity {
     private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;
 
     /**
+     * The child collections that stay editable on a locked deal.
+     *
+     * Named here rather than in `sales-entities` because, unlike the field list, no other surface needs
+     * it yet: the grids decide their own New/delete affordances. If a form ever has to render this, it
+     * moves next to `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` for the same reason that one moved.
+     *
+     * `Lines` is deliberately absent -- see the reasoning at the check itself.
+     */
+    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([
+        'Team',
+        'PaymentSchedule',
+    ]);
+
+    /**
      * Runs `body` with the close lock suppressed, and always restores it.
      *
      * The `finally` is the point: an exception inside the reopen must not leave the lock disabled for
@@ -1673,16 +1687,24 @@ export class DealEntityServer extends DealEntity {
          * `this.Fields`, so the header check above cannot see them. Without this the lock would refuse a
          * renamed deal and happily accept a deleted line, which is the more damaging edit of the two.
          *
-         * Enumerated as `Companions` rather than as the three collections by name, deliberately: anything
-         * that contributes work to this record's save is something the lock has to see, and naming them
-         * individually would mean a collection added later is silently unprotected.
+         * WHICH COLLECTIONS ARE FROZEN IS NOW AN ALLOW-LIST, AND THE DIRECTION MATTERS
+         * (bc-aidp-next-golive#206 item 2). Reassigning a rep or correcting a payment schedule after a
+         * close is record-keeping, not a change to what was agreed, so `Team` and `PaymentSchedule` are
+         * permitted. The lines are not: they are exactly what the contract and the order were derived
+         * from.
+         *
+         * This was previously "freeze every dirty companion", enumerated that way deliberately so that a
+         * collection added later would be protected without anyone remembering to add it. That property
+         * is kept -- which is why this names what is ALLOWED rather than what is frozen. Listing the
+         * frozen ones instead would leave the next collection silently editable on a closed deal, and
+         * that is the failure the original comment was written against.
          *
          * Guarded by the same already-closed test, so the closing transition may still carry final
          * collection state — a close that writes its last line is legal; editing that line tomorrow is
          * not.
          */
         const dirtyCollections = this.Companions
-            .filter((c) => c.Dirty)
+            .filter((c) => c.Dirty && !DealEntityServer.LOCK_EDITABLE_COMPANIONS.has(c.Name))
             .map((c) => c.Name);
 
         const all = [...changed, ...dirtyCollections];
