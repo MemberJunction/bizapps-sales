@@ -1804,7 +1804,8 @@ export class DealEntityServer extends DealEntity {
      *
      * Because the caller believed they were setting the owner. Correcting them in silence produces the
      * same wrong outcome as before — the owner is not who they said — with no way to notice. The
-     * message names {@link DealEntity.SetOwner}, which is the operation they actually wanted.
+     * message names the Internal team panel, which is where a person actually changes the owner;
+     * `DealEntity.SetOwner` is the same operation in code, and the wording is the tester's (golive#207).
      *
      * ── WHY `SetOwner` IS NOT CAUGHT BY THIS ────────────────────────────────────────────────────
      *
@@ -1820,10 +1821,8 @@ export class DealEntityServer extends DealEntity {
             return null;   // nobody supplied it. The common case.
         }
         return (
-            'Deal.OwnerEmployeeID is a server-maintained stamp derived from the DealTeamMember holding ' +
-            'the owner role, and cannot be set directly — a save that changed it without the roster ' +
-            'would leave the column and the team disagreeing about who owns the deal. Use ' +
-            'DealEntity.SetOwner(employeeID), which edits the roster and lets the stamp follow.'
+            'The owner is set from the deal team. Change the Owner role on the Internal team panel ' +
+            'instead.'
         );
     }
 
