@@ -1804,7 +1804,8 @@ export class DealEntityServer extends DealEntity {
      *
      * Because the caller believed they were setting the owner. Correcting them in silence produces the
      * same wrong outcome as before — the owner is not who they said — with no way to notice. The
-     * message names {@link DealEntity.SetOwner}, which is the operation they actually wanted.
+     * message names the Internal team panel, which is where a person actually changes the owner;
+     * `DealEntity.SetOwner` is the same operation in code, and the wording is the tester's (golive#207).
      *
      * ── WHY `SetOwner` IS NOT CAUGHT BY THIS ────────────────────────────────────────────────────
      *
