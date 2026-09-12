@@ -240,6 +240,14 @@ const MUTATIONS = [
     { id: 'M-CD14', file: DES, expect: ['CD14'],
       from: '    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;',
       to: "    private static readonly LOCK_EDITABLE_FIELDS = new Set<string>(['Description']);" },
+    // golive#206: the close stamps. Aimed at what CD27 UNIQUELY asserts -- that the refusal fires on a
+    // hand-set stamp. Short-circuiting the guard makes the method always return null, which is exactly
+    // the code as it stood before the fix. The other half of CD27 (a DECLARED close and reopen still
+    // move the stamps) needs no mutant: it is held by the 25 other close-deal checks, every one of
+    // which closes or reopens a deal and would fall together if the exemption broke.
+    { id: 'M-CD27A', file: DES, expect: ['CD27'],
+      from: '        if (this._declaredTransition) {\n            return null;   // Sales.CloseDeal or Sales.ReopenDeal is running; the stamps are its job',
+      to: '        if (true) {\n            return null;   // Sales.CloseDeal or Sales.ReopenDeal is running; the stamps are its job' },
 
     // The stage → order-status writer (D-OS1).
     { id: 'M-OS1', file: DES, expect: ['CO3', 'CO5'],

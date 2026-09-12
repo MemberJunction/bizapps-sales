@@ -50,6 +50,56 @@ export function IsDealFieldEditableWhileLocked(fieldName: string): boolean {
     return DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has(fieldName);
 }
 
+/**
+ * The four columns that record what a close actually did. No caller may set them.
+ *
+ * They are written in exactly two places, both inside `Sales.CloseDeal`: the close stamps them, the
+ * reopen clears them. Nothing else in the app writes them at all — the demo seed reaches the table
+ * through raw SQL, below the entity layer, and no migration touches the values.
+ *
+ * ── WHY THE CLOSE LOCK IS NOT ENOUGH ────────────────────────────────────────────────────────────
+ *
+ * `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` above only governs a deal that is ALREADY closed. The damaging
+ * write is the one before that: setting `ActualCloseDate` on an OPEN deal. No lock applies, the column
+ * is nullable, so nothing refuses it.
+ *
+ * ── WHAT A HAND-SET STAMP COSTS ─────────────────────────────────────────────────────────────────
+ *
+ * `ActualCloseDate` is the date dimension of the bookings reports, and all three select on it being
+ * present -- `metadata/queries/SQL/bookings-by-owner.sql`, `bookings-by-period.sql` and
+ * `deal-cycle-time.sql` each carry `WHERE d.ActualCloseDate IS NOT NULL`. So a date typed onto an open
+ * deal books revenue no close ever produced, and a date edited on a closed one moves that revenue into
+ * another period. `ClosedAt` carries the same weight: `Sales.ReopenDeal` nulls it explicitly to keep a
+ * rollup that tests `ClosedAt IS NOT NULL` honest, and that care is wasted if a plain `Save()` can put
+ * it back.
+ *
+ * `LossReasonID` is in this list rather than in the editable-while-locked set deliberately. The reason
+ * is part of the close event and stays frozen so the event stays honest; `LossNotes` is the correction
+ * channel and is editable.
+ *
+ * ── WHO READS THIS ──────────────────────────────────────────────────────────────────────────────
+ *
+ * `DealEntityServer.closeStampEditRefusal` refuses a save that sets one without a declared transition,
+ * and the deal form's Close panel renders them read-only, for the reason this module's header gives:
+ * a correct refusal delivered at the worst possible moment is not a usable form. Same list, one place,
+ * nothing to keep in sync.
+ */
+export const DEAL_CLOSE_STAMPS: readonly string[] = [
+    'ActualCloseDate',
+    'ClosedAt',
+    'ClosedByUserID',
+    'LossReasonID',
+];
+
+/**
+ * Whether `fieldName` is a server-written close stamp.
+ *
+ * Preferred to reaching into the array, matching {@link IsDealFieldEditableWhileLocked} above.
+ */
+export function IsDealCloseStamp(fieldName: string): boolean {
+    return DEAL_CLOSE_STAMPS.includes(fieldName);
+}
+
 /** Sales' deal-status type table. Named here so the lock lookup below has one spelling of it. */
 const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 
@@ -159,4 +209,66 @@ export function IsBareCloseWrite(facts: StatusTransitionFacts): boolean {
         return false; // a reopen attempt; the close lock owns that refusal
     }
     return facts.TargetLocks;
+}
+
+/** One row of the deal-status list, with the flag that decides whether it may be picked. */
+export interface DealStatusOption {
+    ID: string;
+    Name: string;
+    /** Entering this status closes and freezes the deal. Enforced server-side. */
+    LocksDeal: boolean;
+    /**
+     * The OUTCOME flags, carried so a close action can find the status to close INTO by flag rather
+     * than by name. A deployment may call its winning status "Signed"; nothing may match on the word.
+     */
+    IsWon: boolean;
+    IsLost: boolean;
+}
+
+/**
+ * Every active deal status, with its lock flag, for a surface that has to offer a choice.
+ *
+ * RETURNS ALL OF THEM AND LETS THE CALLER FILTER, deliberately. A closed deal still has to SHOW the
+ * status it is in — a control that simply dropped the locking ones would render a won deal as blank
+ * or "— choose —", which reads as data loss. The workspace already solves it this way: it offers the
+ * non-locking ones and adds the deal's own status back as a display-only option.
+ *
+ * `LocksDeal` rather than `IsWon || IsLost`, because that is the flag the server's refusal reads.
+ * They coincide on today's data — Won, Lost and Abandoned carry both — but a surface filtering on a
+ * different flag would eventually offer a status the server then refuses, which is the drift this
+ * module exists to prevent.
+ */
+export async function LoadDealStatusOptions(contextUser?: UserInfo): Promise<DealStatusOption[]> {
+    const result = await new RunView().RunView<{
+        ID: string;
+        Name: string;
+        LocksDeal: boolean;
+        IsWon: boolean;
+        IsLost: boolean;
+    }>(
+        {
+            EntityName: E_DEAL_STATUS_TYPE,
+            ExtraFilter: 'IsActive = 1',
+            OrderBy: 'DisplayRank',
+            ResultType: 'simple',
+            // Every field read below must be listed here. A field declared on the row type and left
+            // out of this list arrives `undefined`, and a flag check against it quietly never fires --
+            // which is how ActivitySyncProviderType.IsActive did nothing for a release.
+            Fields: ['ID', 'Name', 'LocksDeal', 'IsWon', 'IsLost'],
+        },
+        contextUser,
+    );
+    if (!result?.Success) {
+        // An empty list leaves the control with nothing to offer, which is visibly wrong and therefore
+        // reportable. Inventing a list from somewhere else would hide a failed lookup behind a control
+        // that looks like it is working.
+        return [];
+    }
+    return (result.Results ?? []).map((r) => ({
+        ID: String(r.ID),
+        Name: String(r.Name),
+        LocksDeal: r.LocksDeal === true,
+        IsWon: r.IsWon === true,
+        IsLost: r.IsLost === true,
+    }));
 }

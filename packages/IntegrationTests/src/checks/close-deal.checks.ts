@@ -1834,6 +1834,87 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-deal.CD27',
+        Name: 'CD27: a hand-set close stamp is refused; the real close stamps and the reopen clears',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#206, the Close panel. It rendered ActualCloseDate, ClosedAt, ClosedByUserID and
+                 * LossReasonID as ordinary editable fields, so a user could type a close date onto a deal
+                 * nobody had closed. The close lock could not catch it: the lock reads the PERSISTED
+                 * status, and an OPEN deal is not locked, so the write is an ordinary save on an ordinary
+                 * row. The columns are nullable, so the database had no opinion either.
+                 *
+                 * WHAT IT COST. All three bookings queries select on the stamp being present -- see
+                 * `WHERE d.ActualCloseDate IS NOT NULL` in `metadata/queries/SQL/bookings-by-owner.sql`,
+                 * `bookings-by-period.sql` and `deal-cycle-time.sql`. A date typed onto an open deal
+                 * therefore books revenue that no close ever produced.
+                 *
+                 * WHY AN INTEGRATION CHECK. The list itself is pure and unit-tested
+                 * (`deal-close-stamps.test.ts`). What that cannot reach is the wiring: that
+                 * `callerSuppliedValue` reads a real load-edit-save the way the refusal assumes, and --
+                 * the half that would be expensive to get wrong -- that a DECLARED transition still
+                 * exempts both writers. So the same deal is then closed for real and reopened for real,
+                 * and the stamps must move both times.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD27 hand-set close stamp',
+                );
+
+                // Exactly what the Close panel did: load, type a close date, save. No operation.
+                const md = new Metadata();
+                const byHand = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await byHand.Load(dealID), 'the open deal loads');
+                byHand.ActualCloseDate = new Date(Date.UTC(2026, 0, 15));
+                const handSaved = await byHand.Save();
+
+                Assert(
+                    handSaved === false,
+                    'a hand-set ActualCloseDate must be refused: it is written by the close, not by a caller',
+                );
+
+                // A refusal that still wrote the column would leave precisely the open-but-booked deal
+                // this exists to prevent, so the row is read rather than the entity.
+                const after = await TxOne<{ ActualCloseDate: Date | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT ActualCloseDate, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(after.ActualCloseDate === null, 'the refused write must not have stamped the deal');
+                Assert(after.ClosedAt === null, 'and nothing may have stamped a close');
+
+                /**
+                 * THE OTHER HALF, and the reason this check is worth its runtime. A refusal keyed on the
+                 * field alone rather than on the declared transition would pass every assertion above and
+                 * break every close in the product.
+                 */
+                const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(out.Success, `the real close must still succeed: ${JSON.stringify(out.Issues)}`);
+
+                const closed = await TxOne<{ ActualCloseDate: Date | null; ClosedAt: Date | null; ClosedByUserID: string | null }>(
+                    ctx,
+                    `SELECT ActualCloseDate, ClosedAt, ClosedByUserID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(closed.ActualCloseDate !== null, 'the close must stamp ActualCloseDate');
+                Assert(closed.ClosedAt !== null, 'the close must stamp ClosedAt');
+                Assert(closed.ClosedByUserID !== null, 'the close must stamp ClosedByUserID');
+
+                // And the reopen, which is the second declared writer -- it CLEARS the same columns, so a
+                // refusal that forgot it would strand every closed deal.
+                const back = await reopen(ctx, { DealID: dealID, Reason: 'CD27: the reopen must still clear the stamps.' });
+                Assert(back.Success, `the reopen must still succeed: ${JSON.stringify(back.Issues ?? back)}`);
+
+                const reopened = await TxOne<{ ActualCloseDate: Date | null; ClosedAt: Date | null; ClosedByUserID: string | null }>(
+                    ctx,
+                    `SELECT ActualCloseDate, ClosedAt, ClosedByUserID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(reopened.ActualCloseDate === null, 'the reopen must clear ActualCloseDate');
+                Assert(reopened.ClosedAt === null, 'the reopen must clear ClosedAt');
+                Assert(reopened.ClosedByUserID === null, 'the reopen must clear ClosedByUserID');
+            }),
+    },
 ];
 
 for (const check of CloseDealChecks) {

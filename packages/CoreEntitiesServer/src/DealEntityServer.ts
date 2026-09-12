@@ -59,6 +59,7 @@ import { RegisterClass } from '@memberjunction/global';
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
 import { CanTransition, type OrderStatus } from '@mj-biz-apps/orders-entities';
 import {
+    DEAL_CLOSE_STAMPS,
     DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
     DealEntity,
     type mjBizAppsSalesDealStageEventEntity,
@@ -305,6 +306,24 @@ export class DealEntityServer extends DealEntity {
         const ownerRefusal = this.ownerStampEditRefusal();
         if (ownerRefusal) {
             LogError(`DealEntityServer.Save refused: ${ownerRefusal}`);
+            return false;
+        }
+
+        /**
+         * NOR ARE THE CLOSE STAMPS (bc-aidp-next-golive#206).
+         *
+         * Beside the owner stamp because it is the same rule: a column the server owns is not a
+         * column a caller may set. The close lock above cannot cover these — it reads the PERSISTED
+         * status, so it only fires once the deal is already closed, and the write that does the
+         * damage is the one BEFORE that: an `ActualCloseDate` typed onto an OPEN deal is not a
+         * locked-record edit, and the column is nullable, so nothing refuses it and the deal lands
+         * in the bookings reports without ever having been won.
+         *
+         * Runs before the transaction, like the two above, so a refused save costs nothing.
+         */
+        const stampRefusal = this.closeStampEditRefusal();
+        if (stampRefusal) {
+            LogError(`DealEntityServer.Save refused: ${stampRefusal}`);
             return false;
         }
 
@@ -1824,6 +1843,47 @@ export class DealEntityServer extends DealEntity {
             'the owner role, and cannot be set directly — a save that changed it without the roster ' +
             'would leave the column and the team disagreeing about who owns the deal. Use ' +
             'DealEntity.SetOwner(employeeID), which edits the roster and lets the stamp follow.'
+        );
+    }
+
+    /**
+     * Why a direct write to a close stamp is refused, or null when this save is not doing that.
+     *
+     * The list is {@link DEAL_CLOSE_STAMPS}, which lives in `sales-entities` so the deal form renders
+     * exactly the fields this refuses — the module header there explains why one copy matters.
+     *
+     * ── WHAT SEPARATES A REAL CLOSE FROM A HAND-SET STAMP ───────────────────────────────────────
+     *
+     * The declared transition, and nothing else. `Sales.CloseDeal` calls `DeclareTransition('Close')`
+     * before it stamps, and `Sales.ReopenDeal` calls `DeclareTransition('Reopen')` before it clears —
+     * so the two writers that are allowed both announce themselves, and a form write has no way to.
+     * That is the same question {@link bareCloseRefusal} asks, deliberately: the status and the stamps
+     * are two halves of one close, and a rule that admitted one without the other would let a caller
+     * assemble a closed-looking deal a field at a time.
+     *
+     * ── WHY `callerSuppliedValue` RATHER THAN `Dirty` ───────────────────────────────────────────
+     *
+     * Because creation has to be covered too, and on a new record nothing is dirty. An importer doing
+     * `NewRecord() -> ActualCloseDate = X -> Save()` is exactly the path that would otherwise walk
+     * straight past this — the same hole {@link ownerStampEditRefusal} was strengthened to close, which
+     * is why that helper exists rather than a second `Dirty` test here.
+     *
+     * Nothing legitimate is caught by that. The demo seed writes these columns through raw `sqlcmd`,
+     * below the entity layer, and no migration sets a value.
+     */
+    private closeStampEditRefusal(): string | null {
+        if (this._declaredTransition) {
+            return null;   // Sales.CloseDeal or Sales.ReopenDeal is running; the stamps are its job
+        }
+        const supplied = DEAL_CLOSE_STAMPS.filter((name) => this.callerSuppliedValue(name, this.Get(name)));
+        if (supplied.length === 0) {
+            return null;   // nobody touched them. The common case, and it costs one array scan.
+        }
+        return (
+            `${supplied.join(', ')} cannot be set directly: the close stamps record what the close ` +
+            'actually did, and the bookings reports read them as fact — a date set by hand puts a deal ' +
+            'into revenue figures no close ever produced. They are written by Sales.CloseDeal and ' +
+            'cleared by Sales.ReopenDeal; use Loss Notes to correct the record of a deal already closed.'
         );
     }
 

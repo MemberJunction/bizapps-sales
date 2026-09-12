@@ -165,12 +165,25 @@ describe('#189 / #190 — the Pipeline panel does not repeat the hero', () => {
             'PipelineID',
             'PipelineStageID',
             'DealTypeID',
-            'DealStatusTypeID',
             'ForecastCategoryTypeID',
             'Probability',
         ]) {
             expect(names).toContain(kept);
         }
+    });
+
+    /**
+     * `DealStatusTypeID` left this array on purpose (bc-aidp-next-golive#205).
+     *
+     * `<mj-form-field>` renders a foreign key as an unfiltered dropdown off the related entity, so it
+     * offered Won and Lost — and picking one wrote the status with none of the close running. The panel
+     * now renders its own control that filters by `LocksDeal`, matching the deal workspace.
+     *
+     * Asserted as an ABSENCE rather than simply dropped from the list above, because a generic field
+     * reappearing here is exactly how the defect would come back, and it would look like a tidy-up.
+     */
+    it('does NOT render status as a generic field, which is what offered the closing statuses', () => {
+        expect(fieldNames()).not.toContain('DealStatusTypeID');
     });
 
     it('lists every field exactly once', () => {
