@@ -1,0 +1,40 @@
+[
+  {
+    "_comments": [
+      "bc-aidp-next-golive#207, the tester's third comment: 'Deal Status Type' -> 'Status' and",
+      "'Forecast Category Type' -> 'Forecast Category'.",
+      "",
+      "THE ROW THAT MATTERS IS THE VIRTUAL NAME FIELD, NOT THE FOREIGN KEY, and getting that wrong is",
+      "silent. mj-form-field resolves an FK's label through RelatedEntityNameFieldMap BEFORE the field's",
+      "own DisplayName (form-field.component.ts: it returns nameField.DisplayNameOrName and only falls",
+      "through to FieldInfo.DisplayNameOrName afterwards), and the baseline maps DealStatusTypeID ->",
+      "'DealStatusType' and ForecastCategoryTypeID -> 'ForecastCategoryType'. So relabelling the ...TypeID",
+      "rows applies cleanly, asserts successfully, and changes nothing anyone sees.",
+      "",
+      "Measured against the database before writing this: DealStatusType reads 'Deal Status Type' and",
+      "DealStatusTypeID reads 'Deal Status Type ID'. The tester's 'Current label' column says 'Deal Status",
+      "Type' -- the virtual field -- which is the tell that these are the rows they meant.",
+      "",
+      "AutoUpdateDisplayName goes to 0 so the label is a deliberate choice rather than something derived",
+      "from the column name if the column is ever renamed. CodeGen does not otherwise revert DisplayName:",
+      "spUpdateExistingEntityFieldsFromSchema never writes it (unlike Description), and",
+      "updateEntityFieldDisplayNameWhereNull is gated on the value being NULL."
+    ],
+    "fields": {
+      "DisplayName": "Status",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=DealStatusType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Forecast Category",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ForecastCategoryType"
+    }
+  }
+]
