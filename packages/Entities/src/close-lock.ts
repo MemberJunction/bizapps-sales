@@ -50,6 +50,56 @@ export function IsDealFieldEditableWhileLocked(fieldName: string): boolean {
     return DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has(fieldName);
 }
 
+/**
+ * The four columns that record what a close actually did. No caller may set them.
+ *
+ * They are written in exactly two places, both inside `Sales.CloseDeal`: the close stamps them, the
+ * reopen clears them. Nothing else in the app writes them at all — the demo seed reaches the table
+ * through raw SQL, below the entity layer, and no migration touches the values.
+ *
+ * ── WHY THE CLOSE LOCK IS NOT ENOUGH ────────────────────────────────────────────────────────────
+ *
+ * `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` above only governs a deal that is ALREADY closed. The damaging
+ * write is the one before that: setting `ActualCloseDate` on an OPEN deal. No lock applies, the column
+ * is nullable, so nothing refuses it.
+ *
+ * ── WHAT A HAND-SET STAMP COSTS ─────────────────────────────────────────────────────────────────
+ *
+ * `ActualCloseDate` is the date dimension of the bookings reports, and all three select on it being
+ * present -- `metadata/queries/SQL/bookings-by-owner.sql`, `bookings-by-period.sql` and
+ * `deal-cycle-time.sql` each carry `WHERE d.ActualCloseDate IS NOT NULL`. So a date typed onto an open
+ * deal books revenue no close ever produced, and a date edited on a closed one moves that revenue into
+ * another period. `ClosedAt` carries the same weight: `Sales.ReopenDeal` nulls it explicitly to keep a
+ * rollup that tests `ClosedAt IS NOT NULL` honest, and that care is wasted if a plain `Save()` can put
+ * it back.
+ *
+ * `LossReasonID` is in this list rather than in the editable-while-locked set deliberately. The reason
+ * is part of the close event and stays frozen so the event stays honest; `LossNotes` is the correction
+ * channel and is editable.
+ *
+ * ── WHO READS THIS ──────────────────────────────────────────────────────────────────────────────
+ *
+ * `DealEntityServer.closeStampEditRefusal` refuses a save that sets one without a declared transition,
+ * and the deal form's Close panel renders them read-only, for the reason this module's header gives:
+ * a correct refusal delivered at the worst possible moment is not a usable form. Same list, one place,
+ * nothing to keep in sync.
+ */
+export const DEAL_CLOSE_STAMPS: readonly string[] = [
+    'ActualCloseDate',
+    'ClosedAt',
+    'ClosedByUserID',
+    'LossReasonID',
+];
+
+/**
+ * Whether `fieldName` is a server-written close stamp.
+ *
+ * Preferred to reaching into the array, matching {@link IsDealFieldEditableWhileLocked} above.
+ */
+export function IsDealCloseStamp(fieldName: string): boolean {
+    return DEAL_CLOSE_STAMPS.includes(fieldName);
+}
+
 /** Sales' deal-status type table. Named here so the lock lookup below has one spelling of it. */
 const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 

@@ -136,6 +136,26 @@ interface DealFieldSpec {
     type: DealFieldType;
     link?: 'Record';
     span?: boolean;
+    /**
+     * The server owns this column, so the field renders read-only even while the form is in Edit mode.
+     *
+     * Every field flagged here is one the server either REFUSES outright (`ownerStampEditRefusal`,
+     * `closeStampEditRefusal`) or silently OVERWRITES (`stampCompanyFromPipeline`). Offering an input
+     * for such a column gives the user a box whose value cannot survive the save, which is precisely
+     * what bc-aidp-next-golive#206 reported: "Clicking Edit opens every field for typing, and I only
+     * find out a field is frozen when the save is refused." The silent half is the worse of the two,
+     * because nothing tells the user at all — they simply find a different value later.
+     *
+     * This is the STATIC half of the rule: a column no save may ever set, whatever state the deal is
+     * in. The lock's dynamic half — fields editable on an open deal but frozen once it closes — is a
+     * different question with a different answer per record, and is not this flag.
+     *
+     * Read-only here is `EditMode=false` on that one field, which also lets `mj-form-field` hide it
+     * when empty (`HideWhenEmptyInReadOnlyMode`). That is the intended reading rather than a side
+     * effect: an open deal has no close record, so the Close panel shows the stamps once there is a
+     * close to show, and an empty box for "who closed this" stops appearing on deals nobody closed.
+     */
+    serverWritten?: boolean;
 }
 
 const FIELD_STYLES = `
@@ -456,7 +476,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && !f.serverWritten" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -577,7 +597,7 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && !f.serverWritten" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -594,8 +614,14 @@ export class MJSDealPartyPanel extends BaseFormPanel<DealEntity> {
      */
     public readonly Fields: DealFieldSpec[] = [
         { name: 'AccountID', type: 'textbox', link: 'Record' },
-        { name: 'CompanyID', type: 'textbox', link: 'Record' },
-        { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record' },
+        // Forced to the pipeline's company by `stampCompanyFromPipeline` on EVERY save, whatever the
+        // caller supplied. An editable box here was a silent discard: the user picked a company, the
+        // save succeeded, and the value they chose was gone with nothing said about it.
+        { name: 'CompanyID', type: 'textbox', link: 'Record', serverWritten: true },
+        // Derived from the DealTeamMember holding the owner role, and a direct write is REFUSED by
+        // `ownerStampEditRefusal` — so typing here could only ever end in a failed save. The Internal
+        // team panel below is where the owner actually changes.
+        { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record', serverWritten: true },
         { name: 'PrimaryContactID', type: 'textbox', link: 'Record' },
         { name: 'BillingContactID', type: 'textbox', link: 'Record' },
     ];
@@ -619,7 +645,7 @@ export class MJSDealPartyPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && !f.serverWritten" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -705,7 +731,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && !f.serverWritten" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -816,7 +842,7 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && !f.serverWritten" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -967,11 +993,24 @@ export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
         this.Message = message;
     }
 
+    /**
+     * The first four are the close stamps, and they are read-only here for the same reason the server
+     * refuses them: `Sales.CloseDeal` writes them and `Sales.ReopenDeal` clears them, and nothing else
+     * in the app writes them at all. The panel used to offer all four as editable, so a user could type
+     * a close date onto a deal nobody had closed — and `ActualCloseDate IS NOT NULL` is what every
+     * bookings report selects on, so that deal would have appeared in the revenue figures.
+     *
+     * The names come from `DEAL_CLOSE_STAMPS` in `sales-entities`, and `deal-close-stamps.test.ts`
+     * pins this list against it so a stamp cannot be added there and stay editable here.
+     *
+     * `LossNotes` is deliberately NOT among them. It is the correction channel — the reason stays
+     * frozen so the close event stays honest, and the notes are how someone says more about it later.
+     */
     public readonly Fields: DealFieldSpec[] = [
-        { name: 'ActualCloseDate', type: 'datepicker' },
-        { name: 'ClosedAt', type: 'datepicker' },
-        { name: 'ClosedByUserID', type: 'textbox', link: 'Record' },
-        { name: 'LossReasonID', type: 'textbox', link: 'Record' },
+        { name: 'ActualCloseDate', type: 'datepicker', serverWritten: true },
+        { name: 'ClosedAt', type: 'datepicker', serverWritten: true },
+        { name: 'ClosedByUserID', type: 'textbox', link: 'Record', serverWritten: true },
+        { name: 'LossReasonID', type: 'textbox', link: 'Record', serverWritten: true },
         { name: 'StandardAgreementModified', type: 'checkbox' },
         { name: 'AnnualIncreasePctOverride', type: 'number' },
         { name: 'CancellationNoticeDaysOverride', type: 'number' },
