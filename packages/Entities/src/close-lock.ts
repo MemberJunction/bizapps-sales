@@ -167,6 +167,12 @@ export interface DealStatusOption {
     Name: string;
     /** Entering this status closes and freezes the deal. Enforced server-side. */
     LocksDeal: boolean;
+    /**
+     * The OUTCOME flags, carried so a close action can find the status to close INTO by flag rather
+     * than by name. A deployment may call its winning status "Signed"; nothing may match on the word.
+     */
+    IsWon: boolean;
+    IsLost: boolean;
 }
 
 /**
@@ -183,13 +189,22 @@ export interface DealStatusOption {
  * module exists to prevent.
  */
 export async function LoadDealStatusOptions(contextUser?: UserInfo): Promise<DealStatusOption[]> {
-    const result = await new RunView().RunView<{ ID: string; Name: string; LocksDeal: boolean }>(
+    const result = await new RunView().RunView<{
+        ID: string;
+        Name: string;
+        LocksDeal: boolean;
+        IsWon: boolean;
+        IsLost: boolean;
+    }>(
         {
             EntityName: E_DEAL_STATUS_TYPE,
             ExtraFilter: 'IsActive = 1',
             OrderBy: 'DisplayRank',
             ResultType: 'simple',
-            Fields: ['ID', 'Name', 'LocksDeal'],
+            // Every field read below must be listed here. A field declared on the row type and left
+            // out of this list arrives `undefined`, and a flag check against it quietly never fires --
+            // which is how ActivitySyncProviderType.IsActive did nothing for a release.
+            Fields: ['ID', 'Name', 'LocksDeal', 'IsWon', 'IsLost'],
         },
         contextUser,
     );
@@ -203,5 +218,7 @@ export async function LoadDealStatusOptions(contextUser?: UserInfo): Promise<Dea
         ID: String(r.ID),
         Name: String(r.Name),
         LocksDeal: r.LocksDeal === true,
+        IsWon: r.IsWon === true,
+        IsLost: r.IsLost === true,
     }));
 }
