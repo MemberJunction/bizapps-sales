@@ -18,14 +18,97 @@ import { CompositeKey, Metadata, RunView, type EntityInfo } from '@memberjunctio
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
 import { EntityViewerModule, type AfterDataLoadEventArgs, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
-import { DealEntity, LoadDealStatusOptions,
+import {
+    DealEntity,
+    LoadDealStatusOptions,
     type DealStatusOption,
+    type SalesCloseDealInput,
+    type SalesCloseDealOutput,
 } from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import { SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 
 const E = MJS_ENTITIES.Deal;
+
+/** Sales' loss-reason table. Named here so the close action has one spelling of it. */
+const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
+
+/** One pickable loss reason, with the flag that decides whether notes are mandatory. */
+export interface LossReasonOption {
+    ID: string;
+    Name: string;
+    RequiresNotes: boolean;
+}
+
+/**
+ * The loss reasons a close may cite.
+ *
+ * Loaded even on a deal nobody will lose, because the alternative is fetching inside the click
+ * handler: an empty dropdown then fails as a TIMEOUT rather than as a missing list, which is a slow
+ * way to find out the table was never seeded.
+ */
+async function LoadLossReasons(): Promise<LossReasonOption[]> {
+    const result = await new RunView().RunView<{ ID: string; Name: string; RequiresNotes: boolean }>({
+        EntityName: E_LOSS_REASON,
+        ExtraFilter: 'IsActive = 1',
+        OrderBy: 'Name',
+        ResultType: 'simple',
+        Fields: ['ID', 'Name', 'RequiresNotes'],
+    });
+    if (!result?.Success) return [];
+    return (result.Results ?? []).map((r) => ({
+        ID: String(r.ID),
+        Name: String(r.Name),
+        RequiresNotes: r.RequiresNotes === true,
+    }));
+}
+
+/**
+ * `RouteOperation` is on the SQL Server / GraphQL provider, not on the `IMetadataProvider` interface
+ * `Metadata.Provider` is declared as, so it has to be narrowed. Declared as a precise shape rather
+ * than reached for with a loose cast, so the operation's input and output stay type-checked — which
+ * is the whole value of calling a typed operation.
+ */
+interface DealCloseOperationRouter {
+    RouteOperation<TInput, TOutput>(
+        operationKey: string,
+        input: TInput,
+    ): Promise<{ Success: boolean; Output?: TOutput; ErrorMessage?: string }>;
+}
+
+const CLOSE_ACTION_STYLES = `
+    .mjs-close-action {
+        padding: var(--mj-space-4) var(--mj-space-5);
+        border-bottom: 1px solid var(--mj-border-default);
+        display: flex; flex-direction: column; gap: var(--mj-space-3);
+    }
+    .mjs-close-action__start {
+        align-self: flex-start; cursor: pointer;
+        padding: 6px 14px; border-radius: var(--mj-radius-sm);
+        border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface-card);
+        font-weight: 600;
+    }
+    .mjs-close-action__start:hover { background: var(--mj-bg-surface-hover); }
+    .mjs-close-action__hint { color: var(--mj-text-muted); font-size: 0.78rem; }
+    .mjs-close-action__form { display: flex; flex-direction: column; gap: var(--mj-space-3); max-width: 520px; }
+    .mjs-close-action__row { display: flex; gap: var(--mj-space-4); align-items: center; }
+    .mjs-close-action__field { display: flex; flex-direction: column; gap: 4px; }
+    .mjs-close-action__field > span { font-size: 0.78rem; color: var(--mj-text-muted); }
+    .mjs-close-action__confirm {
+        cursor: pointer; padding: 6px 14px; border-radius: var(--mj-radius-sm);
+        border: 1px solid var(--mj-brand-primary); background: var(--mj-brand-primary); color: #fff;
+        font-weight: 600;
+    }
+    .mjs-close-action__confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+    .mjs-close-action__cancel {
+        cursor: pointer; padding: 6px 14px; border-radius: var(--mj-radius-sm);
+        border: 1px solid var(--mj-border-default); background: transparent;
+    }
+    .mjs-close-action__msg { font-size: 0.82rem; color: var(--mj-status-success); }
+    .mjs-close-action__msg.is-error { color: var(--mj-status-warning); font-weight: 500; }
+    .mjs-close-action__issue { font-size: 0.78rem; color: var(--mj-status-warning); }
+`;
 
 function money(n: number | null | undefined): string {
     if (n == null || !Number.isFinite(Number(n))) return '—';
@@ -652,11 +735,83 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
     selector: 'mjs-deal-close-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, BaseFormsModule],
-    styles: [FIELD_STYLES],
+    imports: [CommonModule, FormsModule, BaseFormsModule],
+    styles: [FIELD_STYLES, CLOSE_ACTION_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="close" SectionName="Close" Icon="fa-solid fa-flag-checkered"
             [Form]="FormComponent" [FormContext]="FormContext">
+
+            <!-- THE ACTION, not a status field (bc-aidp-next-golive#205).
+                 The deal workspace closes through Sales.CloseDeal and its status dropdown has never
+                 offered a closing status. This form filters the same way now, which left it with no way
+                 to close a deal at all -- the panel below is fields, and fields are not an action.
+                 So the door the workspace uses is put here too. -->
+            @if (CanClose) {
+                <div class="mjs-close-action">
+                    @if (!PanelOpen) {
+                        <button type="button" class="mjs-close-action__start" (click)="OpenPanel()">
+                            <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i> Close this deal
+                        </button>
+                        <small class="mjs-close-action__hint">
+                            Records the outcome, writes the stage history, and for a won B2B deal creates
+                            the contract and finance tasks.
+                        </small>
+                    } @else {
+                        <div class="mjs-close-action__form">
+                            <div class="mjs-close-action__row">
+                                <label>
+                                    <input type="radio" name="dealCloseOutcome" value="won"
+                                           [(ngModel)]="Outcome" [disabled]="Closing" /> Won
+                                </label>
+                                <label>
+                                    <input type="radio" name="dealCloseOutcome" value="lost"
+                                           [(ngModel)]="Outcome" [disabled]="Closing" /> Lost
+                                </label>
+                            </div>
+
+                            @if (Outcome === 'lost') {
+                                <label class="mjs-close-action__field">
+                                    <span>Loss reason</span>
+                                    <select [(ngModel)]="LossReasonID" [disabled]="Closing">
+                                        <option [ngValue]="null">— choose —</option>
+                                        @for (r of LossReasons; track r.ID) {
+                                            <option [ngValue]="r.ID">{{ r.Name }}</option>
+                                        }
+                                    </select>
+                                </label>
+                                @if (LossReasonRequiresNotes) {
+                                    <label class="mjs-close-action__field">
+                                        <span>Loss notes <em>(required for this reason)</em></span>
+                                        <textarea rows="2" [(ngModel)]="LossNotes" [disabled]="Closing"></textarea>
+                                    </label>
+                                }
+                            }
+
+                            <label class="mjs-close-action__field">
+                                <span>Notes <em>(optional)</em></span>
+                                <textarea rows="2" [(ngModel)]="Notes" [disabled]="Closing"></textarea>
+                            </label>
+
+                            <div class="mjs-close-action__row">
+                                <button type="button" class="mjs-close-action__confirm"
+                                        [disabled]="!CanConfirm" (click)="ConfirmClose()">
+                                    {{ Closing ? 'Closing…' : 'Close deal' }}
+                                </button>
+                                <button type="button" class="mjs-close-action__cancel"
+                                        [disabled]="Closing" (click)="CancelClose()">Cancel</button>
+                            </div>
+                        </div>
+                    }
+
+                    @if (Message) {
+                        <div class="mjs-close-action__msg" [class.is-error]="MessageIsError">{{ Message }}</div>
+                    }
+                    @for (i of Issues; track i) {
+                        <div class="mjs-close-action__issue">{{ i }}</div>
+                    }
+                </div>
+            }
+
             <div class="mjs-fields">
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
@@ -670,6 +825,148 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
     `,
 })
 export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
+    public PanelOpen = false;
+    public Closing = false;
+    public Outcome: 'won' | 'lost' | null = null;
+    public LossReasonID: string | null = null;
+    public LossNotes = '';
+    public Notes = '';
+    public Message = '';
+    public MessageIsError = false;
+    public Issues: string[] = [];
+    public LossReasons: LossReasonOption[] = [];
+
+    private statuses: DealStatusOption[] = [];
+
+    public async ngOnInit(): Promise<void> {
+        [this.statuses, this.LossReasons] = await Promise.all([
+            LoadDealStatusOptions(),
+            LoadLossReasons(),
+        ]);
+    }
+
+    /** Only an open, saved deal can be closed. A closed one shows its stamps and nothing else. */
+    public get CanClose(): boolean {
+        if (!this.Record?.IsSaved) return false;
+        const id = String(this.Record.DealStatusTypeID ?? '').toLowerCase();
+        return !this.statuses.some((x) => x.ID.toLowerCase() === id && x.LocksDeal);
+    }
+
+    public get LossReasonRequiresNotes(): boolean {
+        return this.LossReasons.find((r) => r.ID === this.LossReasonID)?.RequiresNotes === true;
+    }
+
+    /**
+     * What the operation will refuse anyway, refused here first.
+     *
+     * Not a second rule: `Sales.CloseDeal` validates the same things and is the one that matters,
+     * since an import or an agent never comes through this panel. This only spares the round trip.
+     */
+    public get CanConfirm(): boolean {
+        if (this.Closing || !this.Outcome) return false;
+        if (this.Outcome === 'lost') {
+            if (!this.LossReasonID) return false;
+            if (this.LossReasonRequiresNotes && !this.LossNotes.trim()) return false;
+
+        }
+        return true;
+    }
+
+    public OpenPanel(): void {
+        this.PanelOpen = true;
+        this.Outcome = null;
+        this.LossReasonID = null;
+        this.LossNotes = '';
+        this.Notes = '';
+        this.Message = '';
+        this.Issues = [];
+    }
+
+    public CancelClose(): void {
+        this.PanelOpen = false;
+        this.Message = '';
+        this.Issues = [];
+    }
+
+    /**
+     * Close the deal through the operation.
+     *
+     * UNSAVED EDITS ARE SAVED FIRST, for the reason the workspace records: a close routes the deal's
+     * lines, so closing the persisted state would build an order from data the user is not looking at,
+     * and discarding the edits would drop work silently. If the save is refused the close is NOT
+     * attempted and the refusal stands on screen, with the deal intact and still open.
+     *
+     * THE TARGET STATUS IS FOUND BY FLAG. A deployment may call its winning status "Signed"; matching
+     * on the word would report "no such status" on a perfectly good database.
+     */
+    public async ConfirmClose(): Promise<void> {
+        if (!this.CanConfirm || !this.Record) return;
+
+        const wantWon = this.Outcome === 'won';
+        const target = this.statuses.find((x) => (wantWon ? x.IsWon : x.IsLost));
+        if (!target) {
+            this.Fail(`No active status carries Is${wantWon ? 'Won' : 'Lost'}. Seed the deal status types first.`);
+            return;
+        }
+
+        this.Closing = true;
+        this.Message = '';
+        this.Issues = [];
+        try {
+            if (this.EditMode || this.Record.Dirty) {
+                if (!(await this.FormComponent.SaveRecord(false))) {
+                    this.Fail('The deal could not be saved, so it was not closed. Fix the errors above and try again.');
+                    return;
+                }
+            }
+
+            /**
+             * TWO LAYERS OF SUCCESS, and checking only the outer one is a mistake this repo has made
+             * before: `Success` on the envelope means the operation RAN. Whether the deal actually
+             * closed is `Output.Success`.
+             */
+            const router = Metadata.Provider as unknown as DealCloseOperationRouter;
+            const envelope = await router.RouteOperation<SalesCloseDealInput, SalesCloseDealOutput>(
+                'Sales.CloseDeal',
+                {
+                    DealID: this.Record.ID,
+                    DealStatusTypeID: target.ID,
+                    LossReasonID: wantWon ? null : this.LossReasonID,
+                    LossNotes: wantWon ? null : (this.LossNotes.trim() || null),
+                    Notes: this.Notes.trim() || null,
+                },
+            );
+            if (!envelope.Success) {
+                this.Fail(envelope.ErrorMessage ?? 'Sales.CloseDeal could not be reached.');
+                return;
+            }
+            const out = envelope.Output;
+            if (!out?.Success) {
+                this.Issues = (out?.Issues ?? []).map((i) => i.Message);
+                this.Fail(out?.Issues?.[0]?.Message ?? 'The deal could not be closed.');
+                return;
+            }
+
+            this.PanelOpen = false;
+            this.MessageIsError = false;
+            this.Message = out.IsWon ? 'Deal closed as won.' : 'Deal closed as lost.';
+            // WARNINGS ON A SUCCESSFUL CLOSE are the interesting ones -- a stubbed downstream, a finance
+            // task that could not be routed, an order status orders refused. Reporting only failures
+            // would call a half-done close clean.
+            this.Issues = (out.Issues ?? []).map((i) => i.Message);
+            await this.FormComponent.RefreshRecord();
+        } catch (err) {
+            this.Fail(`The close did not complete: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+            this.Closing = false;
+        }
+    }
+
+    private Fail(message: string): void {
+        this.MessageIsError = true;
+        this.Message = message;
+    }
+
     public readonly Fields: DealFieldSpec[] = [
         { name: 'ActualCloseDate', type: 'datepicker' },
         { name: 'ClosedAt', type: 'datepicker' },
