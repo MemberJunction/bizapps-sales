@@ -144,7 +144,7 @@ function money(n: number | null | undefined): string {
                         @if (Record.OwnerEmployeeID && OwnerName) {
                             <button type="button" class="mjs-deal-hero__stat-val is-link" (click)="OpenOwner($event)">{{ OwnerName }}</button>
                         } @else {
-                            <span class="mjs-deal-hero__stat-val">{{ OwnerName || 'Unowned' }}</span>
+                            <span class="mjs-deal-hero__stat-val">{{ OwnerName || 'No owner' }}</span>
                         }
                     </div>
                     <div class="mjs-deal-hero__stat">
@@ -486,7 +486,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         const newest = result?.Success ? (result.Results ?? [])[0]?.__mj_UpdatedAt : undefined;
         if (newest && new Date(newest).getTime() > new Date(computedAt).getTime()) {
             this.StaleAmountNotice =
-                'A line has changed since this amount was priced, so the total shown is out of date. Reprice from Orders — Sales does not recalculate it here.';
+                'A line has changed since this amount was last priced. Reprice the order to update the total.';
         }
     }
 }
