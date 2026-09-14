@@ -81,7 +81,7 @@ interface DealCloseOperationRouter {
     ): Promise<{ Success: boolean; Output?: TOutput; ErrorMessage?: string }>;
 }
 
-/** What a surface needs back from a reopen, without either of them re-deriving it. */
+/** What a surface needs back from a close or a reopen, without either of them re-deriving it. */
 interface ReopenOutcome {
     ok: boolean;
     message: string;
@@ -101,6 +101,83 @@ interface ReopenOutcome {
  * an order orders treats as terminal, and that list is the only thing between the rep and a live deal
  * pointing at a dead order.
  */
+/**
+ * Whether a close has everything `Sales.CloseDeal` will demand of it.
+ *
+ * ONE RULE, because two surfaces ask it now -- the Status field and the Close panel's button. A second
+ * copy would drift on exactly the condition that is easy to forget: `RequiresNotes` is a per-reason
+ * flag, so "a loss reason was chosen" is not the same question as "this close is complete".
+ *
+ * Not a second enforcement. The operation validates the same things and is the one that matters, since
+ * an import or an agent never comes through either surface. This only spares the round trip.
+ */
+function CloseDetailComplete(
+    target: DealStatusOption | null,
+    lossReasonID: string | null,
+    lossNotes: string,
+    reasons: LossReasonOption[],
+): boolean {
+    if (!target) return false;
+    if (!target.IsLost) return true;
+    if (!lossReasonID) return false;
+    const needsNotes = reasons.find((r) => r.ID === lossReasonID)?.RequiresNotes === true;
+    return !needsNotes || lossNotes.trim().length > 0;
+}
+
+/** What a close needs from whichever surface collected it. */
+interface CloseRequest {
+    dealID: string;
+    target: DealStatusOption;
+    lossReasonID: string | null;
+    lossNotes: string;
+    notes: string;
+}
+
+/**
+ * `Sales.CloseDeal`, called in ONE place, for the same reason `RunReopen` is.
+ *
+ * Two surfaces reach the close: picking a closing status on the Status field (golive#205: "Changing
+ * Deal Status to Won or Lost should close the deal properly") and the Close panel's button. The
+ * envelope-versus-Output split is the mistake this repo has made before, and it should exist once.
+ */
+async function RunClose(req: CloseRequest): Promise<ReopenOutcome> {
+    try {
+        const router = Metadata.Provider as unknown as DealCloseOperationRouter;
+        const envelope = await router.RouteOperation<SalesCloseDealInput, SalesCloseDealOutput>(
+            'Sales.CloseDeal',
+            {
+                DealID: req.dealID,
+                DealStatusTypeID: req.target.ID,
+                LossReasonID: req.target.IsLost ? req.lossReasonID : null,
+                LossNotes: req.target.IsLost ? (req.lossNotes.trim() || null) : null,
+                Notes: req.notes.trim() || null,
+            },
+        );
+        if (!envelope.Success) {
+            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.CloseDeal could not be reached.', issues: [] };
+        }
+        const out = envelope.Output;
+        if (!out?.Success) {
+            const issues = (out?.Issues ?? []).map((i) => i.Message);
+            return { ok: false, message: issues[0] ?? 'The deal could not be closed.', issues };
+        }
+        // WARNINGS ON A SUCCESSFUL CLOSE are the interesting ones -- a stubbed downstream, a finance
+        // task that could not be routed, an order status orders refused. Reporting only failures would
+        // call a half-done close clean.
+        return {
+            ok: true,
+            message: `Deal closed as ${req.target.Name}.`,
+            issues: (out.Issues ?? []).map((i) => i.Message),
+        };
+    } catch (err) {
+        return {
+            ok: false,
+            message: `The close did not complete: ${err instanceof Error ? err.message : String(err)}`,
+            issues: [],
+        };
+    }
+}
+
 async function RunReopen(dealID: string, reason: string, targetStatusID: string | null): Promise<ReopenOutcome> {
     try {
         const router = Metadata.Provider as unknown as DealCloseOperationRouter;
@@ -562,6 +639,43 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                     <option [ngValue]="Record.DealStatusTypeID" disabled>{{ CurrentStatusName }}</option>
                                 }
                             </select>
+                            @if (PendingCloseStatusID) {
+                                <!-- golive#205: "Changing Deal Status to Won or Lost should close the
+                                     deal properly." Picking it does not WRITE it -- the close has to
+                                     run, and a Lost close needs a reason the dropdown cannot carry. -->
+                                <div class="mjs-reopen">
+                                    @if (PendingCloseStatus?.IsLost) {
+                                        <label class="mjs-reopen__field">
+                                            <span>Loss reason</span>
+                                            <select [(ngModel)]="LossReasonID" (ngModelChange)="OnLossReasonChange()"
+                                                    [disabled]="Busy">
+                                                <option [ngValue]="null">— choose —</option>
+                                                @for (r of LossReasons(); track r.ID) {
+                                                    <option [ngValue]="r.ID">{{ r.Name }}</option>
+                                                }
+                                            </select>
+                                        </label>
+                                        @if (LossReasonRequiresNotes) {
+                                            <label class="mjs-reopen__field">
+                                                <span>Loss notes <em>(required for this reason)</em></span>
+                                                <textarea rows="2" [(ngModel)]="LossNotes" [disabled]="Busy"></textarea>
+                                            </label>
+                                        }
+                                    }
+                                    <label class="mjs-reopen__field">
+                                        <span>Notes <em>(optional)</em></span>
+                                        <textarea rows="2" [(ngModel)]="CloseNotes" [disabled]="Busy"></textarea>
+                                    </label>
+                                    <div class="mjs-reopen__row">
+                                        <button type="button" class="mjs-reopen__confirm"
+                                                [disabled]="!CanConfirmClose" (click)="ConfirmClose()">
+                                            {{ Busy ? 'Closing\u2026' : 'Close as ' + PendingCloseStatusName }}
+                                        </button>
+                                        <button type="button" class="mjs-reopen__cancel"
+                                                [disabled]="Busy" (click)="CancelClose()">Cancel</button>
+                                    </div>
+                                </div>
+                            }
                             @if (PendingReopenStatusID) {
                                 <!-- golive#205 D9: the status field IS the way back. Picking an open
                                      status on a closed deal does not write it -- Sales.ReopenDeal has
@@ -570,22 +684,22 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                 <div class="mjs-reopen">
                                     <label class="mjs-reopen__field">
                                         <span>Reopen as {{ PendingReopenStatusName }} — reason <em>(required)</em></span>
-                                        <textarea rows="2" [(ngModel)]="ReopenReason" [disabled]="Reopening"></textarea>
+                                        <textarea rows="2" [(ngModel)]="ReopenReason" [disabled]="Busy"></textarea>
                                     </label>
                                     <div class="mjs-reopen__row">
                                         <button type="button" class="mjs-reopen__confirm"
                                                 [disabled]="!CanConfirmReopen" (click)="ConfirmReopen()">
-                                            {{ Reopening ? 'Reopening…' : 'Reopen deal' }}
+                                            {{ Busy ? 'Reopening…' : 'Reopen deal' }}
                                         </button>
                                         <button type="button" class="mjs-reopen__cancel"
-                                                [disabled]="Reopening" (click)="CancelReopen()">Cancel</button>
+                                                [disabled]="Busy" (click)="CancelReopen()">Cancel</button>
                                     </div>
                                 </div>
                             }
-                            @if (ReopenMessage) {
-                                <div class="mjs-reopen__msg" [class.is-error]="ReopenFailed">{{ ReopenMessage }}</div>
+                            @if (ActionMessage) {
+                                <div class="mjs-reopen__msg" [class.is-error]="ActionFailed">{{ ActionMessage }}</div>
                             }
-                            @for (i of ReopenIssues; track $index) {
+                            @for (i of ActionIssues; track $index) {
                                 <div class="mjs-reopen__issue">{{ i }}</div>
                             }
                             @if (CurrentStatusIsClosing && !PendingReopenStatusID) {
@@ -618,7 +732,21 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
     public async ngOnInit(): Promise<void> {
         // BaseFormPanel declares no lifecycle hook, so there is nothing to chain to. Angular calls this
         // on the component regardless of whether the base class has one.
-        this.statuses.set(await LoadDealStatusOptions());
+        const settled = await Promise.allSettled([LoadDealStatusOptions(), LoadLossReasons()]);
+        const valueOf = <T>(r: PromiseSettledResult<T>): T | null =>
+            r.status === 'fulfilled' ? r.value : null; // vocabulary-grep-allow: PromiseSettledResult discriminant, not a domain status
+        const loadedStatuses = valueOf(settled[0] as PromiseSettledResult<DealStatusOption[]>);
+        const loadedReasons = valueOf(settled[1] as PromiseSettledResult<LossReasonOption[]>);
+        if (loadedStatuses) {
+            this.statuses.set(loadedStatuses);
+        }
+        if (loadedReasons) {
+            this.LossReasons.set(loadedReasons);
+        }
+        if (!loadedStatuses || !loadedReasons) {
+            this.ActionFailed = true;
+            this.ActionMessage = 'Some of this panel could not load. Reload the page before closing this deal.';
+        }
     }
 
     /**
@@ -657,7 +785,12 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
      * change.
      */
     public get SelectableStatuses(): DealStatusOption[] {
-        return this.statuses().filter((s) => !s.LocksDeal);
+        // A CLOSED deal may only move to a non-locking status, and that move is a reopen. Offering it
+        // another closing status would be neither a close nor a reopen, and the server has no path for it.
+        if (this.CurrentStatusIsClosing) {
+            return this.statuses().filter((s) => !s.LocksDeal);
+        }
+        return this.statuses();
     }
 
     /** The display name of whatever status the deal currently holds. */
@@ -692,7 +825,7 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
      * unknown, and offering either path on that is guessing.
      */
     public get StatusIsEditable(): boolean {
-        if (this.Reopening) return false;                               // one in flight
+        if (this.Busy) return false;                               // one in flight
         if (this.statuses().length === 0) return false;                 // list never resolved
         if (this.Record?.IsSaved && !this.currentStatus) return false;  // status not in the active list
         return true;
@@ -718,12 +851,133 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
         if (this.CurrentStatusIsClosing) {
             this.PendingReopenStatusID = id;
             this.ReopenReason = '';
-            this.ReopenMessage = '';
-            this.ReopenIssues = [];
-            this.ReopenFailed = false;
+            this.ActionMessage = '';
+            this.ActionIssues = [];
+            this.ActionFailed = false;
+            return;
+        }
+        /**
+         * AND A CLOSING PICK IS A CLOSE REQUEST, for the same reason (golive#205: "Changing Deal Status
+         * to Won or Lost should close the deal properly"). Writing it would lock the deal with none of
+         * the close having run -- no stage event, no contract, no finance tasks, and for a Lost deal no
+         * loss reason and a live order. `bareCloseRefusal` on the server refuses exactly that, so
+         * writing it here would produce a refused save rather than a closed deal.
+         */
+        const picked = this.statuses().find((s) => s.ID.toLowerCase() === String(id).toLowerCase());
+        if (picked?.LocksDeal) {
+            this.PendingCloseStatusID = picked.ID;
+            this.LossReasonID = null;
+            this.LossNotes = '';
+            this.CloseNotes = '';
+            this.ActionMessage = '';
+            this.ActionIssues = [];
+            this.ActionFailed = false;
             return;
         }
         this.Record.DealStatusTypeID = id;
+    }
+
+    /* -- Closing from the Status control (golive#205) ------------------------------------ */
+
+    /** The closing status the user picked on an open deal, held until the close is confirmed. */
+    public PendingCloseStatusID: string | null = null;
+    public LossReasonID: string | null = null;
+    public LossNotes = '';
+    public CloseNotes = '';
+    public readonly LossReasons = signal<LossReasonOption[]>([]);
+
+    public get PendingCloseStatus(): DealStatusOption | null {
+        const id = String(this.PendingCloseStatusID ?? '').toLowerCase();
+        if (!id) return null;
+        return this.statuses().find((s) => s.ID.toLowerCase() === id) ?? null;
+    }
+
+    public get PendingCloseStatusName(): string {
+        return this.PendingCloseStatus?.Name ?? '';
+    }
+
+    public get LossReasonRequiresNotes(): boolean {
+        return this.LossReasons().find((r) => r.ID === this.LossReasonID)?.RequiresNotes === true;
+    }
+
+    /** The shared rule, so this surface and the Close panel cannot disagree about a complete close. */
+    public get CanConfirmClose(): boolean {
+        if (this.Busy) return false;
+        return CloseDetailComplete(this.PendingCloseStatus, this.LossReasonID, this.LossNotes, this.LossReasons());
+    }
+
+    /** A reason that no longer needs notes must not carry the old ones into the close. */
+    public OnLossReasonChange(): void {
+        if (!this.LossReasonRequiresNotes) {
+            this.LossNotes = '';
+        }
+    }
+
+    public CancelClose(): void {
+        this.PendingCloseStatusID = null;
+        this.LossReasonID = null;
+        this.LossNotes = '';
+        this.CloseNotes = '';
+        this.ActionMessage = '';
+        this.ActionIssues = [];
+        this.ActionFailed = false;
+    }
+
+    public async ConfirmClose(): Promise<void> {
+        const target = this.PendingCloseStatus;
+        if (!this.CanConfirmClose || !this.Record || !target) return;
+        this.Busy = true;
+        this.ActionMessage = '';
+        this.ActionIssues = [];
+        try {
+            /**
+             * UNSAVED EDITS ARE SAVED FIRST. A close routes the deal's lines, so closing the persisted
+             * state would build an order from data the user is not looking at. `true` ends edit mode,
+             * which is what lets the refresh below actually run -- `canRefreshRecord()` is
+             * `record && IsSaved && !EditMode`.
+             */
+            if (this.EditMode || this.Record.Dirty) {
+                if (!(await this.FormComponent.SaveRecord(true))) {
+                    this.ActionFailed = true;
+                    this.ActionMessage = 'The deal could not be saved, so it was not closed. Fix the errors above and try again.';
+                    return;
+                }
+            }
+            const result = await RunClose({
+                dealID: this.Record.ID,
+                target,
+                lossReasonID: this.LossReasonID,
+                lossNotes: this.LossNotes,
+                notes: this.CloseNotes,
+            });
+            this.ActionFailed = !result.ok;
+            this.ActionMessage = result.message;
+            this.ActionIssues = result.issues;
+            if (result.ok) {
+                this.CancelPendingOnly();
+                await this.refreshQuietly();
+            }
+        } finally {
+            this.Busy = false;
+        }
+    }
+
+    /** Clears the pending pick without wiping the message the caller just set. */
+    private CancelPendingOnly(): void {
+        this.PendingCloseStatusID = null;
+        this.LossReasonID = null;
+        this.LossNotes = '';
+        this.CloseNotes = '';
+    }
+
+    private async refreshQuietly(): Promise<void> {
+        // The operation has committed by here; a reload that throws is a stale screen, not a failure,
+        // and must not rewrite the message above it.
+        try {
+            await this.FormComponent.RefreshRecord();
+        } catch {
+            this.ActionIssues = [...this.ActionIssues, 'The deal was updated, but this page could not reload. Refresh to see it.'];
+        }
     }
 
     /* -- Reopening from the Status control (golive#205 D9) ------------------------------- */
@@ -731,10 +985,10 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
     /** The open status the user picked on a closed deal, held until they give a reason. */
     public PendingReopenStatusID: string | null = null;
     public ReopenReason = '';
-    public Reopening = false;
-    public ReopenMessage = '';
-    public ReopenFailed = false;
-    public ReopenIssues: string[] = [];
+    public Busy = false;
+    public ActionMessage = '';
+    public ActionFailed = false;
+    public ActionIssues: string[] = [];
 
     public get PendingReopenStatusName(): string {
         const id = String(this.PendingReopenStatusID ?? '').toLowerCase();
@@ -743,27 +997,27 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
 
     /** `Sales.ReopenDeal` refuses without a reason, and CD10 pins that. Refused here first. */
     public get CanConfirmReopen(): boolean {
-        return !this.Reopening && !!this.PendingReopenStatusID && this.ReopenReason.trim().length > 0;
+        return !this.Busy && !!this.PendingReopenStatusID && this.ReopenReason.trim().length > 0;
     }
 
     public CancelReopen(): void {
         this.PendingReopenStatusID = null;
         this.ReopenReason = '';
-        this.ReopenMessage = '';
-        this.ReopenIssues = [];
-        this.ReopenFailed = false;
+        this.ActionMessage = '';
+        this.ActionIssues = [];
+        this.ActionFailed = false;
     }
 
     public async ConfirmReopen(): Promise<void> {
         if (!this.CanConfirmReopen || !this.Record) return;
-        this.Reopening = true;
-        this.ReopenMessage = '';
-        this.ReopenIssues = [];
+        this.Busy = true;
+        this.ActionMessage = '';
+        this.ActionIssues = [];
         try {
             const result = await RunReopen(this.Record.ID, this.ReopenReason, this.PendingReopenStatusID);
-            this.ReopenFailed = !result.ok;
-            this.ReopenMessage = result.message;
-            this.ReopenIssues = result.issues;
+            this.ActionFailed = !result.ok;
+            this.ActionMessage = result.message;
+            this.ActionIssues = result.issues;
             if (result.ok) {
                 this.PendingReopenStatusID = null;
                 this.ReopenReason = '';
@@ -772,11 +1026,11 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
                 try {
                     await this.FormComponent.RefreshRecord();
                 } catch {
-                    this.ReopenIssues = [...this.ReopenIssues, 'The deal was reopened, but this page could not reload. Refresh to see it.'];
+                    this.ActionIssues = [...this.ActionIssues, 'The deal was reopened, but this page could not reload. Refresh to see it.'];
                 }
             }
         } finally {
-            this.Reopening = false;
+            this.Busy = false;
         }
     }
 

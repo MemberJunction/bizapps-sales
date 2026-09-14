@@ -2,7 +2,7 @@ import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { DealEntity, DealStatusOption } from '@mj-biz-apps/sales-entities';
-import { MJSDealPipelinePanel } from '../lib/form-panels/deal-form.panels';
+import { MJSDealPipelinePanel, type LossReasonOption } from '../lib/form-panels/deal-form.panels';
 
 /**
  * bc-aidp-next-golive#205: the deal form offered Won and Lost in the Status control, and picking one
@@ -23,6 +23,11 @@ import { MJSDealPipelinePanel } from '../lib/form-panels/deal-form.panels';
  * panel takes no constructor arguments and injects nothing, deliberately — see the note on `statuses`
  * in the component.
  */
+const REASONS: LossReasonOption[] = [
+    { ID: 'r-price', Name: 'Price', RequiresNotes: false },
+    { ID: 'r-compet', Name: 'Competitor', RequiresNotes: true },
+];
+
 const STATUSES: DealStatusOption[] = [
     { ID: 'open-1', Name: 'Open', LocksDeal: false, IsWon: false, IsLost: false },
     { ID: 'hold-1', Name: 'On Hold', LocksDeal: false, IsWon: false, IsLost: false },
@@ -40,22 +45,30 @@ function panelWith(statusID: string | null, statuses: DealStatusOption[] = STATU
     });
     // The loaded list, as ngOnInit would have left it.
     (panel as unknown as { statuses: { set(v: DealStatusOption[]): void } }).statuses.set(statuses);
+    panel.LossReasons.set(REASONS);
     return panel;
 }
 
-describe('the status control offers the open lifecycle only', () => {
-    it('excludes every status that locks the deal', () => {
+describe('what the status control offers depends on where the deal is', () => {
+    it('offers the WHOLE lifecycle on an open deal', () => {
+        /**
+         * golive#205: "Changing Deal Status to Won or Lost should close the deal properly." The closing
+         * statuses are offered again — what makes that safe is that picking one does not WRITE it, it
+         * starts the close. See the suite below.
+         */
         const names = panelWith('open-1').SelectableStatuses.map((s) => s.Name);
+        expect(names).toEqual(['Open', 'On Hold', 'Won', 'Lost', 'Abandoned']);
+    });
+
+    it('reaches Abandoned, which a Won/Lost pair could never express', () => {
+        expect(panelWith('open-1').SelectableStatuses.map((s) => s.ID)).toContain('aban-1');
+    });
+
+    it('offers only the non-locking ones on a CLOSED deal', () => {
+        // The only move a closed deal has is a reopen. Another closing status is neither a close nor
+        // a reopen, and the server has no path for it.
+        const names = panelWith('won-1').SelectableStatuses.map((s) => s.Name);
         expect(names).toEqual(['Open', 'On Hold']);
-    });
-
-    it('keeps On Hold, which is neither won nor lost nor locking', () => {
-        // Pausing a deal is not closing it. A filter on "is it closed" would take this with it.
-        expect(panelWith('open-1').SelectableStatuses.map((s) => s.ID)).toContain('hold-1');
-    });
-
-    it('excludes Abandoned, which a won/lost filter would have to know about separately', () => {
-        expect(panelWith('open-1').SelectableStatuses.map((s) => s.ID)).not.toContain('aban-1');
     });
 });
 
@@ -89,9 +102,9 @@ describe('editability fails CLOSED when the status cannot be resolved', () => {
         expect(panelWith('won-1').StatusIsEditable).toBe(true);
     });
 
-    it('is not editable while a reopen is in flight', () => {
+    it('is not editable while a close or reopen is in flight', () => {
         const p = panelWith('won-1');
-        p.Reopening = true;
+        p.Busy = true;
         expect(p.StatusIsEditable).toBe(false);
     });
 
@@ -195,6 +208,73 @@ describe('picking an open status on a CLOSED deal starts a reopen, it does not w
     });
 });
 
+describe('picking a closing status on an OPEN deal starts a close, it does not write', () => {
+    /**
+     * The other half of the same rule as the reopen. Writing it would lock the deal with none of the
+     * close having run — no stage event, no contract, no finance tasks, and for a Lost deal no loss
+     * reason and a live order. `bareCloseRefusal` refuses exactly that on the server, so writing it
+     * here would produce a refused save rather than a closed deal.
+     */
+    it('holds the pick instead of writing it', () => {
+        const p = panelWith('open-1');
+        p.SetStatus('won-1');
+        expect(p.Record.DealStatusTypeID, 'the status must not have moved').toBe('open-1');
+        expect(p.PendingCloseStatusID).toBe('won-1');
+        expect(p.PendingCloseStatusName).toBe('Won');
+    });
+
+    it('a winning close needs nothing else', () => {
+        const p = panelWith('open-1');
+        p.SetStatus('won-1');
+        expect(p.CanConfirmClose).toBe(true);
+    });
+
+    it('a losing close needs a reason', () => {
+        const p = panelWith('open-1');
+        p.SetStatus('lost-1');
+        expect(p.CanConfirmClose).toBe(false);
+        p.LossReasonID = 'r-price';
+        expect(p.CanConfirmClose).toBe(true);
+    });
+
+    it('a reason flagged RequiresNotes needs notes', () => {
+        const p = panelWith('open-1');
+        p.SetStatus('aban-1');
+        p.LossReasonID = 'r-compet';
+        expect(p.LossReasonRequiresNotes).toBe(true);
+        expect(p.CanConfirmClose).toBe(false);
+        p.LossNotes = '   ';
+        expect(p.CanConfirmClose, 'whitespace is not notes').toBe(false);
+        p.LossNotes = 'Lost to a cheaper incumbent.';
+        expect(p.CanConfirmClose).toBe(true);
+    });
+
+    it('drops notes when the new reason does not require them', () => {
+        const p = panelWith('open-1');
+        p.SetStatus('lost-1');
+        p.LossReasonID = 'r-compet';
+        p.LossNotes = 'Lost to Acme.';
+        p.LossReasonID = 'r-price';
+        p.OnLossReasonChange();
+        expect(p.LossNotes).toBe('');
+    });
+
+    it('cancelling drops the pick and leaves the deal open', () => {
+        const p = panelWith('open-1');
+        p.SetStatus('won-1');
+        p.CancelClose();
+        expect(p.PendingCloseStatusID).toBeNull();
+        expect(p.Record.DealStatusTypeID).toBe('open-1');
+    });
+
+    it('cannot confirm while something is in flight', () => {
+        const p = panelWith('open-1');
+        p.SetStatus('won-1');
+        p.Busy = true;
+        expect(p.CanConfirmClose).toBe(false);
+    });
+});
+
 describe('option matching is case-insensitive', () => {
     it('compares ids without regard to case', () => {
         const c = panelWith('open-1').CompareStatus;
@@ -234,6 +314,17 @@ describe('the template actually uses all of this', () => {
 
     it('keeps the current status visible when it is a closing one', () => {
         expect(control).toContain('@if (CurrentStatusIsClosing)');
+    });
+
+    it('renders the close prompt and wires it to the guarded confirm', () => {
+        // Same reasoning as the reopen prompt below: without this block a pick on an open deal is held
+        // and never released, and without the guard a Lost close goes through with no reason.
+        const after = source.slice(source.indexOf('@if (PendingCloseStatusID) {'));
+        const prompt = after.slice(0, after.indexOf('@if (PendingReopenStatusID) {'));
+        expect(prompt).toContain('[disabled]="!CanConfirmClose"');
+        expect(prompt).toContain('(click)="ConfirmClose()"');
+        expect(prompt).toContain('(click)="CancelClose()"');
+        expect(prompt).toContain('@if (PendingCloseStatus?.IsLost)');
     });
 
     it('renders the reopen prompt and wires it to the guarded confirm', () => {
