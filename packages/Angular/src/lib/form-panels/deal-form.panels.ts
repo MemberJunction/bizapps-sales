@@ -11,7 +11,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectorRef, Component, ViewEncapsulation, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, ViewEncapsulation, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CompositeKey, Metadata, RunView, type EntityInfo } from '@memberjunction/core';
@@ -24,6 +24,8 @@ import {
     type DealStatusOption,
     type SalesCloseDealInput,
     type SalesCloseDealOutput,
+    type SalesReopenDealInput,
+    type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import { SyntheticActivityView } from '../pages/deal-views';
@@ -52,7 +54,9 @@ async function LoadLossReasons(): Promise<LossReasonOption[]> {
     const result = await new RunView().RunView<{ ID: string; Name: string; RequiresNotes: boolean }>({
         EntityName: E_LOSS_REASON,
         ExtraFilter: 'IsActive = 1',
-        OrderBy: 'Name',
+        // DisplayRank first, matching `deal-workspace.service.ts` — the column exists precisely so an
+        // admin can order this list, and sorting by Name alone silently ignored what they set.
+        OrderBy: 'DisplayRank ASC, Name ASC',
         ResultType: 'simple',
         Fields: ['ID', 'Name', 'RequiresNotes'],
     });
@@ -148,6 +152,11 @@ const FIELD_STYLES = `
     @media (max-width: 720px) { .mjs-fields { grid-template-columns: 1fr; } }
     .mjs-field { min-width: 0; }
     .mjs-field--span { grid-column: 1 / -1; }
+    /* The Status control's hints. Previously dw-field__hint, which is defined only in the deal
+       WORKSPACE's stylesheet under emulated encapsulation, so the rule could never match markup in
+       this component and both hints rendered as unstyled body text. FIELD_STYLES is a template
+       literal, so no backticks in here. */
+    .mjs-field__hint { display: block; margin-top: var(--mj-space-1); color: var(--mj-text-muted); font-size: 0.78rem; }
     .mjs-field .mj-forms-field {
         display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 0;
     }
@@ -473,8 +482,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         @if (EditMode) {
                             <select [ngModel]="Record.DealStatusTypeID"
                                     (ngModelChange)="SetStatus($event)"
+                                    [compareWith]="CompareStatus"
                                     [disabled]="!StatusIsEditable">
-                                <option [ngValue]="null">— choose —</option>
+                                <!-- Pickable only on a deal nobody has saved. On a saved one it writes
+                                     NULL, and a deal with no status is invisible to every rollup. -->
+                                <option [ngValue]="null" [disabled]="Record.IsSaved">— choose —</option>
                                 @for (s of SelectableStatuses; track s.ID) {
                                     <option [ngValue]="s.ID">{{ s.Name }}</option>
                                 }
@@ -485,9 +497,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                 }
                             </select>
                             @if (CurrentStatusIsClosing) {
-                                <small class="dw-field__hint">Closed. Reopen the deal to change this.</small>
+                                <small class="mjs-field__hint">Closed. Use Reopen on the Close panel to change this.</small>
                             } @else {
-                                <small class="dw-field__hint">Use the Close action to win or lose a deal.</small>
+                                <small class="mjs-field__hint">Use the Close action on the Close panel to win or lose a deal.</small>
                             }
                         } @else {
                             <div class="mj-forms-field-value">{{ CurrentStatusName || '—' }}</div>
@@ -500,35 +512,70 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
 })
 export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
     /** Every active status, loaded once. Filtered for display; see SelectableStatuses. */
-    private statuses: DealStatusOption[] = [];
+    /**
+     * A SIGNAL rather than a plain array, and not for style.
+     *
+     * The host container is OnPush, and nothing marked it dirty when this promise resolved -- the
+     * control painted with an empty list and stayed that way until an unrelated click ticked the tree.
+     * A ChangeDetectorRef would also fix that, but `inject()` needs an injection context, which means
+     * the panel can no longer be constructed in a unit test. A signal read through the template marks
+     * the component itself, needs no DI, and leaves `new MJSDealPipelinePanel()` working.
+     */
+    private readonly statuses = signal<DealStatusOption[]>([]);
 
     public async ngOnInit(): Promise<void> {
         // BaseFormPanel declares no lifecycle hook, so there is nothing to chain to. Angular calls this
         // on the component regardless of whether the base class has one.
-        this.statuses = await LoadDealStatusOptions();
+        this.statuses.set(await LoadDealStatusOptions());
     }
+
+    /**
+     * The loaded row for the deal's current status, or null when the list does not contain it.
+     *
+     * One resolver, so every question below answers from the same place. Null has two causes and the
+     * callers treat them alike, deliberately: the list has not resolved yet, or the deal sits in a
+     * status an admin has since deactivated (the loader filters IsActive = 1). In both cases the
+     * honest answer is "not known", never "not closing".
+     */
+    private get currentStatus(): DealStatusOption | null {
+        const id = String(this.Record?.DealStatusTypeID ?? '').toLowerCase();
+        if (!id) return null;
+        return this.statuses().find((s) => s.ID.toLowerCase() === id) ?? null;
+    }
+
+    /**
+     * Angular's select matches the model against each option by strict identity, while every getter
+     * here lowercases both sides because ids arrive cased either way. Without this the control renders
+     * with nothing selected on a deal that plainly has a status, while read mode two lines below shows
+     * the name correctly -- one record answering differently in two places.
+     */
+    public readonly CompareStatus = (a: unknown, b: unknown): boolean =>
+        String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 
     /**
      * The statuses a user may pick DIRECTLY — the non-locking ones.
      *
      * By FLAG, never by name, and `LocksDeal` specifically: that is the flag the server's refusal
-     * reads, so this control and the save cannot disagree about which statuses are pickable. The deal
-     * workspace filters the same way for the same reason.
+     * reads, so this control and the save cannot disagree about which statuses are pickable.
+     *
+     * NOT the predicate the deal workspace uses -- it filters !IsWon && !IsLost. The two coincide on
+     * today's seed and diverge on a status that locks without being either, which bareCloseRefusal
+     * would then refuse from the workspace. Said this way round because an earlier version of this
+     * comment asserted a parity that does not exist; migrating the workspace onto the flag is its own
+     * change.
      */
     public get SelectableStatuses(): DealStatusOption[] {
-        return this.statuses.filter((s) => !s.LocksDeal);
+        return this.statuses().filter((s) => !s.LocksDeal);
     }
 
     /** The display name of whatever status the deal currently holds. */
     public get CurrentStatusName(): string {
-        const id = String(this.Record?.DealStatusTypeID ?? '');
-        return this.statuses.find((s) => s.ID.toLowerCase() === id.toLowerCase())?.Name ?? '';
+        return this.currentStatus?.Name ?? '';
     }
 
     /** True when the deal already sits in a closing status, so the control is showing a frozen value. */
     public get CurrentStatusIsClosing(): boolean {
-        const id = String(this.Record?.DealStatusTypeID ?? '');
-        return this.statuses.some((s) => s.ID.toLowerCase() === id.toLowerCase() && s.LocksDeal);
+        return this.currentStatus?.LocksDeal === true;
     }
 
     /**
@@ -536,14 +583,30 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
      * field would be the mirror of the defect this change closes: a status write that unlocks a deal
      * without the reopen having run.
      */
+    /**
+     * FAILS CLOSED, which is the half that was wrong. The old version asked only whether the current
+     * status locks, and an UNKNOWN status answered "no" -- so a Won deal whose status an admin had
+     * deactivated rendered an ENABLED control whose only pickable option was the blank one, on a deal
+     * the server refuses every edit to. Not knowing is now a reason to leave the control alone.
+     */
     public get StatusIsEditable(): boolean {
+        if (this.statuses().length === 0) return false;                 // list never resolved
+        if (this.Record?.IsSaved && !this.currentStatus) return false;  // status not in the active list
         return !this.CurrentStatusIsClosing;
     }
 
     public SetStatus(id: string | null): void {
-        if (this.Record) {
-            this.Record.DealStatusTypeID = id as never;
-        }
+        if (!this.Record) return;
+        /**
+         * The blank option exists so a NEW deal can start without a status. Writing it to a SAVED deal
+         * clears the column, and the server cannot put it back: the opening default is creation-only,
+         * and applyStageDefaults sees a deliberate null as caller-supplied and leaves it alone. The
+         * result is the state DealEntityServer's own comment calls fatal -- a deal every IsOpen/IsWon
+         * rollup skips. The option is disabled in the template as well; this is the half that does not
+         * depend on a template being right.
+         */
+        if (id === null && this.Record.IsSaved) return;
+        this.Record.DealStatusTypeID = id;
     }
 
     public readonly Fields: DealFieldSpec[] = [
@@ -758,23 +821,28 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
                         </small>
                     } @else {
                         <div class="mjs-close-action__form">
+                            <!-- The real closing statuses, by name, from the flags. A Won/Lost pair
+                                 could not express a deployment with more than one losing status, and
+                                 this one has two: Lost and Abandoned both carry IsLost, so resolving
+                                 the target with find(IsLost) picked whichever sorted first and left
+                                 Abandoned unreachable from the form entirely. -->
                             <div class="mjs-close-action__row">
-                                <label>
-                                    <input type="radio" name="dealCloseOutcome" value="won"
-                                           [(ngModel)]="Outcome" [disabled]="Closing" /> Won
-                                </label>
-                                <label>
-                                    <input type="radio" name="dealCloseOutcome" value="lost"
-                                           [(ngModel)]="Outcome" [disabled]="Closing" /> Lost
-                                </label>
+                                @for (s of ClosingStatuses; track s.ID) {
+                                    <label>
+                                        <input type="radio" name="dealCloseTarget" [value]="s.ID"
+                                               [(ngModel)]="TargetStatusID" (ngModelChange)="OnTargetChange()"
+                                               [disabled]="Closing" /> {{ s.Name }}
+                                    </label>
+                                }
                             </div>
 
-                            @if (Outcome === 'lost') {
+                            @if (SelectedStatus?.IsLost) {
                                 <label class="mjs-close-action__field">
                                     <span>Loss reason</span>
-                                    <select [(ngModel)]="LossReasonID" [disabled]="Closing">
+                                    <select [(ngModel)]="LossReasonID" (ngModelChange)="OnLossReasonChange()"
+                                            [disabled]="Closing">
                                         <option [ngValue]="null">— choose —</option>
-                                        @for (r of LossReasons; track r.ID) {
+                                        @for (r of LossReasons(); track r.ID) {
                                             <option [ngValue]="r.ID">{{ r.Name }}</option>
                                         }
                                     </select>
@@ -803,10 +871,59 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
                         </div>
                     }
 
+                </div>
+            }
+
+            <!-- REOPENING, the other half of bc-aidp-next-golive#205 (golive#206 item 3 keeps Deal
+                 Status frozen, so this is the only way back). The report named two defects, not one:
+                 "no contract was created ... and there is no way to reopen it". Filtering the closing
+                 statuses out fixed the first and left the second exactly as it was, while the Status
+                 hint now tells the user to reopen the deal — a promise the form could not keep. -->
+            @if (CanReopen) {
+                <div class="mjs-close-action">
+                    @if (!ReopenPanelOpen) {
+                        <button type="button" class="mjs-close-action__start" (click)="OpenReopenPanel()">
+                            <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reopen this deal
+                        </button>
+                        <small class="mjs-close-action__hint">
+                            Records the reason on the stage history, clears the close stamps and returns
+                            the order to the pipeline. Refused if the order has already booked.
+                        </small>
+                    } @else {
+                        <div class="mjs-close-action__form">
+                            <label class="mjs-close-action__field">
+                                <span>Reason <em>(required)</em></span>
+                                <textarea rows="2" [(ngModel)]="ReopenReason" [disabled]="Closing"></textarea>
+                            </label>
+                            <div class="mjs-close-action__row">
+                                <button type="button" class="mjs-close-action__confirm"
+                                        [disabled]="!CanConfirmReopen" (click)="ConfirmReopen()">
+                                    {{ Closing ? 'Reopening…' : 'Reopen deal' }}
+                                </button>
+                                <button type="button" class="mjs-close-action__cancel"
+                                        [disabled]="Closing" (click)="CancelReopen()">Cancel</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+
+            <!-- OUTSIDE both gates, deliberately. These used to sit inside the CanClose block, and
+                 ConfirmClose ends with RefreshRecord() - which locks the deal, flips CanClose to false
+                 and unmounted the whole block. The confirmation and every warning the close produced
+                 were destroyed by the refresh that produced them, so a close whose contract was stubbed
+                 or whose finance task could not be routed reported NOTHING. golive#205 asks for exactly
+                 the opposite: "Any downstream step that did not happen ... should show on the form
+                 after the save." -->
+            @if (Message || Issues.length) {
+                <div class="mjs-close-action">
                     @if (Message) {
                         <div class="mjs-close-action__msg" [class.is-error]="MessageIsError">{{ Message }}</div>
                     }
-                    @for (i of Issues; track i) {
+                    <!-- Tracked by index: the operation pushes one issue per task, so two tasks
+                         failing the same way produce two identical strings, and tracking by the string
+                         itself is a duplicate-key error. -->
+                    @for (i of Issues; track $index) {
                         <div class="mjs-close-action__issue">{{ i }}</div>
                     }
                 </div>
@@ -826,34 +943,136 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
 })
 export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
     public PanelOpen = false;
+    public ReopenPanelOpen = false;
+    public ReopenReason = '';
+    /**
+     * One in-flight flag for BOTH operations, not two.
+     *
+     * Close and reopen are mutually exclusive by lock state — `CanClose` and `CanReopen` can never be
+     * true at once — so a second flag could only ever disagree with this one. It keeps its name because
+     * the close came first; the button label says which is running.
+     */
     public Closing = false;
-    public Outcome: 'won' | 'lost' | null = null;
+    public TargetStatusID: string | null = null;
     public LossReasonID: string | null = null;
     public LossNotes = '';
     public Notes = '';
     public Message = '';
     public MessageIsError = false;
     public Issues: string[] = [];
-    public LossReasons: LossReasonOption[] = [];
+    /** Signals for the same reason the Pipeline panel uses them -- see the note on `statuses` there. */
+    public readonly LossReasons = signal<LossReasonOption[]>([]);
 
-    private statuses: DealStatusOption[] = [];
+    private readonly statuses = signal<DealStatusOption[]>([]);
 
     public async ngOnInit(): Promise<void> {
-        [this.statuses, this.LossReasons] = await Promise.all([
-            LoadDealStatusOptions(),
-            LoadLossReasons(),
-        ]);
+        /**
+         * Settled rather than all-or-nothing. `Promise.all` rejects on the first failure, and an
+         * unhandled rejection in `ngOnInit` left BOTH lists empty with nothing on screen to say so --
+         * a loss-reason outage would have taken the close action down with it. Each list now fails on
+         * its own, and `CanClose` treats an unresolved status list as "not offerable" rather than
+         * guessing.
+         */
+        const settled = await Promise.allSettled([LoadDealStatusOptions(), LoadLossReasons()]);
+        const valueOf = <T>(r: PromiseSettledResult<T>): T | null =>
+            r.status === 'fulfilled' ? r.value : null; // vocabulary-grep-allow: PromiseSettledResult discriminant, not a domain status
+
+        const loadedStatuses = valueOf(settled[0] as PromiseSettledResult<DealStatusOption[]>);
+        const loadedReasons = valueOf(settled[1] as PromiseSettledResult<LossReasonOption[]>);
+        if (loadedStatuses) {
+            this.statuses.set(loadedStatuses);
+        }
+        if (loadedReasons) {
+            this.LossReasons.set(loadedReasons);
+        }
+        if (!loadedStatuses || !loadedReasons) {
+            this.Fail('Some of this panel could not load. Reload the page before closing this deal.');
+        }
     }
 
-    /** Only an open, saved deal can be closed. A closed one shows its stamps and nothing else. */
+    /**
+     * The loaded row for the deal's current status, or null when the list does not contain it.
+     *
+     * Same resolver, same reasoning as the Pipeline panel: an unresolved status means "not known", and
+     * both actions below treat not-knowing as a reason to offer nothing.
+     */
+    private get currentStatus(): DealStatusOption | null {
+        const id = String(this.Record?.DealStatusTypeID ?? '').toLowerCase();
+        if (!id) return null;
+        return this.statuses().find((s) => s.ID.toLowerCase() === id) ?? null;
+    }
+
+    /**
+     * Only an open, saved deal can be closed — and FAILS CLOSED on a status it cannot resolve.
+     *
+     * The earlier version asked `!some(locks)`, so an empty or still-loading list answered "nothing
+     * locks, therefore it is open" and offered Close on a deal that was already closed. That is the
+     * same fail-open shape the Pipeline panel had, and the two now agree: unknown means neither action.
+     */
     public get CanClose(): boolean {
         if (!this.Record?.IsSaved) return false;
-        const id = String(this.Record.DealStatusTypeID ?? '').toLowerCase();
-        return !this.statuses.some((x) => x.ID.toLowerCase() === id && x.LocksDeal);
+        const current = this.currentStatus;
+        return current !== null && !current.LocksDeal;
+    }
+
+    /**
+     * The mirror of {@link CanClose}: only a saved, CLOSED deal can be reopened.
+     *
+     * Deliberately NOT `!CanClose` — that would offer the action on an unsaved deal, which has nothing
+     * to reopen, and on a deal whose status list failed to load, where nothing is known to lock. Both
+     * read the same resolver, so a status that vanishes from the list leaves BOTH actions hidden rather
+     * than leaving the form offering one the server would refuse.
+     */
+    public get CanReopen(): boolean {
+        if (!this.Record?.IsSaved) return false;
+        return this.currentStatus?.LocksDeal === true;
+    }
+
+    /**
+     * `Sales.ReopenDeal` REQUIRES a reason — §7.3 makes undoing a lock explainable, and CD10 pins it.
+     *
+     * Worth stating because golive#205 asks for the opposite ("No reopen reason should be required in
+     * this path"). Refusing here rather than letting the operation refuse keeps the round trip off a
+     * request that cannot succeed, and matches how the workspace's reopen behaves.
+     */
+    public get CanConfirmReopen(): boolean {
+        return !this.Closing && this.ReopenReason.trim().length > 0;
+    }
+
+    /** The statuses a close may land in, by flag. Their names are the user's choice of outcome. */
+    public get ClosingStatuses(): DealStatusOption[] {
+        return this.statuses().filter((s) => s.LocksDeal);
+    }
+
+    /** The row the user picked, or null before they pick one. */
+    public get SelectedStatus(): DealStatusOption | null {
+        if (!this.TargetStatusID) return null;
+        const id = this.TargetStatusID.toLowerCase();
+        return this.statuses().find((s) => s.ID.toLowerCase() === id) ?? null;
     }
 
     public get LossReasonRequiresNotes(): boolean {
-        return this.LossReasons.find((r) => r.ID === this.LossReasonID)?.RequiresNotes === true;
+        return this.LossReasons().find((r) => r.ID === this.LossReasonID)?.RequiresNotes === true;
+    }
+
+    /**
+     * Changing the outcome drops the loss detail that belonged to the old one.
+     *
+     * The notes field only RENDERS while a reason needing notes is selected, so a user who typed notes
+     * against "Competitor" and then switched to "Price" could not see that the text was still there --
+     * and it was still submitted, against a reason that contradicts it. Nothing downstream could tell.
+     */
+    public OnTargetChange(): void {
+        if (!this.SelectedStatus?.IsLost) {
+            this.LossReasonID = null;
+            this.LossNotes = '';
+        }
+    }
+
+    public OnLossReasonChange(): void {
+        if (!this.LossReasonRequiresNotes) {
+            this.LossNotes = '';
+        }
     }
 
     /**
@@ -863,18 +1082,19 @@ export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
      * since an import or an agent never comes through this panel. This only spares the round trip.
      */
     public get CanConfirm(): boolean {
-        if (this.Closing || !this.Outcome) return false;
-        if (this.Outcome === 'lost') {
+        if (this.Closing) return false;
+        const target = this.SelectedStatus;
+        if (!target) return false;
+        if (target.IsLost) {
             if (!this.LossReasonID) return false;
             if (this.LossReasonRequiresNotes && !this.LossNotes.trim()) return false;
-
         }
         return true;
     }
 
     public OpenPanel(): void {
         this.PanelOpen = true;
-        this.Outcome = null;
+        this.TargetStatusID = null;
         this.LossReasonID = null;
         this.LossNotes = '';
         this.Notes = '';
@@ -902,10 +1122,9 @@ export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
     public async ConfirmClose(): Promise<void> {
         if (!this.CanConfirm || !this.Record) return;
 
-        const wantWon = this.Outcome === 'won';
-        const target = this.statuses.find((x) => (wantWon ? x.IsWon : x.IsLost));
+        const target = this.SelectedStatus;
         if (!target) {
-            this.Fail(`No active status carries Is${wantWon ? 'Won' : 'Lost'}. Seed the deal status types first.`);
+            this.Fail('Pick an outcome first.');
             return;
         }
 
@@ -913,8 +1132,17 @@ export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
         this.Message = '';
         this.Issues = [];
         try {
+            /**
+             * `true` ENDS EDIT MODE, and that is load-bearing rather than cosmetic.
+             *
+             * `BaseFormComponent.canRefreshRecord()` is `record && record.IsSaved && !this.EditMode`,
+             * so with edit mode still on, the `RefreshRecord()` at the end of this method returned
+             * false and reloaded nothing -- on exactly the path that took it. The form went on showing
+             * the pre-close record: old status, blank close stamps, and `CanClose` still true, so the
+             * button re-rendered and a second click fired `Sales.CloseDeal` at a locked deal.
+             */
             if (this.EditMode || this.Record.Dirty) {
-                if (!(await this.FormComponent.SaveRecord(false))) {
+                if (!(await this.FormComponent.SaveRecord(true))) {
                     this.Fail('The deal could not be saved, so it was not closed. Fix the errors above and try again.');
                     return;
                 }
@@ -931,8 +1159,8 @@ export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
                 {
                     DealID: this.Record.ID,
                     DealStatusTypeID: target.ID,
-                    LossReasonID: wantWon ? null : this.LossReasonID,
-                    LossNotes: wantWon ? null : (this.LossNotes.trim() || null),
+                    LossReasonID: target.IsLost ? this.LossReasonID : null,
+                    LossNotes: target.IsLost ? (this.LossNotes.trim() || null) : null,
                     Notes: this.Notes.trim() || null,
                 },
             );
@@ -949,16 +1177,98 @@ export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
 
             this.PanelOpen = false;
             this.MessageIsError = false;
-            this.Message = out.IsWon ? 'Deal closed as won.' : 'Deal closed as lost.';
+            this.Message = `Deal closed as ${target.Name}.`;
             // WARNINGS ON A SUCCESSFUL CLOSE are the interesting ones -- a stubbed downstream, a finance
             // task that could not be routed, an order status orders refused. Reporting only failures
             // would call a half-done close clean.
             this.Issues = (out.Issues ?? []).map((i) => i.Message);
-            await this.FormComponent.RefreshRecord();
+            // OUTSIDE the try that wraps the operation. The close is committed by this point, and a
+            // reload that throws afterwards is a display problem -- letting it reach the catch below
+            // replaced "Deal closed as Won." with "The close did not complete", on a deal that closed.
+            await this.refreshQuietly();
         } catch (err) {
             this.Fail(`The close did not complete: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
             this.Closing = false;
+        }
+    }
+
+    public OpenReopenPanel(): void {
+        this.ReopenPanelOpen = true;
+        this.ReopenReason = '';
+        this.Message = '';
+        this.MessageIsError = false;
+        this.Issues = [];
+    }
+
+    public CancelReopen(): void {
+        this.ReopenPanelOpen = false;
+        this.ReopenReason = '';
+        this.Message = '';
+        this.MessageIsError = false;
+        this.Issues = [];
+    }
+
+    /**
+     * The audited way back through the lock (bc-aidp-next-golive#205).
+     *
+     * Mirrors {@link ConfirmClose}, including the part that is easy to drop: a reopen can return
+     * `Success: true` WITH issues, and those are the ones that matter most. S-US8's reopen asks the
+     * order to come back while it sits at `Voided`, which orders treats as terminal — the deal reopens
+     * regardless, because an order-side refusal must never block a stage change, so this list is the
+     * only thing standing between the rep and a live deal pointing at a dead order.
+     *
+     * No save-first step, unlike the close. A locked deal has almost nothing editable, and the close
+     * lock would refuse the save anyway — so saving first could only turn a legal reopen into a refusal.
+     */
+    public async ConfirmReopen(): Promise<void> {
+        if (!this.CanConfirmReopen || !this.Record) return;
+
+        this.Closing = true;
+        this.Message = '';
+        this.Issues = [];
+        try {
+            const router = Metadata.Provider as unknown as DealCloseOperationRouter;
+            const envelope = await router.RouteOperation<SalesReopenDealInput, SalesReopenDealOutput>(
+                'Sales.ReopenDeal',
+                { DealID: this.Record.ID, Reason: this.ReopenReason.trim() },
+            );
+            if (!envelope.Success) {
+                this.Fail(envelope.ErrorMessage ?? 'Sales.ReopenDeal could not be reached.');
+                return;
+            }
+            const out = envelope.Output;
+            if (!out?.Success) {
+                this.Issues = (out?.Issues ?? []).map((i) => i.Message);
+                this.Fail(out?.Issues?.[0]?.Message ?? 'The deal could not be reopened.');
+                return;
+            }
+
+            this.ReopenPanelOpen = false;
+            this.ReopenReason = '';
+            this.MessageIsError = false;
+            this.Message = 'Deal reopened. The close event remains in its history.';
+            this.Issues = (out.Issues ?? []).map((i) => i.Message);
+            await this.refreshQuietly();
+        } catch (err) {
+            this.Fail(`The reopen did not complete: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+            this.Closing = false;
+        }
+    }
+
+    /**
+     * Reload the record without letting a reload failure rewrite the outcome.
+     *
+     * Both operations commit server-side before this runs, so a throw here means the screen is stale,
+     * not that the deal did not close. The message already on screen is the true one; this only adds a
+     * line saying the view is behind.
+     */
+    private async refreshQuietly(): Promise<void> {
+        try {
+            await this.FormComponent.RefreshRecord();
+        } catch {
+            this.Issues = [...this.Issues, 'The deal was updated, but this page could not reload. Refresh to see it.'];
         }
     }
 
