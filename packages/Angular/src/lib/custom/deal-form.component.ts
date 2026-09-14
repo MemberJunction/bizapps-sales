@@ -127,8 +127,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
 
         if (new Date(newest).getTime() > new Date(computedAt).getTime()) {
             this.StaleAmountNotice =
-                'A line has changed since this amount was priced, so the total shown is out of date. ' +
-                'Reprice the deal to get a current figure from Orders — Sales does not recalculate it here.';
+                'A line has changed since this amount was last priced. Reprice the order to update the total.';
         }
     }
 
