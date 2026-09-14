@@ -81,6 +81,55 @@ interface DealCloseOperationRouter {
     ): Promise<{ Success: boolean; Output?: TOutput; ErrorMessage?: string }>;
 }
 
+/** What a surface needs back from a reopen, without either of them re-deriving it. */
+interface ReopenOutcome {
+    ok: boolean;
+    message: string;
+    issues: string[];
+}
+
+/**
+ * `Sales.ReopenDeal`, called in ONE place.
+ *
+ * Two surfaces reach the reopen now -- the Status control (golive#205 D9: "Changing Deal Status from
+ * Won or Lost back to Open should reopen the deal") and the Close panel's button. A second copy of the
+ * envelope-versus-Output handling is exactly the drift the review found between this form and the deal
+ * workspace, so there is one.
+ *
+ * TWO LAYERS OF SUCCESS. `Success` on the envelope means the operation RAN; whether the deal reopened
+ * is `Output.Success`. And a SUCCESSFUL reopen still carries issues worth showing: S-US8 reopens behind
+ * an order orders treats as terminal, and that list is the only thing between the rep and a live deal
+ * pointing at a dead order.
+ */
+async function RunReopen(dealID: string, reason: string, targetStatusID: string | null): Promise<ReopenOutcome> {
+    try {
+        const router = Metadata.Provider as unknown as DealCloseOperationRouter;
+        const envelope = await router.RouteOperation<SalesReopenDealInput, SalesReopenDealOutput>(
+            'Sales.ReopenDeal',
+            { DealID: dealID, Reason: reason.trim(), DealStatusTypeID: targetStatusID },
+        );
+        if (!envelope.Success) {
+            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.ReopenDeal could not be reached.', issues: [] };
+        }
+        const out = envelope.Output;
+        if (!out?.Success) {
+            const issues = (out?.Issues ?? []).map((i) => i.Message);
+            return { ok: false, message: issues[0] ?? 'The deal could not be reopened.', issues };
+        }
+        return {
+            ok: true,
+            message: 'Deal reopened. The close event remains in its history.',
+            issues: (out.Issues ?? []).map((i) => i.Message),
+        };
+    } catch (err) {
+        return {
+            ok: false,
+            message: `The reopen did not complete: ${err instanceof Error ? err.message : String(err)}`,
+            issues: [],
+        };
+    }
+}
+
 const CLOSE_ACTION_STYLES = `
     .mjs-close-action {
         padding: var(--mj-space-4) var(--mj-space-5);
@@ -101,7 +150,7 @@ const CLOSE_ACTION_STYLES = `
     .mjs-close-action__field > span { font-size: 0.78rem; color: var(--mj-text-muted); }
     .mjs-close-action__confirm {
         cursor: pointer; padding: 6px 14px; border-radius: var(--mj-radius-sm);
-        border: 1px solid var(--mj-brand-primary); background: var(--mj-brand-primary); color: #fff;
+        border: 1px solid var(--mj-brand-primary); background: var(--mj-brand-primary); color: var(--mj-text-on-brand);
         font-weight: 600;
     }
     .mjs-close-action__confirm:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -157,6 +206,23 @@ const FIELD_STYLES = `
        this component and both hints rendered as unstyled body text. FIELD_STYLES is a template
        literal, so no backticks in here. */
     .mjs-field__hint { display: block; margin-top: var(--mj-space-1); color: var(--mj-text-muted); font-size: 0.78rem; }
+    .mjs-reopen { display: flex; flex-direction: column; gap: var(--mj-space-2); margin-top: var(--mj-space-2); }
+    .mjs-reopen__field { display: flex; flex-direction: column; gap: var(--mj-space-1); font-size: 0.82rem; }
+    .mjs-reopen__field textarea { width: 100%; font: inherit; }
+    .mjs-reopen__row { display: flex; gap: var(--mj-space-2); }
+    .mjs-reopen__confirm {
+        border: 1px solid var(--mj-brand-primary); background: var(--mj-brand-primary);
+        color: var(--mj-text-on-brand); border-radius: var(--mj-radius-sm);
+        padding: var(--mj-space-1) var(--mj-space-3); cursor: pointer; font: inherit;
+    }
+    .mjs-reopen__confirm:disabled { opacity: 0.55; cursor: not-allowed; }
+    .mjs-reopen__cancel {
+        border: 1px solid var(--mj-border-default); background: transparent; color: var(--mj-text-default);
+        border-radius: var(--mj-radius-sm); padding: var(--mj-space-1) var(--mj-space-3); cursor: pointer; font: inherit;
+    }
+    .mjs-reopen__msg { font-size: 0.82rem; color: var(--mj-status-success); }
+    .mjs-reopen__msg.is-error { color: var(--mj-status-warning); font-weight: 500; }
+    .mjs-reopen__issue { font-size: 0.78rem; color: var(--mj-status-warning); }
     .mjs-field .mj-forms-field {
         display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 0;
     }
@@ -496,9 +562,35 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                     <option [ngValue]="Record.DealStatusTypeID" disabled>{{ CurrentStatusName }}</option>
                                 }
                             </select>
-                            @if (CurrentStatusIsClosing) {
-                                <small class="mjs-field__hint">Closed. Use Reopen on the Close panel to change this.</small>
-                            } @else {
+                            @if (PendingReopenStatusID) {
+                                <!-- golive#205 D9: the status field IS the way back. Picking an open
+                                     status on a closed deal does not write it -- Sales.ReopenDeal has
+                                     to run, and it needs a reason -- so it asks for one here and the
+                                     operation moves the status itself. -->
+                                <div class="mjs-reopen">
+                                    <label class="mjs-reopen__field">
+                                        <span>Reopen as {{ PendingReopenStatusName }} — reason <em>(required)</em></span>
+                                        <textarea rows="2" [(ngModel)]="ReopenReason" [disabled]="Reopening"></textarea>
+                                    </label>
+                                    <div class="mjs-reopen__row">
+                                        <button type="button" class="mjs-reopen__confirm"
+                                                [disabled]="!CanConfirmReopen" (click)="ConfirmReopen()">
+                                            {{ Reopening ? 'Reopening…' : 'Reopen deal' }}
+                                        </button>
+                                        <button type="button" class="mjs-reopen__cancel"
+                                                [disabled]="Reopening" (click)="CancelReopen()">Cancel</button>
+                                    </div>
+                                </div>
+                            }
+                            @if (ReopenMessage) {
+                                <div class="mjs-reopen__msg" [class.is-error]="ReopenFailed">{{ ReopenMessage }}</div>
+                            }
+                            @for (i of ReopenIssues; track $index) {
+                                <div class="mjs-reopen__issue">{{ i }}</div>
+                            }
+                            @if (CurrentStatusIsClosing && !PendingReopenStatusID) {
+                                <small class="mjs-field__hint">Closed. Pick an open status to reopen it, or use Reopen on the Close panel.</small>
+                            } @else if (!CurrentStatusIsClosing) {
                                 <small class="mjs-field__hint">Use the Close action on the Close panel to win or lose a deal.</small>
                             }
                         } @else {
@@ -584,15 +676,26 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
      * without the reopen having run.
      */
     /**
-     * FAILS CLOSED, which is the half that was wrong. The old version asked only whether the current
-     * status locks, and an UNKNOWN status answered "no" -- so a Won deal whose status an admin had
-     * deactivated rendered an ENABLED control whose only pickable option was the blank one, on a deal
-     * the server refuses every edit to. Not knowing is now a reason to leave the control alone.
+     * EDITABLE ON A LOCKED DEAL TOO, which is golive#205 D9 and #206 item 3 asking for the same thing:
+     * "Deal Status should stay editable so the deal can be set back to Open, which is how a closed deal
+     * is reopened."
+     *
+     * What makes that safe is that picking an open status here does NOT write it. A bare status write
+     * out of a locking status is the mirror of the defect this whole change closes -- it would unlock
+     * the deal with no reopen event, the close stamps still set and the order still voided, and nothing
+     * would refuse it: `IsBareCloseWrite` returns false when the PRIOR status locks, precisely because
+     * the close lock owns that refusal, and the lock only owns it while DealStatusTypeID stays out of
+     * the editable-while-locked set. So {@link SetStatus} routes the pick into `Sales.ReopenDeal`,
+     * which is the audited way through, and the operation moves the status itself.
+     *
+     * STILL FAILS CLOSED on a status it cannot resolve: an unknown status means the lock state is
+     * unknown, and offering either path on that is guessing.
      */
     public get StatusIsEditable(): boolean {
+        if (this.Reopening) return false;                               // one in flight
         if (this.statuses().length === 0) return false;                 // list never resolved
         if (this.Record?.IsSaved && !this.currentStatus) return false;  // status not in the active list
-        return !this.CurrentStatusIsClosing;
+        return true;
     }
 
     public SetStatus(id: string | null): void {
@@ -606,7 +709,75 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
          * depend on a template being right.
          */
         if (id === null && this.Record.IsSaved) return;
+        /**
+         * ON A CLOSED DEAL THIS IS A REOPEN REQUEST, not a field edit. Writing the status directly
+         * would unlock the deal with none of the reopen having run -- no event, stamps still set, order
+         * still voided -- and nothing downstream would refuse it. So the pick is held, the reason is
+         * asked for, and `Sales.ReopenDeal` performs the status change.
+         */
+        if (this.CurrentStatusIsClosing) {
+            this.PendingReopenStatusID = id;
+            this.ReopenReason = '';
+            this.ReopenMessage = '';
+            this.ReopenIssues = [];
+            this.ReopenFailed = false;
+            return;
+        }
         this.Record.DealStatusTypeID = id;
+    }
+
+    /* -- Reopening from the Status control (golive#205 D9) ------------------------------- */
+
+    /** The open status the user picked on a closed deal, held until they give a reason. */
+    public PendingReopenStatusID: string | null = null;
+    public ReopenReason = '';
+    public Reopening = false;
+    public ReopenMessage = '';
+    public ReopenFailed = false;
+    public ReopenIssues: string[] = [];
+
+    public get PendingReopenStatusName(): string {
+        const id = String(this.PendingReopenStatusID ?? '').toLowerCase();
+        return this.statuses().find((s) => s.ID.toLowerCase() === id)?.Name ?? '';
+    }
+
+    /** `Sales.ReopenDeal` refuses without a reason, and CD10 pins that. Refused here first. */
+    public get CanConfirmReopen(): boolean {
+        return !this.Reopening && !!this.PendingReopenStatusID && this.ReopenReason.trim().length > 0;
+    }
+
+    public CancelReopen(): void {
+        this.PendingReopenStatusID = null;
+        this.ReopenReason = '';
+        this.ReopenMessage = '';
+        this.ReopenIssues = [];
+        this.ReopenFailed = false;
+    }
+
+    public async ConfirmReopen(): Promise<void> {
+        if (!this.CanConfirmReopen || !this.Record) return;
+        this.Reopening = true;
+        this.ReopenMessage = '';
+        this.ReopenIssues = [];
+        try {
+            const result = await RunReopen(this.Record.ID, this.ReopenReason, this.PendingReopenStatusID);
+            this.ReopenFailed = !result.ok;
+            this.ReopenMessage = result.message;
+            this.ReopenIssues = result.issues;
+            if (result.ok) {
+                this.PendingReopenStatusID = null;
+                this.ReopenReason = '';
+                // The reopen is committed by now; a reload that throws afterwards is a stale screen,
+                // not a failed reopen, so it must not rewrite the message above.
+                try {
+                    await this.FormComponent.RefreshRecord();
+                } catch {
+                    this.ReopenIssues = [...this.ReopenIssues, 'The deal was reopened, but this page could not reload. Refresh to see it.'];
+                }
+            }
+        } finally {
+            this.Reopening = false;
+        }
     }
 
     public readonly Fields: DealFieldSpec[] = [
@@ -1228,30 +1399,21 @@ export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
         this.Message = '';
         this.Issues = [];
         try {
-            const router = Metadata.Provider as unknown as DealCloseOperationRouter;
-            const envelope = await router.RouteOperation<SalesReopenDealInput, SalesReopenDealOutput>(
-                'Sales.ReopenDeal',
-                { DealID: this.Record.ID, Reason: this.ReopenReason.trim() },
-            );
-            if (!envelope.Success) {
-                this.Fail(envelope.ErrorMessage ?? 'Sales.ReopenDeal could not be reached.');
+            // The SAME runner the Status control uses. Two surfaces reach the reopen now and a second
+            // copy of the envelope-versus-Output handling is exactly the drift the review found between
+            // this form and the deal workspace. No target status: this door does not choose one, so the
+            // operation applies its own default.
+            const result = await RunReopen(this.Record.ID, this.ReopenReason, null);
+            this.Issues = result.issues;
+            if (!result.ok) {
+                this.Fail(result.message);
                 return;
             }
-            const out = envelope.Output;
-            if (!out?.Success) {
-                this.Issues = (out?.Issues ?? []).map((i) => i.Message);
-                this.Fail(out?.Issues?.[0]?.Message ?? 'The deal could not be reopened.');
-                return;
-            }
-
             this.ReopenPanelOpen = false;
             this.ReopenReason = '';
             this.MessageIsError = false;
-            this.Message = 'Deal reopened. The close event remains in its history.';
-            this.Issues = (out.Issues ?? []).map((i) => i.Message);
+            this.Message = result.message;
             await this.refreshQuietly();
-        } catch (err) {
-            this.Fail(`The reopen did not complete: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
             this.Closing = false;
         }

@@ -80,8 +80,19 @@ describe('editability fails CLOSED when the status cannot be resolved', () => {
         expect(panelWith('open-1').StatusIsEditable).toBe(true);
     });
 
-    it('is not editable on a closed deal', () => {
-        expect(panelWith('won-1').StatusIsEditable).toBe(false);
+    it('IS editable on a closed deal, because that is how you reopen it', () => {
+        /**
+         * golive#205 D9 and #206 item 3 both ask for this: "Deal Status should stay editable so the
+         * deal can be set back to Open." What makes it safe is that picking does not WRITE — see the
+         * reopen suite below.
+         */
+        expect(panelWith('won-1').StatusIsEditable).toBe(true);
+    });
+
+    it('is not editable while a reopen is in flight', () => {
+        const p = panelWith('won-1');
+        p.Reopening = true;
+        expect(p.StatusIsEditable).toBe(false);
     });
 
     it('is not editable before the list has loaded', () => {
@@ -134,6 +145,56 @@ describe('the blank option cannot clear a saved deal', () => {
     });
 });
 
+describe('picking an open status on a CLOSED deal starts a reopen, it does not write', () => {
+    /**
+     * The mirror of the defect this whole change closes. A bare status write OUT of a locking status
+     * would unlock the deal with no reopen event, the close stamps still set and the order still
+     * voided — and nothing would refuse it: `IsBareCloseWrite` returns false when the PRIOR status
+     * locks, deliberately, because the close lock owns that refusal, and the lock only owns it while
+     * DealStatusTypeID stays out of the editable-while-locked set.
+     */
+    it('holds the pick instead of writing it', () => {
+        const p = panelWith('won-1');
+        p.SetStatus('open-1');
+        expect(p.Record.DealStatusTypeID, 'the status must not have moved').toBe('won-1');
+        expect(p.PendingReopenStatusID).toBe('open-1');
+        expect(p.PendingReopenStatusName).toBe('Open');
+    });
+
+    it('writes normally on a deal that is not closed', () => {
+        const p = panelWith('open-1');
+        p.SetStatus('hold-1');
+        expect(p.Record.DealStatusTypeID).toBe('hold-1');
+        expect(p.PendingReopenStatusID).toBeNull();
+    });
+
+    it('demands a reason, which Sales.ReopenDeal requires', () => {
+        const p = panelWith('won-1');
+        p.SetStatus('open-1');
+        expect(p.CanConfirmReopen).toBe(false);
+        p.ReopenReason = '   ';
+        expect(p.CanConfirmReopen, 'whitespace is not a reason').toBe(false);
+        p.ReopenReason = 'Customer came back.';
+        expect(p.CanConfirmReopen).toBe(true);
+    });
+
+    it('cannot confirm without a pending pick', () => {
+        const p = panelWith('won-1');
+        p.ReopenReason = 'Customer came back.';
+        expect(p.CanConfirmReopen).toBe(false);
+    });
+
+    it('cancelling drops the pick and leaves the deal closed', () => {
+        const p = panelWith('won-1');
+        p.SetStatus('open-1');
+        p.ReopenReason = 'Changed my mind.';
+        p.CancelReopen();
+        expect(p.PendingReopenStatusID).toBeNull();
+        expect(p.ReopenReason).toBe('');
+        expect(p.Record.DealStatusTypeID).toBe('won-1');
+    });
+});
+
 describe('option matching is case-insensitive', () => {
     it('compares ids without regard to case', () => {
         const c = panelWith('open-1').CompareStatus;
@@ -173,5 +234,16 @@ describe('the template actually uses all of this', () => {
 
     it('keeps the current status visible when it is a closing one', () => {
         expect(control).toContain('@if (CurrentStatusIsClosing)');
+    });
+
+    it('renders the reopen prompt and wires it to the guarded confirm', () => {
+        // The prompt is the only thing standing between a pick on a closed deal and nothing happening
+        // at all: SetStatus holds the value, and without this block there is no way to release it.
+        const after = source.slice(source.indexOf('@if (PendingReopenStatusID) {'));
+        const prompt = after.slice(0, after.indexOf('} @else if (!CurrentStatusIsClosing)'));
+        expect(prompt).toContain('[(ngModel)]="ReopenReason"');
+        expect(prompt).toContain('[disabled]="!CanConfirmReopen"');
+        expect(prompt).toContain('(click)="ConfirmReopen()"');
+        expect(prompt).toContain('(click)="CancelReopen()"');
     });
 });
