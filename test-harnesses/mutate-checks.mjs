@@ -237,6 +237,12 @@ const MUTATIONS = [
     { id: 'M-CD13', file: DES, expect: ['CD13'],
       from: '        const dirtyCollections = this.Companions\n            .filter((c) => c.Dirty)\n            .map((c) => c.Name);',
       to: '        const dirtyCollections: string[] = [];' },
+    // golive#205's server guard (#68). CD26 is the only check that turns on it, so this mutant is
+    // what separates 'CD26 is green' from 'CD26 can fail'. The PR claimed a manual run; nothing
+    // recorded it, which is the shape docs/CHECK-MUTATION-EVIDENCE.md exists to stop.
+    { id: 'M-CD26', file: DES, expect: ['CD26'],
+      from: '        if (!this.IsSaved || this._declaredTransition || !field?.Dirty || !target) {\n            return null;\n        }',
+      to: '        if (true) {\n            return null;\n        }' },
     { id: 'M-CD14', file: DES, expect: ['CD14'],
       from: '    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;',
       to: "    private static readonly LOCK_EDITABLE_FIELDS = new Set<string>(['Description']);" },
