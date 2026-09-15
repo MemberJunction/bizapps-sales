@@ -154,9 +154,17 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         for (const field of frozen) {
             result.Errors.push({
                 Source: field.Name,
-                Message:
-                    'Frozen: this deal is closed and locked. Reopen it through Sales.ReopenDeal, which ' +
-                    'records a reason, if this genuinely needs to change.',
+                /**
+                 * golive#207 row 17, verbatim: "This deal is closed. Set the status back to Open
+                 * before changing this field."
+                 *
+                 * The old text named `Sales.ReopenDeal` — an API operation — to a person who had just
+                 * typed into a form field. It also said "Frozen:" twice over, once as a prefix and
+                 * once as the sentence. What a person needs here is the one action that unblocks them,
+                 * and since golive#205 that action is genuinely available from this form: the status
+                 * control routes to the reopen.
+                 */
+                Message: 'This deal is closed. Set the status back to Open before changing this field.',
                 Value: field.Value,
                 Type: 'Failure',
             });

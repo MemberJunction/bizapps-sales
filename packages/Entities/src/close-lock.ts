@@ -41,6 +41,60 @@ export const DEAL_FIELDS_EDITABLE_WHILE_LOCKED: ReadonlySet<string> = new Set<st
 ]);
 
 /**
+ * What each editable-while-locked field is CALLED on screen.
+ *
+ * The lock notice used to interpolate the raw field names, so a user read "only Description and
+ * NextStep can still be changed" — `NextStep` being a column name that appears nowhere on the form.
+ * golive#207 asks for the labels a salesperson sees.
+ *
+ * Falling back to the field name is deliberate rather than throwing: a field added to the set without
+ * a label here should read slightly wrong, not take the whole notice down. `DealFieldLabel` is
+ * exported so a test can prove every member of the set has one.
+ */
+const DEAL_FIELD_LABELS: Readonly<Record<string, string>> = {
+    Description: 'Description',
+    NextStep: 'Next Step',
+    NextStepDate: 'Next Step Date',
+    BillingContactID: 'Billing Contact',
+    LeadSourceTypeID: 'Lead Source',
+    CampaignID: 'Campaign',
+    LossNotes: 'Loss Notes',
+    DealStatusTypeID: 'Deal Status',
+};
+
+/** The on-screen label for a deal field, or the field name when nothing better is known. */
+export function DealFieldLabel(fieldName: string): string {
+    return DEAL_FIELD_LABELS[fieldName] ?? fieldName;
+}
+
+/**
+ * What the lock notice lists as still editable.
+ *
+ * DEAL STATUS IS IN HERE AND NOT IN `DEAL_FIELDS_EDITABLE_WHILE_LOCKED`, which looks like a
+ * contradiction and is not. That set is what the SERVER accepts in a bare save, and golive#205 asks
+ * for a bare status write to be refused on every path — the status moves through `Sales.CloseDeal`
+ * and `Sales.ReopenDeal`, which the form's status control routes to. So the field IS editable to a
+ * person and IS NOT writable by a raw save, and one set cannot say both.
+ *
+ * The notice describes what a PERSON can do, so it is the one that carries Deal Status.
+ */
+export function DealFieldsListedAsEditable(): readonly string[] {
+    return ['DealStatusTypeID', ...DEAL_FIELDS_EDITABLE_WHILE_LOCKED];
+}
+
+/**
+ * Join labels the way a sentence does: "A, B and C".
+ *
+ * Oxford-comma-free and with "and" before the last, because this lands mid-sentence in prose a tester
+ * wrote, not in a bulleted list.
+ */
+export function JoinLabels(labels: readonly string[]): string {
+    if (labels.length === 0) return '';
+    if (labels.length === 1) return labels[0];
+    return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
+/**
  * Whether `fieldName` may still be edited on a locked deal.
  *
  * Callers should prefer this to reaching into the set, so the membership test stays in one place if the
@@ -103,14 +157,25 @@ export async function ResolveDealLockState(
         return open;
     }
 
-    const editable = [...DEAL_FIELDS_EDITABLE_WHILE_LOCKED].join(' and ');
+    /**
+     * golive#207 row 16, in the tester's words: "This deal is closed (Won). Only Deal Status,
+     * Description and Next Step can be edited. To change anything else, set the status back to Open."
+     *
+     * DERIVED rather than hardcoded to those three. The tester wrote that list when the editable set
+     * held two fields; golive#206 item 3 expands it. A hardcoded sentence would have started lying the
+     * moment that landed, and the lie would be invisible — it reads perfectly either way.
+     *
+     * What went, and why it is no loss: the old notice explained WHY the deal is frozen ("a contract or
+     * an order was derived from it"). A person who has just been stopped wants to know what they can do,
+     * not the provenance argument, and the reason is one click away in the close history.
+     */
+    const editable = JoinLabels(DealFieldsListedAsEditable().map(DealFieldLabel));
     return {
         IsLocked: true,
         StatusName: row.Name,
         Notice:
-            `This deal is closed (${row.Name}) and locked. A contract or an order was derived from it, so ` +
-            `its terms are frozen — only ${editable} can still be changed. To change anything else, reopen ` +
-            'the deal, which records a reason.',
+            `This deal is closed (${row.Name}). Only ${editable} can be edited. ` +
+            'To change anything else, set the status back to Open.',
     };
 }
 
