@@ -1636,12 +1636,25 @@ export class DealEntityServer extends DealEntity {
         if (!IsBareCloseWrite(facts)) {
             return null;
         }
+        /**
+         * NAMES THE INPUTS, not just the operation.
+         *
+         * golive#205 asks for the entity server to RUN the close on a status write. It does not, and
+         * the reasoning is on sales#73 — a Lost close needs a loss reason a bare write cannot carry, so
+         * the literal ask is impossible for half the close cases and a partial one would make an
+         * import's behaviour depend on which status it picked.
+         *
+         * What that costs is an integrator meeting this refusal and still not knowing what to call
+         * with. Naming the operation alone sent them to read its source. So it names the arguments,
+         * and which ones are conditional and on what.
+         */
         return (
             'this status closes the deal, and closing it needs the close to actually run — the stage ' +
             'event, the contract and the finance tasks for a won deal, the loss reason and the voided ' +
             'order for a lost one. Setting DealStatusTypeID on its own would lock the deal without any ' +
             'of that, and the lock would then refuse the status field, so it could not be undone. Close ' +
-            'it through Sales.CloseDeal.'
+            'it through Sales.CloseDeal, passing DealID and DealStatusTypeID — plus LossReasonID when ' +
+            'the status is a losing one, and LossNotes when the chosen loss reason requires them.'
         );
     }
 
@@ -1689,9 +1702,17 @@ export class DealEntityServer extends DealEntity {
         if (all.length === 0) {
             return null;
         }
+        /**
+         * Names `Sales.ReopenDeal`'s inputs for the same reason `bareCloseRefusal` names the close's:
+         * an integrator who reaches this refusal should not have to read the operation to find out
+         * what it wants. `Reason` is the only required one beyond the deal — and the deal FORM no
+         * longer makes a person type it (golive#205), though the operation still requires it, because
+         * an API caller omitting it has nobody who meant anything by the omission.
+         */
         return (
             `this deal is closed and locked; ${all.join(', ')} cannot be changed. ` +
-            `Reopen it through Sales.ReopenDeal, which records a reason.`
+            `Reopen it through Sales.ReopenDeal, passing DealID and a Reason — optionally ` +
+            `DealStatusTypeID to choose which open status to return to.`
         );
     }
 
