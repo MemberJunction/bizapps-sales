@@ -734,10 +734,20 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                     </div>
                                 </div>
                             }
+                            <!-- BOTH HINTS NAME THIS CONTROL FIRST, and the Close panel second.
+                                 The open-deal one used to read "Use the Close action on the Close
+                                 panel to win or lose a deal" -- which sent the user away from the
+                                 control that does the job. Picking a closing status here IS the close
+                                 (golive#205), and it collects the same target, loss reason, loss notes
+                                 and notes the Close panel does, through the same operation. There is no
+                                 second route to describe, only a second door.
+
+                                 A CLOSING STATUS, never a list of names: a deployment can rename Won,
+                                 and this one already has TWO losing statuses. -->
                             @if (CurrentStatusIsClosing && !PendingReopenStatusID) {
                                 <small class="mjs-field__hint">Closed. Pick an open status to reopen it, or use Reopen on the Close panel.</small>
                             } @else if (!CurrentStatusIsClosing) {
-                                <small class="mjs-field__hint">Use the Close action on the Close panel to win or lose a deal.</small>
+                                <small class="mjs-field__hint">Open. Pick a closing status to close the deal, or use Close on the Close panel.</small>
                             }
                         } @else {
                             <div class="mj-forms-field-value">{{ CurrentStatusName || '—' }}</div>

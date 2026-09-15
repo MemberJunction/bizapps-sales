@@ -460,3 +460,45 @@ describe('what an operation reported outlives the mode it was started in', () =>
             .toBeGreaterThan(elseBranchAt);
     });
 });
+
+describe('the status hints point at this control, not away from it', () => {
+    const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
+    const statusField = (() => {
+        const start = source.indexOf('<label class="mj-forms-field-label">Status</label>');
+        return source.slice(start, source.indexOf('</mj-collapsible-panel>', start));
+    })();
+    const hints = [...statusField.matchAll(/class="mjs-field__hint">([^<]+)</g)].map((m) => m[1].trim());
+
+    it('has one hint for each side of the lock', () => {
+        expect(hints.length, 'a closed-deal hint and an open-deal hint').toBe(2);
+    });
+
+    it('tells an OPEN deal it can close from here', () => {
+        /**
+         * This read "Use the Close action on the Close panel to win or lose a deal", which sent the
+         * user away from the control that does the job. Picking a closing status here IS the close,
+         * through the same operation and the same inputs the Close panel collects.
+         */
+        const open = hints.find((h) => h.startsWith('Open.'));
+        expect(open, 'an open-deal hint').toBeDefined();
+        expect(open).toMatch(/Pick a closing status/);
+        expect(open, 'the Close panel is a second door, not the only one').toMatch(/or use Close/);
+    });
+
+    it('tells a CLOSED deal it can reopen from here', () => {
+        const closed = hints.find((h) => h.startsWith('Closed.'));
+        expect(closed, 'a closed-deal hint').toBeDefined();
+        expect(closed).toMatch(/Pick an open status/);
+        expect(closed).toMatch(/or use Reopen/);
+    });
+
+    it('names no status, because a deployment can rename them', () => {
+        // The control filters by LocksDeal, never by name -- and this seed already has TWO losing
+        // statuses, so any hint naming "Won or Lost" is wrong about Abandoned on the day it ships.
+        for (const hint of hints) {
+            expect(hint, `hint must not name a status: ${hint}`).not.toMatch(
+                /\b(Won|Lost|Abandoned|On Hold)\b/,
+            );
+        }
+    });
+});
