@@ -69,6 +69,18 @@ import {
 import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
+
+/**
+ * A status write that crosses the lock boundary, and therefore is a close or a reopen.
+ *
+ * `PriorStatusID` is kept so the save can put the field back before persisting the caller's other
+ * edits -- see the note at the detection site for why that ordering is the whole design.
+ */
+interface StatusTransitionPlan {
+    Kind: 'Close' | 'Reopen';
+    TargetStatusID: string;
+    PriorStatusID: string | null;
+}
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
@@ -242,6 +254,39 @@ export class DealEntityServer extends DealEntity {
         this._orderJustProvisioned = false;
         this._lockedAtSave = false;
         this._lastStageEventID = null;
+
+        /**
+         * THE STATUS FIELD DRIVES THE CLOSE AND THE REOPEN (bc-aidp-next-golive#205).
+         *
+         * "The deal entity server should run the existing close and reopen flows when a save moves the
+         * status into or out of a locking status."
+         *
+         * ── IT RUNS BEFORE THE CLOSE LOCK, AND THAT ORDERING IS THE WHOLE THING ─────────────────
+         *
+         * `close-deal.CD27` measured what happens otherwise. A reopen is a status write on a deal that
+         * IS locked, so the lock below sees `DealStatusTypeID` dirty, finds it outside the
+         * editable-while-locked set, and refuses — before anything has had the chance to notice the
+         * write was a reopen. The close half worked and the reopen half could not, which is precisely
+         * the defect golive#205 reported, reintroduced one layer up.
+         *
+         * ── WHY THE STATUS IS PUT BACK ─────────────────────────────────────────────────────────
+         *
+         * `Sales.CloseDeal` loads its OWN copy of this deal and saves it. If this save also wrote the
+         * status, the two would race over one row and whichever landed second would win. So the field is
+         * reverted to what is on disk, the ordinary save below persists every OTHER edit the caller
+         * made, and the flow then runs against the committed row. A caller who set the status and three
+         * other fields gets all four, in an order that cannot lose any of them.
+         *
+         * Reverting is also what leaves the lock and `bareCloseRefusal` doing their real jobs instead of
+         * being bypassed: by the time either runs the status is clean, so a locked deal still refuses
+         * every frozen field, and a write this method could NOT turn into a transition is still refused.
+         * DealStatusTypeID stays OUT of `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` for the same reason — the
+         * field is reachable through the flow, never by writing it.
+         */
+        const transition = await this.planStatusTransition();
+        if (transition) {
+            this.Set('DealStatusTypeID', transition.PriorStatusID);
+        }
 
         /**
          * THE CLOSE LOCK (L-17, master plan §7.3) — enforced HERE and nowhere else.
@@ -435,8 +480,112 @@ export class DealEntityServer extends DealEntity {
 
         if (!saved) {
             this.explainOrderProvisioningFailure();
+            return false;
         }
-        return saved;
+
+        // Everything else is on disk; now the transition the caller asked for, against that row.
+        if (transition) {
+            return this.runStatusTransition(transition);
+        }
+        return true;
+    }
+
+    /**
+     * Is this save a status move into or out of a locking status, and therefore a close or a reopen?
+     *
+     * Null in every ordinary case. Mirrors `bareCloseRefusal`'s cheap-half-first shape, so a save that
+     * does not touch the status costs no status lookups at all.
+     *
+     * A DECLARED transition returns null: `Sales.CloseDeal` and `Sales.ReopenDeal` announce themselves
+     * before saving, and that IS the flow running. Without this term, the operation's own save would
+     * re-enter the flow it is already executing.
+     *
+     * Creation returns null too. A deal born closed has no transition to have run, and the opening
+     * default would otherwise read as one -- the same carve-out `bareCloseRefusal` makes, for the same
+     * reason.
+     */
+    private async planStatusTransition(): Promise<StatusTransitionPlan | null> {
+        const field = this.GetFieldByName('DealStatusTypeID');
+        const target = this.DealStatusTypeID;
+        if (!this.IsSaved || this._declaredTransition || !field?.Dirty || !target) {
+            return null;
+        }
+        const priorID = (field.OldValue as string | null) ?? null;
+        const targetLocks = await this.statusLocksDeal(target);
+        const priorLocks = priorID ? await this.statusLocksDeal(priorID) : false;
+
+        if (targetLocks && !priorLocks) {
+            return { Kind: 'Close', TargetStatusID: target, PriorStatusID: priorID };
+        }
+        if (priorLocks && !targetLocks) {
+            return { Kind: 'Reopen', TargetStatusID: target, PriorStatusID: priorID };
+        }
+        // Won -> Lost, or Open -> On Hold. Neither crosses the lock boundary, so neither is a close or
+        // a reopen, and the ordinary rules above already decided whether it was allowed.
+        return null;
+    }
+
+    /**
+     * Run the close or the reopen that the caller's status write asked for.
+     *
+     * WHY THE OPERATIONS AND NOT A COPY OF THEIR WORK. A close writes a stage event, creates a contract
+     * and two finance tasks for a won B2B deal, and voids the order for a lost one; a reopen undoes the
+     * stamps and returns the order. All of it already exists, is transactional, and is pinned by the
+     * `close-deal` checks. Reimplementing any of it here would be a second copy of the most
+     * consequential code in this app.
+     *
+     * IMPORTED LAZILY because `CloseDealOperation` imports this class, so a top-level import would be a
+     * cycle. The module system caches it, so this costs nothing after the first transition in a process.
+     *
+     * A LOST CLOSE STILL NEEDS ITS LOSS REASON, and a caller who set the status without one gets the
+     * operation's own refusal rather than a second, vaguer one from here. `LossReasonID` and `LossNotes`
+     * are columns on this deal, so an importer that sets them alongside the status has supplied
+     * everything the close needs -- which is the case #205 is about.
+     */
+    private async runStatusTransition(plan: StatusTransitionPlan): Promise<boolean> {
+        const { CloseDealOperation, ReopenDealOperation } = await import('./CloseDealOperation.js');
+        const context = {
+            provider: this.ProviderToUse as unknown as IMetadataProvider,
+            user: this.ContextCurrentUser,
+        };
+
+        const result =
+            plan.Kind === 'Close'
+                ? await new CloseDealOperation().ExecuteServer(
+                      {
+                          DealID: this.ID,
+                          DealStatusTypeID: plan.TargetStatusID,
+                          LossReasonID: this.LossReasonID ?? null,
+                          LossNotes: this.LossNotes ?? null,
+                      },
+                      context as never,
+                  )
+                : await new ReopenDealOperation().ExecuteServer(
+                      {
+                          DealID: this.ID,
+                          // #205: "No reopen reason is required." One is still RECORDED, because 7.3
+                          // wants undoing a lock to be explainable and the operation refuses a blank.
+                          Reason: 'Reopened by setting the deal status back to an open status.',
+                          DealStatusTypeID: plan.TargetStatusID,
+                      },
+                      context as never,
+                  );
+
+        const output = result.Output as { Success?: boolean; Issues?: { Message: string }[] } | undefined;
+        const issues = output?.Issues ?? [];
+        if (!result.Success || output?.Success === false) {
+            const detail = result.ErrorMessage ?? issues.map((i) => i.Message).join(' | ');
+            LogError(`DealEntityServer.Save: the ${plan.Kind.toLowerCase()} did not complete: ${detail}`);
+            // The other edits ARE committed; only the transition failed. Reloading leaves this object
+            // agreeing with the row rather than holding a status the database never accepted.
+            await this.Load(this.ID);
+            return false;
+        }
+
+        // The operation saved its own copy of this row. Without this, the caller keeps an object whose
+        // stamps, stage and status all predate the close it just triggered.
+        await this.Load(this.ID);
+        return true;
     }
 
     /* ── STAGE PROVENANCE ─────────────────────────────────────────────────────────────────────────
