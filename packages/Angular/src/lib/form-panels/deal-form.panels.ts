@@ -17,7 +17,7 @@ import { CompositeKey, Metadata, RunView, type EntityInfo } from '@memberjunctio
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
 import { EntityViewerModule, type AfterDataLoadEventArgs, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
-import { DealEntity } from '@mj-biz-apps/sales-entities';
+import { DealEntity, IsDealFieldEditableWhileLocked } from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import { SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
@@ -44,6 +44,50 @@ function daysFrom(d: Date | string | null | undefined): number | null {
 type DealFieldType =
     | 'textbox' | 'textarea' | 'number' | 'datepicker' | 'checkbox'
     | 'select' | 'autocomplete' | 'code' | 'dropdownlist' | 'numerictextbox';
+
+/**
+ * The deal panels that render a list of fields, and therefore have to honour the close lock.
+ *
+ * ── WHAT THIS FIXES (bc-aidp-next-golive#206 item 3) ────────────────────────────────────────────
+ *
+ * "Every other field ... should render read-only, instead of accepting typing and refusing on save."
+ * A tester clicked Edit on a closed deal, every field opened for typing, and they only found out a
+ * field was frozen when the save came back refused. That is a correct refusal delivered at the worst
+ * possible moment, after the work.
+ *
+ * ── WHY A BASE CLASS AND NOT FIVE COPIES ────────────────────────────────────────────────────────
+ *
+ * Five panels render fields this way. Five copies of the rule is five chances for one of them to
+ * disagree with the server, and a panel that offers a field the server refuses is the exact failure
+ * `close-lock.ts` exists to prevent -- it says so in its own header.
+ *
+ * ── WHY IT READS THE FORM AND NOT THE STATUS ────────────────────────────────────────────────────
+ *
+ * `DealFormComponentExtended` already resolves the lock once per load, through the same shared
+ * `ResolveDealLockState` the server uses. Resolving it again here would be a second answer to a
+ * question that already has one, and five more database reads per form.
+ */
+abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
+    /** The fields this panel renders, in order. */
+    public abstract readonly Fields: DealFieldSpec[];
+
+    /**
+     * May this field be typed into right now?
+     *
+     * The membership test is `IsDealFieldEditableWhileLocked` -- the SAME rule the entity server
+     * enforces, not a copy -- so the form cannot offer a field the save would refuse, or grey out one
+     * it would have accepted.
+     *
+     * DEAL STATUS IS NOT IN THAT SET and is deliberately not special-cased here. The status moves
+     * through the Pipeline panel's own control, which routes to `Sales.CloseDeal` / `Sales.ReopenDeal`
+     * (golive#205); the generic field for it stays read-only on a locked deal, because writing it
+     * directly is exactly what the server refuses.
+     */
+    public FieldEditable(fieldName: string): boolean {
+        const locked = (this.FormComponent as unknown as { IsLocked?: boolean } | undefined)?.IsLocked === true;
+        return !locked || IsDealFieldEditableWhileLocked(fieldName);
+    }
+}
 
 interface DealFieldSpec {
     name: string;
@@ -402,7 +446,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -410,7 +454,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
-export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
+export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public readonly Fields: DealFieldSpec[] = [
         // Name and DealNumber are deliberately NOT here. The hero directly above this panel already
         // renders Name as an editable field in edit mode, and shows DealNumber beneath the title once
@@ -443,7 +487,7 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -451,7 +495,7 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
-export class MJSDealPartyPanel extends BaseFormPanel<DealEntity> {
+export class MJSDealPartyPanel extends MJSDealFieldPanel {
     /**
      * Record links on these fields emit `Navigate` from `mj-form-field`. That output must be
      * forwarded to `FormComponent.OnFormNavigate`, which Explorer maps onto
@@ -485,7 +529,7 @@ export class MJSDealPartyPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -493,7 +537,7 @@ export class MJSDealPartyPanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
-export class MJSDealCommercialPanel extends BaseFormPanel<DealEntity> {
+export class MJSDealCommercialPanel extends MJSDealFieldPanel {
     public readonly Fields: DealFieldSpec[] = [
         { name: 'Amount', type: 'number' },
         { name: 'CurrencyID', type: 'textbox' },
@@ -571,7 +615,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -579,7 +623,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
-export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
+export class MJSDealMotionPanel extends MJSDealFieldPanel {
     public readonly Fields: DealFieldSpec[] = [
         { name: 'NextStep', type: 'textbox', span: true },
         { name: 'NextStepDate', type: 'datepicker' },
@@ -610,7 +654,7 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -618,7 +662,7 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
-export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
+export class MJSDealClosePanel extends MJSDealFieldPanel {
     public readonly Fields: DealFieldSpec[] = [
         { name: 'ActualCloseDate', type: 'datepicker' },
         { name: 'ClosedAt', type: 'datepicker' },
