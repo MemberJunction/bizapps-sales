@@ -98,15 +98,35 @@ describe('the reopen action is the mirror of it', () => {
         }
     });
 
-    it('demands a reason, which the operation requires', () => {
-        // golive#205 asks for the opposite ("No reopen reason should be required in this path"), but
-        // Sales.ReopenDeal refuses without one and CD10 pins that. Refusing here saves a round trip.
+    /**
+     * THIS ASSERTED THE OPPOSITE until golive#205 was read properly. It said a reason was demanded
+     * "which the operation requires", and noted #205 asks for the reverse -- then kept the demand.
+     *
+     * Both rules hold once they are separated. Master plan 7.3 is about the AUDIT TRAIL and
+     * `Sales.ReopenDeal` still refuses a blank reason (CD10 pins it). #205 is about whether a person
+     * is made to type before the button works. So the form stops demanding and starts supplying.
+     */
+    it('does not demand a reason before the button works', () => {
         const p = panelWith({ DealStatusTypeID: 'won-1' });
-        expect(p.CanConfirmReopen).toBe(false);
+        expect(p.CanConfirmReopen, '#205: no reopen reason should be required in this path').toBe(true);
         p.ReopenReason = '   ';
-        expect(p.CanConfirmReopen, 'whitespace is not a reason').toBe(false);
-        p.ReopenReason = 'Customer came back.';
         expect(p.CanConfirmReopen).toBe(true);
+    });
+
+    it('still records a reason, so nothing lands in the trail unexplained', () => {
+        const p = panelWith({ DealStatusTypeID: 'won-1' });
+        // Whitespace is not a reason, and must not be sent as one -- the operation would refuse it and
+        // the user would see a round trip fail for a field the form told them was optional.
+        p.ReopenReason = '   ';
+        const supplied = p.ResolvedReopenReason();
+        expect(supplied.trim().length, 'never blank').toBeGreaterThan(0);
+        expect(supplied).toMatch(/no reason was given/i);
+    });
+
+    it('sends what the user wrote, when they wrote something', () => {
+        const p = panelWith({ DealStatusTypeID: 'won-1' });
+        p.ReopenReason = '  Customer came back.  ';
+        expect(p.ResolvedReopenReason()).toBe('Customer came back.');
     });
 });
 

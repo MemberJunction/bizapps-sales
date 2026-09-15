@@ -181,14 +181,28 @@ describe('picking an open status on a CLOSED deal starts a reopen, it does not w
         expect(p.PendingReopenStatusID).toBeNull();
     });
 
-    it('demands a reason, which Sales.ReopenDeal requires', () => {
+    /**
+     * THIS PINNED THE OPPOSITE, and golive#205 asks for it in so many words: "No reopen reason should
+     * be required in this path." Master plan 7.3 and `close-deal.CD10` still hold -- they are about
+     * the AUDIT TRAIL, and `Sales.ReopenDeal` still refuses a blank reason. The form stops demanding
+     * one and starts supplying one instead, so nobody is made to type and nothing lands unexplained.
+     */
+    it('does not demand a reason before the button works', () => {
         const p = panelWith('won-1');
         p.SetStatus('open-1');
-        expect(p.CanConfirmReopen).toBe(false);
-        p.ReopenReason = '   ';
-        expect(p.CanConfirmReopen, 'whitespace is not a reason').toBe(false);
-        p.ReopenReason = 'Customer came back.';
         expect(p.CanConfirmReopen).toBe(true);
+        p.ReopenReason = '   ';
+        expect(p.CanConfirmReopen, 'whitespace must not re-impose the requirement').toBe(true);
+    });
+
+    it('records a reason naming the status it was reopened into', () => {
+        // The operation refuses a blank one, so an "optional" label that sent blank would fail a round
+        // trip on a field the form said was optional.
+        const p = panelWith('won-1');
+        p.SetStatus('open-1');
+        const reason = p.ResolvedReopenReason();
+        expect(reason.trim().length).toBeGreaterThan(0);
+        expect(reason).toContain('Open');
     });
 
     it('cannot confirm without a pending pick', () => {
@@ -336,5 +350,40 @@ describe('the template actually uses all of this', () => {
         expect(prompt).toContain('[disabled]="!CanConfirmReopen"');
         expect(prompt).toContain('(click)="ConfirmReopen()"');
         expect(prompt).toContain('(click)="CancelReopen()"');
+    });
+});
+
+/**
+ * THE WIRING, which the behavioural tests above cannot see.
+ *
+ * `ReopenReasonOrDefault` is correct and pinned, and both `CanConfirmReopen` gates are pinned — and a
+ * mutation making `ConfirmReopen` send `this.ReopenReason` straight through, bypassing the default,
+ * SURVIVED all of them. The helper being right does not prove anything calls it, which is the exact
+ * shape of defect this branch exists to remove.
+ *
+ * Asserted against the source because `ConfirmReopen` reaches `Metadata.Provider` through `RunReopen`,
+ * and standing that up to observe one argument would test the harness more than the code.
+ */
+describe('every reopen goes through the resolved reason', () => {
+    const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
+
+    it('has both call sites, and neither passes the raw field', () => {
+        // `await` so the function's own declaration does not count as a call site.
+        const calls = source.match(/await RunReopen\([^)]*\)/g) ?? [];
+        // Two panels offer a reopen; if a third appears this count fails and someone has to decide
+        // whether it too should go through the helper. That is the intended outcome.
+        expect(calls.length, 'the Close panel and the Pipeline panel').toBe(2);
+        for (const call of calls) {
+            expect(call, `raw ReopenReason must not reach the operation: ${call}`).not.toMatch(
+                /this\.ReopenReason/,
+            );
+            expect(call).toMatch(/ResolvedReopenReason\(\)/);
+        }
+    });
+
+    it('resolves through the one module-level rule, not a per-panel copy', () => {
+        // Two copies of this rule is what made the two panels disagree in the first place.
+        const definitions = source.match(/function ReopenReasonOrDefault\(/g) ?? [];
+        expect(definitions.length, 'exactly one definition').toBe(1);
     });
 });

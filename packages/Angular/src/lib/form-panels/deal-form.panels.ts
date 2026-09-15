@@ -178,6 +178,37 @@ async function RunClose(req: CloseRequest): Promise<ReopenOutcome> {
     }
 }
 
+/**
+ * The reason a reopen is recorded under: what the user wrote, or a statement of what they did.
+ *
+ * ── WHY IT IS NOT REQUIRED, AND STILL ALWAYS PRESENT ────────────────────────────────────────────
+ *
+ * golive#205 asks for it in so many words: "No reopen reason should be required in this path." Master
+ * plan 7.3 says the opposite for the OPERATION -- undoing a lock has to be explainable -- and
+ * `Sales.ReopenDeal` refuses a blank one, which `close-deal.CD10` pins.
+ *
+ * Both hold, because they are not actually about the same thing. 7.3 is about the audit trail; #205 is
+ * about whether a person is made to type before the button works. So nobody is prompted, and nothing
+ * lands unexplained: this supplies a sentence stating how the deal was reopened and into what, which
+ * is what someone reading that trail in six months wants to know and the one thing this code can say
+ * truthfully without asking.
+ *
+ * ── WHY IT IS MODULE-LEVEL ─────────────────────────────────────────────────────────────────────
+ *
+ * TWO panels offer a reopen -- the Close section's explicit button and the Pipeline section's status
+ * picker -- and they had different rules for the same operation on the same form: one demanded a
+ * reason, the other did not. Two copies of a rule drift, and the drift here was already visible to a
+ * user as "the button works over there and not over here."
+ */
+export function ReopenReasonOrDefault(typed: string, targetStatusName: string | null): string {
+    const written = typed.trim();
+    if (written) return written;
+    const target = targetStatusName?.trim();
+    return target
+        ? `Reopened from the deal form by setting the status to ${target}. No reason was given.`
+        : 'Reopened from the deal form. No reason was given.';
+}
+
 async function RunReopen(dealID: string, reason: string, targetStatusID: string | null): Promise<ReopenOutcome> {
     try {
         const router = Metadata.Provider as unknown as DealCloseOperationRouter;
@@ -679,11 +710,18 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                             @if (PendingReopenStatusID) {
                                 <!-- golive#205 D9: the status field IS the way back. Picking an open
                                      status on a closed deal does not write it -- Sales.ReopenDeal has
-                                     to run, and it needs a reason -- so it asks for one here and the
-                                     operation moves the status itself. -->
+                                     to run -- so this confirms here and the operation moves the status
+                                     itself.
+
+                                     THE REASON IS OPTIONAL, which golive#205 asks for in so many words:
+                                     "No reopen reason should be required in this path." It is still
+                                     RECORDED either way -- see ReopenReasonOrDefault -- because master
+                                     plan 7.3 requires undoing a lock to be explainable, and an
+                                     unexplained reopen in the audit trail is what that rule is against.
+                                     Not prompting is not the same as not recording. -->
                                 <div class="mjs-reopen">
                                     <label class="mjs-reopen__field">
-                                        <span>Reopen as {{ PendingReopenStatusName }} — reason <em>(required)</em></span>
+                                        <span>Reopen as {{ PendingReopenStatusName }} — reason <em>(optional)</em></span>
                                         <textarea rows="2" [(ngModel)]="ReopenReason" [disabled]="Busy"></textarea>
                                     </label>
                                     <div class="mjs-reopen__row">
@@ -995,9 +1033,21 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
         return this.statuses().find((s) => s.ID.toLowerCase() === id)?.Name ?? '';
     }
 
-    /** `Sales.ReopenDeal` refuses without a reason, and CD10 pins that. Refused here first. */
+    /**
+     * Confirmable as soon as a target is picked. The reason is NOT part of this test.
+     *
+     * golive#205: "No reopen reason should be required in this path." `Sales.ReopenDeal` still refuses
+     * a blank one -- CD10 pins that, and it is right for an API or agent caller, where an unexplained
+     * reopen has no human at the other end to have meant anything by it. This path always sends one,
+     * so both hold: nobody is made to type, and nothing lands unexplained.
+     */
     public get CanConfirmReopen(): boolean {
-        return !this.Busy && !!this.PendingReopenStatusID && this.ReopenReason.trim().length > 0;
+        return !this.Busy && !!this.PendingReopenStatusID;
+    }
+
+    /** See the module-level {@link ReopenReasonOrDefault}: one rule, both panels. */
+    public ResolvedReopenReason(): string {
+        return ReopenReasonOrDefault(this.ReopenReason, this.PendingReopenStatusName);
     }
 
     public CancelReopen(): void {
@@ -1014,7 +1064,7 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
         this.ActionMessage = '';
         this.ActionIssues = [];
         try {
-            const result = await RunReopen(this.Record.ID, this.ReopenReason, this.PendingReopenStatusID);
+            const result = await RunReopen(this.Record.ID, this.ResolvedReopenReason(), this.PendingReopenStatusID);
             this.ActionFailed = !result.ok;
             this.ActionMessage = result.message;
             this.ActionIssues = result.issues;
@@ -1317,7 +1367,7 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
                     } @else {
                         <div class="mjs-close-action__form">
                             <label class="mjs-close-action__field">
-                                <span>Reason <em>(required)</em></span>
+                                <span>Reason <em>(optional)</em></span>
                                 <textarea rows="2" [(ngModel)]="ReopenReason" [disabled]="Closing"></textarea>
                             </label>
                             <div class="mjs-close-action__row">
@@ -1460,8 +1510,19 @@ export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
      * this path"). Refusing here rather than letting the operation refuse keeps the round trip off a
      * request that cannot succeed, and matches how the workspace's reopen behaves.
      */
+    /**
+     * Confirmable as soon as the panel is open. The reason is NOT part of this test, for the same
+     * reason it is not on the Pipeline panel -- see the module-level {@link ReopenReasonOrDefault}.
+     * This panel used to demand one while that one did not, which a user saw as the same button
+     * working in one place and not the other.
+     */
     public get CanConfirmReopen(): boolean {
-        return !this.Closing && this.ReopenReason.trim().length > 0;
+        return !this.Closing;
+    }
+
+    /** See the module-level {@link ReopenReasonOrDefault}: one rule, both panels. */
+    public ResolvedReopenReason(): string {
+        return ReopenReasonOrDefault(this.ReopenReason, null);
     }
 
     /** The statuses a close may land in, by flag. Their names are the user's choice of outcome. */
@@ -1657,7 +1718,7 @@ export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
             // copy of the envelope-versus-Output handling is exactly the drift the review found between
             // this form and the deal workspace. No target status: this door does not choose one, so the
             // operation applies its own default.
-            const result = await RunReopen(this.Record.ID, this.ReopenReason, null);
+            const result = await RunReopen(this.Record.ID, this.ResolvedReopenReason(), null);
             this.Issues = result.issues;
             if (!result.ok) {
                 this.Fail(result.message);
