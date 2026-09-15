@@ -3,7 +3,7 @@
 '@mj-biz-apps/sales-ng': patch
 ---
 
-Deal form — the two lock messages a person reads, in plain English (golive#207 rows 16 and 17).
+Deal form — all three lock messages, in plain English (golive#207 rows 16, 17 and 18).
 
 These were the tester's own deferrals from the last copy round: they wait on the close/reopen work,
 because both replacements tell the user to "set the status back to Open" and until golive#205 landed
@@ -31,9 +31,22 @@ a bare status write to be refused on every path — the status moves through `Sa
 `Sales.ReopenDeal`, which the form's status control routes to. The field is editable to a person and
 not writable by a raw save, and one set cannot say both. The notice is the one that describes people.
 
-14 tests, five mutations checked: reverting either message, dropping Deal Status from the list,
-un-humanising the labels, and losing the sentence's final "and". The row 17 revert survived every
-other test in the repo until its own gate existed.
+**Row 18, the SERVER refusal**, said "this deal is closed and locked; {fields} cannot be changed.
+Reopen it through Sales.ReopenDeal, which records a reason." It is row 17's sibling: row 17 is what
+the form shows a person, row 18 is what the save returns to whoever asked — the form, an import, an
+agent or a raw API call. Its `{fields}` stays interpolated for the same reason the notice composes
+its list: golive#206 item 3 grows that set.
 
-Row 18 (the SERVER refusal) is not here — sales#73 is already rewriting that exact string, so it
-ships there rather than conflicting.
+Row 18 began on sales#73, the golive#205 branch, because that is where its sentence became TRUE —
+until the trigger landed, a status write could not reopen a deal and the refusal genuinely had
+nowhere else to send an integrator. It moved here so that one PR owns one issue. The sequencing is
+unchanged and was the tester's own: "the three lock messages assume the close/reopen issue lands".
+**This PR merges with sales#73, never before it.**
+
+It also arrived with no test at all — reverting the sentence broke nothing. It has one now, which is
+where the fourth mutation below comes from.
+
+18 tests, eight mutations checked: reverting any of the three messages, dropping Deal Status from the
+list, un-humanising the labels, losing the sentence's final "and", hardcoding row 18's field list,
+and appending the API detail back onto it. The row 17 revert survived every other test in the repo
+until its own gate existed, and row 18's revert did the same.

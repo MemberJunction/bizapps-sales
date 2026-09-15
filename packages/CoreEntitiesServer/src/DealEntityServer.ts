@@ -1689,10 +1689,28 @@ export class DealEntityServer extends DealEntity {
         if (all.length === 0) {
             return null;
         }
-        return (
-            `this deal is closed and locked; ${all.join(', ')} cannot be changed. ` +
-            `Reopen it through Sales.ReopenDeal, which records a reason.`
-        );
+        /**
+         * golive#207 row 18, verbatim: "This deal is closed. {fields} cannot be changed until the
+         * status is set back to Open."
+         *
+         * The third of the three lock messages, with rows 16 and 17 on this PR. It began on the #205
+         * branch, which is where the sentence became TRUE -- until that trigger landed, a status write
+         * could not reopen a deal and this refusal had to send the reader to `Sales.ReopenDeal`. It is
+         * here instead so that one PR owns one issue, and the sequencing the tester already called out
+         * ("the three lock messages assume the close/reopen issue lands") is unchanged: this PR merges
+         * with #205's, never before it.
+         *
+         * NOTHING IS APPENDED FOR INTEGRATORS. An earlier revision added a second sentence naming
+         * `Sales.ReopenDeal` and its arguments, on the reasoning that this string reaches an API caller
+         * as well as a person. Once setting the status back RUNS the reopen from any path, that is the
+         * same instruction spelled longer. A caller who wants the operation directly still finds it
+         * named, with its arguments, in `bareCloseRefusal` -- which fires where the flow cannot run.
+         *
+         * {fields} IS INTERPOLATED, not spelled out, which the tester asked for in the same breath:
+         * the notice "should match whatever #206 settles on". #206 item 3 grows that set from two
+         * fields to seven, and a hardcoded sentence would have started lying the day it merged.
+         */
+        return `This deal is closed. ${all.join(', ')} cannot be changed until the status is set back to Open.`;
     }
 
     /**
