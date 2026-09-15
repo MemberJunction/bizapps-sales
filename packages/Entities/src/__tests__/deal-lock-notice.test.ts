@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
+    DealFieldsEditableWhileLocked,
     DealFieldLabel,
     DealFieldsListedAsEditable,
     JoinLabels,
@@ -24,7 +24,9 @@ describe('the labels the notice uses', () => {
         //
         // Tested by SHAPE rather than against a copy of the map, which would only assert the map
         // equals itself: a label must not end in ID and must not run two words together.
-        for (const field of [...DEAL_FIELDS_EDITABLE_WHILE_LOCKED, 'DealStatusTypeID']) {
+        // The LOST set, because it is the widest — a label missing only from Loss Notes would
+        // otherwise go unnoticed until someone closed a deal as Lost.
+        for (const field of [...DealFieldsEditableWhileLocked(true), 'DealStatusTypeID']) {
             const label = DealFieldLabel(field);
             expect(label, `${field} is labelled with an id column`).not.toMatch(/ID$/);
             expect(label, `${field} is labelled with a run-together name`).not.toMatch(/[a-z][A-Z]/);
@@ -53,24 +55,31 @@ describe('what the notice lists', () => {
     /**
      * DEAL STATUS IS LISTED BUT IS NOT IN THE SERVER SET, which looks like a contradiction.
      *
-     * `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` is what a bare SAVE may change, and golive#205 asks for a
+     * `DealFieldsEditableWhileLocked` is what a bare SAVE may change, and golive#205 asks for a
      * bare status write to be refused on every path. The status moves through Sales.CloseDeal and
      * Sales.ReopenDeal instead, which the form's status control routes to. So it is editable to a
      * person and not writable by a raw save, and the notice is the one that describes people.
      */
     it('leads with Deal Status, because that is the way out of the lock', () => {
-        expect(DealFieldsListedAsEditable()[0]).toBe('DealStatusTypeID');
+        expect(DealFieldsListedAsEditable(false)[0]).toBe('DealStatusTypeID');
     });
 
     it('does NOT put Deal Status in the set the server enforces', () => {
-        expect(DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has('DealStatusTypeID')).toBe(false);
+        expect(DealFieldsEditableWhileLocked(false).has('DealStatusTypeID')).toBe(false);
+        expect(DealFieldsEditableWhileLocked(true).has('DealStatusTypeID')).toBe(false);
     });
 
     it('lists everything the server does accept, so the notice cannot under-promise', () => {
-        const listed = new Set(DealFieldsListedAsEditable());
-        for (const field of DEAL_FIELDS_EDITABLE_WHILE_LOCKED) {
-            expect(listed.has(field), `${field} is accepted but not listed`).toBe(true);
+        // Both outcomes, because the notice has to match whichever set the deal is under: Loss Notes
+        // is listed on a Lost deal and must NOT be on a Won one.
+        for (const isLost of [false, true]) {
+            const listed = new Set(DealFieldsListedAsEditable(isLost));
+            for (const field of DealFieldsEditableWhileLocked(isLost)) {
+                expect(listed.has(field), `${field} is accepted but not listed (isLost=${isLost})`).toBe(true);
+            }
         }
+        expect(new Set(DealFieldsListedAsEditable(true)).has('LossNotes')).toBe(true);
+        expect(new Set(DealFieldsListedAsEditable(false)).has('LossNotes')).toBe(false);
     });
 });
 
@@ -93,7 +102,7 @@ describe('how the list reads in a sentence', () => {
 });
 
 describe('the sentence the user actually reads', () => {
-    const listed = JoinLabels(DealFieldsListedAsEditable().map(DealFieldLabel));
+    const listed = JoinLabels(DealFieldsListedAsEditable(false).map(DealFieldLabel));
 
     it('leads with Deal Status, so the way out is the first thing named', () => {
         expect(listed.startsWith('Deal Status')).toBe(true);

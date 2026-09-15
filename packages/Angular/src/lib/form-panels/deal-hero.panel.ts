@@ -14,7 +14,7 @@ import { CompositeKey, RunView } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
-import { DealEntity, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
+import { DealEntity, IsDealFieldEditableWhileLocked, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 
 
@@ -125,7 +125,8 @@ function money(n: number | null | undefined): string {
                 <div class="mjs-deal-hero__edit">
                     <div class="mjs-deal-hero__field">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" FieldName="Name"
-                            Type="textbox" [EditMode]="EditMode" [FormContext]="FormContext"></mj-form-field>
+                            Type="textbox" [EditMode]="EditMode && NameEditable"
+                            [FormContext]="FormContext"></mj-form-field>
                     </div>
                 </div>
             }
@@ -327,6 +328,26 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     private focusedFor: string | null = null;
     public Collapsed = false;
     public IsLocked = false;
+    /** Whether the locking status is a LOSS. Only Loss Notes turns on it (golive#206). */
+    public IsLost = false;
+
+    /**
+     * May the deal's Name be typed into right now? (bc-aidp-next-golive#206 item 3)
+     *
+     * The issue asks for every field on "the header and ... the Pipeline, Account & people, Commercial,
+     * Motion and Close panels" to render read-only on a locked deal, and the tester's own reproduction
+     * lists Name FIRST: "Click Edit on the deal. Name, Pipeline, Account, Commercial, Motion and Close
+     * fields all become editable." The five panels were gated and the header was not, which left Name as
+     * the ONE field on the whole form that still accepted typing on a closed deal -- and the server then
+     * refused it on save, which is precisely the behaviour item 3 exists to remove.
+     *
+     * Asks `IsDealFieldEditableWhileLocked`, the SAME rule the entity server enforces, rather than
+     * testing `IsLocked` alone. Name is not in that set today; if it is ever added, this agrees with the
+     * server automatically instead of having to be found and changed.
+     */
+    public get NameEditable(): boolean {
+        return !this.IsLocked || IsDealFieldEditableWhileLocked('Name', this.IsLost);
+    }
     public LockNotice: string | null = null;
     public StaleAmountNotice: string | null = null;
 
@@ -468,6 +489,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         const persisted = this.Record?.GetFieldByName?.('DealStatusTypeID')?.OldValue as string | null | undefined;
         const lock = await ResolveDealLockState(persisted ?? this.Record?.DealStatusTypeID);
         this.IsLocked = lock.IsLocked;
+        this.IsLost = lock.IsLost;
         this.LockNotice = lock.Notice;
     }
 

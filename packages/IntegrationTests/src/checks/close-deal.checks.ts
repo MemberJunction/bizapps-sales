@@ -37,7 +37,7 @@ import {
     type NamedCheck,
 } from '@memberjunction/testing-integration';
 import {
-    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
+    DealFieldsEditableWhileLocked,
     StubDownstreamSeam,
     SalesCloseDealOperation,
     SalesReopenDealOperation,
@@ -524,7 +524,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 /**
                  * PINS THE CONSTANT THE EXPLORER FORM READS.
                  *
-                 * `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` moved into `sales-entities` so the Deal form can
+                 * `DealFieldsEditableWhileLocked` lives in `sales-entities` so the Deal form can
                  * grey out exactly what `DealEntityServer.Save()` refuses. That sharing is only worth
                  * anything if the constant still describes real behaviour — a list that drifts from the
                  * server turns into a form that offers a field the server rejects, or greys out one it
@@ -537,7 +537,42 @@ export const CloseDealChecks: NamedCheck[] = [
                 const f = await ResolveSalesFixture(ctx);
                 const md = new Metadata();
 
-                for (const field of DEAL_FIELDS_EDITABLE_WHILE_LOCKED) {
+                /**
+                 * A TYPE-APPROPRIATE VALUE PER FIELD, and this used to be one string for all of them.
+                 *
+                 * That held while the set was Description and NextStep. #206 item 3 added a date and
+                 * three ids, and `Set(field, 'CD14 touched ...')` on a datetime or a uniqueidentifier
+                 * fails for reasons that have nothing to do with the lock — which would read as "the
+                 * server refused an editable field" and send the next person hunting the wrong bug.
+                 *
+                 * The two ids that carry a foreign key are filled from the real table, so the save is
+                 * refused by the LOCK or not at all, never by referential integrity.
+                 */
+                const leadSource = await TxOne<{ ID: string }>(
+                    ctx, `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.LeadSourceType ORDER BY ID`,
+                );
+                const contact = await TxOne<{ ID: string }>(
+                    ctx, `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.SalesContact ORDER BY ID`,
+                );
+                const valueFor = (field: string): unknown => {
+                    switch (field) {
+                        case 'NextStepDate':
+                            return new Date('2026-01-15T00:00:00.000Z');
+                        case 'LeadSourceTypeID':
+                            return leadSource.ID;
+                        case 'BillingContactID':
+                            return contact.ID;
+                        case 'CampaignID':
+                            // No FK constraint on this column, so any id is referentially fine.
+                            return '11111111-2222-4333-8444-555555555555';
+                        default:
+                            return `CD14 touched ${field}`;
+                    }
+                };
+
+                // The WON set: everything editable on any locked deal. Loss Notes is not in it, and
+                // gets its own both-directions check below.
+                for (const field of DealFieldsEditableWhileLocked(false)) {
                     const dealID = await openDeal(
                         ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, `CD14 ${field}`,
                     );
@@ -548,13 +583,91 @@ export const CloseDealChecks: NamedCheck[] = [
 
                     const deal = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
                     Assert(await deal.Load(dealID), `the closed deal loads for ${field}`);
-                    deal.Set(field, `CD14 touched ${field}`);
+                    deal.Set(field, valueFor(field));
+                    // Without this, a value that happened to match what was already stored would leave
+                    // the record clean, the save would succeed having written nothing, and the field
+                    // would look carved-out when nothing had been tested.
+                    Assert(
+                        deal.GetFieldByName(field)?.Dirty === true,
+                        `CD14 did not actually change '${field}', so saving proves nothing about it`,
+                    );
                     Assert(
                         await deal.Save(),
-                        `'${field}' is in DEAL_FIELDS_EDITABLE_WHILE_LOCKED but the server REFUSED it — ` +
-                            'the shared constant no longer matches the lock',
+                        `'${field}' is in DealFieldsEditableWhileLocked(false) but the server REFUSED it — ` +
+                            'the shared rule no longer matches the lock',
                     );
                 }
+
+                /**
+                 * LOSS NOTES IS THE ONE CONDITIONAL MEMBER, and both directions are asserted because
+                 * only one of them fails loudly if it regresses.
+                 *
+                 * golive#206's field table says "Loss Notes (Lost deals only)" and item 3 asks that the
+                 * server's list "match this list exactly". An earlier version of the rule had it in the
+                 * flat set, editable on a WON deal too. That direction is the silent one: nobody files a
+                 * bug because a field they did not need was accepted, so nothing but this check would
+                 * ever notice it come back.
+                 *
+                 * Both halves also assert the SET first. Without that, a rule that dropped LossNotes
+                 * entirely would satisfy the won half and fail the lost half for a reason the message
+                 * would misdescribe.
+                 */
+                const lossReason = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.LossReason WHERE IsActive = 1 AND RequiresNotes = 0
+                     ORDER BY ID`,
+                );
+                Assert(!!lossReason?.ID, 'CD14 needs a loss reason that does not require notes');
+
+                const wonID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD14 LossNotes on won',
+                );
+                Assert(
+                    (await close(ctx, { DealID: wonID, DealStatusTypeID: f.WonStatusID })).Success,
+                    'the won close ran for the LossNotes case',
+                );
+                Assert(
+                    !DealFieldsEditableWhileLocked(false).has('LossNotes'),
+                    'the WON set must NOT carry LossNotes, or the refusal below proves nothing',
+                );
+                const won = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await won.Load(wonID), 'the won deal loads');
+                won.Set('LossNotes', 'CD14 loss notes on a WON deal');
+                Assert(
+                    won.GetFieldByName('LossNotes')?.Dirty === true,
+                    'CD14 did not actually change LossNotes on the won deal, so saving proves nothing',
+                );
+                Assert(
+                    !(await won.Save()),
+                    'LossNotes must be REFUSED on a WON deal — golive#206 carves it out for LOST deals only',
+                );
+
+                const lostID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD14 LossNotes on lost',
+                );
+                Assert(
+                    (await close(ctx, {
+                        DealID: lostID,
+                        DealStatusTypeID: f.LostStatusID,
+                        LossReasonID: String(lossReason!.ID),
+                    })).Success,
+                    'the lost close ran for the LossNotes case',
+                );
+                Assert(
+                    DealFieldsEditableWhileLocked(true).has('LossNotes'),
+                    'the LOST set must carry LossNotes, or the acceptance below proves nothing',
+                );
+                const lost = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await lost.Load(lostID), 'the lost deal loads');
+                lost.Set('LossNotes', 'CD14 loss notes on a LOST deal');
+                Assert(
+                    lost.GetFieldByName('LossNotes')?.Dirty === true,
+                    'CD14 did not actually change LossNotes on the lost deal, so saving proves nothing',
+                );
+                Assert(
+                    await lost.Save(),
+                    'LossNotes must be ACCEPTED on a LOST deal — the whole point of the carve-out',
+                );
 
                 // And the other direction: a field OUTSIDE the set must still be refused, or the set is
                 // describing a lock that is not actually holding anything.
@@ -568,7 +681,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 const locked = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
                 Assert(await locked.Load(lockedID), 'the locked deal loads');
                 Assert(
-                    !DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has('Name'),
+                    !DealFieldsEditableWhileLocked(true).has('Name'),
                     'this check assumes Name is NOT carved out; update it if that ever changes',
                 );
                 locked.Name = 'CD14 should not be allowed to rename a closed deal';
@@ -872,7 +985,7 @@ export const CloseDealChecks: NamedCheck[] = [
     },
     {
         Id: 'close-deal.CD13',
-        Name: 'CD13: the lock covers the CHILD COLLECTIONS too — and the closing transition may still carry them',
+        Name: 'CD13: bookkeeping collections stay editable on a closed deal, and the header does not',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -919,40 +1032,55 @@ export const CloseDealChecks: NamedCheck[] = [
                 Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
                 Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
 
-                const before = await instalments(ctx, dealID);
-
-                // ── HALF TWO: a REMOVAL on the closed deal is refused ──────────────────────────────
+                /**
+                 * ── HALF TWO: THE PAYMENT SCHEDULE IS NOW EDITABLE ON A CLOSED DEAL ──────────────
+                 *
+                 * This half asserted the opposite until bc-aidp-next-golive#206 item 2, and the reversal
+                 * is deliberate rather than a relaxation of the lock. Correcting a schedule or
+                 * reassigning a rep after a close is BOOKKEEPING; it does not change what was agreed,
+                 * which is what the lock protects. The lines are a different matter and stay frozen —
+                 * they are what the contract and the order were derived from.
+                 *
+                 * The allow-list in `DealEntityServer` names what is PERMITTED, not what is frozen, so a
+                 * collection added later is still refused by default. That is the property the original
+                 * "freeze every companion" rule was written for, and losing it was the real risk in this
+                 * change.
+                 */
                 const locked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
                 Assert(await locked.Load(dealID), 'the closed deal loads');
                 await locked.LoadRelatedRecords('PaymentSchedule');
                 AssertEqual(locked.PaymentSchedule.Count, 2, 'both instalments came back');
 
-                locked.PaymentSchedule.Remove(locked.PaymentSchedule.Items[1]);
-                AssertEqual(
-                    await locked.Save(),
-                    false,
-                    'removing an instalment from a CLOSED deal must be refused — the header is untouched, so only ' +
-                        'the collection check can catch this',
-                );
-
-                AssertEqual(
-                    (await instalments(ctx, dealID)).length,
-                    before.length,
-                    'and the refusal kept the instalment in the database',
-                );
-
-                // ── HALF TWO (b): an EDIT on the closed deal is refused too ────────────────────────
-                const edited = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
-                Assert(await edited.Load(dealID), 'the closed deal loads again');
-                await edited.LoadRelatedRecords('PaymentSchedule');
-                const target = edited.PaymentSchedule.Items[0];
+                const target = locked.PaymentSchedule.Items[0];
                 target.Amount = 99900;
-                AssertEqual(await edited.Save(), false, 'editing an instalment on a CLOSED deal must be refused');
+                Assert(
+                    await locked.Save(),
+                    `the payment schedule must stay editable on a closed deal — ${locked.LatestResult?.CompleteMessage ?? ''}`,
+                );
 
                 const finalRow = await TxOne<{ Amount: number }>(
                     ctx, `SELECT Amount FROM ${SALES_SCHEMA}.DealPaymentSchedule WHERE ID = '${target.ID}'`,
                 );
-                AssertEqual(Number(finalRow.Amount), 41000, 'the stored amount is still the pre-close value');
+                AssertEqual(Number(finalRow.Amount), 99900, 'and the edit actually landed');
+
+                // ── HALF THREE: the HEADER is still frozen, so this is a carve-out and not a hole ──
+                // Without this, a version that simply stopped checking collections at all would pass
+                // everything above.
+                const header = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await header.Load(dealID), 'the closed deal loads again');
+                header.Name = 'CD13 should not be allowed to rename a closed deal';
+                AssertEqual(
+                    await header.Save(),
+                    false,
+                    'the header lock must still hold — permitting a collection is not permitting the deal',
+                );
+
+                /**
+                 * NOT COVERED HERE: that `Lines` is still refused. The fixture deal is provisioned with a
+                 * Draft order carrying no lines, so there is nothing to remove, and adding one needs the
+                 * product fixture this bundle does not build. The order-line guard is #206 item 1 and
+                 * lands with its own check — flagged rather than left to look covered.
+                 */
             }),
     },
     {
@@ -1831,6 +1959,100 @@ export const CloseDealChecks: NamedCheck[] = [
                 Assert(
                     !out.Issues.some((i) => i.Message.includes('no reason given')),
                     `"no reason given" is the tell of a route reported before it was tried — ${JSON.stringify(out.Issues)}`,
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD27',
+        Name: 'CD27: a status write to Won RUNS the close, and one back to Open runs the reopen',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205, the half a refusal cannot satisfy: "the deal entity server should run the
+                 * existing close and reopen flows when a save moves the status into or out of a locking
+                 * status."
+                 *
+                 * WHY IT NEEDS A DATABASE. The trigger's whole job is to hand off to `Sales.CloseDeal`
+                 * and then agree with what that wrote. Every interesting way it can be wrong is a
+                 * persistence question -- the stage event, the stamps, the status itself, and whether
+                 * the in-memory object still disagrees with the row afterwards.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD27 status drives close',
+                );
+
+                // ── THE CLOSE: load, set the status, save. No operation call. ──────────────────
+                const md = new Metadata();
+                const deal = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await deal.Load(dealID), 'the open deal loads');
+                deal.DealStatusTypeID = f.WonStatusID;
+                Assert(
+                    await deal.Save(),
+                    `a status write to a locking status must RUN the close: ${deal.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const closed = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(closed.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.WonStatusID).toLowerCase(),
+                    'the status the caller asked for is what landed',
+                );
+                Assert(closed.ClosedAt !== null, 'and the close actually stamped, rather than only the status moving');
+
+                // The stage event is the thing a bare write never produced -- it is why #205 was filed.
+                const events = await TxOne<{ N: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.DealStageEvent WHERE DealID = '${dealID}'`,
+                );
+                Assert(Number(events.N) > 0, 'the close wrote its stage event');
+
+                /**
+                 * THE IN-MEMORY OBJECT MUST AGREE WITH THE ROW. The operation saves its OWN copy, so
+                 * without the reload at the end of the trigger the caller is left holding a deal whose
+                 * stamps predate the close it just ran -- and the next save off that object would write
+                 * them back.
+                 */
+                Assert(!!deal.ClosedAt, 'the saved object reflects the close, not the state before it');
+
+                // ── THE REOPEN: the same move, the other way. ──────────────────────────────────
+                const back = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await back.Load(dealID), 'the closed deal loads');
+                back.DealStatusTypeID = f.OpenStatusID;
+                Assert(
+                    await back.Save(),
+                    `a status write out of a locking status must RUN the reopen: ${back.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const reopened = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(reopened.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.OpenStatusID).toLowerCase(),
+                    'the deal is open again',
+                );
+                Assert(
+                    reopened.ClosedAt === null,
+                    'and the reopen CLEARED the stamps -- a status change that left them would be the ' +
+                        'mirror of the defect #205 reported',
+                );
+
+                // No reason was supplied by the caller and none was demanded (#205). One is still
+                // recorded, which is what keeps the audit trail honest.
+                const reopenEvent = await TxOne<{ Notes: string | null }>(
+                    ctx,
+                    `SELECT TOP 1 Notes FROM ${SALES_SCHEMA}.DealStageEvent WHERE DealID = '${dealID}' ` +
+                        `ORDER BY __mj_CreatedAt DESC`,
+                );
+                Assert(
+                    String(reopenEvent.Notes ?? '').length > 0,
+                    'the reopen recorded a reason even though the caller gave none',
                 );
             }),
     },
