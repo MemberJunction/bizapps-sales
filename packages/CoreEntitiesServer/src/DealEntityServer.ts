@@ -1859,26 +1859,22 @@ export class DealEntityServer extends DealEntity {
          * an API caller omitting it has nobody who meant anything by the omission.
          */
         /**
-         * golive#207 row 18 leads, then the API detail follows.
+         * golive#207 row 18, verbatim: "This deal is closed. {fields} cannot be changed until the
+         * status is set back to Open."
          *
-         * The tester's replacement is "This deal is closed. {fields} cannot be changed until the
-         * status is set back to Open." — written for a person, and right for one, because since
-         * golive#205 the status control on the form genuinely does that.
+         * ── WHY NO API DETAIL IS APPENDED ANY MORE ──────────────────────────────────────────────
          *
-         * ONE STRING, TWO AUDIENCES. This refusal is raised by the entity server, so it reaches a form
-         * user AND an import, an agent or a raw save. Naming the operation and its arguments is the
-         * whole reason the server-side trigger was not built — an integrator who hits this should not
-         * have to read the operation's source to find out what to call. So the tester's sentence leads
-         * and the API line follows it, rather than either one displacing the other.
+         * An earlier version of this added a second sentence naming `Sales.ReopenDeal` and its
+         * arguments, on the reasoning that this string reaches an integrator as well as a person. That
+         * was written when a status write could not reopen a deal, so an integrator genuinely had
+         * nowhere else to go. golive#205's trigger removed that: setting the status back to an open one
+         * now RUNS the reopen, from any path. The sentence the tester wrote is the whole instruction
+         * for both audiences, and the API detail would only be a longer way of saying it.
          *
-         * Worth confirming with the tester: they asked for their sentence, and this is their sentence
-         * plus one more.
+         * For a caller who does want the operation directly, `bareCloseRefusal` names it and its
+         * arguments — that refusal fires where the flow genuinely cannot run.
          */
-        return (
-            `This deal is closed. ${all.join(', ')} cannot be changed until the status is set back to ` +
-            `Open. Through the API that is Sales.ReopenDeal, passing DealID and a Reason — optionally ` +
-            `DealStatusTypeID to choose which open status to return to.`
-        );
+        return `This deal is closed. ${all.join(', ')} cannot be changed until the status is set back to Open.`;
     }
 
     /**
