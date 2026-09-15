@@ -1962,6 +1962,100 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-deal.CD27',
+        Name: 'CD27: a status write to Won RUNS the close, and one back to Open runs the reopen',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205, the half a refusal cannot satisfy: "the deal entity server should run the
+                 * existing close and reopen flows when a save moves the status into or out of a locking
+                 * status."
+                 *
+                 * WHY IT NEEDS A DATABASE. The trigger's whole job is to hand off to `Sales.CloseDeal`
+                 * and then agree with what that wrote. Every interesting way it can be wrong is a
+                 * persistence question -- the stage event, the stamps, the status itself, and whether
+                 * the in-memory object still disagrees with the row afterwards.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD27 status drives close',
+                );
+
+                // ── THE CLOSE: load, set the status, save. No operation call. ──────────────────
+                const md = new Metadata();
+                const deal = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await deal.Load(dealID), 'the open deal loads');
+                deal.DealStatusTypeID = f.WonStatusID;
+                Assert(
+                    await deal.Save(),
+                    `a status write to a locking status must RUN the close: ${deal.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const closed = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(closed.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.WonStatusID).toLowerCase(),
+                    'the status the caller asked for is what landed',
+                );
+                Assert(closed.ClosedAt !== null, 'and the close actually stamped, rather than only the status moving');
+
+                // The stage event is the thing a bare write never produced -- it is why #205 was filed.
+                const events = await TxOne<{ N: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.DealStageEvent WHERE DealID = '${dealID}'`,
+                );
+                Assert(Number(events.N) > 0, 'the close wrote its stage event');
+
+                /**
+                 * THE IN-MEMORY OBJECT MUST AGREE WITH THE ROW. The operation saves its OWN copy, so
+                 * without the reload at the end of the trigger the caller is left holding a deal whose
+                 * stamps predate the close it just ran -- and the next save off that object would write
+                 * them back.
+                 */
+                Assert(!!deal.ClosedAt, 'the saved object reflects the close, not the state before it');
+
+                // ── THE REOPEN: the same move, the other way. ──────────────────────────────────
+                const back = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await back.Load(dealID), 'the closed deal loads');
+                back.DealStatusTypeID = f.OpenStatusID;
+                Assert(
+                    await back.Save(),
+                    `a status write out of a locking status must RUN the reopen: ${back.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const reopened = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(reopened.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.OpenStatusID).toLowerCase(),
+                    'the deal is open again',
+                );
+                Assert(
+                    reopened.ClosedAt === null,
+                    'and the reopen CLEARED the stamps -- a status change that left them would be the ' +
+                        'mirror of the defect #205 reported',
+                );
+
+                // No reason was supplied by the caller and none was demanded (#205). One is still
+                // recorded, which is what keeps the audit trail honest.
+                const reopenEvent = await TxOne<{ Notes: string | null }>(
+                    ctx,
+                    `SELECT TOP 1 Notes FROM ${SALES_SCHEMA}.DealStageEvent WHERE DealID = '${dealID}' ` +
+                        `ORDER BY __mj_CreatedAt DESC`,
+                );
+                Assert(
+                    String(reopenEvent.Notes ?? '').length > 0,
+                    'the reopen recorded a reason even though the caller gave none',
+                );
+            }),
+    },
 ];
 
 for (const check of CloseDealChecks) {
