@@ -1834,6 +1834,64 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-deal.CD26',
+        Name: 'CD26: a status write the close CANNOT satisfy is refused, and leaves the deal open',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205's SAFETY NET, and the half that survives the status field driving the close.
+                 *
+                 * This check used to assert that a bare status write to Won was REFUSED. #205 asks for
+                 * the opposite -- "the deal entity server should run the existing close and reopen flows
+                 * when a save moves the status into or out of a locking status" -- and `close-deal.CD27`
+                 * now measures exactly that. Keeping both would have been two checks asserting opposite
+                 * outcomes for the same action.
+                 *
+                 * What is left, and what #205's second sentence is actually for: "A bare status write
+                 * into a locking status THAT DOES NOT RUN THE CLOSE FLOW must be refused on every path."
+                 * A Lost close needs a loss reason. A caller who sets the status without one has asked
+                 * for a close that cannot run, and the save must refuse rather than lock the deal with
+                 * none of the close having happened -- which is the original defect.
+                 *
+                 * BRANCH-INDEPENDENT ON PURPOSE. The same outcome holds whether the refusal comes from
+                 * the old `bareCloseRefusal` guard or from the close flow itself declining for want of
+                 * a loss reason, so this does not depend on which is in the tree and cannot dictate a
+                 * merge order.
+                 *
+                 * WHY THIS ONE STILL NEEDS A DATABASE. The refusal is only worth anything if the row is
+                 * untouched afterwards. A save that returned false having already written the status
+                 * would leave precisely the locked-but-not-closed deal #205 reported, and only the row
+                 * can say.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD26 unsatisfiable close',
+                );
+
+                // Lost, with no loss reason supplied. The close cannot run.
+                const md = new Metadata();
+                const bare = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await bare.Load(dealID), 'the open deal loads');
+                bare.DealStatusTypeID = f.LostStatusID;
+                Assert(
+                    (await bare.Save()) === false,
+                    'a status write asking for a close that cannot run must be refused',
+                );
+
+                const row = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.OpenStatusID).toLowerCase(),
+                    'the deal must still be open after the refused write',
+                );
+                Assert(row.ClosedAt === null, 'and nothing may have stamped a close');
+            }),
+    },
 ];
 
 for (const check of CloseDealChecks) {

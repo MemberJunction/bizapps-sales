@@ -237,6 +237,17 @@ const MUTATIONS = [
     { id: 'M-CD13', file: DES, expect: ['CD13'],
       from: '        const dirtyCollections = this.Companions\n            .filter((c) => c.Dirty)\n            .map((c) => c.Name);',
       to: '        const dirtyCollections: string[] = [];' },
+    // golive#205's server guard (#68). CD26 is the only check that turns on it, so this mutant is
+    // what separates 'CD26 is green' from 'CD26 can fail'. The PR claimed a manual run; nothing
+    // recorded it, which is the shape docs/CHECK-MUTATION-EVIDENCE.md exists to stop.
+    // RE-AIMED at what CD26 asserts now. The old anchor was `bareCloseRefusal`'s early-return guard,
+    // and golive#205's server-side trigger gives `planStatusTransition` the SAME guard shape -- so that
+    // anchor matches twice on a merged tree and the driver skips it. It aims at the refusal's own
+    // predicate instead, which is the thing CD26 turns on either way: with the trigger the close flow
+    // declines for want of a loss reason, without it this guard declines, and both leave the deal open.
+    { id: 'M-CD26', file: DES, expect: ['CD26'],
+      from: '        if (!IsBareCloseWrite(facts)) {\n            return null;\n        }',
+      to: '        if (true) {\n            return null;\n        }' },
     { id: 'M-CD14', file: DES, expect: ['CD14'],
       from: '    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;',
       to: "    private static readonly LOCK_EDITABLE_FIELDS = new Set<string>(['Description']);" },
