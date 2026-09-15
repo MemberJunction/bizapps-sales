@@ -160,3 +160,65 @@ export function IsBareCloseWrite(facts: StatusTransitionFacts): boolean {
     }
     return facts.TargetLocks;
 }
+
+/** One row of the deal-status list, with the flag that decides whether it may be picked. */
+export interface DealStatusOption {
+    ID: string;
+    Name: string;
+    /** Entering this status closes and freezes the deal. Enforced server-side. */
+    LocksDeal: boolean;
+    /**
+     * The OUTCOME flags, carried so a close action can find the status to close INTO by flag rather
+     * than by name. A deployment may call its winning status "Signed"; nothing may match on the word.
+     */
+    IsWon: boolean;
+    IsLost: boolean;
+}
+
+/**
+ * Every active deal status, with its lock flag, for a surface that has to offer a choice.
+ *
+ * RETURNS ALL OF THEM AND LETS THE CALLER FILTER, deliberately. A closed deal still has to SHOW the
+ * status it is in — a control that simply dropped the locking ones would render a won deal as blank
+ * or "— choose —", which reads as data loss. The workspace already solves it this way: it offers the
+ * non-locking ones and adds the deal's own status back as a display-only option.
+ *
+ * `LocksDeal` rather than `IsWon || IsLost`, because that is the flag the server's refusal reads.
+ * They coincide on today's data — Won, Lost and Abandoned carry both — but a surface filtering on a
+ * different flag would eventually offer a status the server then refuses, which is the drift this
+ * module exists to prevent.
+ */
+export async function LoadDealStatusOptions(contextUser?: UserInfo): Promise<DealStatusOption[]> {
+    const result = await new RunView().RunView<{
+        ID: string;
+        Name: string;
+        LocksDeal: boolean;
+        IsWon: boolean;
+        IsLost: boolean;
+    }>(
+        {
+            EntityName: E_DEAL_STATUS_TYPE,
+            ExtraFilter: 'IsActive = 1',
+            OrderBy: 'DisplayRank',
+            ResultType: 'simple',
+            // Every field read below must be listed here. A field declared on the row type and left
+            // out of this list arrives `undefined`, and a flag check against it quietly never fires --
+            // which is how ActivitySyncProviderType.IsActive did nothing for a release.
+            Fields: ['ID', 'Name', 'LocksDeal', 'IsWon', 'IsLost'],
+        },
+        contextUser,
+    );
+    if (!result?.Success) {
+        // An empty list leaves the control with nothing to offer, which is visibly wrong and therefore
+        // reportable. Inventing a list from somewhere else would hide a failed lookup behind a control
+        // that looks like it is working.
+        return [];
+    }
+    return (result.Results ?? []).map((r) => ({
+        ID: String(r.ID),
+        Name: String(r.Name),
+        LocksDeal: r.LocksDeal === true,
+        IsWon: r.IsWon === true,
+        IsLost: r.IsLost === true,
+    }));
+}
