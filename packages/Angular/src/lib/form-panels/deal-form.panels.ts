@@ -66,6 +66,22 @@ type DealFieldType =
  * `DealFormComponentExtended` already resolves the lock once per load, through the same shared
  * `ResolveDealLockState` the server uses. Resolving it again here would be a second answer to a
  * question that already has one, and five more database reads per form.
+ *
+ * ── WHY `FormComponent` IS THE EXTENDED CLASS, WHICH IS WORTH PROVING ───────────────────────────
+ *
+ * This is the first panel code to read an EXTENDED member off `FormComponent` -- everything else here
+ * uses `BaseFormComponent`'s own API -- and it fails OPEN if the member is missing, which is the
+ * dangerous direction: a locked deal would render fully editable and nobody would see an error.
+ *
+ * The chain: `MJGlobal.ClassFactory` resolves 'MJ_BizApps_Sales: Deals' to
+ * `DealFormComponentExtended` (registered at priority 2, above the generated form), that class
+ * renders the GENERATED template, and the template passes `[FormComponent]="this"` into the panel
+ * slot -- so `this` is the extended instance.
+ *
+ * The evidence it holds at runtime is in golive#206 itself. The tester reported "I only find out a
+ * field is frozen when the save is refused", and that refusal is produced by
+ * `DealFormComponentExtended.ValidateAsync` reading `this.IsLocked`. Nothing else produces it. A
+ * tester seeing it is a tester whose Explorer resolved the extended class.
  */
 abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     /** The fields this panel renders, in order. */
