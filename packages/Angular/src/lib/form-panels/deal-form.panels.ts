@@ -584,11 +584,26 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
             Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="false"
             [BadgeCount]="FormComponent.GetSectionRowCount('lines')">
             @if (Record.IsSaved && Record.OrderID) {
+                <!-- NEW IS HIDDEN ON A LOCKED DEAL (bc-aidp-next-golive#206 item 1). The tester added a
+                     line to a Won deal through this toolbar and it saved: "the grid should hide its New
+                     and delete buttons when the deal is locked".
+
+                     DELETE IS NOT BOUND HERE ON PURPOSE. ShowDeleteButton defaults to FALSE, so the
+                     toolbar never offers delete on any deal; binding it to !IsLocked would START showing
+                     it on open ones, which is the opposite of what the issue asks. Stage history sets it
+                     to false explicitly for the same reason it sets New to false: there, both are off on
+                     every deal.
+
+                     THIS IS THE FORM HALF ONLY. The server half -- refusing the line save whichever path
+                     it arrives by -- needs the order-line veto from bizapps-orders#206, which is not
+                     published yet. Hiding a button is not a lock, and this comment is here so nobody
+                     reads it as one. -->
                 <mj-explorer-entity-data-grid
                     [Params]="Params"
                     [NewRecordValues]="NewValues"
                     [AllowLoad]="FormComponent.IsSectionExpanded('lines')"
                     [ShowToolbar]="true"
+                    [ShowNewButton]="!IsLocked"
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
@@ -600,6 +615,17 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
     styles: [`.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }`],
 })
 export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
+    /**
+     * Whether the deal's persisted status locks it.
+     *
+     * Read off the form component, which resolved it once per load through the shared
+     * `ResolveDealLockState` -- the same answer the field panels gate on. Resolving it again here would
+     * be a second answer to a question that already has one.
+     */
+    public get IsLocked(): boolean {
+        return (this.FormComponent as unknown as { IsLocked?: boolean } | undefined)?.IsLocked === true;
+    }
+
     public get Params() {
         const id = this.Record?.OrderID;
         if (!id) return null;

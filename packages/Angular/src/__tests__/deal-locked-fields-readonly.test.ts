@@ -97,3 +97,72 @@ describe('the binding is wired, not just the helper', () => {
         expect(source).not.toMatch(/const\s+\w*EDITABLE\w*\s*=\s*\[/);
     });
 });
+
+/**
+ * THE TWO GAPS AN AUDIT AGAINST THE ISSUE TEXT FOUND, after the panels were already done and verified.
+ *
+ * Both were missed the same way: the work was checked against the panels it changed, not against the
+ * sentence in the issue. golive#206 item 3 says "the header AND ... the Pipeline, Account & people,
+ * Commercial, Motion and Close panels", and item 1 asks for the grid's buttons as well as the server
+ * refusal. The sweep above is the reason the header survived -- it read ONE file.
+ */
+describe('the header is part of item 3, not just the panels', () => {
+    const PANELS = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
+    const HERO = readFileSync(new URL('../lib/form-panels/deal-hero.panel.ts', import.meta.url), 'utf8');
+
+    it('binds no field with a bare EditMode, in EITHER file', () => {
+        /**
+         * Scoped to one file, this same assertion passed while the hero's Name field stayed editable on
+         * a closed deal -- the only typeable field left on the form, refused by the server on save,
+         * which is the exact behaviour item 3 removes. The file list is the assertion.
+         */
+        for (const [name, source] of [['panels', PANELS], ['hero', HERO]] as const) {
+            const unguarded = (source.match(/\[EditMode\]="EditMode"/g) ?? []);
+            expect(unguarded, `${name}: ${unguarded.length} field(s) bind EditMode without asking the lock`)
+                .toEqual([]);
+        }
+    });
+
+    it('gates the header Name through the shared rule, not a bare IsLocked test', () => {
+        expect(HERO).toMatch(/\[EditMode\]="EditMode && NameEditable"/);
+        // The same constant the entity server enforces. A bare `!IsLocked` would silently disagree with
+        // the server the day Name joins the editable set.
+        expect(HERO).toContain('IsDealFieldEditableWhileLocked');
+    });
+});
+
+describe("item 1's form half: the lines grid stops offering New on a locked deal", () => {
+    const PANELS = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
+    /**
+     * COMMENTS STRIPPED. The first version of the last assertion below read the getter's own doc
+     * comment -- which names ResolveDealLockState while explaining why it does NOT call it -- and
+     * failed on prose. That is the third time this session a source-level test matched the comment
+     * instead of the code, so the helper is explicit rather than incidental.
+     */
+    const codeOnly = (text: string): string =>
+        text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+    const linesPanel = codeOnly(
+        (() => {
+            const start = PANELS.indexOf("key: 'sales:deal-lines'");
+            return PANELS.slice(start, PANELS.indexOf('@RegisterClassEx', start + 10));
+        })(),
+    );
+
+    it('hides New when the deal is locked', () => {
+        // The tester added a line to a Won deal through this toolbar and it saved.
+        expect(linesPanel).toMatch(/\[ShowNewButton\]="!IsLocked"/);
+    });
+
+    it('does NOT bind delete, which would start showing it on open deals', () => {
+        // ShowDeleteButton defaults to false, so the toolbar never offers delete on any deal. Binding
+        // it to !IsLocked would turn it ON for every open deal -- the opposite of what #206 asks.
+        expect(linesPanel).not.toMatch(/\[ShowDeleteButton\]/);
+    });
+
+    it('reads the lock off the form rather than resolving it a second time', () => {
+        expect(linesPanel).toMatch(/public get IsLocked\(\): boolean/);
+        expect(linesPanel, 'a second ResolveDealLockState call is a second answer to a settled question')
+            .not.toContain('ResolveDealLockState');
+    });
+});
