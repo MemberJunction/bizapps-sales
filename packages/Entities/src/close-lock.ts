@@ -29,13 +29,13 @@
 import { RunView, type UserInfo } from '@memberjunction/core';
 
 /**
- * The deal fields that stay editable while the deal is locked.
+ * The deal fields that stay editable while the deal is locked, on ANY locked deal.
  *
  * Pinned by integration check CD14, which closes a deal and then proves each of these is genuinely
- * accepted and that a field outside the set is genuinely refused — so this constant cannot quietly
- * stop describing what the server does.
+ * accepted and that a field outside the set is genuinely refused — so this cannot quietly stop
+ * describing what the server does.
  */
-export const DEAL_FIELDS_EDITABLE_WHILE_LOCKED: ReadonlySet<string> = new Set<string>([
+const EDITABLE_ON_ANY_LOCKED_DEAL: ReadonlySet<string> = new Set<string>([
     // Commentary. A closed deal still gets notes, and forcing a reopen to add one would corrupt the
     // reopen record with administrative noise.
     'Description',
@@ -49,25 +49,48 @@ export const DEAL_FIELDS_EDITABLE_WHILE_LOCKED: ReadonlySet<string> = new Set<st
     'BillingContactID',
     'LeadSourceTypeID',
     'CampaignID',
-    // Why a deal was lost, elaborated after the fact. LossReasonID stays FROZEN on purpose -- the close
-    // event records which reason was chosen, and rewriting it would make that event dishonest. Notes
-    // are the channel for corrections.
-    //
-    // Not conditioned on the deal being Lost, which the spec asks for. The set is a flat membership
-    // test shared by the form and the server, and a conditional member would need both to evaluate the
-    // same condition -- the exact drift this module exists to prevent. Loss notes on a Won deal are
-    // harmless; a form and a server disagreeing about whether a field is editable is not.
-    'LossNotes',
 ]);
 
 /**
- * Whether `fieldName` may still be edited on a locked deal.
+ * The fields that stay editable only on a LOST deal.
  *
- * Callers should prefer this to reaching into the set, so the membership test stays in one place if the
- * rule ever grows a condition beyond simple membership.
+ * golive#206's field table says "Loss Notes (Lost deals only)", and item 3 asks that the server's
+ * list "match this list exactly". An earlier version of this module put `LossNotes` in the flat set
+ * above and said so out loud: a conditional member would need the form and the server to evaluate the
+ * same condition, which is the drift this module exists to prevent.
+ *
+ * That reasoning was weaker than it read. THIS module is exactly where such a condition belongs --
+ * the same place that already owns "how you decide a deal is locked at all". Both sides now pass a
+ * flag they already hold, from the same resolver, and the condition itself lives here once.
+ *
+ * `LossReasonID` stays frozen on every deal, lost included: the close event records which reason was
+ * chosen, and rewriting it would make that event dishonest. Notes are the channel for corrections.
  */
-export function IsDealFieldEditableWhileLocked(fieldName: string): boolean {
-    return DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has(fieldName);
+const EDITABLE_ON_A_LOST_DEAL: ReadonlySet<string> = new Set<string>(['LossNotes']);
+
+/**
+ * Every field a locked deal still accepts, given its outcome.
+ *
+ * Takes the flag rather than exposing a flat set, so a caller cannot read the list and forget the
+ * condition. That is not hypothetical: four call sites used to read the flat constant directly.
+ *
+ * @param isLost - whether the deal's PERSISTED status carries `IsLost`. When it cannot be determined,
+ *                 pass `false`: refusing an edit to a closed deal is the cheaper mistake.
+ */
+export function DealFieldsEditableWhileLocked(isLost: boolean): ReadonlySet<string> {
+    if (!isLost) {
+        return EDITABLE_ON_ANY_LOCKED_DEAL;
+    }
+    return new Set<string>([...EDITABLE_ON_ANY_LOCKED_DEAL, ...EDITABLE_ON_A_LOST_DEAL]);
+}
+
+/**
+ * Whether `fieldName` may still be edited on a locked deal with this outcome.
+ *
+ * Callers should prefer this to reaching into the sets, so the membership test stays in one place.
+ */
+export function IsDealFieldEditableWhileLocked(fieldName: string, isLost: boolean): boolean {
+    return EDITABLE_ON_ANY_LOCKED_DEAL.has(fieldName) || (isLost && EDITABLE_ON_A_LOST_DEAL.has(fieldName));
 }
 
 /** Sales' deal-status type table. Named here so the lock lookup below has one spelling of it. */
@@ -78,6 +101,16 @@ export interface DealLockState {
     IsLocked: boolean;
     /** The status' display name, for the notice. Null when not locked. */
     StatusName: string | null;
+    /**
+     * Whether the locking status carries `IsLost`, which decides one field: golive#206 keeps Loss
+     * Notes editable on a lost deal and frozen on a won one.
+     *
+     * Resolved HERE rather than by each surface, for the same reason `IsLocked` is: it is read off the
+     * status ROW by flag, from the PERSISTED status, and a second implementation gets one of those
+     * quietly wrong. `false` on an open deal and on a status that cannot be read — refusing an edit to
+     * a closed deal is the cheaper mistake.
+     */
+    IsLost: boolean;
     /** A ready-to-render explanation, or null when the deal is open. */
     Notice: string | null;
 }
@@ -104,17 +137,17 @@ export async function ResolveDealLockState(
     persistedStatusID: string | null | undefined,
     contextUser?: UserInfo,
 ): Promise<DealLockState> {
-    const open: DealLockState = { IsLocked: false, StatusName: null, Notice: null };
+    const open: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, Notice: null };
     if (!persistedStatusID) {
         return open;
     }
 
-    const result = await new RunView().RunView<{ LocksDeal: boolean; Name: string }>(
+    const result = await new RunView().RunView<{ LocksDeal: boolean; Name: string; IsLost: boolean }>(
         {
             EntityName: E_DEAL_STATUS_TYPE,
             ExtraFilter: `ID = '${String(persistedStatusID).replace(/'/g, "''")}'`,
             ResultType: 'simple',
-            Fields: ['LocksDeal', 'Name'],
+            Fields: ['LocksDeal', 'Name', 'IsLost'],
         },
         contextUser,
     );
@@ -123,10 +156,12 @@ export async function ResolveDealLockState(
         return open;
     }
 
-    const editable = [...DEAL_FIELDS_EDITABLE_WHILE_LOCKED].join(' and ');
+    const isLost = row.IsLost === true;
+    const editable = [...DealFieldsEditableWhileLocked(isLost)].join(' and ');
     return {
         IsLocked: true,
         StatusName: row.Name,
+        IsLost: isLost,
         Notice:
             `This deal is closed (${row.Name}) and locked. A contract or an order was derived from it, so ` +
             `its terms are frozen — only ${editable} can still be changed. To change anything else, reopen ` +

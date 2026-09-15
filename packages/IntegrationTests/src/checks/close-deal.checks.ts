@@ -37,7 +37,7 @@ import {
     type NamedCheck,
 } from '@memberjunction/testing-integration';
 import {
-    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
+    DealFieldsEditableWhileLocked,
     StubDownstreamSeam,
     SalesCloseDealOperation,
     SalesReopenDealOperation,
@@ -524,7 +524,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 /**
                  * PINS THE CONSTANT THE EXPLORER FORM READS.
                  *
-                 * `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` moved into `sales-entities` so the Deal form can
+                 * `DealFieldsEditableWhileLocked` lives in `sales-entities` so the Deal form can
                  * grey out exactly what `DealEntityServer.Save()` refuses. That sharing is only worth
                  * anything if the constant still describes real behaviour — a list that drifts from the
                  * server turns into a form that offers a field the server rejects, or greys out one it
@@ -570,7 +570,9 @@ export const CloseDealChecks: NamedCheck[] = [
                     }
                 };
 
-                for (const field of DEAL_FIELDS_EDITABLE_WHILE_LOCKED) {
+                // The WON set: everything editable on any locked deal. Loss Notes is not in it, and
+                // gets its own both-directions check below.
+                for (const field of DealFieldsEditableWhileLocked(false)) {
                     const dealID = await openDeal(
                         ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, `CD14 ${field}`,
                     );
@@ -591,10 +593,81 @@ export const CloseDealChecks: NamedCheck[] = [
                     );
                     Assert(
                         await deal.Save(),
-                        `'${field}' is in DEAL_FIELDS_EDITABLE_WHILE_LOCKED but the server REFUSED it — ` +
-                            'the shared constant no longer matches the lock',
+                        `'${field}' is in DealFieldsEditableWhileLocked(false) but the server REFUSED it — ` +
+                            'the shared rule no longer matches the lock',
                     );
                 }
+
+                /**
+                 * LOSS NOTES IS THE ONE CONDITIONAL MEMBER, and both directions are asserted because
+                 * only one of them fails loudly if it regresses.
+                 *
+                 * golive#206's field table says "Loss Notes (Lost deals only)" and item 3 asks that the
+                 * server's list "match this list exactly". An earlier version of the rule had it in the
+                 * flat set, editable on a WON deal too. That direction is the silent one: nobody files a
+                 * bug because a field they did not need was accepted, so nothing but this check would
+                 * ever notice it come back.
+                 *
+                 * Both halves also assert the SET first. Without that, a rule that dropped LossNotes
+                 * entirely would satisfy the won half and fail the lost half for a reason the message
+                 * would misdescribe.
+                 */
+                const lossReason = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.LossReason WHERE IsActive = 1 AND RequiresNotes = 0
+                     ORDER BY ID`,
+                );
+                Assert(!!lossReason?.ID, 'CD14 needs a loss reason that does not require notes');
+
+                const wonID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD14 LossNotes on won',
+                );
+                Assert(
+                    (await close(ctx, { DealID: wonID, DealStatusTypeID: f.WonStatusID })).Success,
+                    'the won close ran for the LossNotes case',
+                );
+                Assert(
+                    !DealFieldsEditableWhileLocked(false).has('LossNotes'),
+                    'the WON set must NOT carry LossNotes, or the refusal below proves nothing',
+                );
+                const won = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await won.Load(wonID), 'the won deal loads');
+                won.Set('LossNotes', 'CD14 loss notes on a WON deal');
+                Assert(
+                    won.GetFieldByName('LossNotes')?.Dirty === true,
+                    'CD14 did not actually change LossNotes on the won deal, so saving proves nothing',
+                );
+                Assert(
+                    !(await won.Save()),
+                    'LossNotes must be REFUSED on a WON deal — golive#206 carves it out for LOST deals only',
+                );
+
+                const lostID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD14 LossNotes on lost',
+                );
+                Assert(
+                    (await close(ctx, {
+                        DealID: lostID,
+                        DealStatusTypeID: f.LostStatusID,
+                        LossReasonID: String(lossReason!.ID),
+                    })).Success,
+                    'the lost close ran for the LossNotes case',
+                );
+                Assert(
+                    DealFieldsEditableWhileLocked(true).has('LossNotes'),
+                    'the LOST set must carry LossNotes, or the acceptance below proves nothing',
+                );
+                const lost = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await lost.Load(lostID), 'the lost deal loads');
+                lost.Set('LossNotes', 'CD14 loss notes on a LOST deal');
+                Assert(
+                    lost.GetFieldByName('LossNotes')?.Dirty === true,
+                    'CD14 did not actually change LossNotes on the lost deal, so saving proves nothing',
+                );
+                Assert(
+                    await lost.Save(),
+                    'LossNotes must be ACCEPTED on a LOST deal — the whole point of the carve-out',
+                );
 
                 // And the other direction: a field OUTSIDE the set must still be refused, or the set is
                 // describing a lock that is not actually holding anything.
@@ -608,7 +681,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 const locked = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
                 Assert(await locked.Load(lockedID), 'the locked deal loads');
                 Assert(
-                    !DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has('Name'),
+                    !DealFieldsEditableWhileLocked(true).has('Name'),
                     'this check assumes Name is NOT carved out; update it if that ever changes',
                 );
                 locked.Name = 'CD14 should not be allowed to rename a closed deal';

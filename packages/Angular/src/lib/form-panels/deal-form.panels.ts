@@ -100,8 +100,11 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
      * directly is exactly what the server refuses.
      */
     public FieldEditable(fieldName: string): boolean {
-        const locked = (this.FormComponent as unknown as { IsLocked?: boolean } | undefined)?.IsLocked === true;
-        return !locked || IsDealFieldEditableWhileLocked(fieldName);
+        const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
+        const locked = form?.IsLocked === true;
+        // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
+        // Notes editable on a LOST deal and frozen on a won one.
+        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
     }
 }
 

@@ -69,6 +69,7 @@ const SEQ = 'packages/CoreEntitiesServer/src/SequenceService.ts';
 const CWT = 'packages/CoreEntitiesServer/src/CloseWonTaskService.ts';
 const SEAM = 'packages/Entities/src/downstream-seams.ts';
 const LCS = 'packages/CoreEntitiesServer/src/LiveContractsSeam.ts';
+const CL = 'packages/Entities/src/close-lock.ts';
 
 /**
  * ── THE ACTIVITIES AND FORECAST SOURCES, ABSENT FROM THIS FILE UNTIL NOW ────────────────────────
@@ -242,9 +243,20 @@ const MUTATIONS = [
     { id: 'M-CD13', file: DES, expect: ['CD13'],
       from: "    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([\n        'Team',\n        'PaymentSchedule',\n    ]);",
       to: '    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>();' },
+    // RE-AIMED. The old anchor was `LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED`, a
+    // static the rule no longer has: golive#206's "Loss Notes (Lost deals only)" made the answer depend
+    // on the outcome, so it became a call. An anchor that no longer matches is SKIPPED, not failed --
+    // CD14 would have looked mutation-covered while nothing tested it.
     { id: 'M-CD14', file: DES, expect: ['CD14'],
-      from: '    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;',
-      to: "    private static readonly LOCK_EDITABLE_FIELDS = new Set<string>(['Description']);" },
+      from: '        return DealFieldsEditableWhileLocked(isLost);',
+      to: "        return new Set<string>(['Description']);" },
+
+    // The conditional member itself, which is the whole of this round. Making the WON set carry
+    // LossNotes is the regression that reverts golive#206 item 3, and it is the SILENT direction:
+    // nobody reports a field they did not need being accepted.
+    { id: 'M-CD14-LOSSNOTES', file: CL, expect: ['CD14'],
+      from: '    if (!isLost) {\n        return EDITABLE_ON_ANY_LOCKED_DEAL;\n    }',
+      to: '    if (false) {\n        return EDITABLE_ON_ANY_LOCKED_DEAL;\n    }' },
 
     // The stage → order-status writer (D-OS1).
     { id: 'M-OS1', file: DES, expect: ['CO3', 'CO5'],

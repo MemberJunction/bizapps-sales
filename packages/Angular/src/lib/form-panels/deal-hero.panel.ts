@@ -328,6 +328,8 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     private focusedFor: string | null = null;
     public Collapsed = false;
     public IsLocked = false;
+    /** Whether the locking status is a LOSS. Only Loss Notes turns on it (golive#206). */
+    public IsLost = false;
 
     /**
      * May the deal's Name be typed into right now? (bc-aidp-next-golive#206 item 3)
@@ -344,7 +346,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
      * server automatically instead of having to be found and changed.
      */
     public get NameEditable(): boolean {
-        return !this.IsLocked || IsDealFieldEditableWhileLocked('Name');
+        return !this.IsLocked || IsDealFieldEditableWhileLocked('Name', this.IsLost);
     }
     public LockNotice: string | null = null;
     public StaleAmountNotice: string | null = null;
@@ -487,6 +489,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         const persisted = this.Record?.GetFieldByName?.('DealStatusTypeID')?.OldValue as string | null | undefined;
         const lock = await ResolveDealLockState(persisted ?? this.Record?.DealStatusTypeID);
         this.IsLocked = lock.IsLocked;
+        this.IsLost = lock.IsLost;
         this.LockNotice = lock.Notice;
     }
 

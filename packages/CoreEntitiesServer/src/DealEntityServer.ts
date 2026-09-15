@@ -59,7 +59,7 @@ import { RegisterClass } from '@memberjunction/global';
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
 import { CanTransition, type OrderStatus } from '@mj-biz-apps/orders-entities';
 import {
-    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
+    DealFieldsEditableWhileLocked,
     DealEntity,
     type mjBizAppsSalesDealStageEventEntity,
     IsBareCloseWrite,
@@ -1575,11 +1575,17 @@ export class DealEntityServer extends DealEntity {
     /**
      * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.
      *
-     * It moved to `@mj-biz-apps/sales-entities` so the Explorer Deal form can apply the same list. A
-     * second copy here would drift, and the drift would only ever surface as a user typing into a field
-     * the server then refuses. See `close-lock.ts` for the reasoning; CD14 pins it to real behaviour.
+     * It lives in `@mj-biz-apps/sales-entities` so the Explorer Deal form and the workspace apply the
+     * same list. A second copy here would drift, and the drift would only ever surface as a user typing
+     * into a field the server then refuses. See `close-lock.ts`; CD14 pins it to real behaviour.
+     *
+     * A FUNCTION, not a constant, since golive#206's "Loss Notes (Lost deals only)": the answer depends
+     * on the deal's outcome, so the outcome has to reach it. It used to be a flat `ReadonlySet` held in
+     * a static, which is precisely how a caller ends up with the list and without the condition.
      */
-    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;
+    private static lockEditableFields(isLost: boolean): ReadonlySet<string> {
+        return DealFieldsEditableWhileLocked(isLost);
+    }
 
     /**
      * The child collections that stay editable on a locked deal.
@@ -1679,7 +1685,8 @@ export class DealEntityServer extends DealEntity {
         if (!persistedStatusID) {
             return null;
         }
-        if (!(await this.statusLocksDeal(persistedStatusID))) {
+        const persisted = await this.readStatusLockFlags(persistedStatusID);
+        if (!persisted.LocksDeal) {
             return null;
         }
 
@@ -1688,9 +1695,13 @@ export class DealEntityServer extends DealEntity {
         // whether this one edit was permitted.
         this._lockedAtSave = true;
 
-        const changed = this.Fields.filter(
-            (f) => f.Dirty && !DealEntityServer.LOCK_EDITABLE_FIELDS.has(f.Name),
-        ).map((f) => f.Name);
+        /**
+         * The outcome decides one field. golive#206: Loss Notes stays editable on a LOST deal and is
+         * frozen on a won one, and the form asks the same function with the same flag — both take it
+         * from the status ROW, never from a name.
+         */
+        const editable = DealEntityServer.lockEditableFields(persisted.IsLost);
+        const changed = this.Fields.filter((f) => f.Dirty && !editable.has(f.Name)).map((f) => f.Name);
 
         /**
          * THE CHILD COLLECTIONS COUNT AS CHANGES TOO, and this half did not exist when the lock was
@@ -1740,24 +1751,41 @@ export class DealEntityServer extends DealEntity {
      * working. It is also why the lock is a property of the STATUS TYPE rather than of the stage.
      */
     private async statusLocksDeal(statusID: string): Promise<boolean> {
+        return (await this.readStatusLockFlags(statusID)).LocksDeal;
+    }
+
+    /**
+     * The two flags the lock needs off a status row: does it lock the deal, and is it a LOSS.
+     *
+     * One read for both, because every caller that wants the second also wants the first, and two
+     * round trips for two columns of one row is a cost with nothing to show for it.
+     *
+     * ── THE TWO FAILURE DEFAULTS POINT THE SAME WAY ─────────────────────────────────────────────
+     *
+     * `LocksDeal` FAILS CLOSED: if the status cannot be read we cannot prove the deal is unlocked, and
+     * wrongly allowing an edit to a closed deal is the more expensive mistake. `IsLost` fails to
+     * `false` for the same reason read the other way round — `false` means Loss Notes is NOT carved
+     * out, so an unreadable status refuses more, never less.
+     */
+    private async readStatusLockFlags(statusID: string): Promise<{ LocksDeal: boolean; IsLost: boolean }> {
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
             {
                 EntityName: DEAL_STATUS_ENTITY,
                 ExtraFilter: `ID = '${statusID}'`,
                 ResultType: 'simple',
-                Fields: ['LocksDeal'],
+                Fields: ['LocksDeal', 'IsLost'],
             },
             this.ContextCurrentUser,
         );
         if (!result.Success) {
-            // FAIL CLOSED. If the status cannot be read we cannot prove the deal is unlocked, and
-            // wrongly allowing an edit to a closed deal is the more expensive mistake.
-            LogError(`DealEntityServer.statusLocksDeal: could not read status ${statusID}: ${result.ErrorMessage}`);
-            return true;
+            LogError(
+                `DealEntityServer.readStatusLockFlags: could not read status ${statusID}: ${result.ErrorMessage}`,
+            );
+            return { LocksDeal: true, IsLost: false };
         }
-        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean } | undefined;
-        return row?.LocksDeal === true;
+        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean } | undefined;
+        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true };
     }
 
     /* ── Selling company ────────────────────────────────────────────────────── */

@@ -34,7 +34,7 @@ import { Component } from '@angular/core';
 import { RunView } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
-import { DEAL_FIELDS_EDITABLE_WHILE_LOCKED, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
+import { DealFieldsEditableWhileLocked, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
 import type { ValidationResult } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
@@ -54,6 +54,14 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     /** True when the PERSISTED status locks the deal. Resolved once per load. */
     public IsLocked = false;
 
+    /**
+     * Whether the locking status is a LOSS — which decides exactly one field.
+     *
+     * golive#206 keeps Loss Notes editable on a lost deal and frozen on a won one. Resolved once, with
+     * the lock, by `ResolveDealLockState`, and handed to the panels; nothing here reads a status name.
+     */
+    public IsLost = false;
+
     /** Shown when locked, so the greyed-out-ness the form cannot render is at least explained. */
     public LockNotice: string | null = null;
 
@@ -69,7 +77,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
 
     /** The fields a user may still edit right now — everything when open, the carve-outs when locked. */
     public EditableFieldNames(): readonly string[] | null {
-        return this.IsLocked ? [...DEAL_FIELDS_EDITABLE_WHILE_LOCKED] : null;
+        return this.IsLocked ? [...DealFieldsEditableWhileLocked(this.IsLost)] : null;
     }
 
     /**
@@ -82,6 +90,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         const persisted = this.record?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
         const lock = await ResolveDealLockState(persisted);
         this.IsLocked = lock.IsLocked;
+        this.IsLost = lock.IsLost;
         this.LockNotice = lock.Notice;
     }
 
@@ -143,9 +152,8 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return result;
         }
 
-        const frozen = this.record.Fields.filter(
-            (f) => f.Dirty && !DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has(f.Name),
-        );
+        const editable = DealFieldsEditableWhileLocked(this.IsLost);
+        const frozen = this.record.Fields.filter((f) => f.Dirty && !editable.has(f.Name));
         if (frozen.length === 0) {
             return result;
         }
