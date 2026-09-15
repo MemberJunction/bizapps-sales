@@ -734,12 +734,6 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                     </div>
                                 </div>
                             }
-                            @if (ActionMessage) {
-                                <div class="mjs-reopen__msg" [class.is-error]="ActionFailed">{{ ActionMessage }}</div>
-                            }
-                            @for (i of ActionIssues; track $index) {
-                                <div class="mjs-reopen__issue">{{ i }}</div>
-                            }
                             @if (CurrentStatusIsClosing && !PendingReopenStatusID) {
                                 <small class="mjs-field__hint">Closed. Pick an open status to reopen it, or use Reopen on the Close panel.</small>
                             } @else if (!CurrentStatusIsClosing) {
@@ -747,6 +741,23 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                             }
                         } @else {
                             <div class="mj-forms-field-value">{{ CurrentStatusName || '—' }}</div>
+                        }
+
+                        <!-- OUTSIDE the EditMode gate, deliberately. The outcome of an operation has to
+                             outlive the mode it was started in. ConfirmClose ends edit mode BEFORE the
+                             close runs, via SaveRecord(true), so by the time these are assigned the gate
+                             above is already false: a close that half-succeeded said "Deal closed as Won"
+                             and hid "the contract was planned but not created" in the same breath, and
+                             the rep only ever saw it by clicking Edit again. The reopen reaches here the
+                             same way now that it ends edit mode too.
+
+                             NO BACKTICKS IN HERE: this comment sits inside the component's template
+                             literal, and one would end it. -->
+                        @if (ActionMessage) {
+                            <div class="mjs-reopen__msg" [class.is-error]="ActionFailed">{{ ActionMessage }}</div>
+                        }
+                        @for (i of ActionIssues; track $index) {
+                            <div class="mjs-reopen__issue">{{ i }}</div>
                         }
                     </div>
                 </div>
@@ -1071,6 +1082,21 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
             if (result.ok) {
                 this.PendingReopenStatusID = null;
                 this.ReopenReason = '';
+                /**
+                 * EDIT MODE HAS TO END BEFORE THE RELOAD, and that is load-bearing rather than tidy.
+                 *
+                 * `BaseFormComponent.canRefreshRecord()` is `record && record.IsSaved && !this.EditMode`,
+                 * and this control renders ONLY inside `@if (EditMode)` -- so EVERY reopen that reaches
+                 * here started in edit mode, `RefreshRecord()` returned false, and the form went on
+                 * showing a Won, locked deal the server had already reopened: stale badges, stale stage,
+                 * and a lock notice telling the user to reopen a deal that was open. It returns false
+                 * rather than throwing, so the catch below never covered it either.
+                 *
+                 * NOT `SaveRecord(true)`, which is how {@link ConfirmClose} ends edit mode. A reopen must
+                 * not save first: the close lock would refuse the save and turn a legal reopen into a
+                 * refusal -- the Close panel's own reopen says the same thing, and for the same reason.
+                 */
+                this.FormComponent.EndEditMode();
                 // The reopen is committed by now; a reload that throws afterwards is a stale screen,
                 // not a failed reopen, so it must not rewrite the message above.
                 try {

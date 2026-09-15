@@ -387,3 +387,76 @@ describe('every reopen goes through the resolved reason', () => {
         expect(definitions.length, 'exactly one definition').toBe(1);
     });
 });
+
+/**
+ * Both of these were found by CLOSING AND REOPENING A REAL DEAL IN EXPLORER, not by reading the code.
+ * Each is the same shape: a call that runs, reports nothing, and does nothing.
+ */
+describe('the reopen actually reaches the screen', () => {
+    const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
+
+    /**
+     * COMMENTS STRIPPED FIRST, and that is not tidiness.
+     *
+     * The first version of these two tests searched the raw method, and both of them read the
+     * EXPLANATORY COMMENT rather than the code -- the comment names RefreshRecord and SaveRecord
+     * while saying what the method must not do, so one test failed on prose and the other would
+     * have passed on prose long after someone deleted the call it claims to pin.
+     */
+    const codeOnly = (text: string): string =>
+        text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+    const confirmReopen = codeOnly(
+        (() => {
+            const start = source.indexOf('public async ConfirmReopen(): Promise<void> {');
+            return source.slice(start, source.indexOf('\n    }', start));
+        })(),
+    );
+
+    it('leaves edit mode BEFORE reloading, because the reload is a no-op inside it', () => {
+        /**
+         * `BaseFormComponent.canRefreshRecord()` is `record && record.IsSaved && !this.EditMode`, and
+         * the Status control renders only inside `@if (EditMode)` -- so every reopen starts in edit
+         * mode. Without this the reload returned false and the form kept showing a Won, locked deal
+         * the server had already reopened. Observed in Explorer, not inferred.
+         */
+        const endedAt = confirmReopen.indexOf('EndEditMode()');
+        const refreshedAt = confirmReopen.indexOf('RefreshRecord()');
+        expect(endedAt, 'ConfirmReopen must end edit mode').toBeGreaterThan(-1);
+        expect(refreshedAt, 'ConfirmReopen must reload').toBeGreaterThan(-1);
+        expect(endedAt, 'edit mode ends before the reload, or the reload does nothing').toBeLessThan(
+            refreshedAt,
+        );
+    });
+
+    it('does NOT end edit mode by saving, which would refuse a legal reopen', () => {
+        // `ConfirmClose` uses `SaveRecord(true)`; a reopen must not, because the close lock refuses
+        // the save on the very deal being reopened. The Close panel's own reopen says the same.
+        expect(confirmReopen).not.toMatch(/SaveRecord\(/);
+    });
+});
+
+describe('what an operation reported outlives the mode it was started in', () => {
+    const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
+    const statusField = (() => {
+        const start = source.indexOf('<label class="mj-forms-field-label">Status</label>');
+        return source.slice(start, source.indexOf('</mj-collapsible-panel>', start));
+    })();
+
+    it('renders the outcome outside the EditMode gate', () => {
+        /**
+         * `ConfirmClose` ends edit mode BEFORE the close runs, so by the time it assigns these the
+         * gate is already false. A close that half-succeeded said "Deal closed as Won" and hid
+         * "the contract was planned but not created" in the same breath -- visible only by clicking
+         * Edit again. Seen on a real close, with the contract and both tasks failing.
+         */
+        const elseBranchAt = statusField.indexOf('{{ CurrentStatusName ||');
+        const messageAt = statusField.indexOf('mjs-reopen__msg');
+        const issuesAt = statusField.indexOf('mjs-reopen__issue');
+        expect(elseBranchAt, 'the read-mode branch').toBeGreaterThan(-1);
+        expect(messageAt, 'the outcome message must render after the if/else, not inside it')
+            .toBeGreaterThan(elseBranchAt);
+        expect(issuesAt, 'the issue list must render after the if/else, not inside it')
+            .toBeGreaterThan(elseBranchAt);
+    });
+});
