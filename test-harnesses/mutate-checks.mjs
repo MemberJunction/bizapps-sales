@@ -234,9 +234,14 @@ const MUTATIONS = [
     { id: 'M-CD11', file: CDO, expect: ['CD11'],
       from: '            deal.ClosedAt = null;\n            deal.ClosedByUserID = null;\n            deal.ActualCloseDate = null;',
       to: '            deal.ClosedByUserID = null;\n            deal.ActualCloseDate = null;' },
+    // RE-AIMED AT THE ALLOW-LIST. The old anchor mutated the filter to `[]` and stopped matching when
+    // #206 item 2 introduced the allow-list -- so CD13 had nothing proving it could fail. Restoring the
+    // old anchor would not help either: both of the Deal's declared companions are allow-listed, so the
+    // filter already yields [] and mutating it to [] is a no-op. Emptying the ALLOW-LIST flips the
+    // direction CD13 actually asserts now -- that PaymentSchedule stays editable on a closed deal.
     { id: 'M-CD13', file: DES, expect: ['CD13'],
-      from: '        const dirtyCollections = this.Companions\n            .filter((c) => c.Dirty)\n            .map((c) => c.Name);',
-      to: '        const dirtyCollections: string[] = [];' },
+      from: "    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([\n        'Team',\n        'PaymentSchedule',\n    ]);",
+      to: '    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>();' },
     { id: 'M-CD14', file: DES, expect: ['CD14'],
       from: '    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;',
       to: "    private static readonly LOCK_EDITABLE_FIELDS = new Set<string>(['Description']);" },

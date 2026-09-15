@@ -1588,7 +1588,22 @@ export class DealEntityServer extends DealEntity {
      * it yet: the grids decide their own New/delete affordances. If a form ever has to render this, it
      * moves next to `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` for the same reason that one moved.
      *
-     * `Lines` is deliberately absent -- see the reasoning at the check itself.
+     * ── WHAT THIS DOES AND DOES NOT CATCH TODAY ─────────────────────────────────────────────────
+     *
+     * The Deal declares exactly TWO child collections (`metadata/entity-relationships`):
+     * `PaymentSchedule` and `Team`. Both are named here, so `dirtyCollections` below is currently
+     * always empty and this check refuses nothing in practice.
+     *
+     * That is deliberate and it is not the same as the check being pointless. It is an ALLOW-LIST, so
+     * a collection added later is refused without anyone remembering to add it — which is the whole
+     * property the previous "freeze every dirty companion" rule existed for. What it means is that
+     * the freeze direction has no companion to demonstrate it on right now, and no check can prove
+     * it until a third collection exists. Said out loud so nobody reads the guard as tested.
+     *
+     * ORDER LINES ARE NOT A COMPANION OF THE DEAL and never were — they belong to the ORDER, in the
+     * Orders app. An earlier version of this comment listed `Lines` alongside these two, which made
+     * this look like the thing freezing them. It is not: that is bizapps-orders#206, which adds a veto
+     * seam Sales registers into.
      */
     private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([
         'Team',
@@ -1681,17 +1696,18 @@ export class DealEntityServer extends DealEntity {
          * THE CHILD COLLECTIONS COUNT AS CHANGES TOO, and this half did not exist when the lock was
          * written — the collections did not exist either.
          *
-         * A deal's lines are exactly what a contract and an order were derived from, so editing or
-         * removing one on a closed deal falsifies the same provenance the header lock protects. But
-         * `Lines`, `PaymentSchedule` and `Team` are COMPANIONS, not fields: they never appear in
-         * `this.Fields`, so the header check above cannot see them. Without this the lock would refuse a
-         * renamed deal and happily accept a deleted line, which is the more damaging edit of the two.
+         * `PaymentSchedule` and `Team` are COMPANIONS, not fields: they never appear in `this.Fields`,
+         * so the header check above cannot see them at all. Without this half, the lock would refuse a
+         * renamed deal while a companion edit went straight through.
+         *
+         * A deal's ORDER LINES are exactly what a contract was derived from, and they are NOT reachable
+         * from here — they belong to the order, in the Orders app, and this entity never sees them.
+         * Freezing those is bizapps-orders#206.
          *
          * WHICH COLLECTIONS ARE FROZEN IS NOW AN ALLOW-LIST, AND THE DIRECTION MATTERS
          * (bc-aidp-next-golive#206 item 2). Reassigning a rep or correcting a payment schedule after a
          * close is record-keeping, not a change to what was agreed, so `Team` and `PaymentSchedule` are
-         * permitted. The lines are not: they are exactly what the contract and the order were derived
-         * from.
+         * permitted — which today is both of them.
          *
          * This was previously "freeze every dirty companion", enumerated that way deliberately so that a
          * collection added later would be protected without anyone remembering to add it. That property
