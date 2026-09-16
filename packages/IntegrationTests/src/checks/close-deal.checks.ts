@@ -1963,6 +1963,80 @@ export const CloseDealChecks: NamedCheck[] = [
             }),
     },
     {
+        Id: 'close-deal.CD26',
+        Name: 'CD26: a status write the close CANNOT satisfy is refused, and commits NOTHING',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205's SAFETY NET, and the half that survives the status field driving the close.
+                 *
+                 * This check used to assert that a bare status write to Won was REFUSED. #205 asks for
+                 * the opposite -- "the deal entity server should run the existing close and reopen flows
+                 * when a save moves the status into or out of a locking status" -- and `close-deal.CD27`
+                 * now measures exactly that. Keeping both would have been two checks asserting opposite
+                 * outcomes for the same action.
+                 *
+                 * What is left, and what #205's second sentence is actually for: "A bare status write
+                 * into a locking status THAT DOES NOT RUN THE CLOSE FLOW must be refused on every path."
+                 * A Lost close needs a loss reason. A caller who sets the status without one has asked
+                 * for a close that cannot run, and the save must refuse rather than lock the deal with
+                 * none of the close having happened -- which is the original defect.
+                 *
+                 * TWO REFUSALS CAN PRODUCE THIS OUTCOME, AND THE COMPANION EDIT IS WHAT TELLS THEM
+                 * APART. `CloseDealOperation` declines for want of a loss reason no matter what, so the
+                 * save returns false and the status stays put either way — measured: disabling the
+                 * pre-flight guard alone left this check green on every assertion above. But that
+                 * refusal arrives AFTER `super.Save()`, with the caller's other fields already on disk.
+                 *
+                 * So this sets Description alongside the status and requires it NOT to land. That is
+                 * the whole of what refusing early buys, it is the only assertion here that can tell
+                 * the two paths apart, and `M-CD26` turns on it.
+                 *
+                 * WHY THIS ONE STILL NEEDS A DATABASE. Every claim above is about what reached the row.
+                 * A save that returned false having already written some of it is exactly the defect,
+                 * and only the row can say.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD26 unsatisfiable close',
+                );
+
+                // Lost, with no loss reason supplied. The close cannot run.
+                const md = new Metadata();
+                const bare = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await bare.Load(dealID), 'the open deal loads');
+                bare.DealStatusTypeID = f.LostStatusID;
+                // The companion edit. An ordinary field, set in the same save, the way a form or an
+                // importer would send one.
+                const COMPANION = 'CD26 companion edit, which must not survive the refusal';
+                bare.Description = COMPANION;
+                Assert(
+                    (await bare.Save()) === false,
+                    'a status write asking for a close that cannot run must be refused',
+                );
+
+                const row = await TxOne<{
+                    DealStatusTypeID: string | null; ClosedAt: Date | null; Description: string | null;
+                }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt, Description FROM ${SALES_SCHEMA}.Deal ` +
+                        `WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.OpenStatusID).toLowerCase(),
+                    'the deal must still be open after the refused write',
+                );
+                Assert(row.ClosedAt === null, 'and nothing may have stamped a close');
+                Assert(
+                    row.Description !== COMPANION,
+                    'the refusal must have come BEFORE the save: a committed companion edit means the ' +
+                        'caller got a partial apply out of a save that reported false',
+                );
+            }),
+    },
+    {
         Id: 'close-deal.CD27',
         Name: 'CD27: a status write to Won RUNS the close, and one back to Open runs the reopen',
         RequiresMutation: true,

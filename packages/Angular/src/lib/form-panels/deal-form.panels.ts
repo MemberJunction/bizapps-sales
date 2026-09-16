@@ -934,10 +934,10 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
      * reads, so this control and the save cannot disagree about which statuses are pickable.
      *
      * NOT the predicate the deal workspace uses -- it filters !IsWon && !IsLost. The two coincide on
-     * today's seed and diverge on a status that locks without being either, which bareCloseRefusal
-     * would then refuse from the workspace. Said this way round because an earlier version of this
-     * comment asserted a parity that does not exist; migrating the workspace onto the flag is its own
-     * change.
+     * today's seed and diverge on a status that locks without being either: the workspace would offer
+     * it as an ordinary field write, and the server would run a full close on it. Said this way round
+     * because an earlier version of this comment asserted a parity that does not exist; migrating the
+     * workspace onto the flag is its own change.
      */
     public get SelectableStatuses(): DealStatusOption[] {
         // A CLOSED deal may only move to a non-locking status, and that move is a reopen. Offering it
@@ -968,13 +968,14 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
      * "Deal Status should stay editable so the deal can be set back to Open, which is how a closed deal
      * is reopened."
      *
-     * What makes that safe is that picking an open status here does NOT write it. A bare status write
-     * out of a locking status is the mirror of the defect this whole change closes -- it would unlock
-     * the deal with no reopen event, the close stamps still set and the order still voided, and nothing
-     * would refuse it: `IsBareCloseWrite` returns false when the PRIOR status locks, precisely because
-     * the close lock owns that refusal, and the lock only owns it while DealStatusTypeID stays out of
-     * the editable-while-locked set. So {@link SetStatus} routes the pick into `Sales.ReopenDeal`,
-     * which is the audited way through, and the operation moves the status itself.
+     * What makes that safe is that picking an open status here does NOT write it. {@link SetStatus}
+     * holds the pick and routes it into `Sales.ReopenDeal` instead, which is the audited way through,
+     * and the operation moves the status itself.
+     *
+     * THE SERVER WOULD NOW COPE EITHER WAY ── a status write out of a locking status is a reopen the
+     * entity server runs for itself, which `close-deal.CD27` measures. Routing through the operation is
+     * still what this panel does, because a reopen the server runs on its own behalf has to invent a
+     * reason, and the one thing a person reopening a deal can supply that nothing else can is why.
      *
      * STILL FAILS CLOSED on a status it cannot resolve: an unknown status means the lock state is
      * unknown, and offering either path on that is guessing.
@@ -1013,10 +1014,13 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         }
         /**
          * AND A CLOSING PICK IS A CLOSE REQUEST, for the same reason (golive#205: "Changing Deal Status
-         * to Won or Lost should close the deal properly"). Writing it would lock the deal with none of
-         * the close having run -- no stage event, no contract, no finance tasks, and for a Lost deal no
-         * loss reason and a live order. `bareCloseRefusal` on the server refuses exactly that, so
-         * writing it here would produce a refused save rather than a closed deal.
+         * to Won or Lost should close the deal properly").
+         *
+         * The server would now run the close on a bare write — `close-deal.CD27` measures that — so this
+         * is not the last line of defence it once was. What it is for is the LOSS REASON. A Lost close
+         * needs one, the panel has not collected it at the moment of the pick, and a status write
+         * without it is refused outright before anything is saved. Holding the pick is how the reason
+         * gets collected, and it is the same reason `ConfirmClose` exists rather than a plain write.
          */
         const picked = this.statuses().find((s) => s.ID.toLowerCase() === String(id).toLowerCase());
         if (picked?.LocksDeal) {

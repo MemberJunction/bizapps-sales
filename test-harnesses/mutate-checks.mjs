@@ -243,6 +243,23 @@ const MUTATIONS = [
     { id: 'M-CD13', file: DES, expect: ['CD13'],
       from: "    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([\n        'Team',\n        'PaymentSchedule',\n    ]);",
       to: '    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>();' },
+    // CD26 and CD27 are the two halves of golive#205's server-side trigger, and they need separate
+    // mutants because they turn on different guards. M-CD27 disables the trigger itself; M-CD26
+    // disables only the pre-flight refusal, leaving the trigger in place.
+    //
+    // RE-AIMED from what #69 proposed. That mutation anchored on `bareCloseRefusal`'s own predicate,
+    // and this branch removes that method: `planStatusTransition` decides the same case first and
+    // reverts the status, so the guard could not execute. The anchor would have matched nothing and
+    // been SKIPPED, which reads as covered while testing nothing.
+    { id: 'M-CD26', file: DES, expect: ['CD26'],
+      from: "        if (transition?.Kind === 'Close' && transition.TargetIsLost && !this.LossReasonID) {",
+      to: '        if (false) {' },
+    // Disabling the trigger is the whole of what CD27 measures, so this is the mutant that separates
+    // 'CD27 is green' from 'CD27 can fail'. It fells CD26 as collateral: with no plan there is no
+    // pre-flight refusal either, and the bare write reaches the row.
+    { id: 'M-CD27', file: DES, expect: ['CD27'],
+      from: '        const transition = await this.planStatusTransition();',
+      to: '        const transition = null as StatusTransitionPlan | null;' },
     // RE-AIMED. The old anchor was `LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED`, a
     // static the rule no longer has: golive#206's "Loss Notes (Lost deals only)" made the answer depend
     // on the outcome, so it became a call. An anchor that no longer matches is SKIPPED, not failed --

@@ -62,8 +62,6 @@ import {
     DealFieldsEditableWhileLocked,
     DealEntity,
     type mjBizAppsSalesDealStageEventEntity,
-    IsBareCloseWrite,
-    type StatusTransitionFacts,
 } from '@mj-biz-apps/sales-entities';
 
 import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
@@ -80,6 +78,9 @@ interface StatusTransitionPlan {
     Kind: 'Close' | 'Reopen';
     TargetStatusID: string;
     PriorStatusID: string | null;
+    /** Whether the TARGET status is a loss. Carried on the plan because the status row was already
+     *  read to decide the plan at all, and the pre-flight refusal below needs it. */
+    TargetIsLost: boolean;
 }
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
@@ -277,15 +278,43 @@ export class DealEntityServer extends DealEntity {
          * made, and the flow then runs against the committed row. A caller who set the status and three
          * other fields gets all four, in an order that cannot lose any of them.
          *
-         * Reverting is also what leaves the lock and `bareCloseRefusal` doing their real jobs instead of
-         * being bypassed: by the time either runs the status is clean, so a locked deal still refuses
-         * every frozen field, and a write this method could NOT turn into a transition is still refused.
+         * Reverting is also what leaves the close lock doing its real job instead of being bypassed: by
+         * the time it runs the status is clean, so a locked deal still refuses every frozen field.
          * DealStatusTypeID stays OUT of `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` for the same reason — the
          * field is reachable through the flow, never by writing it.
          */
         const transition = await this.planStatusTransition();
         if (transition) {
             this.Set('DealStatusTypeID', transition.PriorStatusID);
+        }
+
+        /**
+         * A CLOSE THAT CANNOT RUN IS REFUSED BEFORE ANYTHING IS WRITTEN.
+         *
+         * The transition runs AFTER `super.Save()`, against the committed row, because it loads its own
+         * copy of this deal and the two would otherwise race. That ordering has a cost: a caller who
+         * sets the status AND three other fields, and whose close then fails, has those three fields on
+         * disk and an open deal. The save reports false, so nothing is silent, but it is a partial
+         * apply.
+         *
+         * Closing as lost with no loss reason is the one case worth spending a check to avoid, because
+         * it is not an edge: `LossReasonID` is a column on this deal, a form or an importer can set the
+         * status without it, and the close then refuses every time — deterministically, for a reason
+         * known right here, before a single row moves. Catching it up front turns a partial apply into
+         * a clean refusal for the case most likely to hit one.
+         *
+         * THE PREDICATE IS THE OPERATION'S OWN, and deliberately no wider: `CloseDealOperation.validate`
+         * refuses `IsLost` with no `LossReasonID`, and this asks the same question of the same two
+         * values. It does NOT duplicate the rest of that validation — whether the chosen reason demands
+         * notes needs the loss-reason row, which is a read this path should not be making, and that one
+         * stays downstream with the others.
+         */
+        if (transition?.Kind === 'Close' && transition.TargetIsLost && !this.LossReasonID) {
+            const refusal =
+                'A loss reason is required to close a deal as lost. Set LossReasonID alongside the ' +
+                'status, or close the deal through Sales.CloseDeal.';
+            LogError(`DealEntityServer.Save refused: ${refusal}`);
+            return false;
         }
 
         /**
@@ -308,36 +337,6 @@ export class DealEntityServer extends DealEntity {
                 LogError(`DealEntityServer.Save refused: ${refusal}`);
                 return false;
             }
-        }
-
-        /**
-         * A BARE STATUS WRITE MUST NOT CLOSE A DEAL (bc-aidp-next-golive#205).
-         *
-         * The close lock above reads the PERSISTED status, so it cannot see this: moving Open -> Won is
-         * a save on an unlocked deal and passed straight through. The deal came out locked, and none of
-         * the close ran — no stage event, no contract, no finance tasks, and for a Lost deal no loss
-         * reason and an order still live. Worse, the lock then refused `DealStatusTypeID` on every later
-         * save, so the deal could not be reopened either. A field edit on a form had produced a state
-         * no operation could have produced and none could undo.
-         *
-         * WHAT SEPARATES THIS FROM A REAL CLOSE is the declared transition, which `Sales.CloseDeal`
-         * already sets and a form write has no way to set. So this needs no new flag: it asks whether
-         * anybody announced a transition, which is the same question `stampClose` asks downstream.
-         *
-         * IT RUNS BEFORE THE TRANSACTION, and that placement is what makes it precise. The server
-         * derives a status from the stage later, inside the transaction (`applyStageOrderStatus`), so at
-         * THIS point a dirty status can only have come from the caller. Checking here refuses the write
-         * somebody made and never the one this class is about to make itself.
-         *
-         * Refusing rather than closing is deliberate, and is the narrower of the two readings of #205 —
-         * see the issue for the open question about whether the entity should instead RUN the close.
-         * Refusing is correct under either: a status write that reaches the database without the close
-         * having run is the defect, whoever ends up running it.
-         */
-        const bareClose = await this.bareCloseRefusal();
-        if (bareClose) {
-            LogError(`DealEntityServer.Save refused: ${bareClose}`);
-            return false;
         }
 
         /**
@@ -483,7 +482,20 @@ export class DealEntityServer extends DealEntity {
             return false;
         }
 
-        // Everything else is on disk; now the transition the caller asked for, against that row.
+        /**
+         * Everything else is ON DISK by now; the transition runs against that committed row.
+         *
+         * SO A TRANSITION THAT FAILS HERE LEAVES THE CALLER'S OTHER EDITS COMMITTED. The save returns
+         * false and the operation's own issues say why, but the fields that were not the status have
+         * already been written. That is the price of running the close against a committed row instead
+         * of racing the operation's own copy of this deal, and the close's own work is still
+         * transactional within itself — a half-done close is not among the outcomes.
+         *
+         * The one case common enough to be worth pre-empting is refused above, before anything is
+         * written. What is left here is a close that failed for a reason this path could not have known
+         * in advance: a downstream route declining, a loss reason that demands notes, a contract or
+         * order write failing.
+         */
         if (transition) {
             return this.runStatusTransition(transition);
         }
@@ -493,16 +505,15 @@ export class DealEntityServer extends DealEntity {
     /**
      * Is this save a status move into or out of a locking status, and therefore a close or a reopen?
      *
-     * Null in every ordinary case. Mirrors `bareCloseRefusal`'s cheap-half-first shape, so a save that
-     * does not touch the status costs no status lookups at all.
+     * Null in every ordinary case. The cheap half comes first, so a save that does not touch the status
+     * costs no status lookups at all — this runs on every save, and most saves do not touch it.
      *
      * A DECLARED transition returns null: `Sales.CloseDeal` and `Sales.ReopenDeal` announce themselves
      * before saving, and that IS the flow running. Without this term, the operation's own save would
      * re-enter the flow it is already executing.
      *
      * Creation returns null too. A deal born closed has no transition to have run, and the opening
-     * default would otherwise read as one -- the same carve-out `bareCloseRefusal` makes, for the same
-     * reason.
+     * default (`needsStatusDefault`) would otherwise read as one.
      */
     private async planStatusTransition(): Promise<StatusTransitionPlan | null> {
         const field = this.GetFieldByName('DealStatusTypeID');
@@ -511,14 +522,20 @@ export class DealEntityServer extends DealEntity {
             return null;
         }
         const priorID = (field.OldValue as string | null) ?? null;
-        const targetLocks = await this.statusLocksDeal(target);
+        const targetFlags = await this.readStatusLockFlags(target);
         const priorLocks = priorID ? await this.statusLocksDeal(priorID) : false;
 
-        if (targetLocks && !priorLocks) {
-            return { Kind: 'Close', TargetStatusID: target, PriorStatusID: priorID };
+        if (targetFlags.LocksDeal && !priorLocks) {
+            return {
+                Kind: 'Close', TargetStatusID: target, PriorStatusID: priorID,
+                TargetIsLost: targetFlags.IsLost,
+            };
         }
-        if (priorLocks && !targetLocks) {
-            return { Kind: 'Reopen', TargetStatusID: target, PriorStatusID: priorID };
+        if (priorLocks && !targetFlags.LocksDeal) {
+            return {
+                Kind: 'Reopen', TargetStatusID: target, PriorStatusID: priorID,
+                TargetIsLost: targetFlags.IsLost,
+            };
         }
         // Won -> Lost, or Open -> On Hold. Neither crosses the lock boundary, so neither is a close or
         // a reopen, and the ordinary rules above already decided whether it was allowed.
@@ -1788,60 +1805,6 @@ export class DealEntityServer extends DealEntity {
      * database, so it passes, and only saves made once the deal is ALREADY closed are refused. Reading
      * the current value instead would make a deal impossible to close.
      */
-    /**
-     * The refusal for a status write that would lock the deal without closing it.
-     *
-     * Null in every ordinary case, including the three that look similar and are not:
-     *
-     *   · a DECLARED transition — `Sales.CloseDeal` announced itself, so the close is running;
-     *   · LEAVING a locking status — that is a reopen, and the close lock already refuses a bare one,
-     *     with a message that names `Sales.ReopenDeal`;
-     *   · a status that does not lock — ordinary pipeline movement, which is most saves.
-     *
-     * Creation is excluded too: a deal born closed has no transition to have run, and the opening
-     * default (`needsStatusDefault`) would otherwise be read as one.
-     */
-    private async bareCloseRefusal(): Promise<string | null> {
-        const field = this.GetFieldByName('DealStatusTypeID');
-        const target = this.DealStatusTypeID;
-        // The cheap half first, so an ordinary save costs no status lookups at all — this runs on
-        // every save, and most saves do not touch the status.
-        if (!this.IsSaved || this._declaredTransition || !field?.Dirty || !target) {
-            return null;
-        }
-        const priorID = (field.OldValue as string | null) ?? null;
-        const facts: StatusTransitionFacts = {
-            IsSaved: true,
-            HasDeclaredTransition: false,
-            StatusIsDirty: true,
-            TargetLocks: await this.statusLocksDeal(target),
-            PriorLocks: priorID ? await this.statusLocksDeal(priorID) : null,
-        };
-        if (!IsBareCloseWrite(facts)) {
-            return null;
-        }
-        /**
-         * NAMES THE INPUTS, not just the operation.
-         *
-         * golive#205 asks for the entity server to RUN the close on a status write. It does not, and
-         * the reasoning is on sales#73 — a Lost close needs a loss reason a bare write cannot carry, so
-         * the literal ask is impossible for half the close cases and a partial one would make an
-         * import's behaviour depend on which status it picked.
-         *
-         * What that costs is an integrator meeting this refusal and still not knowing what to call
-         * with. Naming the operation alone sent them to read its source. So it names the arguments,
-         * and which ones are conditional and on what.
-         */
-        return (
-            'this status closes the deal, and closing it needs the close to actually run — the stage ' +
-            'event, the contract and the finance tasks for a won deal, the loss reason and the voided ' +
-            'order for a lost one. Setting DealStatusTypeID on its own would lock the deal without any ' +
-            'of that, and the lock would then refuse the status field, so it could not be undone. Close ' +
-            'it through Sales.CloseDeal, passing DealID and DealStatusTypeID — plus LossReasonID when ' +
-            'the status is a losing one, and LossNotes when the chosen loss reason requires them.'
-        );
-    }
-
     private async checkCloseLock(): Promise<string | null> {
         const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
         if (!persistedStatusID) {
@@ -1915,7 +1878,7 @@ export class DealEntityServer extends DealEntity {
          * `Sales.ReopenDeal` and its arguments, on the reasoning that this string reaches an API caller
          * as well as a person. Once setting the status back RUNS the reopen from any path, that is the
          * same instruction spelled longer. A caller who wants the operation directly still finds it
-         * named, with its arguments, in `bareCloseRefusal` -- which fires where the flow cannot run.
+         * named, with its arguments, in the refusal a close that cannot run produces.
          *
          * {fields} IS INTERPOLATED, not spelled out, which the tester asked for in the same breath:
          * the notice "should match whatever #206 settles on". #206 item 3 grows that set from two fields to
