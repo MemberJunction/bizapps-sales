@@ -197,7 +197,9 @@ export interface OwnerBar {
 export function OwnerCoverage(deals: readonly DealRosterRow[]): OwnerBar[] {
     const map = new Map<string, number>();
     for (const d of deals.filter((x) => x.IsOpen && x.IncludeInCommit)) {
-        const name = d.OwnerEmployee?.trim() || 'Unowned';
+        // golive#207 replaced "Unowned" with "No owner" on the deal form's Situation card. This is
+        // the same label on a chart axis, so it says the same thing.
+        const name = d.OwnerEmployee?.trim() || 'No owner';
         map.set(name, (map.get(name) ?? 0) + amount(d));
     }
     return [...map.entries()]
