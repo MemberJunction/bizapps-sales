@@ -872,13 +872,14 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
      * "Deal Status should stay editable so the deal can be set back to Open, which is how a closed deal
      * is reopened."
      *
-     * What makes that safe is that picking an open status here does NOT write it. A bare status write
-     * out of a locking status is the mirror of the defect this whole change closes -- it would unlock
-     * the deal with no reopen event, the close stamps still set and the order still voided, and nothing
-     * would refuse it: `IsBareCloseWrite` returns false when the PRIOR status locks, precisely because
-     * the close lock owns that refusal, and the lock only owns it while DealStatusTypeID stays out of
-     * the editable-while-locked set. So {@link SetStatus} routes the pick into `Sales.ReopenDeal`,
-     * which is the audited way through, and the operation moves the status itself.
+     * What makes that safe is that picking an open status here does NOT write it. {@link SetStatus}
+     * holds the pick and routes it into `Sales.ReopenDeal` instead, which is the audited way through,
+     * and the operation moves the status itself.
+     *
+     * THE SERVER WOULD NOW COPE EITHER WAY ── a status write out of a locking status is a reopen the
+     * entity server runs for itself, which `close-deal.CD27` measures. Routing through the operation is
+     * still what this panel does, because a reopen the server runs on its own behalf has to invent a
+     * reason, and the one thing a person reopening a deal can supply that nothing else can is why.
      *
      * STILL FAILS CLOSED on a status it cannot resolve: an unknown status means the lock state is
      * unknown, and offering either path on that is guessing.
