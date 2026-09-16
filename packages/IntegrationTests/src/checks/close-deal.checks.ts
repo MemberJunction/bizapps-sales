@@ -58,6 +58,7 @@ import {
 
 import {
     E_DEAL,
+    E_EMPLOYEE,
     E_SCHEDULE,
     E_STAGE_EVENT,
     InRolledBackTransaction,
@@ -2053,6 +2054,133 @@ export const CloseDealChecks: NamedCheck[] = [
                     row.Description !== COMPANION,
                     'the refusal must have come BEFORE the save: a committed companion edit means the ' +
                         'caller got a partial apply out of a save that reported false',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD28',
+        Name: 'CD28: the team roster stays editable on a locked deal, and the owner stamp FOLLOWS it',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#206 item 2, the half of the sentence nothing measured.
+                 *
+                 * The requirement is two claims joined by an "and": "The server should allow these child
+                 * saves on a locked deal, AND the owner stamp should still follow a change to the Owner
+                 * role." `CD13` proves the first for PaymentSchedule. Nothing proved it for Team, and
+                 * nothing at all proved the second — `SD3` covers the stamp on an OPEN deal, which is a
+                 * different question, because on an open deal the lock is not in the way.
+                 *
+                 * ── WHY THE STAMP IS THE INTERESTING HALF ──────────────────────────────
+                 *
+                 * `OwnerEmployeeID` is a FROZEN field — it is in the provenance group, and `SD26` proves a
+                 * hand-set one is refused. Yet this save must write it, because the roster moved and the
+                 * stamp is derived from the roster. Both are true only because of an ORDERING nobody had
+                 * pinned: `checkCloseLock` runs first and sees the field clean, and `stampOwnerFromTeam`
+                 * makes it dirty afterwards.
+                 *
+                 * Move the stamp above the lock check and this deal stops being editable by its own
+                 * team panel; drop the Team allow-list entry and the same. Neither would fail any other
+                 * check, which is exactly why this one exists.
+                 *
+                 * ── THE ROSTER IS EDITED DIRECTLY, AND NOT VIA `SetOwner()` ─────────────────
+                 *
+                 * That is the path the form takes — the Internal team panel is a grid over
+                 * `DealTeamMember` — and it is what golive#206 item 2 means by "these child saves".
+                 *
+                 * `SetOwner()` is a DIFFERENT path and it is refused here, measured: it assigns
+                 * `this.OwnerEmployeeID` on the client before saving, so `checkCloseLock` sees a dirty
+                 * frozen field and returns false. The deal workspace's owner picker calls it
+                 * (`deal-workspace.component.ts`), so reassigning an owner there does not work on a
+                 * closed deal even though item 2 says it should. Deliberately NOT asserted here: a check
+                 * that pinned the refusal would enshrine the defect. Raised separately instead.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD28 owner under lock',
+                );
+
+                // A second employee to move the role TO. Read rather than seeded: the stamp following
+                // means nothing if it follows to the person it already named.
+                const others = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: E_EMPLOYEE,
+                        ExtraFilter: `Active = 1 AND ID <> '${f.EmployeeID}'`,
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                    },
+                    ctx.User,
+                );
+                Assert(others.Success, `reading employees failed — ${others.ErrorMessage}`);
+                const successorID = (others.Results ?? [])[0]?.ID;
+                Assert(
+                    !!successorID,
+                    'CD28 needs a SECOND active employee to move the owner role to; this host has one. ' +
+                        'Re-seed before reading anything into this failure: it is not the lock.',
+                );
+
+                // The deal starts owned, then closes. Owning it first is the point -- the check is about
+                // REASSIGNMENT after the close, not about acquiring an owner while locked.
+                const opening = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await opening.Load(dealID), 'the open deal loads');
+                await opening.SetOwner(f.EmployeeID);
+                Assert(
+                    await opening.Save(),
+                    `setup: the owner could not be set — ${opening.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+                Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
+
+                // ── THE CLAIM ───────────────────────────────────────────────────────────────────
+                const roleRow = await TxOne<{ ID: string }>(
+                    ctx, `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.DealRole WHERE IsOwnerRole = 1 AND IsActive = 1`,
+                );
+                const locked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await locked.Load(dealID), 'the closed deal loads');
+                await locked.Team.Load();
+                const holder = locked.Team.Items.find((m) => m.DealRoleID === roleRow.ID);
+                Assert(!!holder, 'setup: the deal has an owner-role member to reassign');
+                holder!.EmployeeID = successorID;
+                Assert(
+                    await locked.Save(),
+                    'a roster change on a CLOSED deal must be allowed -- reassigning a rep is ' +
+                        `record-keeping, not a change to what was agreed: ${locked.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const stored = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(stored.OwnerEmployeeID ?? '').toLowerCase(),
+                    String(successorID).toLowerCase(),
+                    'the stamp must have FOLLOWED the roster onto the new owner, on a locked deal',
+                );
+
+                const team = await TxOne<{ Holders: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS Holders FROM ${SALES_SCHEMA}.DealTeamMember tm ` +
+                        `JOIN ${SALES_SCHEMA}.DealRole r ON r.ID = tm.DealRoleID ` +
+                        `WHERE tm.DealID = '${dealID}' AND r.IsOwnerRole = 1 ` +
+                        `AND tm.EmployeeID = '${successorID}'`,
+                );
+                AssertEqual(
+                    Number(team.Holders), 1,
+                    'and the roster itself names the successor once -- the stamp is derived from this row, ' +
+                        'so a stamp that agreed with nothing would be the defect SD3 exists to catch',
+                );
+
+                // ── THE CONTROL: the lock is genuinely on. ─────────────────────────────────────
+                // Without this, every assertion above would also pass on a deal that was never locked.
+                const header = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await header.Load(dealID), 'the closed deal loads again');
+                header.Name = 'CD28 must not be allowed to rename a closed deal';
+                Assert(
+                    (await header.Save()) === false,
+                    'the deal must still be LOCKED -- if a header edit passes, the roster save above ' +
+                        'proved nothing about the lock allowing it',
                 );
             }),
     },

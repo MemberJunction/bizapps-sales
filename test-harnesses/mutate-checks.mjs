@@ -253,6 +253,18 @@ const MUTATIONS = [
     { id: 'M-CD13', file: DES, expect: ['CD13'],
       from: "    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([\n        'Team',\n        'PaymentSchedule',\n    ]);",
       to: '    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>();' },
+    // The Team allow-list is what lets a roster change through the lock. Dropping it freezes the
+    // team panel on every closed deal -- golive#206 item 2 in reverse, and the SILENT direction:
+    // nobody reports being unable to do a thing they were told was frozen anyway.
+    //
+    // SAME LINE AS `M-CD13`, DIFFERENT MUTATION, AND THIS ONE ISOLATES. M-CD13 empties the set,
+    // which freezes BOTH companions and so fells CD13 and CD28 together. This removes only
+    // `Team`, leaving PaymentSchedule allow-listed -- so CD13 still passes and CD28 is the only
+    // check that falls. Two mutants on one line earn their keep when they name different members
+    // of the thing on it.
+    { id: 'M-CD28', file: DES, expect: ['CD28'],
+      from: "    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([\n        'Team',\n        'PaymentSchedule',\n    ]);",
+      to: "    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>(['PaymentSchedule']);" },
     // CD26 and CD27 are the two halves of golive#205's server-side trigger, and they need separate
     // mutants because they turn on different guards. M-CD27 disables the trigger itself; M-CD26
     // disables only the pre-flight refusal, leaving the trigger in place.
