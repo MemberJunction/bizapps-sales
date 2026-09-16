@@ -30,7 +30,7 @@ describe('the server save refusal on a locked deal', () => {
 
     it('is the tester sentence, with the fields interpolated', () => {
         expect(codeOnly).toContain(
-            '`This deal is closed. ${all.join(\', \')} cannot be changed until the status is set back to Open.`',
+            '`This deal is closed. ${named} cannot be changed until the status is set back to Open.`',
         );
     });
 
@@ -40,13 +40,19 @@ describe('the server save refusal on a locked deal', () => {
          * #206 settles on". #206 item 3 grows the editable set from two fields to seven, so a sentence
          * that spelled them out would have started lying the day that merged.
          */
-        expect(codeOnly).toMatch(/\$\{all\.join\(/);
+        expect(codeOnly).toMatch(/\$\{named\}/);
+    });
+
+    it('names the fields the way row 16 does, not by column name', () => {
+        // The two refusals described the same field as "Deal Status" and "DealStatusTypeID".
+        // Both now go through `DealFieldLabel`, and both join with `JoinLabels`.
+        expect(codeOnly).toContain('JoinLabels(all.map(DealFieldLabel))');
     });
 
     it('names no API operation', () => {
         // The whole of row 18: the old text sent the reader to `Sales.ReopenDeal`. Since golive#205,
         // setting the status back IS the reopen, on every path this refusal reaches.
-        const refusal = codeOnly.slice(codeOnly.indexOf('This deal is closed. ${all'));
+        const refusal = codeOnly.slice(codeOnly.indexOf('This deal is closed. ${named'));
         const sentence = refusal.slice(0, refusal.indexOf('`;') + 2);
         expect(sentence, `row 18 must not name an operation: ${sentence}`).not.toContain('Sales.ReopenDeal');
     });

@@ -60,7 +60,9 @@ import { RegisterClass } from '@memberjunction/global';
 import { CanTransition, type OrderStatus } from '@mj-biz-apps/orders-entities';
 import {
     DealFieldsEditableWhileLocked,
+    DealFieldLabel,
     DealEntity,
+    JoinLabels,
     type mjBizAppsSalesDealStageEventEntity,
 } from '@mj-biz-apps/sales-entities';
 
@@ -1884,8 +1886,15 @@ export class DealEntityServer extends DealEntity {
          * the notice "should match whatever #206 settles on". #206 item 3 grows that set from two fields to
          * six -- seven on a Lost deal -- and a hardcoded sentence would have started lying the day
          * it merged.
+         *
+         * THE SAME LABELS AND THE SAME JOIN AS ROW 16. This sentence used to print raw column names
+         * while row 16 printed the on-screen ones, so one refusal said "DealStatusTypeID" and the other
+         * said "Deal Status" about the same field. `DealFieldLabel` falls back to the field name, so a
+         * frozen field nobody has labelled still reads as its column ─ slightly wrong, rather than
+         * taking the notice down.
          */
-        return `This deal is closed. ${all.join(', ')} cannot be changed until the status is set back to Open.`;
+        const named = JoinLabels(all.map(DealFieldLabel));
+        return `This deal is closed. ${named} cannot be changed until the status is set back to Open.`;
     }
 
     /**

@@ -214,12 +214,22 @@ const MUTATIONS = [
       from: '        event.AmountAtTransition = prior.Amount;',
       to: '        event.AmountAtTransition = null;',
       note: 'the stage event stamps no amount -- the CD4 defect, re-aimed after the stamping moved to DealEntityServer' },
+    // RE-AIMED. The old anchor read the lock through `statusLocksDeal(persistedStatusID)`; this
+    // PR reads both flags at once through `readStatusLockFlags`, so that text is gone. Same
+    // mutation as before -- the lock never engages -- against the guard that now decides it.
     { id: 'M-CD5', file: DES, expect: ['CD5', 'CD13', 'CD14'],
-      from: '        if (!(await this.statusLocksDeal(persistedStatusID))) {\n            return null;\n        }',
+      from: '        if (!persisted.LocksDeal) {\n            return null;\n        }',
       to: '        if (true) {\n            return null;\n        }' },
+    // RE-AIMED at what CD6 actually claims. The old anchor was the `LOCK_EDITABLE_FIELDS` static,
+    // which golive#206 item 3 turned into a call because the answer now depends on the outcome.
+    //
+    // Not simply re-pointed at `lockEditableFields`: `M-CD14` already mutates that line, and two
+    // mutants on one line prove one thing twice. CD6's claim is that the lock is FIELD-BY-FIELD
+    // and not a wall, so this makes it a wall -- drop the editable-set term and every dirty field
+    // is refused, Description included. CD14 falls with it, as its expect list already said.
     { id: 'M-CD6', file: DES, expect: ['CD6', 'CD14'],
-      from: '    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;',
-      to: "    private static readonly LOCK_EDITABLE_FIELDS = new Set<string>(['NextStep']);" },
+      from: '        const changed = this.Fields.filter((f) => f.Dirty && !editable.has(f.Name)).map((f) => f.Name);',
+      to: '        const changed = this.Fields.filter((f) => f.Dirty).map((f) => f.Name);' },
     { id: 'M-CD7', file: SEAM, expect: ['CD7'],
       from: "    public async CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {\n        this.Attempts.push({ Target: 'Contract', Payload: input });\n        return {\n            Success: false,",
       to: "    public async CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {\n        this.Attempts.push({ Target: 'Contract', Payload: input });\n        return {\n            Success: true," },

@@ -1,5 +1,5 @@
 ---
-'@mj-biz-apps/sales-entities': patch
+'@mj-biz-apps/sales-entities': minor
 '@mj-biz-apps/sales-ng': patch
 ---
 
@@ -25,7 +25,13 @@ Description and Next Step" when the editable set held two fields; golive#206 ite
 hardcoded sentence would have started lying the moment that landed, and it would have read perfectly
 while doing it. The notice composes the set through a label map, so it stays true as the set changes.
 
-**Deal Status is listed but is not in `DEAL_FIELDS_EDITABLE_WHILE_LOCKED`**, which looks like a
+**MINOR, not patch, because `sales-entities` breaks.** The exported constant
+`DEAL_FIELDS_EDITABLE_WHILE_LOCKED` is gone and `IsDealFieldEditableWhileLocked` takes a second
+argument now. golive#206 item 3 made the editable set depend on whether the deal was LOST, so a
+constant could no longer answer the question and a one-argument predicate could no longer ask it.
+Consumers outside this repo would not compile.
+
+**Deal Status is listed but is not in the editable-while-locked set**, which looks like a
 contradiction and is not. That set is what the SERVER accepts in a bare save, and golive#205 asks for
 a bare status write to be refused on every path — the status moves through `Sales.CloseDeal` and
 `Sales.ReopenDeal`, which the form's status control routes to. The field is editable to a person and
@@ -46,7 +52,8 @@ unchanged and was the tester's own: "the three lock messages assume the close/re
 It also arrived with no test at all — reverting the sentence broke nothing. It has one now, which is
 where the fourth mutation below comes from.
 
-18 tests, eight mutations checked: reverting any of the three messages, dropping Deal Status from the
+22 tests, nine mutations checked: reverting any of the three messages, dropping Deal Status from the
 list, un-humanising the labels, losing the sentence's final "and", hardcoding row 18's field list,
-and appending the API detail back onto it. The row 17 revert survived every other test in the repo
-until its own gate existed, and row 18's revert did the same.
+appending the API detail back onto it, and printing row 18's fields by column name instead of label.
+The row 17 revert survived every other test in the repo until its own gate existed, and row 18's
+revert did the same.

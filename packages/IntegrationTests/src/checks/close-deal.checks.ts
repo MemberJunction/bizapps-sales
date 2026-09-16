@@ -548,11 +548,31 @@ export const CloseDealChecks: NamedCheck[] = [
                  * The two ids that carry a foreign key are filled from the real table, so the save is
                  * refused by the LOCK or not at all, never by referential integrity.
                  */
-                const leadSource = await TxOne<{ ID: string }>(
-                    ctx, `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.LeadSourceType ORDER BY ID`,
+                /**
+                 * THE SUBQUERY IS WHAT MAKES THE ASSERTION REACHABLE.
+                 *
+                 * `SELECT TOP 1 ID FROM X` returns NO ROW on an empty table, and `TxOne` asserts on that
+                 * itself ─ so a check added after it could never execute, and would read as covering the
+                 * empty-fixture case while testing nothing. Selecting the subquery always returns exactly
+                 * one row, with a NULL id when the table is empty, which is a value this check can see.
+                 */
+                const leadSource = await TxOne<{ ID: string | null }>(
+                    ctx, `SELECT (SELECT TOP 1 ID FROM ${SALES_SCHEMA}.LeadSourceType ORDER BY ID) AS ID`,
                 );
-                const contact = await TxOne<{ ID: string }>(
-                    ctx, `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.SalesContact ORDER BY ID`,
+                Assert(
+                    !!leadSource.ID,
+                    'CD14 needs at least one LeadSourceType row, to set LeadSourceTypeID to a value ' +
+                        'the foreign key accepts. The fixture has none, so re-seed before reading ' +
+                        'anything into this failure: it is not the lock.',
+                );
+                const contact = await TxOne<{ ID: string | null }>(
+                    ctx, `SELECT (SELECT TOP 1 ID FROM ${SALES_SCHEMA}.SalesContact ORDER BY ID) AS ID`,
+                );
+                Assert(
+                    !!contact.ID,
+                    'CD14 needs at least one SalesContact row, to set BillingContactID to a value the ' +
+                        'foreign key accepts. The fixture has none, so re-seed before reading anything ' +
+                        'into this failure: it is not the lock.',
                 );
                 const valueFor = (field: string): unknown => {
                     switch (field) {
