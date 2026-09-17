@@ -248,6 +248,7 @@ export class DealEntityServer extends DealEntity {
             return await this.saveDeclared(options);
         } finally {
             this._declaredTransition = null;
+            this._revertedStatusTarget = null;
         }
     }
 
@@ -288,6 +289,7 @@ export class DealEntityServer extends DealEntity {
          */
         const transition = await this.planStatusTransition();
         if (transition) {
+            this._revertedStatusTarget = transition.TargetStatusID;
             this.Set('DealStatusTypeID', transition.PriorStatusID);
         }
 
@@ -356,8 +358,7 @@ export class DealEntityServer extends DealEntity {
             await this.stampCompanyFromPipeline();
             await this.stampOwnerFromTeam();
         } catch (err) {
-            LogError(`DealEntityServer.Save: could not resolve a server-maintained stamp: ${err}`);
-            return false;
+            return this.refuseSave(`could not resolve a server-maintained stamp: ${err}`);
         }
 
         /**
@@ -1737,6 +1738,11 @@ export class DealEntityServer extends DealEntity {
     private _declaredTransition: DeclaredTransition | null = null;
     private _lastStageEventID: string | null = null;
     private _lockedAtSave = false;
+    /**
+     * The status the caller asked for, held while the field is reverted to its persisted value so the
+     * close lock can do its real job. `refuseSave` puts it back; see the note there for why.
+     */
+    private _revertedStatusTarget: string | null = null;
 
     /**
      * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.
@@ -1823,6 +1829,22 @@ export class DealEntityServer extends DealEntity {
      * production in orders' line delete.
      */
     private refuseSave(message: string): false {
+        /**
+         * PUT THE CALLER'S STATUS BACK BEFORE REFUSING, or the retry they were just invited to make
+         * silently does nothing.
+         *
+         * The status is reverted to its persisted value above so the close lock sees a clean field.
+         * That revert is correct for a save that PROCEEDS. On a refusal it is a trap: the field is now
+         * clean, so a caller who reads this message, fixes what it named and saves the SAME object gets
+         * `planStatusTransition() === null` on `!field?.Dirty`, no close runs, the other edits commit,
+         * and `Save()` returns TRUE. An open deal carrying a loss reason, and a caller told it worked.
+         *
+         * Restored HERE rather than at each `return false` for the reason the `finally` above exists:
+         * the bug is always the exit somebody adds later, and there are four of these already.
+         */
+        if (this._revertedStatusTarget) {
+            this.Set('DealStatusTypeID', this._revertedStatusTarget);
+        }
         LogError(`DealEntityServer.Save refused: ${message}`);
         const failed = new BaseEntityResult();
         failed.Success = false;
