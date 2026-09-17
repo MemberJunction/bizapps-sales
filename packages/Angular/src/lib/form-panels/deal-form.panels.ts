@@ -348,6 +348,21 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
      * directly is exactly what the server refuses.
      */
     public FieldEditable(fieldName: string): boolean {
+        /**
+         * SERVER-MAINTAINED STAMPS ARE NEVER EDITABLE, on an open deal or a closed one.
+         *
+         * Checked BEFORE the lock, because the lock is not the reason: `stampCompanyFromPipeline()`
+         * overwrites a supplied CompanyID from the pipeline's company, and `ownerStampEditRefusal()`
+         * REFUSES a supplied OwnerEmployeeID outright -- the owner comes from the deal team via
+         * `stampOwnerFromTeam()`. Offering either as an editable control invites a rep to choose a
+         * value the save then discards or rejects, which is the "accepts typing, refuses on save"
+         * behaviour golive#206 item 3 exists to delete.
+         *
+         * They stay RENDERED and keep `link: 'Record'`, so the company and the owner are still
+         * visible and still navigable. What goes away is the invitation to type into them.
+         */
+        if (this.Fields?.find((f) => f.name === fieldName)?.serverMaintained === true) return false;
+
         const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
         const locked = form?.IsLocked === true;
         // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
@@ -407,6 +422,16 @@ interface DealFieldSpec {
     type: DealFieldType;
     link?: 'Record';
     span?: boolean;
+    /**
+     * A SERVER-MAINTAINED STAMP: rendered, navigable, never editable.
+     *
+     * Not the same thing as the close lock. The lock freezes a field because the deal is closed;
+     * this freezes it because no caller may set it AT ALL -- `DealEntityServer` derives the value
+     * and either overwrites what you supplied or refuses the save outright. CLAUDE.md states it
+     * directly: "Deal.OwnerEmployeeID and DealLine.CompanyID are written by entity-server code.
+     * Never hand-set them."
+     */
+    serverMaintained?: boolean;
 }
 
 const FIELD_STYLES = `
@@ -1344,8 +1369,9 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
      */
     public readonly Fields: DealFieldSpec[] = [
         { name: 'AccountID', type: 'textbox', link: 'Record' },
-        { name: 'CompanyID', type: 'textbox', link: 'Record' },
-        { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record' },
+        // Derived by stampCompanyFromPipeline() / stampOwnerFromTeam(); see serverMaintained.
+        { name: 'CompanyID', type: 'textbox', link: 'Record', serverMaintained: true },
+        { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record', serverMaintained: true },
         { name: 'PrimaryContactID', type: 'textbox', link: 'Record' },
         { name: 'BillingContactID', type: 'textbox', link: 'Record' },
     ];
