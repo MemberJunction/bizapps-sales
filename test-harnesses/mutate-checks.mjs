@@ -227,9 +227,14 @@ const MUTATIONS = [
     // mutants on one line prove one thing twice. CD6's claim is that the lock is FIELD-BY-FIELD
     // and not a wall, so this makes it a wall -- drop the editable-set term and every dirty field
     // is refused, Description included. CD14 falls with it, as its expect list already said.
+    // RE-AIMED AGAIN, and for the same reason as last time: the code moved under it. The
+    // frozen-field test became a named `frozen` predicate when the owner carve-out was added, so
+    // the one-line filter this anchored on no longer exists. Same mutation as before -- drop the
+    // editable-set term and the lock becomes a WALL, refusing every dirty field including
+    // Description, which is exactly what CD6 says it must not be.
     { id: 'M-CD6', file: DES, expect: ['CD6', 'CD14'],
-      from: '        const changed = this.Fields.filter((f) => f.Dirty && !editable.has(f.Name)).map((f) => f.Name);',
-      to: '        const changed = this.Fields.filter((f) => f.Dirty).map((f) => f.Name);' },
+      from: '            && !editable.has(f.Name)\n            && !(f.Name === \'OwnerEmployeeID\' && this.RosterDrivesThisSave);',
+      to: '            && true;' },
     { id: 'M-CD7', file: SEAM, expect: ['CD7'],
       from: "    public async CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {\n        this.Attempts.push({ Target: 'Contract', Payload: input });\n        return {\n            Success: false,",
       to: "    public async CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {\n        this.Attempts.push({ Target: 'Contract', Payload: input });\n        return {\n            Success: true," },
@@ -253,6 +258,17 @@ const MUTATIONS = [
     { id: 'M-CD13', file: DES, expect: ['CD13'],
       from: "    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([\n        'Team',\n        'PaymentSchedule',\n    ]);",
       to: '    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>();' },
+    // The carve-out that lets a roster-driven stamp past the lock. Removing it restores the defect
+    // CD28 turned up: the workspace's owner picker stops working on a closed deal, while the form's
+    // team panel keeps working -- which is why nothing noticed for so long.
+    { id: 'M-CD29', file: DES, expect: ['CD29'],
+      from: "            && !(f.Name === 'OwnerEmployeeID' && this.RosterDrivesThisSave);",
+      to: '            && true;' },
+    // The refusal goes back to being log-only. Every other close-deal check still passes, because
+    // they all read the boolean; CD30 is the only one that reads the MESSAGE.
+    { id: 'M-CD30', file: DES, expect: ['CD30'],
+      from: '        this.RegisterResultHistoryEntry(failed);\n        return false;',
+      to: '        void failed;\n        return false;' },
     // The Team allow-list is what lets a roster change through the lock. Dropping it freezes the
     // team panel on every closed deal -- golive#206 item 2 in reverse, and the SILENT direction:
     // nobody reports being unable to do a thing they were told was frozen anyway.

@@ -2185,6 +2185,146 @@ export const CloseDealChecks: NamedCheck[] = [
             }),
     },
     {
+        Id: 'close-deal.CD29',
+        Name: 'CD29: SetOwner() reassigns the owner on a LOCKED deal, the way the workspace picker does',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE PATH `CD28` DELIBERATELY DOES NOT TAKE, and it was broken.
+                 *
+                 * CD28 edits `DealTeamMember` rows directly, which is what the deal FORM's Internal team
+                 * panel does. The deal WORKSPACE has an owner picker, and it calls
+                 * `DealEntity.SetOwner()` — which loads the roster and then assigns `OwnerEmployeeID`
+                 * itself. That made the field dirty before the save, `checkCloseLock` counted it as an
+                 * edit to a frozen field, and the save was refused.
+                 *
+                 * So golive#206 item 2 — "reassigning a rep after close is record-keeping" — held on one
+                 * surface and not the other, and no check could tell, because the only owner-stamp check
+                 * that existed (`SD3`) runs on an OPEN deal where the lock is not in the way.
+                 *
+                 * `SD26` still holds and is the reason this is narrow: a caller who hand-sets
+                 * `OwnerEmployeeID` WITHOUT the roster is still refused. The carve-out asks the same
+                 * question `ownerStampEditRefusal` asks, and grants nothing — `stampOwnerFromTeam`
+                 * re-derives the stamp from the roster afterwards regardless.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD29 SetOwner under lock',
+                );
+
+                const others = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: E_EMPLOYEE,
+                        ExtraFilter: `Active = 1 AND ID <> '${f.EmployeeID}'`,
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                    },
+                    ctx.User,
+                );
+                Assert(others.Success, `reading employees failed — ${others.ErrorMessage}`);
+                const successorID = (others.Results ?? [])[0]?.ID;
+                Assert(
+                    !!successorID,
+                    'CD29 needs a SECOND active employee to move the owner role to. Re-seed before ' +
+                        'reading anything into this failure: it is not the lock.',
+                );
+
+                const opening = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await opening.Load(dealID), 'the open deal loads');
+                await opening.SetOwner(f.EmployeeID);
+                Assert(await opening.Save(), 'setup: the first owner was set');
+
+                const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+                Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
+
+                const locked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await locked.Load(dealID), 'the closed deal loads');
+                await locked.SetOwner(successorID);
+                Assert(
+                    await locked.Save(),
+                    'SetOwner must work on a closed deal -- it is the workspace picker, and item 2 ' +
+                        `allows it: ${locked.LatestResult?.Message ?? '(no message)'}`,
+                );
+
+                const stored = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(stored.OwnerEmployeeID ?? '').toLowerCase(),
+                    String(successorID).toLowerCase(),
+                    'and the stamp landed on the successor',
+                );
+
+                // SD26'S RULE IS NOT WEAKENED. A hand-set stamp with no roster in the save is still
+                // refused -- without this, the carve-out above could have been a hole and nothing here
+                // would have noticed.
+                const handSet = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await handSet.Load(dealID), 'the closed deal loads again');
+                handSet.OwnerEmployeeID = f.EmployeeID;
+                Assert(
+                    (await handSet.Save()) === false,
+                    'a hand-set owner with no roster in the save must STILL be refused on a locked deal',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD30',
+        Name: 'CD30: a refused save leaves its reason where the CALLER can read it, not only in the log',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#207 row 18 is explicit about who the message is for: row 17 is what the FORM
+                 * shows a person, row 18 is "what the save returns to whoever asked — the form, an
+                 * import, an agent or a raw API call".
+                 *
+                 * It was built, and then `LogError`'d. The caller got a bare `false` and the sentence went
+                 * to the server log. The form looked correct only because
+                 * `DealFormComponentExtended.Validate()` produces row 17 on its own; an importer got
+                 * silence, which is the thing row 18 exists to end.
+                 *
+                 * A SOURCE-LEVEL TEST COULD NOT HAVE CAUGHT THIS. `deal-lock-server-refusal-copy.test.ts`
+                 * proves the sentence is in the file, and it was — every word of it, correct and
+                 * unreachable. Only a real save can say whether anybody receives it.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD30 readable refusal',
+                );
+                const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+
+                const locked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await locked.Load(dealID), 'the closed deal loads');
+                locked.Name = 'CD30 renames a frozen field';
+                Assert((await locked.Save()) === false, 'the save must be refused');
+
+                Assert(
+                    locked.LatestResult !== null && locked.LatestResult !== undefined,
+                    'a refused save must REGISTER a result -- assigning onto LatestResult is what threw ' +
+                        'in orders, because the getter returns null on an empty history while typed non-null',
+                );
+                Assert(locked.LatestResult?.Success === false, 'and that result must say it failed');
+
+                const message = String(locked.LatestResult?.Message ?? '');
+                Assert(
+                    message.length > 0,
+                    'the refusal must carry a message; a caller that gets `false` and nothing else ' +
+                        'cannot tell a frozen field from a database outage',
+                );
+                Assert(
+                    message.includes('This deal is closed.'),
+                    `and it must be row 18's sentence, not a generic one: ${message}`,
+                );
+                Assert(
+                    message.includes('Name'),
+                    `naming the field that was refused, which is the whole of {fields}: ${message}`,
+                );
+            }),
+    },
+    {
         Id: 'close-deal.CD27',
         Name: 'CD27: a status write to Won RUNS the close, and one back to Open runs the reopen',
         RequiresMutation: true,
