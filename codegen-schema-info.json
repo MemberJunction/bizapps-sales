@@ -14,5 +14,27 @@
       "ParentEntity": "MJ_BizApps_Common: People",
       "SchemaName": "__mj_BizAppsSales"
     }
+  ],
+  "__mj_BizAppsSales": [
+    {
+      "_comment": "SOFT FOREIGN KEYS — metadata only. CodeGen sets RelatedEntityID + RelatedEntityFieldName + IsSoftForeignKey=1 and clears AutoUpdateRelatedEntityInfo, which is what stops the next schema sync re-deriving the pair from a constraint that does not exist. It creates NO database constraint: Deal.ContractID and Deal.RenewsContractID stay deliberately FK-free, because the link points DOWN the dependency graph and contracts knows nothing about sales (see the column descriptions). What the metadata buys is the UI half — mj-form-field can then show the contract NUMBER as a link instead of the raw GUID a UAT tester reported (bc-aidp-next-golive#226 item 3), and offers an FK search in edit mode for RenewsContractID, which a rep has to set on every renewal. This declaration is the durable half: metadata/entity-fields/.deal-contract-soft-fk.json is what SHIPS, and this is what re-applies it after a rebuild-from-zero, which would otherwise silently regress the form to GUIDs. On a host where contracts is absent, applySoftPKFKConfig logs 'Related entity not found' and skips — it does not fail.",
+      "TableName": "Deal",
+      "ForeignKeys": [
+        {
+          "FieldName": "ContractID",
+          "SchemaName": "__mj_BizAppsContracts",
+          "RelatedTable": "Contract",
+          "RelatedField": "ID",
+          "Description": "SOFT reference (no FK) to the contract this won deal produced."
+        },
+        {
+          "FieldName": "RenewsContractID",
+          "SchemaName": "__mj_BizAppsContracts",
+          "RelatedTable": "Contract",
+          "RelatedField": "ID",
+          "Description": "SOFT reference (no FK) to the contract this deal RENEWS."
+        }
+      ]
+    }
   ]
 }

@@ -194,6 +194,24 @@ export interface DealLockState {
      * a closed deal is the cheaper mistake.
      */
     IsLost: boolean;
+    /**
+     * Whether the PERSISTED status carries `IsWon` — the outcome, not the lock.
+     *
+     * UNLIKE EVERY OTHER MEMBER HERE, THIS IS NOT GATED ON `LocksDeal`, and the difference is the
+     * whole reason it exists. The rest of this shape answers "what may still be edited", a question
+     * only a locked deal has. `IsWon` answers "did we win", which an OPEN deal can also answer, and
+     * golive#226 asks the Deal header for chips that appear on a won deal and on no other. Gating it
+     * on the lock would tie a header decision to a field-editing one, so a deployment whose winning
+     * status does not freeze the deal would lose its Order and Contract chips with nothing on screen
+     * to explain it.
+     *
+     * Read off the status ROW by FLAG, like its siblings. Nothing anywhere compares a status name —
+     * a deployment may call its winning status "Signed" (§3), and `test:vocabulary-gate` enforces it.
+     *
+     * `false` when the status cannot be read: a chip that is missing costs a click, and one that
+     * should not be there says a deal was won when it was not.
+     */
+    IsWon: boolean;
     /** A ready-to-render explanation, or null when the deal is open. */
     Notice: string | null;
 }
@@ -220,23 +238,33 @@ export async function ResolveDealLockState(
     persistedStatusID: string | null | undefined,
     contextUser?: UserInfo,
 ): Promise<DealLockState> {
-    const open: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, Notice: null };
+    const open: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, IsWon: false, Notice: null };
     if (!persistedStatusID) {
         return open;
     }
 
-    const result = await new RunView().RunView<{ LocksDeal: boolean; Name: string; IsLost: boolean }>(
+    const result = await new RunView().RunView<{ LocksDeal: boolean; Name: string; IsLost: boolean; IsWon: boolean }>(
         {
             EntityName: E_DEAL_STATUS_TYPE,
             ExtraFilter: `ID = '${String(persistedStatusID).replace(/'/g, "''")}'`,
             ResultType: 'simple',
-            Fields: ['LocksDeal', 'Name', 'IsLost'],
+            Fields: ['LocksDeal', 'Name', 'IsLost', 'IsWon'],
         },
         contextUser,
     );
     const row = result?.Success ? (result.Results ?? [])[0] : undefined;
+
+    /**
+     * THE OUTCOME SURVIVES THE EARLY RETURN, THE LOCK DOES NOT.
+     *
+     * `IsWon` is a fact about the status itself, so it is carried out of every exit below rather than
+     * being reset to `false` by the unlocked one. The cost of getting this backwards is silent: the
+     * header would simply draw no chips on a won-but-unlocked deal, which looks exactly like a deal
+     * with no order and no contract.
+     */
+    const isWon = row?.IsWon === true;
     if (!row?.LocksDeal) {
-        return open;
+        return { ...open, IsWon: isWon };
     }
 
     /**
@@ -257,6 +285,7 @@ export async function ResolveDealLockState(
         IsLocked: true,
         StatusName: row.Name,
         IsLost: isLost,
+        IsWon: isWon,
         Notice:
             `This deal is closed (${row.Name}). Only ${editable} can be edited. ` +
             'To change anything else, set the status back to Open.',

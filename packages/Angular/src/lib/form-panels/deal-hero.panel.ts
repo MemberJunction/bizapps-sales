@@ -14,6 +14,7 @@ import { CompositeKey } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
+import { RelatedChipsComponent, type BizAppsRelatedLink } from '@mj-biz-apps/common-ng';
 import {
     DealEntity,
     IsDealFieldEditableWhileLocked,
@@ -21,6 +22,7 @@ import {
     ResolveDealLockState,
 } from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
+import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
 
 
 /**
@@ -75,7 +77,7 @@ function money(n: number | null | undefined): string {
     selector: 'mjs-deal-hero-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, BaseFormsModule],
+    imports: [CommonModule, BaseFormsModule, RelatedChipsComponent],
     template: `
         <div class="mjs-deal-hero" [class.mjs-deal-hero--collapsed]="Collapsed">
             <div class="mjs-deal-hero__identity">
@@ -119,6 +121,26 @@ function money(n: number | null | undefined): string {
                     <i [class]="Collapsed ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-up'"></i>
                 </button>
             </div>
+            <!--
+                 THE RELATED ROW IS SHARED, NOT OURS (golive#225, #226).
+
+                 All this hero decides is WHICH relationships a deal has - the rule is in
+                 deal-related-links.ts, where a test can reach it. Reading each record's NAME, and
+                 deciding when a chip must not be drawn at all (the app is not installed here, the
+                 record is not there, the user may not read it), belongs to bizapps-related-chips
+                 in common. Sales, contracts and orders each had their own answer to that or none,
+                 which is the divergence golive#225 built the shared row to end.
+
+                 OUTSIDE THE COLLAPSED REGION, for the reason the Name editor below is: Collapsed
+                 is a persisted per-user setting, and these chips are now the ONLY route from a won
+                 deal to its order - the Motion panel's order link came off with them (#226 item 4).
+                 Gating them would mean anyone who had ever collapsed the header could not reach the
+                 order at all, which is the bug this issue reported, reintroduced one fold deeper.
+            -->
+            <bizapps-related-chips
+                [Links]="RelatedLinks"
+                [Provider]="FormComponent.ProviderToUse"
+                (Navigate)="FormComponent.OnFormNavigate($event)" />
             <!-- OUTSIDE the collapsed region, deliberately. Collapsing hides the BRIEFING - the
                  account/owner/stage stats - not the control that names the record. The Pipeline
                  panel used to carry a second Name box, so a collapsed header still left somewhere
@@ -260,6 +282,12 @@ function money(n: number | null | undefined): string {
             background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text);
             border-color: var(--mj-status-warning);
         }
+        /* The chip row brings its own styling — design tokens, its own class prefix — so the hero
+           only places it. 'display: contents' rather than a margin because the hero is a COLUMN FLEX
+           WITH A GAP: a host box that renders nothing still takes a gap, so every open deal (no
+           chips at all) would grow a band of dead space under its title. With 'contents' the host
+           makes no box, and an empty row contributes no flex item and therefore no gap. */
+        .mjs-deal-hero bizapps-related-chips { display: contents; }
         .mjs-deal-hero__toggle {
             display: inline-flex; align-items: center; justify-content: center;
             flex: none; width: 32px; height: 32px; margin-left: auto; padding: 0;
@@ -334,6 +362,12 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     public IsLocked = false;
     /** Whether the locking status is a LOSS. Only Loss Notes turns on it (golive#206). */
     public IsLost = false;
+    /** Whether the PERSISTED status is a WIN. Decides the Order and Contract chips (golive#226). */
+    public IsWon = false;
+
+    /** The links last published to the chip row, and the state they were built from. */
+    private relatedFor: string | null = null;
+    private relatedLinks: BizAppsRelatedLink[] = [];
 
     /**
      * May the deal's Name be typed into right now? (bc-aidp-next-golive#206 item 3)
@@ -465,6 +499,30 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         return 'muted';
     }
 
+    /**
+     * The relationships this deal offers, as descriptors for the shared chip row.
+     *
+     * RETURNS A STABLE ARRAY. `bizapps-related-chips` re-resolves whenever `Links` is a new
+     * reference and reads the input on every change-detection pass, so a getter that built a fresh
+     * array each pass would hold it in a permanent re-read loop. The key changes exactly when the
+     * answer would, including on the record id — a form container reuses this panel across records,
+     * and stale chips offer a click that opens the previous deal's order.
+     */
+    public get RelatedLinks(): BizAppsRelatedLink[] {
+        const state = {
+            IsWon: this.IsWon,
+            OrderID: this.Record?.OrderID,
+            ContractID: this.Record?.ContractID,
+            RenewsContractID: this.Record?.RenewsContractID,
+        };
+        const key = DealRelatedLinksKey(this.Record?.ID, state);
+        if (this.relatedFor !== key) {
+            this.relatedFor = key;
+            this.relatedLinks = DealRelatedLinks(state);
+        }
+        return this.relatedLinks;
+    }
+
     public OpenAccount(event: MouseEvent): void {
         this.open(event, MJS_ENTITIES.SalesAccount, this.Record?.AccountID);
     }
@@ -494,6 +552,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         const lock = await ResolveDealLockState(persisted ?? this.Record?.DealStatusTypeID);
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
+        this.IsWon = lock.IsWon;
         this.LockNotice = lock.Notice;
     }
 

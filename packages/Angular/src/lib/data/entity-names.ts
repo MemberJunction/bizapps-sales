@@ -20,7 +20,14 @@ export const MJS_FOREIGN_ENTITIES = {
     Organization: 'MJ_BizApps_Common: Organizations',
     Person: 'MJ_BizApps_Common: People',
     Employee: 'MJ: Employees',
+    OrderHeader: 'MJ_BizApps_Orders: Order Headers',
     OrderLine: 'MJ_BizApps_Orders: Order Lines',
+    /**
+     * Contracts' agreement. A deal holds TWO soft references to it — the contract the win produced
+     * and the contract a renewal renews — and neither is a database FK, which is what left both
+     * rendering as raw GUIDs until golive#226.
+     */
+    Contract: 'MJ_BizApps_Contracts: Contracts',
     Activity: 'MJ_BizApps_Common: Activities',
     ActivityLink: 'MJ_BizApps_Common: Activity Links',
 } as const;

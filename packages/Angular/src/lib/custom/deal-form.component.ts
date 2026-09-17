@@ -66,6 +66,15 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     public IsLost = false;
 
+    /**
+     * Whether the PERSISTED status is a WIN — which decides what the header offers to open.
+     *
+     * golive#226: the Order and Contract chips belong on a won deal and on no other, because an open
+     * deal's order is still a draft nobody should be editing directly. Resolved with the lock, from
+     * the same status row, by flag; the panels read it here rather than asking again.
+     */
+    public IsWon = false;
+
     /** Shown when locked, so the greyed-out-ness the form cannot render is at least explained. */
     public LockNotice: string | null = null;
 
@@ -95,6 +104,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         const lock = await ResolveDealLockState(persisted);
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
+        this.IsWon = lock.IsWon;
         this.LockNotice = lock.Notice;
     }
 
