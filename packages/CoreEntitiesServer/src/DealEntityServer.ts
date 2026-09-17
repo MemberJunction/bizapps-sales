@@ -592,12 +592,23 @@ export class DealEntityServer extends DealEntity {
         const output = result.Output as { Success?: boolean; Issues?: { Message: string }[] } | undefined;
         const issues = output?.Issues ?? [];
         if (!result.Success || output?.Success === false) {
-            const detail = result.ErrorMessage ?? issues.map((i) => i.Message).join(' | ');
-            LogError(`DealEntityServer.Save: the ${plan.Kind.toLowerCase()} did not complete: ${detail}`);
             // The other edits ARE committed; only the transition failed. Reloading leaves this object
             // agreeing with the row rather than holding a status the database never accepted.
             await this.Load(this.ID);
-            return false;
+            const reasons = issues.length > 0
+                ? issues.map((i) => i.Message)
+                : result.ErrorMessage
+                  ? [result.ErrorMessage]
+                  : [];
+            // Names BOTH halves. "The save failed" is as wrong as "it worked": the caller's field
+            // edits are on disk and only the status did not move, and a caller who cannot tell the
+            // difference will either re-send edits that already landed or assume a close that never
+            // happened.
+            return this.reportPostSaveFailure(
+                `Your edits to this deal were saved, but the ${plan.Kind.toLowerCase()} did not ` +
+                `complete, so its status is unchanged. Set the status again once this is resolved:`,
+                reasons,
+            );
         }
 
         // The operation saved its own copy of this row. Without this, the caller keeps an object whose
@@ -817,9 +828,11 @@ export class DealEntityServer extends DealEntity {
             return true;
         } catch (err) {
             LogError(`DealEntityServer.saveWithinScope failed for deal ${this.ID}: ${err}`);
+            let rolledBack = true;
             try {
                 await scope.Rollback();
             } catch (rollbackErr) {
+                rolledBack = false;
                 LogError(`Failed to roll back after a failed deal save: ${rollbackErr}`);
             }
             /**
@@ -846,7 +859,22 @@ export class DealEntityServer extends DealEntity {
             if (work.assignNumber) {
                 this.DealNumber = null;
             }
-            return false;
+            /**
+             * `super.Save()` may already have registered a SUCCESS entry inside this scope, and the
+             * rollback does not reach the result history -- so without this the caller reads
+             * `Save() === false` beside `LatestResult.Success === true`. Reported last, after the
+             * compensation above, so the message describes the state the object is actually left in.
+             *
+             * The rollback outcome is in the sentence because the two are genuinely different
+             * situations for whoever reads it: a clean rollback means retry, a failed one means the
+             * row needs looking at before anything else is tried.
+             */
+            return this.reportPostSaveFailure(
+                rolledBack
+                    ? `This deal could not be saved, and the change was rolled back: ${err}`
+                    : `This deal could not be saved AND the rollback failed, so the row may be ` +
+                      `partly written. Check it before retrying: ${err}`,
+            );
         }
     }
 
@@ -1850,6 +1878,60 @@ export class DealEntityServer extends DealEntity {
         failed.Success = false;
         failed.Type = this.IsSaved ? 'update' : 'create';
         failed.Message = message;
+        failed.StartedAt = new Date();
+        failed.EndedAt = new Date();
+        failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
+        this.RegisterResultHistoryEntry(failed);
+        return false;
+    }
+
+    /**
+     * Report a failure that happened AFTER `super.Save()` already registered a SUCCESS result.
+     *
+     * ── WHY THIS IS NOT `refuseSave` ──────────────────────────────────────────────────────────────
+     *
+     * `Save()` returning false was, on these paths, the ONLY signal. `super.Save()` had already
+     * registered a success entry and `this.Load(this.ID)` does not clear the history -- core guards
+     * its `init()` with `if (!this.IsSaved)` and the deal is saved -- so a caller doing the obvious
+     * thing read:
+     *
+     *     await deal.Save()                 -> false
+     *     deal.LatestResult.Success         -> TRUE
+     *     deal.LatestResult.CompleteMessage -> undefined  -> "Unknown error"
+     *
+     * A caller following exactly the pattern `deal-workspace.service.ts` uses was told the save
+     * succeeded. Worse than silent: the last thing on the history contradicted the return value.
+     *
+     * Two things differ from `refuseSave` and both matter:
+     *
+     * 1. IT DOES NOT PUT THE STATUS BACK. `refuseSave` restores the caller's target because nothing
+     *    was written and a retry must still carry it. Here the row has already moved (or been rolled
+     *    back) and `Load()` has resynced this object to it -- re-dirtying a field to a value the
+     *    database just rejected would invite the same failure on the next save.
+     * 2. IT CARRIES THE OPERATION'S ISSUES. `CloseDealOperation` returns a structured `Issues` array
+     *    which was being joined into a `LogError` and dropped. Those sentences are the only thing
+     *    that says WHY the close refused, and they are what the user needs.
+     *
+     * AND WHY NOT A TRANSACTION, since "both or neither" is the obvious wish: the transition reaches
+     * bizapps-contracts and bizapps-orders through seams, so there is no single database to be atomic
+     * in; `CloseDealOperation` is a remote operation that owns its own scope and rollback; and it
+     * loads its own copy of this deal, which is exactly why it must run after the commit rather than
+     * inside it. Atomicity is not available here, so honesty about the partial apply is the fix.
+     * Narrowing the window belongs upstream, in the pre-flight that already refuses a lost close with
+     * no loss reason before a single row moves.
+     */
+    private reportPostSaveFailure(message: string, issues: readonly string[] = []): false {
+        // Into the MESSAGE, not only into `Errors`: `CompleteMessage` is what the resolver reads, and
+        // it builds from `Message`. An issue list that renders nowhere is the defect being fixed.
+        const full = issues.length > 0 ? `${message} ${issues.join(' | ')}` : message;
+        LogError(`DealEntityServer.Save: ${full}`);
+        const failed = new BaseEntityResult();
+        failed.Success = false;
+        failed.Type = this.IsSaved ? 'update' : 'create';
+        failed.Message = full;
+        if (issues.length > 0) {
+            failed.Errors = issues.map((issue) => ({ Message: issue, Source: 'DealEntityServer' }));
+        }
         failed.StartedAt = new Date();
         failed.EndedAt = new Date();
         failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
