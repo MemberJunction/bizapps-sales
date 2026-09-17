@@ -1,0 +1,343 @@
+[
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Account Types"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Buying Role Types"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Contact Roles"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Payment Schedules"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": true,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "AutoUpdateIncludeInUserSearchAPI": false,
+            "UserSearchPredicateAPI": "BeginsWith"
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
+          }
+        },
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=ID&EntityID=@parent:ID"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Roles"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Sequences"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Stage Events"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": true,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "AutoUpdateIncludeInUserSearchAPI": false,
+            "UserSearchPredicateAPI": "BeginsWith"
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
+          }
+        },
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=ID&EntityID=@parent:ID"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Status Types"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Team Members"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": true,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "AutoUpdateIncludeInUserSearchAPI": false,
+            "UserSearchPredicateAPI": "BeginsWith"
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
+          }
+        },
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=ID&EntityID=@parent:ID"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Types"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": true,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "AutoUpdateIncludeInUserSearchAPI": false,
+            "UserSearchPredicateAPI": "BeginsWith"
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
+          }
+        },
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=ID&EntityID=@parent:ID"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deals"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Forecast Category Types"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Forecast Snapshots"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Lead Source Types"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Lifecycle Stage Types"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Loss Reasons"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": true,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "AutoUpdateIncludeInUserSearchAPI": false,
+            "UserSearchPredicateAPI": "BeginsWith"
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
+          }
+        },
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=ID&EntityID=@parent:ID"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Pipeline Stages"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": true,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "AutoUpdateIncludeInUserSearchAPI": false,
+            "UserSearchPredicateAPI": "BeginsWith"
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
+          }
+        },
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=ID&EntityID=@parent:ID"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Pipelines"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": true,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "AutoUpdateIncludeInUserSearchAPI": false,
+            "UserSearchPredicateAPI": "BeginsWith"
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
+          }
+        },
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=ID&EntityID=@parent:ID"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Sales Accounts"
+    }
+  },
+  {
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Sales Contacts"
+    }
+  }
+]
