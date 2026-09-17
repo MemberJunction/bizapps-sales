@@ -421,9 +421,24 @@ The Explorer UI harness is deliberately **not** in CI: it needs a live database,
 one-time interactive human login. Run it locally before merging.
 
 ### Changesets
-**A PR that adds or edits anything under `migrations/`, or changes a published package, must carry a
-changeset with at least a `minor` bump** — `npx changeset`. CI warns rather than fails, so treat the
-warning as a review item. `baseBranch` is `next`.
+**Every PR that changes a published package must carry a changeset** — `npx changeset`. CI warns rather
+than fails, so treat the warning as a review item. `baseBranch` is `next`.
+
+**The bump level follows semver, and `minor` is required for exactly two things:** anything under
+`migrations/`, and any change to a package's public API — a removed or renamed export, a changed
+exported signature, a new required argument. Everything else is `patch`: user-facing copy, UI
+behaviour, and server-side fixes that keep their signatures. `major` is for a break a consumer cannot
+absorb by reading the CHANGELOG.
+
+> This paragraph used to read *"or changes a published package, must carry a changeset with at least a
+> `minor` bump"*, which is stricter than MJ's rule and stricter than what this repo actually merges —
+> `deal-hero-focus-new-record`, `deal-hero-number-collapsed`, `deal-pipeline-leads-when-unsaved` and
+> `deal-hero-drop-dead-focus-call` all landed as `patch` with no migration. It produced one wrong
+> review finding on sales#79/#80 before anyone checked it against practice. Andrew's `minor` call on
+> sales#72 was right for the OTHER reason: it removed an exported symbol.
+
+`fixed: [["@mj-biz-apps/*"]]` in `.changeset/config.json` means the whole family versions together, so
+the level you pick drives the CHANGELOG's accuracy rather than which packages move.
 
 ---
 
