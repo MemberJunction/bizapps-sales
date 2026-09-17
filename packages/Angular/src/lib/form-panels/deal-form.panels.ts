@@ -20,6 +20,7 @@ import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
 import { EntityViewerModule, type AfterDataLoadEventArgs, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
 import {
     DealEntity,
+    IsDealFieldEditableWhileLocked,
     LoadDealStatusOptions,
     type DealStatusOption,
     type SalesCloseDealInput,
@@ -292,6 +293,69 @@ type DealFieldType =
     | 'textbox' | 'textarea' | 'number' | 'datepicker' | 'checkbox'
     | 'select' | 'autocomplete' | 'code' | 'dropdownlist' | 'numerictextbox';
 
+/**
+ * The deal panels that render a list of fields, and therefore have to honour the close lock.
+ *
+ * ── WHAT THIS FIXES (bc-aidp-next-golive#206 item 3) ────────────────────────────────────────────
+ *
+ * "Every other field ... should render read-only, instead of accepting typing and refusing on save."
+ * A tester clicked Edit on a closed deal, every field opened for typing, and they only found out a
+ * field was frozen when the save came back refused. That is a correct refusal delivered at the worst
+ * possible moment, after the work.
+ *
+ * ── WHY A BASE CLASS AND NOT FIVE COPIES ────────────────────────────────────────────────────────
+ *
+ * Five panels render fields this way. Five copies of the rule is five chances for one of them to
+ * disagree with the server, and a panel that offers a field the server refuses is the exact failure
+ * `close-lock.ts` exists to prevent -- it says so in its own header.
+ *
+ * ── WHY IT READS THE FORM AND NOT THE STATUS ────────────────────────────────────────────────────
+ *
+ * `DealFormComponentExtended` already resolves the lock once per load, through the same shared
+ * `ResolveDealLockState` the server uses. Resolving it again here would be a second answer to a
+ * question that already has one, and five more database reads per form.
+ *
+ * ── WHY `FormComponent` IS THE EXTENDED CLASS, WHICH IS WORTH PROVING ───────────────────────────
+ *
+ * This is the first panel code to read an EXTENDED member off `FormComponent` -- everything else here
+ * uses `BaseFormComponent`'s own API -- and it fails OPEN if the member is missing, which is the
+ * dangerous direction: a locked deal would render fully editable and nobody would see an error.
+ *
+ * The chain: `MJGlobal.ClassFactory` resolves 'MJ_BizApps_Sales: Deals' to
+ * `DealFormComponentExtended` (registered at priority 2, above the generated form), that class
+ * renders the GENERATED template, and the template passes `[FormComponent]="this"` into the panel
+ * slot -- so `this` is the extended instance.
+ *
+ * The evidence it holds at runtime is in golive#206 itself. The tester reported "I only find out a
+ * field is frozen when the save is refused", and that refusal is produced by
+ * `DealFormComponentExtended.ValidateAsync` reading `this.IsLocked`. Nothing else produces it. A
+ * tester seeing it is a tester whose Explorer resolved the extended class.
+ */
+abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
+    /** The fields this panel renders, in order. */
+    public abstract readonly Fields: DealFieldSpec[];
+
+    /**
+     * May this field be typed into right now?
+     *
+     * The membership test is `IsDealFieldEditableWhileLocked` -- the SAME rule the entity server
+     * enforces, not a copy -- so the form cannot offer a field the save would refuse, or grey out one
+     * it would have accepted.
+     *
+     * DEAL STATUS IS NOT IN THAT SET and is deliberately not special-cased here. The status moves
+     * through the Pipeline panel's own control, which routes to `Sales.CloseDeal` / `Sales.ReopenDeal`
+     * (golive#205); the generic field for it stays read-only on a locked deal, because writing it
+     * directly is exactly what the server refuses.
+     */
+    public FieldEditable(fieldName: string): boolean {
+        const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
+        const locked = form?.IsLocked === true;
+        // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
+        // Notes editable on a LOST deal and frozen on a won one.
+        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
+    }
+}
+
 interface DealFieldSpec {
     name: string;
     type: DealFieldType;
@@ -398,7 +462,7 @@ const FIELD_STYLES = `
                     </div>
                     <div class="mjs-ov-kpi">
                         <div class="l">Forecast</div>
-                        <div class="v">{{ G('ForecastCategoryType') || '—' }}</div>
+                        <div class="v">{{ ForecastHeadline }}</div>
                         <div class="s">{{ G('DealStatusType') || 'No status set' }}</div>
                     </div>
                     <div class="mjs-ov-kpi" [attr.data-tone]="CloseClock.tone">
@@ -454,7 +518,7 @@ const FIELD_STYLES = `
                                     @if (NextStepOverdue) { · overdue }
                                 </div>
                             }
-                        } @else {
+                        } @else if (!IsClosed) {
                             <p class="mjs-ov-empty">No next step recorded.</p>
                         }
                     </article>
@@ -548,13 +612,40 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     public get CloseLabel(): string { return this.DateLabel(this.Record?.ExpectedCloseDate); }
     public get DaysToCloseLabel(): string {
         const n = daysFrom(this.Record?.ExpectedCloseDate);
+        if (this.IsClosed) return this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
         if (n === null) return '—';
         if (n < 0) return `${Math.abs(n)}d past`;
         if (n === 0) return 'today';
         return `${n}d`;
     }
+    /**
+     * Has this deal been closed? (bc-aidp-next-golive#206 item 4)
+     *
+     * Read off the CLOSE STAMPS rather than the status flags, because the stamps are what the server
+     * writes when the close actually runs, and a panel that keyed on the status would call a deal
+     * closed before any of the close had happened. Either stamp counts: `ClosedAt` is the instant,
+     * `ActualCloseDate` the day, and a legacy row may carry only one.
+     */
+    public get IsClosed(): boolean {
+        return !!(this.Record?.ClosedAt ?? this.Record?.ActualCloseDate);
+    }
+
+    /**
+     * The Forecast tile's headline: the OUTCOME once a deal is closed, the forecast category while it
+     * is open. A forecast is a statement about a deal that might still move; Won is not a forecast.
+     */
+    public get ForecastHeadline(): string {
+        if (this.IsClosed) return String(this.Record?.Get?.('DealStatusType') ?? '') || '—';
+        return String(this.Record?.Get?.('ForecastCategoryType') ?? '') || '—';
+    }
+
     public get CloseClock(): { label: string; tone: 'success' | 'warning' | 'muted' } {
         const n = daysFrom(this.Record?.ExpectedCloseDate);
+        // A closed deal shows WHEN it closed. Counting days against an expected date it already met
+        // (or missed) is advice on a decision nobody can take any more.
+        if (this.IsClosed) {
+            return { label: this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt), tone: 'success' };
+        }
         if (this.Record?.ActualCloseDate) return { label: 'Closed', tone: 'success' };
         if (n === null) return { label: 'No close date', tone: 'muted' };
         if (n < 0) return { label: `${Math.abs(n)}d past`, tone: 'warning' };
@@ -567,6 +658,8 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return m ? `${m} mo` : '—';
     }
     public get NextStepOverdue(): boolean {
+        // Nothing is overdue on a deal that is finished.
+        if (this.IsClosed) return false;
         const n = daysFrom(this.Record?.NextStepDate);
         return n !== null && n < 0;
     }
@@ -578,6 +671,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         // reports the absence of work that has not started, which is why a brand-new deal opened on a
         // wall of warnings. The briefing stays quiet until there is something to brief on.
         if (!this.Record.IsSaved) return out;
+        // A closed deal is not coached. Every line below asks someone to do something about a deal
+        // that is finished -- re-date it, assign it, give it a next step -- and none of it applies.
+        if (this.IsClosed) return out;
         const days = daysFrom(this.Record.ExpectedCloseDate);
         if (days !== null && days < 0 && !this.Record.ActualCloseDate) {
             out.push('The expected close date has passed. Update the date or close the deal.');
@@ -639,7 +735,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -775,7 +871,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
-export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
+export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     /** Every active status, loaded once. Filtered for display; see SelectableStatuses. */
     /**
      * A SIGNAL rather than a plain array, and not for style.
@@ -838,10 +934,10 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
      * reads, so this control and the save cannot disagree about which statuses are pickable.
      *
      * NOT the predicate the deal workspace uses -- it filters !IsWon && !IsLost. The two coincide on
-     * today's seed and diverge on a status that locks without being either, which bareCloseRefusal
-     * would then refuse from the workspace. Said this way round because an earlier version of this
-     * comment asserted a parity that does not exist; migrating the workspace onto the flag is its own
-     * change.
+     * today's seed and diverge on a status that locks without being either: the workspace would offer
+     * it as an ordinary field write, and the server would run a full close on it. Said this way round
+     * because an earlier version of this comment asserted a parity that does not exist; migrating the
+     * workspace onto the flag is its own change.
      */
     public get SelectableStatuses(): DealStatusOption[] {
         // A CLOSED deal may only move to a non-locking status, and that move is a reopen. Offering it
@@ -918,10 +1014,13 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
         }
         /**
          * AND A CLOSING PICK IS A CLOSE REQUEST, for the same reason (golive#205: "Changing Deal Status
-         * to Won or Lost should close the deal properly"). Writing it would lock the deal with none of
-         * the close having run -- no stage event, no contract, no finance tasks, and for a Lost deal no
-         * loss reason and a live order. `bareCloseRefusal` on the server refuses exactly that, so
-         * writing it here would produce a refused save rather than a closed deal.
+         * to Won or Lost should close the deal properly").
+         *
+         * The server would now run the close on a bare write — `close-deal.CD27` measures that — so this
+         * is not the last line of defence it once was. What it is for is the LOSS REASON. A Lost close
+         * needs one, the panel has not collected it at the moment of the pick, and a status write
+         * without it is refused outright before anything is saved. Holding the pick is how the reason
+         * gets collected, and it is the same reason `ConfirmClose` exists rather than a plain write.
          */
         const picked = this.statuses().find((s) => s.ID.toLowerCase() === String(id).toLowerCase());
         if (picked?.LocksDeal) {
@@ -1152,7 +1251,7 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -1160,7 +1259,7 @@ export class MJSDealPipelinePanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
-export class MJSDealPartyPanel extends BaseFormPanel<DealEntity> {
+export class MJSDealPartyPanel extends MJSDealFieldPanel {
     /**
      * Record links on these fields emit `Navigate` from `mj-form-field`. That output must be
      * forwarded to `FormComponent.OnFormNavigate`, which Explorer maps onto
@@ -1194,7 +1293,7 @@ export class MJSDealPartyPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -1202,7 +1301,7 @@ export class MJSDealPartyPanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
-export class MJSDealCommercialPanel extends BaseFormPanel<DealEntity> {
+export class MJSDealCommercialPanel extends MJSDealFieldPanel {
     public readonly Fields: DealFieldSpec[] = [
         { name: 'Amount', type: 'number' },
         { name: 'CurrencyID', type: 'textbox' },
@@ -1233,11 +1332,26 @@ export class MJSDealCommercialPanel extends BaseFormPanel<DealEntity> {
             Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="false"
             [BadgeCount]="FormComponent.GetSectionRowCount('lines')">
             @if (Record.IsSaved && Record.OrderID) {
+                <!-- NEW IS HIDDEN ON A LOCKED DEAL (bc-aidp-next-golive#206 item 1). The tester added a
+                     line to a Won deal through this toolbar and it saved: "the grid should hide its New
+                     and delete buttons when the deal is locked".
+
+                     DELETE IS NOT BOUND HERE ON PURPOSE. ShowDeleteButton defaults to FALSE, so the
+                     toolbar never offers delete on any deal; binding it to !IsLocked would START showing
+                     it on open ones, which is the opposite of what the issue asks. Stage history sets it
+                     to false explicitly for the same reason it sets New to false: there, both are off on
+                     every deal.
+
+                     THIS IS THE FORM HALF ONLY. The server half -- refusing the line save whichever path
+                     it arrives by -- needs the order-line veto from bizapps-orders#206, which is not
+                     published yet. Hiding a button is not a lock, and this comment is here so nobody
+                     reads it as one. -->
                 <mj-explorer-entity-data-grid
                     [Params]="Params"
                     [NewRecordValues]="NewValues"
                     [AllowLoad]="FormComponent.IsSectionExpanded('lines')"
                     [ShowToolbar]="true"
+                    [ShowNewButton]="!IsLocked"
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
@@ -1249,6 +1363,17 @@ export class MJSDealCommercialPanel extends BaseFormPanel<DealEntity> {
     styles: [`.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }`],
 })
 export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
+    /**
+     * Whether the deal's persisted status locks it.
+     *
+     * Read off the form component, which resolved it once per load through the shared
+     * `ResolveDealLockState` -- the same answer the field panels gate on. Resolving it again here would
+     * be a second answer to a question that already has one.
+     */
+    public get IsLocked(): boolean {
+        return (this.FormComponent as unknown as { IsLocked?: boolean } | undefined)?.IsLocked === true;
+    }
+
     public get Params() {
         const id = this.Record?.OrderID;
         if (!id) return null;
@@ -1280,7 +1405,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -1288,7 +1413,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
-export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
+export class MJSDealMotionPanel extends MJSDealFieldPanel {
     public readonly Fields: DealFieldSpec[] = [
         { name: 'NextStep', type: 'textbox', span: true },
         { name: 'NextStepDate', type: 'datepicker' },
@@ -1445,7 +1570,7 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -1453,7 +1578,7 @@ export class MJSDealMotionPanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
-export class MJSDealClosePanel extends BaseFormPanel<DealEntity> {
+export class MJSDealClosePanel extends MJSDealFieldPanel {
     public PanelOpen = false;
     public ReopenPanelOpen = false;
     public ReopenReason = '';
@@ -2003,6 +2128,8 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
                     [NewRecordValues]="FormComponent.NewRecordValues(Entity, 'DealID')"
                     [AllowLoad]="FormComponent.IsSectionExpanded('stage-history')"
                     [ShowToolbar]="true"
+                    [ShowNewButton]="false"
+                    [ShowDeleteButton]="false"
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
@@ -2010,6 +2137,16 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
         </mj-collapsible-panel>
     `,
 })
+/**
+ * READ-ONLY ON EVERY DEAL, open or closed (bc-aidp-next-golive#206 item 5).
+ *
+ * These rows are written by the server as part of each save -- they are the deal's audit trail, and a
+ * hand-typed one is a lie about what happened. The toolbar stays for search and export; only the two
+ * write affordances go.
+ *
+ * `ShowDeleteButton` already defaults to false. It is set anyway, because a default is not a decision
+ * and this panel should not quietly grow a delete button if that default ever changes.
+ */
 export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealStageEvent;
     public OnDataLoad(event: AfterDataLoadEventArgs): void {

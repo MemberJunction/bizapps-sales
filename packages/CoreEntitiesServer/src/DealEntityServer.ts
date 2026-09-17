@@ -59,8 +59,10 @@ import { RegisterClass } from '@memberjunction/global';
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
 import { CanTransition, type OrderStatus } from '@mj-biz-apps/orders-entities';
 import {
-    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
+    DealFieldsEditableWhileLocked,
+    DealFieldLabel,
     DealEntity,
+    JoinLabels,
     type mjBizAppsSalesDealStageEventEntity,
 } from '@mj-biz-apps/sales-entities';
 
@@ -1741,11 +1743,46 @@ export class DealEntityServer extends DealEntity {
     /**
      * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.
      *
-     * It moved to `@mj-biz-apps/sales-entities` so the Explorer Deal form can apply the same list. A
-     * second copy here would drift, and the drift would only ever surface as a user typing into a field
-     * the server then refuses. See `close-lock.ts` for the reasoning; CD14 pins it to real behaviour.
+     * It lives in `@mj-biz-apps/sales-entities` so the Explorer Deal form and the workspace apply the
+     * same list. A second copy here would drift, and the drift would only ever surface as a user typing
+     * into a field the server then refuses. See `close-lock.ts`; CD14 pins it to real behaviour.
+     *
+     * A FUNCTION, not a constant, since golive#206's "Loss Notes (Lost deals only)": the answer depends
+     * on the deal's outcome, so the outcome has to reach it. It used to be a flat `ReadonlySet` held in
+     * a static, which is precisely how a caller ends up with the list and without the condition.
      */
-    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;
+    private static lockEditableFields(isLost: boolean): ReadonlySet<string> {
+        return DealFieldsEditableWhileLocked(isLost);
+    }
+
+    /**
+     * The child collections that stay editable on a locked deal.
+     *
+     * Named here rather than in `sales-entities` because, unlike the field list, no other surface needs
+     * it yet: the grids decide their own New/delete affordances. If a form ever has to render this, it
+     * moves next to `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` for the same reason that one moved.
+     *
+     * ── WHAT THIS DOES AND DOES NOT CATCH TODAY ─────────────────────────────────────────────────
+     *
+     * The Deal declares exactly TWO child collections (`metadata/entity-relationships`):
+     * `PaymentSchedule` and `Team`. Both are named here, so `dirtyCollections` below is currently
+     * always empty and this check refuses nothing in practice.
+     *
+     * That is deliberate and it is not the same as the check being pointless. It is an ALLOW-LIST, so
+     * a collection added later is refused without anyone remembering to add it — which is the whole
+     * property the previous "freeze every dirty companion" rule existed for. What it means is that
+     * the freeze direction has no companion to demonstrate it on right now, and no check can prove
+     * it until a third collection exists. Said out loud so nobody reads the guard as tested.
+     *
+     * ORDER LINES ARE NOT A COMPANION OF THE DEAL and never were — they belong to the ORDER, in the
+     * Orders app. An earlier version of this comment listed `Lines` alongside these two, which made
+     * this look like the thing freezing them. It is not: that is bizapps-orders#206, which adds a veto
+     * seam Sales registers into.
+     */
+    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([
+        'Team',
+        'PaymentSchedule',
+    ]);
 
     /**
      * Runs `body` with the close lock suppressed, and always restores it.
@@ -1775,7 +1812,8 @@ export class DealEntityServer extends DealEntity {
         if (!persistedStatusID) {
             return null;
         }
-        if (!(await this.statusLocksDeal(persistedStatusID))) {
+        const persisted = await this.readStatusLockFlags(persistedStatusID);
+        if (!persisted.LocksDeal) {
             return null;
         }
 
@@ -1784,30 +1822,43 @@ export class DealEntityServer extends DealEntity {
         // whether this one edit was permitted.
         this._lockedAtSave = true;
 
-        const changed = this.Fields.filter(
-            (f) => f.Dirty && !DealEntityServer.LOCK_EDITABLE_FIELDS.has(f.Name),
-        ).map((f) => f.Name);
+        /**
+         * The outcome decides one field. golive#206: Loss Notes stays editable on a LOST deal and is
+         * frozen on a won one, and the form asks the same function with the same flag — both take it
+         * from the status ROW, never from a name.
+         */
+        const editable = DealEntityServer.lockEditableFields(persisted.IsLost);
+        const changed = this.Fields.filter((f) => f.Dirty && !editable.has(f.Name)).map((f) => f.Name);
 
         /**
          * THE CHILD COLLECTIONS COUNT AS CHANGES TOO, and this half did not exist when the lock was
          * written — the collections did not exist either.
          *
-         * A deal's lines are exactly what a contract and an order were derived from, so editing or
-         * removing one on a closed deal falsifies the same provenance the header lock protects. But
-         * `Lines`, `PaymentSchedule` and `Team` are COMPANIONS, not fields: they never appear in
-         * `this.Fields`, so the header check above cannot see them. Without this the lock would refuse a
-         * renamed deal and happily accept a deleted line, which is the more damaging edit of the two.
+         * `PaymentSchedule` and `Team` are COMPANIONS, not fields: they never appear in `this.Fields`,
+         * so the header check above cannot see them at all. Without this half, the lock would refuse a
+         * renamed deal while a companion edit went straight through.
          *
-         * Enumerated as `Companions` rather than as the three collections by name, deliberately: anything
-         * that contributes work to this record's save is something the lock has to see, and naming them
-         * individually would mean a collection added later is silently unprotected.
+         * A deal's ORDER LINES are exactly what a contract was derived from, and they are NOT reachable
+         * from here — they belong to the order, in the Orders app, and this entity never sees them.
+         * Freezing those is bizapps-orders#206.
+         *
+         * WHICH COLLECTIONS ARE FROZEN IS NOW AN ALLOW-LIST, AND THE DIRECTION MATTERS
+         * (bc-aidp-next-golive#206 item 2). Reassigning a rep or correcting a payment schedule after a
+         * close is record-keeping, not a change to what was agreed, so `Team` and `PaymentSchedule` are
+         * permitted — which today is both of them.
+         *
+         * This was previously "freeze every dirty companion", enumerated that way deliberately so that a
+         * collection added later would be protected without anyone remembering to add it. That property
+         * is kept -- which is why this names what is ALLOWED rather than what is frozen. Listing the
+         * frozen ones instead would leave the next collection silently editable on a closed deal, and
+         * that is the failure the original comment was written against.
          *
          * Guarded by the same already-closed test, so the closing transition may still carry final
          * collection state — a close that writes its last line is legal; editing that line tomorrow is
          * not.
          */
         const dirtyCollections = this.Companions
-            .filter((c) => c.Dirty)
+            .filter((c) => c.Dirty && !DealEntityServer.LOCK_EDITABLE_COMPANIONS.has(c.Name))
             .map((c) => c.Name);
 
         const all = [...changed, ...dirtyCollections];
@@ -1815,18 +1866,35 @@ export class DealEntityServer extends DealEntity {
             return null;
         }
         /**
-         * THIS COPY IS NOT THIS PR'S TO CHANGE. golive#207 row 18 replaces this sentence, and it ships
-         * on sales#77 with the other two lock messages (rows 16 and 17), so that one PR owns one issue.
+         * golive#207 row 18, verbatim: "This deal is closed. {fields} cannot be changed until the
+         * status is set back to Open."
          *
-         * Which leaves this branch alone still telling the reader to reopen through `Sales.ReopenDeal`
-         * while the trigger above has just made the status field do it. That contradiction is real, and
-         * #77 is what resolves it -- #77 cannot land before this PR either, because its replacement says
-         * "set the status back to Open", an instruction that only became true here. They merge together.
+         * The third of the three lock messages, with rows 16 and 17 on this PR. It began on the #205
+         * branch, which is where the sentence became TRUE -- until that trigger landed, a status write
+         * could not reopen a deal and this refusal had to send the reader to `Sales.ReopenDeal`. It is
+         * here instead so that one PR owns one issue, and the sequencing the tester already called out
+         * ("the three lock messages assume the close/reopen issue lands") is unchanged: this PR merges
+         * with #205's, never before it.
+         *
+         * NOTHING IS APPENDED FOR INTEGRATORS. An earlier revision added a second sentence naming
+         * `Sales.ReopenDeal` and its arguments, on the reasoning that this string reaches an API caller
+         * as well as a person. Once setting the status back RUNS the reopen from any path, that is the
+         * same instruction spelled longer. A caller who wants the operation directly still finds it
+         * named, with its arguments, in the refusal a close that cannot run produces.
+         *
+         * {fields} IS INTERPOLATED, not spelled out, which the tester asked for in the same breath:
+         * the notice "should match whatever #206 settles on". #206 item 3 grows that set from two fields to
+         * six -- seven on a Lost deal -- and a hardcoded sentence would have started lying the day
+         * it merged.
+         *
+         * THE SAME LABELS AND THE SAME JOIN AS ROW 16. This sentence used to print raw column names
+         * while row 16 printed the on-screen ones, so one refusal said "DealStatusTypeID" and the other
+         * said "Deal Status" about the same field. `DealFieldLabel` falls back to the field name, so a
+         * frozen field nobody has labelled still reads as its column ─ slightly wrong, rather than
+         * taking the notice down.
          */
-        return (
-            `this deal is closed and locked; ${all.join(', ')} cannot be changed. ` +
-            `Reopen it through Sales.ReopenDeal, which records a reason.`
-        );
+        const named = JoinLabels(all.map(DealFieldLabel));
+        return `This deal is closed. ${named} cannot be changed until the status is set back to Open.`;
     }
 
     /**
@@ -1849,8 +1917,8 @@ export class DealEntityServer extends DealEntity {
      *
      * `LocksDeal` FAILS CLOSED: if the status cannot be read we cannot prove the deal is unlocked, and
      * wrongly allowing an edit to a closed deal is the more expensive mistake. `IsLost` fails to
-     * `false`, which is the same instinct read the other way round: `false` withholds the carve-outs a
-     * loss earns, so an unreadable status refuses more, never less.
+     * `false` for the same reason read the other way round — `false` means Loss Notes is NOT carved
+     * out, so an unreadable status refuses more, never less.
      */
     private async readStatusLockFlags(statusID: string): Promise<{ LocksDeal: boolean; IsLost: boolean }> {
         const provider = this.ProviderToUse as unknown as IRunViewProvider;

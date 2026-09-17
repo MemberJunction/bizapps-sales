@@ -241,6 +241,55 @@ until then, treat the per-bundle table as a claim about the code each mutation w
 
 ---
 
+## Round 13 (2026-09-16) — `9e22e1e` — `M-AM2` repaired, and SD41 given its first mutant
+
+**2 mutants, 2 killed, 0 misses, 0 skips.** Found and fixed on `next` at `9e22e1e`, then folded into
+the sales#72 branch and re-run there. Both runs are below, because the fix is landing on the second
+tree and a figure measured somewhere else is not evidence for where it ships.
+
+| Mutant | What it breaks | Declared | on `next` `9e22e1e` | on sales#72 `a9bc0e0` |
+|---|---|---|---|---|
+| `M-AM2` | the deleted hand-typed carve-out is put BACK | SD41 | **OK** — 125 passed, 13 failed | **OK** — 127 passed, 13 failed |
+| `M-AM3` | `"nothing priced"` becomes a computed amount of nothing | SD22, SD23 | **OK** — 121 passed, 17 failed | **OK** — 123 passed, 17 failed |
+
+The two extra passes on sales#72 are CD26 and CD27, which that stack adds. Declared kills and collateral
+are identical set-for-set across the two trees.
+
+### The anchor was not drift — the mechanism was deleted on purpose
+
+`M-AM2` anchored on the guard that left a hand-typed figure alone unconditionally:
+
+> `if (this.AmountIsComputed === false && this.Amount !== null && this.Amount !== undefined) return;`
+
+Commit `6d46c4a` ("fix: lined Deal.Amount is OrderHeader.TotalGross") **removed** it and inverted the
+rule: a typed figure survives only on a header-only deal, and a lined deal's Amount is always a cache of
+`OrderHeader.TotalGross`. Its own message names both checks — *"A typed figure survives only on a
+header-only deal (SD22). SD41 proves a prior typed figure is overwritten when lines exist."*
+
+Nobody updated the mutant. It has reported `SKIPPED — anchor appears 0 times` ever since, which makes
+the driver exit 1, and SD22's only declared mutant was one that could not run.
+
+`M-AM2`'s note always read *"the rule that must not drift"*. The rule turned over, so the drift to guard
+against is now RE-ADDING the carve-out — and that is what the mutant puts back. It declares **SD41**,
+which had no mutant at all. It fells SD41 and nothing else in sales, which is the cleanest isolation in
+this file: restoring the carve-out cannot hurt the header-only case, only the lined one.
+
+### SD22 was promoted deliberately, not by arithmetic
+
+With `M-AM2` re-aimed, SD22 needed a mutant. `M-AM3` already felled it as collateral, and this file's own
+counting rule says a collateral kill is promoted only after confirming the mutated code is on the check's
+path. It is: SD22's deal has no lines, so `TotalGross` is NULL and `M-AM3`'s guard is exactly the return
+that leaves the typed figure alone. `M-AM3` now declares `['SD22', 'SD23']`.
+
+### Every anchor in the table was checked, not just this one
+
+91 mutations on `next`, **0 would skip** after this change — it was 1 of 91 before. Re-run on the
+sales#72 branch where this lands: **94 of 94, 0 skips.**
+
+**Baseline on this host:** 12 checks fail with nothing mutated — AC6, AC8, AC12, AC13, AC16, AC19,
+CT1, CT5, CT6, SD6, WT10, WT14 — and they appear in every `failed=` column above. `SD6` is the KI-20
+tripwire reporting `expected 2, got 1`, which its own comment says means orders has fixed
+`savePendingLines()`. The rest were not diagnosed.
 ## Round 12 (2026-09-16) — `2e79c37` — golive#205's server-side trigger: CD26 and CD27
 
 **2 mutants, 2 killed, 0 misses.** Both halves of the status-write trigger now have a mutant aimed at

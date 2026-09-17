@@ -223,10 +223,10 @@ describe('picking an open status on a CLOSED deal starts a reopen, it does not w
 
 describe('picking a closing status on an OPEN deal starts a close, it does not write', () => {
     /**
-     * The other half of the same rule as the reopen. Writing it would lock the deal with none of the
-     * close having run — no stage event, no contract, no finance tasks, and for a Lost deal no loss
-     * reason and a live order. `bareCloseRefusal` refuses exactly that on the server, so writing it
-     * here would produce a refused save rather than a closed deal.
+     * The other half of the same rule as the reopen. The server would run the close on a bare write
+     * — `close-deal.CD27` measures that — so the pick is held for the LOSS REASON, which a Lost
+     * close needs and the panel has not collected yet. A status write without one is refused before
+     * anything is saved.
      */
     it('holds the pick instead of writing it', () => {
         const p = panelWith('open-1');

@@ -37,7 +37,7 @@ import {
     type NamedCheck,
 } from '@memberjunction/testing-integration';
 import {
-    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
+    DealFieldsEditableWhileLocked,
     StubDownstreamSeam,
     SalesCloseDealOperation,
     SalesReopenDealOperation,
@@ -58,6 +58,7 @@ import {
 
 import {
     E_DEAL,
+    E_EMPLOYEE,
     E_SCHEDULE,
     E_STAGE_EVENT,
     InRolledBackTransaction,
@@ -524,7 +525,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 /**
                  * PINS THE CONSTANT THE EXPLORER FORM READS.
                  *
-                 * `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` moved into `sales-entities` so the Deal form can
+                 * `DealFieldsEditableWhileLocked` lives in `sales-entities` so the Deal form can
                  * grey out exactly what `DealEntityServer.Save()` refuses. That sharing is only worth
                  * anything if the constant still describes real behaviour — a list that drifts from the
                  * server turns into a form that offers a field the server rejects, or greys out one it
@@ -537,7 +538,62 @@ export const CloseDealChecks: NamedCheck[] = [
                 const f = await ResolveSalesFixture(ctx);
                 const md = new Metadata();
 
-                for (const field of DEAL_FIELDS_EDITABLE_WHILE_LOCKED) {
+                /**
+                 * A TYPE-APPROPRIATE VALUE PER FIELD, and this used to be one string for all of them.
+                 *
+                 * That held while the set was Description and NextStep. #206 item 3 added a date and
+                 * three ids, and `Set(field, 'CD14 touched ...')` on a datetime or a uniqueidentifier
+                 * fails for reasons that have nothing to do with the lock — which would read as "the
+                 * server refused an editable field" and send the next person hunting the wrong bug.
+                 *
+                 * The two ids that carry a foreign key are filled from the real table, so the save is
+                 * refused by the LOCK or not at all, never by referential integrity.
+                 */
+                /**
+                 * THE SUBQUERY IS WHAT MAKES THE ASSERTION REACHABLE.
+                 *
+                 * `SELECT TOP 1 ID FROM X` returns NO ROW on an empty table, and `TxOne` asserts on that
+                 * itself ─ so a check added after it could never execute, and would read as covering the
+                 * empty-fixture case while testing nothing. Selecting the subquery always returns exactly
+                 * one row, with a NULL id when the table is empty, which is a value this check can see.
+                 */
+                const leadSource = await TxOne<{ ID: string | null }>(
+                    ctx, `SELECT (SELECT TOP 1 ID FROM ${SALES_SCHEMA}.LeadSourceType ORDER BY ID) AS ID`,
+                );
+                Assert(
+                    !!leadSource.ID,
+                    'CD14 needs at least one LeadSourceType row, to set LeadSourceTypeID to a value ' +
+                        'the foreign key accepts. The fixture has none, so re-seed before reading ' +
+                        'anything into this failure: it is not the lock.',
+                );
+                const contact = await TxOne<{ ID: string | null }>(
+                    ctx, `SELECT (SELECT TOP 1 ID FROM ${SALES_SCHEMA}.SalesContact ORDER BY ID) AS ID`,
+                );
+                Assert(
+                    !!contact.ID,
+                    'CD14 needs at least one SalesContact row, to set BillingContactID to a value the ' +
+                        'foreign key accepts. The fixture has none, so re-seed before reading anything ' +
+                        'into this failure: it is not the lock.',
+                );
+                const valueFor = (field: string): unknown => {
+                    switch (field) {
+                        case 'NextStepDate':
+                            return new Date('2026-01-15T00:00:00.000Z');
+                        case 'LeadSourceTypeID':
+                            return leadSource.ID;
+                        case 'BillingContactID':
+                            return contact.ID;
+                        case 'CampaignID':
+                            // No FK constraint on this column, so any id is referentially fine.
+                            return '11111111-2222-4333-8444-555555555555';
+                        default:
+                            return `CD14 touched ${field}`;
+                    }
+                };
+
+                // The WON set: everything editable on any locked deal. Loss Notes is not in it, and
+                // gets its own both-directions check below.
+                for (const field of DealFieldsEditableWhileLocked(false)) {
                     const dealID = await openDeal(
                         ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, `CD14 ${field}`,
                     );
@@ -548,13 +604,91 @@ export const CloseDealChecks: NamedCheck[] = [
 
                     const deal = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
                     Assert(await deal.Load(dealID), `the closed deal loads for ${field}`);
-                    deal.Set(field, `CD14 touched ${field}`);
+                    deal.Set(field, valueFor(field));
+                    // Without this, a value that happened to match what was already stored would leave
+                    // the record clean, the save would succeed having written nothing, and the field
+                    // would look carved-out when nothing had been tested.
+                    Assert(
+                        deal.GetFieldByName(field)?.Dirty === true,
+                        `CD14 did not actually change '${field}', so saving proves nothing about it`,
+                    );
                     Assert(
                         await deal.Save(),
-                        `'${field}' is in DEAL_FIELDS_EDITABLE_WHILE_LOCKED but the server REFUSED it — ` +
-                            'the shared constant no longer matches the lock',
+                        `'${field}' is in DealFieldsEditableWhileLocked(false) but the server REFUSED it — ` +
+                            'the shared rule no longer matches the lock',
                     );
                 }
+
+                /**
+                 * LOSS NOTES IS THE ONE CONDITIONAL MEMBER, and both directions are asserted because
+                 * only one of them fails loudly if it regresses.
+                 *
+                 * golive#206's field table says "Loss Notes (Lost deals only)" and item 3 asks that the
+                 * server's list "match this list exactly". An earlier version of the rule had it in the
+                 * flat set, editable on a WON deal too. That direction is the silent one: nobody files a
+                 * bug because a field they did not need was accepted, so nothing but this check would
+                 * ever notice it come back.
+                 *
+                 * Both halves also assert the SET first. Without that, a rule that dropped LossNotes
+                 * entirely would satisfy the won half and fail the lost half for a reason the message
+                 * would misdescribe.
+                 */
+                const lossReason = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.LossReason WHERE IsActive = 1 AND RequiresNotes = 0
+                     ORDER BY ID`,
+                );
+                Assert(!!lossReason?.ID, 'CD14 needs a loss reason that does not require notes');
+
+                const wonID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD14 LossNotes on won',
+                );
+                Assert(
+                    (await close(ctx, { DealID: wonID, DealStatusTypeID: f.WonStatusID })).Success,
+                    'the won close ran for the LossNotes case',
+                );
+                Assert(
+                    !DealFieldsEditableWhileLocked(false).has('LossNotes'),
+                    'the WON set must NOT carry LossNotes, or the refusal below proves nothing',
+                );
+                const won = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await won.Load(wonID), 'the won deal loads');
+                won.Set('LossNotes', 'CD14 loss notes on a WON deal');
+                Assert(
+                    won.GetFieldByName('LossNotes')?.Dirty === true,
+                    'CD14 did not actually change LossNotes on the won deal, so saving proves nothing',
+                );
+                Assert(
+                    !(await won.Save()),
+                    'LossNotes must be REFUSED on a WON deal — golive#206 carves it out for LOST deals only',
+                );
+
+                const lostID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD14 LossNotes on lost',
+                );
+                Assert(
+                    (await close(ctx, {
+                        DealID: lostID,
+                        DealStatusTypeID: f.LostStatusID,
+                        LossReasonID: String(lossReason!.ID),
+                    })).Success,
+                    'the lost close ran for the LossNotes case',
+                );
+                Assert(
+                    DealFieldsEditableWhileLocked(true).has('LossNotes'),
+                    'the LOST set must carry LossNotes, or the acceptance below proves nothing',
+                );
+                const lost = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await lost.Load(lostID), 'the lost deal loads');
+                lost.Set('LossNotes', 'CD14 loss notes on a LOST deal');
+                Assert(
+                    lost.GetFieldByName('LossNotes')?.Dirty === true,
+                    'CD14 did not actually change LossNotes on the lost deal, so saving proves nothing',
+                );
+                Assert(
+                    await lost.Save(),
+                    'LossNotes must be ACCEPTED on a LOST deal — the whole point of the carve-out',
+                );
 
                 // And the other direction: a field OUTSIDE the set must still be refused, or the set is
                 // describing a lock that is not actually holding anything.
@@ -568,7 +702,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 const locked = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
                 Assert(await locked.Load(lockedID), 'the locked deal loads');
                 Assert(
-                    !DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has('Name'),
+                    !DealFieldsEditableWhileLocked(true).has('Name'),
                     'this check assumes Name is NOT carved out; update it if that ever changes',
                 );
                 locked.Name = 'CD14 should not be allowed to rename a closed deal';
@@ -872,7 +1006,7 @@ export const CloseDealChecks: NamedCheck[] = [
     },
     {
         Id: 'close-deal.CD13',
-        Name: 'CD13: the lock covers the CHILD COLLECTIONS too — and the closing transition may still carry them',
+        Name: 'CD13: bookkeeping collections stay editable on a closed deal, and the header does not',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -919,40 +1053,55 @@ export const CloseDealChecks: NamedCheck[] = [
                 Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
                 Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
 
-                const before = await instalments(ctx, dealID);
-
-                // ── HALF TWO: a REMOVAL on the closed deal is refused ──────────────────────────────
+                /**
+                 * ── HALF TWO: THE PAYMENT SCHEDULE IS NOW EDITABLE ON A CLOSED DEAL ──────────────
+                 *
+                 * This half asserted the opposite until bc-aidp-next-golive#206 item 2, and the reversal
+                 * is deliberate rather than a relaxation of the lock. Correcting a schedule or
+                 * reassigning a rep after a close is BOOKKEEPING; it does not change what was agreed,
+                 * which is what the lock protects. The lines are a different matter and stay frozen —
+                 * they are what the contract and the order were derived from.
+                 *
+                 * The allow-list in `DealEntityServer` names what is PERMITTED, not what is frozen, so a
+                 * collection added later is still refused by default. That is the property the original
+                 * "freeze every companion" rule was written for, and losing it was the real risk in this
+                 * change.
+                 */
                 const locked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
                 Assert(await locked.Load(dealID), 'the closed deal loads');
                 await locked.LoadRelatedRecords('PaymentSchedule');
                 AssertEqual(locked.PaymentSchedule.Count, 2, 'both instalments came back');
 
-                locked.PaymentSchedule.Remove(locked.PaymentSchedule.Items[1]);
-                AssertEqual(
-                    await locked.Save(),
-                    false,
-                    'removing an instalment from a CLOSED deal must be refused — the header is untouched, so only ' +
-                        'the collection check can catch this',
-                );
-
-                AssertEqual(
-                    (await instalments(ctx, dealID)).length,
-                    before.length,
-                    'and the refusal kept the instalment in the database',
-                );
-
-                // ── HALF TWO (b): an EDIT on the closed deal is refused too ────────────────────────
-                const edited = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
-                Assert(await edited.Load(dealID), 'the closed deal loads again');
-                await edited.LoadRelatedRecords('PaymentSchedule');
-                const target = edited.PaymentSchedule.Items[0];
+                const target = locked.PaymentSchedule.Items[0];
                 target.Amount = 99900;
-                AssertEqual(await edited.Save(), false, 'editing an instalment on a CLOSED deal must be refused');
+                Assert(
+                    await locked.Save(),
+                    `the payment schedule must stay editable on a closed deal — ${locked.LatestResult?.CompleteMessage ?? ''}`,
+                );
 
                 const finalRow = await TxOne<{ Amount: number }>(
                     ctx, `SELECT Amount FROM ${SALES_SCHEMA}.DealPaymentSchedule WHERE ID = '${target.ID}'`,
                 );
-                AssertEqual(Number(finalRow.Amount), 41000, 'the stored amount is still the pre-close value');
+                AssertEqual(Number(finalRow.Amount), 99900, 'and the edit actually landed');
+
+                // ── HALF THREE: the HEADER is still frozen, so this is a carve-out and not a hole ──
+                // Without this, a version that simply stopped checking collections at all would pass
+                // everything above.
+                const header = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await header.Load(dealID), 'the closed deal loads again');
+                header.Name = 'CD13 should not be allowed to rename a closed deal';
+                AssertEqual(
+                    await header.Save(),
+                    false,
+                    'the header lock must still hold — permitting a collection is not permitting the deal',
+                );
+
+                /**
+                 * NOT COVERED HERE: that `Lines` is still refused. The fixture deal is provisioned with a
+                 * Draft order carrying no lines, so there is nothing to remove, and adding one needs the
+                 * product fixture this bundle does not build. The order-line guard is #206 item 1 and
+                 * lands with its own check — flagged rather than left to look covered.
+                 */
             }),
     },
     {
@@ -1905,6 +2054,133 @@ export const CloseDealChecks: NamedCheck[] = [
                     row.Description !== COMPANION,
                     'the refusal must have come BEFORE the save: a committed companion edit means the ' +
                         'caller got a partial apply out of a save that reported false',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD28',
+        Name: 'CD28: the team roster stays editable on a locked deal, and the owner stamp FOLLOWS it',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#206 item 2, the half of the sentence nothing measured.
+                 *
+                 * The requirement is two claims joined by an "and": "The server should allow these child
+                 * saves on a locked deal, AND the owner stamp should still follow a change to the Owner
+                 * role." `CD13` proves the first for PaymentSchedule. Nothing proved it for Team, and
+                 * nothing at all proved the second — `SD3` covers the stamp on an OPEN deal, which is a
+                 * different question, because on an open deal the lock is not in the way.
+                 *
+                 * ── WHY THE STAMP IS THE INTERESTING HALF ──────────────────────────────
+                 *
+                 * `OwnerEmployeeID` is a FROZEN field — it is in the provenance group, and `SD26` proves a
+                 * hand-set one is refused. Yet this save must write it, because the roster moved and the
+                 * stamp is derived from the roster. Both are true only because of an ORDERING nobody had
+                 * pinned: `checkCloseLock` runs first and sees the field clean, and `stampOwnerFromTeam`
+                 * makes it dirty afterwards.
+                 *
+                 * Move the stamp above the lock check and this deal stops being editable by its own
+                 * team panel; drop the Team allow-list entry and the same. Neither would fail any other
+                 * check, which is exactly why this one exists.
+                 *
+                 * ── THE ROSTER IS EDITED DIRECTLY, AND NOT VIA `SetOwner()` ─────────────────
+                 *
+                 * That is the path the form takes — the Internal team panel is a grid over
+                 * `DealTeamMember` — and it is what golive#206 item 2 means by "these child saves".
+                 *
+                 * `SetOwner()` is a DIFFERENT path and it is refused here, measured: it assigns
+                 * `this.OwnerEmployeeID` on the client before saving, so `checkCloseLock` sees a dirty
+                 * frozen field and returns false. The deal workspace's owner picker calls it
+                 * (`deal-workspace.component.ts`), so reassigning an owner there does not work on a
+                 * closed deal even though item 2 says it should. Deliberately NOT asserted here: a check
+                 * that pinned the refusal would enshrine the defect. Raised separately instead.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD28 owner under lock',
+                );
+
+                // A second employee to move the role TO. Read rather than seeded: the stamp following
+                // means nothing if it follows to the person it already named.
+                const others = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: E_EMPLOYEE,
+                        ExtraFilter: `Active = 1 AND ID <> '${f.EmployeeID}'`,
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                    },
+                    ctx.User,
+                );
+                Assert(others.Success, `reading employees failed — ${others.ErrorMessage}`);
+                const successorID = (others.Results ?? [])[0]?.ID;
+                Assert(
+                    !!successorID,
+                    'CD28 needs a SECOND active employee to move the owner role to; this host has one. ' +
+                        'Re-seed before reading anything into this failure: it is not the lock.',
+                );
+
+                // The deal starts owned, then closes. Owning it first is the point -- the check is about
+                // REASSIGNMENT after the close, not about acquiring an owner while locked.
+                const opening = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await opening.Load(dealID), 'the open deal loads');
+                await opening.SetOwner(f.EmployeeID);
+                Assert(
+                    await opening.Save(),
+                    `setup: the owner could not be set — ${opening.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+                Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
+
+                // ── THE CLAIM ───────────────────────────────────────────────────────────────────
+                const roleRow = await TxOne<{ ID: string }>(
+                    ctx, `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.DealRole WHERE IsOwnerRole = 1 AND IsActive = 1`,
+                );
+                const locked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await locked.Load(dealID), 'the closed deal loads');
+                await locked.Team.Load();
+                const holder = locked.Team.Items.find((m) => m.DealRoleID === roleRow.ID);
+                Assert(!!holder, 'setup: the deal has an owner-role member to reassign');
+                holder!.EmployeeID = successorID;
+                Assert(
+                    await locked.Save(),
+                    'a roster change on a CLOSED deal must be allowed -- reassigning a rep is ' +
+                        `record-keeping, not a change to what was agreed: ${locked.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const stored = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(stored.OwnerEmployeeID ?? '').toLowerCase(),
+                    String(successorID).toLowerCase(),
+                    'the stamp must have FOLLOWED the roster onto the new owner, on a locked deal',
+                );
+
+                const team = await TxOne<{ Holders: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS Holders FROM ${SALES_SCHEMA}.DealTeamMember tm ` +
+                        `JOIN ${SALES_SCHEMA}.DealRole r ON r.ID = tm.DealRoleID ` +
+                        `WHERE tm.DealID = '${dealID}' AND r.IsOwnerRole = 1 ` +
+                        `AND tm.EmployeeID = '${successorID}'`,
+                );
+                AssertEqual(
+                    Number(team.Holders), 1,
+                    'and the roster itself names the successor once -- the stamp is derived from this row, ' +
+                        'so a stamp that agreed with nothing would be the defect SD3 exists to catch',
+                );
+
+                // ── THE CONTROL: the lock is genuinely on. ─────────────────────────────────────
+                // Without this, every assertion above would also pass on a deal that was never locked.
+                const header = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await header.Load(dealID), 'the closed deal loads again');
+                header.Name = 'CD28 must not be allowed to rename a closed deal';
+                Assert(
+                    (await header.Save()) === false,
+                    'the deal must still be LOCKED -- if a header edit passes, the roster save above ' +
+                        'proved nothing about the lock allowing it',
                 );
             }),
     },

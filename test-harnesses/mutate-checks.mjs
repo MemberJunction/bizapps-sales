@@ -69,6 +69,7 @@ const SEQ = 'packages/CoreEntitiesServer/src/SequenceService.ts';
 const CWT = 'packages/CoreEntitiesServer/src/CloseWonTaskService.ts';
 const SEAM = 'packages/Entities/src/downstream-seams.ts';
 const LCS = 'packages/CoreEntitiesServer/src/LiveContractsSeam.ts';
+const CL = 'packages/Entities/src/close-lock.ts';
 
 /**
  * ── THE ACTIVITIES AND FORECAST SOURCES, ABSENT FROM THIS FILE UNTIL NOW ────────────────────────
@@ -213,12 +214,22 @@ const MUTATIONS = [
       from: '        event.AmountAtTransition = prior.Amount;',
       to: '        event.AmountAtTransition = null;',
       note: 'the stage event stamps no amount -- the CD4 defect, re-aimed after the stamping moved to DealEntityServer' },
+    // RE-AIMED. The old anchor read the lock through `statusLocksDeal(persistedStatusID)`; this
+    // PR reads both flags at once through `readStatusLockFlags`, so that text is gone. Same
+    // mutation as before -- the lock never engages -- against the guard that now decides it.
     { id: 'M-CD5', file: DES, expect: ['CD5', 'CD13', 'CD14'],
-      from: '        if (!(await this.statusLocksDeal(persistedStatusID))) {\n            return null;\n        }',
+      from: '        if (!persisted.LocksDeal) {\n            return null;\n        }',
       to: '        if (true) {\n            return null;\n        }' },
+    // RE-AIMED at what CD6 actually claims. The old anchor was the `LOCK_EDITABLE_FIELDS` static,
+    // which golive#206 item 3 turned into a call because the answer now depends on the outcome.
+    //
+    // Not simply re-pointed at `lockEditableFields`: `M-CD14` already mutates that line, and two
+    // mutants on one line prove one thing twice. CD6's claim is that the lock is FIELD-BY-FIELD
+    // and not a wall, so this makes it a wall -- drop the editable-set term and every dirty field
+    // is refused, Description included. CD14 falls with it, as its expect list already said.
     { id: 'M-CD6', file: DES, expect: ['CD6', 'CD14'],
-      from: '    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;',
-      to: "    private static readonly LOCK_EDITABLE_FIELDS = new Set<string>(['NextStep']);" },
+      from: '        const changed = this.Fields.filter((f) => f.Dirty && !editable.has(f.Name)).map((f) => f.Name);',
+      to: '        const changed = this.Fields.filter((f) => f.Dirty).map((f) => f.Name);' },
     { id: 'M-CD7', file: SEAM, expect: ['CD7'],
       from: "    public async CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {\n        this.Attempts.push({ Target: 'Contract', Payload: input });\n        return {\n            Success: false,",
       to: "    public async CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {\n        this.Attempts.push({ Target: 'Contract', Payload: input });\n        return {\n            Success: true," },
@@ -234,9 +245,26 @@ const MUTATIONS = [
     { id: 'M-CD11', file: CDO, expect: ['CD11'],
       from: '            deal.ClosedAt = null;\n            deal.ClosedByUserID = null;\n            deal.ActualCloseDate = null;',
       to: '            deal.ClosedByUserID = null;\n            deal.ActualCloseDate = null;' },
+    // RE-AIMED AT THE ALLOW-LIST. The old anchor mutated the filter to `[]` and stopped matching when
+    // #206 item 2 introduced the allow-list -- so CD13 had nothing proving it could fail. Restoring the
+    // old anchor would not help either: both of the Deal's declared companions are allow-listed, so the
+    // filter already yields [] and mutating it to [] is a no-op. Emptying the ALLOW-LIST flips the
+    // direction CD13 actually asserts now -- that PaymentSchedule stays editable on a closed deal.
     { id: 'M-CD13', file: DES, expect: ['CD13'],
-      from: '        const dirtyCollections = this.Companions\n            .filter((c) => c.Dirty)\n            .map((c) => c.Name);',
-      to: '        const dirtyCollections: string[] = [];' },
+      from: "    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([\n        'Team',\n        'PaymentSchedule',\n    ]);",
+      to: '    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>();' },
+    // The Team allow-list is what lets a roster change through the lock. Dropping it freezes the
+    // team panel on every closed deal -- golive#206 item 2 in reverse, and the SILENT direction:
+    // nobody reports being unable to do a thing they were told was frozen anyway.
+    //
+    // SAME LINE AS `M-CD13`, DIFFERENT MUTATION, AND THIS ONE ISOLATES. M-CD13 empties the set,
+    // which freezes BOTH companions and so fells CD13 and CD28 together. This removes only
+    // `Team`, leaving PaymentSchedule allow-listed -- so CD13 still passes and CD28 is the only
+    // check that falls. Two mutants on one line earn their keep when they name different members
+    // of the thing on it.
+    { id: 'M-CD28', file: DES, expect: ['CD28'],
+      from: "    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([\n        'Team',\n        'PaymentSchedule',\n    ]);",
+      to: "    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>(['PaymentSchedule']);" },
     // CD26 and CD27 are the two halves of golive#205's server-side trigger, and they need separate
     // mutants because they turn on different guards. M-CD27 disables the trigger itself; M-CD26
     // disables only the pre-flight refusal, leaving the trigger in place.
@@ -254,9 +282,20 @@ const MUTATIONS = [
     { id: 'M-CD27', file: DES, expect: ['CD27'],
       from: '        const transition = await this.planStatusTransition();',
       to: '        const transition = null as StatusTransitionPlan | null;' },
+    // RE-AIMED. The old anchor was `LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED`, a
+    // static the rule no longer has: golive#206's "Loss Notes (Lost deals only)" made the answer depend
+    // on the outcome, so it became a call. An anchor that no longer matches is SKIPPED, not failed --
+    // CD14 would have looked mutation-covered while nothing tested it.
     { id: 'M-CD14', file: DES, expect: ['CD14'],
-      from: '    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;',
-      to: "    private static readonly LOCK_EDITABLE_FIELDS = new Set<string>(['Description']);" },
+      from: '        return DealFieldsEditableWhileLocked(isLost);',
+      to: "        return new Set<string>(['Description']);" },
+
+    // The conditional member itself, which is the whole of this round. Making the WON set carry
+    // LossNotes is the regression that reverts golive#206 item 3, and it is the SILENT direction:
+    // nobody reports a field they did not need being accepted.
+    { id: 'M-CD14-LOSSNOTES', file: CL, expect: ['CD14'],
+      from: '    if (!isLost) {\n        return EDITABLE_ON_ANY_LOCKED_DEAL;\n    }',
+      to: '    if (false) {\n        return EDITABLE_ON_ANY_LOCKED_DEAL;\n    }' },
 
     // The stage → order-status writer (D-OS1).
     { id: 'M-OS1', file: DES, expect: ['CO3', 'CO5'],
@@ -271,11 +310,27 @@ const MUTATIONS = [
       from: '            await this.refreshAmountFromOrder();',
       to: '            void this.refreshAmountFromOrder;',
       note: 'the cache is never refreshed — the defect SD21 exists for' },
-    { id: 'M-AM2', file: DES, expect: ['SD22'],
-      from: '        if (this.AmountIsComputed === false && this.Amount !== null && this.Amount !== undefined) {\n            return;\n        }',
-      to: '        if (false) {\n            return;\n        }',
-      note: 'a hand-typed amount is overwritten — the rule that must not drift' },
-    { id: 'M-AM3', file: DES, expect: ['SD23'],
+    // RE-AIMED, because the code it mutated was DELETED ON PURPOSE rather than moved.
+    //
+    // M-AM2 anchored on `if (this.AmountIsComputed === false && this.Amount !== null ...) return;`
+    // -- the carve-out that left a hand-typed figure alone unconditionally. Commit 6d46c4a removed
+    // it and INVERTED the rule: a typed figure survives only on a header-only deal, and a lined
+    // deal's Amount is always a cache of OrderHeader.TotalGross. SD41 is the check written for that.
+    // The mutant was never updated, so it has reported SKIPPED ever since, and the driver exits 1.
+    //
+    // Its note always read 'the rule that must not drift'. The rule turned over; the drift to guard
+    // against is now RE-ADDING the carve-out, so that is what this puts back. It declares SD41,
+    // which had no mutant at all. SD22 keeps one -- see M-AM3 below.
+    { id: 'M-AM2', file: DES, expect: ['SD41'],
+      from: '    private async refreshAmountFromOrder(): Promise<void> {\n        if (!this.OrderID) {\n            return;\n        }',
+      to: '    private async refreshAmountFromOrder(): Promise<void> {\n        if (!this.OrderID) {\n            return;\n        }\n        if (this.AmountIsComputed === false && this.Amount !== null && this.Amount !== undefined) {\n            return;\n        }',
+      note: 'the deleted hand-typed carve-out is back, so a lined deal keeps a stale typed figure' },
+    // SD22 IS A DELIBERATE PROMOTION, not arithmetic on a collateral column. Measured on next at
+    // 9e22e1e: this mutant fells SD22 as well as SD23, and the guard it removes is genuinely on
+    // SD22's path -- that deal has no lines, so TotalGross is NULL and this is the return that
+    // leaves the typed figure alone. SD22's own mutant used to be M-AM2, whose mechanism no longer
+    // exists; this is what carries the claim now.
+    { id: 'M-AM3', file: DES, expect: ['SD22', 'SD23'],
       from: '        if (total === null || !Number.isFinite(total)) {',
       to: '        if (false) {',
       note: '"nothing priced" becomes a computed amount of nothing -- the SD23 defect' },
