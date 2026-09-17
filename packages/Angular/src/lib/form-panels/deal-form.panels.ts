@@ -354,6 +354,52 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         // Notes editable on a LOST deal and frozen on a won one.
         return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
     }
+
+    /**
+     * Persist whatever the user has typed, so the reload that follows an operation cannot discard it.
+     *
+     * ── WHAT THIS FIXES (#73 review) ────────────────────────────────────────────────────────────
+     *
+     * `RefreshRecord()` re-reads the row and overwrites the in-memory one. Every caller below runs it
+     * after an operation, so anything the user had typed and not saved went with it -- silently, with
+     * no prompt and no message. A locked deal is not a read-only deal: six fields stay editable, seven
+     * on a lost one, and the panels render them. A rep who wrote a Description and then reopened the
+     * deal from the status control lost the Description.
+     *
+     * ── WHY SAVING IS LEGAL HERE, WHICH AN EARLIER COMMENT DENIED ───────────────────────────────
+     *
+     * That comment said a reopen "must not save first: the close lock would refuse the save and turn a
+     * legal reopen into a refusal". It refuses less than that. `DealEntityServer.checkCloseLock`
+     * filters `f.Dirty && !editable.has(f.Name)` -- only a DIRTY FROZEN field is refused -- so a save
+     * carrying nothing but editable ones passes straight through it, and that is the only kind of edit
+     * these panels can produce: `FieldEditable` above renders the rest read-only.
+     *
+     * A frozen field that IS dirty makes this return false, which is the outcome worth having rather
+     * than the one to avoid. `DealFormComponentExtended.Validate()` refuses it before the round trip
+     * and names the field; the caller then abandons the operation instead of running it over the top,
+     * so the deal is left as it was and the typing is still on screen to correct. Discarding it to get
+     * the operation through would be the defect this method exists to close, wearing the other costume.
+     *
+     * ── WHY `Record.Dirty` AND NOT `EditMode || Record.Dirty` LIKE `ConfirmClose` ───────────────
+     *
+     * The reopen control renders only inside `@if (EditMode)`, so that condition is always true there
+     * and would save on every reopen, including one with nothing to save -- a write to a locked row
+     * for no reason. `Dirty` is the question actually being asked: is there anything a reload would
+     * destroy? It covers companions and the IsA parent as well as fields (`BaseEntity.Dirty`), so a
+     * team or payment-schedule edit counts. The form's PENDING records are not in it and do not need
+     * to be: they live on the form component, not on the record, so `RefreshRecord()` cannot reach
+     * them, and `SaveRecord` folds them in on any save that does run.
+     *
+     * @returns true when it is safe to proceed -- either nothing needed saving, or the save succeeded.
+     */
+    protected async SaveBeforeReload(): Promise<boolean> {
+        if (!this.Record?.Dirty) {
+            return true;
+        }
+        // `true` also ends edit mode, which every caller needs anyway: `canRefreshRecord()` is
+        // `record && record.IsSaved && !this.EditMode`, so a refresh in edit mode reloads nothing.
+        return await this.FormComponent.SaveRecord(true);
+    }
 }
 
 interface DealFieldSpec {
@@ -1185,6 +1231,31 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         this.ActionMessage = '';
         this.ActionIssues = [];
         try {
+            /**
+             * WHAT THE USER TYPED IS SAVED FIRST -- see {@link MJSDealFieldPanel.SaveBeforeReload} for
+             * why that is legal under the close lock, which this method's own comment used to deny.
+             *
+             * BEFORE THE OPERATION, NEVER AFTER, and the order is the load-bearing part. Once
+             * `Sales.ReopenDeal` has committed, this record still holds the CLOSED status in both
+             * `Value` and `OldValue` -- the operation moved the ROW, not the copy in the browser, and
+             * {@link SetStatus} only ever HELD the pick. A save at that point writes the stale closing
+             * status straight back over the reopened row.
+             *
+             * AND NOTHING WOULD REFUSE IT, which is what makes the ordering a correctness matter rather
+             * than a tidiness one. Both halves of the status field are equal, so it is CLEAN:
+             * `planStatusTransition` returns null on `!field?.Dirty` and never runs the close, and the
+             * golive#205 trigger therefore never sees this at all. The write still happens — an MJ update
+             * sends every field with `AllowUpdateAPI` and applies no dirty filter — so the row ends up
+             * closed again with `ClosedAt` still cleared by the reopen, and no refusal anywhere. It is
+             * the shape of the defect #205 was filed about, arrived at by the one route #205's own guard
+             * cannot cover. The refresh below is the only thing that may follow the operation.
+             */
+            if (!(await this.SaveBeforeReload())) {
+                this.ActionFailed = true;
+                this.ActionMessage =
+                    'Your unsaved changes could not be saved, so the deal was not reopened. Fix the errors above and try again.';
+                return;
+            }
             const result = await RunReopen(this.Record.ID, this.ResolvedReopenReason(), this.PendingReopenStatusID);
             this.ActionFailed = !result.ok;
             this.ActionMessage = result.message;
@@ -1202,9 +1273,14 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
                  * and a lock notice telling the user to reopen a deal that was open. It returns false
                  * rather than throwing, so the catch below never covered it either.
                  *
-                 * NOT `SaveRecord(true)`, which is how {@link ConfirmClose} ends edit mode. A reopen must
-                 * not save first: the close lock would refuse the save and turn a legal reopen into a
-                 * refusal -- the Close panel's own reopen says the same thing, and for the same reason.
+                 * A BARE `EndEditMode()` AND NOT `SaveRecord(true)`, but no longer because saving is
+                 * forbidden here -- it is not, and {@link MJSDealFieldPanel.SaveBeforeReload} above has
+                 * already done it. This call is what covers the case that method deliberately skips: a
+                 * reopen with nothing dirty saves nothing, so nothing has ended edit mode yet, and
+                 * without this the refresh below would reload nothing.
+                 *
+                 * It is a no-op on the path where the save ran -- `SaveRecord(true)` ends edit mode
+                 * itself -- and calling it anyway is cheaper than asking which path we are on.
                  */
                 this.FormComponent.EndEditMode();
                 // The reopen is committed by now; a reload that throws afterwards is a stale screen,
@@ -1866,8 +1942,17 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
      * regardless, because an order-side refusal must never block a stage change, so this list is the
      * only thing standing between the rep and a live deal pointing at a dead order.
      *
-     * No save-first step, unlike the close. A locked deal has almost nothing editable, and the close
-     * lock would refuse the save anyway — so saving first could only turn a legal reopen into a refusal.
+     * IT DOES SAVE FIRST, which this comment used to say it must not. The old reasoning was that "a
+     * locked deal has almost nothing editable, and the close lock would refuse the save anyway". Both
+     * halves were wrong in the same direction: the carve-out is six fields and this panel renders one
+     * of them (Loss Notes, on a lost deal), and the lock refuses only a DIRTY FROZEN field -- see
+     * {@link MJSDealFieldPanel.SaveBeforeReload}.
+     *
+     * UNLIKE THE STATUS CONTROL, this button is not inside `@if (EditMode)`, so it is reachable in read
+     * mode as well. There the record is clean, nothing is saved and nothing changes. In EDIT mode it
+     * used to reopen the deal and then reload nothing at all -- `canRefreshRecord()` is false while
+     * edit mode is on -- leaving a reopened deal rendered as closed and locked, which is the same stale
+     * screen the Pipeline panel's reopen fixed for itself and this one was left with.
      */
     public async ConfirmReopen(): Promise<void> {
         if (!this.CanConfirmReopen || !this.Record) return;
@@ -1876,6 +1961,13 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Message = '';
         this.Issues = [];
         try {
+            // Before the operation, never after: the record still holds the CLOSED status afterwards,
+            // so a save then would write it back over the reopened row. Same reasoning as the Pipeline
+            // panel's reopen, which spells it out.
+            if (!(await this.SaveBeforeReload())) {
+                this.Fail('Your unsaved changes could not be saved, so the deal was not reopened. Fix the errors above and try again.');
+                return;
+            }
             // The SAME runner the Status control uses. Two surfaces reach the reopen now and a second
             // copy of the envelope-versus-Output handling is exactly the drift the review found between
             // this form and the deal workspace. No target status: this door does not choose one, so the
@@ -1890,6 +1982,9 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
             this.ReopenReason = '';
             this.MessageIsError = false;
             this.Message = result.message;
+            // Covers the reopen that had nothing to save, exactly as it does on the Pipeline panel: with
+            // edit mode still on, `refreshQuietly()` reloads nothing and reports no failure either.
+            this.FormComponent.EndEditMode();
             await this.refreshQuietly();
         } finally {
             this.Closing = false;
