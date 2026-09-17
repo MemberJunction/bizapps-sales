@@ -45,6 +45,7 @@
  */
 import {
     BaseEntity,
+    BaseEntityResult,
     DatabaseProviderBase,
     EntitySaveOptions,
     IMetadataProvider,
@@ -312,11 +313,10 @@ export class DealEntityServer extends DealEntity {
          * stays downstream with the others.
          */
         if (transition?.Kind === 'Close' && transition.TargetIsLost && !this.LossReasonID) {
-            const refusal =
+            return this.refuseSave(
                 'A loss reason is required to close a deal as lost. Set LossReasonID alongside the ' +
-                'status, or close the deal through Sales.CloseDeal.';
-            LogError(`DealEntityServer.Save refused: ${refusal}`);
-            return false;
+                'status, or close the deal through Sales.CloseDeal.',
+            );
         }
 
         /**
@@ -336,8 +336,7 @@ export class DealEntityServer extends DealEntity {
         if (this.IsSaved && !this._reopenInProgress) {
             const refusal = await this.checkCloseLock();
             if (refusal) {
-                LogError(`DealEntityServer.Save refused: ${refusal}`);
-                return false;
+                return this.refuseSave(refusal);
             }
         }
 
@@ -350,8 +349,7 @@ export class DealEntityServer extends DealEntity {
          */
         const ownerRefusal = this.ownerStampEditRefusal();
         if (ownerRefusal) {
-            LogError(`DealEntityServer.Save refused: ${ownerRefusal}`);
-            return false;
+            return this.refuseSave(ownerRefusal);
         }
 
         try {
@@ -1807,6 +1805,36 @@ export class DealEntityServer extends DealEntity {
      * database, so it passes, and only saves made once the deal is ALREADY closed are refused. Reading
      * the current value instead would make a deal impossible to close.
      */
+    /**
+     * Refuse this save, and leave the reason where the CALLER reads it.
+     *
+     * ── WHY LOGGING WAS NOT ENOUGH ────────────────────────────────────────────────
+     *
+     * Every refusal in `Save` used to be `LogError(...)` followed by `return false`, so a caller got a
+     * bare `false` and the reason went to the server log. golive#207 row 18 is explicit about what that
+     * message is for: row 17 is what the FORM shows a person, and row 18 is "what the save returns to
+     * whoever asked — the form, an import, an agent or a raw API call". Logged, it returned to nobody.
+     * The form looked fine only because `DealFormComponentExtended.Validate()` produces row 17 for
+     * itself; every other caller got silence.
+     *
+     * `RegisterResultHistoryEntry` is what core uses to record a failed write, and it is what puts the
+     * text on `LatestResult` — registered rather than assigned, because `LatestResult` returns null
+     * when the history is empty while TYPING itself non-null, which is how the same mistake reached
+     * production in orders' line delete.
+     */
+    private refuseSave(message: string): false {
+        LogError(`DealEntityServer.Save refused: ${message}`);
+        const failed = new BaseEntityResult();
+        failed.Success = false;
+        failed.Type = this.IsSaved ? 'update' : 'create';
+        failed.Message = message;
+        failed.StartedAt = new Date();
+        failed.EndedAt = new Date();
+        failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
+        this.RegisterResultHistoryEntry(failed);
+        return false;
+    }
+
     private async checkCloseLock(): Promise<string | null> {
         const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
         if (!persistedStatusID) {
@@ -1828,7 +1856,29 @@ export class DealEntityServer extends DealEntity {
          * from the status ROW, never from a name.
          */
         const editable = DealEntityServer.lockEditableFields(persisted.IsLost);
-        const changed = this.Fields.filter((f) => f.Dirty && !editable.has(f.Name)).map((f) => f.Name);
+
+        /**
+         * `OwnerEmployeeID` IS FROZEN, AND IS STILL WRITTEN HERE WHEN THE ROSTER DRIVES IT.
+         *
+         * It stays out of the editable set on purpose — `SD26` proves a hand-set one is refused, and
+         * golive#206 classes Owner as server-written provenance. But golive#206 item 2 also says
+         * reassigning a rep on a closed deal is record-keeping and must be allowed, and the stamp has
+         * to follow the roster when it does.
+         *
+         * The form's team panel edits `DealTeamMember` rows, leaving this field clean, so it passed.
+         * `DealEntity.SetOwner()` assigns the stamp itself after loading the roster, so it arrived here
+         * DIRTY and the lock refused it — which is the deal workspace's owner picker, and it did not
+         * work on a closed deal. `CD29` is that case.
+         *
+         * Asking `RosterDrivesThisSave` is the same question `ownerStampEditRefusal` already asks, which
+         * is what stops the two from disagreeing again. It grants nothing a caller could exploit:
+         * `stampOwnerFromTeam` re-derives the value from the roster a moment later.
+         */
+        const frozen = (f: { Dirty: boolean; Name: string }): boolean =>
+            f.Dirty
+            && !editable.has(f.Name)
+            && !(f.Name === 'OwnerEmployeeID' && this.RosterDrivesThisSave);
+        const changed = this.Fields.filter(frozen).map((f) => f.Name);
 
         /**
          * THE CHILD COLLECTIONS COUNT AS CHANGES TOO, and this half did not exist when the lock was
@@ -2033,7 +2083,7 @@ export class DealEntityServer extends DealEntity {
      * conditions mirror `stampOwnerFromTeam`'s guard exactly, which is what keeps them from disagreeing.
      */
     private ownerStampEditRefusal(): string | null {
-        if (this.Team.IsLoaded || this.Team.Count > 0) {
+        if (this.RosterDrivesThisSave) {
             return null;   // the roster is part of this save; the stamp is derived from it below
         }
         if (!this.callerSuppliedValue('OwnerEmployeeID', this.OwnerEmployeeID)) {
@@ -2045,8 +2095,26 @@ export class DealEntityServer extends DealEntity {
         );
     }
 
+    /**
+     * Is the ROSTER driving this save, rather than a caller naming an owner out of thin air?
+     *
+     * Three places need this answer and they must never disagree, which is how a defect got in:
+     * `ownerStampEditRefusal` and `stampOwnerFromTeam` each spelled the condition out, `checkCloseLock`
+     * did not ask at all, and `DealEntity.SetOwner()` — which loads the roster and then assigns the
+     * stamp — was refused on a locked deal for editing a frozen field. golive#206 item 2 says
+     * reassigning a rep after close is record-keeping and must be allowed.
+     *
+     * `Team.Load()` is what makes it true, and `SetOwner` calls it first. A caller who hand-sets
+     * `OwnerEmployeeID` without touching the roster gets `false` here and the refusal it deserves.
+     * A caller who sets BOTH gets no advantage: `stampOwnerFromTeam` re-derives the stamp from the
+     * roster afterwards and overwrites whatever was supplied.
+     */
+    private get RosterDrivesThisSave(): boolean {
+        return this.Team.IsLoaded || this.Team.Count > 0;
+    }
+
     private async stampOwnerFromTeam(): Promise<void> {
-        if (!this.Team.IsLoaded && this.Team.Count === 0) {
+        if (!this.RosterDrivesThisSave) {
             return; // the roster is not part of this save; leave the stamp alone
         }
 
