@@ -114,49 +114,64 @@ export async function ResolveDealLockState(
     };
 }
 
-/**
- * What a save knows about a status change, before deciding whether it is a bare close.
- *
- * Resolved by the caller because two of these need a database read; the decision itself does not, and
- * that is the point of separating them.
- */
-export interface StatusTransitionFacts {
-    /** False on creation — a deal born closed has no transition to have run. */
-    IsSaved: boolean;
-    /** True when `Sales.CloseDeal` (or a reopen) announced itself via `DeclareTransition`. */
-    HasDeclaredTransition: boolean;
-    /** True when the caller set `DealStatusTypeID` on this save. */
-    StatusIsDirty: boolean;
-    /** Whether the status being moved INTO carries `LocksDeal`. */
-    TargetLocks: boolean;
-    /** Whether the status being moved OUT OF carries it. Null when there was none. */
-    PriorLocks: boolean | null;
+/** One row of the deal-status list, with the flag that decides whether it may be picked. */
+export interface DealStatusOption {
+    ID: string;
+    Name: string;
+    /** Entering this status closes and freezes the deal. Enforced server-side. */
+    LocksDeal: boolean;
+    /**
+     * The OUTCOME flags, carried so a close action can find the status to close INTO by flag rather
+     * than by name. A deployment may call its winning status "Signed"; nothing may match on the word.
+     */
+    IsWon: boolean;
+    IsLost: boolean;
 }
 
 /**
- * Is this save about to lock a deal without the close having run? (bc-aidp-next-golive#205)
+ * Every active deal status, with its lock flag, for a surface that has to offer a choice.
  *
- * THE DEFECT IT NAMES. The close lock reads the PERSISTED status, so Open -> Won is a save on an
- * unlocked deal and passes straight through it. The deal ends up locked with none of the close having
- * happened — no stage event, no contract, no finance tasks, no loss reason, an order still live — and
- * the lock then refuses `DealStatusTypeID` on every later save, so it cannot be undone either.
+ * RETURNS ALL OF THEM AND LETS THE CALLER FILTER, deliberately. A closed deal still has to SHOW the
+ * status it is in — a control that simply dropped the locking ones would render a won deal as blank
+ * or "— choose —", which reads as data loss. The workspace already solves it this way: it offers the
+ * non-locking ones and adds the deal's own status back as a display-only option.
  *
- * WHAT MAKES A CLOSE LEGITIMATE is the declared transition. `Sales.CloseDeal` calls `stampClose`
- * immediately before saving, and that declares one; a form writing a field has no way to. So this
- * needs no new flag on the entity, and it cannot be spoofed by a caller that does not know about it.
- *
- * LEAVING a locking status is deliberately NOT this function's business. That is a reopen, and the
- * close lock already refuses a bare one with a message that names `Sales.ReopenDeal` — two refusals
- * for the same edit would be one too many, and the other one is better worded for it.
- *
- * Pure, so the decision can be pinned without a deal, a status table or a save.
+ * `LocksDeal` rather than `IsWon || IsLost`, because that is the flag the server's refusal reads.
+ * They coincide on today's data — Won, Lost and Abandoned carry both — but a surface filtering on a
+ * different flag would eventually offer a status the server then refuses, which is the drift this
+ * module exists to prevent.
  */
-export function IsBareCloseWrite(facts: StatusTransitionFacts): boolean {
-    if (!facts.IsSaved || facts.HasDeclaredTransition || !facts.StatusIsDirty) {
-        return false;
+export async function LoadDealStatusOptions(contextUser?: UserInfo): Promise<DealStatusOption[]> {
+    const result = await new RunView().RunView<{
+        ID: string;
+        Name: string;
+        LocksDeal: boolean;
+        IsWon: boolean;
+        IsLost: boolean;
+    }>(
+        {
+            EntityName: E_DEAL_STATUS_TYPE,
+            ExtraFilter: 'IsActive = 1',
+            OrderBy: 'DisplayRank',
+            ResultType: 'simple',
+            // Every field read below must be listed here. A field declared on the row type and left
+            // out of this list arrives `undefined`, and a flag check against it quietly never fires --
+            // which is how ActivitySyncProviderType.IsActive did nothing for a release.
+            Fields: ['ID', 'Name', 'LocksDeal', 'IsWon', 'IsLost'],
+        },
+        contextUser,
+    );
+    if (!result?.Success) {
+        // An empty list leaves the control with nothing to offer, which is visibly wrong and therefore
+        // reportable. Inventing a list from somewhere else would hide a failed lookup behind a control
+        // that looks like it is working.
+        return [];
     }
-    if (facts.PriorLocks === true) {
-        return false; // a reopen attempt; the close lock owns that refusal
-    }
-    return facts.TargetLocks;
+    return (result.Results ?? []).map((r) => ({
+        ID: String(r.ID),
+        Name: String(r.Name),
+        LocksDeal: r.LocksDeal === true,
+        IsWon: r.IsWon === true,
+        IsLost: r.IsLost === true,
+    }));
 }

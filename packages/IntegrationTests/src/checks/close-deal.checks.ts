@@ -1834,6 +1834,174 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-deal.CD26',
+        Name: 'CD26: a status write the close CANNOT satisfy is refused, and commits NOTHING',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205's SAFETY NET, and the half that survives the status field driving the close.
+                 *
+                 * This check used to assert that a bare status write to Won was REFUSED. #205 asks for
+                 * the opposite -- "the deal entity server should run the existing close and reopen flows
+                 * when a save moves the status into or out of a locking status" -- and `close-deal.CD27`
+                 * now measures exactly that. Keeping both would have been two checks asserting opposite
+                 * outcomes for the same action.
+                 *
+                 * What is left, and what #205's second sentence is actually for: "A bare status write
+                 * into a locking status THAT DOES NOT RUN THE CLOSE FLOW must be refused on every path."
+                 * A Lost close needs a loss reason. A caller who sets the status without one has asked
+                 * for a close that cannot run, and the save must refuse rather than lock the deal with
+                 * none of the close having happened -- which is the original defect.
+                 *
+                 * TWO REFUSALS CAN PRODUCE THIS OUTCOME, AND THE COMPANION EDIT IS WHAT TELLS THEM
+                 * APART. `CloseDealOperation` declines for want of a loss reason no matter what, so the
+                 * save returns false and the status stays put either way — measured: disabling the
+                 * pre-flight guard alone left this check green on every assertion above. But that
+                 * refusal arrives AFTER `super.Save()`, with the caller's other fields already on disk.
+                 *
+                 * So this sets Description alongside the status and requires it NOT to land. That is
+                 * the whole of what refusing early buys, it is the only assertion here that can tell
+                 * the two paths apart, and `M-CD26` turns on it.
+                 *
+                 * WHY THIS ONE STILL NEEDS A DATABASE. Every claim above is about what reached the row.
+                 * A save that returned false having already written some of it is exactly the defect,
+                 * and only the row can say.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD26 unsatisfiable close',
+                );
+
+                // Lost, with no loss reason supplied. The close cannot run.
+                const md = new Metadata();
+                const bare = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await bare.Load(dealID), 'the open deal loads');
+                bare.DealStatusTypeID = f.LostStatusID;
+                // The companion edit. An ordinary field, set in the same save, the way a form or an
+                // importer would send one.
+                const COMPANION = 'CD26 companion edit, which must not survive the refusal';
+                bare.Description = COMPANION;
+                Assert(
+                    (await bare.Save()) === false,
+                    'a status write asking for a close that cannot run must be refused',
+                );
+
+                const row = await TxOne<{
+                    DealStatusTypeID: string | null; ClosedAt: Date | null; Description: string | null;
+                }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt, Description FROM ${SALES_SCHEMA}.Deal ` +
+                        `WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.OpenStatusID).toLowerCase(),
+                    'the deal must still be open after the refused write',
+                );
+                Assert(row.ClosedAt === null, 'and nothing may have stamped a close');
+                Assert(
+                    row.Description !== COMPANION,
+                    'the refusal must have come BEFORE the save: a committed companion edit means the ' +
+                        'caller got a partial apply out of a save that reported false',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD27',
+        Name: 'CD27: a status write to Won RUNS the close, and one back to Open runs the reopen',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205, the half a refusal cannot satisfy: "the deal entity server should run the
+                 * existing close and reopen flows when a save moves the status into or out of a locking
+                 * status."
+                 *
+                 * WHY IT NEEDS A DATABASE. The trigger's whole job is to hand off to `Sales.CloseDeal`
+                 * and then agree with what that wrote. Every interesting way it can be wrong is a
+                 * persistence question -- the stage event, the stamps, the status itself, and whether
+                 * the in-memory object still disagrees with the row afterwards.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD27 status drives close',
+                );
+
+                // ── THE CLOSE: load, set the status, save. No operation call. ──────────────────
+                const md = new Metadata();
+                const deal = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await deal.Load(dealID), 'the open deal loads');
+                deal.DealStatusTypeID = f.WonStatusID;
+                Assert(
+                    await deal.Save(),
+                    `a status write to a locking status must RUN the close: ${deal.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const closed = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(closed.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.WonStatusID).toLowerCase(),
+                    'the status the caller asked for is what landed',
+                );
+                Assert(closed.ClosedAt !== null, 'and the close actually stamped, rather than only the status moving');
+
+                // The stage event is the thing a bare write never produced -- it is why #205 was filed.
+                const events = await TxOne<{ N: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.DealStageEvent WHERE DealID = '${dealID}'`,
+                );
+                Assert(Number(events.N) > 0, 'the close wrote its stage event');
+
+                /**
+                 * THE IN-MEMORY OBJECT MUST AGREE WITH THE ROW. The operation saves its OWN copy, so
+                 * without the reload at the end of the trigger the caller is left holding a deal whose
+                 * stamps predate the close it just ran -- and the next save off that object would write
+                 * them back.
+                 */
+                Assert(!!deal.ClosedAt, 'the saved object reflects the close, not the state before it');
+
+                // ── THE REOPEN: the same move, the other way. ──────────────────────────────────
+                const back = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await back.Load(dealID), 'the closed deal loads');
+                back.DealStatusTypeID = f.OpenStatusID;
+                Assert(
+                    await back.Save(),
+                    `a status write out of a locking status must RUN the reopen: ${back.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const reopened = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(reopened.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.OpenStatusID).toLowerCase(),
+                    'the deal is open again',
+                );
+                Assert(
+                    reopened.ClosedAt === null,
+                    'and the reopen CLEARED the stamps -- a status change that left them would be the ' +
+                        'mirror of the defect #205 reported',
+                );
+
+                // No reason was supplied by the caller and none was demanded (#205). One is still
+                // recorded, which is what keeps the audit trail honest.
+                const reopenEvent = await TxOne<{ Notes: string | null }>(
+                    ctx,
+                    `SELECT TOP 1 Notes FROM ${SALES_SCHEMA}.DealStageEvent WHERE DealID = '${dealID}' ` +
+                        `ORDER BY __mj_CreatedAt DESC`,
+                );
+                Assert(
+                    String(reopenEvent.Notes ?? '').length > 0,
+                    'the reopen recorded a reason even though the caller gave none',
+                );
+            }),
+    },
 ];
 
 for (const check of CloseDealChecks) {

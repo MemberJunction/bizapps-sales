@@ -241,6 +241,47 @@ until then, treat the per-bundle table as a claim about the code each mutation w
 
 ---
 
+## Round 12 (2026-09-16) — `2e79c37` — golive#205's server-side trigger: CD26 and CD27
+
+**2 mutants, 2 killed, 0 misses.** Both halves of the status-write trigger now have a mutant aimed at
+them, which is what sales#73's review asked for. Run on `fix/deal-form-filter-closing-statuses` at
+`2e79c37` with the working tree carrying the review fixes, against `MJ_V6_Host`.
+
+| Mutant | What it breaks | Declared | Result |
+|---|---|---|---|
+| `M-CD26` | the pre-flight refusal for a Lost close with no loss reason | CD26 | **OK** — 127 passed, 13 failed, 112s |
+| `M-CD27` | `planStatusTransition` never returns a plan, so the trigger never fires | CD27 | **OK** — 126 passed, 14 failed, 110s |
+
+`M-CD27` also fells CD26, correctly and not as noise: with no plan there is no pre-flight refusal either,
+and the bare write reaches the row. It is declared on CD27 alone, so it is counted once.
+
+**Collateral on both runs was the unmutated baseline, not the mutation.** The same twelve — AC6, AC8,
+AC12, AC13, AC16, AC19, CT1, CT5, CT6, SD6, WT10, WT14 — fail on this tree with nothing mutated
+(128 passed / 12 failed). `close-deal` is 27 of 27 green unmutated. Per this file's own counting rule the
+`failed=` column was read rather than summed, and the baseline was measured rather than assumed.
+
+`SD6` in that set is the **KI-20 tripwire firing**: it reports `expected 2, got 1`, which is the condition
+its own comment says means orders has fixed `savePendingLines()`. That is a finding for KI-20, not for
+this round.
+
+### `M-CD26` was re-aimed twice, and the first miss is the useful part
+
+sales#69 proposed anchoring CD26's mutant on `bareCloseRefusal`'s predicate. That method is **removed** on
+this branch (sales#73 review item 4): `planStatusTransition` decides the same case first and reverts the
+status, so the guard could not execute — the anchor would have matched nothing and been SKIPPED, which
+reads as covered while testing nothing.
+
+Re-aimed at the new pre-flight refusal, `M-CD26` **still missed**, and that was the finding. CD26 as
+written could not tell the two refusal paths apart: `CloseDealOperation` declines for want of a loss
+reason either way, so `Save()` returns false and the status stays put whether the refusal came before
+`super.Save()` or after it. The guard had no reader — this repo's recurring defect class, arrived at from
+the other direction.
+
+CD26 now sets a companion field alongside the status and requires it **not** to land, which is the whole of
+what refusing early buys. `M-CD26` kills on that assertion and on no other.
+
+---
+
 ## Round 9 (2026-08-23) — `b9e73d4` — AC22 made reachable, and seven drifted anchors repaired
 
 **Every figure in this section was measured against `b9e73d4`.** Branch `feature/mutant-repair`.
