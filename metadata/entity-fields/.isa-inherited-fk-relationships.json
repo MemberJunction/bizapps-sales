@@ -1,0 +1,74 @@
+[
+  {
+    "_comments": [
+      "INHERITED IsA FOREIGN KEYS, whose RelatedEntityID CodeGen cannot derive.",
+      "",
+      "CodeGen reads RelatedEntityID from FOREIGN KEY CONSTRAINTS ON THE BASE TABLE. In",
+      "Table-Per-Type the child table holds only its own columns -- __mj_BizAppsSales.SalesAccount",
+      "has five FKs and none of them is for an inherited column, because those columns are not on",
+      "the table. They reach the child through vwSalesAccounts. There is no constraint to read, so",
+      "the relationship comes back NULL and the generated form omits LinkType=\"Record\".",
+      "",
+      "WHAT THAT COSTS, and it is not cosmetic: without LinkType the control is a plain text input,",
+      "so form-field's OnInputChange does `this.Value = input.value` -- and a native input's value is",
+      "ALWAYS a string. An empty field writes '' rather than null, '' is not a null against a",
+      "uniqueidentifier, and creating a Sales Account fails with",
+      "",
+      "    Conversion failed when converting from a character string to uniqueidentifier",
+      "",
+      "on the PARENT entity save, naming neither the field nor the form.",
+      "",
+      "The correlation was measured and is exception-free: every column physically on the child",
+      "table carries RelatedEntityID; every inherited one does not.",
+      "",
+      "AutoUpdateRelatedEntityInfo GOES TO 0 for the same reason .deal-field-labels.json sets",
+      "AutoUpdateDisplayName false -- so the next CodeGen run cannot re-derive NULL over these rows",
+      "and silently reopen the bug. Values are copied from the parent entity's own field, so a child",
+      "resolves exactly what the parent does.",
+      "",
+      "Upstream: MemberJunction/MJ#4569 (CodeGen should carry the parent's FK metadata to IsA",
+      "children) and MJ#4570 (form-field should coerce '' to null for uniqueidentifier). This file",
+      "can be deleted once 4569 lands and a regenerate confirms the rows come back populated.",
+      "See bizapps-sales#90."
+    ],
+    "fields": {
+      "RelatedEntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Common: Organization Types",
+      "RelatedEntityNameFieldMap": "OrganizationType",
+      "RelatedEntityDisplayType": "Search",
+      "AutoUpdateRelatedEntityInfo": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=OrganizationTypeID"
+    }
+  },
+  {
+    "_comments": [
+      "Self-referencing: an account's parent organization. This is the one that LOOKED fine in the",
+      "reported failure -- it passed NULL correctly via @ParentID_Clear=1 -- but only because no",
+      "panel rendered it. Identical defect, one rendered field away from the same error."
+    ],
+    "fields": {
+      "RelatedEntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Common: Organizations",
+      "RelatedEntityNameFieldMap": "Parent",
+      "RelatedEntityDisplayType": "Search",
+      "AutoUpdateRelatedEntityInfo": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=ParentID"
+    }
+  },
+  {
+    "_comments": [
+      "Sales Contacts is the IsA child of common's People, and carries the same shape."
+    ],
+    "fields": {
+      "RelatedEntityID": "@lookup:MJ: Entities.Name=MJ: Users",
+      "RelatedEntityNameFieldMap": "LinkedUser",
+      "RelatedEntityDisplayType": "Search",
+      "AutoUpdateRelatedEntityInfo": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=LinkedUserID"
+    }
+  }
+]
