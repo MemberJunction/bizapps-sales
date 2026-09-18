@@ -45,6 +45,61 @@
     color: var(--mj-text-primary);
 }
 
+/* ── Reporting-period selector ─────────────────────────────────────────────── */
+
+/*
+  Sits on the right of `.sechead`, which is already `justify-content: space-between`.
+  Pills mirror the board's `.db-pipe` so a reader meets one switcher idiom in this app, not two.
+  Colour is entirely semantic tokens, so the selected state is legible in dark mode unchanged.
+*/
+.period {
+    display: flex;
+    align-items: center;
+    gap: var(--mj-space-3);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    /* `.sechead` aligns its children on the baseline, which is right for the `<h2>` and its caption
+       but would hang a two-part control off the text baseline of its first pill. */
+    align-self: center;
+}
+
+.period__pills {
+    display: flex;
+    gap: var(--mj-space-1);
+    flex-wrap: wrap;
+}
+
+.period__pill {
+    padding: var(--mj-space-1) var(--mj-space-3);
+    border: 1px solid var(--mj-border-default);
+    border-radius: var(--mj-radius-full);
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-secondary);
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+.period__pill:hover {
+    background: var(--mj-bg-surface-hover);
+}
+
+.period__pill:focus-visible {
+    outline: 2px solid var(--mj-border-focus);
+    outline-offset: 1px;
+}
+
+.period__pill--on {
+    border-color: var(--mj-brand-primary);
+    color: var(--mj-brand-primary);
+    font-weight: 600;
+}
+
+/* The fiscal basis in force. Muted, but never hidden — see the template comment. */
+.period__basis {
+    font-size: 0.75rem;
+    color: var(--mj-text-muted);
+}
+
 .msg {
     margin: 0.75rem 1.25rem 0;
     padding: 0.5rem 0.7rem;

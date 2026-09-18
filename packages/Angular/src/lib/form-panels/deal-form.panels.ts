@@ -348,6 +348,21 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
      * directly is exactly what the server refuses.
      */
     public FieldEditable(fieldName: string): boolean {
+        /**
+         * SERVER-MAINTAINED STAMPS ARE NEVER EDITABLE, on an open deal or a closed one.
+         *
+         * Checked BEFORE the lock, because the lock is not the reason: `stampCompanyFromPipeline()`
+         * overwrites a supplied CompanyID from the pipeline's company, and `ownerStampEditRefusal()`
+         * REFUSES a supplied OwnerEmployeeID outright -- the owner comes from the deal team via
+         * `stampOwnerFromTeam()`. Offering either as an editable control invites a rep to choose a
+         * value the save then discards or rejects, which is the "accepts typing, refuses on save"
+         * behaviour golive#206 item 3 exists to delete.
+         *
+         * They stay RENDERED and keep `link: 'Record'`, so the company and the owner are still
+         * visible and still navigable. What goes away is the invitation to type into them.
+         */
+        if (this.Fields?.find((f) => f.name === fieldName)?.serverMaintained === true) return false;
+
         const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
         const locked = form?.IsLocked === true;
         // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
@@ -407,6 +422,16 @@ interface DealFieldSpec {
     type: DealFieldType;
     link?: 'Record';
     span?: boolean;
+    /**
+     * A SERVER-MAINTAINED STAMP: rendered, navigable, never editable.
+     *
+     * Not the same thing as the close lock. The lock freezes a field because the deal is closed;
+     * this freezes it because no caller may set it AT ALL -- `DealEntityServer` derives the value
+     * and either overwrites what you supplied or refuses the save outright. CLAUDE.md states it
+     * directly: "Deal.OwnerEmployeeID and DealLine.CompanyID are written by entity-server code.
+     * Never hand-set them."
+     */
+    serverMaintained?: boolean;
 }
 
 const EMPTY_STATE_STYLES =
@@ -1347,8 +1372,9 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
      */
     public readonly Fields: DealFieldSpec[] = [
         { name: 'AccountID', type: 'textbox', link: 'Record' },
-        { name: 'CompanyID', type: 'textbox', link: 'Record' },
-        { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record' },
+        // Derived by stampCompanyFromPipeline() / stampOwnerFromTeam(); see serverMaintained.
+        { name: 'CompanyID', type: 'textbox', link: 'Record', serverMaintained: true },
+        { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record', serverMaintained: true },
         { name: 'PrimaryContactID', type: 'textbox', link: 'Record' },
         { name: 'BillingContactID', type: 'textbox', link: 'Record' },
     ];
@@ -1434,8 +1460,18 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
-            } @else if (Record.IsSaved) {
-                <p class="mjs-deal-empty">Save the deal to add products.</p>
+            } @else if (!Record.IsSaved) {
+                <!-- THE CASE THE HINT EXISTS FOR (bc-aidp-next-golive#216). This branch used to be
+                     gated on Record.IsSaved, so it told a SAVED deal to save and showed a brand-new
+                     one nothing at all: neither branch matched, the panel rendered empty, and a tester
+                     reported no way to add products and no message saying why. -->
+                <p class="mjs-deal-empty">Save the deal first. Products are added to the order it creates.</p>
+            } @else {
+                <!-- Saved, but no order to hang lines on. A deal mints its order on save, so this is the
+                     legacy row that closed before that was true: DealEntityServer deliberately does not
+                     mint one for a deal whose whole point has passed. Telling that rep to save would be
+                     the same wrong answer as before, one case over. -->
+                <p class="mjs-deal-empty">This deal has no order, so there is nothing to add products to.</p>
             }
         </mj-collapsible-panel>
     `,

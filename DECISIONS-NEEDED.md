@@ -1389,6 +1389,24 @@ and a common February.
 read from. The Action already accepts an explicit `PeriodStart`/`PeriodEnd` pair, so a caller who knows
 better can override it today — both or neither, never one.
 
+> **UPDATE (golive#232) — half of this is now answered, and the half that matters is not.**
+>
+> "A fiscal calendar to read from" exists after all, one app over:
+> `__mj_BizAppsAccounting.AccountingCompanyProfile.FiscalYearStartMonth` / `FiscalYearStartDay`,
+> per-company, which `JournalEntryEntityServer.deriveFiscalYear()` has been reading all along. The
+> dashboard's new period selector reads it (`docs/DECISIONS.md` D-FY1), so the claim above — that
+> nothing anywhere says when a year begins — was true of *sales* and never true of the workspace.
+>
+> **What stays open is the question this entry was actually asking:** whether forecasting is MONTHLY.
+> A fiscal year start fixes where a year begins; it says nothing about whether a snapshot should be
+> captured per month, per quarter or per fiscal year, and `CurrentMonthPeriod()` is a claim about the
+> second. So `ForecastSnapshotJob` is deliberately unchanged here.
+>
+> It should not be changed casually when it is: `ForecastSnapshot.PeriodStart`/`PeriodEnd` are stored
+> on every captured row, so moving the boundary re-files history against windows the existing rows
+> were never captured for, and four checks in `packages/IntegrationTests/src/checks/forecast.checks.ts`
+> assert the month boundary directly.
+
 ---
 
 ## D-29 · A snapshot is skipped once per day per grain, rather than versioned

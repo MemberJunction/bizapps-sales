@@ -225,8 +225,9 @@ term months · expected/actual close · probability · forecast category · loss
 source · **`ContractID`** · **`RenewsContractID`** · next step.
 
 The three `Amount*` provenance columns are load-bearing. `Amount` is a **cached answer**;
-`AmountSourceHash` fingerprints `OrderID` and the order total it came from, so the UI can say *"this
-figure is stale, reprice"* instead of showing a number nobody can trace. **Without them, `Amount`
+`AmountSourceHash` fingerprints `OrderID` and the order total it came from, so the UI can say *"the
+products on this deal changed after the amount was calculated"* instead of showing a number nobody can
+trace. **Without them, `Amount`
 becomes a hand-edited field within a month and rule #1 quietly dies.**
 
 > The hash used to fingerprint a `DealLine` set. `DealLine` is retired, and while the fingerprint still

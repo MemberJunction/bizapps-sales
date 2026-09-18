@@ -77,14 +77,33 @@ const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
  * `PriorStatusID` is kept so the save can put the field back before persisting the caller's other
  * edits -- see the note at the detection site for why that ordering is the whole design.
  */
-interface StatusTransitionPlan {
-    Kind: 'Close' | 'Reopen';
+interface StatusTransitionPlanFields {
     TargetStatusID: string;
     PriorStatusID: string | null;
     /** Whether the TARGET status is a loss. Carried on the plan because the status row was already
      *  read to decide the plan at all, and the pre-flight refusal below needs it. */
     TargetIsLost: boolean;
 }
+
+/**
+ * A transition that will actually RUN — the only shape `runStatusTransition` accepts.
+ *
+ * Split out so the narrowing is the COMPILER'S job rather than a claim made 200 lines away. That
+ * method chooses its operation with a ternary on `Kind === 'Close'`, so anything which is not a Close
+ * takes the REOPEN branch; an `Unreadable` plan arriving there would reopen a deal on a status nobody
+ * could read. It cannot arrive today, because the save refuses it near the top — but nothing at the
+ * point of use said so, and a fourth `Kind` added later would have inherited the reopen branch in
+ * silence. Now it fails to compile instead.
+ */
+type ActionableStatusTransition = StatusTransitionPlanFields & { Kind: 'Close' | 'Reopen' };
+
+/**
+ * `Unreadable` is not a transition: the target status row could not be read, so no safe answer exists
+ * and the save is refused rather than guessed either way.
+ */
+type UnreadableStatusTransition = StatusTransitionPlanFields & { Kind: 'Unreadable' };
+
+type StatusTransitionPlan = ActionableStatusTransition | UnreadableStatusTransition;
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
@@ -248,6 +267,7 @@ export class DealEntityServer extends DealEntity {
             return await this.saveDeclared(options);
         } finally {
             this._declaredTransition = null;
+            this._revertedStatusTarget = null;
         }
     }
 
@@ -287,7 +307,28 @@ export class DealEntityServer extends DealEntity {
          * field is reachable through the flow, never by writing it.
          */
         const transition = await this.planStatusTransition();
+
+        /**
+         * REFUSED BEFORE THE REVERT, and the order is the whole of why the retry works.
+         *
+         * The revert below exists so the close lock and `super.Save()` do not write a status the
+         * transition is about to move. On this path nothing downstream runs at all, so reverting would
+         * serve nothing — and it would cost the one thing this message asks for. A reverted field is
+         * CLEAN, so a caller who reads "try again" and re-saves the same object gets
+         * `planStatusTransition() === null` on `!field?.Dirty`: no close, the other edits commit, and
+         * `Save()` returns true. Leaving it dirty means the retry reads the status again, which is
+         * exactly what a transient failure needs.
+         */
+        if (transition?.Kind === 'Unreadable') {
+            return this.refuseSave(
+                'The deal status could not be read, so this save cannot tell whether it closes the ' +
+                    'deal. Nothing was changed. Try again, and if it persists check that the Deal ' +
+                    'Status Types list is readable.',
+            );
+        }
+
         if (transition) {
+            this._revertedStatusTarget = transition.TargetStatusID;
             this.Set('DealStatusTypeID', transition.PriorStatusID);
         }
 
@@ -356,8 +397,7 @@ export class DealEntityServer extends DealEntity {
             await this.stampCompanyFromPipeline();
             await this.stampOwnerFromTeam();
         } catch (err) {
-            LogError(`DealEntityServer.Save: could not resolve a server-maintained stamp: ${err}`);
-            return false;
+            return this.refuseSave(`could not resolve a server-maintained stamp: ${err}`);
         }
 
         /**
@@ -414,7 +454,7 @@ export class DealEntityServer extends DealEntity {
          *
          * Drift caused by someone else — finance editing the order directly, which S-US5 explicitly
          * allows — is deliberately NOT chased here. That is what `AmountSourceHash` is for: a surface
-         * holding the order can recompute the fingerprint and say "stale, reprice". Polling the order on
+         * holding the order can recompute the fingerprint and say so. Polling the order on
          * every unrelated deal save would be a read per keystroke for a guarantee the hash already gives.
          */
         const order = this.OrderID_Object;
@@ -496,6 +536,14 @@ export class DealEntityServer extends DealEntity {
          * in advance: a downstream route declining, a loss reason that demands notes, a contract or
          * order write failing.
          */
+        /**
+         * NO `Kind` CHECK IS NEEDED HERE, and that is the point rather than an omission.
+         *
+         * `runStatusTransition` accepts only `ActionableStatusTransition`, and the `Unreadable`
+         * refusal above is an early `return`, so the compiler has already narrowed `transition` to
+         * `Close | Reopen` by this line — adding a guard here is rejected as a comparison with no
+         * overlap. The invariant the reader used to have to carry is now held by the type.
+         */
         if (transition) {
             return this.runStatusTransition(transition);
         }
@@ -523,6 +571,24 @@ export class DealEntityServer extends DealEntity {
         }
         const priorID = (field.OldValue as string | null) ?? null;
         const targetFlags = await this.readStatusLockFlags(target);
+
+        /**
+         * AN UNREADABLE TARGET STATUS REFUSES THE SAVE. It does not close, and it does not proceed.
+         *
+         * `readStatusLockFlags` fails closed — `LocksDeal: true` — which is right for the lock and
+         * exactly wrong here: read as "the target closes the deal", a blip on this one row would run a
+         * full close on a save that asked for nothing of the kind. Guessing the other way is no better;
+         * a status that really does lock would then be written with no close behind it, which is the
+         * defect golive#205 was filed about.
+         *
+         * So neither guess is taken. This is the same instinct `planStageDefaults` already states for
+         * its own read — "Unreadable is treated as do not derive" — and the cost is the same shape: a
+         * rep retries one save, instead of a deal closing that nobody asked to close.
+         */
+        if (!targetFlags.Read) {
+            return { Kind: 'Unreadable', TargetStatusID: target, PriorStatusID: priorID, TargetIsLost: false };
+        }
+
         const priorLocks = priorID ? await this.statusLocksDeal(priorID) : false;
 
         if (targetFlags.LocksDeal && !priorLocks) {
@@ -559,7 +625,7 @@ export class DealEntityServer extends DealEntity {
      * are columns on this deal, so an importer that sets them alongside the status has supplied
      * everything the close needs -- which is the case #205 is about.
      */
-    private async runStatusTransition(plan: StatusTransitionPlan): Promise<boolean> {
+    private async runStatusTransition(plan: ActionableStatusTransition): Promise<boolean> {
         const { CloseDealOperation, ReopenDealOperation } = await import('./CloseDealOperation.js');
         const context = {
             provider: this.ProviderToUse as unknown as IMetadataProvider,
@@ -591,12 +657,23 @@ export class DealEntityServer extends DealEntity {
         const output = result.Output as { Success?: boolean; Issues?: { Message: string }[] } | undefined;
         const issues = output?.Issues ?? [];
         if (!result.Success || output?.Success === false) {
-            const detail = result.ErrorMessage ?? issues.map((i) => i.Message).join(' | ');
-            LogError(`DealEntityServer.Save: the ${plan.Kind.toLowerCase()} did not complete: ${detail}`);
             // The other edits ARE committed; only the transition failed. Reloading leaves this object
             // agreeing with the row rather than holding a status the database never accepted.
             await this.Load(this.ID);
-            return false;
+            const reasons = issues.length > 0
+                ? issues.map((i) => i.Message)
+                : result.ErrorMessage
+                  ? [result.ErrorMessage]
+                  : [];
+            // Names BOTH halves. "The save failed" is as wrong as "it worked": the caller's field
+            // edits are on disk and only the status did not move, and a caller who cannot tell the
+            // difference will either re-send edits that already landed or assume a close that never
+            // happened.
+            return this.reportPostSaveFailure(
+                `Your edits to this deal were saved, but the ${plan.Kind.toLowerCase()} did not ` +
+                `complete, so its status is unchanged. Set the status again once this is resolved:`,
+                reasons,
+            );
         }
 
         // The operation saved its own copy of this row. Without this, the caller keeps an object whose
@@ -816,9 +893,11 @@ export class DealEntityServer extends DealEntity {
             return true;
         } catch (err) {
             LogError(`DealEntityServer.saveWithinScope failed for deal ${this.ID}: ${err}`);
+            let rolledBack = true;
             try {
                 await scope.Rollback();
             } catch (rollbackErr) {
+                rolledBack = false;
                 LogError(`Failed to roll back after a failed deal save: ${rollbackErr}`);
             }
             /**
@@ -845,7 +924,22 @@ export class DealEntityServer extends DealEntity {
             if (work.assignNumber) {
                 this.DealNumber = null;
             }
-            return false;
+            /**
+             * `super.Save()` may already have registered a SUCCESS entry inside this scope, and the
+             * rollback does not reach the result history -- so without this the caller reads
+             * `Save() === false` beside `LatestResult.Success === true`. Reported last, after the
+             * compensation above, so the message describes the state the object is actually left in.
+             *
+             * The rollback outcome is in the sentence because the two are genuinely different
+             * situations for whoever reads it: a clean rollback means retry, a failed one means the
+             * row needs looking at before anything else is tried.
+             */
+            return this.reportPostSaveFailure(
+                rolledBack
+                    ? `This deal could not be saved, and the change was rolled back: ${err}`
+                    : `This deal could not be saved AND the rollback failed, so the row may be ` +
+                      `partly written. Check it before retrying: ${err}`,
+            );
         }
     }
 
@@ -1603,8 +1697,8 @@ export class DealEntityServer extends DealEntity {
          */
 
         /**
-         * The fingerprint, so a surface can say "stale, reprice" instead of showing an untraceable
-         * number. It covers the ORDER and the TOTAL, which is exactly what the cache was derived from —
+         * The fingerprint, so a surface can say the amount no longer describes its order instead of
+         * showing an untraceable number. It covers the ORDER and the TOTAL, which is exactly what the cache was derived from —
          * a reader holding the order can recompute this and compare without a second table.
          */
         const hash = createHash('sha256').update(`${this.OrderID}|${total}`).digest('hex');
@@ -1737,6 +1831,11 @@ export class DealEntityServer extends DealEntity {
     private _declaredTransition: DeclaredTransition | null = null;
     private _lastStageEventID: string | null = null;
     private _lockedAtSave = false;
+    /**
+     * The status the caller asked for, held while the field is reverted to its persisted value so the
+     * close lock can do its real job. `refuseSave` puts it back; see the note there for why.
+     */
+    private _revertedStatusTarget: string | null = null;
 
     /**
      * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.
@@ -1823,11 +1922,81 @@ export class DealEntityServer extends DealEntity {
      * production in orders' line delete.
      */
     private refuseSave(message: string): false {
+        /**
+         * PUT THE CALLER'S STATUS BACK BEFORE REFUSING, or the retry they were just invited to make
+         * silently does nothing.
+         *
+         * The status is reverted to its persisted value above so the close lock sees a clean field.
+         * That revert is correct for a save that PROCEEDS. On a refusal it is a trap: the field is now
+         * clean, so a caller who reads this message, fixes what it named and saves the SAME object gets
+         * `planStatusTransition() === null` on `!field?.Dirty`, no close runs, the other edits commit,
+         * and `Save()` returns TRUE. An open deal carrying a loss reason, and a caller told it worked.
+         *
+         * Restored HERE rather than at each `return false` for the reason the `finally` above exists:
+         * the bug is always the exit somebody adds later, and there are four of these already.
+         */
+        if (this._revertedStatusTarget) {
+            this.Set('DealStatusTypeID', this._revertedStatusTarget);
+        }
         LogError(`DealEntityServer.Save refused: ${message}`);
         const failed = new BaseEntityResult();
         failed.Success = false;
         failed.Type = this.IsSaved ? 'update' : 'create';
         failed.Message = message;
+        failed.StartedAt = new Date();
+        failed.EndedAt = new Date();
+        failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
+        this.RegisterResultHistoryEntry(failed);
+        return false;
+    }
+
+    /**
+     * Report a failure that happened AFTER `super.Save()` already registered a SUCCESS result.
+     *
+     * ── WHY THIS IS NOT `refuseSave` ──────────────────────────────────────────────────────────────
+     *
+     * `Save()` returning false was, on these paths, the ONLY signal. `super.Save()` had already
+     * registered a success entry and `this.Load(this.ID)` does not clear the history -- core guards
+     * its `init()` with `if (!this.IsSaved)` and the deal is saved -- so a caller doing the obvious
+     * thing read:
+     *
+     *     await deal.Save()                 -> false
+     *     deal.LatestResult.Success         -> TRUE
+     *     deal.LatestResult.CompleteMessage -> undefined  -> "Unknown error"
+     *
+     * A caller following exactly the pattern `deal-workspace.service.ts` uses was told the save
+     * succeeded. Worse than silent: the last thing on the history contradicted the return value.
+     *
+     * Two things differ from `refuseSave` and both matter:
+     *
+     * 1. IT DOES NOT PUT THE STATUS BACK. `refuseSave` restores the caller's target because nothing
+     *    was written and a retry must still carry it. Here the row has already moved (or been rolled
+     *    back) and `Load()` has resynced this object to it -- re-dirtying a field to a value the
+     *    database just rejected would invite the same failure on the next save.
+     * 2. IT CARRIES THE OPERATION'S ISSUES. `CloseDealOperation` returns a structured `Issues` array
+     *    which was being joined into a `LogError` and dropped. Those sentences are the only thing
+     *    that says WHY the close refused, and they are what the user needs.
+     *
+     * AND WHY NOT A TRANSACTION, since "both or neither" is the obvious wish: the transition reaches
+     * bizapps-contracts and bizapps-orders through seams, so there is no single database to be atomic
+     * in; `CloseDealOperation` is a remote operation that owns its own scope and rollback; and it
+     * loads its own copy of this deal, which is exactly why it must run after the commit rather than
+     * inside it. Atomicity is not available here, so honesty about the partial apply is the fix.
+     * Narrowing the window belongs upstream, in the pre-flight that already refuses a lost close with
+     * no loss reason before a single row moves.
+     */
+    private reportPostSaveFailure(message: string, issues: readonly string[] = []): false {
+        // Into the MESSAGE, not only into `Errors`: `CompleteMessage` is what the resolver reads, and
+        // it builds from `Message`. An issue list that renders nowhere is the defect being fixed.
+        const full = issues.length > 0 ? `${message} ${issues.join(' | ')}` : message;
+        LogError(`DealEntityServer.Save: ${full}`);
+        const failed = new BaseEntityResult();
+        failed.Success = false;
+        failed.Type = this.IsSaved ? 'update' : 'create';
+        failed.Message = full;
+        if (issues.length > 0) {
+            failed.Errors = issues.map((issue) => ({ Message: issue, Source: 'DealEntityServer' }));
+        }
         failed.StartedAt = new Date();
         failed.EndedAt = new Date();
         failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
@@ -1969,8 +2138,18 @@ export class DealEntityServer extends DealEntity {
      * wrongly allowing an edit to a closed deal is the more expensive mistake. `IsLost` fails to
      * `false` for the same reason read the other way round — `false` means Loss Notes is NOT carved
      * out, so an unreadable status refuses more, never less.
+     *
+     * ── AND THAT IS WHY `Read` IS REPORTED SEPARATELY ──────────────────────────────────────
+     *
+     * "Refuses more, never less" holds for the LOCK and inverts for the TRIGGER. `planStatusTransition`
+     * reads `LocksDeal` to mean "the target status closes the deal", so the same fail-closed default
+     * turns a transient read failure into a REAL CLOSE — stage event, contract, finance tasks, a voided
+     * order — on a save that asked for none of it. One default cannot serve both readings, so callers
+     * are told whether the row was actually read and decide for themselves.
      */
-    private async readStatusLockFlags(statusID: string): Promise<{ LocksDeal: boolean; IsLost: boolean }> {
+    private async readStatusLockFlags(
+        statusID: string,
+    ): Promise<{ LocksDeal: boolean; IsLost: boolean; Read: boolean }> {
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
             {
@@ -1985,10 +2164,10 @@ export class DealEntityServer extends DealEntity {
             LogError(
                 `DealEntityServer.readStatusLockFlags: could not read status ${statusID}: ${result.ErrorMessage}`,
             );
-            return { LocksDeal: true, IsLost: false };
+            return { LocksDeal: true, IsLost: false, Read: false };
         }
         const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean } | undefined;
-        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true };
+        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row };
     }
 
     /* ── Selling company ────────────────────────────────────────────────────── */
