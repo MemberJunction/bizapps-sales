@@ -1,6 +1,6 @@
 import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -126,18 +126,31 @@ describe('a record that has not been saved is told why a related panel is empty'
         },
     );
 
-    it('leaves no related panel gated on IsSaved without an empty state', () => {
-        // The sweep that found these in the first place, kept as a tripwire: a NEW panel written to
-        // the old shape fails here rather than shipping the same defect a tenth time.
-        for (const source of [DEAL, PARTY]) {
-            const gates = [...source.matchAll(/@if \(Record\.IsSaved\) \{/g)];
-            for (const gate of gates) {
-                const after = source.slice(gate.index ?? 0);
+    it('leaves no related panel gated on IsSaved without an empty state, in ANY panel file', () => {
+        /**
+         * The sweep that found these eight, kept as a tripwire.
+         *
+         * IT READS THE DIRECTORY, not the two files this change touches, and that is the whole point.
+         * The next instance of this shape is most likely to arrive in a NEW file -- which is exactly
+         * how `order-related.panel.ts` appeared while this PR was open. A tripwire pinned to two
+         * hardcoded sources would have been watching the wrong place and still reported green.
+         */
+        const dir = join(HERE, '..', 'lib', 'form-panels');
+        const sources = readdirSync(dir)
+            .filter((f) => f.endsWith('.ts'))
+            .map((f) => ({ file: f, text: readFileSync(join(dir, f), 'utf8') }))
+            .filter((s) => s.text.includes('mj-collapsible-panel'));
+
+        expect(sources.length, 'the panel files must still be findable').toBeGreaterThan(1);
+
+        for (const { file, text } of sources) {
+            for (const gate of text.matchAll(/@if \(Record\.IsSaved\) \{/g)) {
+                const after = text.slice(gate.index ?? 0);
                 const close = after.indexOf('</mj-collapsible-panel>');
-                expect(close, 'every gate sits inside a panel').toBeGreaterThan(-1);
+                expect(close, `${file}: every gate sits inside a panel`).toBeGreaterThan(-1);
                 expect(
                     after.slice(0, close).includes('} @else {'),
-                    'a related panel gated on IsSaved must say something when it is not',
+                    `${file}: a related panel gated on IsSaved must say something when it is not`,
                 ).toBe(true);
             }
         }

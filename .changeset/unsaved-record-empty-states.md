@@ -43,5 +43,12 @@ panel touched here therefore carries `EMPTY_STATE_STYLES` in its own decorator, 
 per panel — a panel could otherwise pass every copy assertion and still look broken.
 
 17 tests: the message and its branch ORDER for each of the eight, the style for each of the eight, and
-a sweep tripwire that fails if any related panel is ever gated on `IsSaved` again without an empty
-state — so the tenth instance of this shape cannot ship quietly.
+a sweep tripwire for the shape itself.
+
+**The tripwire reads the form-panels DIRECTORY, not the two files this changes**, and that distinction
+is load-bearing. The next instance is most likely to arrive in a NEW file — which is exactly what
+happened while this was open, when `order-related.panel.ts` landed from another PR. A tripwire pinned
+to two hardcoded sources would have been watching the wrong place and still reported green. Proved by
+dropping a new panel file written to the old shape into that directory: the tripwire fails and names
+the file. (That panel is not itself an offender — it renders no labelled section when it has nothing,
+so nobody expands it and finds a blank.)
