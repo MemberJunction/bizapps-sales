@@ -149,9 +149,23 @@ describe("item 1's form half: the lines grid stops offering New on a locked deal
         })(),
     );
 
-    it('hides New when the deal is locked', () => {
-        // The tester added a line to a Won deal through this toolbar and it saved.
-        expect(linesPanel).toMatch(/\[ShowNewButton\]="!IsLocked"/);
+    /**
+     * SUPERSEDED BY golive#229, AND THE REQUIREMENT UNDERNEATH IT IS UNCHANGED.
+     *
+     * #206 asked that a locked deal stop offering New, and the binding was `[ShowNewButton]="!IsLocked"`.
+     * #229 turned the grid's New off for EVERY deal, because it opened the generic Order Line form where
+     * a rep could type a unit price -- so the old assertion now describes a binding that is deliberately
+     * gone, and asserting it would demand the defect back.
+     *
+     * What #206 actually protects is that A LOCKED DEAL OFFERS NO WAY TO ADD A LINE. That is now carried
+     * by the panel's own Add button, so the check moves there rather than being dropped: the grid's New
+     * is off unconditionally, and the one remaining affordance is gated on the lock.
+     */
+    it('offers no way to add a line to a locked deal', () => {
+        expect(linesPanel).toMatch(/\[ShowNewButton\]="false"/);
+        // The panel's own Add button is the only remaining route in, and it is hidden when locked.
+        expect(linesPanel).toMatch(/@if \(!IsLocked\)/);
+        expect(linesPanel).toMatch(/\(click\)="AddLine\(\)"/);
     });
 
     it('does NOT bind delete, which would start showing it on open deals', () => {
