@@ -202,8 +202,8 @@ Click the **pencil** to edit and point at three fields: **`Amount Is Computed`**
 
 **Say:** *"`Amount` is a cached answer, not a fact. These three columns are its receipt. The number
 comes back from orders — sales caches `OrderHeader.TotalGross` and never computes any part of it — and
-`AmountSourceHash` fingerprints the order it came from, so the UI can say 'this figure is stale,
-reprice' instead of showing a number nobody can trace."*
+`AmountSourceHash` fingerprints the order it came from, so the UI can say 'the products on this deal
+changed after the amount was calculated' instead of showing a number nobody can trace."*
 
 > Corrected 2026-08-24: this said the hash fingerprints "the line set it came from". It fingerprints
 > `sha256(OrderID|total)`. While it still described a `DealLine` set, nothing repopulated `Amount` at
