@@ -118,6 +118,10 @@ export * from './lib/data/entity-names';
 export { DealBoardComponent } from './lib/board/deal-board.component';
 export type { BoardColumn } from './lib/board/deal-board.component';
 export * from './lib/pages/dashboard-inspect';
+// Exported alongside dashboard-inspect for the same reason: these are the dashboard's measure
+// definitions, and a second surface needing "the current fiscal quarter" must reach THIS one rather
+// than reimplement the boundary arithmetic.
+export * from './lib/pages/dashboard-period';
 export { DealWorkspaceService } from './lib/workspace/deal-workspace.service';
 export type { DealSaveOutcome, DealRosterRow } from './lib/workspace/deal-workspace.service';
 export * from './lib/workspace/deal-workspace.types';
