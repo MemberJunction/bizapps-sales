@@ -168,6 +168,12 @@ function item(overrides: Partial<NormalizedItem> = {}): NormalizedItem {
             { Address: STRANGER_ADDRESS, Name: null, Role: 'To', IdentityKind: 'Email' },
         ],
         Cancelled: false,
+        /**
+         * REQUIRED SINCE common 5.43.0 — `4ad78ac`, "honour IncludeAttachments instead of ignoring
+         * it". `false` is the honest default for a fixture that carries no attachments; a check that
+         * cares passes its own value through `overrides`.
+         */
+        HasAttachments: false,
         Raw: { fixture: true },
         ...overrides,
     };
@@ -1221,13 +1227,30 @@ export const ActivitiesChecks: NamedCheck[] = [
              * local object: nothing contacts Graph.
              */
             const eventStart = '2031-12-01T10:00:00.0000000';
-            const fetcher = {
+            /**
+             * AN `ActivityMessageTransport`, NOT A GRAPH CLIENT — the shape changed in common 5.43.0.
+             *
+             * The provider's second constructor argument used to be a client exposing `GetEvents()`;
+             * it is now a transport (`Describe` / `IsLive` / `Fetch`) returning a `RawBatch` of
+             * unmapped payloads, which the provider then maps. The payload below is the same raw Graph
+             * event as before, so what this check actually claims is unchanged — only the seam moved.
+             */
+            const transport = {
                 calls: 0,
-                async GetEvents() {
+                /** Names where the messages came from, so a run is attributable. This one never leaves the process. */
+                Describe: 'AC21 stub calendar transport (local object; nothing contacts Graph)',
+                /**
+                 * TRUE, deliberately, to keep exercising the path this check has always exercised.
+                 * Before 5.43 the provider hard-coded `IsLive = true`, so the `AllowLiveFetch: true`
+                 * below is what made the fetch legal; `FetchRaw` refuses only when live AND not
+                 * allowed. Setting this `false` would take the other branch and quietly stop testing
+                 * the one the check was written for.
+                 */
+                IsLive: true,
+                async Fetch() {
                     this.calls++;
                     return {
-                        Success: true,
-                        Events: [
+                        Payloads: [
                             {
                                 id: 'ac21-far-future-event',
                                 subject: 'AC21 planning session, years out',
@@ -1237,12 +1260,13 @@ export const ActivitiesChecks: NamedCheck[] = [
                                 attendees: [{ emailAddress: { address: 'attendee@example.invalid' } }],
                             },
                         ],
+                        Issues: [],
                     };
                 },
             };
 
             const before = Date.now();
-            const source = new MSGraphCalendarSyncProvider(true, fetcher);
+            const source = new MSGraphCalendarSyncProvider(true, transport);
             const batch = await source.Fetch({
                 Mailbox: 'ac21@example.invalid',
                 Since: null,
@@ -1250,7 +1274,7 @@ export const ActivitiesChecks: NamedCheck[] = [
             });
             const after = Date.now();
 
-            AssertEqual(fetcher.calls, 1, 'the source did fetch');
+            AssertEqual(transport.calls, 1, 'the source did fetch');
             AssertEqual(batch.Items.length, 1, 'and mapped the event');
             AssertEqual(batch.Items[0].TypeCode, 'Meeting', 'as a Meeting');
 

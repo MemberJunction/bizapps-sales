@@ -253,11 +253,11 @@ importers:
         specifier: ^6.1.0-edge.5
         version: 6.1.0-edge.5(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@mj-biz-apps/common-activity-sync':
-        specifier: ^5.37.0
-        version: 5.37.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: ^5.43.0
+        version: 5.43.0(@memberjunction/communication-types@6.1.0-edge.5)(@memberjunction/core@6.1.0-edge.5)(@memberjunction/credentials@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/common-entities':
-        specifier: ^5.37.0
-        version: 5.37.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: ^5.43.0
+        version: 5.43.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/orders-entities':
         specifier: ^5.2.1
         version: 5.2.1(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
@@ -315,8 +315,8 @@ importers:
         specifier: ^6.1.0-edge.5
         version: 6.1.0-edge.5(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@mj-biz-apps/common-entities':
-        specifier: ^5.37.0
-        version: 5.37.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: ^5.43.0
+        version: 5.43.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/orders-entities':
         specifier: ^5.2.1
         version: 5.2.1(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
@@ -2475,14 +2475,16 @@ packages:
   '@mixmark-io/domino@2.2.0':
     resolution: {integrity: sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==}
 
-  '@mj-biz-apps/common-activity-sync@5.37.0':
-    resolution: {integrity: sha512-wZCKXGAlSqwVrVhYltYhIRC3NkQUZCLhNC8nWRLAErd4Yawwl8CIBDxcJExHkiiHan4Di5leeFBMd89nx7Gjrw==}
+  '@mj-biz-apps/common-activity-sync@5.43.0':
+    resolution: {integrity: sha512-DTMVe4s/hGDHeMnyaK6WCZkYcPuQ5Pfs+MYAJImXl7TYNWCEuIsmG7/XhmEGFjEgcGLWo4yIfBpAX3kuQLaaGw==}
     peerDependencies:
+      '@memberjunction/communication-types': ^6.1.0-edge.6
       '@memberjunction/core': ^6.1.0-edge.5
+      '@memberjunction/credentials': ^6.1.0-edge.6
       '@memberjunction/global': ^6.1.0-edge.5
 
-  '@mj-biz-apps/common-entities@5.37.0':
-    resolution: {integrity: sha512-BlwCC1qhihLg/IiERe+4U2HfoD6bneaP6AkpYceSzMIPHTJpBdgVrQUfOQM73OoCZRGG6sRAvww4Tph/f4wNmA==}
+  '@mj-biz-apps/common-entities@5.43.0':
+    resolution: {integrity: sha512-T0BZF/XwJbsLi+JxXEKhxYIMAzSQ0OPmERYv24IqeIm67Pbp0FK1uvx+GapNu7lHq5rDdwsTnDMDWcN4aha6Hg==}
     peerDependencies:
       '@memberjunction/core': ^6.1.0-edge.5
       '@memberjunction/global': ^6.1.0-edge.5
@@ -15326,13 +15328,15 @@ snapshots:
 
   '@mixmark-io/domino@2.2.0': {}
 
-  '@mj-biz-apps/common-activity-sync@5.37.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)':
+  '@mj-biz-apps/common-activity-sync@5.43.0(@memberjunction/communication-types@6.1.0-edge.5)(@memberjunction/core@6.1.0-edge.5)(@memberjunction/credentials@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)':
     dependencies:
+      '@memberjunction/communication-types': 6.1.0-edge.5
       '@memberjunction/core': 6.1.0-edge.5
+      '@memberjunction/credentials': 6.1.0-edge.5
       '@memberjunction/global': 6.1.0-edge.5
-      '@mj-biz-apps/common-entities': 5.37.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+      '@mj-biz-apps/common-entities': 5.43.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
 
-  '@mj-biz-apps/common-entities@5.37.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)':
+  '@mj-biz-apps/common-entities@5.43.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)':
     dependencies:
       '@memberjunction/core': 6.1.0-edge.5
       '@memberjunction/global': 6.1.0-edge.5
@@ -15342,7 +15346,7 @@ snapshots:
     dependencies:
       '@memberjunction/core': 6.1.0-edge.5
       '@memberjunction/global': 6.1.0-edge.5
-      '@mj-biz-apps/common-entities': 5.37.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+      '@mj-biz-apps/common-entities': 5.43.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       zod: 3.25.76
 
   '@mj-biz-apps/tasks-core@1.4.1(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)':

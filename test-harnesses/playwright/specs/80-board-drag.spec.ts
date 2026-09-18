@@ -398,7 +398,7 @@ test.describe('pipeline board — a drag writes three things, and never closes a
             'the closing column must carry the lock affordance — it is the standing hint that replaces the '
                 + 'message a prevented drop never produces',
         ).toBeVisible();
-        await expect(lockHint).toHaveAttribute('title', /closes and locks/i);
+        await expect(lockHint).toHaveAttribute('title', /cannot be moved/i);
         await expect(lockHint).toHaveAttribute('title', /form/i);
 
         // And no transient message either, because nothing was dropped.

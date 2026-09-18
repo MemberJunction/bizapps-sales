@@ -115,9 +115,35 @@ const DEAL_FIELD_LABELS: Readonly<Record<string, string>> = {
     DealStatusTypeID: 'Deal Status',
 };
 
-/** The on-screen label for a deal field, or the field name when nothing better is known. */
+/**
+ * Splits a column name into words and drops a trailing `ID`: `ExpectedCloseDate` -> `Expected Close
+ * Date`, `BillingContactID` -> `Billing Contact`.
+ *
+ * THIS EXISTS BECAUSE THE MAP ABOVE COVERS THE WRONG HALF OF THE RULE. It holds the fields the lock
+ * leaves EDITABLE -- what row 16 lists. Row 18 names the FROZEN fields, and there are far more of
+ * those, none of them in the map: `Amount`, `ExpectedCloseDate`, `AnnualIncreasePctOverride` and every
+ * other column a form or an importer can set. Falling back to the raw field name meant row 18 read
+ * "ExpectedCloseDate, AnnualIncreasePctOverride cannot be changed" -- the exact "NextStep being a
+ * column name that appears nowhere on the form" complaint the map was added to answer, on the message
+ * a user is far more likely to see.
+ *
+ * Deriving rather than hand-listing the frozen set, because a hand list would have to be extended
+ * every time a column is added and would read correctly right up until somebody forgot -- the same
+ * shape as the gap it is replacing. The map stays for the two labels a split cannot produce
+ * (`LeadSourceTypeID` -> "Lead Source", not "Lead Source Type") and is now an override rather than
+ * the only source of a label.
+ */
+function SplitFieldName(fieldName: string): string {
+    return fieldName
+        .replace(/ID$/, '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .trim();
+}
+
+/** The on-screen label for a deal field: the override if there is one, else the field name split into words. */
 export function DealFieldLabel(fieldName: string): string {
-    return DEAL_FIELD_LABELS[fieldName] ?? fieldName;
+    return DEAL_FIELD_LABELS[fieldName] ?? SplitFieldName(fieldName);
 }
 
 /**
