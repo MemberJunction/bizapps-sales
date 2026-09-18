@@ -48,9 +48,21 @@
             <span class="db-col__name">
               {{ column.Label }}
               @if (column.IsClosing) {
+                <!--
+                     THIS SAID THE OPPOSITE OF WHAT HAPPENS. "Arriving here closes and locks the
+                     deal" describes a behaviour the server deliberately refuses: a stage whose
+                     status locks contributes NO status to a save, so a deal moved into this
+                     column keeps the status it had (`planStageDefaults` gates on `LocksDeal`).
+                     A rep reading the old text would think a drag closes the deal.
+
+                     And the drag cannot happen either: `CanDropInto` returns false for a closing
+                     column, with a second guard behind it. So the tooltip says what the lock icon
+                     actually means -- this column is not a destination -- and where closing lives,
+                     which is the same place the empty state below points.
+                -->
                 <i class="fa-solid fa-lock db-col__lock"
                    aria-hidden="true"
-                   title="Arriving here closes and locks the deal — close it from the deal form."></i>
+                   title="Deals cannot be moved here. Close a deal from the deal form."></i>
               }
             </span>
             <span class="db-col__meta">
@@ -142,11 +154,11 @@
                       @if (deal.AmountIsComputed) {
                         <i class="fa-solid fa-calculator db-card__computed"
                            aria-hidden="true"
-                           title="Priced by the orders engine"></i>
+                           title="Priced by Orders"></i>
                       } @else {
                         <i class="fa-solid fa-pen-nib db-card__stated"
                            aria-hidden="true"
-                           title="Stated by a person, not priced by the orders engine"></i>
+                           title="Entered manually rather than priced by Orders"></i>
                       }
                     }
                   </span>

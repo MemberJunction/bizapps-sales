@@ -1258,7 +1258,7 @@ export class DealWorkspaceComponent implements OnInit {
      */
 
     /** True when the PERSISTED status locks the deal — resolved through the SHARED rule. */
-    public Lock: DealLockState = { IsLocked: false, StatusName: null, Notice: null };
+    public Lock: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, Notice: null };
 
     public ClosePanelOpen = false;
     /** `null` until the user picks; drives which fields the panel demands. */
@@ -1287,7 +1287,9 @@ export class DealWorkspaceComponent implements OnInit {
 
     /** Whether a field may be edited right now. One rule, shared with the server and the record form. */
     public IsFieldEditable(fieldName: string): boolean {
-        return !this.Lock.IsLocked || IsDealFieldEditableWhileLocked(fieldName);
+        // `Lock.IsLost` comes from the same resolver as `Lock.IsLocked`, so this surface cannot
+        // disagree with the server about Loss Notes on a won deal (golive#206).
+        return !this.Lock.IsLocked || IsDealFieldEditableWhileLocked(fieldName, this.Lock.IsLost);
     }
 
     /** The chosen loss reason demands notes — read off the row's FLAG. */

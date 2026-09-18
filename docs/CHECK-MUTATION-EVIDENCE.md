@@ -241,6 +241,133 @@ until then, treat the per-bundle table as a claim about the code each mutation w
 
 ---
 
+## Round 14 (2026-09-17) — `a9bc0e0` — the re-aims that were run and not written down
+
+**Recorded late, and that is the point.** `M-CD5` and `M-CD6` were re-aimed on sales#72 after this
+PR's review found both anchored on deleted code. Both were run, both killed, and **neither run was
+entered here** — so the re-review that followed could say, correctly, that `M-CD6`'s expect list was a
+new claim with nothing behind it. An anchor that matches is necessary and not sufficient; a run
+nobody wrote down is not evidence.
+
+| Mutant | What it breaks | Declared | Result on `a9bc0e0` |
+|---|---|---|---|
+| `M-CD5` | the close lock never engages | CD5, CD13, CD14 | **OK** — 124 passed, 16 failed, 114s |
+| `M-CD6` | the lock becomes a WALL: every dirty field refused | CD6, CD14 | **OK** — 125 passed, 15 failed, 108s |
+
+Both felled their full declared lists. Collateral on each was the host's twelve-check unmutated
+baseline plus `SD27`, which is genuinely on the lock's path.
+
+### Why `M-CD6` is not simply `M-CD14` again
+
+Its old anchor was the `LOCK_EDITABLE_FIELDS` static, which golive#206 item 3 turned into a call
+because the answer now depends on the outcome. The obvious re-aim — point it at
+`lockEditableFields` — is the line `M-CD14` already mutates, and two mutants on one line prove one
+thing twice.
+
+So the mechanism changed instead: `M-CD6` now drops the editable-set term from the frozen-field
+predicate, making the lock a WALL that refuses every dirty field including Description. That is what
+`CD6` claims it is not. The mechanism changing wholesale is exactly why the run needed recording —
+the expect list carried over from a mutant that no longer exists.
+
+### `M-CD28` shares `M-CD13`'s anchor line, deliberately
+
+Measured, and worth stating because the rule elsewhere in this file is that two mutants on one line
+prove one thing twice. These do not. `M-CD13` empties `LOCK_EDITABLE_COMPANIONS` and fells **CD13 and
+CD28 together**; `M-CD28` removes only `Team`, leaves PaymentSchedule allow-listed, and fells **CD28
+alone**. Different members of the set, different blast radius, and the narrower one isolates.
+
+---
+
+## Round 13 (2026-09-16) — `9e22e1e` — `M-AM2` repaired, and SD41 given its first mutant
+
+**2 mutants, 2 killed, 0 misses, 0 skips.** Found and fixed on `next` at `9e22e1e`, then folded into
+the sales#72 branch and re-run there. Both runs are below, because the fix is landing on the second
+tree and a figure measured somewhere else is not evidence for where it ships.
+
+| Mutant | What it breaks | Declared | on `next` `9e22e1e` | on sales#72 `a9bc0e0` |
+|---|---|---|---|---|
+| `M-AM2` | the deleted hand-typed carve-out is put BACK | SD41 | **OK** — 125 passed, 13 failed | **OK** — 127 passed, 13 failed |
+| `M-AM3` | `"nothing priced"` becomes a computed amount of nothing | SD22, SD23 | **OK** — 121 passed, 17 failed | **OK** — 123 passed, 17 failed |
+
+The two extra passes on sales#72 are CD26 and CD27, which that stack adds. Declared kills and collateral
+are identical set-for-set across the two trees.
+
+### The anchor was not drift — the mechanism was deleted on purpose
+
+`M-AM2` anchored on the guard that left a hand-typed figure alone unconditionally:
+
+> `if (this.AmountIsComputed === false && this.Amount !== null && this.Amount !== undefined) return;`
+
+Commit `6d46c4a` ("fix: lined Deal.Amount is OrderHeader.TotalGross") **removed** it and inverted the
+rule: a typed figure survives only on a header-only deal, and a lined deal's Amount is always a cache of
+`OrderHeader.TotalGross`. Its own message names both checks — *"A typed figure survives only on a
+header-only deal (SD22). SD41 proves a prior typed figure is overwritten when lines exist."*
+
+Nobody updated the mutant. It has reported `SKIPPED — anchor appears 0 times` ever since, which makes
+the driver exit 1, and SD22's only declared mutant was one that could not run.
+
+`M-AM2`'s note always read *"the rule that must not drift"*. The rule turned over, so the drift to guard
+against is now RE-ADDING the carve-out — and that is what the mutant puts back. It declares **SD41**,
+which had no mutant at all. It fells SD41 and nothing else in sales, which is the cleanest isolation in
+this file: restoring the carve-out cannot hurt the header-only case, only the lined one.
+
+### SD22 was promoted deliberately, not by arithmetic
+
+With `M-AM2` re-aimed, SD22 needed a mutant. `M-AM3` already felled it as collateral, and this file's own
+counting rule says a collateral kill is promoted only after confirming the mutated code is on the check's
+path. It is: SD22's deal has no lines, so `TotalGross` is NULL and `M-AM3`'s guard is exactly the return
+that leaves the typed figure alone. `M-AM3` now declares `['SD22', 'SD23']`.
+
+### Every anchor in the table was checked, not just this one
+
+91 mutations on `next`, **0 would skip** after this change — it was 1 of 91 before. Re-run on the
+sales#72 branch where this lands: **94 of 94, 0 skips.**
+
+**Baseline on this host:** 12 checks fail with nothing mutated — AC6, AC8, AC12, AC13, AC16, AC19,
+CT1, CT5, CT6, SD6, WT10, WT14 — and they appear in every `failed=` column above. `SD6` is the KI-20
+tripwire reporting `expected 2, got 1`, which its own comment says means orders has fixed
+`savePendingLines()`. The rest were not diagnosed.
+## Round 12 (2026-09-16) — `2e79c37` — golive#205's server-side trigger: CD26 and CD27
+
+**2 mutants, 2 killed, 0 misses.** Both halves of the status-write trigger now have a mutant aimed at
+them, which is what sales#73's review asked for. Run on `fix/deal-form-filter-closing-statuses` at
+`2e79c37` with the working tree carrying the review fixes, against `MJ_V6_Host`.
+
+| Mutant | What it breaks | Declared | Result |
+|---|---|---|---|
+| `M-CD26` | the pre-flight refusal for a Lost close with no loss reason | CD26 | **OK** — 127 passed, 13 failed, 112s |
+| `M-CD27` | `planStatusTransition` never returns a plan, so the trigger never fires | CD27 | **OK** — 126 passed, 14 failed, 110s |
+
+`M-CD27` also fells CD26, correctly and not as noise: with no plan there is no pre-flight refusal either,
+and the bare write reaches the row. It is declared on CD27 alone, so it is counted once.
+
+**Collateral on both runs was the unmutated baseline, not the mutation.** The same twelve — AC6, AC8,
+AC12, AC13, AC16, AC19, CT1, CT5, CT6, SD6, WT10, WT14 — fail on this tree with nothing mutated
+(128 passed / 12 failed). `close-deal` is 27 of 27 green unmutated. Per this file's own counting rule the
+`failed=` column was read rather than summed, and the baseline was measured rather than assumed.
+
+`SD6` in that set is the **KI-20 tripwire firing**: it reports `expected 2, got 1`, which is the condition
+its own comment says means orders has fixed `savePendingLines()`. That is a finding for KI-20, not for
+this round.
+
+### `M-CD26` was re-aimed twice, and the first miss is the useful part
+
+sales#69 proposed anchoring CD26's mutant on `bareCloseRefusal`'s predicate. That method is **removed** on
+this branch (sales#73 review item 4): `planStatusTransition` decides the same case first and reverts the
+status, so the guard could not execute — the anchor would have matched nothing and been SKIPPED, which
+reads as covered while testing nothing.
+
+Re-aimed at the new pre-flight refusal, `M-CD26` **still missed**, and that was the finding. CD26 as
+written could not tell the two refusal paths apart: `CloseDealOperation` declines for want of a loss
+reason either way, so `Save()` returns false and the status stays put whether the refusal came before
+`super.Save()` or after it. The guard had no reader — this repo's recurring defect class, arrived at from
+the other direction.
+
+CD26 now sets a companion field alongside the status and requires it **not** to land, which is the whole of
+what refusing early buys. `M-CD26` kills on that assertion and on no other.
+
+---
+
 ## Round 9 (2026-08-23) — `b9e73d4` — AC22 made reachable, and seven drifted anchors repaired
 
 **Every figure in this section was measured against `b9e73d4`.** Branch `feature/mutant-repair`.

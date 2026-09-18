@@ -45,6 +45,7 @@
  */
 import {
     BaseEntity,
+    BaseEntityResult,
     DatabaseProviderBase,
     EntitySaveOptions,
     IMetadataProvider,
@@ -59,16 +60,50 @@ import { RegisterClass } from '@memberjunction/global';
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
 import { CanTransition, type OrderStatus } from '@mj-biz-apps/orders-entities';
 import {
-    DEAL_FIELDS_EDITABLE_WHILE_LOCKED,
+    DealFieldsEditableWhileLocked,
+    DealFieldLabel,
     DealEntity,
+    JoinLabels,
     type mjBizAppsSalesDealStageEventEntity,
-    IsBareCloseWrite,
-    type StatusTransitionFacts,
 } from '@mj-biz-apps/sales-entities';
 
 import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
+
+/**
+ * A status write that crosses the lock boundary, and therefore is a close or a reopen.
+ *
+ * `PriorStatusID` is kept so the save can put the field back before persisting the caller's other
+ * edits -- see the note at the detection site for why that ordering is the whole design.
+ */
+interface StatusTransitionPlanFields {
+    TargetStatusID: string;
+    PriorStatusID: string | null;
+    /** Whether the TARGET status is a loss. Carried on the plan because the status row was already
+     *  read to decide the plan at all, and the pre-flight refusal below needs it. */
+    TargetIsLost: boolean;
+}
+
+/**
+ * A transition that will actually RUN — the only shape `runStatusTransition` accepts.
+ *
+ * Split out so the narrowing is the COMPILER'S job rather than a claim made 200 lines away. That
+ * method chooses its operation with a ternary on `Kind === 'Close'`, so anything which is not a Close
+ * takes the REOPEN branch; an `Unreadable` plan arriving there would reopen a deal on a status nobody
+ * could read. It cannot arrive today, because the save refuses it near the top — but nothing at the
+ * point of use said so, and a fourth `Kind` added later would have inherited the reopen branch in
+ * silence. Now it fails to compile instead.
+ */
+type ActionableStatusTransition = StatusTransitionPlanFields & { Kind: 'Close' | 'Reopen' };
+
+/**
+ * `Unreadable` is not a transition: the target status row could not be read, so no safe answer exists
+ * and the save is refused rather than guessed either way.
+ */
+type UnreadableStatusTransition = StatusTransitionPlanFields & { Kind: 'Unreadable' };
+
+type StatusTransitionPlan = ActionableStatusTransition | UnreadableStatusTransition;
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
@@ -232,6 +267,7 @@ export class DealEntityServer extends DealEntity {
             return await this.saveDeclared(options);
         } finally {
             this._declaredTransition = null;
+            this._revertedStatusTarget = null;
         }
     }
 
@@ -242,6 +278,87 @@ export class DealEntityServer extends DealEntity {
         this._orderJustProvisioned = false;
         this._lockedAtSave = false;
         this._lastStageEventID = null;
+
+        /**
+         * THE STATUS FIELD DRIVES THE CLOSE AND THE REOPEN (bc-aidp-next-golive#205).
+         *
+         * "The deal entity server should run the existing close and reopen flows when a save moves the
+         * status into or out of a locking status."
+         *
+         * ── IT RUNS BEFORE THE CLOSE LOCK, AND THAT ORDERING IS THE WHOLE THING ─────────────────
+         *
+         * `close-deal.CD27` measured what happens otherwise. A reopen is a status write on a deal that
+         * IS locked, so the lock below sees `DealStatusTypeID` dirty, finds it outside the
+         * editable-while-locked set, and refuses — before anything has had the chance to notice the
+         * write was a reopen. The close half worked and the reopen half could not, which is precisely
+         * the defect golive#205 reported, reintroduced one layer up.
+         *
+         * ── WHY THE STATUS IS PUT BACK ─────────────────────────────────────────────────────────
+         *
+         * `Sales.CloseDeal` loads its OWN copy of this deal and saves it. If this save also wrote the
+         * status, the two would race over one row and whichever landed second would win. So the field is
+         * reverted to what is on disk, the ordinary save below persists every OTHER edit the caller
+         * made, and the flow then runs against the committed row. A caller who set the status and three
+         * other fields gets all four, in an order that cannot lose any of them.
+         *
+         * Reverting is also what leaves the close lock doing its real job instead of being bypassed: by
+         * the time it runs the status is clean, so a locked deal still refuses every frozen field.
+         * DealStatusTypeID stays OUT of `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` for the same reason — the
+         * field is reachable through the flow, never by writing it.
+         */
+        const transition = await this.planStatusTransition();
+
+        /**
+         * REFUSED BEFORE THE REVERT, and the order is the whole of why the retry works.
+         *
+         * The revert below exists so the close lock and `super.Save()` do not write a status the
+         * transition is about to move. On this path nothing downstream runs at all, so reverting would
+         * serve nothing — and it would cost the one thing this message asks for. A reverted field is
+         * CLEAN, so a caller who reads "try again" and re-saves the same object gets
+         * `planStatusTransition() === null` on `!field?.Dirty`: no close, the other edits commit, and
+         * `Save()` returns true. Leaving it dirty means the retry reads the status again, which is
+         * exactly what a transient failure needs.
+         */
+        if (transition?.Kind === 'Unreadable') {
+            return this.refuseSave(
+                'The deal status could not be read, so this save cannot tell whether it closes the ' +
+                    'deal. Nothing was changed. Try again, and if it persists check that the Deal ' +
+                    'Status Types list is readable.',
+            );
+        }
+
+        if (transition) {
+            this._revertedStatusTarget = transition.TargetStatusID;
+            this.Set('DealStatusTypeID', transition.PriorStatusID);
+        }
+
+        /**
+         * A CLOSE THAT CANNOT RUN IS REFUSED BEFORE ANYTHING IS WRITTEN.
+         *
+         * The transition runs AFTER `super.Save()`, against the committed row, because it loads its own
+         * copy of this deal and the two would otherwise race. That ordering has a cost: a caller who
+         * sets the status AND three other fields, and whose close then fails, has those three fields on
+         * disk and an open deal. The save reports false, so nothing is silent, but it is a partial
+         * apply.
+         *
+         * Closing as lost with no loss reason is the one case worth spending a check to avoid, because
+         * it is not an edge: `LossReasonID` is a column on this deal, a form or an importer can set the
+         * status without it, and the close then refuses every time — deterministically, for a reason
+         * known right here, before a single row moves. Catching it up front turns a partial apply into
+         * a clean refusal for the case most likely to hit one.
+         *
+         * THE PREDICATE IS THE OPERATION'S OWN, and deliberately no wider: `CloseDealOperation.validate`
+         * refuses `IsLost` with no `LossReasonID`, and this asks the same question of the same two
+         * values. It does NOT duplicate the rest of that validation — whether the chosen reason demands
+         * notes needs the loss-reason row, which is a read this path should not be making, and that one
+         * stays downstream with the others.
+         */
+        if (transition?.Kind === 'Close' && transition.TargetIsLost && !this.LossReasonID) {
+            return this.refuseSave(
+                'A loss reason is required to close a deal as lost. Set LossReasonID alongside the ' +
+                'status, or close the deal through Sales.CloseDeal.',
+            );
+        }
 
         /**
          * THE CLOSE LOCK (L-17, master plan §7.3) — enforced HERE and nowhere else.
@@ -260,39 +377,8 @@ export class DealEntityServer extends DealEntity {
         if (this.IsSaved && !this._reopenInProgress) {
             const refusal = await this.checkCloseLock();
             if (refusal) {
-                LogError(`DealEntityServer.Save refused: ${refusal}`);
-                return false;
+                return this.refuseSave(refusal);
             }
-        }
-
-        /**
-         * A BARE STATUS WRITE MUST NOT CLOSE A DEAL (bc-aidp-next-golive#205).
-         *
-         * The close lock above reads the PERSISTED status, so it cannot see this: moving Open -> Won is
-         * a save on an unlocked deal and passed straight through. The deal came out locked, and none of
-         * the close ran — no stage event, no contract, no finance tasks, and for a Lost deal no loss
-         * reason and an order still live. Worse, the lock then refused `DealStatusTypeID` on every later
-         * save, so the deal could not be reopened either. A field edit on a form had produced a state
-         * no operation could have produced and none could undo.
-         *
-         * WHAT SEPARATES THIS FROM A REAL CLOSE is the declared transition, which `Sales.CloseDeal`
-         * already sets and a form write has no way to set. So this needs no new flag: it asks whether
-         * anybody announced a transition, which is the same question `stampClose` asks downstream.
-         *
-         * IT RUNS BEFORE THE TRANSACTION, and that placement is what makes it precise. The server
-         * derives a status from the stage later, inside the transaction (`applyStageOrderStatus`), so at
-         * THIS point a dirty status can only have come from the caller. Checking here refuses the write
-         * somebody made and never the one this class is about to make itself.
-         *
-         * Refusing rather than closing is deliberate, and is the narrower of the two readings of #205 —
-         * see the issue for the open question about whether the entity should instead RUN the close.
-         * Refusing is correct under either: a status write that reaches the database without the close
-         * having run is the defect, whoever ends up running it.
-         */
-        const bareClose = await this.bareCloseRefusal();
-        if (bareClose) {
-            LogError(`DealEntityServer.Save refused: ${bareClose}`);
-            return false;
         }
 
         /**
@@ -304,16 +390,14 @@ export class DealEntityServer extends DealEntity {
          */
         const ownerRefusal = this.ownerStampEditRefusal();
         if (ownerRefusal) {
-            LogError(`DealEntityServer.Save refused: ${ownerRefusal}`);
-            return false;
+            return this.refuseSave(ownerRefusal);
         }
 
         try {
             await this.stampCompanyFromPipeline();
             await this.stampOwnerFromTeam();
         } catch (err) {
-            LogError(`DealEntityServer.Save: could not resolve a server-maintained stamp: ${err}`);
-            return false;
+            return this.refuseSave(`could not resolve a server-maintained stamp: ${err}`);
         }
 
         /**
@@ -370,7 +454,7 @@ export class DealEntityServer extends DealEntity {
          *
          * Drift caused by someone else — finance editing the order directly, which S-US5 explicitly
          * allows — is deliberately NOT chased here. That is what `AmountSourceHash` is for: a surface
-         * holding the order can recompute the fingerprint and say "stale, reprice". Polling the order on
+         * holding the order can recompute the fingerprint and say so. Polling the order on
          * every unrelated deal save would be a read per keystroke for a guarantee the hash already gives.
          */
         const order = this.OrderID_Object;
@@ -435,8 +519,167 @@ export class DealEntityServer extends DealEntity {
 
         if (!saved) {
             this.explainOrderProvisioningFailure();
+            return false;
         }
-        return saved;
+
+        /**
+         * Everything else is ON DISK by now; the transition runs against that committed row.
+         *
+         * SO A TRANSITION THAT FAILS HERE LEAVES THE CALLER'S OTHER EDITS COMMITTED. The save returns
+         * false and the operation's own issues say why, but the fields that were not the status have
+         * already been written. That is the price of running the close against a committed row instead
+         * of racing the operation's own copy of this deal, and the close's own work is still
+         * transactional within itself — a half-done close is not among the outcomes.
+         *
+         * The one case common enough to be worth pre-empting is refused above, before anything is
+         * written. What is left here is a close that failed for a reason this path could not have known
+         * in advance: a downstream route declining, a loss reason that demands notes, a contract or
+         * order write failing.
+         */
+        /**
+         * NO `Kind` CHECK IS NEEDED HERE, and that is the point rather than an omission.
+         *
+         * `runStatusTransition` accepts only `ActionableStatusTransition`, and the `Unreadable`
+         * refusal above is an early `return`, so the compiler has already narrowed `transition` to
+         * `Close | Reopen` by this line — adding a guard here is rejected as a comparison with no
+         * overlap. The invariant the reader used to have to carry is now held by the type.
+         */
+        if (transition) {
+            return this.runStatusTransition(transition);
+        }
+        return true;
+    }
+
+    /**
+     * Is this save a status move into or out of a locking status, and therefore a close or a reopen?
+     *
+     * Null in every ordinary case. The cheap half comes first, so a save that does not touch the status
+     * costs no status lookups at all — this runs on every save, and most saves do not touch it.
+     *
+     * A DECLARED transition returns null: `Sales.CloseDeal` and `Sales.ReopenDeal` announce themselves
+     * before saving, and that IS the flow running. Without this term, the operation's own save would
+     * re-enter the flow it is already executing.
+     *
+     * Creation returns null too. A deal born closed has no transition to have run, and the opening
+     * default (`needsStatusDefault`) would otherwise read as one.
+     */
+    private async planStatusTransition(): Promise<StatusTransitionPlan | null> {
+        const field = this.GetFieldByName('DealStatusTypeID');
+        const target = this.DealStatusTypeID;
+        if (!this.IsSaved || this._declaredTransition || !field?.Dirty || !target) {
+            return null;
+        }
+        const priorID = (field.OldValue as string | null) ?? null;
+        const targetFlags = await this.readStatusLockFlags(target);
+
+        /**
+         * AN UNREADABLE TARGET STATUS REFUSES THE SAVE. It does not close, and it does not proceed.
+         *
+         * `readStatusLockFlags` fails closed — `LocksDeal: true` — which is right for the lock and
+         * exactly wrong here: read as "the target closes the deal", a blip on this one row would run a
+         * full close on a save that asked for nothing of the kind. Guessing the other way is no better;
+         * a status that really does lock would then be written with no close behind it, which is the
+         * defect golive#205 was filed about.
+         *
+         * So neither guess is taken. This is the same instinct `planStageDefaults` already states for
+         * its own read — "Unreadable is treated as do not derive" — and the cost is the same shape: a
+         * rep retries one save, instead of a deal closing that nobody asked to close.
+         */
+        if (!targetFlags.Read) {
+            return { Kind: 'Unreadable', TargetStatusID: target, PriorStatusID: priorID, TargetIsLost: false };
+        }
+
+        const priorLocks = priorID ? await this.statusLocksDeal(priorID) : false;
+
+        if (targetFlags.LocksDeal && !priorLocks) {
+            return {
+                Kind: 'Close', TargetStatusID: target, PriorStatusID: priorID,
+                TargetIsLost: targetFlags.IsLost,
+            };
+        }
+        if (priorLocks && !targetFlags.LocksDeal) {
+            return {
+                Kind: 'Reopen', TargetStatusID: target, PriorStatusID: priorID,
+                TargetIsLost: targetFlags.IsLost,
+            };
+        }
+        // Won -> Lost, or Open -> On Hold. Neither crosses the lock boundary, so neither is a close or
+        // a reopen, and the ordinary rules above already decided whether it was allowed.
+        return null;
+    }
+
+    /**
+     * Run the close or the reopen that the caller's status write asked for.
+     *
+     * WHY THE OPERATIONS AND NOT A COPY OF THEIR WORK. A close writes a stage event, creates a contract
+     * and two finance tasks for a won B2B deal, and voids the order for a lost one; a reopen undoes the
+     * stamps and returns the order. All of it already exists, is transactional, and is pinned by the
+     * `close-deal` checks. Reimplementing any of it here would be a second copy of the most
+     * consequential code in this app.
+     *
+     * IMPORTED LAZILY because `CloseDealOperation` imports this class, so a top-level import would be a
+     * cycle. The module system caches it, so this costs nothing after the first transition in a process.
+     *
+     * A LOST CLOSE STILL NEEDS ITS LOSS REASON, and a caller who set the status without one gets the
+     * operation's own refusal rather than a second, vaguer one from here. `LossReasonID` and `LossNotes`
+     * are columns on this deal, so an importer that sets them alongside the status has supplied
+     * everything the close needs -- which is the case #205 is about.
+     */
+    private async runStatusTransition(plan: ActionableStatusTransition): Promise<boolean> {
+        const { CloseDealOperation, ReopenDealOperation } = await import('./CloseDealOperation.js');
+        const context = {
+            provider: this.ProviderToUse as unknown as IMetadataProvider,
+            user: this.ContextCurrentUser,
+        };
+
+        const result =
+            plan.Kind === 'Close'
+                ? await new CloseDealOperation().ExecuteServer(
+                      {
+                          DealID: this.ID,
+                          DealStatusTypeID: plan.TargetStatusID,
+                          LossReasonID: this.LossReasonID ?? null,
+                          LossNotes: this.LossNotes ?? null,
+                      },
+                      context as never,
+                  )
+                : await new ReopenDealOperation().ExecuteServer(
+                      {
+                          DealID: this.ID,
+                          // #205: "No reopen reason is required." One is still RECORDED, because 7.3
+                          // wants undoing a lock to be explainable and the operation refuses a blank.
+                          Reason: 'Reopened by setting the deal status back to an open status.',
+                          DealStatusTypeID: plan.TargetStatusID,
+                      },
+                      context as never,
+                  );
+
+        const output = result.Output as { Success?: boolean; Issues?: { Message: string }[] } | undefined;
+        const issues = output?.Issues ?? [];
+        if (!result.Success || output?.Success === false) {
+            // The other edits ARE committed; only the transition failed. Reloading leaves this object
+            // agreeing with the row rather than holding a status the database never accepted.
+            await this.Load(this.ID);
+            const reasons = issues.length > 0
+                ? issues.map((i) => i.Message)
+                : result.ErrorMessage
+                  ? [result.ErrorMessage]
+                  : [];
+            // Names BOTH halves. "The save failed" is as wrong as "it worked": the caller's field
+            // edits are on disk and only the status did not move, and a caller who cannot tell the
+            // difference will either re-send edits that already landed or assume a close that never
+            // happened.
+            return this.reportPostSaveFailure(
+                `Your edits to this deal were saved, but the ${plan.Kind.toLowerCase()} did not ` +
+                `complete, so its status is unchanged. Set the status again once this is resolved:`,
+                reasons,
+            );
+        }
+
+        // The operation saved its own copy of this row. Without this, the caller keeps an object whose
+        // stamps, stage and status all predate the close it just triggered.
+        await this.Load(this.ID);
+        return true;
     }
 
     /* ── STAGE PROVENANCE ─────────────────────────────────────────────────────────────────────────
@@ -650,9 +893,11 @@ export class DealEntityServer extends DealEntity {
             return true;
         } catch (err) {
             LogError(`DealEntityServer.saveWithinScope failed for deal ${this.ID}: ${err}`);
+            let rolledBack = true;
             try {
                 await scope.Rollback();
             } catch (rollbackErr) {
+                rolledBack = false;
                 LogError(`Failed to roll back after a failed deal save: ${rollbackErr}`);
             }
             /**
@@ -679,7 +924,22 @@ export class DealEntityServer extends DealEntity {
             if (work.assignNumber) {
                 this.DealNumber = null;
             }
-            return false;
+            /**
+             * `super.Save()` may already have registered a SUCCESS entry inside this scope, and the
+             * rollback does not reach the result history -- so without this the caller reads
+             * `Save() === false` beside `LatestResult.Success === true`. Reported last, after the
+             * compensation above, so the message describes the state the object is actually left in.
+             *
+             * The rollback outcome is in the sentence because the two are genuinely different
+             * situations for whoever reads it: a clean rollback means retry, a failed one means the
+             * row needs looking at before anything else is tried.
+             */
+            return this.reportPostSaveFailure(
+                rolledBack
+                    ? `This deal could not be saved, and the change was rolled back: ${err}`
+                    : `This deal could not be saved AND the rollback failed, so the row may be ` +
+                      `partly written. Check it before retrying: ${err}`,
+            );
         }
     }
 
@@ -1437,8 +1697,8 @@ export class DealEntityServer extends DealEntity {
          */
 
         /**
-         * The fingerprint, so a surface can say "stale, reprice" instead of showing an untraceable
-         * number. It covers the ORDER and the TOTAL, which is exactly what the cache was derived from —
+         * The fingerprint, so a surface can say the amount no longer describes its order instead of
+         * showing an untraceable number. It covers the ORDER and the TOTAL, which is exactly what the cache was derived from —
          * a reader holding the order can recompute this and compare without a second table.
          */
         const hash = createHash('sha256').update(`${this.OrderID}|${total}`).digest('hex');
@@ -1571,15 +1831,55 @@ export class DealEntityServer extends DealEntity {
     private _declaredTransition: DeclaredTransition | null = null;
     private _lastStageEventID: string | null = null;
     private _lockedAtSave = false;
+    /**
+     * The status the caller asked for, held while the field is reverted to its persisted value so the
+     * close lock can do its real job. `refuseSave` puts it back; see the note there for why.
+     */
+    private _revertedStatusTarget: string | null = null;
 
     /**
      * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.
      *
-     * It moved to `@mj-biz-apps/sales-entities` so the Explorer Deal form can apply the same list. A
-     * second copy here would drift, and the drift would only ever surface as a user typing into a field
-     * the server then refuses. See `close-lock.ts` for the reasoning; CD14 pins it to real behaviour.
+     * It lives in `@mj-biz-apps/sales-entities` so the Explorer Deal form and the workspace apply the
+     * same list. A second copy here would drift, and the drift would only ever surface as a user typing
+     * into a field the server then refuses. See `close-lock.ts`; CD14 pins it to real behaviour.
+     *
+     * A FUNCTION, not a constant, since golive#206's "Loss Notes (Lost deals only)": the answer depends
+     * on the deal's outcome, so the outcome has to reach it. It used to be a flat `ReadonlySet` held in
+     * a static, which is precisely how a caller ends up with the list and without the condition.
      */
-    private static readonly LOCK_EDITABLE_FIELDS = DEAL_FIELDS_EDITABLE_WHILE_LOCKED;
+    private static lockEditableFields(isLost: boolean): ReadonlySet<string> {
+        return DealFieldsEditableWhileLocked(isLost);
+    }
+
+    /**
+     * The child collections that stay editable on a locked deal.
+     *
+     * Named here rather than in `sales-entities` because, unlike the field list, no other surface needs
+     * it yet: the grids decide their own New/delete affordances. If a form ever has to render this, it
+     * moves next to `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` for the same reason that one moved.
+     *
+     * ── WHAT THIS DOES AND DOES NOT CATCH TODAY ─────────────────────────────────────────────────
+     *
+     * The Deal declares exactly TWO child collections (`metadata/entity-relationships`):
+     * `PaymentSchedule` and `Team`. Both are named here, so `dirtyCollections` below is currently
+     * always empty and this check refuses nothing in practice.
+     *
+     * That is deliberate and it is not the same as the check being pointless. It is an ALLOW-LIST, so
+     * a collection added later is refused without anyone remembering to add it — which is the whole
+     * property the previous "freeze every dirty companion" rule existed for. What it means is that
+     * the freeze direction has no companion to demonstrate it on right now, and no check can prove
+     * it until a third collection exists. Said out loud so nobody reads the guard as tested.
+     *
+     * ORDER LINES ARE NOT A COMPANION OF THE DEAL and never were — they belong to the ORDER, in the
+     * Orders app. An earlier version of this comment listed `Lines` alongside these two, which made
+     * this look like the thing freezing them. It is not: that is bizapps-orders#206, which adds a veto
+     * seam Sales registers into.
+     */
+    private static readonly LOCK_EDITABLE_COMPANIONS: ReadonlySet<string> = new Set<string>([
+        'Team',
+        'PaymentSchedule',
+    ]);
 
     /**
      * Runs `body` with the close lock suppressed, and always restores it.
@@ -1605,44 +1905,103 @@ export class DealEntityServer extends DealEntity {
      * the current value instead would make a deal impossible to close.
      */
     /**
-     * The refusal for a status write that would lock the deal without closing it.
+     * Refuse this save, and leave the reason where the CALLER reads it.
      *
-     * Null in every ordinary case, including the three that look similar and are not:
+     * ── WHY LOGGING WAS NOT ENOUGH ────────────────────────────────────────────────
      *
-     *   · a DECLARED transition — `Sales.CloseDeal` announced itself, so the close is running;
-     *   · LEAVING a locking status — that is a reopen, and the close lock already refuses a bare one,
-     *     with a message that names `Sales.ReopenDeal`;
-     *   · a status that does not lock — ordinary pipeline movement, which is most saves.
+     * Every refusal in `Save` used to be `LogError(...)` followed by `return false`, so a caller got a
+     * bare `false` and the reason went to the server log. golive#207 row 18 is explicit about what that
+     * message is for: row 17 is what the FORM shows a person, and row 18 is "what the save returns to
+     * whoever asked — the form, an import, an agent or a raw API call". Logged, it returned to nobody.
+     * The form looked fine only because `DealFormComponentExtended.Validate()` produces row 17 for
+     * itself; every other caller got silence.
      *
-     * Creation is excluded too: a deal born closed has no transition to have run, and the opening
-     * default (`needsStatusDefault`) would otherwise be read as one.
+     * `RegisterResultHistoryEntry` is what core uses to record a failed write, and it is what puts the
+     * text on `LatestResult` — registered rather than assigned, because `LatestResult` returns null
+     * when the history is empty while TYPING itself non-null, which is how the same mistake reached
+     * production in orders' line delete.
      */
-    private async bareCloseRefusal(): Promise<string | null> {
-        const field = this.GetFieldByName('DealStatusTypeID');
-        const target = this.DealStatusTypeID;
-        // The cheap half first, so an ordinary save costs no status lookups at all — this runs on
-        // every save, and most saves do not touch the status.
-        if (!this.IsSaved || this._declaredTransition || !field?.Dirty || !target) {
-            return null;
+    private refuseSave(message: string): false {
+        /**
+         * PUT THE CALLER'S STATUS BACK BEFORE REFUSING, or the retry they were just invited to make
+         * silently does nothing.
+         *
+         * The status is reverted to its persisted value above so the close lock sees a clean field.
+         * That revert is correct for a save that PROCEEDS. On a refusal it is a trap: the field is now
+         * clean, so a caller who reads this message, fixes what it named and saves the SAME object gets
+         * `planStatusTransition() === null` on `!field?.Dirty`, no close runs, the other edits commit,
+         * and `Save()` returns TRUE. An open deal carrying a loss reason, and a caller told it worked.
+         *
+         * Restored HERE rather than at each `return false` for the reason the `finally` above exists:
+         * the bug is always the exit somebody adds later, and there are four of these already.
+         */
+        if (this._revertedStatusTarget) {
+            this.Set('DealStatusTypeID', this._revertedStatusTarget);
         }
-        const priorID = (field.OldValue as string | null) ?? null;
-        const facts: StatusTransitionFacts = {
-            IsSaved: true,
-            HasDeclaredTransition: false,
-            StatusIsDirty: true,
-            TargetLocks: await this.statusLocksDeal(target),
-            PriorLocks: priorID ? await this.statusLocksDeal(priorID) : null,
-        };
-        if (!IsBareCloseWrite(facts)) {
-            return null;
+        LogError(`DealEntityServer.Save refused: ${message}`);
+        const failed = new BaseEntityResult();
+        failed.Success = false;
+        failed.Type = this.IsSaved ? 'update' : 'create';
+        failed.Message = message;
+        failed.StartedAt = new Date();
+        failed.EndedAt = new Date();
+        failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
+        this.RegisterResultHistoryEntry(failed);
+        return false;
+    }
+
+    /**
+     * Report a failure that happened AFTER `super.Save()` already registered a SUCCESS result.
+     *
+     * ── WHY THIS IS NOT `refuseSave` ──────────────────────────────────────────────────────────────
+     *
+     * `Save()` returning false was, on these paths, the ONLY signal. `super.Save()` had already
+     * registered a success entry and `this.Load(this.ID)` does not clear the history -- core guards
+     * its `init()` with `if (!this.IsSaved)` and the deal is saved -- so a caller doing the obvious
+     * thing read:
+     *
+     *     await deal.Save()                 -> false
+     *     deal.LatestResult.Success         -> TRUE
+     *     deal.LatestResult.CompleteMessage -> undefined  -> "Unknown error"
+     *
+     * A caller following exactly the pattern `deal-workspace.service.ts` uses was told the save
+     * succeeded. Worse than silent: the last thing on the history contradicted the return value.
+     *
+     * Two things differ from `refuseSave` and both matter:
+     *
+     * 1. IT DOES NOT PUT THE STATUS BACK. `refuseSave` restores the caller's target because nothing
+     *    was written and a retry must still carry it. Here the row has already moved (or been rolled
+     *    back) and `Load()` has resynced this object to it -- re-dirtying a field to a value the
+     *    database just rejected would invite the same failure on the next save.
+     * 2. IT CARRIES THE OPERATION'S ISSUES. `CloseDealOperation` returns a structured `Issues` array
+     *    which was being joined into a `LogError` and dropped. Those sentences are the only thing
+     *    that says WHY the close refused, and they are what the user needs.
+     *
+     * AND WHY NOT A TRANSACTION, since "both or neither" is the obvious wish: the transition reaches
+     * bizapps-contracts and bizapps-orders through seams, so there is no single database to be atomic
+     * in; `CloseDealOperation` is a remote operation that owns its own scope and rollback; and it
+     * loads its own copy of this deal, which is exactly why it must run after the commit rather than
+     * inside it. Atomicity is not available here, so honesty about the partial apply is the fix.
+     * Narrowing the window belongs upstream, in the pre-flight that already refuses a lost close with
+     * no loss reason before a single row moves.
+     */
+    private reportPostSaveFailure(message: string, issues: readonly string[] = []): false {
+        // Into the MESSAGE, not only into `Errors`: `CompleteMessage` is what the resolver reads, and
+        // it builds from `Message`. An issue list that renders nowhere is the defect being fixed.
+        const full = issues.length > 0 ? `${message} ${issues.join(' | ')}` : message;
+        LogError(`DealEntityServer.Save: ${full}`);
+        const failed = new BaseEntityResult();
+        failed.Success = false;
+        failed.Type = this.IsSaved ? 'update' : 'create';
+        failed.Message = full;
+        if (issues.length > 0) {
+            failed.Errors = issues.map((issue) => ({ Message: issue, Source: 'DealEntityServer' }));
         }
-        return (
-            'this status closes the deal, and closing it needs the close to actually run — the stage ' +
-            'event, the contract and the finance tasks for a won deal, the loss reason and the voided ' +
-            'order for a lost one. Setting DealStatusTypeID on its own would lock the deal without any ' +
-            'of that, and the lock would then refuse the status field, so it could not be undone. Close ' +
-            'it through Sales.CloseDeal.'
-        );
+        failed.StartedAt = new Date();
+        failed.EndedAt = new Date();
+        failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
+        this.RegisterResultHistoryEntry(failed);
+        return false;
     }
 
     private async checkCloseLock(): Promise<string | null> {
@@ -1650,7 +2009,8 @@ export class DealEntityServer extends DealEntity {
         if (!persistedStatusID) {
             return null;
         }
-        if (!(await this.statusLocksDeal(persistedStatusID))) {
+        const persisted = await this.readStatusLockFlags(persistedStatusID);
+        if (!persisted.LocksDeal) {
             return null;
         }
 
@@ -1659,40 +2019,101 @@ export class DealEntityServer extends DealEntity {
         // whether this one edit was permitted.
         this._lockedAtSave = true;
 
-        const changed = this.Fields.filter(
-            (f) => f.Dirty && !DealEntityServer.LOCK_EDITABLE_FIELDS.has(f.Name),
-        ).map((f) => f.Name);
+        /**
+         * The outcome decides one field. golive#206: Loss Notes stays editable on a LOST deal and is
+         * frozen on a won one, and the form asks the same function with the same flag — both take it
+         * from the status ROW, never from a name.
+         */
+        const editable = DealEntityServer.lockEditableFields(persisted.IsLost);
+
+        /**
+         * `OwnerEmployeeID` IS FROZEN, AND IS STILL WRITTEN HERE WHEN THE ROSTER DRIVES IT.
+         *
+         * It stays out of the editable set on purpose — `SD26` proves a hand-set one is refused, and
+         * golive#206 classes Owner as server-written provenance. But golive#206 item 2 also says
+         * reassigning a rep on a closed deal is record-keeping and must be allowed, and the stamp has
+         * to follow the roster when it does.
+         *
+         * The form's team panel edits `DealTeamMember` rows, leaving this field clean, so it passed.
+         * `DealEntity.SetOwner()` assigns the stamp itself after loading the roster, so it arrived here
+         * DIRTY and the lock refused it — which is the deal workspace's owner picker, and it did not
+         * work on a closed deal. `CD29` is that case.
+         *
+         * Asking `RosterDrivesThisSave` is the same question `ownerStampEditRefusal` already asks, which
+         * is what stops the two from disagreeing again. It grants nothing a caller could exploit:
+         * `stampOwnerFromTeam` re-derives the value from the roster a moment later.
+         */
+        const frozen = (f: { Dirty: boolean; Name: string }): boolean =>
+            f.Dirty
+            && !editable.has(f.Name)
+            && !(f.Name === 'OwnerEmployeeID' && this.RosterDrivesThisSave);
+        const changed = this.Fields.filter(frozen).map((f) => f.Name);
 
         /**
          * THE CHILD COLLECTIONS COUNT AS CHANGES TOO, and this half did not exist when the lock was
          * written — the collections did not exist either.
          *
-         * A deal's lines are exactly what a contract and an order were derived from, so editing or
-         * removing one on a closed deal falsifies the same provenance the header lock protects. But
-         * `Lines`, `PaymentSchedule` and `Team` are COMPANIONS, not fields: they never appear in
-         * `this.Fields`, so the header check above cannot see them. Without this the lock would refuse a
-         * renamed deal and happily accept a deleted line, which is the more damaging edit of the two.
+         * `PaymentSchedule` and `Team` are COMPANIONS, not fields: they never appear in `this.Fields`,
+         * so the header check above cannot see them at all. Without this half, the lock would refuse a
+         * renamed deal while a companion edit went straight through.
          *
-         * Enumerated as `Companions` rather than as the three collections by name, deliberately: anything
-         * that contributes work to this record's save is something the lock has to see, and naming them
-         * individually would mean a collection added later is silently unprotected.
+         * A deal's ORDER LINES are exactly what a contract was derived from, and they are NOT reachable
+         * from here — they belong to the order, in the Orders app, and this entity never sees them.
+         * Freezing those is bizapps-orders#206.
+         *
+         * WHICH COLLECTIONS ARE FROZEN IS NOW AN ALLOW-LIST, AND THE DIRECTION MATTERS
+         * (bc-aidp-next-golive#206 item 2). Reassigning a rep or correcting a payment schedule after a
+         * close is record-keeping, not a change to what was agreed, so `Team` and `PaymentSchedule` are
+         * permitted — which today is both of them.
+         *
+         * This was previously "freeze every dirty companion", enumerated that way deliberately so that a
+         * collection added later would be protected without anyone remembering to add it. That property
+         * is kept -- which is why this names what is ALLOWED rather than what is frozen. Listing the
+         * frozen ones instead would leave the next collection silently editable on a closed deal, and
+         * that is the failure the original comment was written against.
          *
          * Guarded by the same already-closed test, so the closing transition may still carry final
          * collection state — a close that writes its last line is legal; editing that line tomorrow is
          * not.
          */
         const dirtyCollections = this.Companions
-            .filter((c) => c.Dirty)
+            .filter((c) => c.Dirty && !DealEntityServer.LOCK_EDITABLE_COMPANIONS.has(c.Name))
             .map((c) => c.Name);
 
         const all = [...changed, ...dirtyCollections];
         if (all.length === 0) {
             return null;
         }
-        return (
-            `this deal is closed and locked; ${all.join(', ')} cannot be changed. ` +
-            `Reopen it through Sales.ReopenDeal, which records a reason.`
-        );
+        /**
+         * golive#207 row 18, verbatim: "This deal is closed. {fields} cannot be changed until the
+         * status is set back to Open."
+         *
+         * The third of the three lock messages, with rows 16 and 17 on this PR. It began on the #205
+         * branch, which is where the sentence became TRUE -- until that trigger landed, a status write
+         * could not reopen a deal and this refusal had to send the reader to `Sales.ReopenDeal`. It is
+         * here instead so that one PR owns one issue, and the sequencing the tester already called out
+         * ("the three lock messages assume the close/reopen issue lands") is unchanged: this PR merges
+         * with #205's, never before it.
+         *
+         * NOTHING IS APPENDED FOR INTEGRATORS. An earlier revision added a second sentence naming
+         * `Sales.ReopenDeal` and its arguments, on the reasoning that this string reaches an API caller
+         * as well as a person. Once setting the status back RUNS the reopen from any path, that is the
+         * same instruction spelled longer. A caller who wants the operation directly still finds it
+         * named, with its arguments, in the refusal a close that cannot run produces.
+         *
+         * {fields} IS INTERPOLATED, not spelled out, which the tester asked for in the same breath:
+         * the notice "should match whatever #206 settles on". #206 item 3 grows that set from two fields to
+         * six -- seven on a Lost deal -- and a hardcoded sentence would have started lying the day
+         * it merged.
+         *
+         * THE SAME LABELS AND THE SAME JOIN AS ROW 16. This sentence used to print raw column names
+         * while row 16 printed the on-screen ones, so one refusal said "DealStatusTypeID" and the other
+         * said "Deal Status" about the same field. `DealFieldLabel` falls back to the field name, so a
+         * frozen field nobody has labelled still reads as its column ─ slightly wrong, rather than
+         * taking the notice down.
+         */
+        const named = JoinLabels(all.map(DealFieldLabel));
+        return `This deal is closed. ${named} cannot be changed until the status is set back to Open.`;
     }
 
     /**
@@ -1702,24 +2123,51 @@ export class DealEntityServer extends DealEntity {
      * working. It is also why the lock is a property of the STATUS TYPE rather than of the stage.
      */
     private async statusLocksDeal(statusID: string): Promise<boolean> {
+        return (await this.readStatusLockFlags(statusID)).LocksDeal;
+    }
+
+    /**
+     * The two flags the lock needs off a status row: does it lock the deal, and is it a LOSS.
+     *
+     * One read for both, because every caller that wants the second also wants the first, and two
+     * round trips for two columns of one row is a cost with nothing to show for it.
+     *
+     * ── THE TWO FAILURE DEFAULTS POINT THE SAME WAY ─────────────────────────────────────────────
+     *
+     * `LocksDeal` FAILS CLOSED: if the status cannot be read we cannot prove the deal is unlocked, and
+     * wrongly allowing an edit to a closed deal is the more expensive mistake. `IsLost` fails to
+     * `false` for the same reason read the other way round — `false` means Loss Notes is NOT carved
+     * out, so an unreadable status refuses more, never less.
+     *
+     * ── AND THAT IS WHY `Read` IS REPORTED SEPARATELY ──────────────────────────────────────
+     *
+     * "Refuses more, never less" holds for the LOCK and inverts for the TRIGGER. `planStatusTransition`
+     * reads `LocksDeal` to mean "the target status closes the deal", so the same fail-closed default
+     * turns a transient read failure into a REAL CLOSE — stage event, contract, finance tasks, a voided
+     * order — on a save that asked for none of it. One default cannot serve both readings, so callers
+     * are told whether the row was actually read and decide for themselves.
+     */
+    private async readStatusLockFlags(
+        statusID: string,
+    ): Promise<{ LocksDeal: boolean; IsLost: boolean; Read: boolean }> {
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
             {
                 EntityName: DEAL_STATUS_ENTITY,
                 ExtraFilter: `ID = '${statusID}'`,
                 ResultType: 'simple',
-                Fields: ['LocksDeal'],
+                Fields: ['LocksDeal', 'IsLost'],
             },
             this.ContextCurrentUser,
         );
         if (!result.Success) {
-            // FAIL CLOSED. If the status cannot be read we cannot prove the deal is unlocked, and
-            // wrongly allowing an edit to a closed deal is the more expensive mistake.
-            LogError(`DealEntityServer.statusLocksDeal: could not read status ${statusID}: ${result.ErrorMessage}`);
-            return true;
+            LogError(
+                `DealEntityServer.readStatusLockFlags: could not read status ${statusID}: ${result.ErrorMessage}`,
+            );
+            return { LocksDeal: true, IsLost: false, Read: false };
         }
-        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean } | undefined;
-        return row?.LocksDeal === true;
+        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean } | undefined;
+        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row };
     }
 
     /* ── Selling company ────────────────────────────────────────────────────── */
@@ -1814,7 +2262,7 @@ export class DealEntityServer extends DealEntity {
      * conditions mirror `stampOwnerFromTeam`'s guard exactly, which is what keeps them from disagreeing.
      */
     private ownerStampEditRefusal(): string | null {
-        if (this.Team.IsLoaded || this.Team.Count > 0) {
+        if (this.RosterDrivesThisSave) {
             return null;   // the roster is part of this save; the stamp is derived from it below
         }
         if (!this.callerSuppliedValue('OwnerEmployeeID', this.OwnerEmployeeID)) {
@@ -1826,8 +2274,26 @@ export class DealEntityServer extends DealEntity {
         );
     }
 
+    /**
+     * Is the ROSTER driving this save, rather than a caller naming an owner out of thin air?
+     *
+     * Three places need this answer and they must never disagree, which is how a defect got in:
+     * `ownerStampEditRefusal` and `stampOwnerFromTeam` each spelled the condition out, `checkCloseLock`
+     * did not ask at all, and `DealEntity.SetOwner()` — which loads the roster and then assigns the
+     * stamp — was refused on a locked deal for editing a frozen field. golive#206 item 2 says
+     * reassigning a rep after close is record-keeping and must be allowed.
+     *
+     * `Team.Load()` is what makes it true, and `SetOwner` calls it first. A caller who hand-sets
+     * `OwnerEmployeeID` without touching the roster gets `false` here and the refusal it deserves.
+     * A caller who sets BOTH gets no advantage: `stampOwnerFromTeam` re-derives the stamp from the
+     * roster afterwards and overwrites whatever was supplied.
+     */
+    private get RosterDrivesThisSave(): boolean {
+        return this.Team.IsLoaded || this.Team.Count > 0;
+    }
+
     private async stampOwnerFromTeam(): Promise<void> {
-        if (!this.Team.IsLoaded && this.Team.Count === 0) {
+        if (!this.RosterDrivesThisSave) {
             return; // the roster is not part of this save; leave the stamp alone
         }
 

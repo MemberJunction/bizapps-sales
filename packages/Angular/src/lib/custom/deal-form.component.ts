@@ -23,25 +23,29 @@
  *
  * `Deal.Amount` is a CACHED ANSWER from Orders, stamped with `AmountIsComputed` / `AmountComputedAt` /
  * `AmountSourceHash`. Sales never recomputes it — this form does not add, multiply or round anything. It
- * only COMPARES timestamps: if a line has been touched since the amount was computed, the amount on
- * screen predates the line set it claims to describe, and the form says so.
+ * only COMPARES the cached figure with the order's current total: if they differ, the number on screen
+ * no longer describes the order it claims to, and the form says so.
  *
  * That comparison is not pricing. It is the difference between showing a number and vouching for one.
+ *
+ * It compares the NUMBER, not a timestamp, and `amount-freshness.ts` records why: the timestamp test
+ * asked whether a line had been touched, and closing a deal touches every line without moving a price —
+ * so every Won deal warned forever about an amount it was simultaneously forbidden to change
+ * (golive#230).
  *
  * @module @mj-biz-apps/sales-ng
  */
 import { Component } from '@angular/core';
-import { RunView } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
-import { DEAL_FIELDS_EDITABLE_WHILE_LOCKED, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
+import {
+    DealFieldsEditableWhileLocked,
+    ResolveDealAmountFreshness,
+    ResolveDealLockState,
+} from '@mj-biz-apps/sales-entities';
 import type { ValidationResult } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
-
-// The lines whose freshness the stale-amount notice checks are ORDER lines now (S-US4), reached
-// through the deal's embedded order rather than by DealID -- see the filter below.
-const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
 
 /** See `deal-stage-event-form.component.ts` for why the priority is explicit rather than import-order. */
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Sales: Deals', 2)
@@ -54,10 +58,18 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     /** True when the PERSISTED status locks the deal. Resolved once per load. */
     public IsLocked = false;
 
+    /**
+     * Whether the locking status is a LOSS — which decides exactly one field.
+     *
+     * golive#206 keeps Loss Notes editable on a lost deal and frozen on a won one. Resolved once, with
+     * the lock, by `ResolveDealLockState`, and handed to the panels; nothing here reads a status name.
+     */
+    public IsLost = false;
+
     /** Shown when locked, so the greyed-out-ness the form cannot render is at least explained. */
     public LockNotice: string | null = null;
 
-    /** Set when `Deal.Amount` predates its line set. Null when the amount is trustworthy or absent. */
+    /** Set when `Deal.Amount` no longer matches its order's total. Null when trustworthy, absent or locked. */
     public StaleAmountNotice: string | null = null;
 
     public override async ngOnInit(): Promise<void> {
@@ -69,7 +81,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
 
     /** The fields a user may still edit right now — everything when open, the carve-outs when locked. */
     public EditableFieldNames(): readonly string[] | null {
-        return this.IsLocked ? [...DEAL_FIELDS_EDITABLE_WHILE_LOCKED] : null;
+        return this.IsLocked ? [...DealFieldsEditableWhileLocked(this.IsLost)] : null;
     }
 
     /**
@@ -82,53 +94,33 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         const persisted = this.record?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
         const lock = await ResolveDealLockState(persisted);
         this.IsLocked = lock.IsLocked;
+        this.IsLost = lock.IsLost;
         this.LockNotice = lock.Notice;
     }
 
     /**
-     * Compares the amount's stamp against the lines it claims to describe. No arithmetic.
+     * Compares the cached amount against the order it claims to describe. No arithmetic.
+     *
+     * The rule lives in `ResolveDealAmountFreshness` so this form and the deal hero cannot answer it
+     * differently — the same reason `ResolveDealLockState` is shared. Read that file's header for why
+     * this is no longer a timestamp comparison (golive#230).
+     *
+     * ORDER MATTERS: `resolveCloseLock()` runs first in `ngOnInit`, so `IsLocked` is settled before it
+     * is passed here. A locked deal never warns.
      */
     private async resolveAmountFreshness(): Promise<void> {
-        const computedAt = this.record?.Get?.('AmountComputedAt') as string | Date | null | undefined;
-        const isComputed = this.record?.Get?.('AmountIsComputed') as boolean | null | undefined;
-        if (!isComputed || !computedAt || !this.record?.Get?.('ID')) {
+        this.StaleAmountNotice = null;
+        if (!this.record?.Get?.('ID')) {
             return;
         }
 
-        // No order means no lines, so nothing can have gone stale.
-        const orderID = this.record.Get('OrderID');
-        if (!orderID) {
-            return;
-        }
-
-        const rv = new RunView();
-        /**
-         * `__mj_UpdatedAt` is typed as `string | Date` because BOTH arrive.
-         *
-         * MJ v6 hands back real `Date` objects where v5 handed back ISO strings, and this repo has already
-         * been caught by that once (`7e55bae`, "dates arrive as Date, not string — the Sales UI assumed
-         * string"). Typing it `string` compiles perfectly and would be wrong at runtime the moment the
-         * value is used as one. `new Date()` accepts either, so the comparison below is safe on both.
-         */
-        const result = await rv.RunView<{ __mj_UpdatedAt: string | Date }>({
-            EntityName: E_ORDER_LINE,
-            // BY OrderHeaderID, NOT DealID. An order line carries no DealID -- the deal reaches its lines
-            // through OrderID. Filtering on the deal's own key would have matched nothing and the notice
-            // would simply never appear again: a warning that silently stops warning.
-            ExtraFilter: `OrderHeaderID = '${String(orderID).replace(/'/g, "''")}'`,
-            OrderBy: '__mj_UpdatedAt DESC',
-            ResultType: 'simple',
-            Fields: ['__mj_UpdatedAt'],
+        const freshness = await ResolveDealAmountFreshness({
+            IsLocked: this.IsLocked,
+            AmountIsComputed: this.record.Get('AmountIsComputed') as boolean | null | undefined,
+            Amount: this.record.Get('Amount') as number | string | null | undefined,
+            OrderID: this.record.Get('OrderID') as string | null | undefined,
         });
-        const newest = result?.Success ? (result.Results ?? [])[0]?.__mj_UpdatedAt : undefined;
-        if (!newest) {
-            return;
-        }
-
-        if (new Date(newest).getTime() > new Date(computedAt).getTime()) {
-            this.StaleAmountNotice =
-                'A line has changed since this amount was last priced. Reprice the order to update the total.';
-        }
+        this.StaleAmountNotice = freshness.Notice;
     }
 
     /**
@@ -143,9 +135,8 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return result;
         }
 
-        const frozen = this.record.Fields.filter(
-            (f) => f.Dirty && !DEAL_FIELDS_EDITABLE_WHILE_LOCKED.has(f.Name),
-        );
+        const editable = DealFieldsEditableWhileLocked(this.IsLost);
+        const frozen = this.record.Fields.filter((f) => f.Dirty && !editable.has(f.Name));
         if (frozen.length === 0) {
             return result;
         }
@@ -154,9 +145,17 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         for (const field of frozen) {
             result.Errors.push({
                 Source: field.Name,
-                Message:
-                    'Frozen: this deal is closed and locked. Reopen it through Sales.ReopenDeal, which ' +
-                    'records a reason, if this genuinely needs to change.',
+                /**
+                 * golive#207 row 17, verbatim: "This deal is closed. Set the status back to Open
+                 * before changing this field."
+                 *
+                 * The old text named `Sales.ReopenDeal` — an API operation — to a person who had just
+                 * typed into a form field. It also said "Frozen:" twice over, once as a prefix and
+                 * once as the sentence. What a person needs here is the one action that unblocks them,
+                 * and since golive#205 that action is genuinely available from this form: the status
+                 * control routes to the reopen.
+                 */
+                Message: 'This deal is closed. Set the status back to Open before changing this field.',
                 Value: field.Value,
                 Type: 'Failure',
             });

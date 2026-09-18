@@ -113,7 +113,7 @@ jobs:
       # Was unwired AND unable to fail: no sys.exit, and a path hardcoded into another working copy, so it
       # audited 15 files nobody was shipping and reported clean about them. Both fixed.
       - name: Query comment-drift gate (a documented column that is not returned)
-        run: python scripts/assert-no-comment-drift.py
+        run: pnpm run test:drift-gate
 
       # PLAYWRIGHT STRIPS TYPES RATHER THAN CHECKING THEM, so a spec that calls a function it never
       # imported ships and fails at RUNTIME, inside a test, frames from the reporting assertion. All 21

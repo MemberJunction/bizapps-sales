@@ -86,7 +86,11 @@ const QUERIES = [
     ['Sales: Forecast History', { ...SLICED, CapturedOnOrBefore: '2099-12-31' }],
     ['Sales: Forecast by Owner', { ...SLICED, OwnerEmployeeID: owner?.OwnerEmployeeID }],
     ['Sales: Deal Roster', { ...SLICED, OwnerEmployeeID: owner?.OwnerEmployeeID, OpenOnly: 'true' }],
-    ['Sales: Dashboard Summary', { CompanyID: company?.CompanyID, PipelineID: pipeline?.PipelineID }],
+    // WIDE included since golive#232: WonCount now takes an optional period window. Without the
+    // period parameters the parameterised run would never reach the new predicate, and a filter that
+    // is never exercised reports clean — which is the exact failure shape this harness exists for.
+    // The window is deliberately wide so the run still produces qualifying rows and EVIDENCE holds.
+    ['Sales: Dashboard Summary', { CompanyID: company?.CompanyID, PipelineID: pipeline?.PipelineID, ...WIDE }],
 ];
 
 // Aggregates return a row over an empty set, so "rows came back" does not prove the joins were
