@@ -42,7 +42,7 @@
  */
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CompositeKey, Metadata, type EntityInfo } from '@memberjunction/core';
+import { CompositeKey, LogError, Metadata, type EntityInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
@@ -91,6 +91,17 @@ import {
     type InspectKey,
     type OwnerBar,
 } from '../pages/dashboard-inspect';
+import {
+    CALENDAR_YEAR_START,
+    DescribeFiscalBasis,
+    FormatWindow,
+    PERIOD_OPTIONS,
+    PeriodParameters,
+    ResolvePeriod,
+    type FiscalYearStartResolution,
+    type PeriodKey,
+    type PeriodWindow,
+} from '../pages/dashboard-period';
 
 /**
  * The account entity, for opening a customer as its own Explorer tab.
@@ -149,6 +160,41 @@ export class MJSSalesSectionComponent implements OnInit {
     public Message = '';
     /** Which slice the inspect grid is showing. Default is closing-soonest (the DB-oracle spec). */
     public InspectFilter: InspectKey = 'closing';
+    /**
+     * The dashboard's reporting period, and what it resolves to.
+     *
+     * ── WHAT IT DOES AND DOES NOT TOUCH (golive#232) ────────────────────────────────────────────
+     *
+     * It bounds exactly three things: the **Won** tile, the **Closed** segment of the forecast stack,
+     * and the **win rate**. Open pipeline, open deals, past expected close, stage mix, close buckets
+     * and commit by owner are the CURRENT BOOK and stay unwindowed — they answer "what is in front of
+     * us now", which a period cannot narrow without changing the question.
+     *
+     * Defaults to the current fiscal quarter, reckoned from accounting's configured fiscal year start
+     * (see `DealWorkspaceService.LoadFiscalYearStart`), not from the calendar.
+     */
+    public Period: PeriodKey = 'quarter';
+    public readonly PeriodOptions = PERIOD_OPTIONS;
+    /**
+     * Where the fiscal year start came from. Starts at the calendar default with `pending` -- NOT
+     * with `no-accounting`.
+     *
+     * The selector and its basis line sit in `.sechead`, which renders OUTSIDE the dashboard's
+     * loading guard, so whatever this holds is on screen from the first paint. Seeding it with
+     * `no-accounting` made that line read "calendar year (BizApps Accounting not installed)" on
+     * every load of a host where accounting IS installed, and left that claim standing permanently
+     * if the read never resolved. `pending` is a state the template can still describe, and it is
+     * the true one until {@link DealWorkspaceService.LoadFiscalYearStart} answers.
+     */
+    public FiscalStart: FiscalYearStartResolution = { Start: CALENDAR_YEAR_START, Basis: 'pending' };
+    /**
+     * A period change is in flight. The figures it bounds are stale until it lands, and the pill and
+     * the footnote have ALREADY moved -- so the template shows those three as pending rather than
+     * letting a reader take last period's Won count for this period's.
+     */
+    public PeriodLoading = false;
+    /** Identifies the newest period request, so a slower superseded one cannot apply late. */
+    private periodToken = 0;
     public WinRateByCount: number | null = null;
     public WinRateByValue: number | null = null;
     public WinClosedCount = 0;
@@ -217,14 +263,28 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Loading = true;
         this.cdr.detectChanges();
 
+        /**
+         * THE FISCAL START IS READ BEFORE THE WINDOWED QUERIES, NOT ALONGSIDE THEM.
+         *
+         * It is what the window is computed FROM, so firing it in the same `Promise.all` would send
+         * the summary and win-rate queries a window derived from whatever `FiscalStart` still held —
+         * on first load, the calendar default. The figures would be right for a January year and
+         * quietly wrong for every other deployment, and they would settle to the correct values on
+         * the next refresh, which is the hardest kind of wrong number to notice.
+         */
+        this.FiscalStart = await this.service.LoadFiscalYearStart();
+        const window = this.Window;
+
         const [roster, lookups, summary, winRate] = await Promise.all([
             this.service.LoadRoster(),
             // Still needed: the BOARD renders from these, and StatusTone reads them for the roster
             // pill. The KPI tiles no longer do -- their flags are applied server-side by the query.
             this.service.LoadLookups(),
             // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
-            this.service.LoadDashboardSummary(),
-            this.service.RunNamedQuery('Sales: Win Rate by Count and Value'),
+            this.service.LoadDashboardSummary(window),
+            // The window reaches win rate through parameters the query ALREADY declared -- it filters
+            // on ActualCloseDate, the same dimension the Won tile now uses, so the two cannot drift.
+            this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
         ]);
         this.Deals = roster;
         this.summary = summary;
@@ -272,6 +332,97 @@ export class MJSSalesSectionComponent implements OnInit {
             return;
         }
         this.nav.OpenEntityRecord(E_ACCOUNT, CompositeKey.FromID(row.AccountID));
+    }
+
+    // ── Reporting period ───────────────────────────────────────────────────────
+
+    /** The resolved bounds of the selected period. Recomputed rather than cached — it is arithmetic. */
+    public get Window(): PeriodWindow {
+        return ResolvePeriod(this.Period, this.FiscalStart.Start, TodayUtc());
+    }
+
+    /** "1 Jul 2026 – 30 Sep 2026" — the bounds spelled out, for a footnote. */
+    public get WindowLabel(): string {
+        return FormatWindow(this.Window);
+    }
+
+    /**
+     * How the fiscal year start was arrived at, in one line.
+     *
+     * Rendered beside the selector because a period control whose boundaries are invisible is the
+     * same defect golive#232 was filed about: a figure that looks settled while meaning something
+     * other than what a reader assumes. If this host fell back to the calendar year, the reader
+     * should learn that here rather than by reconciling a total by hand.
+     */
+    public get FiscalBasisLabel(): string {
+        return DescribeFiscalBasis(this.FiscalStart);
+    }
+
+    /**
+     * Change the reporting period and re-read ONLY what the period bounds.
+     *
+     * The roster is deliberately not refetched. It is not period-bound — the board, the stage mix,
+     * the close buckets and commit-by-owner all read that same array and must not move when a
+     * dashboard control changes — and re-fetching it would also blank those surfaces mid-interaction
+     * for no gain. The stack's Closed segment narrows from the roster already in hand, through the
+     * same predicate the server applies to the tile.
+     */
+    public async SetPeriod(key: PeriodKey): Promise<void> {
+        if (key === this.Period) {
+            return;
+        }
+        this.Period = key;
+        /**
+         * EVERY RESPONSE IS CHECKED AGAINST THE SELECTION THAT IS CURRENT WHEN IT LANDS.
+         *
+         * Two clicks in quick succession put two pairs of queries in flight, and nothing orders the
+         * responses. Without this token the slower one wins whenever it finishes last, leaving the
+         * Won tile and the win rate showing All-time figures under a pill and a footnote that both
+         * say "last quarter" -- and staying that way, because `Refresh()` is the only thing that
+         * would correct it and a period change does not call it. A superseded reply is discarded
+         * rather than applied late.
+         */
+        const token = ++this.periodToken;
+        this.PeriodLoading = true;
+        this.cdr.detectChanges();
+        try {
+            const window = this.Window;
+            const [summary, winRate] = await Promise.all([
+                this.service.LoadDashboardSummary(window),
+                this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
+            ]);
+            if (token !== this.periodToken) {
+                return;
+            }
+            this.summary = summary;
+            this.applyWinRate(winRate);
+            // The Won slice is period-bound, so a narrowing period changes which deals Inspect should
+            // be listing. Refreshing the view keeps the grid showing the set the tile just counted.
+            if (this.InspectFilter === 'won') {
+                await this.refreshInspectView();
+            }
+        } catch (e) {
+            /**
+             * A THROW USED TO ESCAPE AS AN UNHANDLED REJECTION, with `Period` already flipped -- so
+             * the pills showed the new period, the figures were the old one's, and the early
+             * `key === this.Period` return above meant clicking the same pill again would not retry.
+             * Clearing the summary makes the failure visible (`Kpis` renders em-dashes and "figures
+             * unavailable") instead of presenting stale numbers under a new label.
+             */
+            if (token === this.periodToken) {
+                this.summary = null;
+                this.WinRateByCount = null;
+                this.WinRateByValue = null;
+                this.WinClosedCount = 0;
+                this.WinWonCount = 0;
+                LogError(`Sales: reporting period '${key}' failed to load - ${e instanceof Error ? e.message : String(e)}`);
+            }
+        } finally {
+            if (token === this.periodToken) {
+                this.PeriodLoading = false;
+                this.cdr.detectChanges();
+            }
+        }
     }
 
     // ── Dashboard ──────────────────────────────────────────────────────────────
@@ -350,8 +501,27 @@ export class MJSSalesSectionComponent implements OnInit {
             },
             {
                 Label: 'Won',
-                Value: String(s.WonCount),
-                Footnote: 'closed won to date',
+                /**
+                 * PENDING WHILE THE PERIOD IS CHANGING, because `Period` flips synchronously on the
+                 * click and the footnote below moves with it, while `s.WonCount` is still the figure
+                 * the PREVIOUS period returned. Rendering it would put last period's count under this
+                 * period's dates for the length of a round trip — a tile that looks settled while
+                 * meaning something else, which is the defect golive#232 was filed about.
+                 */
+                Value: this.PeriodLoading ? '…' : String(s.WonCount),
+                /**
+                 * THE FOOTNOTE NAMES THE PERIOD, because the tile's value no longer speaks for itself.
+                 *
+                 * It read "closed won to date" while the three tiles beside it described the current
+                 * book, which is the mismatch golive#232 reported. Now that the figure is windowed,
+                 * saying WHICH window is what stops the same confusion arriving from the other
+                 * direction — a reader seeing a smaller number and assuming deals went missing.
+                 */
+                Footnote: this.PeriodLoading
+                    ? `counting ${this.Period === 'alltime' ? 'all time' : this.WindowLabel}…`
+                    : this.Period === 'alltime'
+                        ? 'closed won · all time'
+                        : `closed won · ${this.Window.Label.toLowerCase()} (${this.WindowLabel})`,
                 Filter: 'won',
             },
         ];
@@ -399,7 +569,9 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     public get InspectRows(): DealRosterRow[] {
-        return FilterInspect(this.Deals, this.InspectFilter, TodayUtc());
+        // The window is passed so the `won` slice lists exactly the deals the Won tile counted. Every
+        // other slice ignores it -- they are about the open book, which the period does not bound.
+        return FilterInspect(this.Deals, this.InspectFilter, TodayUtc(), this.Window);
     }
 
     public get InspectLabel(): string {
@@ -417,7 +589,7 @@ export class MJSSalesSectionComponent implements OnInit {
             case 'noowner':
                 return 'Open, no owner';
             case 'won':
-                return 'IsWon';
+                return this.Period === 'alltime' ? 'IsWon · all time' : `IsWon · closed ${this.WindowLabel}`;
             case 'week':
                 return 'Expected close in the next 7 days';
             case 'month':
@@ -462,10 +634,24 @@ export class MJSSalesSectionComponent implements OnInit {
         this.OnInspectOpened(event);
     }
 
+    /**
+     * The forecast stack. `Closed` is bounded by the selected period; the open segments never are.
+     *
+     * `Total` is therefore the sum of two different questions — what landed in the window, and what is
+     * open right now — which is exactly what the card's header tells the reader. See
+     * {@link ForecastSlices} for why it is built this way rather than windowing all four.
+     */
     public get Stack(): { Closed: number; Commit: number; BestOnly: number; PipeOnly: number; Total: number } {
-        const s = ForecastSlices(this.Deals);
+        const s = ForecastSlices(this.Deals, this.Window);
         const Total = s.Closed + s.Commit + s.BestOnly + s.PipeOnly;
         return { ...s, Total };
+    }
+
+    /** What the stack's Closed segment is bounded by, for the card header. */
+    public get StackClosedNote(): string {
+        return this.Period === 'alltime'
+            ? 'Closed is all time · open segments are the current book'
+            : `Closed is ${this.Window.Label.toLowerCase()} · open segments are the current book`;
     }
 
     public StackPct(part: number): string {

@@ -1,5 +1,105 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.5.0
+
+### Patch Changes
+
+- 079111d: Integration checks compile against `common-activity-sync` 5.43.0, which is what the host already runs.
+
+  `packages/IntegrationTests` did not build against 5.43.0. CI was green only because `pnpm-lock.yaml`
+  pinned **5.37.0** — the declared range was `^5.37.0`, which resolves 5.43.0 on any install that does not
+  honour the lockfile, and on any workspace with a local `bizapps-common` checkout linked in.
+
+  **It silently disabled the mutation harness.** `mutate-checks.mjs` builds before applying each mutation,
+  so every mutation reported `BUILD FAILED` and then `skipped` — a skip, not a failure, which is the exact
+  shape `docs/CHECK-MUTATION-EVIDENCE.md` exists to warn about. The harness is how this repo proves a check
+  can fail, and it could not run at all for anyone resolving 5.43.
+
+  Two breaking changes had landed in common between 5.37 and 5.43, both inside a **minor** bump:
+
+  - **`NormalizedItem.HasAttachments` became required** (`4ad78ac`, _"honour IncludeAttachments instead of
+    ignoring it"_). The `item()` fixture built the object without it; it now passes `false`, the honest
+    default for a fixture carrying no attachments.
+  - **`MSGraphCalendarSyncProvider`'s second constructor argument is now an `ActivityMessageTransport`**
+    (`Describe` / `IsLive` / `Fetch` returning a `RawBatch`) rather than a Graph client exposing
+    `GetEvents()`. AC21's stub is rewritten to that seam, carrying the same raw Graph event, so what the
+    check claims is unchanged — only the seam moved. `IsLive: true` is deliberate: before 5.43 the provider
+    hard-coded it, and `FetchRaw` refuses only when live AND not allowed, so `false` would take the other
+    branch and quietly stop testing the path AC21 was written for.
+
+  The range moves to `^5.43.0` and the lockfile follows, so the declared dependency now says what the code
+  actually requires. The MJ host in the linking spike already runs 5.43.0, so sales' server code was
+  executing against 5.43 while its tests compiled against 5.37 — those should not disagree.
+
+  No behaviour change: two test fixtures and a dependency range.
+
+- aaf9189: Five defects the deal-lock stack (sales#72, #73, #78, #79, #80) merged with, and the three checks that were looking the wrong way.
+
+  **A refused save put the caller's status back.** `saveDeclared` reverts `DealStatusTypeID` to its persisted value so the close lock sees a clean field — correct for a save that proceeds, a trap for one that refuses. A caller who read the refusal, fixed what it named and saved the SAME object got `planStatusTransition() === null` on `!field?.Dirty`: no close ran, the other edits committed, and `Save()` returned **true**. An open deal carrying a loss reason, and a caller told it worked. Restored in `refuseSave` rather than at each `return false`, for the same reason the `finally` above it exists — there are four exits and the bug is always the one added later.
+
+  **A stamp failure was silent.** The `catch` around `stampCompanyFromPipeline`/`stampOwnerFromTeam` was `LogError` + `return false`, so `ResolveOwnerRoleID`'s "no active DealRole has IsOwnerRole = 1. Seed one before assigning an owner." — a message that names its own remedy — reached the user as "Unknown error creating record" (bc-aidp-next-golive#216). It now goes through `refuseSave`; the log line still contains the exact substring that issue tells people to grep for.
+
+  **Row 18 printed column names.** `DEAL_FIELD_LABELS` holds exactly the editable-while-locked set plus `DealStatusTypeID` — the fields row 16 lists. Row 18 names the FROZEN fields, none of which were in the map, so every one fell through to its raw column name. The fallback now splits the column name and drops a trailing `ID`, so the map is an override rather than the only source of a label and a column added tomorrow cannot regress it.
+
+  **The reopen test only ever saw one of two panels.** `source.indexOf('public async ConfirmReopen...')` returned the Pipeline panel's copy, so `MJSDealClosePanel` was invisible to it — permanently. That is how the Close panel shipped a reopen which never left edit mode under a green test named for exactly that. It now finds every declaration and asserts about each, and accepts either spelling of the reload (`RefreshRecord()` directly, or `refreshQuietly()`), because pinning one would have failed the panel that does it correctly. Verified against sales#72's tree, where it correctly fails `MJSDealClosePanel`.
+
+  **A Playwright assertion outlived its string.** sales#79 rewrote the closing column's lock title to "Deals cannot be moved here."; `80-board-drag.spec.ts` still asserted `/closes and locks/i`. The Explorer harness is deliberately out of CI, so nothing caught it. `COVERAGE-MAP.md`'s row for that step had drifted independently — it claimed `/workspace/i` where the spec asserts `/form/i` — and now matches.
+
+- 83ca517: A failure after the save now tells the caller what happened, instead of contradicting itself.
+
+  Two paths returned `false` AFTER `super.Save()` had already registered a SUCCESS result: the status-write transition failing, and the `saveWithinScope` catch. `this.Load(this.ID)` does not clear the history — core guards its `init()` with `if (!this.IsSaved)` and the deal is saved — so a caller doing the obvious thing read `Save() === false` beside `LatestResult.Success === true` and a `CompleteMessage` of `undefined`, which the resolver renders as "Unknown error". A caller following exactly the pattern `deal-workspace.service.ts` uses was told the save succeeded. That is worse than silent: the last entry on the history contradicted the return value. Since golive#205 made the status-write trigger the primary close path for importers and agents, it is also the path most likely to hit it.
+
+  `reportPostSaveFailure` is a sibling to `refuseSave` rather than a reuse, because two things genuinely differ. It does **not** restore the caller's status — `refuseSave` does that because nothing was written and a retry must still carry it, whereas here the row has already moved and `Load()` has resynced this object to it, so re-dirtying a field to a value the database just rejected would invite the same failure again. And it carries `CloseDealOperation`'s structured `Issues`, which were being joined into a `LogError` and dropped; those sentences are the only thing that says why the close refused.
+
+  The transition message names both halves — the field edits were saved, the status did not move — because "the save failed" is as wrong as "it worked", and a caller who cannot tell the difference will either re-send edits that already landed or assume a close that never happened. The scope-catch message says whether the rollback itself succeeded, since a clean rollback means retry and a failed one means the row needs looking at first.
+
+  **A transaction was considered and is not available.** The transition reaches bizapps-contracts and bizapps-orders through seams, so there is no single database to be atomic in; `CloseDealOperation` is a remote operation owning its own scope and rollback; and it loads its own copy of the deal, which is why it must run after the commit rather than inside it. Narrowing the window belongs upstream, in the pre-flight that already refuses a lost close with no loss reason before a single row moves.
+
+  `M-CD30` is re-aimed. Its anchor was the registration line plus its `return false`, which stopped being unique the moment the new helper was added beside `refuseSave` — and two matches means the driver SKIPS and exits 1, so CD30 would have lost its proof while reading exactly as before. It now targets `failed.Message`, the line only `refuseSave` has, and isolates what CD30 actually claims: that the refusal's sentence reaches the caller.
+
+- 8f82990: Two defects on a closed deal: the owner could not be reassigned from the workspace, and a refused save told the caller nothing.
+
+  Both were found by writing the check golive#206 item 2 had been missing. Neither would have been found by reading the code, and neither failed any existing check.
+
+  **1. `SetOwner()` was refused on a locked deal.** golive#206 item 2 says reassigning a rep after close is record-keeping and must be allowed, and it held on one surface and not the other. The deal form's Internal team panel edits `DealTeamMember` rows, leaving `Deal.OwnerEmployeeID` clean, so it passed the lock. The deal workspace's owner picker calls `DealEntity.SetOwner()`, which loads the roster and then assigns the stamp itself — so the field arrived at `checkCloseLock` dirty, was counted as an edit to a frozen field, and the save was refused.
+
+  `ownerStampEditRefusal` already knew that assignment was legitimate when the roster drives it; `checkCloseLock` never asked. The condition is now a single `RosterDrivesThisSave` predicate with three readers, which is what stops them disagreeing again — it was spelled out twice and omitted once, and the omission was the bug.
+
+  The carve-out is narrow and grants nothing: `SD26`'s rule stands, a caller who hand-sets `OwnerEmployeeID` without touching the roster is still refused, and `stampOwnerFromTeam` re-derives the stamp from the roster afterwards regardless of what was supplied. `CD29` asserts both directions.
+
+  **2. Every refusal in `Save()` was `LogError`'d and nothing else.** The caller got a bare `false` and the reason went to the server log.
+
+  golive#207 row 18 is explicit about who that message is for: row 17 is what the form shows a person, and row 18 is _"what the save returns to whoever asked — the form, an import, an agent or a raw API call"_. Logged, it returned to nobody. The form looked correct only because `DealFormComponentExtended.Validate()` produces row 17 for itself; every other caller got silence.
+
+  The three refusals now go through a `refuseSave` helper that registers a failed `BaseEntityResult`, so the sentence lands on `LatestResult` where a caller reads it. Registered rather than assigned, because `LatestResult` returns `null` on an empty history while typing itself non-null — the same mistake that reached production in orders' line delete.
+
+  **A source-level test could not have caught this.** `deal-lock-server-refusal-copy.test.ts` proves row 18's sentence is in the file, and it was — every word of it, correct and unreachable. `CD30` runs a real save and reads the message off the result, and it is the only check that does: `M-CD30` returns the refusal to log-only and fells CD30 **alone**, with all 129 other checks still green. That is the measurement of how unread the message was.
+
+  `M-CD6` was re-aimed in passing, because the frozen-field filter it anchored on became a named predicate when the owner carve-out was added. Same mutation, new anchor. Anchor sweep: 97 of 97, 0 skips. Count bumped to 30 / CD1-CD30.
+
+- fe8d94a: A deal status that cannot be read no longer closes the deal.
+
+  `readStatusLockFlags` fails closed — it returns `LocksDeal: true` when the read fails. That is right for the close lock: an unreadable status means we cannot prove the deal is unlocked, so the edit is refused, and an unreadable status refuses more, never less.
+
+  `planStatusTransition` reads the same value to mean _"the target status closes the deal"_. Under the same default, a transient failure on one status row produced a **Close plan** and ran a real close — stage event, contract, finance tasks, a voided order — on a save that asked for none of it. One default, two readings, opposite consequences. The fail-closed instinct that protects the lock is what fires the close.
+
+  Guessing the other way is no better: a status that really does lock would then be written with no close behind it, which is the defect golive#205 was filed about. So neither guess is taken. `readStatusLockFlags` now reports whether it actually read the row, and the trigger refuses the save when it did not — the same instinct `planStageDefaults` already states for its own read, _"Unreadable is treated as do not derive"_, and the same trade: a rep retries one save, rather than a deal closing that nobody asked to close.
+
+  A status the lookup succeeds at but does not **find** is treated the same way. `Success: true` with no rows is not a failure, but it is equally unanswerable — there is no row to say whether that status closes a deal — and the foreign key would refuse the write a moment later with a worse message.
+
+  **The refusal runs BEFORE the status is reverted, and that ordering is what makes the retry work.** The revert exists so the close lock and `super.Save()` do not write a status the transition is about to move; on this path nothing downstream runs, so reverting would serve nothing and would cost the one thing the message asks for. A reverted field is clean, so a caller who reads "try again" and re-saves the same object would get `planStatusTransition() === null` on `!field?.Dirty` — no close, the other edits committed, and `Save()` returning true. Left dirty, the retry reads the status again, which is exactly what a transient failure needs.
+
+  Eight tests, three mutations, all killed: removing the guard (which restores the defect exactly), making the read always claim success, and making the failure path claim success. The three that would have shipped it.
+
+  **Two of those tests were added after re-running the mutations, because the first one was not killed.** Every original test drove `planStatusTransition` and asserted the PLAN was `Unreadable`; none drove `saveDeclared`, where the guard actually lives. So replacing `if (transition?.Kind === 'Unreadable')` with `if (false)` — the defect, exactly — failed nothing. One test even carried the words _"and it must be the one the save refuses"_ while asserting only the plan's Kind. A plan nobody acts on is not a refusal.
+
+  The lock's own behaviour is unchanged — `statusLocksDeal` still fails closed, and a status row that is merely absent still reads as not-locking there, exactly as before.
+
+- Updated dependencies [9404cfc]
+- Updated dependencies [dd4a8d4]
+- Updated dependencies [aaf9189]
+  - @mj-biz-apps/sales-entities@6.5.0
+
 ## 6.4.0
 
 ### Minor Changes

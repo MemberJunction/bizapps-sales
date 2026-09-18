@@ -13,6 +13,23 @@
 --
 -- DATE DIMENSION: ActualCloseDate. A win rate is about deals that closed in the window.
 --
+-- ── A MISSING CLOSE DATE IS EXCLUDED BY THE WINDOW, NOT BY A STANDING `IS NOT NULL` ─────────────
+--
+-- This WHERE used to open with an unconditional `d.ActualCloseDate IS NOT NULL`, which contradicted
+-- the denominator stated three paragraphs up: a closed deal that never recorded its close date is
+-- still a closed deal, and dropping it moved the rate without appearing in either count.
+--
+-- It also put this query out of step with the Won tile. `dashboard-summary.sql` counts every won
+-- deal when no period is supplied, INCLUDING an undated one, so on "All time" the dashboard showed
+-- a Won count next to an "N won / M closed" line computed over a different set, with nothing on
+-- screen explaining the gap.
+--
+-- The guard is not needed for the bounded case either. A comparison against NULL is UNKNOWN, so a
+-- row with no ActualCloseDate fails `>= PeriodStart` and `<= PeriodEnd` on its own -- the same
+-- mechanism `dashboard-summary.sql` relies on inside its `WonCount` CASE. Both queries therefore
+-- now read the same way: an undated win is outside every bounded window and inside the unbounded
+-- one, so it is never invisible everywhere at once.
+--
 -- NULLIF GUARDS BOTH RATES. A period with no closed deals returns NULL rather than dividing by zero,
 -- and NULL is the honest answer: "no rate" is a different fact from "a rate of zero".
 SELECT
@@ -35,7 +52,7 @@ FROM [__mj_BizAppsSales].vwDeals d
 INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
        AND st.IsClosed = 1
-WHERE d.ActualCloseDate IS NOT NULL
+WHERE 1 = 1
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
   {% endif %}

@@ -1,5 +1,234 @@
 # @mj-biz-apps/sales-ng
 
+## 6.5.0
+
+### Minor Changes
+
+- ffa2600: Sales dashboard: a reporting period, defaulting to the current fiscal quarter, bounding the Won tile, the forecast stack's Closed segment and win rate — and nothing else (golive#232).
+
+  The Won KPI counted every won deal ever while the three tiles beside it described the current book, so the forecast stack added an all-time figure to open segments and produced a total that answered no question. UAT read the mismatch off the footnote ("closed won to date") and filed it.
+
+  **The report's premise was half right, and the correction matters.** `Commit` and `Best Case` were drawn from the same unfiltered roster as `Closed`, so the entire stack was all-time, not just its Closed segment. Requirement 3 of the issue says open-deal figures stay unwindowed, so the stack now deliberately mixes a windowed Closed with the current open book — the same mixed-dimension caveat `DECISIONS-NEEDED.md` D-33 already records for `Sales: Forecast by Category` — and the card header says so instead of leaving a reader to add four bars that do not belong to one question.
+
+  **"Fiscal quarter" reads a configuration that already existed, one app over.** `AccountingCompanyProfile.FiscalYearStartMonth`/`FiscalYearStartDay` is per-company, sales already declares accounting as a dependency, its own dev seed already writes those columns, and `deriveFiscalYear()` already reads them — so this adds **no table, no column, no migration**, and the year label follows accounting's convention (labelled by the calendar year it starts in). A copy in sales would have given one fact two homes and let the ledger and the dashboard disagree about FY26 while both looked right. Recorded as `docs/DECISIONS.md` D-FY1; D-28 is annotated, because a fiscal start being readable answers half of what it asked and not the half about monthly capture.
+
+  Accounting may be absent — sales runs standalone — so the read is guarded on metadata first, exactly as the product picker is for orders. And because the setting is per-company while the dashboard is not company-scoped, **profiles that disagree fall back to the calendar year rather than picking one**, which is `deal-board`'s mixed-currency rule applied to a boundary. All four cases are named beside the selector.
+
+  **The window is applied inside the `WonCount` CASE, never in the query's `WHERE`.** A `WHERE` would narrow every column: open pipeline would drop deals closing outside the window and `TotalCount` would stop describing the whole book. Omitting both parameters reproduces the previous all-time count exactly, which is what "All time" selects. `win-rate.sql` already took `PeriodStart`/`PeriodEnd` on the same `ActualCloseDate` dimension; one line of it did change, because it also carried an unconditional `ActualCloseDate IS NOT NULL` that contradicted its own stated denominator of closed deals and dropped an undated win from the all-time rate while the Won tile beside it counted one. A NULL comparison is UNKNOWN, so the window excludes an undated deal without that guard — the two figures now describe the same set under every period. The roster is deliberately _not_ parameterised: its filter is `COALESCE(ActualCloseDate, ExpectedCloseDate)`, which would have windowed the open deals the issue asks to leave alone.
+
+  50 unit tests over the boundary arithmetic and the slices, plus the dashboard spec rewritten so the selector is the thing under test — it reads the window the tile _prints_ and holds the database to it, rather than re-deriving the quarter and proving only that two implementations agree. Two mutations checked: removing the month-end clamp (a 31 January year start putting Q2 on "31 April") fails exactly one test, and the won-deal fall-through fails two. The second of those initially passed against the mutation, because every fixture had `IsWon` and `IsOpen` mutually exclusive and the `else if` branch was unreachable — `IsOpen`/`IsWon` are independent columns on a vocabulary table, so a fixture setting both was added and the check now kills it.
+
+  **Three defects found in review, fixed here.** A period change had no in-flight guard, so two quick clicks could leave the tile and the rate showing a superseded period's figures under the new period's label, permanently — each response is now matched against the selection current when it lands, a throw no longer escapes as an unhandled rejection, and the two period-bound figures render as pending rather than as last period's numbers under this period's dates. The fiscal-start read was logged at error level and awaited ahead of everything else the section loads, so a user without accounting permissions put a `console.error` on every dashboard load (which `expectNoConsoleErrors` fails on) and a thrown read took the whole section down for a value that has a documented fallback; it now logs at status and catches. And the basis line was seeded with `no-accounting`, telling every reader on an accounting host that the app was not installed until the read resolved — there is now a `pending` basis for the state before an answer exists.
+
+  `dashboard-inspect` and `dashboard-period` imported each other; the two UTC date-only primitives both sides need have moved to a leaf `dashboard-dates` module, so the cycle is gone and `dashboard-inspect` re-exports them for every existing import path.
+
+- e122765: Deal form: close and reopen a deal through actions, not by typing into the Status field (#205).
+
+  The Status control offers the open lifecycle only, filtered by the `LocksDeal` flag the server's own
+  refusal reads. Closing and reopening are actions on the Close panel: the close offers the real closing
+  statuses by name and collects the loss reason and notes the operation demands; the reopen collects the
+  reason `Sales.ReopenDeal` requires. Both surface the operation's warnings on success, not just on
+  failure — a close whose contract was stubbed or whose finance task could not be routed now says so.
+
+  The reopen is new here. The issue reported two defects, not one: a status write that closed a deal
+  without closing it, and no way back afterwards. Filtering the statuses fixed the first and left the
+  second, while the Status hint told the user to reopen a deal the form gave them no way to reopen.
+
+- c931c6c: Deal form: reopening a deal no longer throws away what the user had typed (sales#73 review).
+
+  Both reopen paths **on the deal form** ended by reloading the record, and a reload overwrites the
+  in-memory one. Anything
+  edited and not yet saved went with it — no prompt, no warning, no message. A locked deal is not a
+  read-only deal: `DealFieldsEditableWhileLocked` keeps six fields open, seven on a lost one, and the
+  panels render them, so a rep could legitimately be mid-sentence in Description when they decided to
+  reopen from the Status control. The Description was gone when the form came back.
+
+  **The reopen now saves first**, which the code previously said out loud that it must not do. The old
+  comment's reasoning was that "the close lock would refuse the save and turn a legal reopen into a
+  refusal". The lock refuses less than that: `DealEntityServer.checkCloseLock` filters
+  `f.Dirty && !editable.has(f.Name)`, so only a dirty FROZEN field is refused, and a save carrying
+  nothing but the carve-out fields passes straight through. Those are the only fields these panels let
+  anyone type into — `FieldEditable` renders the rest read-only — so the case the comment was defending
+  against is the one the form cannot produce, and the case it was preventing was the everyday one.
+
+  When a frozen field IS dirty the save is refused, and the reopen is then **abandoned rather than run
+  over the top**: `DealFormComponentExtended.Validate()` names the field before any round trip, the deal
+  is left closed, and the typing is still on screen to correct. Discarding it to get the operation
+  through would be the same defect wearing a different costume.
+
+  **The order is the load-bearing part, and it is why this is not simply "save on the way past".** The
+  save goes BEFORE the operation. Once `Sales.ReopenDeal` commits, the record in the browser still holds
+  the CLOSED status in both `Value` and `OldValue` — the operation moved the row, not the copy — so a
+  save at that point writes that closing status back over the reopened row.
+
+  Nothing would refuse it, which is what makes the order a correctness matter rather than a tidiness
+  one. Both halves of the status field are equal, so it is clean: `planStatusTransition` returns null on
+  `!field?.Dirty`, the golive#205 trigger never sees it, and the update writes the column anyway because
+  MJ sends every `AllowUpdateAPI` field and applies no dirty filter. The result is a silently re-closed
+  deal with `ClosedAt` still cleared by the reopen. A check that only proved a save happened would stay
+  green through that rearrangement, so every ordering assertion in the new suite names both calls and
+  their positions.
+
+  **The Close panel's reopen is fixed too**, because it carried the same wrong premise in its own
+  comment. Its symptom differed rather than being absent: that button is not inside `@if (EditMode)`, so
+  in edit mode it reopened the deal and then reloaded **nothing at all** — `canRefreshRecord()` is false
+  while edit mode is on, and it returns false rather than throwing — leaving a reopened deal still drawn
+  as closed and locked. It now saves, ends edit mode and reloads, the same way the Status control does.
+
+  A clean record is still not saved. The reopen control renders only inside `@if (EditMode)`, so
+  `ConfirmClose`'s `EditMode || Dirty` condition would have written to a locked row on every reopen for
+  no reason; `Record.Dirty` is the question actually being asked, and it covers companions and the IsA
+  parent as well as fields.
+
+  9 tests, three mutations checked: skipping the save entirely (the original defect) fails 6 of them,
+  moving the save after the operation fails 2, and saving unconditionally fails 2.
+
+  **Scope, added after review: the deal WORKSPACE is not covered.** Its `ReopenDeal()` still goes
+  straight to `RouteOperation` and then `ReloadActiveDeal()`, with no save-when-dirty — and
+  `ReloadActiveDeal()` also calls `MarkClean(tabId)`, so the tab-strip dirty marker is cleared and the
+  user loses even the after-the-fact signal. `Description` is editable on a closed deal there too, and
+  the Reopen button sits in the lock banner directly above it. The workspace's own `ConfirmClose`
+  already saves when dirty, so the fix is a mirror of the pattern established here. Tracked separately;
+  this changeset said "both reopen paths" unqualified, which would have read in the CHANGELOG as if the
+  whole class were closed.
+
+### Patch Changes
+
+- 21f30ab: Pipeline board and command-center dashboard: the plain-English pass from golive#207, on the two surfaces it did not reach.
+
+  #207 is written about the Deal form, and every row of its replacement table landed there. The same strings were still live elsewhere, so the form read **"Entered manually"** while the board's Amount icon said **"Stated by a person, not priced by the orders engine"** about the same number — which is the complaint #207 was filed about, one screen over. The board's other provenance tooltip said "Priced by the orders engine" where the form says "Priced by Orders"; the dashboard's owner chart bucketed ownerless deals under "Unowned" where the form's Situation card now says "No owner".
+
+  **One of these was not a copy problem.** The lock icon on a closing board column carried:
+
+  > Arriving here closes and locks the deal — close it from the deal form.
+
+  That is not developer voice, it is wrong. `planStageDefaults` gates the stage-derived status on `LocksDeal` and contributes nothing when it is set, so a deal moved into such a stage keeps the status it had — its own comment says "the deal keeps whatever status it had and only `Sales.CloseDeal` can change that". And the move cannot happen anyway: `CanDropInto` returns false for a closing column, with a second guard behind it. A rep reading the old text would have believed a drag closes a deal, which is the same wrong belief golive#205 was filed about. It now says what the lock icon means — the column is not a destination — and points where the empty state below it already points.
+
+  Scope is deliberately narrow: four user-visible strings. Left alone on purpose are `sales-section.component.ts`, where "Unowned" is in a code comment, and `metadata/queries/.forecast-by-owner.json`, which renders ownerless deals as "(unassigned)" with its own documented reasoning and would need a metadata migration to change. Both are worth a decision, neither is this change.
+
+  7 tests, five mutations checked, all killed: reverting each of the four strings, plus swapping the owner fallback from `||` to `??` — which keeps the label correct but stops a blank owner name reaching it, and is the one that proves the blank-owner check is not vacuous. The dashboard half is tested through `OwnerCoverage` itself rather than against the source, because it is a pure function and the label can be read off what it returns.
+
+- 9404cfc: Deal form: a closed deal no longer shows a permanent, unactionable stale-amount warning (golive#230).
+
+  Every Won deal carried "A line has changed since this amount was last priced. Reprice the order to
+  update the total." — forever, and with nothing the reader could do about it. The deal is locked, so the
+  amount cannot change; and there is no reprice control anywhere in this codebase, so the sentence asked
+  for an action that does not exist.
+
+  **The check was keyed on a proxy rather than on the thing it cared about.** Both surfaces read the
+  newest `__mj_UpdatedAt` across the order's lines and called the amount stale if it was later than
+  `AmountComputedAt` — which asks "was a line TOUCHED", not "has the number moved". Closing a deal books
+  the order, which moves every line's status and stamps `__mj_UpdatedAt` without a figure changing, so the
+  close itself guaranteed the warning and the lock guaranteed nobody could clear it.
+
+  That is CLAUDE.md rule 8's shape exactly: a claim that was true when it was written — a touched line
+  usually did mean a moved price — and stayed asserted after the close flow started touching lines for its
+  own reasons. A proxy can be outgrown; the number cannot.
+
+  **Now it compares the number.** `ResolveDealAmountFreshness` in `sales-entities` tests the cached
+  `Deal.Amount` against the order's current `TotalGross`, which is the SAME test
+  `DealEntityServer.refreshAmountFromOrder()` uses to decide the cache is already current — so the surface
+  and the server agree by construction rather than by coincidence: if the server would rewrite the cache,
+  this says stale; if it would no-op, this says fresh. Still a comparison of two stored figures, never
+  arithmetic.
+
+  **A locked deal returns fresh before anything else**, and does not even read the order. The amount is
+  frozen, so there is no edit that could resolve the notice and no reason to ask.
+
+  **The copy now names an action that exists**: "The products on this deal changed after the amount was
+  calculated. Save the deal to update it." Verified rather than assumed — `DealEntityServer.Save()` sets
+  `amountMayHaveMoved` when `AmountIsComputed === true`, which is precisely the state the notice appears
+  in, and then re-reads `OrderHeader.TotalGross` into the cache.
+
+  The rule is shared so the Deal form and the deal hero cannot answer it differently, the same reason
+  `ResolveDealLockState` is. 12 checks, each no-warning case paired with one that DOES warn on the same
+  input — a suite that only proved "a locked deal is quiet" would pass against an implementation that
+  never warned at all.
+
+- d79ef5b: Deal form: the two server-maintained stamps are no longer offered for editing.
+
+  The Account & people panel rendered `CompanyID` and `OwnerEmployeeID` as editable on any unlocked deal, and neither is a field a caller may set. `stampCompanyFromPipeline()` overwrites a supplied `CompanyID` from the pipeline's company; `ownerStampEditRefusal()` refuses a supplied `OwnerEmployeeID` outright, because the owner comes from the deal team via `stampOwnerFromTeam()`. CLAUDE.md states it directly — "written by entity-server code. Never hand-set them."
+
+  So a rep could pick a company or an owner, press Save, and have the choice silently discarded or the save refused. That is the "accepts typing, refuses on save" behaviour golive#206 item 3 exists to delete, on a panel nobody had revisited.
+
+  Both fields stay **rendered and navigable** — `link: 'Record'` is untouched, so the company and the owner are still visible and still open their records. What goes away is the invitation to type into them.
+
+  The flag is consulted BEFORE the close lock, deliberately: the lock is not the reason. A server stamp is frozen on an open deal too, and checking it after the lock would leave exactly the case that matters — an unlocked deal — still editable.
+
+  Not to be confused with the `''`-into-`uniqueidentifier` bug also found on this panel's neighbours: these five fields all carry `RelatedEntityID` and render as FK pickers, so they never had that defect. That one was the generated Sales Accounts form, fixed separately.
+
+- dd4a8d4: Deal form — all three lock messages, in plain English (golive#207 rows 16, 17 and 18).
+
+  These were the tester's own deferrals from the last copy round: they wait on the close/reopen work,
+  because both replacements tell the user to "set the status back to Open" and until golive#205 landed
+  that was not something the form could do. It is now.
+
+  **The header lock notice** said the deal was "closed (Won) and locked", explained that a contract or
+  an order was derived from it, and told the reader to "reopen the deal, which records a reason". The
+  replacement names what can still be edited and the one action that unblocks them. The provenance
+  argument is gone: a person who has just been stopped wants to know what they can do, and the reason
+  is one click away in the close history.
+
+  **The form save refusal** said "Frozen: this deal is closed and locked. Reopen it through
+  Sales.ReopenDeal, which records a reason, if this genuinely needs to change." — the word "frozen"
+  three times over before anything actionable, and an API operation named to someone who had just typed
+  into a form field.
+
+  **The editable list is DERIVED, not the three names the tester wrote.** They wrote "Deal Status,
+  Description and Next Step" when the editable set held two fields; golive#206 item 3 expands it. A
+  hardcoded sentence would have started lying the moment that landed, and it would have read perfectly
+  while doing it. The notice composes the set through a label map, so it stays true as the set changes.
+
+  **MINOR, not patch, because `sales-entities` breaks.** The exported constant
+  `DEAL_FIELDS_EDITABLE_WHILE_LOCKED` is gone and `IsDealFieldEditableWhileLocked` takes a second
+  argument now. golive#206 item 3 made the editable set depend on whether the deal was LOST, so a
+  constant could no longer answer the question and a one-argument predicate could no longer ask it.
+  Consumers outside this repo would not compile.
+
+  **Deal Status is listed but is not in the editable-while-locked set**, which looks like a
+  contradiction and is not. That set is what the SERVER accepts in a bare save, and golive#205 asks for
+  a bare status write to be refused on every path — the status moves through `Sales.CloseDeal` and
+  `Sales.ReopenDeal`, which the form's status control routes to. The field is editable to a person and
+  not writable by a raw save, and one set cannot say both. The notice is the one that describes people.
+
+  **Row 18, the SERVER refusal**, said "this deal is closed and locked; {fields} cannot be changed.
+  Reopen it through Sales.ReopenDeal, which records a reason." It is row 17's sibling: row 17 is what
+  the form shows a person, row 18 is what the save returns to whoever asked — the form, an import, an
+  agent or a raw API call. Its `{fields}` stays interpolated for the same reason the notice composes
+  its list: golive#206 item 3 grows that set.
+
+  Row 18 began on sales#73, the golive#205 branch, because that is where its sentence became TRUE —
+  until the trigger landed, a status write could not reopen a deal and the refusal genuinely had
+  nowhere else to send an integrator. It moved here so that one PR owns one issue. The sequencing is
+  unchanged and was the tester's own: "the three lock messages assume the close/reopen issue lands".
+  **This PR merges with sales#73, never before it.**
+
+  It also arrived with no test at all — reverting the sentence broke nothing. It has one now, which is
+  where the fourth mutation below comes from.
+
+  22 tests, nine mutations checked: reverting any of the three messages, dropping Deal Status from the
+  list, un-humanising the labels, losing the sentence's final "and", hardcoding row 18's field list,
+  appending the API detail back onto it, and printing row 18's fields by column name instead of label.
+  The row 17 revert survived every other test in the repo until its own gate existed, and row 18's
+  revert did the same.
+
+- aaf9189: Five defects the deal-lock stack (sales#72, #73, #78, #79, #80) merged with, and the three checks that were looking the wrong way.
+
+  **A refused save put the caller's status back.** `saveDeclared` reverts `DealStatusTypeID` to its persisted value so the close lock sees a clean field — correct for a save that proceeds, a trap for one that refuses. A caller who read the refusal, fixed what it named and saved the SAME object got `planStatusTransition() === null` on `!field?.Dirty`: no close ran, the other edits committed, and `Save()` returned **true**. An open deal carrying a loss reason, and a caller told it worked. Restored in `refuseSave` rather than at each `return false`, for the same reason the `finally` above it exists — there are four exits and the bug is always the one added later.
+
+  **A stamp failure was silent.** The `catch` around `stampCompanyFromPipeline`/`stampOwnerFromTeam` was `LogError` + `return false`, so `ResolveOwnerRoleID`'s "no active DealRole has IsOwnerRole = 1. Seed one before assigning an owner." — a message that names its own remedy — reached the user as "Unknown error creating record" (bc-aidp-next-golive#216). It now goes through `refuseSave`; the log line still contains the exact substring that issue tells people to grep for.
+
+  **Row 18 printed column names.** `DEAL_FIELD_LABELS` holds exactly the editable-while-locked set plus `DealStatusTypeID` — the fields row 16 lists. Row 18 names the FROZEN fields, none of which were in the map, so every one fell through to its raw column name. The fallback now splits the column name and drops a trailing `ID`, so the map is an override rather than the only source of a label and a column added tomorrow cannot regress it.
+
+  **The reopen test only ever saw one of two panels.** `source.indexOf('public async ConfirmReopen...')` returned the Pipeline panel's copy, so `MJSDealClosePanel` was invisible to it — permanently. That is how the Close panel shipped a reopen which never left edit mode under a green test named for exactly that. It now finds every declaration and asserts about each, and accepts either spelling of the reload (`RefreshRecord()` directly, or `refreshQuietly()`), because pinning one would have failed the panel that does it correctly. Verified against sales#72's tree, where it correctly fails `MJSDealClosePanel`.
+
+  **A Playwright assertion outlived its string.** sales#79 rewrote the closing column's lock title to "Deals cannot be moved here."; `80-board-drag.spec.ts` still asserted `/closes and locks/i`. The Explorer harness is deliberately out of CI, so nothing caught it. `COVERAGE-MAP.md`'s row for that step had drifted independently — it claimed `/workspace/i` where the spec asserts `/form/i` — and now matches.
+
+- Updated dependencies [9404cfc]
+- Updated dependencies [dd4a8d4]
+- Updated dependencies [aaf9189]
+  - @mj-biz-apps/sales-entities@6.5.0
+
 ## 6.4.0
 
 ### Minor Changes

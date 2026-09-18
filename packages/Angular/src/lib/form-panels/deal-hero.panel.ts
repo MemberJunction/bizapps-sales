@@ -10,11 +10,16 @@
  */
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CompositeKey, RunView } from '@memberjunction/core';
+import { CompositeKey } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
-import { DealEntity, IsDealFieldEditableWhileLocked, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
+import {
+    DealEntity,
+    IsDealFieldEditableWhileLocked,
+    ResolveDealAmountFreshness,
+    ResolveDealLockState,
+} from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 
 
@@ -49,7 +54,6 @@ export function ShouldPlaceCursorInName(state: {
     if (state.FocusAlreadyElsewhere) return false;
     return true;
 }
-const E_ORDER_LINE = MJS_FOREIGN_ENTITIES.OrderLine;
 const COLLAPSE_SETTING = 'mj.identityHeader.collapsed.deal';
 
 function money(n: number | null | undefined): string {
@@ -493,22 +497,21 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         this.LockNotice = lock.Notice;
     }
 
+    /**
+     * Whether the cached amount still matches its order — through the SHARED rule, so this panel and the
+     * Deal form cannot disagree. See `amount-freshness.ts` for why it is no longer a timestamp test
+     * (golive#230), and note the ordering: `refreshNotices()` resolves the lock first, so `IsLocked` is
+     * settled before it is passed here and a closed deal never warns.
+     */
     private async resolveStale(): Promise<void> {
         this.StaleAmountNotice = null;
-        const computedAt = this.Record?.AmountComputedAt;
-        if (!this.Record?.AmountIsComputed || !computedAt || !this.Record.OrderID) return;
-        const rv = new RunView();
-        const result = await rv.RunView<{ __mj_UpdatedAt: string | Date }>({
-            EntityName: E_ORDER_LINE,
-            ExtraFilter: `OrderHeaderID = '${String(this.Record.OrderID).replace(/'/g, "''")}'`,
-            OrderBy: '__mj_UpdatedAt DESC',
-            ResultType: 'simple',
-            Fields: ['__mj_UpdatedAt'],
+        if (!this.Record) return;
+        const freshness = await ResolveDealAmountFreshness({
+            IsLocked: this.IsLocked,
+            AmountIsComputed: this.Record.AmountIsComputed,
+            Amount: this.Record.Amount,
+            OrderID: this.Record.OrderID,
         });
-        const newest = result?.Success ? (result.Results ?? [])[0]?.__mj_UpdatedAt : undefined;
-        if (newest && new Date(newest).getTime() > new Date(computedAt).getTime()) {
-            this.StaleAmountNotice =
-                'A line has changed since this amount was last priced. Reprice the order to update the total.';
-        }
+        this.StaleAmountNotice = freshness.Notice;
     }
 }

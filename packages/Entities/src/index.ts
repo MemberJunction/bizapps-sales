@@ -41,6 +41,13 @@ export * from './term-start';
 export * from './close-lock';
 
 /**
+ * Whether `Deal.Amount` still matches the order it was cached from — shared by the Deal form and the
+ * deal hero so the two surfaces cannot answer the same question differently. A comparison of two
+ * stored figures, never a computation. See the file header for why it is no longer a timestamp test.
+ */
+export * from './amount-freshness';
+
+/**
  * Forces the generated entity subclasses to be loaded. Without an explicit
  * import + call, tree-shaking drops the generated entities because they are not
  * directly referenced. Import and call this from the app bootstrap so the
