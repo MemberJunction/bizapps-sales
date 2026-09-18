@@ -862,6 +862,41 @@ export class DealWorkspaceComponent implements OnInit {
         return 'Save the deal first — its order is created on the first save, and a product line needs it.';
     }
 
+    /**
+     * May the rep change what is already on the order? Only the LOCK decides this.
+     *
+     * ── THE HALF sales#84 DID NOT COVER ─────────────────────────────────────────────────────────
+     *
+     * #84 stopped this pane OFFERING Add on a closed deal. Its review then pointed out that the same
+     * pane still let a rep edit product, quantity, discount and term start on one -- and golive#206
+     * item 1 covers edits, not just additions: "Adding, EDITING or deleting a line on a locked deal
+     * should be refused at the server, whichever screen or API path it comes from."
+     *
+     * NOT gated on `IsSaved`, unlike `CanAddLine`. A deal that has not been saved yet is exactly where
+     * a rep composes its lines, and nothing is frozen until a status locks it.
+     */
+    public get CanEditLines(): boolean {
+        return !this.Lock.IsLocked;
+    }
+
+    /**
+     * Why a line field is disabled, for the hover. Null when they are editable.
+     *
+     * NO SECOND VISIBLE PARAGRAPH, and that is deliberate. On a locked deal `AddLineBlockedReason`
+     * already renders "This deal is closed..." under this grid; a second sentence saying the same
+     * thing about a different gesture would be two messages for one condition -- the reasoning #84
+     * used to leave removal alone. The refusal reaches a rep who hovers a greyed field through
+     * `title`, and the pane-level explanation is already on screen.
+     *
+     * The wording matches `DealLockRefusal('update')` on the server side word for word, so the
+     * affordance and the refusal a save would produce say the same thing.
+     */
+    public get LineEditBlockedReason(): string | null {
+        return this.CanEditLines
+            ? null
+            : 'This deal is closed. Set the status back to Open before changing what was sold.';
+    }
+
     public async AddLine(): Promise<void> {
         // NOT the provisioning mechanism any more -- DealEntityServer.provisionEmbeddedOrder() owns
         // that, so an agent or an importer gets an order too. This stays for the UNSAVED deal: a rep
