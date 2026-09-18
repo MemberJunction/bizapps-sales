@@ -10,6 +10,37 @@
  * @module @mj-biz-apps/sales-ng
  */
 import type { DealRosterRow } from '../workspace/deal-workspace.service';
+import { WithinWindow, type PeriodWindow } from './dashboard-period';
+
+/**
+ * Whether a WON deal falls inside the dashboard's selected period.
+ *
+ * ── ONE PREDICATE, TWO CALLERS, ON PURPOSE ──────────────────────────────────────────────────────
+ *
+ * {@link ForecastSlices} totals the stack's Closed segment and {@link FilterInspect}'s `won` case
+ * lists the deals behind it. If those two ever branched differently, the Won tile would report a
+ * figure whose own drill-through showed a different set of deals — and nothing on screen would say
+ * which was wrong. Sharing the predicate makes that disagreement unrepresentable rather than merely
+ * unlikely.
+ *
+ * NO WINDOW MEANS EVERY WON DEAL, which is what the "All time" option selects. A bounded window
+ * excludes a deal with no `ActualCloseDate`: the question is "did this land in the period", and a
+ * deal that never recorded when it closed cannot answer it. It is still counted under All time, so
+ * such a deal is never invisible everywhere at once. `dashboard-summary.sql` applies the identical
+ * rule server-side, which is what keeps the tile and this list in agreement.
+ */
+export function WonInPeriod(d: DealRosterRow, window?: PeriodWindow): boolean {
+    if (!d.IsWon) {
+        return false;
+    }
+    if (!window || (window.Start === null && window.End === null)) {
+        return true;
+    }
+    if (!d.ActualCloseDate) {
+        return false;
+    }
+    return WithinWindow(UtcDatePart(d.ActualCloseDate), window);
+}
 
 export type InspectKey =
     | 'closing'
@@ -67,10 +98,16 @@ export function ClosingSoon(deals: readonly DealRosterRow[], limit = 8): DealRos
         .slice(0, limit);
 }
 
+/**
+ * @param window Applies to the `won` slice ONLY. Every other slice here is about the OPEN book —
+ * what is in the pipeline, what has slipped, what is expected to close when — and golive#232 is
+ * explicit that those are not period-bound. Windowing them would answer a different question.
+ */
 export function FilterInspect(
     deals: readonly DealRosterRow[],
     key: InspectKey,
     today: string = TodayUtc(),
+    window?: PeriodWindow,
 ): DealRosterRow[] {
     const weekEnd = addDays(today, 7);
     const restMonth = monthEnd(today);
@@ -89,7 +126,7 @@ export function FilterInspect(
         case 'noowner':
             return deals.filter((d) => d.IsOpen && !d.OwnerEmployee);
         case 'won':
-            return deals.filter((d) => d.IsWon);
+            return deals.filter((d) => WonInPeriod(d, window));
         case 'week':
             return deals.filter((d) => {
                 if (!d.IsOpen || !d.ExpectedCloseDate) return false;
@@ -125,8 +162,25 @@ export interface ForecastSlice {
  *
  * Commit ⊂ Best Case ⊂ Pipeline, so adding the three query columns is meaningless. The bar is
  * Closed (won) + Commit + (BestCase − Commit) + (open remainder).
+ *
+ * ── THE STACK MIXES TWO DATE DIMENSIONS, AND IT SAYS SO ─────────────────────────────────────────
+ *
+ * `Closed` is bounded by the dashboard's selected period on `ActualCloseDate` — deals that ACTUALLY
+ * landed in the window. The three open segments are not bounded at all: they are the current book,
+ * because golive#232 requires open-deal figures to stay as they were.
+ *
+ * So after the period selector, `Closed + Commit + BestOnly + PipeOnly` is not a single-period
+ * figure, and the card's header says as much rather than leaving a reader to add four bars that do
+ * not belong to one question. This is the same mixed-dimension caveat `DECISIONS-NEEDED.md` D-33
+ * already records for `Sales: Forecast by Category`, which filters open deals on expected close and
+ * won deals on actual close for the same reason: each uses the date that answers its own question.
+ *
+ * Worth naming because the original report assumed the opposite — that `Commit` was already "this
+ * period" while only `Closed` was all-time. Both were all-time. Only `Closed` changes here.
+ *
+ * @param window Bounds `Closed` only. Omitted means every won deal, which is the "All time" option.
  */
-export function ForecastSlices(deals: readonly DealRosterRow[]): ForecastSlice {
+export function ForecastSlices(deals: readonly DealRosterRow[], window?: PeriodWindow): ForecastSlice {
     let Closed = 0;
     let Commit = 0;
     let BestOnly = 0;
@@ -134,7 +188,13 @@ export function ForecastSlices(deals: readonly DealRosterRow[]): ForecastSlice {
     for (const d of deals) {
         const amt = amount(d);
         if (d.IsWon) {
-            Closed += amt;
+            // A won deal outside the window contributes to NOTHING here -- not to Closed, and not to
+            // the open segments either, because it is not open. Falling through to the `IsOpen`
+            // branch would be the bug: it would move a closed deal into the pipeline remainder the
+            // moment someone narrowed the period.
+            if (WonInPeriod(d, window)) {
+                Closed += amt;
+            }
         } else if (d.IsOpen) {
             if (d.IncludeInCommit) Commit += amt;
             else if (d.IncludeInBestCase) BestOnly += amt;

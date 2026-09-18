@@ -34,6 +34,13 @@ import {
     type DealWorkspaceValidation,
 } from './deal-workspace.validation';
 import { E_ORDERS_PRODUCT, PRODUCT_LOOKUP_FIELDS, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
+import {
+    PeriodParameters,
+    ResolveFiscalYearStart,
+    type FiscalYearStart,
+    type FiscalYearStartResolution,
+    type PeriodWindow,
+} from '../pages/dashboard-period';
 
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
@@ -45,6 +52,16 @@ const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 const E_EMPLOYEE = 'MJ: Employees';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
+
+/**
+ * Accounting's per-company profile — where the FISCAL YEAR START lives.
+ *
+ * Another app's entity, read and never written, for the same reason `E_ORDERS_PRODUCT` is: the fact
+ * belongs to that app and duplicating it here would give one fact two homes. `mj-app.json` already
+ * declares `mj-bizapps-accounting` as a dependency, so this is not a new coupling — and the read is
+ * still guarded on metadata, because sales is built to run standalone.
+ */
+const E_ACCOUNTING_COMPANY_PROFILE = 'MJ_BizApps_Accounting: Accounting Company Profiles';
 
 /**
  * One row of the deal roster.
@@ -83,6 +100,16 @@ export interface DealRosterRow {
     AmountIsComputed: boolean;
     Probability: number | null;
     ExpectedCloseDate: string | Date | null;
+    /**
+     * When the deal actually closed. NULL on every open deal, and on a closed one that never recorded
+     * it.
+     *
+     * Carried so the forecast stack's Closed segment can be bounded by the dashboard's selected period
+     * (golive#232) without re-querying. The roster query has always returned this column; nothing
+     * consumed it until the period selector needed a date that says when a win LANDED rather than when
+     * it was expected to.
+     */
+    ActualCloseDate: string | Date | null;
     /** Virtual name columns that DO resolve on the Deal view. */
     Pipeline: string | null;
     PipelineStage: string | null;
@@ -379,6 +406,7 @@ export class DealWorkspaceService {
             AmountIsComputed: bool(d['AmountIsComputed']),
             Probability: num(d['Probability']),
             ExpectedCloseDate: (d['ExpectedCloseDate'] as string | Date | null) ?? null,
+            ActualCloseDate: (d['ActualCloseDate'] as string | Date | null) ?? null,
             Pipeline: (d['PipelineName'] as string | null) ?? null,
             PipelineStage: (d['StageName'] as string | null) ?? null,
             DealType: (d['DealTypeName'] as string | null) ?? null,
@@ -637,10 +665,75 @@ export class DealWorkspaceService {
      * implementations over the same data and fails on any disagreement. All eight comparisons agreed,
      * including the closing-soon ORDER and the slipped set by deal identity rather than by count.
      */
-    public async LoadDashboardSummary(): Promise<DealDashboardSummary | null> {
+    /**
+     * The fiscal year start the dashboard's period selector reckons from.
+     *
+     * -- READ FROM ACCOUNTING, NEVER STORED HERE --
+     *
+     * `AccountingCompanyProfile` is an IsA child of `__mj.Company` carrying `FiscalYearStartMonth` /
+     * `FiscalYearStartDay`, and bizapps-accounting already derives its fiscal year from exactly those
+     * two columns. Sales declares accounting as a dependency and its own dev seed writes them. A
+     * second copy in this app would give one fact two homes and let two apps disagree about what
+     * "FY26" means while both looked right.
+     *
+     * -- THE METADATA CHECK COMES FIRST, AND IT IS NOT DEFENSIVE TIDINESS --
+     *
+     * Sales is designed to run standalone. Asking `RunView` for an unregistered entity does NOT come
+     * back `Success: false`; it logs `Entity ... not found in metadata`, and the Playwright keystone
+     * (correctly) treats a console error as a broken screen. That is how the product picker once took
+     * the whole workspace gate down on a host without orders -- see {@link LoadProducts}. So absence
+     * is established from metadata before any read is attempted, and it is reported as its own basis
+     * rather than as an empty result, because "accounting is not installed" and "nobody has filled in
+     * a profile" call for different fixes.
+     *
+     * Returns a resolution rather than a bare start so the caller can SAY which case it hit. What it
+     * never does is throw or pick arbitrarily: see {@link ResolveFiscalYearStart} for why a
+     * disagreement between companies falls back instead of choosing a winner.
+     */
+    public async LoadFiscalYearStart(): Promise<FiscalYearStartResolution> {
+        const md = new Metadata();
+        if (!md.Entities.some((e) => e.Name === E_ACCOUNTING_COMPANY_PROFILE)) {
+            return ResolveFiscalYearStart(null);
+        }
+
+        const result = await new RunView().RunView<FiscalYearStart & { IsActive: boolean }>({
+            EntityName: E_ACCOUNTING_COMPANY_PROFILE,
+            // Only companies still trading define the year the dashboard reports on. A retired
+            // subsidiary's January start should not put the whole dashboard into 'mixed'.
+            ExtraFilter: 'IsActive = 1',
+            ResultType: 'simple',
+            Fields: ['FiscalYearStartMonth', 'FiscalYearStartDay'],
+        });
+        if (!result?.Success) {
+            LogError(`${E_ACCOUNTING_COMPANY_PROFILE} read failed - ${result?.ErrorMessage ?? 'unknown error'}`);
+            // A FAILED read is not an absent app. Reporting it as 'no-profiles' would tell a reader to
+            // go and configure something that may already be configured, so it degrades the same way
+            // an unconfigured host does and the error goes to the log where it can be diagnosed.
+            return ResolveFiscalYearStart([]);
+        }
+
+        const rows = (result.Results ?? []) as unknown as Record<string, unknown>[];
+        const starts = rows
+            .map((r) => ({ Month: Number(r['FiscalYearStartMonth']), Day: Number(r['FiscalYearStartDay']) }))
+            // A row whose columns did not arrive as numbers cannot define a boundary. Dropping it is
+            // right: counting it would make every host with one bad row read as 'mixed', which reports
+            // a disagreement between companies that does not exist.
+            .filter((s) => Number.isFinite(s.Month) && Number.isFinite(s.Day) && s.Month >= 1 && s.Month <= 12);
+        return ResolveFiscalYearStart(starts);
+    }
+
+    /**
+     * @param window Bounds the WON tile only. The query applies these inside its `WonCount` CASE
+     * rather than in its `WHERE`, so every other figure it returns still describes the whole book —
+     * see `dashboard-summary.sql`. A null bound is passed as no parameter at all, which is how the
+     * Nunjucks `{% if %}` blocks drop the clause.
+     */
+    public async LoadDashboardSummary(window?: PeriodWindow): Promise<DealDashboardSummary | null> {
+        const parameters = PeriodParameters(window);
         const result = await new RunQuery().RunQuery({
             QueryName: 'Sales: Dashboard Summary',
             CategoryPath: 'Sales',
+            ...(parameters ? { Parameters: parameters } : {}),
         });
         if (!result?.Success) {
             LogError(`Sales: Dashboard Summary failed - ${result?.ErrorMessage ?? 'unknown error'}`);

@@ -41,7 +41,34 @@
 
         <!-- ═════════════════════════ DASHBOARD ═════════════════════════ -->
         <div class="wrap wrap--dashboard" [hidden]="Page !== 'dashboard'">
-          <div class="sechead"><h2>Dashboard</h2></div>
+          <!--
+            The period selector. Markup shape is the board's pipeline switcher (role="tablist" of pill
+            buttons with aria-selected), so the two surfaces stay one vocabulary rather than two
+            controls that do the same job and look different.
+
+            It bounds the Won tile, the stack's Closed segment and win rate — and nothing else. The
+            basis line beside it names the fiscal year start in force, because a period control whose
+            boundaries are invisible is the defect this whole feature exists to fix.
+          -->
+          <div class="sechead">
+            <h2>Dashboard</h2>
+            <div class="period">
+              <div class="period__pills" role="tablist" aria-label="Reporting period">
+                @for (option of PeriodOptions; track option.Key) {
+                  <button
+                    type="button"
+                    role="tab"
+                    class="period__pill"
+                    [class.period__pill--on]="option.Key === Period"
+                    [attr.aria-selected]="option.Key === Period"
+                    (click)="SetPeriod(option.Key)">
+                    {{ option.Label }}
+                  </button>
+                }
+              </div>
+              <span class="period__basis">{{ FiscalBasisLabel }}</span>
+            </div>
+          </div>
 
           @if (Loading) {
             <mj-loading></mj-loading>
@@ -60,7 +87,7 @@
             <div class="card">
               <div class="ch">
                 Forecast stack
-                <span class="r">Closed + Commit + Best Case incremental + remainder · flags are cumulative</span>
+                <span class="r">{{ StackClosedNote }} · flags are cumulative</span>
               </div>
               <div class="stack-pad">
                 @if (Stack.Total <= 0) {
@@ -168,7 +195,7 @@
                 </div>
               </div>
               <div class="card">
-                <div class="ch">Win rate <span class="r">closed deals · count and value</span></div>
+                <div class="ch">Win rate <span class="r">closed deals · count and value · {{ WindowLabel }}</span></div>
                 <div class="winrate">
                   <div class="kpi">
                     <div class="l">By count</div>

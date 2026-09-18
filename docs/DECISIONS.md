@@ -544,3 +544,63 @@ Do **not** bind `DiscountAmount` and call it the discount. Derive it (`list − 
 figure. The column is not the number you want, and it will be zero exactly when a discount exists.
 
 ---
+
+## D-FY1 — The fiscal year start is READ from accounting, never stored in sales
+
+**Ruling:** the dashboard's reporting period reckons from
+`__mj_BizAppsAccounting.AccountingCompanyProfile.FiscalYearStartMonth` / `FiscalYearStartDay`. Sales
+adds no fiscal configuration of its own — no table, no column, no setting, no migration.
+
+### Why this was a live question at all
+
+golive#232 asked for a dashboard period selector defaulting to "the current fiscal quarter". Sales had
+nothing to answer that with: `DECISIONS-NEEDED.md` D-28 states it flatly — "no `FiscalPeriod` table,
+nothing on `Company` naming a year end, nothing anywhere that says when a quarter begins" — which is
+why `CurrentMonthPeriod()` uses the calendar month and says so.
+
+The choice was between falling back to the calendar quarter and making the year start configurable.
+Configurable won, and it turned out to cost no schema, because the configuration already exists one
+app over.
+
+### Why accounting's copy is the right one to read
+
+`AccountingCompanyProfile` is an IsA-disjoint child of `__mj.Company`, so its `ID` **is** the company's
+and the setting is naturally per-company. Three things make reading it a continuation rather than a new
+coupling:
+
+- `mj-app.json` already declares `mj-bizapps-accounting` as a dependency.
+- `scripts/dev/seed-revenue-stack.sql` already writes those exact two columns from this repo.
+- `JournalEntryEntityServer.deriveFiscalYear()` already derives a fiscal year from them, in UTC.
+
+A sales-side copy would give one fact two homes. The failure that follows is not a crash: the ledger
+and the dashboard would each be internally consistent and would disagree about which months "FY26"
+covers, with both screens looking right.
+
+**The year label follows accounting's convention** — a fiscal year is labelled by the calendar year it
+*starts* in. Diverging would be worse than having no label, because both readings are plausible.
+
+### The two degradations, and why each is visible
+
+Sales is built to run standalone, so accounting may simply be absent. `DealWorkspaceService.
+LoadFiscalYearStart()` therefore checks metadata before reading, exactly as `LoadProducts()` does for
+orders — asking `RunView` for an unregistered entity logs a console error rather than failing, and the
+Playwright keystone (correctly) treats that as a broken screen.
+
+Second, the setting is per-company while the dashboard is not company-scoped: `Sales: Dashboard
+Summary` accepts a `CompanyID` the UI does not pass. **When active company profiles disagree about the
+fiscal start, the dashboard falls back to the calendar year rather than picking one.** Choosing
+silently would produce a window correct for one company's figures and wrong for another's, with
+nothing on screen saying which. This is the rule `deal-board` already applies to mixed currency: refuse
+to present a total over a set holding more than one distinct value.
+
+All four cases — configured, accounting absent, no profile, companies disagreeing — are named on the
+dashboard beside the selector. A period control whose boundaries are invisible is the same defect
+golive#232 was filed about.
+
+### What this does NOT do
+
+`ForecastSnapshotJob`'s `CurrentMonthPeriod()` is untouched. A fiscal start being readable makes D-28
+answerable, but changing the snapshot's period changes what every stored row means and has its own
+integration checks. That is a separate decision; D-28 records the new fact.
+
+---
