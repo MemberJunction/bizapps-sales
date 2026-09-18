@@ -37,8 +37,15 @@ has to be right about when a deal changed.
 **Where the registration lives matters.** It is called from `sales-core-entities-server`, which
 DECLARES `@mj-biz-apps/orders-entities`. `sales-server` does not, and resolves that name transitively
 to whatever is published — measured locally, it resolves to the npm build while the declaring package
-resolves to the workspace. Putting the import in the package that owns the dependency is what makes
-the version requirement honest rather than accidental.
+resolves to the workspace. Putting the import in the package that owns the dependency is what lets
+the version requirement be stated at all.
+
+**It is not stated yet, and that is the remaining work.** That package declares `^5.2.1`, and the
+lockfile pins 5.2.1; no published version carries the seam at all (5.12.2 is the newest). So merging
+orders#206 does not turn this green on its own: orders has to PUBLISH the version that ships the
+seam, the range here has to be raised to it, and the lockfile refreshed. Until then the declared
+range is satisfied by builds that cannot compile this file, which is precisely the accidental
+requirement this paragraph is about.
 
 13 tests, 7 mutations all killed: the flag never locking (the defect), every status locking, an
 order with no deal falling through, each of the two failed reads allowing instead of refusing, a

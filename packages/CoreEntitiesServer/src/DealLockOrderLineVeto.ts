@@ -159,7 +159,10 @@ function SafeID(id: string): string {
  * `@mj-biz-apps/orders-entities`. `sales-server` resolves that name transitively to whatever is
  * published, so a call from there compiles only by accident of hoisting — and not at all until orders
  * ships the version carrying the seam. Keeping the import in the package that owns the dependency is
- * what makes the version requirement honest.
+ * what lets the version requirement be stated here at all. It is not stated yet: the range is
+ * `^5.2.1`, pinned to 5.2.1 in the lockfile, and no published version carries the seam -- so the
+ * range has to be raised to whatever orders publishes, and the lockfile refreshed, before this
+ * compiles anywhere that resolves `orders-entities` from npm rather than from the workspace.
  *
  * Last-call-wins in the registry, so a host that boots twice in one process ends up with one vetoer.
  */
