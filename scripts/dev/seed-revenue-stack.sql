@@ -76,8 +76,11 @@ WHERE NOT EXISTS (
    orders' number against orders' own number rather than against a constant. Sales never supplies a
    price, so without a rule here orders correctly refuses to guess one. */
 INSERT INTO __mj_BizAppsOrders.ProductPrice
-    (ID, ProductID, PricingModel, FeeType, Amount, EffectiveFrom, Priority, Status)
-SELECT NEWID(), p.ID, 'PerUnit', 'Standard',
+    (ID, ProductID, Name, PricingModel, FeeType, Amount, EffectiveFrom, Priority, Status)
+-- Name is NOT NULL (orders V202609031400). Shape and width match that migration's own
+-- backfill -- LEFT(CONCAT(d.Name, ' (', d.rn, ')'), 100) -- so a seeded row is
+-- indistinguishable from one orders wrote itself. One price per product here, hence (1).
+SELECT NEWID(), p.ID, LEFT(CONCAT(p.Name, ' (1)'), 100), 'PerUnit', 'Standard',
        CAST(100 + (ABS(CHECKSUM(p.SKU)) % 400) AS DECIMAL(18, 2)), '2020-01-01', 1, 'Active'
 FROM __mj_BizAppsOrders.Product p
 WHERE p.Status = 'Active'                                  -- vocabulary-grep-allow: ORDERS' Product.Status is a CHECK-constrained enum in another app's schema with no flag table behind it.
