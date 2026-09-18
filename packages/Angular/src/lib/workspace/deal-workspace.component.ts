@@ -1258,7 +1258,7 @@ export class DealWorkspaceComponent implements OnInit {
      */
 
     /** True when the PERSISTED status locks the deal — resolved through the SHARED rule. */
-    public Lock: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, Notice: null };
+    public Lock: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, IsWon: false, Notice: null };
 
     public ClosePanelOpen = false;
     /** `null` until the user picks; drives which fields the panel demands. */

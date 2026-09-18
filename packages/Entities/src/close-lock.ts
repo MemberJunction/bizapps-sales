@@ -168,6 +168,17 @@ export interface DealLockState {
      * a closed deal is the cheaper mistake.
      */
     IsLost: boolean;
+    /**
+     * Whether the locking status carries `IsWon`.
+     *
+     * Read as its OWN flag rather than inferred from `!IsLost`, because the two are not complements:
+     * a status can lock a deal while carrying neither (and `Abandoned` carries `IsLost` alongside
+     * `Lost`). golive#231 labels the Overview's outcome tiles from this, and inferring it would print
+     * "Won" over a deal that was never won — a lie that reads perfectly.
+     *
+     * `false` on an open deal and on a status that cannot be read, matching `IsLost`.
+     */
+    IsWon: boolean;
     /** A ready-to-render explanation, or null when the deal is open. */
     Notice: string | null;
 }
@@ -194,17 +205,17 @@ export async function ResolveDealLockState(
     persistedStatusID: string | null | undefined,
     contextUser?: UserInfo,
 ): Promise<DealLockState> {
-    const open: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, Notice: null };
+    const open: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, IsWon: false, Notice: null };
     if (!persistedStatusID) {
         return open;
     }
 
-    const result = await new RunView().RunView<{ LocksDeal: boolean; Name: string; IsLost: boolean }>(
+    const result = await new RunView().RunView<{ LocksDeal: boolean; Name: string; IsLost: boolean; IsWon: boolean }>(
         {
             EntityName: E_DEAL_STATUS_TYPE,
             ExtraFilter: `ID = '${String(persistedStatusID).replace(/'/g, "''")}'`,
             ResultType: 'simple',
-            Fields: ['LocksDeal', 'Name', 'IsLost'],
+            Fields: ['LocksDeal', 'Name', 'IsLost', 'IsWon'],
         },
         contextUser,
     );
@@ -231,6 +242,7 @@ export async function ResolveDealLockState(
         IsLocked: true,
         StatusName: row.Name,
         IsLost: isLost,
+        IsWon: row.IsWon === true,
         Notice:
             `This deal is closed (${row.Name}). Only ${editable} can be edited. ` +
             'To change anything else, set the status back to Open.',
