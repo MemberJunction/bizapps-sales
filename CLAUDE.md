@@ -410,20 +410,52 @@ PW_HEADLESS=1 pnpm run test:explorer   # unattended
   and view-vs-edit-mode traps that cost real time to find.
 
 ### CI (`.github/workflows/ci.yml`)
-Two hard gates on every PR and every push to `next`:
+**EIGHT gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
+listed the first and third; five more have been added since and went unrecorded. That understatement is
+not harmless — a reviewer who believes CI only greps and builds will reason that a template change, a
+copy change or a query comment cannot be caught by it, and will hand-check things CI already covers
+while trusting things it does not:
 
-1. **`npm run test:vocabulary-gate`** — the master plan §3 grep. This is what makes "enforced by a CI
+1. **`pnpm run test:vocabulary-gate`** — the master plan §3 grep. This is what makes "enforced by a CI
    grep" true rather than aspirational. Audited against injected violations: it catches 7 of 8, and its
    one measured blind spot is documented in the script.
-2. **`npm run build`** — all 8 turbo tasks including the Angular Explorer.
+2. **`pnpm run test:money-gate`** — sales records intent; orders computes the number.
+3. **`pnpm run build`** — all turbo tasks including the Angular Explorer.
+4. **`pnpm run test:discount-gate`** — percent vs fraction, both directions.
+5. **`pnpm run test:validation-gate`** — pane attribution, and what blocks a save.
+6. **`python3 scripts/assert-no-comment-drift.py`** — a documented column that is not returned.
+7. **`npm run test:spec-gate`** — Playwright specs typecheck (it does NOT run them).
+8. **Unit tests**, guarded on any existing.
+
+Plus a non-blocking changeset presence check.
+
+**What CI still does NOT cover**, and the distinction matters more than the count: `test:spec-gate`
+COMPILES the Playwright specs, it does not execute them. A spec asserting a string the app no longer
+renders typechecks perfectly and passes this gate. That is not hypothetical — sales#79 shipped exactly
+that, and only a local harness run would have caught it.
 
 The Explorer UI harness is deliberately **not** in CI: it needs a live database, running servers and a
 one-time interactive human login. Run it locally before merging.
 
 ### Changesets
-**A PR that adds or edits anything under `migrations/`, or changes a published package, must carry a
-changeset with at least a `minor` bump** — `npx changeset`. CI warns rather than fails, so treat the
-warning as a review item. `baseBranch` is `next`.
+**Every PR that changes a published package must carry a changeset** — `npx changeset`. CI warns rather
+than fails, so treat the warning as a review item. `baseBranch` is `next`.
+
+**The bump level follows semver, and `minor` is required for exactly two things:** anything under
+`migrations/`, and any change to a package's public API — a removed or renamed export, a changed
+exported signature, a new required argument. Everything else is `patch`: user-facing copy, UI
+behaviour, and server-side fixes that keep their signatures. `major` is for a break a consumer cannot
+absorb by reading the CHANGELOG.
+
+> This paragraph used to read *"or changes a published package, must carry a changeset with at least a
+> `minor` bump"*, which is stricter than MJ's rule and stricter than what this repo actually merges —
+> `deal-hero-focus-new-record`, `deal-hero-number-collapsed`, `deal-pipeline-leads-when-unsaved` and
+> `deal-hero-drop-dead-focus-call` all landed as `patch` with no migration. It produced one wrong
+> review finding on sales#79/#80 before anyone checked it against practice. Andrew's `minor` call on
+> sales#72 was right for the OTHER reason: it removed an exported symbol.
+
+`fixed: [["@mj-biz-apps/*"]]` in `.changeset/config.json` means the whole family versions together, so
+the level you pick drives the CHANGELOG's accuracy rather than which packages move.
 
 ---
 

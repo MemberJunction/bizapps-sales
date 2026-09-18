@@ -669,10 +669,30 @@ $SQLCMD -d "${DB_DATABASE}" -h -1 -W -i "$(cygpath -w "$TMP" 2>/dev/null || echo
 # table locks across a provider startup. It is also allowed to fail without failing the seed: the SQL
 # rows are already committed by here, so aborting would leave a half-seeded database, and a demo where
 # every deal is hand-typed is still a working demo -- just a less complete story.
+# ── THE CATALOG, AFTER THE PIPELINE COMPANIES SETTLE AND BEFORE ANYTHING NEEDS A PRICE ──────────
+#
+# seed-orders-catalog.sql picks its selling company from the first active pipeline:
+#
+#     SELECT TOP 1 p.CompanyID FROM Pipeline p WHERE p.IsActive = 1 ORDER BY p.Name
+#
+# and THIS script is what puts the pipelines on their final companies -- the two UPDATE statements
+# above, which move them off the Default Company the metadata seeds them with. Run the catalog before
+# that (as WORKSPACE-SETUP used to instruct) and it reads a company that is about to stop owning any
+# pipeline: the products land on Default Company, every deal then fails with "no active product
+# PLAT-STD for its company", and the seed reports `deals w/ order 0` -- a symptom whose documented
+# cause ("the catalogue was not there when it ran") is the one thing that is NOT wrong.
+#
+# It goes HERE rather than earlier for the same reason the entity-layer half does: the SQL above has
+# committed, so the companies are final, and nothing downstream has to know the ordering rule.
+say "Seeding the orders catalog against the settled pipeline companies"
+$SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-orders-catalog.sql
+$SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-revenue-stack.sql
+
 say "Pricing five deals through the entity layer"
 if node scripts/seed-demo-lines.mjs; then
     :
 else
+    PRICING_FAILED=1
     echo ""
     echo "  !! Order lines were NOT seeded, so all seven deals stay hand-typed."
     echo "     The demo works; the stated-vs-priced distinction just is not visible."
@@ -731,3 +751,18 @@ Demo data seeded. Remove it again with:
 
 Walkthrough and talking points: docs/DEMO.md
 NEXT
+
+# ── EXIT NON-ZERO IF THE PRICED HALF DID NOT LAND ────────────────────────────────────────────────
+#
+# The rows above ARE committed and a hand-typed demo still works, so this deliberately does not
+# abort or roll anything back -- that reasoning is unchanged. What changes is the EXIT CODE.
+#
+# Before this, the summary printed `deals w/ order 0` as DATA and the script returned 0, so a broken
+# seed and a complete one were indistinguishable to anything that checked. That is the failure shape
+# CLAUDE.md rule 8 names: a green result nobody investigates. A human reading the summary might spot
+# the zero; a script never would, and neither did a session that read only the tail of the output.
+if [ "${PRICING_FAILED:-0}" = "1" ]; then
+    echo ""
+    echo "  !! SEED INCOMPLETE: the deals are seeded but none is priced."
+    exit 1
+fi
