@@ -11,13 +11,18 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectorRef, Component, ViewEncapsulation, inject, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, ViewChild, ViewEncapsulation, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CompositeKey, Metadata, RunView, type EntityInfo } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
-import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
-import { EntityViewerModule, type AfterDataLoadEventArgs, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
+import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent } from '@memberjunction/ng-base-forms';
+import {
+    EntityViewerModule,
+    type AfterDataLoadEventArgs,
+    type AfterRowDoubleClickEventArgs,
+    type RecordOpenedEvent,
+} from '@memberjunction/ng-entity-viewer';
 import {
     DealEntity,
     IsDealFieldEditableWhileLocked,
@@ -31,6 +36,7 @@ import {
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import { SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
+import { MJSDealLineEditorComponent } from './deal-line-editor.component';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -1620,12 +1626,21 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
 @Component({
     selector: 'mjs-deal-lines-panel',
     standalone: true,
-    imports: [CommonModule, BaseFormsModule],
+    imports: [CommonModule, BaseFormsModule, MJSDealLineEditorComponent],
     template: `
         <mj-collapsible-panel SectionKey="lines" SectionName="What's being sold" Icon="fa-solid fa-boxes-stacked"
             Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="false"
             [BadgeCount]="FormComponent.GetSectionRowCount('lines')">
             @if (Record.IsSaved && Record.OrderID) {
+                <!-- OUR OWN ADD BUTTON, because the grid's New opened the generic Order Line form
+                     (golive#229). Hidden on a locked deal for the same reason the grid's New was. -->
+                @if (!IsLocked) {
+                    <div class="mjs-deal-lines__bar">
+                        <button type="button" class="mjs-deal-lines__add" (click)="AddLine()">
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add a product
+                        </button>
+                    </div>
+                }
                 <!-- NEW IS HIDDEN ON A LOCKED DEAL (bc-aidp-next-golive#206 item 1). The tester added a
                      line to a Won deal through this toolbar and it saved: "the grid should hide its New
                      and delete buttons when the deal is locked".
@@ -1640,13 +1655,34 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
                      it arrives by -- needs the order-line veto from bizapps-orders#206, which is not
                      published yet. Hiding a button is not a lock, and this comment is here so nobody
                      reads it as one. -->
+
+                <!-- NEW IS HIDDEN ON A LOCKED DEAL (bc-aidp-next-golive#206 item 1). The tester added a
+                     line to a Won deal through this toolbar and it saved: "the grid should hide its New
+                     and delete buttons when the deal is locked".
+
+                     DELETE IS NOT BOUND HERE ON PURPOSE. ShowDeleteButton defaults to FALSE, so the
+                     toolbar never offers delete on any deal; binding it to !IsLocked would START showing
+                     it on open ones, which is the opposite of what the issue asks. Stage history sets it
+                     to false explicitly for the same reason it sets New to false: there, both are off on
+                     every deal.
+
+                     THIS IS THE FORM HALF ONLY. The server half -- refusing the line save whichever path
+                     it arrives by -- needs the order-line veto from bizapps-orders#206, which is not
+                     published yet. Hiding a button is not a lock, and this comment is here so nobody
+                     reads it as one. -->
+                <!-- ShowNewButton and NavigateOnDoubleClick are BOTH off, and that pair is the fix
+                     (golive#229). Either one left on re-opens the generic Order Line form, which
+                     renders Unit Price as a plain editable field and lets a rep type any price with no
+                     discount recorded — the thing D-DL2 says must be impossible. A row double-click now
+                     opens the restricted editor instead; Navigate is left unbound because with
+                     NavigateOnDoubleClick off the grid never emits it. -->
                 <mj-explorer-entity-data-grid
                     [Params]="Params"
-                    [NewRecordValues]="NewValues"
                     [AllowLoad]="FormComponent.IsSectionExpanded('lines')"
                     [ShowToolbar]="true"
-                    [ShowNewButton]="!IsLocked"
-                    (Navigate)="FormComponent.OnFormNavigate($event)"
+                    [ShowNewButton]="false"
+                    [NavigateOnDoubleClick]="false"
+                    (AfterRowDoubleClick)="EditLine($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
             } @else if (!Record.IsSaved) {
@@ -1662,9 +1698,28 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
                      the same wrong answer as before, one case over. -->
                 <p class="mjs-deal-empty">This deal has no order, so there is nothing to add products to.</p>
             }
+
+            @if (EditorOpen) {
+                <mjs-deal-line-editor
+                    [Deal]="Record"
+                    [LineID]="EditingLineID"
+                    (Saved)="OnLineSaved()"
+                    (Closed)="CloseEditor()">
+                </mjs-deal-line-editor>
+            }
         </mj-collapsible-panel>
     `,
-    styles: [`.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }`],
+    styles: [`
+        .mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }
+        .mjs-deal-lines__bar { display: flex; padding: var(--mj-space-3) var(--mj-space-5) 0; }
+        .mjs-deal-lines__add {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 12px; border-radius: var(--mj-radius-md, 8px); cursor: pointer;
+            border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface);
+            color: var(--mj-text-default); font: inherit; font-weight: 600;
+        }
+        .mjs-deal-lines__add:hover { background: var(--mj-bg-surface-hover); }
+    `],
 })
 export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     /**
@@ -1683,11 +1738,55 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
         if (!id) return null;
         return { EntityName: MJS_FOREIGN_ENTITIES.OrderLine, ExtraFilter: `OrderHeaderID = '${String(id).replace(/'/g, "''")}'` };
     }
-    public get NewValues(): Record<string, unknown> {
-        return this.Record?.OrderID ? { OrderHeaderID: this.Record.OrderID } : {};
-    }
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('lines', event.totalRowCount);
+    }
+
+    /* ── The restricted line editor (bc-aidp-next-golive#229) ─────────────────────────────────── */
+
+    /** Whether the editor dialog is mounted. */
+    public EditorOpen = false;
+    /** The line being edited; null means a new one. */
+    public EditingLineID: string | null = null;
+
+    /** The grid itself, so a saved line can make it re-read rather than leaving it stale. */
+    @ViewChild(ExplorerEntityDataGridComponent) private linesGrid?: ExplorerEntityDataGridComponent;
+
+    public AddLine(): void {
+        this.EditingLineID = null;
+        this.EditorOpen = true;
+    }
+
+    /**
+     * Opens the restricted editor for a row.
+     *
+     * The grid hands back the ROW, not an entity, so the primary key is read off it. A row without an
+     * ID is not a click that can be honoured — silently doing nothing beats opening an empty editor
+     * that would save a second, unrelated line.
+     */
+    public EditLine(event: AfterRowDoubleClickEventArgs): void {
+        const row = event?.row as Record<string, unknown> | undefined;
+        const id = row?.['ID'];
+        if (!id) return;
+        this.EditingLineID = String(id);
+        this.EditorOpen = true;
+    }
+
+    public CloseEditor(): void {
+        this.EditorOpen = false;
+        this.EditingLineID = null;
+    }
+
+    /**
+     * A saved line must change the GRID, not just close the dialog.
+     *
+     * Without the re-read the rep saves a product and the panel still shows the old set — which reads
+     * exactly like a save that silently did nothing, the failure mode the Explorer harness exists to
+     * catch.
+     */
+    public OnLineSaved(): void {
+        this.CloseEditor();
+        void this.linesGrid?.Refresh();
     }
 }
 
