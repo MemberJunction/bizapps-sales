@@ -66,6 +66,12 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     public IsLost = false;
 
+    /**
+     * Whether the locking status carries `IsWon` — read as its own flag, never inferred from `!IsLost`.
+     * golive#231 labels the Overview's outcome tiles from this; see `DealLockState.IsWon`.
+     */
+    public IsWon = false;
+
     /** Shown when locked, so the greyed-out-ness the form cannot render is at least explained. */
     public LockNotice: string | null = null;
 
@@ -95,6 +101,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         const lock = await ResolveDealLockState(persisted);
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
+        this.IsWon = lock.IsWon;
         this.LockNotice = lock.Notice;
     }
 

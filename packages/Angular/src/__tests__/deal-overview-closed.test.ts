@@ -85,7 +85,10 @@ describe('#206 item 4 — the Overview stops coaching once a deal is closed', ()
 describe('#206 item 4 — the Close tile shows when it closed, not how late it was', () => {
     it('counts days against the expected date while open', () => {
         const open = overviewWith(deal({ ExpectedCloseDate: '2020-01-01' }));
-        expect(open.CloseClock.label).toMatch(/past/);
+        // golive#231 spelled this out: "3 days overdue" rather than "3d past". The ASSERTION IS
+        // UNCHANGED IN INTENT -- an open deal past its date still reports the overrun -- only the
+        // word it reports it with moved.
+        expect(open.CloseClock.label).toMatch(/overdue/);
         expect(open.CloseClock.tone).toBe('warning');
     });
 
@@ -98,12 +101,25 @@ describe('#206 item 4 — the Close tile shows when it closed, not how late it w
         expect(closed.CloseClock.tone).toBe('success');
     });
 
-    it('does the same for Days to close, which had the same "past" wording', () => {
+    /**
+     * REWRITTEN BY golive#231, which supersedes this half of #206 item 4.
+     *
+     * #206 made `DaysToCloseLabel` return the close DATE on a closed deal — a date under a label
+     * reading "Days to close", which is what #231 was filed about. The row is now SWAPPED for
+     * "Sales cycle" when closed, so the old assertion describes a caller that no longer exists.
+     * What survives is the requirement underneath it: a closed deal's Timing card must not present
+     * a countdown.
+     */
+    it('replaces the countdown with the sales cycle once closed', () => {
         const closed = overviewWith(
-            deal({ ExpectedCloseDate: '2020-01-01', ActualCloseDate: '2026-09-01' }),
+            deal({
+                ExpectedCloseDate: '2020-01-01',
+                ActualCloseDate: '2026-09-01',
+                Get: (f: string) => (f === '__mj_CreatedAt' ? '2026-08-02' : null),
+            }),
         );
-        expect(closed.DaysToCloseLabel).not.toMatch(/past/);
-        expect(closed.DaysToCloseLabel).toMatch(/2026/);
+        expect(closed.IsClosed).toBe(true);
+        expect(closed.SalesCycleLabel).toBe('30 days');
     });
 });
 

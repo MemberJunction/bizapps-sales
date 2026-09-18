@@ -289,6 +289,38 @@ function daysFrom(d: Date | string | null | undefined): number | null {
     return Math.round((t - today) / 86_400_000);
 }
 
+/**
+ * Whole days from one date to another, both read as UTC days.
+ *
+ * SEPARATE FROM {@link daysFrom}, which measures against TODAY. A sales cycle and a close variance are
+ * both statements about two dates in the record, and expressing either through a today-relative helper
+ * would make the number change every day after the deal closed — a figure about the past that keeps
+ * moving. Everything stored is UTC (CLAUDE.md), so both sides are floored to a UTC day before
+ * subtracting; using local getters here shifts the answer by a day either side of midnight.
+ */
+function daysBetween(
+    from: Date | string | null | undefined,
+    to: Date | string | null | undefined,
+): number | null {
+    const utcDay = (d: Date | string): number | null => {
+        const iso = d instanceof Date
+            ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+            : String(d).slice(0, 10);
+        const t = Date.parse(`${iso}T00:00:00Z`);
+        return Number.isFinite(t) ? t : null;
+    };
+    if (!from || !to) return null;
+    const a = utcDay(from);
+    const b = utcDay(to);
+    if (a === null || b === null) return null;
+    return Math.round((b - a) / 86_400_000);
+}
+
+/** "1 day" / "N days" — so a one-day cycle does not read "1 days". */
+function dayCount(n: number): string {
+    return `${n} ${n === 1 ? 'day' : 'days'}`;
+}
+
 type DealFieldType =
     | 'textbox' | 'textarea' | 'number' | 'datepicker' | 'checkbox'
     | 'select' | 'autocomplete' | 'code' | 'dropdownlist' | 'numerictextbox';
@@ -534,15 +566,19 @@ const FIELD_STYLES = `
                         <div class="v">{{ Weighted }}</div>
                         <div class="s">{{ Prob }} probability</div>
                     </div>
+                    <!-- THE LABELS MOVE WITH THE OUTCOME, not just the values (golive#231).
+                         #206 item 4 made these tiles show the right DATA on a closed deal and left the
+                         static labels alone, so a won deal read "Forecast: Won" and "Close: 14 Mar" —
+                         correct figures sitting under headings that promise something else. -->
                     <div class="mjs-ov-kpi">
-                        <div class="l">Forecast</div>
+                        <div class="l">{{ OutcomeTileLabel }}</div>
                         <div class="v">{{ ForecastHeadline }}</div>
-                        <div class="s">{{ G('DealStatusType') || 'No status set' }}</div>
+                        <div class="s">{{ OutcomeTileSub }}</div>
                     </div>
                     <div class="mjs-ov-kpi" [attr.data-tone]="CloseClock.tone">
-                        <div class="l">Close</div>
+                        <div class="l">{{ CloseTileLabel }}</div>
                         <div class="v">{{ CloseClock.label }}</div>
-                        <div class="s">{{ CloseLabel }}</div>
+                        <div class="s">{{ CloseTileSub }}</div>
                     </div>
                 </div>
 
@@ -570,17 +606,48 @@ const FIELD_STYLES = `
                             <div><div class="l">Pipeline</div><div class="v">{{ G('Pipeline') || '—' }}</div></div>
                             <div><div class="l">Type</div><div class="v">{{ G('DealType') || '—' }}</div></div>
                             <div><div class="l">Selling as</div><div class="v">{{ G('Company') || '—' }}</div></div>
+                            <!-- WHY A DEAL WAS LOST is the single most useful thing on a lost deal, and
+                                 nothing anywhere reported it (golive#231). Shown only when lost: on a won
+                                 or open deal it is an empty row asking a question with no answer. -->
+                            @if (ShowLossReason) {
+                                <div class="mjs-ov-fact--span">
+                                    <div class="l">Loss reason</div>
+                                    <div class="v">{{ G('LossReason') || '—' }}</div>
+                                    @if (Record.LossNotes) {
+                                        <div class="s">{{ Record.LossNotes }}</div>
+                                    }
+                                </div>
+                            }
                         </div>
                     </article>
                     <article class="mjs-ov-card">
                         <header><i class="fa-solid fa-calendar-day"></i> Timing</header>
                         <div class="mjs-ov-facts">
+                            <!-- CLOSED FIRST, because on a finished deal what happened outranks what was
+                                 expected. "Expected close" is KEPT either way so the variance stays
+                                 legible — that is the whole point of the sub-line on the Close tile. -->
+                            @if (IsClosed) {
+                                <div><div class="l">{{ ClosedRowLabel }}</div><div class="v">{{ ClosedDateLabel }}</div></div>
+                            }
                             <div><div class="l">Expected close</div><div class="v">{{ CloseLabel }}</div></div>
-                            <div><div class="l">Days to close</div><div class="v">{{ DaysToCloseLabel }}</div></div>
-                            <div><div class="l">Term</div><div class="v">{{ TermLabel }}</div></div>
-                            <div><div class="l">Start</div><div class="v">{{ DateLabel(Record.StartDate) }}</div></div>
-                            <div><div class="l">Executed</div><div class="v">{{ DateLabel(Record.ExecutionDate) }}</div></div>
-                            <div><div class="l">Actual close</div><div class="v">{{ DateLabel(Record.ActualCloseDate) }}</div></div>
+                            <!-- "Days to close" counted DOWN to a date that has already arrived, and
+                                 #206 item 4 made it render the close DATE instead — a date under a label
+                                 promising a count (golive#231). Closed deals get the sales cycle, which
+                                 is the question actually worth asking afterwards; open ones keep the
+                                 countdown under a label that means it. -->
+                            @if (IsClosed) {
+                                <div><div class="l">Sales cycle</div><div class="v">{{ SalesCycleLabel }}</div></div>
+                            } @else {
+                                <div><div class="l">Days to close</div><div class="v">{{ DaysToCloseLabel }}</div></div>
+                            }
+                            <!-- Term, Start and Executed describe a deal that is being DELIVERED. On a
+                                 lost deal they are three empty rows reporting the absence of things that
+                                 were never going to exist, so they appear only if actually set. -->
+                            @if (ShowDeliveryRows) {
+                                <div><div class="l">Start</div><div class="v">{{ DateLabel(Record.StartDate) }}</div></div>
+                                <div><div class="l">Term</div><div class="v">{{ TermLabel }}</div></div>
+                                <div><div class="l">Executed</div><div class="v">{{ DateLabel(Record.ExecutionDate) }}</div></div>
+                            }
                         </div>
                     </article>
                     <article class="mjs-ov-card mjs-ov-card--wide">
@@ -650,6 +717,13 @@ const FIELD_STYLES = `
             color: var(--mj-text-muted); font-weight: 700;
         }
         .mjs-ov-facts .v { font-weight: 650; margin-top: 2px; }
+        /* The loss reason carries free-text notes under it, so it takes the full row rather than
+           squeezing a sentence into a half-width cell. */
+        .mjs-ov-fact--span { grid-column: 1 / -1; }
+        .mjs-ov-fact--span .s {
+            margin-top: 2px; font-weight: 450; color: var(--mj-text-muted);
+            white-space: pre-wrap; overflow-wrap: anywhere;
+        }
         .mjs-ov-link {
             border: 0; padding: 0; background: transparent; color: var(--mj-text-link);
             cursor: pointer; font: inherit; font-weight: 650; text-align: left;
@@ -684,13 +758,20 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
     }
     public get CloseLabel(): string { return this.DateLabel(this.Record?.ExpectedCloseDate); }
+    /**
+     * The countdown, for an OPEN deal only — the template swaps the whole row for "Sales cycle" once the
+     * deal has closed (golive#231).
+     *
+     * #206 item 4 had made this return the close DATE when closed, which is how a date came to sit under
+     * a label reading "Days to close". That branch is gone rather than left unreachable: a dead branch is
+     * a claim about a caller that no longer exists, and the next reader has no way to tell.
+     */
     public get DaysToCloseLabel(): string {
         const n = daysFrom(this.Record?.ExpectedCloseDate);
-        if (this.IsClosed) return this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
         if (n === null) return '—';
-        if (n < 0) return `${Math.abs(n)}d past`;
+        if (n < 0) return `${dayCount(Math.abs(n))} overdue`;
         if (n === 0) return 'today';
-        return `${n}d`;
+        return dayCount(n);
     }
     /**
      * Has this deal been closed? (bc-aidp-next-golive#206 item 4)
@@ -718,14 +799,122 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         // A closed deal shows WHEN it closed. Counting days against an expected date it already met
         // (or missed) is advice on a decision nobody can take any more.
         if (this.IsClosed) {
-            return { label: this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt), tone: 'success' };
+            return {
+                label: this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt),
+                tone: this.IsLost ? 'muted' : 'success',
+            };
         }
         if (this.Record?.ActualCloseDate) return { label: 'Closed', tone: 'success' };
         if (n === null) return { label: 'No close date', tone: 'muted' };
-        if (n < 0) return { label: `${Math.abs(n)}d past`, tone: 'warning' };
-        if (n === 0) return { label: 'Today', tone: 'warning' };
-        if (n <= 14) return { label: `${n}d`, tone: 'warning' };
-        return { label: `${n}d`, tone: 'muted' };
+        // SPELLED OUT, not "12d" / "3d past" (golive#231). The tile is read at a glance by someone who
+        // is not holding the convention in their head, and "3d past" has to be decoded.
+        if (n < 0) return { label: `${dayCount(Math.abs(n))} overdue`, tone: 'warning' };
+        if (n === 0) return { label: 'today', tone: 'warning' };
+        if (n <= 14) return { label: `in ${dayCount(n)}`, tone: 'warning' };
+        return { label: `in ${dayCount(n)}`, tone: 'muted' };
+    }
+
+    /* ── The outcome labels (bc-aidp-next-golive#231) ───────────────────────────────────────────
+     *
+     * WON AND LOST ARE READ AS FLAGS, never as status names and never as each other's negation. The
+     * flags come from `DealStatusType` through `ResolveDealLockState`, which is what makes "Closed Won"
+     * a label a pipeline can rename (CLAUDE.md rule 2), and reading `!IsLost` as "won" would print
+     * "Won" over any other locking status — a lie that reads perfectly.
+     */
+
+    /** Whether the PERSISTED status carries `IsLost`, as the form component resolved it once. */
+    public get IsLost(): boolean {
+        return (this.FormComponent as unknown as { IsLost?: boolean } | undefined)?.IsLost === true;
+    }
+
+    /** Whether the PERSISTED status carries `IsWon`. */
+    public get IsWon(): boolean {
+        return (this.FormComponent as unknown as { IsWon?: boolean } | undefined)?.IsWon === true;
+    }
+
+    /** "Outcome" once there is one; "Forecast" while the deal can still move. */
+    public get OutcomeTileLabel(): string { return this.IsClosed ? 'Outcome' : 'Forecast'; }
+
+    /** The stage it closed FROM once closed, the status while open. */
+    public get OutcomeTileSub(): string {
+        if (this.IsClosed) {
+            const stage = this.G('PipelineStage');
+            return stage ? `from ${stage}` : 'Closed';
+        }
+        return this.G('DealStatusType') || 'No status set';
+    }
+
+    /** "Won" / "Lost" once decided, "Closes" while it is still ahead. */
+    public get CloseTileLabel(): string {
+        if (!this.IsClosed) return 'Closes';
+        if (this.IsWon) return 'Won';
+        if (this.IsLost) return 'Lost';
+        return 'Closed';
+    }
+
+    /**
+     * Under the close date: how it landed against the expectation, or why it was lost.
+     *
+     * On an open deal this stays the expected date, which is what the value is counting down to.
+     */
+    public get CloseTileSub(): string {
+        if (!this.IsClosed) return this.CloseLabel;
+        if (this.IsLost) return this.G('LossReason') || 'No reason recorded';
+        return this.CloseVariance;
+    }
+
+    /**
+     * "on time" / "N days early" / "N days late" — the close against the date it was expected on.
+     *
+     * Empty when either date is missing: a variance needs both, and inventing "on time" from an absent
+     * expectation would be a claim nobody made.
+     */
+    public get CloseVariance(): string {
+        const n = daysBetween(this.Record?.ExpectedCloseDate, this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
+        if (n === null) return '';
+        if (n === 0) return 'on time';
+        return n < 0 ? `${dayCount(Math.abs(n))} early` : `${dayCount(n)} late`;
+    }
+
+    /** "Closed won" / "Closed lost" — the Timing row that reports what happened. */
+    public get ClosedRowLabel(): string {
+        if (this.IsWon) return 'Closed won';
+        if (this.IsLost) return 'Closed lost';
+        return 'Closed';
+    }
+
+    /** The day it closed. */
+    public get ClosedDateLabel(): string {
+        return this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
+    }
+
+    /**
+     * Creation to close, in days — the question worth asking about a finished deal, and one nothing
+     * reported anywhere. Measured from `__mj_CreatedAt`, which is the only creation stamp there is.
+     */
+    public get SalesCycleLabel(): string {
+        const n = daysBetween(
+            this.Record?.Get?.('__mj_CreatedAt') as Date | string | null | undefined,
+            this.Record?.ActualCloseDate ?? this.Record?.ClosedAt,
+        );
+        // A close back-dated before the deal was created is data, not an error to hide -- but it is not
+        // a sales cycle either, and "-4 days" reads as a bug. Say nothing rather than something wrong.
+        if (n === null || n < 0) return '—';
+        return dayCount(n);
+    }
+
+    /**
+     * Term / Start / Executed describe a deal being DELIVERED, so a lost deal hides them — unless one is
+     * actually set, in which case hiding it would conceal real data.
+     */
+    public get ShowDeliveryRows(): boolean {
+        if (!this.IsClosed || !this.IsLost) return true;
+        return !!(this.Record?.TermMonths || this.Record?.StartDate || this.Record?.ExecutionDate);
+    }
+
+    /** The loss reason row appears only on a deal that was actually lost. */
+    public get ShowLossReason(): boolean {
+        return this.IsClosed && this.IsLost;
     }
     public get TermLabel(): string {
         const m = this.Record?.TermMonths;
