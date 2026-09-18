@@ -77,16 +77,33 @@ const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
  * `PriorStatusID` is kept so the save can put the field back before persisting the caller's other
  * edits -- see the note at the detection site for why that ordering is the whole design.
  */
-interface StatusTransitionPlan {
-    /** `Unreadable` is not a transition: the target status row could not be read, so no safe answer
-     *  exists and the save is refused rather than guessed either way. */
-    Kind: 'Close' | 'Reopen' | 'Unreadable';
+interface StatusTransitionPlanFields {
     TargetStatusID: string;
     PriorStatusID: string | null;
     /** Whether the TARGET status is a loss. Carried on the plan because the status row was already
      *  read to decide the plan at all, and the pre-flight refusal below needs it. */
     TargetIsLost: boolean;
 }
+
+/**
+ * A transition that will actually RUN — the only shape `runStatusTransition` accepts.
+ *
+ * Split out so the narrowing is the COMPILER'S job rather than a claim made 200 lines away. That
+ * method chooses its operation with a ternary on `Kind === 'Close'`, so anything which is not a Close
+ * takes the REOPEN branch; an `Unreadable` plan arriving there would reopen a deal on a status nobody
+ * could read. It cannot arrive today, because the save refuses it near the top — but nothing at the
+ * point of use said so, and a fourth `Kind` added later would have inherited the reopen branch in
+ * silence. Now it fails to compile instead.
+ */
+type ActionableStatusTransition = StatusTransitionPlanFields & { Kind: 'Close' | 'Reopen' };
+
+/**
+ * `Unreadable` is not a transition: the target status row could not be read, so no safe answer exists
+ * and the save is refused rather than guessed either way.
+ */
+type UnreadableStatusTransition = StatusTransitionPlanFields & { Kind: 'Unreadable' };
+
+type StatusTransitionPlan = ActionableStatusTransition | UnreadableStatusTransition;
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
@@ -518,6 +535,14 @@ export class DealEntityServer extends DealEntity {
          * in advance: a downstream route declining, a loss reason that demands notes, a contract or
          * order write failing.
          */
+        /**
+         * NO `Kind` CHECK IS NEEDED HERE, and that is the point rather than an omission.
+         *
+         * `runStatusTransition` accepts only `ActionableStatusTransition`, and the `Unreadable`
+         * refusal above is an early `return`, so the compiler has already narrowed `transition` to
+         * `Close | Reopen` by this line — adding a guard here is rejected as a comparison with no
+         * overlap. The invariant the reader used to have to carry is now held by the type.
+         */
         if (transition) {
             return this.runStatusTransition(transition);
         }
@@ -599,7 +624,7 @@ export class DealEntityServer extends DealEntity {
      * are columns on this deal, so an importer that sets them alongside the status has supplied
      * everything the close needs -- which is the case #205 is about.
      */
-    private async runStatusTransition(plan: StatusTransitionPlan): Promise<boolean> {
+    private async runStatusTransition(plan: ActionableStatusTransition): Promise<boolean> {
         const { CloseDealOperation, ReopenDealOperation } = await import('./CloseDealOperation.js');
         const context = {
             provider: this.ProviderToUse as unknown as IMetadataProvider,
