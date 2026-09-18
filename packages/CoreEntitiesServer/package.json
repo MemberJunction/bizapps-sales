@@ -24,8 +24,8 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@mj-biz-apps/common-activity-sync": "^5.37.0",
-    "@mj-biz-apps/common-entities": "^5.37.0",
+    "@mj-biz-apps/common-activity-sync": "^5.43.0",
+    "@mj-biz-apps/common-entities": "^5.43.0",
     "@mj-biz-apps/orders-entities": "^5.2.1",
     "@mj-biz-apps/sales-entities": "6.4.0",
     "@mj-biz-apps/tasks-core": "^1.4.1",
