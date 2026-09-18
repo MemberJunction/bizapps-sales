@@ -48,7 +48,7 @@
     "test:discount-gate": "node scripts/assert-discount-conversion.mjs",
     "test:validation-gate": "node scripts/assert-workspace-validation.mjs",
     "test:spec-gate": "node scripts/assert-specs-typecheck.mjs",
-    "test:drift-gate": "python3 scripts/assert-no-comment-drift.py",
+    "test:drift-gate": "python scripts/assert-no-comment-drift.py",
     "change": "changeset",
     "commitpush": "node ci/commit_push.mjs",
     "mergemain": "node ci/merge_main.mjs",
