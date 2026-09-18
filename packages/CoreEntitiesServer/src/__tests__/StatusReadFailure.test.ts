@@ -84,6 +84,63 @@ describe('when the target status cannot be read', () => {
     });
 });
 
+describe('the save itself, which is where the refusal lives', () => {
+    /**
+     * THE GUARD, DRIVEN. Everything above asserts the PLAN is `Unreadable`; this asserts what
+     * `saveDeclared` does about it, which is the actual fix and the actual defect.
+     *
+     * Without this, replacing `if (transition?.Kind === 'Unreadable')` with `if (false)` — restoring
+     * the defect exactly — kills nothing, because no test reaches the save. A plan nobody acts on is
+     * not a refusal, and "it must be the one the save refuses" was an assertion about a caller that
+     * no check ran.
+     *
+     * `saveDeclared` touches four fields before the guard and then calls `planStatusTransition`, so
+     * the same fixture reaches it. `refuseSave` records through `RegisterResultHistoryEntry`, which
+     * is why `Fields` and the result history are shadowed: core reads both.
+     */
+    function saving(opts: Parameters<typeof deal>[0]) {
+        const d = deal(opts) as ReturnType<typeof deal> & {
+            saveDeclared(): Promise<boolean>;
+            LatestResult: { Message?: string } | null;
+        };
+        for (const [k, v] of Object.entries({
+            _orderStatusWarnings: [],
+            _orderJustProvisioned: false,
+            _lockedAtSave: false,
+            _lastStageEventID: null,
+            Fields: [],
+            _resultHistory: [],
+        })) {
+            Object.defineProperty(d, k, { value: v, writable: true });
+        }
+        return d;
+    }
+
+    it('REFUSES the save when the status could not be read', async () => {
+        const d = saving({ target: WON, prior: OPEN, rows: {}, failAll: true });
+
+        expect(await d.saveDeclared(), 'an unreadable status must not save').toBe(false);
+        expect(d.LatestResult?.Message, 'and the operator is told what to do about it').toContain(
+            'could not be read',
+        );
+    });
+
+    it('does NOT refuse when the status reads cleanly', async () => {
+        // The other half. Without it, a guard that refused every save would also pass the first.
+        const d = saving({ target: WON, prior: OPEN, rows: { [WON]: LOCKING, [OPEN]: OPENING } });
+
+        // It gets past the guard; what happens after is the close path's own subject, so this only
+        // asserts the refusal did NOT fire.
+        let refused = false;
+        try {
+            refused = (await d.saveDeclared()) === false && !!d.LatestResult?.Message?.includes('could not be read');
+        } catch {
+            refused = false; // reaching further into the close path is not this file's business
+        }
+        expect(refused, 'a readable status must not hit the unreadable refusal').toBe(false);
+    });
+});
+
 describe('a status that reads cleanly is unaffected', () => {
     it('still plans a Close for open -> locking', async () => {
         const d = deal({ target: WON, prior: OPEN, rows: { [WON]: LOCKING, [OPEN]: OPENING } });

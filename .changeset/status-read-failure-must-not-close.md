@@ -14,6 +14,8 @@ A status the lookup succeeds at but does not **find** is treated the same way. `
 
 **The refusal runs BEFORE the status is reverted, and that ordering is what makes the retry work.** The revert exists so the close lock and `super.Save()` do not write a status the transition is about to move; on this path nothing downstream runs, so reverting would serve nothing and would cost the one thing the message asks for. A reverted field is clean, so a caller who reads "try again" and re-saves the same object would get `planStatusTransition() === null` on `!field?.Dirty` — no close, the other edits committed, and `Save()` returning true. Left dirty, the retry reads the status again, which is exactly what a transient failure needs.
 
-Six tests, three mutations, all killed: removing the guard (which restores the defect exactly), making the read always claim success, and making the failure path claim success. The three that would have shipped it.
+Eight tests, three mutations, all killed: removing the guard (which restores the defect exactly), making the read always claim success, and making the failure path claim success. The three that would have shipped it.
+
+**Two of those tests were added after re-running the mutations, because the first one was not killed.** Every original test drove `planStatusTransition` and asserted the PLAN was `Unreadable`; none drove `saveDeclared`, where the guard actually lives. So replacing `if (transition?.Kind === 'Unreadable')` with `if (false)` — the defect, exactly — failed nothing. One test even carried the words *"and it must be the one the save refuses"* while asserting only the plan's Kind. A plan nobody acts on is not a refusal.
 
 The lock's own behaviour is unchanged — `statusLocksDeal` still fails closed, and a status row that is merely absent still reads as not-locking there, exactly as before.
