@@ -30,7 +30,9 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { TodayUtc, UtcDatePart } from './dashboard-inspect';
+// From the leaf date module, NOT from `dashboard-inspect` -- importing it here would close an
+// ES-module cycle, because inspect imports `WithinWindow` from this file. See `dashboard-dates.ts`.
+import { TodayUtc, UtcDatePart } from './dashboard-dates';
 
 /** The four windows the dashboard offers. `alltime` is unbounded, not a very wide bound. */
 export type PeriodKey = 'quarter' | 'lastquarter' | 'year' | 'alltime';
@@ -52,6 +54,16 @@ export const CALENDAR_YEAR_START: FiscalYearStart = { Month: 1, Day: 1 };
  * boundaries are invisible is the same defect class this whole feature exists to fix.
  */
 export type FiscalBasis =
+    /**
+     * NOTHING HAS BEEN READ YET -- the component's state before `LoadFiscalYearStart` resolves.
+     *
+     * {@link ResolveFiscalYearStart} never returns it; only a caller holding a pre-load value does.
+     * It exists because the selector renders outside the dashboard's loading guard, so seeding that
+     * state with `no-accounting` made the basis line assert "BizApps Accounting not installed" on
+     * every load of a host where it IS installed -- and left that assertion on screen permanently if
+     * the read threw. An unresolved basis is a different fact from an absent app and says so.
+     */
+    | 'pending'
     /** Every active profile agreed, and this is what they said. */
     | 'profile'
     /** bizapps-accounting is not installed on this host. */
@@ -136,6 +148,8 @@ export function ResolveFiscalYearStart(
 export function DescribeFiscalBasis(resolution: FiscalYearStartResolution): string {
     const start = MonthDayLabel(resolution.Start);
     switch (resolution.Basis) {
+        case 'pending':
+            return `reading fiscal year start…`;
         case 'profile':
             return `fiscal year starts ${start}`;
         case 'no-accounting':
@@ -194,6 +208,23 @@ function dayBefore(iso: string): string {
  * Matches `bizapps-accounting`'s `deriveFiscalYear()`, deliberately: a July-start deployment calls
  * July 2026 → June 2027 "FY2026" in the ledger, and a dashboard that called the same span FY2027
  * would be reporting against a year nobody else uses.
+ *
+ * ── ONE BOUNDED CASE WHERE IT DOES NOT MATCH, NAMED RATHER THAN CLAIMED AWAY ────────────────────
+ *
+ * The rollover is compared against {@link anchor}, which CLAMPS the start day to the month's length,
+ * while `deriveFiscalYear` compares the stored day raw. `CK_AccountingCompanyProfile_FiscalDay`
+ * permits day 1-31 against any month, so a profile can store a start that does not exist in its own
+ * month -- 29 February, or 31 April. For those, and ONLY those, the two disagree for the few days
+ * between the clamped date and the day accounting rolls over: a 29 February start puts 28 February
+ * 2027 in FY2027 here and in FY2026 in the ledger.
+ *
+ * It is stated rather than fixed because the clamp cannot be dropped from this one comparison alone.
+ * {@link ResolvePeriod} derives every quarter boundary from the same anchors, so a rollover that used
+ * the raw day while the boundaries used the clamped one would produce a window that does not contain
+ * the date that selected it -- a strictly worse defect than a one-day label difference on an
+ * impossible start date. Matching accounting exactly means rolling the anchor FORWARD to the first of
+ * the next month everywhere instead of clamping back, which is a deliberate change to every quarter
+ * boundary and belongs in its own change, not smuggled in here.
  */
 export function FiscalYearOf(today: string, start: FiscalYearStart): number {
     const calendarYear = Number(today.slice(0, 4));

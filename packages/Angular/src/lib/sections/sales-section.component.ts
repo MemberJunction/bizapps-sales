@@ -42,7 +42,7 @@
  */
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CompositeKey, Metadata, type EntityInfo } from '@memberjunction/core';
+import { CompositeKey, LogError, Metadata, type EntityInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
@@ -176,11 +176,25 @@ export class MJSSalesSectionComponent implements OnInit {
     public Period: PeriodKey = 'quarter';
     public readonly PeriodOptions = PERIOD_OPTIONS;
     /**
-     * Where the fiscal year start came from. Starts at the calendar default with `no-accounting` so
-     * the first render before the load resolves is a state the template can describe, rather than a
-     * null it has to guard.
+     * Where the fiscal year start came from. Starts at the calendar default with `pending` -- NOT
+     * with `no-accounting`.
+     *
+     * The selector and its basis line sit in `.sechead`, which renders OUTSIDE the dashboard's
+     * loading guard, so whatever this holds is on screen from the first paint. Seeding it with
+     * `no-accounting` made that line read "calendar year (BizApps Accounting not installed)" on
+     * every load of a host where accounting IS installed, and left that claim standing permanently
+     * if the read never resolved. `pending` is a state the template can still describe, and it is
+     * the true one until {@link DealWorkspaceService.LoadFiscalYearStart} answers.
      */
-    public FiscalStart: FiscalYearStartResolution = { Start: CALENDAR_YEAR_START, Basis: 'no-accounting' };
+    public FiscalStart: FiscalYearStartResolution = { Start: CALENDAR_YEAR_START, Basis: 'pending' };
+    /**
+     * A period change is in flight. The figures it bounds are stale until it lands, and the pill and
+     * the footnote have ALREADY moved -- so the template shows those three as pending rather than
+     * letting a reader take last period's Won count for this period's.
+     */
+    public PeriodLoading = false;
+    /** Identifies the newest period request, so a slower superseded one cannot apply late. */
+    private periodToken = 0;
     public WinRateByCount: number | null = null;
     public WinRateByValue: number | null = null;
     public WinClosedCount = 0;
@@ -358,19 +372,57 @@ export class MJSSalesSectionComponent implements OnInit {
             return;
         }
         this.Period = key;
-        const window = this.Window;
-        const [summary, winRate] = await Promise.all([
-            this.service.LoadDashboardSummary(window),
-            this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
-        ]);
-        this.summary = summary;
-        this.applyWinRate(winRate);
-        // The Won slice is period-bound, so a narrowing period changes which deals Inspect should be
-        // listing. Refreshing the view keeps the grid showing the set the tile just counted.
-        if (this.InspectFilter === 'won') {
-            await this.refreshInspectView();
-        }
+        /**
+         * EVERY RESPONSE IS CHECKED AGAINST THE SELECTION THAT IS CURRENT WHEN IT LANDS.
+         *
+         * Two clicks in quick succession put two pairs of queries in flight, and nothing orders the
+         * responses. Without this token the slower one wins whenever it finishes last, leaving the
+         * Won tile and the win rate showing All-time figures under a pill and a footnote that both
+         * say "last quarter" -- and staying that way, because `Refresh()` is the only thing that
+         * would correct it and a period change does not call it. A superseded reply is discarded
+         * rather than applied late.
+         */
+        const token = ++this.periodToken;
+        this.PeriodLoading = true;
         this.cdr.detectChanges();
+        try {
+            const window = this.Window;
+            const [summary, winRate] = await Promise.all([
+                this.service.LoadDashboardSummary(window),
+                this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
+            ]);
+            if (token !== this.periodToken) {
+                return;
+            }
+            this.summary = summary;
+            this.applyWinRate(winRate);
+            // The Won slice is period-bound, so a narrowing period changes which deals Inspect should
+            // be listing. Refreshing the view keeps the grid showing the set the tile just counted.
+            if (this.InspectFilter === 'won') {
+                await this.refreshInspectView();
+            }
+        } catch (e) {
+            /**
+             * A THROW USED TO ESCAPE AS AN UNHANDLED REJECTION, with `Period` already flipped -- so
+             * the pills showed the new period, the figures were the old one's, and the early
+             * `key === this.Period` return above meant clicking the same pill again would not retry.
+             * Clearing the summary makes the failure visible (`Kpis` renders em-dashes and "figures
+             * unavailable") instead of presenting stale numbers under a new label.
+             */
+            if (token === this.periodToken) {
+                this.summary = null;
+                this.WinRateByCount = null;
+                this.WinRateByValue = null;
+                this.WinClosedCount = 0;
+                this.WinWonCount = 0;
+                LogError(`Sales: reporting period '${key}' failed to load - ${e instanceof Error ? e.message : String(e)}`);
+            }
+        } finally {
+            if (token === this.periodToken) {
+                this.PeriodLoading = false;
+                this.cdr.detectChanges();
+            }
+        }
     }
 
     // ── Dashboard ──────────────────────────────────────────────────────────────
@@ -449,7 +501,14 @@ export class MJSSalesSectionComponent implements OnInit {
             },
             {
                 Label: 'Won',
-                Value: String(s.WonCount),
+                /**
+                 * PENDING WHILE THE PERIOD IS CHANGING, because `Period` flips synchronously on the
+                 * click and the footnote below moves with it, while `s.WonCount` is still the figure
+                 * the PREVIOUS period returned. Rendering it would put last period's count under this
+                 * period's dates for the length of a round trip — a tile that looks settled while
+                 * meaning something else, which is the defect golive#232 was filed about.
+                 */
+                Value: this.PeriodLoading ? '…' : String(s.WonCount),
                 /**
                  * THE FOOTNOTE NAMES THE PERIOD, because the tile's value no longer speaks for itself.
                  *
@@ -458,9 +517,11 @@ export class MJSSalesSectionComponent implements OnInit {
                  * saying WHICH window is what stops the same confusion arriving from the other
                  * direction — a reader seeing a smaller number and assuming deals went missing.
                  */
-                Footnote: this.Period === 'alltime'
-                    ? 'closed won · all time'
-                    : `closed won · ${this.Window.Label.toLowerCase()} (${this.WindowLabel})`,
+                Footnote: this.PeriodLoading
+                    ? `counting ${this.Period === 'alltime' ? 'all time' : this.WindowLabel}…`
+                    : this.Period === 'alltime'
+                        ? 'closed won · all time'
+                        : `closed won · ${this.Window.Label.toLowerCase()} (${this.WindowLabel})`,
                 Filter: 'won',
             },
         ];

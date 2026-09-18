@@ -72,6 +72,21 @@ describe('ResolveFiscalYearStart', () => {
             expect(text).not.toMatch(/no-accounting|no-profiles|undefined/);
         }
     });
+
+    it('PENDING is describable and does not claim accounting is absent', () => {
+        // The selector renders before the read resolves, so the pre-load basis is on screen. It used
+        // to be seeded with 'no-accounting', which told every reader on an accounting host that the
+        // app was not installed. Whatever the wording, it must not assert absence.
+        const text = DescribeFiscalBasis({ Start: CALENDAR_YEAR_START, Basis: 'pending' });
+        expect(text.length).toBeGreaterThan(0);
+        expect(text).not.toMatch(/not installed|no company profile|disagree/i);
+    });
+
+    it('is never itself the PENDING basis — that state belongs to the caller, not to the resolver', () => {
+        for (const rows of [null, [], [JULY], [JULY, APRIL_6]]) {
+            expect(ResolveFiscalYearStart(rows).Basis).not.toBe('pending');
+        }
+    });
 });
 
 describe('FiscalYearOf — labelled by the year it STARTS in, matching accounting', () => {
@@ -91,6 +106,28 @@ describe('FiscalYearOf — labelled by the year it STARTS in, matching accountin
     it('rolls over on the START DAY, not on the first of the start month', () => {
         expect(FiscalYearOf('2026-04-05', APRIL_6)).toBe(2025);
         expect(FiscalYearOf('2026-04-06', APRIL_6)).toBe(2026);
+    });
+
+    /**
+     * PINS THE ONE CASE WHERE THIS DIVERGES FROM ACCOUNTING, so the divergence is a decision on
+     * record rather than something a later reader discovers in production.
+     *
+     * `CK_AccountingCompanyProfile_FiscalDay` allows day 1-31 against any month, so a profile can
+     * name a start that does not exist in its own month. `deriveFiscalYear()` compares the raw day
+     * (28 < 29 → still last year); this module compares the CLAMPED anchor, because every quarter
+     * boundary is derived from the same anchors and a rollover using the raw day would produce a
+     * window that does not contain the date that selected it. Containment is asserted here too, so
+     * the trade-off cannot be undone by accident.
+     */
+    it('clamps an impossible start day, which is the one place it does NOT match deriveFiscalYear', () => {
+        const FEB_29: FiscalYearStart = { Month: 2, Day: 29 };
+        // Accounting reads 28 Feb 2027 as still FY2026; the clamp puts it on the FY2027 boundary.
+        expect(FiscalYearOf('2027-02-28', FEB_29)).toBe(2027);
+        expect(FiscalYearOf('2027-02-27', FEB_29)).toBe(2026);
+        // The reason the clamp wins: the selected window must contain the date that selected it.
+        const w = ResolvePeriod('quarter', FEB_29, '2027-02-28');
+        expect(w.Start!.localeCompare('2027-02-28')).toBeLessThanOrEqual(0);
+        expect(w.End!.localeCompare('2027-02-28')).toBeGreaterThanOrEqual(0);
     });
 });
 

@@ -10,7 +10,15 @@
  * @module @mj-biz-apps/sales-ng
  */
 import type { DealRosterRow } from '../workspace/deal-workspace.service';
+import { TodayUtc, UtcDatePart } from './dashboard-dates';
 import { WithinWindow, type PeriodWindow } from './dashboard-period';
+
+/**
+ * Re-exported so every existing import path (and `public-api.ts`'s `export *`) keeps working. The
+ * definitions moved to `dashboard-dates.ts` to break the inspect <-> period import cycle -- see that
+ * file's header for what the cycle would have cost.
+ */
+export { TodayUtc, UtcDatePart };
 
 /**
  * Whether a WON deal falls inside the dashboard's selected period.
@@ -53,18 +61,6 @@ export type InspectKey =
     | 'week'
     | 'month'
     | 'later';
-
-/** UTC date-only `YYYY-MM-DD`. Accepts an ISO string or a `Date` — v6 RunQuery can hand back either. */
-export function UtcDatePart(value: string | Date): string {
-    if (value instanceof Date) {
-        return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`;
-    }
-    return String(value).slice(0, 10);
-}
-
-export function TodayUtc(): string {
-    return UtcDatePart(new Date());
-}
 
 function addDays(iso: string, days: number): string {
     const [y, m, d] = iso.split('-').map(Number);

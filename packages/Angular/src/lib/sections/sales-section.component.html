@@ -194,17 +194,22 @@
                   }
                 </div>
               </div>
+              <!--
+                Win rate is period-bound, so like the Won tile it shows PENDING rather than the
+                previous period's rate while a period change is in flight — the header beside it has
+                already moved to the new window.
+              -->
               <div class="card">
                 <div class="ch">Win rate <span class="r">closed deals · count and value · {{ WindowLabel }}</span></div>
                 <div class="winrate">
                   <div class="kpi">
                     <div class="l">By count</div>
-                    <div class="v">{{ Pct(WinRateByCount) }}</div>
-                    <div class="f">{{ WinWonCount }} won / {{ WinClosedCount }} closed</div>
+                    <div class="v">{{ PeriodLoading ? '…' : Pct(WinRateByCount) }}</div>
+                    <div class="f">{{ PeriodLoading ? 'counting…' : WinWonCount + ' won / ' + WinClosedCount + ' closed' }}</div>
                   </div>
                   <div class="kpi">
                     <div class="l">By value</div>
-                    <div class="v">{{ Pct(WinRateByValue) }}</div>
+                    <div class="v">{{ PeriodLoading ? '…' : Pct(WinRateByValue) }}</div>
                     <div class="f">Won $ over closed $</div>
                   </div>
                 </div>

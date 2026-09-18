@@ -16,7 +16,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { Injectable } from '@angular/core';
-import { EntitySaveOptions, LogError, Metadata, RunQuery, RunView, RunViewParams } from '@memberjunction/core';
+import { EntitySaveOptions, LogError, LogStatus, Metadata, RunQuery, RunView, RunViewParams, type RunViewResult } from '@memberjunction/core';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 
 import {
@@ -696,19 +696,46 @@ export class DealWorkspaceService {
             return ResolveFiscalYearStart(null);
         }
 
-        const result = await new RunView().RunView<FiscalYearStart & { IsActive: boolean }>({
-            EntityName: E_ACCOUNTING_COMPANY_PROFILE,
-            // Only companies still trading define the year the dashboard reports on. A retired
-            // subsidiary's January start should not put the whole dashboard into 'mixed'.
-            ExtraFilter: 'IsActive = 1',
-            ResultType: 'simple',
-            Fields: ['FiscalYearStartMonth', 'FiscalYearStartDay'],
-        });
+        /**
+         * CAUGHT, BECAUSE THIS READ IS AWAITED BEFORE EVERYTHING ELSE THE SECTION LOADS.
+         *
+         * `Refresh()` has to resolve the fiscal start before it can compute the window it sends to
+         * the windowed queries, so this call sits ahead of the roster, the lookups and the summary.
+         * A rejection here therefore does not degrade one figure -- it aborts the whole load and
+         * leaves the section on its spinner, with no board, no roster and no deals, over a value
+         * that has a documented fallback two lines below. `Success: false` was already handled; a
+         * THROW (transport failure, a provider that rejects on a permission denial) was not.
+         */
+        let result: RunViewResult<FiscalYearStart & { IsActive: boolean }> | null = null;
+        try {
+            result = await new RunView().RunView<FiscalYearStart & { IsActive: boolean }>({
+                EntityName: E_ACCOUNTING_COMPANY_PROFILE,
+                // Only companies still trading define the year the dashboard reports on. A retired
+                // subsidiary's January start should not put the whole dashboard into 'mixed'.
+                ExtraFilter: 'IsActive = 1',
+                ResultType: 'simple',
+                Fields: ['FiscalYearStartMonth', 'FiscalYearStartDay'],
+            });
+        } catch (e) {
+            LogStatus(`${E_ACCOUNTING_COMPANY_PROFILE} read threw, falling back to the calendar year - ${e instanceof Error ? e.message : String(e)}`);
+            return ResolveFiscalYearStart([]);
+        }
         if (!result?.Success) {
-            LogError(`${E_ACCOUNTING_COMPANY_PROFILE} read failed - ${result?.ErrorMessage ?? 'unknown error'}`);
-            // A FAILED read is not an absent app. Reporting it as 'no-profiles' would tell a reader to
-            // go and configure something that may already be configured, so it degrades the same way
-            // an unconfigured host does and the error goes to the log where it can be diagnosed.
+            /**
+             * LOGGED AT STATUS, NOT ERROR, AND THAT IS THE WHOLE POINT OF THE METADATA GUARD ABOVE.
+             *
+             * `LogError` reaches `console.error`. The guard only establishes that the entity is
+             * REGISTERED; it says nothing about whether this user may read it, and a sales rep whose
+             * roles carry no accounting permissions is an ordinary deployment, not a fault. Logging
+             * that at error level would put a console error on every dashboard load for those users
+             * -- which `75-dashboard.spec.ts` fails on via `expectNoConsoleErrors`, and which is
+             * exactly the breakage the guard was added to prevent (see {@link LoadProducts}).
+             *
+             * A FAILED read is still not an absent app. Reporting it as 'no-profiles' would tell a
+             * reader to go and configure something that may already be configured, so it degrades the
+             * same way an unconfigured host does, and the line below is where it gets diagnosed.
+             */
+            LogStatus(`${E_ACCOUNTING_COMPANY_PROFILE} read failed, falling back to the calendar year - ${result?.ErrorMessage ?? 'unknown error'}`);
             return ResolveFiscalYearStart([]);
         }
 

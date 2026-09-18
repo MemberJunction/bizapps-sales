@@ -579,12 +579,36 @@ covers, with both screens looking right.
 **The year label follows accounting's convention** — a fiscal year is labelled by the calendar year it
 *starts* in. Diverging would be worse than having no label, because both readings are plausible.
 
+**With one bounded exception, named rather than claimed away.** `CK_AccountingCompanyProfile_FiscalDay`
+permits day 1-31 against any month, so a profile can store a start that does not exist in its own month
+— 29 February, or 31 April. `deriveFiscalYear()` compares the stored day raw, so it rolls over on the
+first day of the *following* month; `dashboard-period.ts` compares a CLAMPED anchor, so it rolls over on
+the last day of the named one. For those starts, and only those, the two label a handful of days
+differently: a 29 February start puts 28 February 2027 in FY2027 on the dashboard and FY2026 in the
+ledger.
+
+The clamp wins because it is not local to that one comparison. Every quarter boundary is derived from
+the same anchors, so a rollover using the raw day while the boundaries used the clamped one would
+produce a window that does not contain the date that selected it — a strictly worse defect than a
+one-day label difference on a start date that cannot occur. Matching accounting exactly means rolling
+the anchor FORWARD to the first of the next month everywhere instead of clamping back, which changes
+every quarter boundary and is its own decision, not a detail of this one. A unit test pins both the
+divergence and the containment it buys, so neither can be undone by accident.
+
 ### The two degradations, and why each is visible
 
 Sales is built to run standalone, so accounting may simply be absent. `DealWorkspaceService.
 LoadFiscalYearStart()` therefore checks metadata before reading, exactly as `LoadProducts()` does for
 orders — asking `RunView` for an unregistered entity logs a console error rather than failing, and the
 Playwright keystone (correctly) treats that as a broken screen.
+
+That guard establishes only that the entity is REGISTERED, so the read itself degrades twice more. A
+`Success: false` result — most ordinarily, a user whose roles carry no accounting permissions — is
+logged at STATUS, not error, because logging it at error level would put a `console.error` on every
+dashboard load for those users and fail the keystone in exactly the way the guard exists to prevent. A
+THROW is caught for a different reason: the fiscal start has to resolve before the window can be
+computed, so this read is awaited ahead of the roster, the lookups and the summary, and an escaping
+rejection would abort the whole section over a value that has a documented fallback.
 
 Second, the setting is per-company while the dashboard is not company-scoped: `Sales: Dashboard
 Summary` accepts a `CompanyID` the UI does not pass. **When active company profiles disagree about the
