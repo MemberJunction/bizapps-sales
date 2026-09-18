@@ -1457,8 +1457,18 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
-            } @else if (Record.IsSaved) {
-                <p class="mjs-deal-empty">Save the deal to add products.</p>
+            } @else if (!Record.IsSaved) {
+                <!-- THE CASE THE HINT EXISTS FOR (bc-aidp-next-golive#216). This branch used to be
+                     gated on Record.IsSaved, so it told a SAVED deal to save and showed a brand-new
+                     one nothing at all: neither branch matched, the panel rendered empty, and a tester
+                     reported no way to add products and no message saying why. -->
+                <p class="mjs-deal-empty">Save the deal first. Products are added to the order it creates.</p>
+            } @else {
+                <!-- Saved, but no order to hang lines on. A deal mints its order on save, so this is the
+                     legacy row that closed before that was true: DealEntityServer deliberately does not
+                     mint one for a deal whose whole point has passed. Telling that rep to save would be
+                     the same wrong answer as before, one case over. -->
+                <p class="mjs-deal-empty">This deal has no order, so there is nothing to add products to.</p>
             }
         </mj-collapsible-panel>
     `,
