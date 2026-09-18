@@ -99,9 +99,11 @@ describe('the save itself, which is where the refusal lives', () => {
      * is why `Fields` and the result history are shadowed: core reads both.
      */
     function saving(opts: Parameters<typeof deal>[0]) {
+        const setCalls: string[] = [];
         const d = deal(opts) as ReturnType<typeof deal> & {
             saveDeclared(): Promise<boolean>;
             LatestResult: { Message?: string } | null;
+            SetCalls: string[];
         };
         for (const [k, v] of Object.entries({
             _orderStatusWarnings: [],
@@ -110,9 +112,23 @@ describe('the save itself, which is where the refusal lives', () => {
             _lastStageEventID: null,
             Fields: [],
             _resultHistory: [],
+            /**
+             * THE REVERT, MADE OBSERVABLE — and note this stub is why the two checks below exist.
+             *
+             * Without it, `this.Set('DealStatusTypeID', ...)` throws on this double, so moving the
+             * refusal to AFTER the revert was killed by a TypeError rather than by an assertion. That
+             * is a kill by accident: anyone completing this fixture — one line, exactly this line —
+             * would have removed the only thing standing between the suite and that mutation, with
+             * nothing failing to say so. Measured: with `Set` stubbed and no check below, the mutation
+             * passes all eight tests.
+             */
+            Set: (field: string) => {
+                setCalls.push(field);
+            },
         })) {
             Object.defineProperty(d, k, { value: v, writable: true });
         }
+        Object.defineProperty(d, 'SetCalls', { get: () => setCalls });
         return d;
     }
 
@@ -125,19 +141,51 @@ describe('the save itself, which is where the refusal lives', () => {
         );
     });
 
+    /**
+     * THE ORDERING, PINNED. The description calls this "the whole of why the retry works" and nothing
+     * checked it.
+     *
+     * The revert exists so the lock and `super.Save()` do not write a status the transition is about
+     * to move. On this path nothing downstream runs, so reverting would serve nothing and would cost
+     * the retry: a reverted field is CLEAN, so re-saving the same object yields
+     * `planStatusTransition() === null` on `!field?.Dirty` — no close, the other edits committed, and
+     * `Save()` returning TRUE. A save that silently skips the close is exactly what this PR prevents.
+     *
+     * Asserting "the field is still dirty" would NOT do: `GetFieldByName` on this double returns a
+     * fresh `{ Dirty: true }` every call, so that assertion can never fail. Whether `Set` ran is the
+     * observable that actually separates the two orderings.
+     */
+    it('refuses BEFORE reverting the status, so a retry still sees the change', async () => {
+        const d = saving({ target: WON, prior: OPEN, rows: {}, failAll: true });
+
+        expect(await d.saveDeclared()).toBe(false);
+        expect(d.SetCalls, 'the status must NOT have been reverted on the refused path').not.toContain(
+            'DealStatusTypeID',
+        );
+    });
+
     it('does NOT refuse when the status reads cleanly', async () => {
         // The other half. Without it, a guard that refused every save would also pass the first.
         const d = saving({ target: WON, prior: OPEN, rows: { [WON]: LOCKING, [OPEN]: OPENING } });
 
-        // It gets past the guard; what happens after is the close path's own subject, so this only
-        // asserts the refusal did NOT fire.
-        let refused = false;
+        /**
+         * POSITIVELY, not by absence. The previous form initialised `refused = false` and also set
+         * `false` in its `catch`, so a `saveDeclared` that threw BEFORE reaching the guard passed
+         * while never exercising it — the assertion and its fixture could drift apart silently.
+         *
+         * Reaching the revert is the proof that execution got PAST the guard, so it is asserted
+         * directly. What happens beyond the revert is the close path's own subject, hence the catch.
+         */
         try {
-            refused = (await d.saveDeclared()) === false && !!d.LatestResult?.Message?.includes('could not be read');
+            await d.saveDeclared();
         } catch {
-            refused = false; // reaching further into the close path is not this file's business
+            /* the close path beyond the revert is not this file's business */
         }
-        expect(refused, 'a readable status must not hit the unreadable refusal').toBe(false);
+        expect(d.LatestResult?.Message ?? '', 'a readable status must not hit the unreadable refusal')
+            .not.toContain('could not be read');
+        expect(d.SetCalls, 'and execution must actually have reached the revert, past the guard').toContain(
+            'DealStatusTypeID',
+        );
     });
 });
 
