@@ -31,8 +31,8 @@ importers:
   .:
     dependencies:
       '@mj-biz-apps/orders-entities':
-        specifier: ^5.2.1
-        version: 5.2.1(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: 5.13.0
+        version: 5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
     devDependencies:
       '@changesets/cli':
         specifier: ^2.31.1
@@ -222,8 +222,8 @@ importers:
         specifier: ^6.1.0-edge.5
         version: 6.1.0-edge.5(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(@angular/platform-browser@21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(rxjs@7.8.2)
       '@mj-biz-apps/orders-entities':
-        specifier: ^5.2.1
-        version: 5.2.1(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: 5.13.0
+        version: 5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/sales-entities':
         specifier: 6.4.0
         version: link:../Entities
@@ -259,8 +259,8 @@ importers:
         specifier: ^5.37.0
         version: 5.37.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/orders-entities':
-        specifier: ^5.2.1
-        version: 5.2.1(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: 5.13.0
+        version: 5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/sales-entities':
         specifier: 6.4.0
         version: link:../Entities
@@ -290,8 +290,8 @@ importers:
         specifier: ^6.1.0-edge.5
         version: 6.1.0-edge.5
       '@mj-biz-apps/orders-entities':
-        specifier: ^5.2.1
-        version: 5.2.1(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: 5.13.0
+        version: 5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -318,8 +318,8 @@ importers:
         specifier: ^5.37.0
         version: 5.37.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/orders-entities':
-        specifier: ^5.2.1
-        version: 5.2.1(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: 5.13.0
+        version: 5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/sales-core-entities-server':
         specifier: 6.4.0
         version: link:../CoreEntitiesServer
@@ -2487,8 +2487,8 @@ packages:
       '@memberjunction/core': ^6.1.0-edge.5
       '@memberjunction/global': ^6.1.0-edge.5
 
-  '@mj-biz-apps/orders-entities@5.2.1':
-    resolution: {integrity: sha512-S01k3vx2+YLrUcOY64D1QL/9Z68fN6Cjbncno4D0EDQE6mi++2gGp+Itq3YXMH/RynDbS79CeWhFyI4K83iizQ==}
+  '@mj-biz-apps/orders-entities@5.13.0':
+    resolution: {integrity: sha512-sH5jzv31tnQokz1xFagwKRo6RNl4RDM3Fc5haSQlPJX1pb7Pz/nWJ5I+A/nYK2O7ld7fsygGpomkmtZSWzg7Lg==}
     peerDependencies:
       '@memberjunction/core': ^6.1.0-edge.5
       '@memberjunction/global': ^6.1.0-edge.5
@@ -15338,11 +15338,12 @@ snapshots:
       '@memberjunction/global': 6.1.0-edge.5
       zod: 3.25.76
 
-  '@mj-biz-apps/orders-entities@5.2.1(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)':
+  '@mj-biz-apps/orders-entities@5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)':
     dependencies:
       '@memberjunction/core': 6.1.0-edge.5
       '@memberjunction/global': 6.1.0-edge.5
       '@mj-biz-apps/common-entities': 5.37.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+      rxjs: 7.8.2
       zod: 3.25.76
 
   '@mj-biz-apps/tasks-core@1.4.1(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)':

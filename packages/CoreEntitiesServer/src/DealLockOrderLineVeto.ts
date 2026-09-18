@@ -159,10 +159,14 @@ function SafeID(id: string): string {
  * `@mj-biz-apps/orders-entities`. `sales-server` resolves that name transitively to whatever is
  * published, so a call from there compiles only by accident of hoisting — and not at all until orders
  * ships the version carrying the seam. Keeping the import in the package that owns the dependency is
- * what lets the version requirement be stated here at all. It is not stated yet: the range is
- * `^5.2.1`, pinned to 5.2.1 in the lockfile, and no published version carries the seam -- so the
- * range has to be raised to whatever orders publishes, and the lockfile refreshed, before this
- * compiles anywhere that resolves `orders-entities` from npm rather than from the workspace.
+ * what lets the version requirement be stated here at all, and it is now stated exactly: `5.13.0`,
+ * the version orders#206 published, pinned without a caret.
+ *
+ * THE EXACT PIN IS LOAD-BEARING. `hostVeto` is a module-scoped variable, so the registry is
+ * per-COPY, not per-process. Resolving a different version here than the `orders-core-entities-server`
+ * that reads it would put the registration in one copy and the lookup in another -- the veto would
+ * refuse nothing, and every test in this package would still pass. Orders pins `5.13.0` exactly in
+ * all of its own packages; matching that is what keeps this to one copy.
  *
  * Last-call-wins in the registry, so a host that boots twice in one process ends up with one vetoer.
  */

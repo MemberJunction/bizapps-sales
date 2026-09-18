@@ -40,12 +40,19 @@ to whatever is published — measured locally, it resolves to the npm build whil
 resolves to the workspace. Putting the import in the package that owns the dependency is what lets
 the version requirement be stated at all.
 
-**It is not stated yet, and that is the remaining work.** That package declares `^5.2.1`, and the
-lockfile pins 5.2.1; no published version carries the seam at all (5.12.2 is the newest). So merging
-orders#206 does not turn this green on its own: orders has to PUBLISH the version that ships the
-seam, the range here has to be raised to it, and the lockfile refreshed. Until then the declared
-range is satisfied by builds that cannot compile this file, which is precisely the accidental
-requirement this paragraph is about.
+**And it is now stated exactly.** orders#206 merged and published `orders-entities@5.13.0`, which
+carries the seam; every `@mj-biz-apps/orders-entities` declaration in this repo -- the four packages
+and the root -- is pinned at **`5.13.0`**, and the lockfile resolves a single copy.
+
+**Exact, not a caret, and that is the load-bearing part.** The registry is a module-scoped
+`let hostVeto` in `orders-entities`, so it is per-COPY rather than per-process: if Sales ever
+resolved a different version than the `orders-core-entities-server` that reads it, the registration
+would land in one copy and the lookup in the other, and the veto would refuse nothing while every
+test here still passed. Every orders package pins `5.13.0` exactly; matching that is what keeps it
+to one copy. A caret would compile and then silently do nothing, which is strictly worse than the
+honest build failure this replaced. It was two copies for a moment during this change -- the four
+package declarations moved first and the ROOT one was still `^5.2.1`, which the lockfile duly
+resolved alongside 5.13.0 -- so this is measured rather than theoretical.
 
 13 tests, 7 mutations all killed: the flag never locking (the defect), every status locking, an
 order with no deal falling through, each of the two failed reads allowing instead of refusing, a
