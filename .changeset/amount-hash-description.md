@@ -28,3 +28,10 @@ the release `Metadata_Sync`.
 
 Applied against a live database: the old wording is gone, the new wording is present, and a second run
 is a clean no-op.
+
+**CLAUDE.md's migration loop is corrected with it.** Its BASELINE-IN-PLACE section still read as current
+instruction, and it is what this branch followed into editing an applied migration. The section now leads
+with the switch, names the evidence that it had already happened — five additive migrations after the
+baseline, the first publish at `V202608251930`, three weeks earlier — and keeps the original note below
+as history, since its reasoning is still correct for the phase it described. The `switch to
+additive-only at first publish` bullet is struck through and dated.
