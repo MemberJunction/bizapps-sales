@@ -62,7 +62,26 @@ function readEnv() {
   const out = {};
   for (const line of raw.split(/\r?\n/)) {
     const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i.exec(line);
-    if (m) out[m[1]] = m[2];
+    /**
+     * STRIP SURROUNDING QUOTES, as dotenv does. Without this the value keeps them and the
+     * connection fails with `Login failed for user 'sa'` -- reported as `SKIPPED`, not as an
+     * error, so cleanup silently does not run. That is the same shape as the bug documented
+     * below: a teardown that reports success while sweeping nothing, and a suite whose score
+     * then depends on how dirty it started.
+     *
+     * Quoting is not exotic here, it is REQUIRED: scripts/seed-dev-data.sh and
+     * seed-demo-data.sh read this file with `set -a; source .env`, and an unquoted password
+     * containing `$` is expanded by bash into an unbound variable. So the same file must be
+     * readable by bash, by dotenv, and by this parser -- and this was the only one of the
+     * three that could not cope.
+     */
+    if (m) {
+      let v = m[2].trim();
+      if (v.length > 1 && ((v[0] === "'" && v.endsWith("'")) || (v[0] === '"' && v.endsWith('"')))) {
+        v = v.slice(1, -1);
+      }
+      out[m[1]] = v;
+    }
   }
   /**
    * process.env WINS over the file, and that is the whole point.

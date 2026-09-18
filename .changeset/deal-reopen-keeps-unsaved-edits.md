@@ -4,7 +4,8 @@
 
 Deal form: reopening a deal no longer throws away what the user had typed (sales#73 review).
 
-Both reopen paths ended by reloading the record, and a reload overwrites the in-memory one. Anything
+Both reopen paths **on the deal form** ended by reloading the record, and a reload overwrites the
+in-memory one. Anything
 edited and not yet saved went with it — no prompt, no warning, no message. A locked deal is not a
 read-only deal: `DealFieldsEditableWhileLocked` keeps six fields open, seven on a lost one, and the
 panels render them, so a rep could legitimately be mid-sentence in Description when they decided to
@@ -49,3 +50,12 @@ parent as well as fields.
 
 9 tests, three mutations checked: skipping the save entirely (the original defect) fails 6 of them,
 moving the save after the operation fails 2, and saving unconditionally fails 2.
+
+**Scope, added after review: the deal WORKSPACE is not covered.** Its `ReopenDeal()` still goes
+straight to `RouteOperation` and then `ReloadActiveDeal()`, with no save-when-dirty — and
+`ReloadActiveDeal()` also calls `MarkClean(tabId)`, so the tab-strip dirty marker is cleared and the
+user loses even the after-the-fact signal. `Description` is editable on a closed deal there too, and
+the Reopen button sits in the lock banner directly above it. The workspace's own `ConfirmClose`
+already saves when dirty, so the fix is a mirror of the pattern established here. Tracked separately;
+this changeset said "both reopen paths" unqualified, which would have read in the CHANGELOG as if the
+whole class were closed.

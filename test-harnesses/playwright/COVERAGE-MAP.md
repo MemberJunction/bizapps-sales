@@ -245,7 +245,7 @@ embedded order followed.
 | 4 | Compares the event list before and after | **append-only, proved properly**: the first *n* event IDs must be identical afterwards | prior events are byte-for-byte the same rows | — |
 | 5 | Checks the deal's order | a stage move must move the order's status with it | `the deal points at an order that does not exist` (order resolves), and its state moved | — |
 | 6 | Drags toward a **closing** column | closing is `Sales.CloseDeal`, an explicit act — never a side effect of a drag | `a drag must NEVER land a deal in a closing stage`; `whatever column it did land in must be a non-closing one, so nothing locked the deal`; `no stage event may record a transition INTO the closing stage` | — |
-| 7 | Reads the closing column's hint | the refusal must be explained where the user is, not after the fact | the lock affordance carries a `title` matching `/closes and locks/i` **and** `/workspace/i` | — |
+| 7 | Reads the closing column's hint | the refusal must be explained where the user is, not after the fact | the lock affordance carries a `title` matching `/cannot be moved/i` **and** `/form/i` | — |
 | 8 | — | console clean during a drag | `no console errors during a drag` | — |
 
 **Step 4 is the assertion I would keep above all others in this suite.** "Provenance is append-only" is
