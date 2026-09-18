@@ -454,7 +454,7 @@ export class DealEntityServer extends DealEntity {
          *
          * Drift caused by someone else — finance editing the order directly, which S-US5 explicitly
          * allows — is deliberately NOT chased here. That is what `AmountSourceHash` is for: a surface
-         * holding the order can recompute the fingerprint and say "stale, reprice". Polling the order on
+         * holding the order can recompute the fingerprint and say so. Polling the order on
          * every unrelated deal save would be a read per keystroke for a guarantee the hash already gives.
          */
         const order = this.OrderID_Object;
@@ -1697,8 +1697,8 @@ export class DealEntityServer extends DealEntity {
          */
 
         /**
-         * The fingerprint, so a surface can say "stale, reprice" instead of showing an untraceable
-         * number. It covers the ORDER and the TOTAL, which is exactly what the cache was derived from —
+         * The fingerprint, so a surface can say the amount no longer describes its order instead of
+         * showing an untraceable number. It covers the ORDER and the TOTAL, which is exactly what the cache was derived from —
          * a reader holding the order can recompute this and compare without a second table.
          */
         const hash = createHash('sha256').update(`${this.OrderID}|${total}`).digest('hex');
