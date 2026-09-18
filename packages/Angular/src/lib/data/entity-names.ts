@@ -20,7 +20,14 @@ export const MJS_FOREIGN_ENTITIES = {
     Organization: 'MJ_BizApps_Common: Organizations',
     Person: 'MJ_BizApps_Common: People',
     Employee: 'MJ: Employees',
+    OrderHeader: 'MJ_BizApps_Orders: Order Headers',
     OrderLine: 'MJ_BizApps_Orders: Order Lines',
+    /**
+     * Contracts' agreement. A deal's `ContractID` is a SOFT reference with no database FK behind it,
+     * so nothing resolves it automatically in either direction — which is why the contract behind an
+     * order can only be reached through that order's deal (golive#227), by reading the deal row.
+     */
+    Contract: 'MJ_BizApps_Contracts: Contracts',
     Activity: 'MJ_BizApps_Common: Activities',
     ActivityLink: 'MJ_BizApps_Common: Activity Links',
 } as const;
