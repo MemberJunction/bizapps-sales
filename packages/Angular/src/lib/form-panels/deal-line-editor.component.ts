@@ -29,6 +29,26 @@
  *
  * ── WHAT IT DELIBERATELY DOES NOT OFFER ─────────────────────────────────────────────────────────
  *
+ * ── THE LINE IS CREATED ON THE ORDER'S COLLECTION, NOT AS A STANDALONE ENTITY ───────────────────
+ *
+ * An earlier version built the line with `GetEntityObject` + `NewRecord()` and called `Save()` on it.
+ * That fails, and the two reasons are both invisible from here:
+ *
+ *  - `LineNumber` is NOT NULL with no default, and it is stamped by `applySequence()`, which
+ *    `OrderEntityServer` re-runs by array index on every `Add()` and `Create()` OF THE COLLECTION. A
+ *    line that never joins the collection is never numbered.
+ *  - `UnitPrice` is NOT NULL with no default, and it is resolved by `OrderPricingService` during the
+ *    ORDER's save -- the same service that answers `Orders.PriceOrder`. A line saved on its own is
+ *    never priced, and sales must not price it (rule 1).
+ *
+ * The server's refusal arrived with NO MESSAGE, so the dialog showed a bare "The line could not be
+ * saved." and the actual cause was nowhere on screen. That is why the failure text below digs.
+ *
+ * So the editor states INTENT on a line belonging to the order, and saves the ORDER. Orders then
+ * numbers it and prices it, which is the division of labour the whole app is built on. The deal's
+ * cached `Deal.Amount` is refreshed on the DEAL's next save, and until then the stale-amount notice
+ * (golive#230) says so in as many words -- which is exactly what that notice is for.
+ *
  * Unit price and line total are READ-ONLY displays, priced by orders. A discount is expressed as a
  * PERCENT and never as an amount (D-DL2 — `DiscountAmount` is an input channel that reads 0 exactly
  * when a percentage discount exists, so showing it would be a lie). Nothing here multiplies, discounts,
@@ -39,8 +59,8 @@
 import { ChangeDetectorRef, Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Metadata } from '@memberjunction/core';
 import type { mjBizAppsOrdersOrderLineEntity as OrderLineEntity } from '@mj-biz-apps/orders-entities';
+import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountFractionToPercent,
     DiscountPercentToFraction,
@@ -51,7 +71,6 @@ import {
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
-import { MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 
 /** `<input type="date">` wants `yyyy-MM-dd`, and nothing else renders. */
 function toDateInput(d: Date | string | null | undefined): string | null {
@@ -231,10 +250,13 @@ function toDateInput(d: Date | string | null | undefined): string | null {
     `],
 })
 export class MJSDealLineEditorComponent implements OnInit {
-    /** The order the line belongs to. Set on a new line and never shown — it comes from the deal. */
-    @Input() OrderID: string | null = null;
-    /** The order's date, which a term start defaults to when the line stores none of its own. */
-    @Input() OrderDate: Date | string | null = null;
+    /**
+     * The DEAL whose order this line belongs to.
+     *
+     * The deal rather than an order id, because the line has to be created ON the order's `Lines`
+     * collection for orders to number and price it — see the file header.
+     */
+    @Input() Deal: DealEntity | null = null;
     /** The line to edit. Null opens a new one. */
     @Input() LineID: string | null = null;
 
@@ -253,29 +275,36 @@ export class MJSDealLineEditorComponent implements OnInit {
     public Error: string | null = null;
     /** Set when the typed percent could not be converted — see `DiscountPercentToFraction`. */
     public DiscountRefusal: string | null = null;
+    /** Whether this dialog created the line, so cancelling must take it back off the collection. */
+    private IsNewLine = false;
 
     public get Title(): string { return this.LineID ? 'Edit line' : 'Add a product'; }
 
     public async ngOnInit(): Promise<void> {
         try {
             this.Products = await this.service.LoadProducts();
-            const md = new Metadata();
-            const line = await md.GetEntityObject<OrderLineEntity>(MJS_FOREIGN_ENTITIES.OrderLine);
+            const order = this.Deal?.OrderID_EnsureObject();
+            if (!order) {
+                this.Error = 'This deal has no order yet. Save the deal first.';
+                return;
+            }
+            // The collection must be populated before a line can be found in it OR appended to it.
+            await order.Lines.Load(true);
+
             if (this.LineID) {
-                const loaded = await line.Load(this.LineID);
-                if (!loaded) {
+                this.Working = order.Lines.Items.find((l) => l.ID === this.LineID) ?? null;
+                if (!this.Working) {
                     this.Error = 'This line could not be loaded.';
-                    this.Working = null;
                     return;
                 }
             } else {
-                line.NewRecord();
-                line.OrderHeaderID = this.OrderID ?? '';
+                // `Create()` is what stamps LineNumber, via the collection's applySequence().
+                this.Working = await order.Lines.Create();
+                this.IsNewLine = true;
                 // Orders' CK_OrderLine_Quantity forbids zero, so a new line starts at the smallest
                 // legal value rather than at the one the database refuses.
-                line.Quantity = 1;
+                this.Working.Quantity = 1;
             }
-            this.Working = line;
         } catch (err) {
             this.Error = `This line could not be opened: ${err instanceof Error ? err.message : String(err)}`;
         } finally {
@@ -347,7 +376,9 @@ export class MJSDealLineEditorComponent implements OnInit {
 
     /** The order date stands in until the line stores one of its own; it is displayed, never written. */
     public get TermStartInput(): string | null {
-        return toDateInput(EffectiveTermStart(this.Working?.ServicePeriodStart, this.OrderDate));
+        return toDateInput(
+            EffectiveTermStart(this.Working?.ServicePeriodStart, this.Deal?.OrderID_Object?.OrderDate ?? null),
+        );
     }
 
     public get HasExplicitTermStart(): boolean {
@@ -366,12 +397,12 @@ export class MJSDealLineEditorComponent implements OnInit {
     }
 
     public get CanSave(): boolean {
-        return !!this.Working?.ProductID && !this.DiscountRefusal && !!this.OrderID;
+        return !!this.Working?.ProductID && !this.DiscountRefusal && !!this.Deal?.OrderID_Object;
     }
 
     /** Why Save is disabled, in the words a rep needs. */
     public get BlockedReason(): string {
-        if (!this.OrderID) return 'Save the deal first — a product line needs its order.';
+        if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
         return this.DiscountRefusal ?? '';
     }
@@ -382,13 +413,31 @@ export class MJSDealLineEditorComponent implements OnInit {
         this.Error = null;
         this.cdr.detectChanges();
         try {
-            const ok = await this.Working.Save();
-            if (!ok) {
-                // `Save()` returns false rather than throwing, so a missing check here would close the
-                // dialog on a line that was never written.
-                this.Error = this.Working.LatestResult?.Message || 'The line could not be saved.';
+            /**
+             * THE ORDER IS SAVED, NOT THE LINE. Orders numbers and prices the line during this save;
+             * see the file header for why saving the line alone cannot work.
+             */
+            const order = this.Deal?.OrderID_Object;
+            if (!order) {
+                this.Error = 'This deal has no order yet. Save the deal first.';
                 return;
             }
+            const ok = await order.Save();
+            if (!ok) {
+                /**
+                 * `Save()` returns false rather than throwing, so without this check the dialog would
+                 * close over a line that was never written. The message is dug out rather than
+                 * defaulted: the first version showed a bare "The line could not be saved." and the
+                 * actual cause -- two NOT NULL columns nobody had filled -- was nowhere on screen.
+                 */
+                this.Error =
+                    order.LatestResult?.Message ||
+                    (order.LatestResult?.Errors ?? []).map((e) => e.Message).filter(Boolean).join('; ') ||
+                    this.Working?.LatestResult?.Message ||
+                    'The line could not be saved, and the server gave no reason.';
+                return;
+            }
+            this.IsNewLine = false;
             this.Saved.emit();
         } catch (err) {
             this.Error = err instanceof Error ? err.message : String(err);
@@ -398,7 +447,19 @@ export class MJSDealLineEditorComponent implements OnInit {
         }
     }
 
+    /**
+     * Cancelling a NEW line must take it back off the collection.
+     *
+     * `Create()` appended it, so simply closing the dialog would leave an unsaved, product-less line
+     * attached to the order — and the next save of that order would try to write it. `Remove()` is the
+     * collection's own withdrawal (never a splice), which is what the workspace uses for the same
+     * reason.
+     */
     public Cancel(): void {
+        if (this.IsNewLine && this.Working) {
+            this.Deal?.OrderID_Object?.Lines.Remove(this.Working);
+            this.IsNewLine = false;
+        }
         this.Closed.emit();
     }
 }

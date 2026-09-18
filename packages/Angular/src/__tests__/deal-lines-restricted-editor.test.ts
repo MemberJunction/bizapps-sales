@@ -119,10 +119,8 @@ describe('the restricted editor offers intent, never a price', () => {
         }
     });
 
-    it('never shows Order Header — it comes from the deal', () => {
-        // Set from the deal's OrderID and never rendered, which is the tester's expectation 2.
-        expect(EDITOR).toMatch(/OrderHeaderID = this\.OrderID/);
-        expect(EDITOR).not.toMatch(/ngModel\]?="[^"]*OrderHeaderID/);
+    it('never shows Order Header — the line belongs to the deal\'s order by construction', () => {
+        expect(editorTemplate()).not.toMatch(/OrderHeaderID/);
     });
 });
 
@@ -146,10 +144,47 @@ describe('the editor reuses the shared rules rather than restating them', () => 
 
     it('starts a new line at quantity 1, the smallest value orders permits', () => {
         // CK_OrderLine_Quantity forbids zero, so defaulting to 0 would offer the one illegal value.
-        expect(EDITOR).toMatch(/line\.Quantity = 1/);
+        expect(EDITOR).toMatch(/Quantity = 1/);
     });
 
     it('refuses to save without a product', () => {
         expect(EDITOR).toMatch(/get CanSave\(\)[\s\S]{0,200}Working\?\.ProductID/);
+    });
+});
+
+
+/**
+ * THE SAVE PATH, pinned because getting it wrong fails in a way the UI cannot explain.
+ *
+ * The first implementation built the line with `GetEntityObject` + `NewRecord()` and saved the LINE.
+ * That cannot work: `LineNumber` is NOT NULL and is stamped by the collection's `applySequence()` on
+ * `Create()`, and `UnitPrice` is NOT NULL and is resolved by `OrderPricingService` during the ORDER's
+ * save. A standalone line gets neither -- and the server's refusal arrived with no message at all, so
+ * the dialog showed a bare failure with the cause nowhere on screen.
+ */
+describe('the line is created on the order and priced by orders', () => {
+    it('creates the line on the order\'s Lines collection, never standalone', () => {
+        expect(EDITOR).toMatch(/Lines\.Create\(\)/);
+        expect(EDITOR).not.toMatch(/GetEntityObject<OrderLineEntity>/);
+        expect(EDITOR).not.toMatch(/line\.NewRecord\(\)/);
+    });
+
+    it('saves the ORDER, so orders numbers and prices the line', () => {
+        expect(EDITOR).toMatch(/order\.Save\(\)/);
+        expect(EDITOR).not.toMatch(/Working\.Save\(\)/);
+    });
+
+    it('never assigns UnitPrice or LineNumber itself — those are orders\' answers', () => {
+        expect(EDITOR).not.toMatch(/\.UnitPrice\s*=/);
+        expect(EDITOR).not.toMatch(/\.LineNumber\s*=/);
+    });
+
+    it('takes a cancelled NEW line back off the collection', () => {
+        expect(EDITOR).toMatch(/Lines\.Remove\(/);
+    });
+
+    it('surfaces the server\'s reason instead of a bare failure string', () => {
+        expect(EDITOR).toMatch(/LatestResult\?\.Message/);
+        expect(EDITOR).toMatch(/LatestResult\?\.Errors/);
     });
 });

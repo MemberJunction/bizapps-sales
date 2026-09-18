@@ -1473,8 +1473,7 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
 
             @if (EditorOpen) {
                 <mjs-deal-line-editor
-                    [OrderID]="Record.OrderID"
-                    [OrderDate]="OrderDate"
+                    [Deal]="Record"
                     [LineID]="EditingLineID"
                     (Saved)="OnLineSaved()"
                     (Closed)="CloseEditor()">
@@ -1524,17 +1523,6 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
 
     /** The grid itself, so a saved line can make it re-read rather than leaving it stale. */
     @ViewChild(ExplorerEntityDataGridComponent) private linesGrid?: ExplorerEntityDataGridComponent;
-
-    /**
-     * The order's date, which a subscription line's term start defaults to.
-     *
-     * Read off the deal's own expected close only as a fallback — the ORDER carries the authoritative
-     * date, but the panel holds the deal. `EffectiveTermStart` treats a null as "no default", so an
-     * absent date degrades to an empty control rather than to a wrong one.
-     */
-    public get OrderDate(): Date | string | null {
-        return (this.Record?.Get?.('OrderDate') as Date | string | null | undefined) ?? null;
-    }
 
     public AddLine(): void {
         this.EditingLineID = null;
