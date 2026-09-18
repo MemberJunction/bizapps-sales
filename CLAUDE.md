@@ -315,9 +315,36 @@ examined; a pass is not. So the highest-value question about any check is not "d
 - Chosen to avoid every other MJ environment: MJ core 4001/4201, common 4101/4301,
   accounting 4102/4302, orders 4103/4303, contracts 4151/4351.
 
-### The migration loop — BASELINE-IN-PLACE (pre-production)
-Schema changes **edit the baseline migration in place**; do not stack fix-up migrations. That is only
-safe because rebuilding from zero is routine:
+### The migration loop — ADDITIVE-ONLY (this repo has published)
+
+> **⛔ BASELINE-IN-PLACE IS OVER. CLOSED 2026-09-18.** Schema changes are **new migration files**. Do
+> not edit an applied one, and that includes the baseline.
+>
+> **Why, in one sentence:** an applied migration's content is part of its checksum, so editing it makes
+> Flyway refuse the whole run on every host that already has it — and there are such hosts now, the UAT
+> environment among them, which nobody is going to rebuild to accommodate a doc edit.
+>
+> **How to tell this switch had already happened, which is the part that was missed:** `migrations/`
+> holds five additive files after the baseline, including `V202608251930__v5.2.x__Metadata_Sync.sql`.
+> The bullet below always said *"switch to additive-only at first publish"*; the first publish was
+> `V202608251930`, three weeks before this note. The directory was the evidence and the rule was read
+> instead of the directory — which is how a corrected `AmountSourceHash` description was first written
+> as an edit to `V202608042101` (#108) before being redone as a new migration.
+>
+> `V202609020650`'s own header already states the discipline: it is numbered before its partner
+> deliberately, *"so no already-computed migration checksum changes."* Follow that file, not this
+> section's history.
+>
+> **What this changes in practice:** a schema change is a new `V<YYYYMMDDHHMM>__v<X.Y>.x__<Name>.sql`,
+> idempotent where it can be, guarded where it cannot. `scripts/rebuild-db.sh` is still how you get a
+> clean local database and still how a release seed is generated — it is the EDITING of the baseline
+> that is retired, not rebuilding.
+
+The original note is kept below, because its reasoning is still the reasoning for the phase it
+described — and because the condition it depended on is exactly what stopped being true:
+
+**(Historical — pre-publish.)** Schema changes **edit the baseline migration in place**; do not stack
+fix-up migrations. That is only safe because rebuilding from zero is routine:
 
 ```bash
 CONFIRM_DROP=<database> scripts/rebuild-db.sh   # drop+create, MJ core, bizapps-common, this app's DDL
@@ -376,7 +403,8 @@ scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped al
   a full pass emits only a delta, which the script rightly refuses — and with `--skipdb` there is no
   SQL to fold in at all.
 - Never add `__mj_CreatedAt`/`__mj_UpdatedAt` columns or FK indexes — CodeGen does both.
-- Switch to **additive-only** migrations at first publish.
+- ~~Switch to **additive-only** migrations at first publish.~~ **Done — at
+  `V202608251930__v5.2.x__Metadata_Sync.sql`.** See the block at the top of this section.
 - **Author for PostgreSQL from day one.** Production is PG; keep the T-SQL converter-friendly and
   avoid reserved words as column names (this is why `ForecastSnapshot` has `CommitAmount`, not
   `Commit`). Run the conversion once the baseline is stable.

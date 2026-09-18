@@ -186,9 +186,12 @@ function money(n: number | null | undefined): string {
                         <span class="mjs-deal-hero__stat-label">Weighted</span>
                         <span class="mjs-deal-hero__stat-val">{{ WeightedText }}</span>
                     </div>
+                    <!-- A CLOSED DEAL REPORTS, IT DOES NOT FORECAST (golive#231 item 4). This stat
+                         showed ExpectedCloseDate whatever had happened, so a deal that closed in March
+                         still announced a February expectation under a label that reads as fact. -->
                     <div class="mjs-deal-hero__stat">
-                        <span class="mjs-deal-hero__stat-label">Close</span>
-                        <span class="mjs-deal-hero__stat-val">{{ (Record.ExpectedCloseDate | date: 'd MMM y') || '—' }}</span>
+                        <span class="mjs-deal-hero__stat-label">{{ CloseStatLabel }}</span>
+                        <span class="mjs-deal-hero__stat-val">{{ CloseStatValue }}</span>
                     </div>
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Pipeline</span>
@@ -362,7 +365,8 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     public IsLocked = false;
     /** Whether the locking status is a LOSS. Only Loss Notes turns on it (golive#206). */
     public IsLost = false;
-    /** Whether the PERSISTED status is a WIN. Decides the Order and Contract chips (golive#226). */
+    /** Whether the PERSISTED status is a WIN — its own flag, never `!IsLost`. Decides the Order and
+     *  Contract chips (golive#226); the Overview's outcome tiles read it too (golive#231). */
     public IsWon = false;
 
     /** The links last published to the chip row, and the state they were built from. */
@@ -483,6 +487,32 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     public get StageName(): string { return String(this.Record?.PipelineStage ?? this.Record?.Get?.('PipelineStage') ?? ''); }
     public get PipelineName(): string { return String(this.Record?.Pipeline ?? this.Record?.Get?.('Pipeline') ?? ''); }
     public get TypeName(): string { return String(this.Record?.DealType ?? this.Record?.Get?.('DealType') ?? ''); }
+
+    /**
+     * Has the deal actually closed? (golive#231)
+     *
+     * The CLOSE STAMPS, not the status — the same rule the Overview's `IsClosed` uses and for the same
+     * reason: the stamps are what the server writes when the close really runs, so keying on the status
+     * would report a deal closed the moment somebody picked Won. Either stamp counts; a legacy row may
+     * carry only one.
+     */
+    public get IsClosed(): boolean {
+        return !!(this.Record?.ClosedAt ?? this.Record?.ActualCloseDate);
+    }
+
+    /** "Closed" once it has happened, "Close" while it is still a forecast. */
+    public get CloseStatLabel(): string { return this.IsClosed ? 'Closed' : 'Close'; }
+
+    /** The date it closed on, or the date it is expected to. */
+    public get CloseStatValue(): string {
+        const when = this.IsClosed
+            ? (this.Record?.ActualCloseDate ?? this.Record?.ClosedAt)
+            : this.Record?.ExpectedCloseDate;
+        if (!when) return '—';
+        return new Date(when).toLocaleDateString(undefined, {
+            day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+        });
+    }
 
     public get AmountText(): string { return money(this.Record?.Amount); }
     public get WeightedText(): string {

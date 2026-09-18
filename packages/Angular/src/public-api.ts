@@ -67,6 +67,7 @@ import {
     MJSPersonDealTeamPanel,
     MJSPersonDealsPanel,
 } from './lib/form-panels/party-deals.panels';
+import { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
 
 // Re-export for consumers
 export { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
@@ -114,6 +115,12 @@ export {
     MJSPersonDealsPanel,
     MJSPersonDealTeamPanel,
 } from './lib/form-panels/party-deals.panels';
+export { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
+export {
+    OrderRelatedLinks,
+    OrderRelatedLinksKey,
+    type OrderRelatedLinkState,
+} from './lib/form-panels/order-related-links';
 export * from './lib/data/entity-names';
 export { DealBoardComponent } from './lib/board/deal-board.component';
 export type { BoardColumn } from './lib/board/deal-board.component';
@@ -166,6 +173,9 @@ export function LoadBizAppsSalesClient(): void {
     void MJSOrganizationDealsPanel;
     void MJSPersonDealsPanel;
     void MJSPersonDealTeamPanel;
+    // The provenance row on the ORDER form. Contributed onto an entity this app does not own, so
+    // nothing in orders imports it — this anchor is the only thing keeping it in the bundle.
+    void MJSOrderRelatedPanel;
 
     void CLASS_REGISTRATIONS;
     void MJSSalesSectionComponent;

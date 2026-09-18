@@ -11,13 +11,18 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectorRef, Component, ViewEncapsulation, inject, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, ViewChild, ViewEncapsulation, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CompositeKey, Metadata, RunView, type EntityInfo } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
-import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
-import { EntityViewerModule, type AfterDataLoadEventArgs, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
+import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent } from '@memberjunction/ng-base-forms';
+import {
+    EntityViewerModule,
+    type AfterDataLoadEventArgs,
+    type AfterRowDoubleClickEventArgs,
+    type RecordOpenedEvent,
+} from '@memberjunction/ng-entity-viewer';
 import {
     DealEntity,
     IsDealFieldEditableWhileLocked,
@@ -31,6 +36,7 @@ import {
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import { SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
+import { MJSDealLineEditorComponent } from './deal-line-editor.component';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -289,6 +295,38 @@ function daysFrom(d: Date | string | null | undefined): number | null {
     return Math.round((t - today) / 86_400_000);
 }
 
+/**
+ * Whole days from one date to another, both read as UTC days.
+ *
+ * SEPARATE FROM {@link daysFrom}, which measures against TODAY. A sales cycle and a close variance are
+ * both statements about two dates in the record, and expressing either through a today-relative helper
+ * would make the number change every day after the deal closed — a figure about the past that keeps
+ * moving. Everything stored is UTC (CLAUDE.md), so both sides are floored to a UTC day before
+ * subtracting; using local getters here shifts the answer by a day either side of midnight.
+ */
+function daysBetween(
+    from: Date | string | null | undefined,
+    to: Date | string | null | undefined,
+): number | null {
+    const utcDay = (d: Date | string): number | null => {
+        const iso = d instanceof Date
+            ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+            : String(d).slice(0, 10);
+        const t = Date.parse(`${iso}T00:00:00Z`);
+        return Number.isFinite(t) ? t : null;
+    };
+    if (!from || !to) return null;
+    const a = utcDay(from);
+    const b = utcDay(to);
+    if (a === null || b === null) return null;
+    return Math.round((b - a) / 86_400_000);
+}
+
+/** "1 day" / "N days" — so a one-day cycle does not read "1 days". */
+function dayCount(n: number): string {
+    return `${n} ${n === 1 ? 'day' : 'days'}`;
+}
+
 type DealFieldType =
     | 'textbox' | 'textarea' | 'number' | 'datepicker' | 'checkbox'
     | 'select' | 'autocomplete' | 'code' | 'dropdownlist' | 'numerictextbox';
@@ -434,6 +472,9 @@ interface DealFieldSpec {
     serverMaintained?: boolean;
 }
 
+const EMPTY_STATE_STYLES =
+    '.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }';
+
 const FIELD_STYLES = `
     .mjs-fields {
         display: grid;
@@ -531,15 +572,19 @@ const FIELD_STYLES = `
                         <div class="v">{{ Weighted }}</div>
                         <div class="s">{{ Prob }} probability</div>
                     </div>
+                    <!-- THE LABELS MOVE WITH THE OUTCOME, not just the values (golive#231).
+                         #206 item 4 made these tiles show the right DATA on a closed deal and left the
+                         static labels alone, so a won deal read "Forecast: Won" and "Close: 14 Mar" —
+                         correct figures sitting under headings that promise something else. -->
                     <div class="mjs-ov-kpi">
-                        <div class="l">Forecast</div>
+                        <div class="l">{{ OutcomeTileLabel }}</div>
                         <div class="v">{{ ForecastHeadline }}</div>
-                        <div class="s">{{ G('DealStatusType') || 'No status set' }}</div>
+                        <div class="s">{{ OutcomeTileSub }}</div>
                     </div>
                     <div class="mjs-ov-kpi" [attr.data-tone]="CloseClock.tone">
-                        <div class="l">Close</div>
+                        <div class="l">{{ CloseTileLabel }}</div>
                         <div class="v">{{ CloseClock.label }}</div>
-                        <div class="s">{{ CloseLabel }}</div>
+                        <div class="s">{{ CloseTileSub }}</div>
                     </div>
                 </div>
 
@@ -567,17 +612,48 @@ const FIELD_STYLES = `
                             <div><div class="l">Pipeline</div><div class="v">{{ G('Pipeline') || '—' }}</div></div>
                             <div><div class="l">Type</div><div class="v">{{ G('DealType') || '—' }}</div></div>
                             <div><div class="l">Selling as</div><div class="v">{{ G('Company') || '—' }}</div></div>
+                            <!-- WHY A DEAL WAS LOST is the single most useful thing on a lost deal, and
+                                 nothing anywhere reported it (golive#231). Shown only when lost: on a won
+                                 or open deal it is an empty row asking a question with no answer. -->
+                            @if (ShowLossReason) {
+                                <div class="mjs-ov-fact--span">
+                                    <div class="l">Loss reason</div>
+                                    <div class="v">{{ G('LossReason') || '—' }}</div>
+                                    @if (Record.LossNotes) {
+                                        <div class="s">{{ Record.LossNotes }}</div>
+                                    }
+                                </div>
+                            }
                         </div>
                     </article>
                     <article class="mjs-ov-card">
                         <header><i class="fa-solid fa-calendar-day"></i> Timing</header>
                         <div class="mjs-ov-facts">
+                            <!-- CLOSED FIRST, because on a finished deal what happened outranks what was
+                                 expected. "Expected close" is KEPT either way so the variance stays
+                                 legible — that is the whole point of the sub-line on the Close tile. -->
+                            @if (IsClosed) {
+                                <div><div class="l">{{ ClosedRowLabel }}</div><div class="v">{{ ClosedDateLabel }}</div></div>
+                            }
                             <div><div class="l">Expected close</div><div class="v">{{ CloseLabel }}</div></div>
-                            <div><div class="l">Days to close</div><div class="v">{{ DaysToCloseLabel }}</div></div>
-                            <div><div class="l">Term</div><div class="v">{{ TermLabel }}</div></div>
-                            <div><div class="l">Start</div><div class="v">{{ DateLabel(Record.StartDate) }}</div></div>
-                            <div><div class="l">Executed</div><div class="v">{{ DateLabel(Record.ExecutionDate) }}</div></div>
-                            <div><div class="l">Actual close</div><div class="v">{{ DateLabel(Record.ActualCloseDate) }}</div></div>
+                            <!-- "Days to close" counted DOWN to a date that has already arrived, and
+                                 #206 item 4 made it render the close DATE instead — a date under a label
+                                 promising a count (golive#231). Closed deals get the sales cycle, which
+                                 is the question actually worth asking afterwards; open ones keep the
+                                 countdown under a label that means it. -->
+                            @if (IsClosed) {
+                                <div><div class="l">Sales cycle</div><div class="v">{{ SalesCycleLabel }}</div></div>
+                            } @else {
+                                <div><div class="l">Days to close</div><div class="v">{{ DaysToCloseLabel }}</div></div>
+                            }
+                            <!-- Term, Start and Executed describe a deal that is being DELIVERED. On a
+                                 lost deal they are three empty rows reporting the absence of things that
+                                 were never going to exist, so they appear only if actually set. -->
+                            @if (ShowDeliveryRows) {
+                                <div><div class="l">Start</div><div class="v">{{ DateLabel(Record.StartDate) }}</div></div>
+                                <div><div class="l">Term</div><div class="v">{{ TermLabel }}</div></div>
+                                <div><div class="l">Executed</div><div class="v">{{ DateLabel(Record.ExecutionDate) }}</div></div>
+                            }
                         </div>
                     </article>
                     <article class="mjs-ov-card mjs-ov-card--wide">
@@ -647,6 +723,13 @@ const FIELD_STYLES = `
             color: var(--mj-text-muted); font-weight: 700;
         }
         .mjs-ov-facts .v { font-weight: 650; margin-top: 2px; }
+        /* The loss reason carries free-text notes under it, so it takes the full row rather than
+           squeezing a sentence into a half-width cell. */
+        .mjs-ov-fact--span { grid-column: 1 / -1; }
+        .mjs-ov-fact--span .s {
+            margin-top: 2px; font-weight: 450; color: var(--mj-text-muted);
+            white-space: pre-wrap; overflow-wrap: anywhere;
+        }
         .mjs-ov-link {
             border: 0; padding: 0; background: transparent; color: var(--mj-text-link);
             cursor: pointer; font: inherit; font-weight: 650; text-align: left;
@@ -681,13 +764,20 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
     }
     public get CloseLabel(): string { return this.DateLabel(this.Record?.ExpectedCloseDate); }
+    /**
+     * The countdown, for an OPEN deal only — the template swaps the whole row for "Sales cycle" once the
+     * deal has closed (golive#231).
+     *
+     * #206 item 4 had made this return the close DATE when closed, which is how a date came to sit under
+     * a label reading "Days to close". That branch is gone rather than left unreachable: a dead branch is
+     * a claim about a caller that no longer exists, and the next reader has no way to tell.
+     */
     public get DaysToCloseLabel(): string {
         const n = daysFrom(this.Record?.ExpectedCloseDate);
-        if (this.IsClosed) return this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
         if (n === null) return '—';
-        if (n < 0) return `${Math.abs(n)}d past`;
+        if (n < 0) return `${dayCount(Math.abs(n))} overdue`;
         if (n === 0) return 'today';
-        return `${n}d`;
+        return dayCount(n);
     }
     /**
      * Has this deal been closed? (bc-aidp-next-golive#206 item 4)
@@ -715,14 +805,122 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         // A closed deal shows WHEN it closed. Counting days against an expected date it already met
         // (or missed) is advice on a decision nobody can take any more.
         if (this.IsClosed) {
-            return { label: this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt), tone: 'success' };
+            return {
+                label: this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt),
+                tone: this.IsLost ? 'muted' : 'success',
+            };
         }
         if (this.Record?.ActualCloseDate) return { label: 'Closed', tone: 'success' };
         if (n === null) return { label: 'No close date', tone: 'muted' };
-        if (n < 0) return { label: `${Math.abs(n)}d past`, tone: 'warning' };
-        if (n === 0) return { label: 'Today', tone: 'warning' };
-        if (n <= 14) return { label: `${n}d`, tone: 'warning' };
-        return { label: `${n}d`, tone: 'muted' };
+        // SPELLED OUT, not "12d" / "3d past" (golive#231). The tile is read at a glance by someone who
+        // is not holding the convention in their head, and "3d past" has to be decoded.
+        if (n < 0) return { label: `${dayCount(Math.abs(n))} overdue`, tone: 'warning' };
+        if (n === 0) return { label: 'today', tone: 'warning' };
+        if (n <= 14) return { label: `in ${dayCount(n)}`, tone: 'warning' };
+        return { label: `in ${dayCount(n)}`, tone: 'muted' };
+    }
+
+    /* ── The outcome labels (bc-aidp-next-golive#231) ───────────────────────────────────────────
+     *
+     * WON AND LOST ARE READ AS FLAGS, never as status names and never as each other's negation. The
+     * flags come from `DealStatusType` through `ResolveDealLockState`, which is what makes "Closed Won"
+     * a label a pipeline can rename (CLAUDE.md rule 2), and reading `!IsLost` as "won" would print
+     * "Won" over any other locking status — a lie that reads perfectly.
+     */
+
+    /** Whether the PERSISTED status carries `IsLost`, as the form component resolved it once. */
+    public get IsLost(): boolean {
+        return (this.FormComponent as unknown as { IsLost?: boolean } | undefined)?.IsLost === true;
+    }
+
+    /** Whether the PERSISTED status carries `IsWon`. */
+    public get IsWon(): boolean {
+        return (this.FormComponent as unknown as { IsWon?: boolean } | undefined)?.IsWon === true;
+    }
+
+    /** "Outcome" once there is one; "Forecast" while the deal can still move. */
+    public get OutcomeTileLabel(): string { return this.IsClosed ? 'Outcome' : 'Forecast'; }
+
+    /** The stage it closed FROM once closed, the status while open. */
+    public get OutcomeTileSub(): string {
+        if (this.IsClosed) {
+            const stage = this.G('PipelineStage');
+            return stage ? `from ${stage}` : 'Closed';
+        }
+        return this.G('DealStatusType') || 'No status set';
+    }
+
+    /** "Won" / "Lost" once decided, "Closes" while it is still ahead. */
+    public get CloseTileLabel(): string {
+        if (!this.IsClosed) return 'Closes';
+        if (this.IsWon) return 'Won';
+        if (this.IsLost) return 'Lost';
+        return 'Closed';
+    }
+
+    /**
+     * Under the close date: how it landed against the expectation, or why it was lost.
+     *
+     * On an open deal this stays the expected date, which is what the value is counting down to.
+     */
+    public get CloseTileSub(): string {
+        if (!this.IsClosed) return this.CloseLabel;
+        if (this.IsLost) return this.G('LossReason') || 'No reason recorded';
+        return this.CloseVariance;
+    }
+
+    /**
+     * "on time" / "N days early" / "N days late" — the close against the date it was expected on.
+     *
+     * Empty when either date is missing: a variance needs both, and inventing "on time" from an absent
+     * expectation would be a claim nobody made.
+     */
+    public get CloseVariance(): string {
+        const n = daysBetween(this.Record?.ExpectedCloseDate, this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
+        if (n === null) return '';
+        if (n === 0) return 'on time';
+        return n < 0 ? `${dayCount(Math.abs(n))} early` : `${dayCount(n)} late`;
+    }
+
+    /** "Closed won" / "Closed lost" — the Timing row that reports what happened. */
+    public get ClosedRowLabel(): string {
+        if (this.IsWon) return 'Closed won';
+        if (this.IsLost) return 'Closed lost';
+        return 'Closed';
+    }
+
+    /** The day it closed. */
+    public get ClosedDateLabel(): string {
+        return this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
+    }
+
+    /**
+     * Creation to close, in days — the question worth asking about a finished deal, and one nothing
+     * reported anywhere. Measured from `__mj_CreatedAt`, which is the only creation stamp there is.
+     */
+    public get SalesCycleLabel(): string {
+        const n = daysBetween(
+            this.Record?.Get?.('__mj_CreatedAt') as Date | string | null | undefined,
+            this.Record?.ActualCloseDate ?? this.Record?.ClosedAt,
+        );
+        // A close back-dated before the deal was created is data, not an error to hide -- but it is not
+        // a sales cycle either, and "-4 days" reads as a bug. Say nothing rather than something wrong.
+        if (n === null || n < 0) return '—';
+        return dayCount(n);
+    }
+
+    /**
+     * Term / Start / Executed describe a deal being DELIVERED, so a lost deal hides them — unless one is
+     * actually set, in which case hiding it would conceal real data.
+     */
+    public get ShowDeliveryRows(): boolean {
+        if (!this.IsClosed || !this.IsLost) return true;
+        return !!(this.Record?.TermMonths || this.Record?.StartDate || this.Record?.ExecutionDate);
+    }
+
+    /** The loss reason row appears only on a deal that was actually lost. */
+    public get ShowLossReason(): boolean {
+        return this.IsClosed && this.IsLost;
     }
     public get TermLabel(): string {
         const m = this.Record?.TermMonths;
@@ -1428,12 +1626,21 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
 @Component({
     selector: 'mjs-deal-lines-panel',
     standalone: true,
-    imports: [CommonModule, BaseFormsModule],
+    imports: [CommonModule, BaseFormsModule, MJSDealLineEditorComponent],
     template: `
         <mj-collapsible-panel SectionKey="lines" SectionName="What's being sold" Icon="fa-solid fa-boxes-stacked"
             Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="false"
             [BadgeCount]="FormComponent.GetSectionRowCount('lines')">
             @if (Record.IsSaved && Record.OrderID) {
+                <!-- OUR OWN ADD BUTTON, because the grid's New opened the generic Order Line form
+                     (golive#229). Hidden on a locked deal for the same reason the grid's New was. -->
+                @if (!IsLocked) {
+                    <div class="mjs-deal-lines__bar">
+                        <button type="button" class="mjs-deal-lines__add" (click)="AddLine()">
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add a product
+                        </button>
+                    </div>
+                }
                 <!-- NEW IS HIDDEN ON A LOCKED DEAL (bc-aidp-next-golive#206 item 1). The tester added a
                      line to a Won deal through this toolbar and it saved: "the grid should hide its New
                      and delete buttons when the deal is locked".
@@ -1448,21 +1655,71 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
                      it arrives by -- needs the order-line veto from bizapps-orders#206, which is not
                      published yet. Hiding a button is not a lock, and this comment is here so nobody
                      reads it as one. -->
+
+                <!-- NEW IS HIDDEN ON A LOCKED DEAL (bc-aidp-next-golive#206 item 1). The tester added a
+                     line to a Won deal through this toolbar and it saved: "the grid should hide its New
+                     and delete buttons when the deal is locked".
+
+                     DELETE IS NOT BOUND HERE ON PURPOSE. ShowDeleteButton defaults to FALSE, so the
+                     toolbar never offers delete on any deal; binding it to !IsLocked would START showing
+                     it on open ones, which is the opposite of what the issue asks. Stage history sets it
+                     to false explicitly for the same reason it sets New to false: there, both are off on
+                     every deal.
+
+                     THIS IS THE FORM HALF ONLY. The server half -- refusing the line save whichever path
+                     it arrives by -- needs the order-line veto from bizapps-orders#206, which is not
+                     published yet. Hiding a button is not a lock, and this comment is here so nobody
+                     reads it as one. -->
+                <!-- ShowNewButton and NavigateOnDoubleClick are BOTH off, and that pair is the fix
+                     (golive#229). Either one left on re-opens the generic Order Line form, which
+                     renders Unit Price as a plain editable field and lets a rep type any price with no
+                     discount recorded — the thing D-DL2 says must be impossible. A row double-click now
+                     opens the restricted editor instead; Navigate is left unbound because with
+                     NavigateOnDoubleClick off the grid never emits it. -->
                 <mj-explorer-entity-data-grid
                     [Params]="Params"
-                    [NewRecordValues]="NewValues"
                     [AllowLoad]="FormComponent.IsSectionExpanded('lines')"
                     [ShowToolbar]="true"
-                    [ShowNewButton]="!IsLocked"
-                    (Navigate)="FormComponent.OnFormNavigate($event)"
+                    [ShowNewButton]="false"
+                    [NavigateOnDoubleClick]="false"
+                    (AfterRowDoubleClick)="EditLine($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
-            } @else if (Record.IsSaved) {
-                <p class="mjs-deal-empty">Save the deal to add products.</p>
+            } @else if (!Record.IsSaved) {
+                <!-- THE CASE THE HINT EXISTS FOR (bc-aidp-next-golive#216). This branch used to be
+                     gated on Record.IsSaved, so it told a SAVED deal to save and showed a brand-new
+                     one nothing at all: neither branch matched, the panel rendered empty, and a tester
+                     reported no way to add products and no message saying why. -->
+                <p class="mjs-deal-empty">Save the deal first. Products are added to the order it creates.</p>
+            } @else {
+                <!-- Saved, but no order to hang lines on. A deal mints its order on save, so this is the
+                     legacy row that closed before that was true: DealEntityServer deliberately does not
+                     mint one for a deal whose whole point has passed. Telling that rep to save would be
+                     the same wrong answer as before, one case over. -->
+                <p class="mjs-deal-empty">This deal has no order, so there is nothing to add products to.</p>
+            }
+
+            @if (EditorOpen) {
+                <mjs-deal-line-editor
+                    [Deal]="Record"
+                    [LineID]="EditingLineID"
+                    (Saved)="OnLineSaved()"
+                    (Closed)="CloseEditor()">
+                </mjs-deal-line-editor>
             }
         </mj-collapsible-panel>
     `,
-    styles: [`.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }`],
+    styles: [`
+        .mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }
+        .mjs-deal-lines__bar { display: flex; padding: var(--mj-space-3) var(--mj-space-5) 0; }
+        .mjs-deal-lines__add {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 12px; border-radius: var(--mj-radius-md, 8px); cursor: pointer;
+            border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface);
+            color: var(--mj-text-default); font: inherit; font-weight: 600;
+        }
+        .mjs-deal-lines__add:hover { background: var(--mj-bg-surface-hover); }
+    `],
 })
 export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     /**
@@ -1481,11 +1738,55 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
         if (!id) return null;
         return { EntityName: MJS_FOREIGN_ENTITIES.OrderLine, ExtraFilter: `OrderHeaderID = '${String(id).replace(/'/g, "''")}'` };
     }
-    public get NewValues(): Record<string, unknown> {
-        return this.Record?.OrderID ? { OrderHeaderID: this.Record.OrderID } : {};
-    }
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('lines', event.totalRowCount);
+    }
+
+    /* ── The restricted line editor (bc-aidp-next-golive#229) ─────────────────────────────────── */
+
+    /** Whether the editor dialog is mounted. */
+    public EditorOpen = false;
+    /** The line being edited; null means a new one. */
+    public EditingLineID: string | null = null;
+
+    /** The grid itself, so a saved line can make it re-read rather than leaving it stale. */
+    @ViewChild(ExplorerEntityDataGridComponent) private linesGrid?: ExplorerEntityDataGridComponent;
+
+    public AddLine(): void {
+        this.EditingLineID = null;
+        this.EditorOpen = true;
+    }
+
+    /**
+     * Opens the restricted editor for a row.
+     *
+     * The grid hands back the ROW, not an entity, so the primary key is read off it. A row without an
+     * ID is not a click that can be honoured — silently doing nothing beats opening an empty editor
+     * that would save a second, unrelated line.
+     */
+    public EditLine(event: AfterRowDoubleClickEventArgs): void {
+        const row = event?.row as Record<string, unknown> | undefined;
+        const id = row?.['ID'];
+        if (!id) return;
+        this.EditingLineID = String(id);
+        this.EditorOpen = true;
+    }
+
+    public CloseEditor(): void {
+        this.EditorOpen = false;
+        this.EditingLineID = null;
+    }
+
+    /**
+     * A saved line must change the GRID, not just close the dialog.
+     *
+     * Without the re-read the rep saves a product and the panel still shows the old set — which reads
+     * exactly like a save that silently did nothing, the failure mode the Explorer harness exists to
+     * catch.
+     */
+    public OnLineSaved(): void {
+        this.CloseEditor();
+        void this.linesGrid?.Refresh();
     }
 }
 
@@ -2097,9 +2398,12 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the deal first. Team members are recorded against it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealTeamMember;
@@ -2133,9 +2437,12 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the deal first. Contacts are linked to it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealContactRole;
@@ -2174,10 +2481,12 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
                         </div>
                     }
                 </div>
+            } @else {
+                <p class="mjs-deal-empty">Save the deal first. Activity is logged against it from then on.</p>
             }
         </mj-collapsible-panel>
     `,
-    styles: [`
+    styles: [EMPTY_STATE_STYLES, `
         .mjs-deal-activity { display: flex; flex-direction: column; gap: var(--mj-space-3); padding: var(--mj-space-3) var(--mj-space-4) var(--mj-space-5); min-height: 0; }
         .mjs-deal-activity__viewer {
             min-height: 420px; height: 480px;
@@ -2275,9 +2584,12 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the deal first. Stage changes are recorded from then on.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 /**
  * READ-ONLY ON EVERY DEAL, open or closed (bc-aidp-next-golive#206 item 5).
@@ -2321,9 +2633,12 @@ export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the deal first. Payments are scheduled against it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealPaymentSchedule;

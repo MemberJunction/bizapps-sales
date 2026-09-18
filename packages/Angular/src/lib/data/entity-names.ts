@@ -25,7 +25,9 @@ export const MJS_FOREIGN_ENTITIES = {
     /**
      * Contracts' agreement. A deal holds TWO soft references to it — the contract the win produced
      * and the contract a renewal renews — and neither is a database FK, which is what left both
-     * rendering as raw GUIDs until golive#226.
+     * rendering as raw GUIDs until golive#226. Nothing resolves them in either direction, which is
+     * also why the contract behind an ORDER can only be reached through that order's deal
+     * (golive#227), by reading the deal row.
      */
     Contract: 'MJ_BizApps_Contracts: Contracts',
     Activity: 'MJ_BizApps_Common: Activities',

@@ -829,13 +829,35 @@ export class DealWorkspaceComponent implements OnInit {
      * everything before validation runs.
      */
     public get CanAddLine(): boolean {
-        return !!this.Deal?.IsSaved;
+        return !!this.Deal?.IsSaved && !this.Lock.IsLocked;
     }
 
-    /** Why the button is disabled, in the words a rep needs. Null when it is enabled. */
+    /**
+     * Why the button is disabled, in the words a rep needs. Null when it is enabled.
+     *
+     * ── THE LOCKED CASE IS golive#206 ITEM 1, ON THE SURFACE IT DID NOT NAME ─────────────
+     *
+     * Item 1 asks for a line on a closed deal to be refused "whichever screen or API path it comes
+     * from", and names the deal FORM's grid for the button half. The workspace has its own Add, and it
+     * was gated only on the deal being saved — so a rep could add a product to a Won deal here while
+     * the form's grid refused the same gesture one screen over.
+     *
+     * The server is the rule and orders now enforces it: a line saved through the order graph outside
+     * booking is asked, and a frozen deal refuses. This is the affordance half. Without it the gesture
+     * is offered, taken, and then fails at save time as a thrown error — which is the shape item 1
+     * exists to replace.
+     *
+     * REMOVAL NEEDS NOTHING HERE. `ShouldRefuseLineRemoval` is `!!line.IsSaved`, so every saved line is
+     * already declined at the gesture — for KI-20's reasons rather than the lock's, but the rep on a
+     * closed deal meets the same wall either way, and a second rule would just be two messages for one
+     * refusal.
+     */
     public get AddLineBlockedReason(): string | null {
         if (this.CanAddLine) {
             return null;
+        }
+        if (this.Lock.IsLocked) {
+            return 'This deal is closed. Set the status back to Open before adding a product.';
         }
         return 'Save the deal first — its order is created on the first save, and a product line needs it.';
     }

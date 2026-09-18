@@ -210,6 +210,9 @@ export interface DealLockState {
      *
      * `false` when the status cannot be read: a chip that is missing costs a click, and one that
      * should not be there says a deal was won when it was not.
+     *
+     * golive#231's outcome tiles read it too, and are unaffected by the ungating: every one of those
+     * getters tests the CLOSE STAMPS first, so an open won-status deal still reads "Closes".
      */
     IsWon: boolean;
     /** A ready-to-render explanation, or null when the deal is open. */
