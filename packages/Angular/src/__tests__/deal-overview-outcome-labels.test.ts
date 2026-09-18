@@ -65,6 +65,33 @@ describe('an OPEN deal still forecasts', () => {
     });
 });
 
+/**
+ * THE STATE THE UNGATED `IsWon` MAKES REACHABLE.
+ *
+ * `DealLockState.IsWon` is deliberately NOT gated on `LocksDeal` (golive#226, so the header's chips
+ * survive a winning status that does not freeze the deal). That means an OPEN deal can now arrive here
+ * with `IsWon` true, which was impossible while the flag was only set on the locked path.
+ *
+ * Every getter below tests the CLOSE STAMPS first, so the answer is unchanged — but that is a property
+ * worth pinning rather than re-deriving, because the failure would be a deal announcing "Won" while it
+ * is still being worked.
+ */
+describe('an OPEN deal with a winning status still forecasts', () => {
+    const openWon = () => panelFor(deal({ ExpectedCloseDate: '2026-03-14' }), { IsWon: true });
+
+    it('reads "Closes", not "Won"', () => {
+        expect(openWon().CloseTileLabel).toBe('Closes');
+    });
+
+    it('still labels the outcome tile "Forecast"', () => {
+        expect(openWon().OutcomeTileLabel).toBe('Forecast');
+    });
+
+    it('and shows no closed row', () => {
+        expect(openWon().IsClosed).toBe(false);
+    });
+});
+
 describe('a WON deal reports the outcome', () => {
     it('labels the outcome tile "Outcome"', () => {
         expect(won().OutcomeTileLabel).toBe('Outcome');
