@@ -16,7 +16,7 @@ import { LoadSalesDealEntities } from '@mj-biz-apps/sales-entities';
 // the OwnerEmployeeID stamp derived from the team roster. The deal's own child collections are Related
 // Record Collections now, so no hand-rolled tree lives here any more. The close lock lands at S4.
 import '@mj-biz-apps/sales-core-entities-server';
-import { LoadSalesCoreEntitiesServer } from '@mj-biz-apps/sales-core-entities-server';
+import { LoadDealLockOrderLineVeto, LoadSalesCoreEntitiesServer } from '@mj-biz-apps/sales-core-entities-server';
 import { LoadCaptureForecastSnapshotAction } from './custom/forecast-snapshot.action.js';
 import { LoadLogActivityAction } from './custom/log-activity.action.js';
 
@@ -60,6 +60,20 @@ export function LoadBizAppsSalesServer(): void {
     // the imports, ClassFactory then resolves a less-derived Deal class instead of DealEntityServer,
     // and deal numbering plus the owner stamp silently stop applying.
     LoadSalesCoreEntitiesServer();
+
+    /**
+     * ANSWER ORDERS' QUESTION ABOUT ORDER LINES (golive#206 item 1).
+     *
+     * `orders-entities` asks whether a line may be edited and refuses nothing until something
+     * registers. This is the app with the stake: a deal that has closed is locked, and the order's
+     * lines are what its contract was derived from.
+     *
+     * The registration itself lives in `sales-core-entities-server`, which is the package that
+     * DECLARES `@mj-biz-apps/orders-entities`. This one does not, and resolves it transitively to
+     * whatever is published — so reaching for the seam from here compiles only by accident of
+     * hoisting, and not at all until orders ships the version carrying it.
+     */
+    LoadDealLockOrderLineVeto();
 
     LoadCaptureForecastSnapshotAction();
     LoadLogActivityAction();
