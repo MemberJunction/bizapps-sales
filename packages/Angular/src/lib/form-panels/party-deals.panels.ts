@@ -18,6 +18,9 @@ import type { BaseEntity, RunViewParams } from '@memberjunction/core';
 import { CommonModule } from '@angular/common';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 
+const EMPTY_STATE_STYLES =
+    '.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }';
+
 const ORG_SECTION = 'deals';
 const PERSON_SECTION = 'deals';
 const TEAM_SECTION = 'deal-team';
@@ -57,9 +60,12 @@ const TEAM_SECTION = 'deal-team';
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the organization first. Deals are linked to it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 export class MJSOrganizationDealsPanel extends BaseFormPanel<BaseEntity> {
     public readonly DealEntity = MJS_ENTITIES.Deal;
@@ -117,9 +123,12 @@ export class MJSOrganizationDealsPanel extends BaseFormPanel<BaseEntity> {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the person first. Deals are linked to them once they exist.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 export class MJSPersonDealsPanel extends BaseFormPanel<BaseEntity> {
     public readonly DealEntity = MJS_ENTITIES.Deal;
@@ -180,9 +189,12 @@ export class MJSPersonDealsPanel extends BaseFormPanel<BaseEntity> {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the person first. Their role on a deal is recorded once they exist.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 export class MJSPersonDealTeamPanel extends BaseFormPanel<BaseEntity> {
     public readonly TeamEntity = MJS_ENTITIES.DealTeamMember;
