@@ -241,6 +241,43 @@ until then, treat the per-bundle table as a claim about the code each mutation w
 
 ---
 
+## Round 14 (2026-09-17) — `a9bc0e0` — the re-aims that were run and not written down
+
+**Recorded late, and that is the point.** `M-CD5` and `M-CD6` were re-aimed on sales#72 after this
+PR's review found both anchored on deleted code. Both were run, both killed, and **neither run was
+entered here** — so the re-review that followed could say, correctly, that `M-CD6`'s expect list was a
+new claim with nothing behind it. An anchor that matches is necessary and not sufficient; a run
+nobody wrote down is not evidence.
+
+| Mutant | What it breaks | Declared | Result on `a9bc0e0` |
+|---|---|---|---|
+| `M-CD5` | the close lock never engages | CD5, CD13, CD14 | **OK** — 124 passed, 16 failed, 114s |
+| `M-CD6` | the lock becomes a WALL: every dirty field refused | CD6, CD14 | **OK** — 125 passed, 15 failed, 108s |
+
+Both felled their full declared lists. Collateral on each was the host's twelve-check unmutated
+baseline plus `SD27`, which is genuinely on the lock's path.
+
+### Why `M-CD6` is not simply `M-CD14` again
+
+Its old anchor was the `LOCK_EDITABLE_FIELDS` static, which golive#206 item 3 turned into a call
+because the answer now depends on the outcome. The obvious re-aim — point it at
+`lockEditableFields` — is the line `M-CD14` already mutates, and two mutants on one line prove one
+thing twice.
+
+So the mechanism changed instead: `M-CD6` now drops the editable-set term from the frozen-field
+predicate, making the lock a WALL that refuses every dirty field including Description. That is what
+`CD6` claims it is not. The mechanism changing wholesale is exactly why the run needed recording —
+the expect list carried over from a mutant that no longer exists.
+
+### `M-CD28` shares `M-CD13`'s anchor line, deliberately
+
+Measured, and worth stating because the rule elsewhere in this file is that two mutants on one line
+prove one thing twice. These do not. `M-CD13` empties `LOCK_EDITABLE_COMPANIONS` and fells **CD13 and
+CD28 together**; `M-CD28` removes only `Team`, leaves PaymentSchedule allow-listed, and fells **CD28
+alone**. Different members of the set, different blast radius, and the narrower one isolates.
+
+---
+
 ## Round 13 (2026-09-16) — `9e22e1e` — `M-AM2` repaired, and SD41 given its first mutant
 
 **2 mutants, 2 killed, 0 misses, 0 skips.** Found and fixed on `next` at `9e22e1e`, then folded into

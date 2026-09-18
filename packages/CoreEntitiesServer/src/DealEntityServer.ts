@@ -77,14 +77,33 @@ const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
  * `PriorStatusID` is kept so the save can put the field back before persisting the caller's other
  * edits -- see the note at the detection site for why that ordering is the whole design.
  */
-interface StatusTransitionPlan {
-    Kind: 'Close' | 'Reopen';
+interface StatusTransitionPlanFields {
     TargetStatusID: string;
     PriorStatusID: string | null;
     /** Whether the TARGET status is a loss. Carried on the plan because the status row was already
      *  read to decide the plan at all, and the pre-flight refusal below needs it. */
     TargetIsLost: boolean;
 }
+
+/**
+ * A transition that will actually RUN — the only shape `runStatusTransition` accepts.
+ *
+ * Split out so the narrowing is the COMPILER'S job rather than a claim made 200 lines away. That
+ * method chooses its operation with a ternary on `Kind === 'Close'`, so anything which is not a Close
+ * takes the REOPEN branch; an `Unreadable` plan arriving there would reopen a deal on a status nobody
+ * could read. It cannot arrive today, because the save refuses it near the top — but nothing at the
+ * point of use said so, and a fourth `Kind` added later would have inherited the reopen branch in
+ * silence. Now it fails to compile instead.
+ */
+type ActionableStatusTransition = StatusTransitionPlanFields & { Kind: 'Close' | 'Reopen' };
+
+/**
+ * `Unreadable` is not a transition: the target status row could not be read, so no safe answer exists
+ * and the save is refused rather than guessed either way.
+ */
+type UnreadableStatusTransition = StatusTransitionPlanFields & { Kind: 'Unreadable' };
+
+type StatusTransitionPlan = ActionableStatusTransition | UnreadableStatusTransition;
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
@@ -287,6 +306,26 @@ export class DealEntityServer extends DealEntity {
          * field is reachable through the flow, never by writing it.
          */
         const transition = await this.planStatusTransition();
+
+        /**
+         * REFUSED BEFORE THE REVERT, and the order is the whole of why the retry works.
+         *
+         * The revert below exists so the close lock and `super.Save()` do not write a status the
+         * transition is about to move. On this path nothing downstream runs at all, so reverting would
+         * serve nothing — and it would cost the one thing this message asks for. A reverted field is
+         * CLEAN, so a caller who reads "try again" and re-saves the same object gets
+         * `planStatusTransition() === null` on `!field?.Dirty`: no close, the other edits commit, and
+         * `Save()` returns true. Leaving it dirty means the retry reads the status again, which is
+         * exactly what a transient failure needs.
+         */
+        if (transition?.Kind === 'Unreadable') {
+            return this.refuseSave(
+                'The deal status could not be read, so this save cannot tell whether it closes the ' +
+                    'deal. Nothing was changed. Try again, and if it persists check that the Deal ' +
+                    'Status Types list is readable.',
+            );
+        }
+
         if (transition) {
             this.Set('DealStatusTypeID', transition.PriorStatusID);
         }
@@ -496,6 +535,14 @@ export class DealEntityServer extends DealEntity {
          * in advance: a downstream route declining, a loss reason that demands notes, a contract or
          * order write failing.
          */
+        /**
+         * NO `Kind` CHECK IS NEEDED HERE, and that is the point rather than an omission.
+         *
+         * `runStatusTransition` accepts only `ActionableStatusTransition`, and the `Unreadable`
+         * refusal above is an early `return`, so the compiler has already narrowed `transition` to
+         * `Close | Reopen` by this line — adding a guard here is rejected as a comparison with no
+         * overlap. The invariant the reader used to have to carry is now held by the type.
+         */
         if (transition) {
             return this.runStatusTransition(transition);
         }
@@ -523,6 +570,24 @@ export class DealEntityServer extends DealEntity {
         }
         const priorID = (field.OldValue as string | null) ?? null;
         const targetFlags = await this.readStatusLockFlags(target);
+
+        /**
+         * AN UNREADABLE TARGET STATUS REFUSES THE SAVE. It does not close, and it does not proceed.
+         *
+         * `readStatusLockFlags` fails closed — `LocksDeal: true` — which is right for the lock and
+         * exactly wrong here: read as "the target closes the deal", a blip on this one row would run a
+         * full close on a save that asked for nothing of the kind. Guessing the other way is no better;
+         * a status that really does lock would then be written with no close behind it, which is the
+         * defect golive#205 was filed about.
+         *
+         * So neither guess is taken. This is the same instinct `planStageDefaults` already states for
+         * its own read — "Unreadable is treated as do not derive" — and the cost is the same shape: a
+         * rep retries one save, instead of a deal closing that nobody asked to close.
+         */
+        if (!targetFlags.Read) {
+            return { Kind: 'Unreadable', TargetStatusID: target, PriorStatusID: priorID, TargetIsLost: false };
+        }
+
         const priorLocks = priorID ? await this.statusLocksDeal(priorID) : false;
 
         if (targetFlags.LocksDeal && !priorLocks) {
@@ -559,7 +624,7 @@ export class DealEntityServer extends DealEntity {
      * are columns on this deal, so an importer that sets them alongside the status has supplied
      * everything the close needs -- which is the case #205 is about.
      */
-    private async runStatusTransition(plan: StatusTransitionPlan): Promise<boolean> {
+    private async runStatusTransition(plan: ActionableStatusTransition): Promise<boolean> {
         const { CloseDealOperation, ReopenDealOperation } = await import('./CloseDealOperation.js');
         const context = {
             provider: this.ProviderToUse as unknown as IMetadataProvider,
@@ -1969,8 +2034,18 @@ export class DealEntityServer extends DealEntity {
      * wrongly allowing an edit to a closed deal is the more expensive mistake. `IsLost` fails to
      * `false` for the same reason read the other way round — `false` means Loss Notes is NOT carved
      * out, so an unreadable status refuses more, never less.
+     *
+     * ── AND THAT IS WHY `Read` IS REPORTED SEPARATELY ──────────────────────────────────────
+     *
+     * "Refuses more, never less" holds for the LOCK and inverts for the TRIGGER. `planStatusTransition`
+     * reads `LocksDeal` to mean "the target status closes the deal", so the same fail-closed default
+     * turns a transient read failure into a REAL CLOSE — stage event, contract, finance tasks, a voided
+     * order — on a save that asked for none of it. One default cannot serve both readings, so callers
+     * are told whether the row was actually read and decide for themselves.
      */
-    private async readStatusLockFlags(statusID: string): Promise<{ LocksDeal: boolean; IsLost: boolean }> {
+    private async readStatusLockFlags(
+        statusID: string,
+    ): Promise<{ LocksDeal: boolean; IsLost: boolean; Read: boolean }> {
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
             {
@@ -1985,10 +2060,10 @@ export class DealEntityServer extends DealEntity {
             LogError(
                 `DealEntityServer.readStatusLockFlags: could not read status ${statusID}: ${result.ErrorMessage}`,
             );
-            return { LocksDeal: true, IsLost: false };
+            return { LocksDeal: true, IsLost: false, Read: false };
         }
         const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean } | undefined;
-        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true };
+        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row };
     }
 
     /* ── Selling company ────────────────────────────────────────────────────── */
