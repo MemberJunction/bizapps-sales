@@ -409,6 +409,9 @@ interface DealFieldSpec {
     span?: boolean;
 }
 
+const EMPTY_STATE_STYLES =
+    '.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }';
+
 const FIELD_STYLES = `
     .mjs-fields {
         display: grid;
@@ -2050,9 +2053,12 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the deal first. Team members are recorded against it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealTeamMember;
@@ -2086,9 +2092,12 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the deal first. Contacts are linked to it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealContactRole;
@@ -2127,10 +2136,12 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
                         </div>
                     }
                 </div>
+            } @else {
+                <p class="mjs-deal-empty">Save the deal first. Activity is logged against it from then on.</p>
             }
         </mj-collapsible-panel>
     `,
-    styles: [`
+    styles: [EMPTY_STATE_STYLES, `
         .mjs-deal-activity { display: flex; flex-direction: column; gap: var(--mj-space-3); padding: var(--mj-space-3) var(--mj-space-4) var(--mj-space-5); min-height: 0; }
         .mjs-deal-activity__viewer {
             min-height: 420px; height: 480px;
@@ -2228,9 +2239,12 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the deal first. Stage changes are recorded from then on.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 /**
  * READ-ONLY ON EVERY DEAL, open or closed (bc-aidp-next-golive#206 item 5).
@@ -2274,9 +2288,12 @@ export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+            } @else {
+                <p class="mjs-deal-empty">Save the deal first. Payments are scheduled against it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
+    styles: [EMPTY_STATE_STYLES],
 })
 export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealPaymentSchedule;
