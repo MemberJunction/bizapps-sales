@@ -1,0 +1,86 @@
+[
+  {
+    "fields": {
+      "PipelineID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23001",
+      "Version": 1,
+      "AlgorithmID": "25E83BF9-C5EE-4BDF-A891-D36D871B73E3",
+      "ArtifactFileID": "615A734F-5323-4877-B91E-9361446A42D1",
+      "FittedPreprocessing": "{\"ops\":[{\"op\":\"onehot\",\"col\":\"DealType\",\"vocabulary\":[\"New\",\"Renewal\",\"Upsell\"]},{\"op\":\"onehot\",\"col\":\"LeadSourceType\",\"vocabulary\":[\"Event\",\"Outbound\",\"Partner\",\"Referral\",\"Website\"]},{\"op\":\"standardize\",\"cols\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"TeamMemberCount\"],\"stats\":{\"Amount\":{\"mean\":105488.03191489361,\"std\":52473.90729868008},\"TermMonths\":{\"mean\":23.80851063829787,\"std\":9.704437015190614},\"DaysToExpectedClose\":{\"mean\":74.66622340425532,\"std\":37.812759970523025},\"TeamMemberCount\":{\"mean\":2.151595744680851,\"std\":0.8337288747414454}}}],\"output_columns\":[\"DealType=New\",\"DealType=Renewal\",\"DealType=Upsell\",\"LeadSourceType=Event\",\"LeadSourceType=Outbound\",\"LeadSourceType=Partner\",\"LeadSourceType=Referral\",\"LeadSourceType=Website\",\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"HasPaymentSchedule\",\"TeamMemberCount\",\"HasPartnerInvolved\",\"IsEnterpriseTier\",\"AutoRenewFlag\",\"StandardAgreementModifiedFlag\"]}",
+      "FeatureSchema": "[{\"Name\":\"Amount\",\"Kind\":\"numeric\"},{\"Name\":\"TermMonths\",\"Kind\":\"numeric\"},{\"Name\":\"DaysToExpectedClose\",\"Kind\":\"numeric\"},{\"Name\":\"HasPaymentSchedule\",\"Kind\":\"numeric\"},{\"Name\":\"TeamMemberCount\",\"Kind\":\"numeric\"},{\"Name\":\"HasPartnerInvolved\",\"Kind\":\"numeric\"},{\"Name\":\"IsEnterpriseTier\",\"Kind\":\"numeric\"},{\"Name\":\"AutoRenewFlag\",\"Kind\":\"numeric\"},{\"Name\":\"StandardAgreementModifiedFlag\",\"Kind\":\"numeric\"},{\"Name\":\"DealType\",\"Kind\":\"categorical\"},{\"Name\":\"LeadSourceType\",\"Kind\":\"categorical\"}]",
+      "TargetVariable": "WinOutcome",
+      "ProblemType": "classification",
+      "Metrics": "{\"accuracy\":0.984375,\"f1\":0.9871794871794872,\"precision\":0.9746835443037974,\"recall\":1,\"auc\":0.9992360580595875}",
+      "HoldoutMetrics": "{\"accuracy\":0.9911504424778761,\"f1\":0.9927007299270073,\"precision\":0.9855072463768116,\"recall\":1,\"auc\":0.9990196078431373}",
+      "FeatureImportance": "{\"DealType=New\":0.013470843434333801,\"DealType=Renewal\":0.014438379555940628,\"DealType=Upsell\":0,\"LeadSourceType=Event\":0,\"LeadSourceType=Outbound\":0,\"LeadSourceType=Partner\":0.011605877429246902,\"LeadSourceType=Referral\":0,\"LeadSourceType=Website\":0.015575157478451729,\"Amount\":0.029214859008789062,\"TermMonths\":0.017716610804200172,\"DaysToExpectedClose\":0.4942096173763275,\"HasPaymentSchedule\":0.02607322484254837,\"TeamMemberCount\":0.3024369180202484,\"HasPartnerInvolved\":0.01310428511351347,\"IsEnterpriseTier\":0,\"AutoRenewFlag\":0.041177794337272644,\"StandardAgreementModifiedFlag\":0.020976411178708076}",
+      "Lineage": "{\"pipelineId\":\"c1a02e75-4c6e-49b0-96f3-79d1a8e23001\",\"pipelineVersion\":1,\"targetEntityName\":\"MJ_BizApps_Sales: Deals\",\"sourceBindings\":[{\"Kind\":\"Entity\",\"Ref\":\"MJ_BizApps_Sales: Deals\"}],\"featureSteps\":{\"Steps\":[{\"Id\":\"select-features\",\"Kind\":\"select\",\"Columns\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"HasPaymentSchedule\",\"TeamMemberCount\",\"HasPartnerInvolved\",\"IsEnterpriseTier\",\"AutoRenewFlag\",\"StandardAgreementModifiedFlag\",\"DealType\",\"LeadSourceType\"]},{\"Id\":\"onehot-DealType\",\"Kind\":\"onehot\",\"Column\":\"DealType\"},{\"Id\":\"onehot-LeadSourceType\",\"Kind\":\"onehot\",\"Column\":\"LeadSourceType\"},{\"Id\":\"standardize-numerics\",\"Kind\":\"standardize\",\"Columns\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"TeamMemberCount\"]}]},\"asOfStrategy\":{\"Mode\":\"none\"},\"Tournament\":\"Sales Deal Win Propensity Tournament Wave 1\",\"Algorithm\":\"XGBoost\",\"TrainedAt\":\"2026-09-19T19:10:03.706Z\",\"TrainingRows\":752}",
+      "TrainedAt": "2026-09-19T19:10:03.732Z",
+      "TrainingDurationSec": 0,
+      "TrainingRowCount": 752,
+      "Status": "Draft",
+      "SkipEmbeddings": false
+    },
+    "primaryKey": {
+      "ID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23011"
+    },
+    "sync": {
+      "lastModified": "2026-09-19T19:49:34.751Z",
+      "checksum": "3e36bb05150884cad1d651d770f5d5c64f033a11347d670ed0494a14e6ea776b"
+    }
+  },
+  {
+    "fields": {
+      "PipelineID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23001",
+      "Version": 2,
+      "AlgorithmID": "B2FD5E4A-75D4-401A-A1DA-F223A5234FDA",
+      "ArtifactFileID": "721A2E62-557B-4000-86DA-AD64B6BF0C15",
+      "FittedPreprocessing": "{\"ops\":[{\"op\":\"onehot\",\"col\":\"DealType\",\"vocabulary\":[\"New\",\"Renewal\",\"Upsell\"]},{\"op\":\"onehot\",\"col\":\"LeadSourceType\",\"vocabulary\":[\"Event\",\"Outbound\",\"Partner\",\"Referral\",\"Website\"]},{\"op\":\"standardize\",\"cols\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"TeamMemberCount\"],\"stats\":{\"Amount\":{\"mean\":105488.03191489361,\"std\":52473.90729868008},\"TermMonths\":{\"mean\":23.80851063829787,\"std\":9.704437015190614},\"DaysToExpectedClose\":{\"mean\":74.66622340425532,\"std\":37.812759970523025},\"TeamMemberCount\":{\"mean\":2.151595744680851,\"std\":0.8337288747414454}}}],\"output_columns\":[\"DealType=New\",\"DealType=Renewal\",\"DealType=Upsell\",\"LeadSourceType=Event\",\"LeadSourceType=Outbound\",\"LeadSourceType=Partner\",\"LeadSourceType=Referral\",\"LeadSourceType=Website\",\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"HasPaymentSchedule\",\"TeamMemberCount\",\"HasPartnerInvolved\",\"IsEnterpriseTier\",\"AutoRenewFlag\",\"StandardAgreementModifiedFlag\"]}",
+      "FeatureSchema": "[{\"Name\":\"Amount\",\"Kind\":\"numeric\"},{\"Name\":\"TermMonths\",\"Kind\":\"numeric\"},{\"Name\":\"DaysToExpectedClose\",\"Kind\":\"numeric\"},{\"Name\":\"HasPaymentSchedule\",\"Kind\":\"numeric\"},{\"Name\":\"TeamMemberCount\",\"Kind\":\"numeric\"},{\"Name\":\"HasPartnerInvolved\",\"Kind\":\"numeric\"},{\"Name\":\"IsEnterpriseTier\",\"Kind\":\"numeric\"},{\"Name\":\"AutoRenewFlag\",\"Kind\":\"numeric\"},{\"Name\":\"StandardAgreementModifiedFlag\",\"Kind\":\"numeric\"},{\"Name\":\"DealType\",\"Kind\":\"categorical\"},{\"Name\":\"LeadSourceType\",\"Kind\":\"categorical\"}]",
+      "TargetVariable": "WinOutcome",
+      "ProblemType": "classification",
+      "Metrics": "{\"accuracy\":0.96875,\"f1\":0.9743589743589743,\"precision\":0.9620253164556962,\"recall\":0.987012987012987,\"auc\":0.9971988795518207}",
+      "HoldoutMetrics": "{\"accuracy\":0.9911504424778761,\"f1\":0.9927007299270073,\"precision\":0.9855072463768116,\"recall\":1,\"auc\":0.9986928104575163}",
+      "FeatureImportance": "{\"DealType=New\":72,\"DealType=Renewal\":62,\"DealType=Upsell\":36,\"LeadSourceType=Event\":12,\"LeadSourceType=Outbound\":12,\"LeadSourceType=Partner\":58,\"LeadSourceType=Referral\":10,\"LeadSourceType=Website\":113,\"Amount\":698,\"TermMonths\":76,\"DaysToExpectedClose\":1001,\"HasPaymentSchedule\":70,\"TeamMemberCount\":195,\"HasPartnerInvolved\":68,\"IsEnterpriseTier\":19,\"AutoRenewFlag\":87,\"StandardAgreementModifiedFlag\":241}",
+      "Lineage": "{\"pipelineId\":\"c1a02e75-4c6e-49b0-96f3-79d1a8e23001\",\"pipelineVersion\":1,\"targetEntityName\":\"MJ_BizApps_Sales: Deals\",\"sourceBindings\":[{\"Kind\":\"Entity\",\"Ref\":\"MJ_BizApps_Sales: Deals\"}],\"featureSteps\":{\"Steps\":[{\"Id\":\"select-features\",\"Kind\":\"select\",\"Columns\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"HasPaymentSchedule\",\"TeamMemberCount\",\"HasPartnerInvolved\",\"IsEnterpriseTier\",\"AutoRenewFlag\",\"StandardAgreementModifiedFlag\",\"DealType\",\"LeadSourceType\"]},{\"Id\":\"onehot-DealType\",\"Kind\":\"onehot\",\"Column\":\"DealType\"},{\"Id\":\"onehot-LeadSourceType\",\"Kind\":\"onehot\",\"Column\":\"LeadSourceType\"},{\"Id\":\"standardize-numerics\",\"Kind\":\"standardize\",\"Columns\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"TeamMemberCount\"]}]},\"asOfStrategy\":{\"Mode\":\"none\"},\"Tournament\":\"Sales Deal Win Propensity Tournament Wave 1\",\"Algorithm\":\"LightGBM\",\"TrainedAt\":\"2026-09-19T19:10:03.766Z\",\"TrainingRows\":752}",
+      "TrainedAt": "2026-09-19T19:10:03.788Z",
+      "TrainingDurationSec": 1,
+      "TrainingRowCount": 752,
+      "Status": "Draft",
+      "SkipEmbeddings": false
+    },
+    "primaryKey": {
+      "ID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23012"
+    },
+    "sync": {
+      "lastModified": "2026-09-19T19:49:34.751Z",
+      "checksum": "63904768883ac012aa152653a24133591a6e86ae54d7b6cf87027a43b4265a19"
+    }
+  },
+  {
+    "fields": {
+      "PipelineID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23001",
+      "Version": 3,
+      "AlgorithmID": "F966965D-3A87-4DD6-91E0-4F9D1AF17796",
+      "ArtifactFileID": "B9E9DE96-6FB0-4EB6-82F0-A96D749E1EC8",
+      "FittedPreprocessing": "{\"ops\":[{\"op\":\"onehot\",\"col\":\"DealType\",\"vocabulary\":[\"New\",\"Renewal\",\"Upsell\"]},{\"op\":\"onehot\",\"col\":\"LeadSourceType\",\"vocabulary\":[\"Event\",\"Outbound\",\"Partner\",\"Referral\",\"Website\"]},{\"op\":\"standardize\",\"cols\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"TeamMemberCount\"],\"stats\":{\"Amount\":{\"mean\":105488.03191489361,\"std\":52473.90729868008},\"TermMonths\":{\"mean\":23.80851063829787,\"std\":9.704437015190614},\"DaysToExpectedClose\":{\"mean\":74.66622340425532,\"std\":37.812759970523025},\"TeamMemberCount\":{\"mean\":2.151595744680851,\"std\":0.8337288747414454}}}],\"output_columns\":[\"DealType=New\",\"DealType=Renewal\",\"DealType=Upsell\",\"LeadSourceType=Event\",\"LeadSourceType=Outbound\",\"LeadSourceType=Partner\",\"LeadSourceType=Referral\",\"LeadSourceType=Website\",\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"HasPaymentSchedule\",\"TeamMemberCount\",\"HasPartnerInvolved\",\"IsEnterpriseTier\",\"AutoRenewFlag\",\"StandardAgreementModifiedFlag\"]}",
+      "FeatureSchema": "[{\"Name\":\"Amount\",\"Kind\":\"numeric\"},{\"Name\":\"TermMonths\",\"Kind\":\"numeric\"},{\"Name\":\"DaysToExpectedClose\",\"Kind\":\"numeric\"},{\"Name\":\"HasPaymentSchedule\",\"Kind\":\"numeric\"},{\"Name\":\"TeamMemberCount\",\"Kind\":\"numeric\"},{\"Name\":\"HasPartnerInvolved\",\"Kind\":\"numeric\"},{\"Name\":\"IsEnterpriseTier\",\"Kind\":\"numeric\"},{\"Name\":\"AutoRenewFlag\",\"Kind\":\"numeric\"},{\"Name\":\"StandardAgreementModifiedFlag\",\"Kind\":\"numeric\"},{\"Name\":\"DealType\",\"Kind\":\"categorical\"},{\"Name\":\"LeadSourceType\",\"Kind\":\"categorical\"}]",
+      "TargetVariable": "WinOutcome",
+      "ProblemType": "classification",
+      "Metrics": "{\"accuracy\":0.984375,\"f1\":0.9871794871794872,\"precision\":0.9746835443037974,\"recall\":1,\"auc\":0.9994907053730583}",
+      "HoldoutMetrics": "{\"accuracy\":0.9911504424778761,\"f1\":0.9927007299270073,\"precision\":0.9855072463768116,\"recall\":1,\"auc\":1}",
+      "FeatureImportance": "{\"DealType=New\":0.00310036061959506,\"DealType=Renewal\":0.003706542668638627,\"DealType=Upsell\":0.0026762753877914445,\"LeadSourceType=Event\":0.002248589159815724,\"LeadSourceType=Outbound\":0.0031492610812140836,\"LeadSourceType=Partner\":0.003163680739430533,\"LeadSourceType=Referral\":0.002270127347279662,\"LeadSourceType=Website\":0.003471926978935096,\"Amount\":0.07714756974863847,\"TermMonths\":0.007299337788094896,\"DaysToExpectedClose\":0.503446144520249,\"HasPaymentSchedule\":0.03700124181575374,\"TeamMemberCount\":0.1801502483492834,\"HasPartnerInvolved\":0.06841192685374432,\"IsEnterpriseTier\":0.01218450367027076,\"AutoRenewFlag\":0.062050198363714934,\"StandardAgreementModifiedFlag\":0.028522064907550278}",
+      "Lineage": "{\"pipelineId\":\"c1a02e75-4c6e-49b0-96f3-79d1a8e23001\",\"pipelineVersion\":1,\"targetEntityName\":\"MJ_BizApps_Sales: Deals\",\"sourceBindings\":[{\"Kind\":\"Entity\",\"Ref\":\"MJ_BizApps_Sales: Deals\"}],\"featureSteps\":{\"Steps\":[{\"Id\":\"select-features\",\"Kind\":\"select\",\"Columns\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"HasPaymentSchedule\",\"TeamMemberCount\",\"HasPartnerInvolved\",\"IsEnterpriseTier\",\"AutoRenewFlag\",\"StandardAgreementModifiedFlag\",\"DealType\",\"LeadSourceType\"]},{\"Id\":\"onehot-DealType\",\"Kind\":\"onehot\",\"Column\":\"DealType\"},{\"Id\":\"onehot-LeadSourceType\",\"Kind\":\"onehot\",\"Column\":\"LeadSourceType\"},{\"Id\":\"standardize-numerics\",\"Kind\":\"standardize\",\"Columns\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"TeamMemberCount\"]}]},\"asOfStrategy\":{\"Mode\":\"none\"},\"Tournament\":\"Sales Deal Win Propensity Tournament Wave 1\",\"Algorithm\":\"Random Forest\",\"TrainedAt\":\"2026-09-19T19:10:03.642Z\",\"TrainingRows\":752}",
+      "TrainedAt": "2026-09-19T19:10:03.671Z",
+      "TrainingDurationSec": 0,
+      "TrainingRowCount": 752,
+      "Status": "Published",
+      "SkipEmbeddings": false
+    },
+    "primaryKey": {
+      "ID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23013"
+    },
+    "sync": {
+      "lastModified": "2026-09-19T19:49:34.751Z",
+      "checksum": "fb08602a387c2ba25f47a554b60e8118da994b2cc4ac43cccebcc77a682275c0"
+    }
+  }
+]

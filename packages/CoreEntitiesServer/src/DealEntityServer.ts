@@ -259,6 +259,8 @@ export class DealEntityServer extends DealEntity {
         this._lockedAtSave = false;
         this._lastStageEventID = null;
 
+        this.syncPredictiveWinFieldsPreSave();
+
         /**
          * THE STATUS FIELD DRIVES THE CLOSE AND THE REOPEN (bc-aidp-next-golive#205).
          *
@@ -2122,4 +2124,53 @@ export class DealEntityServer extends DealEntity {
         const owner = this.Team.Items.find((m) => m.DealRoleID === ownerRoleID);
         this.OwnerEmployeeID = owner?.EmployeeID ?? null;
     }
+
+    /**
+     * Synchronizes PredictedWinRiskBand when PredictedWinProbability changes or is set.
+     * Low (<0.20), Medium (0.20-0.50), High (0.50-0.80), or Critical (>=0.80).
+     */
+    public syncPredictiveWinFieldsPreSave(): void {
+        try {
+            let probDirty = false;
+            try {
+                const probField = typeof this.GetFieldByName === 'function' ? this.GetFieldByName('PredictedWinProbability') : null;
+                probDirty = probField?.Dirty ?? false;
+            } catch {
+                probDirty = false;
+            }
+            if (this.PredictedWinProbability != null && (probDirty || !this.PredictedWinRiskBand)) {
+                this.PredictedWinRiskBand = ComputePredictiveWinRiskBand(this.PredictedWinProbability);
+            } else if (this.PredictedWinProbability == null && probDirty) {
+                this.PredictedWinRiskBand = null;
+            }
+        } catch {
+            // Tolerate test mocks where BaseEntity._fields is uninitialized
+        }
+    }
+}
+
+/**
+ * Maps a deal win propensity probability to an operational risk/priority tier.
+ * - <0.20: Low
+ * - 0.20 to <0.50: Medium
+ * - 0.50 to <0.80: High
+ * - >=0.80: Critical
+ * - null/undefined/NaN: null
+ */
+export function ComputePredictiveWinRiskBand(
+    probability: number | null | undefined
+): DealEntity['PredictedWinRiskBand'] {
+    if (probability == null || Number.isNaN(probability)) {
+        return null;
+    }
+    if (probability < 0.20) {
+        return 'Low';
+    }
+    if (probability < 0.50) {
+        return 'Medium';
+    }
+    if (probability < 0.80) {
+        return 'High';
+    }
+    return 'Critical';
 }

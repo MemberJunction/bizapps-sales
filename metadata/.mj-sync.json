@@ -82,7 +82,11 @@
     "applications",
     "entity-fields",
     "user-views",
-    "entity-relationships"
+    "entity-relationships",
+    "ml-training-pipelines",
+    "ml-models",
+    "record-processes",
+    "ml-model-scoring-bindings"
   ],
   "sqlLogging": {
     "enabled": true,
