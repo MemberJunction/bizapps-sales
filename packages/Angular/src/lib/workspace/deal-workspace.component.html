@@ -484,7 +484,9 @@
                                 so activating it removes the focused element and a keyboard user lands on
                                 <body>, starting their next Tab from the top of the page.
                               -->
-                              <button type="button" class="dw-iconbtn" title="Reset to the order date"
+                              <button type="button" class="dw-iconbtn"
+                                      [disabled]="!CanEditLines"
+                                      [title]="LineEditBlockedReason || 'Reset to the order date'"
                                       (click)="ResetTermStart(line, termStartInput)">
                                 <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
                                 <span class="dw-sr">Reset term start to the order date</span>

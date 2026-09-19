@@ -24,6 +24,7 @@ function workspace(opts: { saved: boolean; locked: boolean }) {
     const c = Object.create(DealWorkspaceComponent.prototype) as {
         CanEditLines: boolean;
         LineEditBlockedReason: string | null;
+        OpenLineDetail(line: { ID: string; IsSaved: boolean }): Promise<void>;
     };
     Object.defineProperty(c, 'Deal', { value: { IsSaved: opts.saved }, writable: true });
     Object.defineProperty(c, 'Lock', {
@@ -76,6 +77,10 @@ describe('the getters actually reach the fields', () => {
         ['quantity', '[(ngModel)]="line.Quantity"'],
         ['the discount percent', '(ngModelChange)="SetDiscountPercent(line, $event)"'],
         ['the term start', '(ngModelChange)="SetTermStart(line, $event)"'],
+        // The RESET beside the term start, not the input. Disabling the input alone left the button
+        // that clears the same two fields live — and `ResetTermStart` nulls ServicePeriodStart AND
+        // ServicePeriodEnd, so the one control this block missed was the one that wrote most.
+        ['the term-start reset', '(click)="ResetTermStart(line, termStartInput)"'],
     ])('%s is disabled when the lines cannot be edited', (_label, marker) => {
         const at = lines.indexOf(marker);
         expect(at, 'the field must still be findable').toBeGreaterThan(-1);
@@ -91,7 +96,47 @@ describe('the getters actually reach the fields', () => {
         // when editable — the product name is what a rep wants there — and falls back to the refusal
         // only while locked, so nothing is lost in either state.
         expect(lines).toContain('[title]="LineEditBlockedReason || ProductLabel(line)"');
+        // The reset button keeps its own hint while editable, for the same reason the product select
+        // keeps the product name: "Reset to the order date" is what a rep needs there when it works.
+        expect(lines).toContain(`[title]="LineEditBlockedReason || 'Reset to the order date'"`);
         expect((lines.match(/\[title\]="LineEditBlockedReason"/g) ?? []).length).toBe(3);
+    });
+});
+
+/**
+ * THE SLIDE-IN IS THE OTHER WAY INTO THE SAME FIELDS, and it was opened in edit mode unconditionally.
+ *
+ * Asserted on BEHAVIOUR rather than on the source text, because the defect here is not a missing binding
+ * — it is a value handed to a service. A version that read `CanEditLines` and passed `true` anyway would
+ * survive any grep of this file.
+ */
+describe('the full line detail', () => {
+    function openDetail(locked: boolean) {
+        const opened: Array<{ EditMode: boolean }> = [];
+        const c = workspace({ saved: true, locked });
+        Object.defineProperty(c, 'forms', {
+            value: {
+                Open: (o: { EditMode: boolean }) => {
+                    opened.push(o);
+                    return { AfterSaved: async () => null };   // cancelled: stops before the reload
+                },
+            },
+        });
+        return { c, opened };
+    }
+
+    it('opens read-only on a closed deal', async () => {
+        const { c, opened } = openDetail(true);
+        await c.OpenLineDetail({ ID: 'line-1', IsSaved: true });
+        expect(opened, 'the button must still open — a closed deal is what people inspect').toHaveLength(1);
+        expect(opened[0].EditMode).toBe(false);
+    });
+
+    it('opens editable on an open deal', async () => {
+        const { c, opened } = openDetail(false);
+        await c.OpenLineDetail({ ID: 'line-1', IsSaved: true });
+        expect(opened).toHaveLength(1);
+        expect(opened[0].EditMode).toBe(true);
     });
 });
 

@@ -34,7 +34,30 @@ sentence wherever the same lock refuses them.
 line is already declined at the gesture — for KI-20's reasons rather than the lock's, but the wall is
 the same either way.
 
-10 tests, 6 mutations all killed, including the defect as reported and both ways of losing a binding.
-**Four of the ten assert the bindings exist**, which is the point: unlike #84, where the button
+**Two more ways into the same fields, found in review of this PR.** Disabling what a rep can *type
+into* left two controls that write without typing, and the requirement quoted above covers both:
+
+- **The term-start reset.** The date input beside it was disabled; the button that clears it was not.
+  `ResetTermStart` nulls `ServicePeriodStart` **and** `ServicePeriodEnd`, so the one control this
+  change first missed was the one that wrote most. It now carries the same binding, keeping its own
+  hint while editable exactly as the product select keeps `ProductLabel`.
+- **The full line detail.** `OpenLineDetail` opened the generated Order Line form with
+  `EditMode: true` unconditionally — the service period, term, product reference and description,
+  every one of them editable on a frozen line. It now passes `EditMode: this.CanEditLines`.
+
+  The button is still **offered** on a closed deal, and read-only rather than withheld: a closed deal
+  is what people go back and inspect, and those four fields have no other surface, so withholding it
+  would cost the reading to prevent the editing. `CreateRelated` already gated a `forms.Open` the same
+  way, stated the other way round — *a locked deal must not create a record it then cannot attach.*
+
+  This stops the **workspace** from requesting edit on a frozen line. Whether the generated form's own
+  chrome still offers an Edit toggle in view mode is an MJ-level question, identical in every
+  read-only context; `DealLockOrderLineVeto` (sales#98) refuses the save either way.
+
+13 tests, 8 mutations all killed, including the defect as reported and both ways of losing a binding.
+**Five of the thirteen assert the bindings exist**, which is the point: unlike #84, where the button
 already bound `[disabled]` and only a getter changed, these bindings are new — and a correct getter
-that nothing consumes would pass every behavioural assertion while a rep edited a frozen line.
+that nothing consumes would pass every behavioural assertion while a rep edited a frozen line. The
+slide-in is asserted on **behaviour** instead, because there the defect is not a missing binding but a
+value handed to a service: a version that read `CanEditLines` and passed `true` anyway would survive
+any grep of the template.

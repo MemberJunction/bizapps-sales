@@ -1056,7 +1056,16 @@ export class DealWorkspaceComponent implements OnInit {
             EntityName: E_ORDER_LINE,
             RecordId: line.ID,
             Presentation: 'slide-in',
-            EditMode: true,
+            // READ-ONLY ON A LOCKED DEAL, rather than not offered at all. A closed deal is exactly what
+            // people go back and inspect, and the service period, term, product reference and description
+            // have no other surface -- so withholding the button would cost the reading to prevent the
+            // editing. `CreateRelated` gates the same way, for the same reason stated the other way round:
+            // a locked deal must not be offered a gesture it cannot complete.
+            //
+            // This stops the WORKSPACE from requesting edit on a frozen line. If the generated form's own
+            // chrome still offers an Edit toggle in view mode, that is MJ-level and identical in every
+            // read-only context; `DealLockOrderLineVeto` refuses the save either way.
+            EditMode: this.CanEditLines,
             Title: line.Product?.trim() || line.Description?.trim() || 'Order line',
         });
 
