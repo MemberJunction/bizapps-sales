@@ -503,6 +503,10 @@ export class DealEntityServer extends DealEntity {
          */
         const needsStatusDefault = !this.IsSaved && !this.DealStatusTypeID;
 
+        // Staged BEFORE the save so the roster row travels in the same transaction, and so
+        // `stampOwnerFromTeam()` derives the stamp from it rather than being told the answer.
+        await this.seedOwnerOnCreate();
+
         const saved = this.IsSaved || this.DealNumber
             ? await this.saveWithinScope(options, {
                   stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
@@ -2290,6 +2294,114 @@ export class DealEntityServer extends DealEntity {
      */
     private get RosterDrivesThisSave(): boolean {
         return this.Team.IsLoaded || this.Team.Count > 0;
+    }
+
+    /**
+     * Gives a NEW deal an owner: the account's owner when it has one, otherwise whoever is creating it.
+     *
+     * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────────────────────────
+     *
+     * Nothing populated `DealTeamMember`. Not the deal type, not the pipeline, not the account — a deal
+     * was born with an empty roster, `stampOwnerFromTeam()` had nothing to derive from, and the Overview
+     * then reported "No owner assigned." on a deal created seconds earlier. Worse, the form's team panel
+     * is gated on the deal being saved, so at the moment of creation there was no way to supply one
+     * either: every new deal was unowned and stayed that way until somebody noticed.
+     *
+     * ── WHY IT IS HERE AND NOT ON THE FORM ──────────────────────────────────────────────────────────
+     *
+     * `DealTeamMember` is the source of truth for who is on a deal and `Deal.OwnerEmployeeID` is a stamp
+     * derived from it, so a form that wrote either would be the second authority on membership. Putting
+     * it in `Save()` means an Action, an agent and the HubSpot importer all get the same default from
+     * the same code, which is the whole reason the owner rules live on the entity.
+     *
+     * ── THE ORDER OF PREFERENCE, AND WHY ────────────────────────────────────────────────────────────
+     *
+     * The ACCOUNT's owner first. A deal on an existing customer belongs to whoever runs that customer,
+     * and that is true whether a rep, an SE or an admin typed it in — so it beats the creator, who is
+     * merely the person at the keyboard. The creator is the fallback for a deal with no account yet, or
+     * an account nobody owns, where the person entering it is the best answer available.
+     *
+     * ── EVERY WAY THIS DECLINES TO ACT ──────────────────────────────────────────────────────────────
+     *
+     * It is a DEFAULT, not a rule, so each of these leaves the deal exactly as the caller left it:
+     *
+     *  - not a create. An update never needs one; re-deriving on every save would silently re-own a
+     *    deal whose owner had been deliberately removed.
+     *  - the caller already supplied a roster. `RosterDrivesThisSave` is the same guard
+     *    `stampOwnerFromTeam` uses, so an importer or an Action that sets its own team is never
+     *    second-guessed — and the two cannot disagree about what "the caller is managing this" means.
+     *  - nothing resolves. A context user with no linked Employee (`System` and `Anonymous` have none)
+     *    and no account owner leaves the deal unowned, which is exactly what happens today. Refusing the
+     *    save because we could not GUESS an owner would turn a working create into a broken one.
+     *
+     * A failure to READ the account is also not fatal, for the same reason: the deal still saves, just
+     * without a default. The one thing this must never do is cost someone a deal they were creating.
+     */
+    private async seedOwnerOnCreate(): Promise<void> {
+        if (this.IsSaved) {
+            return; // a default belongs to birth, not to every subsequent save
+        }
+        if (this.RosterDrivesThisSave) {
+            return; // the caller is managing the team; do not second-guess it
+        }
+
+        const employeeID = (await this.accountOwnerEmployeeID()) ?? this.creatorEmployeeID();
+        if (!employeeID) {
+            return; // nothing to default to — an unowned deal is the honest outcome
+        }
+
+        // `SetOwner` owns the roster mechanics: it is unique on (deal, employee, role), so replacing an
+        // owner is a remove plus an add, and the collection contributes deletions before insertions.
+        // Restating any of that here would be a second implementation of the same intent.
+        await this.SetOwner(employeeID);
+    }
+
+    /** The owner of the account this deal is for, or null when there is no account or no owner. */
+    private async accountOwnerEmployeeID(): Promise<string | null> {
+        if (!this.AccountID) {
+            return null;
+        }
+        /**
+         * VALIDATED, NOT ESCAPED, AND IT RETURNS RATHER THAN THROWS.
+         *
+         * `DealLockOrderLineVeto` has a `SafeID` that throws, which is right there: those ids arrive
+         * from Orders and a malformed one is a bug worth stopping on. Here the id is our own field on a
+         * deal somebody is creating, and refusing the save because it did not look like a GUID would
+         * cost them the deal to protect a query that simply does not need to run. No id, no default.
+         */
+        if (!/^[0-9a-fA-F-]{36}$/.test(this.AccountID)) {
+            return null;
+        }
+
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await provider.RunView<{ OwnerEmployeeID: string | null }>(
+            {
+                EntityName: 'MJ_BizApps_Sales: Sales Accounts',
+                ExtraFilter: `ID='${this.AccountID}'`,
+                ResultType: 'simple',
+                Fields: ['OwnerEmployeeID'],
+            },
+            this.ContextCurrentUser,
+        );
+        // RunView does not throw. A failed read means no default, not a failed save.
+        if (!result.Success) {
+            return null;
+        }
+        return (result.Results ?? [])[0]?.OwnerEmployeeID ?? null;
+    }
+
+    /**
+     * The Employee behind the user doing the creating, or null when they have none.
+     *
+     * READ AS A STRING despite `UserInfo.EmployeeID` being typed `number` in `@memberjunction/core`.
+     * The column is a `uniqueidentifier` — verified against the database, where this user's value is a
+     * GUID — so the declared type is stale. Trusting it would coerce a GUID through a numeric type and
+     * produce `NaN` or a truncated id, which would then be written into a foreign key.
+     */
+    private creatorEmployeeID(): string | null {
+        const user = this.ContextCurrentUser as unknown as { EmployeeID?: string | number | null } | null;
+        const id = user?.EmployeeID;
+        return typeof id === 'string' && id.trim().length > 0 ? id : null;
     }
 
     private async stampOwnerFromTeam(): Promise<void> {
