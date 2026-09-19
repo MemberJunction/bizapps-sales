@@ -156,7 +156,31 @@ function money(n: number | null | undefined): string {
                     </div>
                 </div>
             }
-            @if (!Collapsed) {
+            <!--
+                 A NEW DEAL GETS GUIDANCE INSTEAD OF A BRIEFING.
+
+                 Products live on the ORDER a deal mints when it is first saved, so there is nothing to
+                 add them to until then. The "What's being sold" panel says so, but it is collapsed by
+                 default and a rep reported no way to add products and no message saying why
+                 (golive#216) — a hint nobody opens is not a hint. It is repeated here, where a new deal
+                 already is, so the sequence is visible before the search for a missing button starts.
+
+                 Outside the collapsed region for the same reason the Name editor is: Collapsed is a
+                 persisted per-user setting, and this is the one instruction that makes the form usable.
+            -->
+            @if (!Record.IsSaved) {
+                <div class="mjs-flag mjs-flag--guide">
+                    Save this deal to create its order. Products are added after that.
+                </div>
+            }
+            <!--
+                 THE BRIEFING IS FOR A DEAL THAT EXISTS. Account, owner, amount, stage and next step are
+                 all empty on a record nobody has saved, so an unsaved deal rendered a grid of dashes
+                 under the name it was still being given. IsSaved, not EditMode: a saved deal being
+                 edited still has all of this to show, and hiding it there would take the briefing away
+                 from the only person who needs it.
+            -->
+            @if (!Collapsed && Record.IsSaved) {
                 <div class="mjs-deal-hero__summary">
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Account</span>
@@ -346,6 +370,21 @@ function money(n: number | null | undefined): string {
             background: var(--mj-status-warning-bg); border-left: 3px solid var(--mj-status-warning);
             padding: var(--mj-space-2) var(--mj-space-3); font-size: var(--mj-text-xs);
             color: var(--mj-status-warning-text); border-radius: 0 var(--mj-radius-sm) var(--mj-radius-sm) 0;
+        }
+        /**
+         * Guidance, not a warning. .mjs-flag is the warning tone -- correct for a lock or a stale
+         * amount, wrong for "here is the next step", which would otherwise tell a rep that naming a new
+         * deal had gone wrong.
+         *
+         * Each token carries a fallback because only --mj-status-info-bg is in use anywhere in this
+         * package; an undefined --mj-status-info would silently paint a transparent border and this
+         * would read as an unstyled paragraph.
+         */
+        .mjs-flag--guide {
+            background: var(--mj-status-info-bg, var(--mj-color-surface-raised));
+            border-left-color: var(--mj-status-info, var(--mj-color-primary));
+            color: var(--mj-status-info-text, var(--mj-color-text-primary));
+            margin-top: var(--mj-space-2);
         }
         .mjs-deal-hero--collapsed { padding: 12px 20px; gap: 0; margin-bottom: var(--mj-space-3); }
         .mjs-deal-hero--collapsed .mjs-deal-hero__avatar { width: 42px; height: 42px; border-radius: var(--mj-radius-md, 10px); font-size: 1.05rem; }

@@ -66,6 +66,7 @@ import {
     DiscountPercentToFraction,
     EffectiveTermStart,
     HasExplicitTermStart as StoresOwnTermStart,
+    ResolveDealLockState,
     RoundDiscountPercent,
     ShouldOfferTermStart,
     type ProductLookup,
@@ -107,7 +108,8 @@ function toDateInput(d: Date | string | null | undefined): string | null {
                              NOT filtered by company: a deal may sell any company's product, and the LINE
                              takes its company from whichever is chosen. Each option names its owner
                              because two companies can both sell an "Onboarding Fee". -->
-                        <select [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)">
+                        <select [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
+                                [disabled]="IsLocked" [title]="BlockedReason">
                             <option [ngValue]="null">— choose a product —</option>
                             @for (p of Products; track p.ID) {
                                 <option [ngValue]="p.ID">{{ ProductOptionLabel(p) }}</option>
@@ -122,7 +124,8 @@ function toDateInput(d: Date | string | null | undefined): string | null {
                                  floor of zero offers the one value the database forbids. Negative is
                                  legal to orders as its reversal mechanism, but a reversal is not
                                  something a deal line expresses. -->
-                            <input type="number" min="1" step="1" [(ngModel)]="Working.Quantity" />
+                            <input type="number" min="1" step="1" [(ngModel)]="Working.Quantity"
+                                   [disabled]="IsLocked" [title]="BlockedReason" />
                         </label>
 
                         <label class="mjs-le__field">
@@ -131,7 +134,8 @@ function toDateInput(d: Date | string | null | undefined): string | null {
                                  OrderLine.DiscountPct DECIMAL(7,4) holds: a hundredth of one percent.
                                  The conversion refuses an ambiguous value rather than guessing. -->
                             <input type="number" min="0" max="100" step="0.01"
-                                   [ngModel]="DiscountPercent" (ngModelChange)="SetDiscountPercent($event)" />
+                                   [ngModel]="DiscountPercent" (ngModelChange)="SetDiscountPercent($event)"
+                                   [disabled]="IsLocked" [title]="BlockedReason" />
                             @if (DiscountRefusal) {
                                 <span class="mjs-le__error">{{ DiscountRefusal }}</span>
                             }
@@ -141,7 +145,8 @@ function toDateInput(d: Date | string | null | undefined): string | null {
                     @if (ShowTermStart) {
                         <label class="mjs-le__field">
                             <span class="mjs-le__label">Term start</span>
-                            <input type="date" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)" />
+                            <input type="date" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
+                                   [disabled]="IsLocked" [title]="BlockedReason" />
                             @if (!HasExplicitTermStart) {
                                 <small class="mjs-le__hint">order date</small>
                             }
@@ -261,6 +266,22 @@ export class MJSDealLineEditorComponent implements OnInit {
     @Input() LineID: string | null = null;
 
     /** Emitted after a successful save, so the panel can refresh its grid. */
+    /**
+     * Whether the deal's PERSISTED status locks it, resolved by this component from the deal it was
+     * handed — deliberately not an `@Input`.
+     *
+     * An input would have to be remembered by every caller, and the defect this closes was exactly a
+     * caller that did not: the deal form's lines grid renders outside its own `@if (!IsLocked)` block,
+     * so a row double-click opened this editor on a closed deal with all four fields typeable. The
+     * save was then refused by `DealLockOrderLineVeto` — offered, taken, refused, which is the shape
+     * golive#206 exists to delete.
+     *
+     * Resolving it here means the guard travels with the component. A second entry point added later
+     * inherits the refusal instead of reopening the hole, which is the failure this repo keeps
+     * finding: a check that was true at the one exit that had it.
+     */
+    public IsLocked = false;
+
     @Output() Saved = new EventEmitter<void>();
     /** Emitted when the dialog should close without saving. */
     @Output() Closed = new EventEmitter<void>();
@@ -282,6 +303,15 @@ export class MJSDealLineEditorComponent implements OnInit {
 
     public async ngOnInit(): Promise<void> {
         try {
+            /**
+             * THE PERSISTED STATUS, matching the server and the deal form: a deal being closed right
+             * now still has an open status in the database, and reading the in-memory value would make
+             * a deal impossible to close. `ResolveDealLockState` is the shared rule, so this editor and
+             * the form cannot answer the question differently.
+             */
+            const persisted = this.Deal?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
+            this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
+
             this.Products = await this.service.LoadProducts();
             const order = this.Deal?.OrderID_EnsureObject();
             if (!order) {
@@ -397,11 +427,24 @@ export class MJSDealLineEditorComponent implements OnInit {
     }
 
     public get CanSave(): boolean {
+        if (this.IsLocked) return false;
         return !!this.Working?.ProductID && !this.DiscountRefusal && !!this.Deal?.OrderID_Object;
     }
 
-    /** Why Save is disabled, in the words a rep needs. */
+    /**
+     * Why Save is disabled, in the words a rep needs.
+     *
+     * THE LOCK IS TESTED FIRST, because it is the reason that outranks the others: on a closed deal a
+     * missing product is not what the rep has to fix, and telling them to choose one invites work the
+     * save would refuse anyway.
+     *
+     * The sentence is `DealLockRefusal('update')`'s, word for word, and is repeated rather than
+     * imported: that function lives in `sales-core-entities-server`, which pulls `node:crypto` and
+     * cannot be bundled for a browser — the same reason the deal workspace carries its own copy. The
+     * three copies are pinned by `deal-lock-refusal-copy` so they cannot drift apart silently.
+     */
     public get BlockedReason(): string {
+        if (this.IsLocked) return 'This deal is closed. Set the status back to Open before changing what was sold.';
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
         return this.DiscountRefusal ?? '';

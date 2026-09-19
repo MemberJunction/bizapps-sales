@@ -455,6 +455,51 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     }
 }
 
+/**
+ * The party fields a PERSON sets, which move to the Overview while a deal is being created.
+ *
+ * ONE LIST, READ BY BOTH PANELS. The Overview renders these while the deal is unsaved and the party
+ * panel drops exactly these for as long as it does — so the same column is never bound twice at once.
+ * Two separate lists would agree today and drift the first time somebody added a fourth contact
+ * field, which is the shape golive#189/#190 already cost a round of UAT.
+ *
+ * `CompanyID` and `OwnerEmployeeID` are NOT here. Both are server-maintained stamps, so a rep cannot
+ * set either while creating, and rendering two permanently-blank read-only boxes under "Who is this
+ * deal with?" would answer the question with nothing.
+ */
+const CREATION_PARTY_FIELDS: readonly string[] = ['AccountID', 'PrimaryContactID', 'BillingContactID'];
+
+/**
+ * The PIPELINE fields a rep chooses while creating, borrowed by the Overview the same way.
+ *
+ * `PipelineID` is required and decides the selling company, so a deal cannot be saved without it —
+ * having it on another rail item was half of why creating one meant hopping sections. `DealTypeID` is
+ * the other choice made at the same moment.
+ *
+ * Stage, forecast category and probability are NOT here. The server fills them from the stage on
+ * create (`applyStageDefaults`), so offering them during creation invites a rep to set values that
+ * are about to be derived. The status control is not here either: it routes to close/reopen, which is
+ * meaningless on a deal that does not exist yet.
+ */
+const CREATION_PIPELINE_FIELDS: readonly string[] = ['PipelineID', 'DealTypeID'];
+
+/**
+ * Every field the party panel owns, at module scope rather than as an instance initializer.
+ *
+ * `Object.create(prototype)` — how these panels are built in tests, because they inject nothing —
+ * does NOT run property initializers, so an instance-level array reads as undefined there. This
+ * file's own header already records that trap for the Pipeline panel's `Fields`; a getter over a
+ * module constant has neither problem.
+ */
+const PARTY_FIELDS: readonly DealFieldSpec[] = [
+    { name: 'AccountID', type: 'textbox', link: 'Record' },
+    // Derived by stampCompanyFromPipeline() / stampOwnerFromTeam(); see serverMaintained.
+    { name: 'CompanyID', type: 'textbox', link: 'Record', serverMaintained: true },
+    { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record', serverMaintained: true },
+    { name: 'PrimaryContactID', type: 'textbox', link: 'Record' },
+    { name: 'BillingContactID', type: 'textbox', link: 'Record' },
+];
+
 interface DealFieldSpec {
     name: string;
     type: DealFieldType;
@@ -545,6 +590,52 @@ const FIELD_STYLES = `
             [FormContext]="FormContext"
             [DefaultExpanded]="true">
             <div class="mjs-ov">
+                <!--
+                     WHO THE DEAL IS WITH, WHILE IT IS BEING CREATED.
+
+                     Account and the two contacts normally live in "Account & people", a different
+                     left-nav section — and left-nav shows one section at a time, so composing a new
+                     deal meant setting the name here, the pipeline there, and the customer somewhere
+                     else again. A rep asked for them to sit with the fields they are already filling
+                     in.
+
+                     THE PARTY PANEL DROPS THEM WHILE THIS IS SHOWN, so the same column is never bound
+                     twice at once — golive#189/#190 were exactly that defect, two inputs over one
+                     column, and this must not reintroduce it one section across. CreationParty is
+                     the single list both panels read, so they cannot disagree about who owns them.
+
+                     Once the deal is saved they go home. This is a composing aid, not a new home: a
+                     saved deal's customer belongs with its people, not under its KPIs.
+                -->
+                @if (!Record.IsSaved) {
+                    <div class="mjs-ov-create">
+                        <div class="mjs-ov-create__head">Where does this deal sit?</div>
+                        <div class="mjs-fields">
+                            @for (f of CreationPipeline; track f.name) {
+                                <div class="mjs-field">
+                                    <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name"
+                                        [Type]="f.type" [EditMode]="EditMode && FieldEditable(f.name)"
+                                        [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                                        (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    <div class="mjs-ov-create">
+                        <div class="mjs-ov-create__head">Who is this deal with?</div>
+                        <div class="mjs-fields">
+                            @for (f of CreationParty; track f.name) {
+                                <div class="mjs-field">
+                                    <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name"
+                                        [Type]="f.type" [EditMode]="EditMode && FieldEditable(f.name)"
+                                        [FormContext]="FormContext"
+                                        [LinkType]="f.link ?? 'None'"
+                                        (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
                 @if (Health.length) {
                     <div class="mjs-ov-health">
                         @for (h of Health; track h) {
@@ -561,6 +652,13 @@ const FIELD_STYLES = `
                     </div>
                 }
 
+                <!--
+                     THE FIGURES ARE FOR A DEAL THAT EXISTS. Amount, Weighted, the outcome tiles and
+                     the Situation card all describe a record with history; on one nobody has saved
+                     they render zeroes and dashes under the fields still being filled in. Same
+                     reasoning as the hero briefing, one surface down.
+                -->
+                @if (Record.IsSaved) {
                 <div class="mjs-ov-strip">
                     <div class="mjs-ov-kpi">
                         <div class="l">Amount</div>
@@ -670,11 +768,16 @@ const FIELD_STYLES = `
                         }
                     </article>
                 </div>
+                }
             </div>
         </mj-collapsible-panel>
     `,
     styles: [`
         .mjs-ov { display: flex; flex-direction: column; gap: var(--mj-space-4); padding: var(--mj-space-3) var(--mj-space-4) var(--mj-space-5); }
+        .mjs-ov-create { margin-bottom: var(--mj-space-4); }
+        .mjs-ov-create__head {
+            font-weight: 600; margin-bottom: var(--mj-space-2); color: var(--mj-text-default);
+        }
         .mjs-ov-health { display: flex; flex-direction: column; gap: var(--mj-space-2); }
         .mjs-ov-alert {
             display: flex; align-items: center; gap: var(--mj-space-2);
@@ -740,6 +843,38 @@ const FIELD_STYLES = `
     `],
 })
 export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
+    /**
+     * Account and contacts, rendered here only while the deal is unsaved. See `CREATION_PARTY_FIELDS`
+     * for why this list is shared with the party panel rather than restated.
+     *
+     * `link: 'Record'` matches what the party panel gives them, so a chosen account is navigable from
+     * here too — the `Navigate` output is forwarded the same way.
+     */
+    public get CreationParty(): DealFieldSpec[] {
+        return PARTY_FIELDS.filter((f) => CREATION_PARTY_FIELDS.includes(f.name));
+    }
+
+    /** The pipeline choices a rep makes while creating. @see CREATION_PIPELINE_FIELDS */
+    public get CreationPipeline(): DealFieldSpec[] {
+        return PIPELINE_FIELDS.filter((f) => CREATION_PIPELINE_FIELDS.includes(f.name));
+    }
+
+    /**
+     * May this creation field be typed into? The same question `MJSDealFieldPanel.FieldEditable` asks,
+     * answered from the same shared rule rather than a copy of it.
+     *
+     * It reads vacuous — an UNSAVED deal cannot be locked, and this block only renders while unsaved.
+     * It is here because a bare `[EditMode]="EditMode"` is how the lock gets bypassed, and
+     * `deal-locked-fields-readonly` refuses one anywhere on this form for exactly that reason. Keying
+     * it on the lock rather than on "we know it cannot be locked here" is what survives someone later
+     * rendering this block somewhere it can be.
+     */
+    public FieldEditable(fieldName: string): boolean {
+        const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
+        if (form?.IsLocked !== true) return true;
+        return IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
+    }
+
     public G(field: string): string {
         const v = this.Record?.Get?.(field);
         return v == null || v === '' ? '' : String(v);
@@ -1519,7 +1654,15 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         }
     }
 
-    public readonly Fields: DealFieldSpec[] = [
+    /** @see PIPELINE_FIELDS — a getter so the Overview can borrow the creation ones while unsaved. */
+    public get Fields(): DealFieldSpec[] {
+        // See the party panel: absence is not the same state as unsaved.
+        if (!this.Record || this.Record.IsSaved) return [...PIPELINE_FIELDS];
+        return PIPELINE_FIELDS.filter((f) => !CREATION_PIPELINE_FIELDS.includes(f.name));
+    }
+}
+
+const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         // Name and DealNumber are deliberately NOT here. The hero directly above this panel already
         // renders Name as an editable field in edit mode, and shows DealNumber beneath the title once
         // the server has assigned one. Listing them again gave the form two inputs bound to the same
@@ -1529,8 +1672,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         { name: 'DealTypeID', type: 'textbox', link: 'Record' },
         { name: 'ForecastCategoryTypeID', type: 'textbox', link: 'Record' },
         { name: 'Probability', type: 'number' },
-    ];
-}
+];
 
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-party',
@@ -1565,14 +1707,25 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
      * `NavigationService.OpenEntityRecord`. Without the binding the cells look like links and
      * do nothing — the Overview / hero buttons already go through this path.
      */
-    public readonly Fields: DealFieldSpec[] = [
-        { name: 'AccountID', type: 'textbox', link: 'Record' },
-        // Derived by stampCompanyFromPipeline() / stampOwnerFromTeam(); see serverMaintained.
-        { name: 'CompanyID', type: 'textbox', link: 'Record', serverMaintained: true },
-        { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record', serverMaintained: true },
-        { name: 'PrimaryContactID', type: 'textbox', link: 'Record' },
-        { name: 'BillingContactID', type: 'textbox', link: 'Record' },
-    ];
+    /**
+     * While the deal is UNSAVED the Overview renders the party fields a person sets, so this panel
+     * drops exactly those — one binding per column, never two.
+     *
+     * FILTERED BY THE SHARED LIST, not by restating three names. `CREATION_PARTY_FIELDS` is what the
+     * Overview iterates, so a field added there leaves here automatically and the two cannot end up
+     * both claiming it.
+     *
+     * The server-maintained pair stays either way. On a new deal both are empty, which is honest:
+     * Company fills itself from the pipeline on save, and Owner comes from the deal team — which
+     * cannot be edited until the deal exists.
+     */
+    public get Fields(): DealFieldSpec[] {
+        // NO RECORD MEANS NO BORROW. `Record?.IsSaved` alone read undefined as "unsaved" and handed
+        // back the filtered list to a panel that had no deal at all — hiding fields on the strength of
+        // a record nobody had set yet. The borrow is a fact about an UNSAVED DEAL, not about absence.
+        if (!this.Record || this.Record.IsSaved) return [...PARTY_FIELDS];
+        return PARTY_FIELDS.filter((f) => !CREATION_PARTY_FIELDS.includes(f.name));
+    }
 }
 
 @RegisterClassEx(BaseFormPanel, {
@@ -1629,7 +1782,7 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
     imports: [CommonModule, BaseFormsModule, MJSDealLineEditorComponent],
     template: `
         <mj-collapsible-panel SectionKey="lines" SectionName="What's being sold" Icon="fa-solid fa-boxes-stacked"
-            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="false"
+            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="!Record.IsSaved"
             [BadgeCount]="FormComponent.GetSectionRowCount('lines')">
             @if (Record.IsSaved && Record.OrderID) {
                 <!-- OUR OWN ADD BUTTON, because the grid's New opened the generic Order Line form
@@ -1640,6 +1793,15 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
                             <i class="fa-solid fa-plus" aria-hidden="true"></i> Add a product
                         </button>
                     </div>
+                } @else {
+                    <!-- SAYS WHY, where the control used to be. Hiding Add told a rep nothing, and the
+                         row double-click is now refused as well (golive#206 item 1) — so without this
+                         the panel would simply stop responding with no account of itself. One sentence,
+                         the same one the server's refusal and the deal workspace use. -->
+                    <p class="mjs-deal-empty">
+                        <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                        {{ LineEditBlockedReason }}
+                    </p>
                 }
                 <!-- NEW IS HIDDEN ON A LOCKED DEAL (bc-aidp-next-golive#206 item 1). The tester added a
                      line to a Won deal through this toolbar and it saved: "the grid should hide its New
@@ -1690,7 +1852,11 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
                      gated on Record.IsSaved, so it told a SAVED deal to save and showed a brand-new
                      one nothing at all: neither branch matched, the panel rendered empty, and a tester
                      reported no way to add products and no message saying why. -->
-                <p class="mjs-deal-empty">Save the deal first. Products are added to the order it creates.</p>
+                <p class="mjs-deal-empty">
+                    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                    Save this deal to create its order, then add products here. A deal has no order —
+                    and so nowhere to put a product — until it has been saved once.
+                </p>
             } @else {
                 <!-- Saved, but no order to hang lines on. A deal mints its order on save, so this is the
                      legacy row that closed before that was true: DealEntityServer deliberately does not
@@ -1710,7 +1876,7 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
         </mj-collapsible-panel>
     `,
     styles: [`
-        .mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }
+        .mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); display: flex; gap: 8px; align-items: baseline; }
         .mjs-deal-lines__bar { display: flex; padding: var(--mj-space-3) var(--mj-space-5) 0; }
         .mjs-deal-lines__add {
             display: inline-flex; align-items: center; gap: 6px;
@@ -1729,6 +1895,18 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
      * `ResolveDealLockState` -- the same answer the field panels gate on. Resolving it again here would
      * be a second answer to a question that already has one.
      */
+    /**
+     * Why lines cannot be changed, for the panel and for anything that needs to say so.
+     *
+     * Word for word what `DealLockRefusal('update')` produces on the server and what the deal
+     * workspace shows, so a rep meets ONE sentence wherever the same lock refuses them. Repeated
+     * rather than imported because the server helper lives in a package that cannot be bundled for a
+     * browser; `deal-lock-refusal-copy` pins the copies together.
+     */
+    public get LineEditBlockedReason(): string {
+        return 'This deal is closed. Set the status back to Open before changing what was sold.';
+    }
+
     public get IsLocked(): boolean {
         return (this.FormComponent as unknown as { IsLocked?: boolean } | undefined)?.IsLocked === true;
     }
@@ -1765,6 +1943,24 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
      * that would save a second, unrelated line.
      */
     public EditLine(event: AfterRowDoubleClickEventArgs): void {
+        /**
+         * A CLOSED DEAL DOES NOT OPEN THE EDITOR (golive#206 item 1).
+         *
+         * The grid renders OUTSIDE this panel's `@if (!IsLocked)` block — deliberately, because a
+         * locked deal must still show what was sold — so the Add button disappearing did not take the
+         * double-click with it. A rep could open a Won deal's line and type into all four fields; the
+         * refusal arrived from the server veto after they pressed Save.
+         *
+         * Nothing is lost by refusing: the grid already displays product, quantity, discount and the
+         * priced figures, so the editor offers no READING this panel does not. That is the difference
+         * from the workspace's full line detail, which carries fields with no other surface and so
+         * opens read-only instead of not at all.
+         *
+         * The reason is already on screen — the panel renders it where the Add button would be — so a
+         * double-click that does nothing is explained rather than silent.
+         */
+        if (this.IsLocked) return;
+
         const row = event?.row as Record<string, unknown> | undefined;
         const id = row?.['ID'];
         if (!id) return;
@@ -2387,7 +2583,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
     imports: [CommonModule, BaseFormsModule],
     template: `
         <mj-collapsible-panel SectionKey="internal-team" SectionName="Internal team" Icon="fa-solid fa-users"
-            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="false"
+            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="!Record.IsSaved"
             [BadgeCount]="FormComponent.GetSectionRowCount('internal-team')">
             @if (Record.IsSaved) {
                 <mj-explorer-entity-data-grid
@@ -2426,7 +2622,7 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     imports: [CommonModule, BaseFormsModule],
     template: `
         <mj-collapsible-panel SectionKey="buying-team" SectionName="Buying team" Icon="fa-solid fa-user-tag"
-            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="false"
+            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="!Record.IsSaved"
             [BadgeCount]="FormComponent.GetSectionRowCount('buying-team')">
             @if (Record.IsSaved) {
                 <mj-explorer-entity-data-grid
@@ -2571,7 +2767,7 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
     imports: [CommonModule, BaseFormsModule],
     template: `
         <mj-collapsible-panel SectionKey="stage-history" SectionName="Stage history" Icon="fa-solid fa-clock-rotate-left"
-            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="false"
+            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="!Record.IsSaved"
             [BadgeCount]="FormComponent.GetSectionRowCount('stage-history')">
             @if (Record.IsSaved) {
                 <mj-explorer-entity-data-grid
@@ -2622,7 +2818,7 @@ export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
     imports: [CommonModule, BaseFormsModule],
     template: `
         <mj-collapsible-panel SectionKey="payment-schedule" SectionName="Payment schedule" Icon="fa-solid fa-calendar-week"
-            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="false"
+            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="!Record.IsSaved"
             [BadgeCount]="FormComponent.GetSectionRowCount('payment-schedule')">
             @if (Record.IsSaved) {
                 <mj-explorer-entity-data-grid
