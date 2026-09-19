@@ -590,52 +590,6 @@ const FIELD_STYLES = `
             [FormContext]="FormContext"
             [DefaultExpanded]="true">
             <div class="mjs-ov">
-                <!--
-                     WHO THE DEAL IS WITH, WHILE IT IS BEING CREATED.
-
-                     Account and the two contacts normally live in "Account & people", a different
-                     left-nav section — and left-nav shows one section at a time, so composing a new
-                     deal meant setting the name here, the pipeline there, and the customer somewhere
-                     else again. A rep asked for them to sit with the fields they are already filling
-                     in.
-
-                     THE PARTY PANEL DROPS THEM WHILE THIS IS SHOWN, so the same column is never bound
-                     twice at once — golive#189/#190 were exactly that defect, two inputs over one
-                     column, and this must not reintroduce it one section across. CreationParty is
-                     the single list both panels read, so they cannot disagree about who owns them.
-
-                     Once the deal is saved they go home. This is a composing aid, not a new home: a
-                     saved deal's customer belongs with its people, not under its KPIs.
-                -->
-                @if (!Record.IsSaved) {
-                    <div class="mjs-ov-create">
-                        <div class="mjs-ov-create__head">Where does this deal sit?</div>
-                        <div class="mjs-fields">
-                            @for (f of CreationPipeline; track f.name) {
-                                <div class="mjs-field">
-                                    <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name"
-                                        [Type]="f.type" [EditMode]="EditMode && FieldEditable(f.name)"
-                                        [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                                        (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
-                                </div>
-                            }
-                        </div>
-                    </div>
-                    <div class="mjs-ov-create">
-                        <div class="mjs-ov-create__head">Who is this deal with?</div>
-                        <div class="mjs-fields">
-                            @for (f of CreationParty; track f.name) {
-                                <div class="mjs-field">
-                                    <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name"
-                                        [Type]="f.type" [EditMode]="EditMode && FieldEditable(f.name)"
-                                        [FormContext]="FormContext"
-                                        [LinkType]="f.link ?? 'None'"
-                                        (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
-                                </div>
-                            }
-                        </div>
-                    </div>
-                }
                 @if (Health.length) {
                     <div class="mjs-ov-health">
                         @for (h of Health; track h) {
@@ -774,10 +728,6 @@ const FIELD_STYLES = `
     `,
     styles: [`
         .mjs-ov { display: flex; flex-direction: column; gap: var(--mj-space-4); padding: var(--mj-space-3) var(--mj-space-4) var(--mj-space-5); }
-        .mjs-ov-create { margin-bottom: var(--mj-space-4); }
-        .mjs-ov-create__head {
-            font-weight: 600; margin-bottom: var(--mj-space-2); color: var(--mj-text-default);
-        }
         .mjs-ov-health { display: flex; flex-direction: column; gap: var(--mj-space-2); }
         .mjs-ov-alert {
             display: flex; align-items: center; gap: var(--mj-space-2);
@@ -843,37 +793,8 @@ const FIELD_STYLES = `
     `],
 })
 export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
-    /**
-     * Account and contacts, rendered here only while the deal is unsaved. See `CREATION_PARTY_FIELDS`
-     * for why this list is shared with the party panel rather than restated.
-     *
-     * `link: 'Record'` matches what the party panel gives them, so a chosen account is navigable from
-     * here too — the `Navigate` output is forwarded the same way.
-     */
-    public get CreationParty(): DealFieldSpec[] {
-        return PARTY_FIELDS.filter((f) => CREATION_PARTY_FIELDS.includes(f.name));
-    }
 
-    /** The pipeline choices a rep makes while creating. @see CREATION_PIPELINE_FIELDS */
-    public get CreationPipeline(): DealFieldSpec[] {
-        return PIPELINE_FIELDS.filter((f) => CREATION_PIPELINE_FIELDS.includes(f.name));
-    }
 
-    /**
-     * May this creation field be typed into? The same question `MJSDealFieldPanel.FieldEditable` asks,
-     * answered from the same shared rule rather than a copy of it.
-     *
-     * It reads vacuous — an UNSAVED deal cannot be locked, and this block only renders while unsaved.
-     * It is here because a bare `[EditMode]="EditMode"` is how the lock gets bypassed, and
-     * `deal-locked-fields-readonly` refuses one anywhere on this form for exactly that reason. Keying
-     * it on the lock rather than on "we know it cannot be locked here" is what survives someone later
-     * rendering this block somewhere it can be.
-     */
-    public FieldEditable(fieldName: string): boolean {
-        const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
-        if (form?.IsLocked !== true) return true;
-        return IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
-    }
 
     public G(field: string): string {
         const v = this.Record?.Get?.(field);
@@ -1654,11 +1575,31 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         }
     }
 
-    /** @see PIPELINE_FIELDS — a getter so the Overview can borrow the creation ones while unsaved. */
+    /**
+     * WHILE THE DEAL IS BEING CREATED, THIS PANEL IS THE WHOLE FORM.
+     *
+     * Left-nav opens a new deal on Pipeline, not Overview, and what decides that sits in MJ's chrome
+     * layer where an app cannot reach it (MemberJunction/MJ#4618). Rather than scatter the creation
+     * fields across rail items a rep has to go and find, they are gathered into the one they land on.
+     *
+     * TWO THINGS CHANGE WHILE UNSAVED, both about not asking for work that is either about to be undone
+     * or cannot be done yet:
+     *
+     *  - only the pipeline choices a REP makes are shown. Stage, forecast category and probability are
+     *    derived by the server from the stage on create, so offering them invites someone to set values
+     *    that are immediately overwritten. On a new deal this panel used to show exactly those three
+     *    and neither of the two that matter, which was precisely backwards.
+     *  - the party fields are borrowed, so the customer is set here too. The party panel drops exactly
+     *    these for as long as this shows them — one binding per column, never two (golive#189/#190).
+     *
+     * Absence is not the same state as unsaved: a panel with no record at all gets the full list.
+     */
     public get Fields(): DealFieldSpec[] {
-        // See the party panel: absence is not the same state as unsaved.
         if (!this.Record || this.Record.IsSaved) return [...PIPELINE_FIELDS];
-        return PIPELINE_FIELDS.filter((f) => !CREATION_PIPELINE_FIELDS.includes(f.name));
+        return [
+            ...PIPELINE_FIELDS.filter((f) => CREATION_PIPELINE_FIELDS.includes(f.name)),
+            ...PARTY_FIELDS.filter((f) => CREATION_PARTY_FIELDS.includes(f.name)),
+        ];
     }
 }
 

@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import { MJSDealOverviewPanel, MJSDealPartyPanel, MJSDealPipelinePanel } from '../lib/form-panels/deal-form.panels';
 
+/** Shape of a panel field spec, as the panels expose it. */
+type DealFieldSpec = { name: string };
+
 /**
  * The three UAT reports against S-US1, all on the New Deal form: bc-aidp-next-golive#188, #189, #190.
  *
@@ -254,121 +257,88 @@ describe('the hero on an unsaved deal', () => {
 });
 
 /**
- * ACCOUNT AND CONTACTS WHILE THE DEAL IS BEING CREATED.
+ * EVERYTHING NEEDED TO CREATE A DEAL, ON THE SECTION A NEW DEAL OPENS ON.
  *
- * They live in "Account & people", a different left-nav section from the fields a rep is already
- * filling in — and left-nav shows one section at a time, so composing a new deal meant hopping
- * sections to say who it was with. The Overview renders them while the deal is unsaved.
+ * Left-nav opens a new deal on Pipeline, and what decides that sits in MJ's chrome layer where an app
+ * cannot reach it (MemberJunction/MJ#4618). So the creation fields are gathered into the rail item a
+ * rep actually lands on rather than scattered across ones they have to go and find.
  *
  * THE INVARIANT THAT MATTERS is that exactly one panel owns each column at any moment. golive#189 and
- * #190 were two inputs bound over one column, and moving fields between panels is precisely how that
- * comes back.
+ * #190 were two inputs bound over one column, and borrowing fields between panels is how that returns.
  */
-describe('who the deal is with, during creation', () => {
-    const party = (saved: boolean) => {
-        const p = Object.create(MJSDealPartyPanel.prototype) as MJSDealPartyPanel;
-        Object.defineProperty(p, 'Record', { value: { IsSaved: saved }, configurable: true });
+describe('creating a deal, on the section it opens on', () => {
+    const panel = <T>(proto: T, saved: boolean | null) => {
+        const p = Object.create(proto as object) as { Fields: DealFieldSpec[] };
+        Object.defineProperty(p, 'Record', {
+            value: saved === null ? null : { IsSaved: saved },
+            configurable: true,
+        });
         return p;
     };
-    const overview = () => Object.create(MJSDealOverviewPanel.prototype) as MJSDealOverviewPanel;
+    const pipeline = (saved: boolean | null) => panel(MJSDealPipelinePanel.prototype, saved);
+    const party = (saved: boolean | null) => panel(MJSDealPartyPanel.prototype, saved);
+    const names = (p: { Fields: DealFieldSpec[] }) => p.Fields.map((f) => f.name);
 
-    it('offers account and both contacts on the Overview', () => {
-        expect(overview().CreationParty.map((f) => f.name))
-            .toEqual(['AccountID', 'PrimaryContactID', 'BillingContactID']);
+    it('offers the pipeline choices a rep makes, and the customer, together', () => {
+        expect(names(pipeline(false))).toEqual([
+            'PipelineID', 'DealTypeID', 'AccountID', 'PrimaryContactID', 'BillingContactID',
+        ]);
     });
 
-    it('drops exactly those from the party panel while the deal is unsaved', () => {
-        const names = party(false).Fields.map((f) => f.name);
-        expect(names).not.toContain('AccountID');
-        expect(names).not.toContain('PrimaryContactID');
-        expect(names).not.toContain('BillingContactID');
+    /**
+     * Stage, forecast category and probability are derived by the server from the stage on create, so
+     * offering them invites a rep to set values that are immediately overwritten. This panel used to
+     * show exactly those three on a new deal and neither of the two that matter.
+     */
+    it('does not offer the fields the server derives', () => {
+        const shown = names(pipeline(false));
+        for (const derived of ['PipelineStageID', 'ForecastCategoryTypeID', 'Probability']) {
+            expect(shown).not.toContain(derived);
+        }
     });
 
-    it('gives them back once the deal is saved — this is a composing aid, not a new home', () => {
-        const names = party(true).Fields.map((f) => f.name);
-        expect(names).toEqual([
+    it('drops the borrowed fields from the party panel while unsaved', () => {
+        expect(names(party(false))).toEqual(['CompanyID', 'OwnerEmployeeID']);
+    });
+
+    /**
+     * The one that would catch a re-introduced #189: no column bound by two panels at once. Asked as a
+     * set intersection rather than by naming fields, so a fourth added later is covered.
+     */
+    it('never binds the same column in two panels at once', () => {
+        for (const saved of [true, false]) {
+            const shown = new Set(names(pipeline(saved)));
+            const overlap = names(party(saved)).filter((n) => shown.has(n));
+            expect(overlap, `both panels claim these while saved=${saved}`).toEqual([]);
+        }
+    });
+
+    it('puts everything back once the deal is saved', () => {
+        expect(names(pipeline(true))).toEqual([
+            'PipelineID', 'PipelineStageID', 'DealTypeID', 'ForecastCategoryTypeID', 'Probability',
+        ]);
+        expect(names(party(true))).toEqual([
             'AccountID', 'CompanyID', 'OwnerEmployeeID', 'PrimaryContactID', 'BillingContactID',
         ]);
     });
 
     /**
-     * The one that would catch a re-introduced #189: no column may be bound by both panels at once.
-     * Asked as a set intersection rather than by naming three fields, so a fourth added later is
-     * covered without anyone remembering to extend this.
+     * The server-maintained stamps are never borrowed. A rep cannot set either, so putting two
+     * permanently-blank read-only boxes among the creation fields would ask a question with no answer.
      */
-    it('never binds the same column in two panels at once', () => {
-        const ov = new Set(overview().CreationParty.map((f) => f.name));
-        const overlapUnsaved = party(false).Fields.map((f) => f.name).filter((n) => ov.has(n));
-        expect(overlapUnsaved, 'unsaved: the Overview owns them').toEqual([]);
-
-        // And while saved the Overview does not render them at all — the template gates on IsSaved.
-        const src = readFileSync(
-            join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'form-panels', 'deal-form.panels.ts'),
-            'utf8',
-        );
-        const block = src.indexOf('mjs-ov-create');
-        expect(block).toBeGreaterThan(-1);
-        expect(src.slice(Math.max(0, block - 400), block)).toContain('@if (!Record.IsSaved) {');
-    });
-
-    /**
-     * The server-maintained pair is deliberately NOT moved. A rep cannot set either, so putting two
-     * permanently-blank read-only boxes under "Who is this deal with?" would answer the question with
-     * nothing.
-     */
-    it('leaves the server-maintained stamps where they are', () => {
-        const ov = overview().CreationParty.map((f) => f.name);
-        expect(ov).not.toContain('CompanyID');
-        expect(ov).not.toContain('OwnerEmployeeID');
-        expect(party(false).Fields.map((f) => f.name)).toEqual(['CompanyID', 'OwnerEmployeeID']);
-    });
-});
-
-/**
- * WHERE THE DEAL SITS, during creation — the pipeline half of the same borrow.
- *
- * `PipelineID` is required and decides the selling company, so a deal cannot be saved without it;
- * having it on another rail item was half of why creating one meant hopping sections.
- */
-describe('where the deal sits, during creation', () => {
-    const pipeline = (record: { IsSaved: boolean } | null) => {
-        const p = Object.create(MJSDealPipelinePanel.prototype) as MJSDealPipelinePanel;
-        Object.defineProperty(p, 'Record', { value: record, configurable: true });
-        return p;
-    };
-    const overview = () => Object.create(MJSDealOverviewPanel.prototype) as MJSDealOverviewPanel;
-
-    it('offers the two choices a rep makes while creating', () => {
-        expect(overview().CreationPipeline.map((f) => f.name)).toEqual(['PipelineID', 'DealTypeID']);
-    });
-
-    /**
-     * Stage, forecast category and probability stay put: the server derives them from the stage on
-     * create, so offering them invites a rep to set values that are about to be overwritten.
-     */
-    it('does not borrow the fields the server derives', () => {
-        const names = overview().CreationPipeline.map((f) => f.name);
-        for (const derived of ['PipelineStageID', 'ForecastCategoryTypeID', 'Probability']) {
-            expect(names).not.toContain(derived);
+    it('never borrows a server-maintained stamp', () => {
+        for (const stamp of ['CompanyID', 'OwnerEmployeeID']) {
+            expect(names(pipeline(false))).not.toContain(stamp);
         }
     });
 
-    it('drops exactly those from the pipeline panel while unsaved', () => {
-        const names = pipeline({ IsSaved: false }).Fields.map((f) => f.name);
-        expect(names).toEqual(['PipelineStageID', 'ForecastCategoryTypeID', 'Probability']);
-    });
-
-    it('gives them back once saved', () => {
-        expect(pipeline({ IsSaved: true }).Fields.map((f) => f.name)).toContain('PipelineID');
-    });
-
     /**
-     * ABSENCE IS NOT THE SAME STATE AS UNSAVED. `Record?.IsSaved` alone read undefined as "unsaved"
-     * and hid fields from a panel that had no deal at all — which is how the pipeline panel's own
-     * field test started failing for a reason unrelated to what it was testing.
+     * ABSENCE IS NOT THE SAME STATE AS UNSAVED. `Record?.IsSaved` alone read undefined as "unsaved" and
+     * hid fields from a panel that had no deal at all.
      */
     it('borrows nothing when there is no record at all', () => {
-        expect(pipeline(null).Fields.map((f) => f.name)).toContain('PipelineID');
+        expect(names(pipeline(null))).toContain('PipelineStageID');
+        expect(names(party(null))).toContain('AccountID');
     });
 
     /** The figures describe a deal with history; on a new one they are zeroes under a half-typed name. */

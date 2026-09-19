@@ -30,11 +30,13 @@ Closed in two layers, because gating only the entry point is how this reopens. T
 
 The refusal sentence now exists on four surfaces, so `deal-lock-refusal-copy` derives it from `DealLockRefusal('update')` in the server source, as text, and checks every copy against it. Reading the file sidesteps the bundling problem that forces the duplication — `sales-core-entities-server` pulls `node:crypto` and cannot go in a browser bundle — and keeps the server the one that decides.
 
-**Creating a deal happens on one screen.** Account and both contacts, plus Pipeline and Deal Type, now render on the Overview while the deal is unsaved — left-nav shows one section at a time, so composing a new deal meant setting the name in the header, the pipeline in one rail item and the customer in another.
+**Creating a deal happens on one screen — the one it opens on.** Pipeline, Deal Type, Account and both contacts now render together on the Pipeline section while the deal is unsaved. Left-nav shows one section at a time and opens a new deal on Pipeline, so composing one otherwise meant setting the name in the header, the pipeline in one rail item and the customer in another.
 
-The panels that normally own those fields drop exactly the borrowed ones for as long as the Overview shows them, filtered through the same shared lists the Overview iterates. Two separate lists would agree today and drift the first time somebody added a fourth contact field, which is the shape golive#189/#190 already cost a round of UAT — a test asks it as a set intersection rather than by naming fields, so a later addition is covered without anyone remembering.
+It also corrects something backwards: on a new deal that section used to show Stage, Forecast Category and Probability — the three the server derives from the stage on create — and neither of the two a rep actually chooses. Offering a derived field invites someone to set a value that is immediately overwritten, so those three are suppressed while unsaved.
 
-Stage, forecast category and probability are deliberately not borrowed: the server derives them from the stage on create, so offering them invites a rep to set values that are about to be overwritten. The status control is not borrowed either — it routes to close/reopen, which is meaningless on a deal that does not exist.
+The party panel drops exactly the borrowed fields for as long as the Pipeline section shows them, filtered through the same shared lists that section iterates. Two separate lists would agree today and drift the first time somebody added a fourth contact field, which is the shape golive#189/#190 already cost a round of UAT — a test asks it as a set intersection, in BOTH saved and unsaved states, so neither direction can regress and a later addition is covered without anyone remembering.
+
+The server-maintained stamps are never borrowed: a rep cannot set either, so two permanently-blank read-only boxes among the creation fields would ask a question with no answer. Routing these through the Pipeline panel also means they inherit the shared `FieldEditable` rule — server-maintained and close-lock handling — rather than a one-off copy.
 
 Absence is not the same state as unsaved, and getting that wrong hid fields from a panel that had no deal at all. Both getters key on `!this.Record || this.Record.IsSaved`.
 
