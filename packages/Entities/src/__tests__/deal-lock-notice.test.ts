@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
@@ -154,5 +155,41 @@ describe('the sentence the user actually reads', () => {
         expect(notice, 'and dropped "and locked", which said the same thing twice').not.toMatch(
             /and locked/,
         );
+    });
+});
+
+/**
+ * bc-aidp-next-golive#226 — the OUTCOME the Deal header reads, which is not the lock.
+ *
+ * `IsWon` rides out of `ResolveDealLockState` so the hero can offer Order and Contract chips on a won
+ * deal and on no other. Two ways that goes wrong, both silent — the header simply draws nothing,
+ * which is indistinguishable from a deal that has no order and no contract:
+ *
+ *   · the flag is never READ, because `IsWon` is missing from the RunView's `Fields` list;
+ *   · the flag is read and then DROPPED by the unlocked early return, which is the exit an open deal
+ *     and a won-but-non-locking status both take.
+ *
+ * Source-read for the same reason the notice test above is: assembling the state needs a database,
+ * and standing one up would test the harness. Both claims are structural, so the source is where
+ * they are visible.
+ */
+describe('#226 — the won flag survives the resolver', () => {
+    const source = readFileSync(new URL('../close-lock.ts', import.meta.url), 'utf8');
+
+    it('asks the status row for IsWon', () => {
+        const fields = source.slice(source.indexOf('Fields: ['), source.indexOf('Fields: [') + 120);
+        expect(fields, 'a flag that is never selected is always undefined, and undefined is not won')
+            .toMatch(/'IsWon'/);
+    });
+
+    it('carries it out of the unlocked exit rather than resetting it', () => {
+        expect(source).toMatch(/if \(!row\?\.LocksDeal\) \{\s*return \{ \.\.\.open, IsWon: isWon \};/);
+    });
+
+    it('reads the flag and never a status name', () => {
+        // §3, enforced repo-wide by test:vocabulary-gate. Named here too because THIS is the file a
+        // shortcut would be taken in: `row.Name === 'Closed Won'` is one character shorter than the
+        // flag and works perfectly until a deployment calls its winning status "Signed".
+        expect(source).toMatch(/const isWon = row\?\.IsWon === true;/);
     });
 });

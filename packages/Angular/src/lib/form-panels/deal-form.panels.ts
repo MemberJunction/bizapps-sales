@@ -1817,14 +1817,35 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     `,
 })
 export class MJSDealMotionPanel extends MJSDealFieldPanel {
+    /**
+     * ── THE TWO ORDER/CONTRACT CHANGES HERE (bc-aidp-next-golive#226) ───────────────────────────
+     *
+     * **`OrderID` CARRIES NO LINK ANY MORE** (item 4). It used to open the order from every deal,
+     * including an OPEN one whose order is still a draft nobody should be editing directly. Reps
+     * price inside the deal; the order becomes reachable once the deal is won, and the hero's chip
+     * row is where that now happens because only it knows the outcome. The row stays as a READ of
+     * the order's name — the provenance is worth showing — it is just not a way in.
+     *
+     * Deliberately not gated on `IsWon` here instead: a link that appears and disappears from a
+     * field list is harder to reason about than one place that owns the rule, and the hero already
+     * owns it.
+     *
+     * **THE TWO CONTRACT FIELDS NOW LINK** (item 3). They rendered raw GUIDs because they are SOFT
+     * references — `Deal.ContractID`'s own column comment says so — so `EntityField.RelatedEntity`
+     * was unset and `mj-form-field` had no name to show and nowhere to go. The soft FK now ships as
+     * metadata (`metadata/entity-fields/.deal-contract-soft-fk.json`), which is what makes
+     * `LinkType='Record'` resolve the contract number here AND gives the field an FK search in edit
+     * mode instead of asking a rep to paste a UUID. The chips cannot serve this: `RenewsContractID`
+     * has to be SET on a renewal deal, and a chip is a link.
+     */
     public readonly Fields: DealFieldSpec[] = [
         { name: 'NextStep', type: 'textbox', span: true },
         { name: 'NextStepDate', type: 'datepicker' },
         { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
         { name: 'CampaignID', type: 'textbox' },
-        { name: 'OrderID', type: 'textbox', link: 'Record' },
-        { name: 'ContractID', type: 'textbox' },
-        { name: 'RenewsContractID', type: 'textbox' },
+        { name: 'OrderID', type: 'textbox' },
+        { name: 'ContractID', type: 'textbox', link: 'Record' },
+        { name: 'RenewsContractID', type: 'textbox', link: 'Record' },
         { name: 'ContractVariances', type: 'textarea', span: true },
     ];
 }

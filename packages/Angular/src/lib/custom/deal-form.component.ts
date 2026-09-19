@@ -67,8 +67,12 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     public IsLost = false;
 
     /**
-     * Whether the locking status carries `IsWon` — read as its own flag, never inferred from `!IsLost`.
-     * golive#231 labels the Overview's outcome tiles from this; see `DealLockState.IsWon`.
+     * Whether the PERSISTED status is a WIN — read as its own flag, never inferred from `!IsLost`.
+     *
+     * golive#226: the Order and Contract chips belong on a won deal and on no other, because an open
+     * deal's order is still a draft nobody should be editing directly. golive#231's outcome tiles read
+     * the same flag. Resolved with the lock, from the same status row; the panels read it here rather
+     * than asking again.
      */
     public IsWon = false;
 

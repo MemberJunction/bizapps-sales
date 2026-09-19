@@ -23,9 +23,11 @@ export const MJS_FOREIGN_ENTITIES = {
     OrderHeader: 'MJ_BizApps_Orders: Order Headers',
     OrderLine: 'MJ_BizApps_Orders: Order Lines',
     /**
-     * Contracts' agreement. A deal's `ContractID` is a SOFT reference with no database FK behind it,
-     * so nothing resolves it automatically in either direction — which is why the contract behind an
-     * order can only be reached through that order's deal (golive#227), by reading the deal row.
+     * Contracts' agreement. A deal holds TWO soft references to it — the contract the win produced
+     * and the contract a renewal renews — and neither is a database FK, which is what left both
+     * rendering as raw GUIDs until golive#226. Nothing resolves them in either direction, which is
+     * also why the contract behind an ORDER can only be reached through that order's deal
+     * (golive#227), by reading the deal row.
      */
     Contract: 'MJ_BizApps_Contracts: Contracts',
     Activity: 'MJ_BizApps_Common: Activities',
