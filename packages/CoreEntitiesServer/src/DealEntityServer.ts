@@ -2350,10 +2350,31 @@ export class DealEntityServer extends DealEntity {
             return; // nothing to default to — an unowned deal is the honest outcome
         }
 
-        // `SetOwner` owns the roster mechanics: it is unique on (deal, employee, role), so replacing an
-        // owner is a remove plus an add, and the collection contributes deletions before insertions.
-        // Restating any of that here would be a second implementation of the same intent.
-        await this.SetOwner(employeeID);
+        /**
+         * `SetOwner` owns the roster mechanics: unique on (deal, employee, role), so replacing an owner
+         * is a remove plus an add with deletions contributing first. Restating that here would be a
+         * second implementation of the same intent.
+         *
+         * WRAPPED BECAUSE `ResolveOwnerRoleID` THROWS. It refuses when no active `DealRole` carries
+         * `IsOwnerRole` — correct when someone deliberately assigns an owner, since silently doing
+         * nothing would be worse. But this is a DEFAULT nobody asked for, and letting it throw would
+         * mean a deployment that had not seeded that role could no longer create deals at all. A
+         * default that breaks creation is worse than no default, which is the one thing this must
+         * never do.
+         *
+         * The seeded role is the vocabulary rule, not a code branch: `metadata/deal-roles` ships
+         * `OWNER` with `IsOwnerRole = 1`, and a host missing it is misconfigured in a way the deal team
+         * panel will report the moment anyone opens it.
+         */
+        try {
+            await this.SetOwner(employeeID);
+        } catch (e) {
+            LogError(
+                `DealEntityServer: could not default the owner on create; the deal is saved without one. ${
+                    e instanceof Error ? e.message : String(e)
+                }`,
+            );
+        }
     }
 
     /** The owner of the account this deal is for, or null when there is no account or no owner. */

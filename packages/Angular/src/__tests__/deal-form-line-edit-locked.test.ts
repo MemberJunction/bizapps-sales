@@ -128,7 +128,8 @@ describe('the restricted editor refuses on its own account', () => {
 
     it.each([
         ['the product select', '(ngModelChange)="OnProductChange($event)"'],
-        ['quantity', '[(ngModel)]="Working.Quantity"'],
+        // One-way plus a handler since quantity became a PRICED input: a change has to reach Orders.
+        ['quantity', '(ngModelChange)="SetQuantity($event)"'],
         ['the discount percent', '(ngModelChange)="SetDiscountPercent($event)"'],
         ['the term start', '(ngModelChange)="SetTermStart($event)"'],
     ])('%s is disabled while locked', (_label, marker) => {

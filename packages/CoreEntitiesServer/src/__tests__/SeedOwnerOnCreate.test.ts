@@ -160,3 +160,22 @@ describe('every way it declines to act', () => {
         expect(d.SetOwnerCalls).toEqual([]);
     });
 });
+
+/**
+ * A MISSING OWNER ROLE MUST NOT COST SOMEONE A DEAL.
+ *
+ * `ResolveOwnerRoleID` throws when no active `DealRole` carries `IsOwnerRole` — correct when someone
+ * deliberately assigns an owner, since silently doing nothing would be worse. But this default is one
+ * nobody asked for, and letting it throw would mean a deployment that had not seeded that role could no
+ * longer create deals at all. A default that breaks creation is worse than no default.
+ */
+describe('when the owner role is not seeded', () => {
+    it('saves the deal anyway rather than failing the create', async () => {
+        const d = deal({ AccountID: null });
+        Object.defineProperty(d, 'SetOwner', {
+            value: async () => { throw new Error('no active DealRole has IsOwnerRole = 1'); },
+            writable: true,
+        });
+        await expect(d.seedOwnerOnCreate()).resolves.toBeUndefined();
+    });
+});

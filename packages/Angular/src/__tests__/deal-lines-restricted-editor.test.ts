@@ -89,7 +89,13 @@ describe('the restricted editor offers intent, never a price', () => {
     it('shows the unit price as a read-only display', () => {
         const readonly = EDITOR.slice(EDITOR.indexOf('mjs-le__readonly'));
         expect(readonly).toMatch(/Unit price/);
-        expect(readonly).toMatch(/Money\(Working\.UnitPrice\)/);
+        /**
+         * Reads `DisplayUnitPrice` since the dialog began asking `Orders.PriceOrder` for a figure
+         * before the line is saved. The getter falls back to the line's own `UnitPrice`, so nothing is
+         * lost — and this stays an INTERPOLATION either way, which is what makes it read-only. The
+         * binding check above is the guarantee; this one is about it being shown at all.
+         */
+        expect(readonly).toMatch(/Money\((?:Working\.UnitPrice|DisplayUnitPrice)\)/);
     });
 
     it('has no input bound to LineTotalNet either — orders computes it', () => {
