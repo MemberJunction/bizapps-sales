@@ -862,6 +862,41 @@ export class DealWorkspaceComponent implements OnInit {
         return 'Save the deal first — its order is created on the first save, and a product line needs it.';
     }
 
+    /**
+     * May the rep change what is already on the order? Only the LOCK decides this.
+     *
+     * ── THE HALF sales#84 DID NOT COVER ─────────────────────────────────────────────────────────
+     *
+     * #84 stopped this pane OFFERING Add on a closed deal. Its review then pointed out that the same
+     * pane still let a rep edit product, quantity, discount and term start on one -- and golive#206
+     * item 1 covers edits, not just additions: "Adding, EDITING or deleting a line on a locked deal
+     * should be refused at the server, whichever screen or API path it comes from."
+     *
+     * NOT gated on `IsSaved`, unlike `CanAddLine`. A deal that has not been saved yet is exactly where
+     * a rep composes its lines, and nothing is frozen until a status locks it.
+     */
+    public get CanEditLines(): boolean {
+        return !this.Lock.IsLocked;
+    }
+
+    /**
+     * Why a line field is disabled, for the hover. Null when they are editable.
+     *
+     * NO SECOND VISIBLE PARAGRAPH, and that is deliberate. On a locked deal `AddLineBlockedReason`
+     * already renders "This deal is closed..." under this grid; a second sentence saying the same
+     * thing about a different gesture would be two messages for one condition -- the reasoning #84
+     * used to leave removal alone. The refusal reaches a rep who hovers a greyed field through
+     * `title`, and the pane-level explanation is already on screen.
+     *
+     * The wording matches `DealLockRefusal('update')` on the server side word for word, so the
+     * affordance and the refusal a save would produce say the same thing.
+     */
+    public get LineEditBlockedReason(): string | null {
+        return this.CanEditLines
+            ? null
+            : 'This deal is closed. Set the status back to Open before changing what was sold.';
+    }
+
     public async AddLine(): Promise<void> {
         // NOT the provisioning mechanism any more -- DealEntityServer.provisionEmbeddedOrder() owns
         // that, so an agent or an importer gets an order too. This stays for the UNSAVED deal: a rep
@@ -1021,7 +1056,16 @@ export class DealWorkspaceComponent implements OnInit {
             EntityName: E_ORDER_LINE,
             RecordId: line.ID,
             Presentation: 'slide-in',
-            EditMode: true,
+            // READ-ONLY ON A LOCKED DEAL, rather than not offered at all. A closed deal is exactly what
+            // people go back and inspect, and the service period, term, product reference and description
+            // have no other surface -- so withholding the button would cost the reading to prevent the
+            // editing. `CreateRelated` gates the same way, for the same reason stated the other way round:
+            // a locked deal must not be offered a gesture it cannot complete.
+            //
+            // This stops the WORKSPACE from requesting edit on a frozen line. If the generated form's own
+            // chrome still offers an Edit toggle in view mode, that is MJ-level and identical in every
+            // read-only context; `DealLockOrderLineVeto` refuses the save either way.
+            EditMode: this.CanEditLines,
             Title: line.Product?.trim() || line.Description?.trim() || 'Order line',
         });
 
