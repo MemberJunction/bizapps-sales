@@ -57,6 +57,35 @@ INNER JOIN
 GO
 
 -- =============================================================================
+-- Grants, because DROPPING A VIEW DISCARDS ITS PERMISSIONS.
+-- =============================================================================
+-- The DROP above takes the previous view's grants with it and CREATE makes a bare
+-- one. CodeGen does re-grant on exactly this kind of object — its guard is
+-- described as being for "objects CodeGen refreshes or GRANTS ON but does NOT
+-- create — specifically the application-owned outer view of a layered entity" —
+-- so on the documented install sequence (migrate -> codegen -> sync push) the
+-- grants arrive anyway.
+--
+-- They are stated here for the window in between, and for any path that applies
+-- migrations WITHOUT a CodeGen run afterwards: until that run, no application
+-- role can read Sales Contacts. The failure is invisible to anyone connected as
+-- `sa`, which is how it survived a day of testing. bizapps-contracts grants
+-- explicitly in the migration that creates ITS layered wrappers, for the same
+-- reason: a permission should not depend on a separate later step.
+--
+-- Each role is granted separately so a deployment missing one still gets the
+-- others, and GRANT over an existing grant is a no-op.
+-- =============================================================================
+
+IF DATABASE_PRINCIPAL_ID('cdp_UI') IS NOT NULL
+    EXEC('GRANT SELECT ON [__mj_BizAppsSales].[vwSalesContacts] TO [cdp_UI]');
+IF DATABASE_PRINCIPAL_ID('cdp_Developer') IS NOT NULL
+    EXEC('GRANT SELECT ON [__mj_BizAppsSales].[vwSalesContacts] TO [cdp_Developer]');
+IF DATABASE_PRINCIPAL_ID('cdp_Integration') IS NOT NULL
+    EXEC('GRANT SELECT ON [__mj_BizAppsSales].[vwSalesContacts] TO [cdp_Integration]');
+GO
+
+-- =============================================================================
 -- Register the derived column, and make it the entity's NAME field.
 -- =============================================================================
 -- AN EXPLICIT INSERT, NOT A CODEGEN CAPTURE. A capture carries
