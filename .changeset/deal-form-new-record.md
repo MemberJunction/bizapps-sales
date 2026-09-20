@@ -32,7 +32,9 @@ The refusal sentence now exists on four surfaces, so `deal-lock-refusal-copy` de
 
 **Creating a deal happens on one screen — the one it opens on.** Pipeline, Deal Type, Account and both contacts now render together on the Pipeline section while the deal is unsaved. Left-nav shows one section at a time and opens a new deal on Pipeline, so composing one otherwise meant setting the name in the header, the pipeline in one rail item and the customer in another.
 
-It also corrects something backwards: on a new deal that section used to show Stage, Forecast Category and Probability — the three the server derives from the stage on create — and neither of the two a rep actually chooses. Offering a derived field invites someone to set a value that is immediately overwritten, so those three are suppressed while unsaved.
+It also corrects something backwards: on a new deal that section used to show Forecast Category and Probability — which the server derives from the stage on create — and not the fields a rep actually chooses. Offering a derived field invites someone to set a value that is immediately overwritten, so those two are suppressed while unsaved.
+
+`PipelineStageID` is offered, and briefly was not. It was suppressed on the same reasoning, which was half right and therefore wrong: `applyStageDefaults` fills probability and forecast category *from* a stage, and `planStageDefaults` returns null the moment the stage is null. Nothing anywhere picks it. One missing control produced three blank fields — no stage, so no probability, so no weighted amount — which is how it was reported. Derived-from-the-stage is not the same as derived-without-one.
 
 The party panel drops exactly the borrowed fields for as long as the Pipeline section shows them, filtered through the same shared lists that section iterates. Two separate lists would agree today and drift the first time somebody added a fourth contact field, which is the shape golive#189/#190 already cost a round of UAT — a test asks it as a set intersection, in BOTH saved and unsaved states, so neither direction can regress and a later addition is covered without anyone remembering.
 

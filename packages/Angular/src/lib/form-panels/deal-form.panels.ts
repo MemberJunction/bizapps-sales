@@ -476,12 +476,19 @@ const CREATION_PARTY_FIELDS: readonly string[] = ['AccountID', 'PrimaryContactID
  * having it on another rail item was half of why creating one meant hopping sections. `DealTypeID` is
  * the other choice made at the same moment.
  *
- * Stage, forecast category and probability are NOT here. The server fills them from the stage on
- * create (`applyStageDefaults`), so offering them during creation invites a rep to set values that
- * are about to be derived. The status control is not here either: it routes to close/reopen, which is
- * meaningless on a deal that does not exist yet.
+ * `PipelineStageID` IS here, and leaving it out was a real defect. The reasoning that removed it —
+ * "the server derives it" — was half right and therefore wrong: `applyStageDefaults` fills
+ * PROBABILITY and FORECAST CATEGORY *from* a stage, and `planStageDefaults` returns null the moment
+ * `PipelineStageID` is null. Nothing anywhere picks the stage. Suppressing the control left every new
+ * deal with no stage, hence no probability, hence a blank weighted amount — three empty fields from
+ * one missing choice.
+ *
+ * Forecast category and probability stay out, which is what that reasoning was actually about: those
+ * the stage really does decide, so offering them invites a rep to set values about to be overwritten.
+ * The status control stays out too — it routes to close/reopen, meaningless on a deal that does not
+ * exist yet.
  */
-const CREATION_PIPELINE_FIELDS: readonly string[] = ['PipelineID', 'DealTypeID'];
+const CREATION_PIPELINE_FIELDS: readonly string[] = ['PipelineID', 'PipelineStageID', 'DealTypeID'];
 
 /**
  * Every field the party panel owns, at module scope rather than as an instance initializer.
@@ -1921,9 +1928,37 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
      * exactly like a save that silently did nothing, the failure mode the Explorer harness exists to
      * catch.
      */
-    public OnLineSaved(): void {
+    /**
+     * A SAVED LINE MUST CHANGE THE DEAL, NOT JUST THE GRID.
+     *
+     * The dialog saves the ORDER. `Deal.Amount` is a cached copy of that order's `TotalGross`, and it is
+     * only ever refreshed during a DEAL save — so adding a product left the deal reading no amount and
+     * no weighted amount, while its order carried a real total. Measured on a test deal: order 229,
+     * deal NULL.
+     *
+     * So the deal is saved here. A FULL save rather than a targeted amount write, deliberately: `Amount`
+     * has one author — `refreshAmountFromOrder`, inside the entity server, where the provenance stamps
+     * are set together — and a second writer reaching in from a panel is how a cached figure and its
+     * fingerprint start disagreeing.
+     *
+     * The bootstrap half of this lives in `DealEntityServer`: a deal that has never had a computed
+     * amount could not trigger the refresh at all, so saving here without that change would still have
+     * moved nothing.
+     *
+     * ── WHAT A FULL SAVE COMMITS, STATED PLAINLY ────────────────────────────────────────────────────
+     *
+     * Anything else the rep has typed and not yet saved goes with it. That is the right answer while
+     * composing — they are adding products to a deal they are building — and it is the honest cost of
+     * the figure appearing straight away rather than after some later unrelated save.
+     *
+     * A FAILED SAVE IS NOT SWALLOWED, but it does not undo the line either: the order is already
+     * committed, so the product genuinely is on the deal. The form reports the failure through its own
+     * path, and the amount catches up on the next successful save.
+     */
+    public async OnLineSaved(): Promise<void> {
         this.CloseEditor();
         void this.linesGrid?.Refresh();
+        await this.FormComponent?.SaveRecord?.(false);
     }
 }
 

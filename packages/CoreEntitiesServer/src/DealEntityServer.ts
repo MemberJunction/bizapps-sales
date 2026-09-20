@@ -458,9 +458,31 @@ export class DealEntityServer extends DealEntity {
          * every unrelated deal save would be a read per keystroke for a guarantee the hash already gives.
          */
         const order = this.OrderID_Object;
-        // Lined deals (`AmountIsComputed`) re-read TotalGross on every save so a line edit made
-        // through the related grid still lands on the header the next time the deal is saved.
-        const amountMayHaveMoved = !!order && (order.Dirty || order.Lines.Dirty || this.AmountIsComputed === true);
+        /**
+         * Lined deals (`AmountIsComputed`) re-read TotalGross on every save so a line edit made through
+         * the related grid still lands on the header the next time the deal is saved.
+         *
+         * ── AND THE BOOTSTRAP, WHICH THAT SET COULD NOT REACH ───────────────────────────────────────
+         *
+         * `AmountIsComputed` is what `refreshAmountFromOrder` STAMPS once it has cached a figure, so a
+         * deal that has never had one is false — and the three tests above are then all false for it
+         * forever. Adding a product through the line dialog saves the ORDER, not the deal, so by the
+         * time anything saves the deal the order is clean and nothing triggers. Measured: an order with
+         * `TotalGross` 229 against a deal reading `Amount` NULL, and no save could move it.
+         *
+         * `Amount === null` is the bootstrap, and it is keyed on the cause — a deal with an order and no
+         * cached figure at all — rather than on a comparison that would poll. It costs one read per save
+         * for exactly that state and stops the moment a figure is cached, because `AmountIsComputed`
+         * then carries it.
+         *
+         * IT DOES NOT REINTRODUCE POLLING, which the note above rejects for good reason. A header-only
+         * deal with a typed amount has `Amount` non-null and is never read; one with no amount yet reads
+         * an order whose `TotalGross` is NULL — SUM over no rows — and `refreshAmountFromOrder` returns
+         * without touching a column. Drift caused by someone editing the order directly is still not
+         * chased here; that is still what `AmountSourceHash` is for.
+         */
+        const amountMayHaveMoved = !!order
+            && (order.Dirty || order.Lines.Dirty || this.AmountIsComputed === true || this.Amount === null);
 
         // The stage's forecast defaults, on the same trigger as the three above. Read here, applied
         // inside the scope, for the same reason the others are: work that might not be needed should not

@@ -179,3 +179,33 @@ describe('asking politely', () => {
         vi.useRealTimers();
     });
 });
+
+/**
+ * A SAVED LINE MUST CHANGE THE DEAL, NOT JUST THE GRID.
+ *
+ * The dialog saves the ORDER. `Deal.Amount` is a cached copy of that order's `TotalGross` and is only
+ * refreshed during a DEAL save, so adding a product left the deal reading no amount and no weighted
+ * amount while its order carried a real total.
+ */
+describe('after a line is saved', () => {
+    it('saves the deal, so the cached amount catches up', async () => {
+        const { MJSDealLinesPanel } = await import('../lib/form-panels/deal-form.panels');
+        const saves: boolean[] = [];
+        const p = Object.create(MJSDealLinesPanel.prototype) as {
+            OnLineSaved(): Promise<void>;
+            EditorOpen: boolean;
+            EditingLineID: string | null;
+        };
+        p.EditorOpen = true;
+        p.EditingLineID = 'line-1';
+        Object.defineProperty(p, 'FormComponent', {
+            value: { SaveRecord: async (stop: boolean) => { saves.push(stop); return true; } },
+            configurable: true,
+        });
+        Object.defineProperty(p, 'linesGrid', { value: { Refresh: async () => {} }, configurable: true });
+
+        await p.OnLineSaved();
+        expect(saves, 'the deal must be saved, staying in edit mode').toEqual([false]);
+        expect(p.EditorOpen, 'and the dialog closes').toBe(false);
+    });
+});

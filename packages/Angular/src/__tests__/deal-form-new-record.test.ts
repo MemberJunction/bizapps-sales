@@ -281,7 +281,7 @@ describe('creating a deal, on the section it opens on', () => {
 
     it('offers the pipeline choices a rep makes, and the customer, together', () => {
         expect(names(pipeline(false))).toEqual([
-            'PipelineID', 'DealTypeID', 'AccountID', 'PrimaryContactID', 'BillingContactID',
+            'PipelineID', 'PipelineStageID', 'DealTypeID', 'AccountID', 'PrimaryContactID', 'BillingContactID',
         ]);
     });
 
@@ -292,7 +292,7 @@ describe('creating a deal, on the section it opens on', () => {
      */
     it('does not offer the fields the server derives', () => {
         const shown = names(pipeline(false));
-        for (const derived of ['PipelineStageID', 'ForecastCategoryTypeID', 'Probability']) {
+        for (const derived of ['ForecastCategoryTypeID', 'Probability']) {
             expect(shown).not.toContain(derived);
         }
     });
@@ -337,7 +337,7 @@ describe('creating a deal, on the section it opens on', () => {
      * hid fields from a panel that had no deal at all.
      */
     it('borrows nothing when there is no record at all', () => {
-        expect(names(pipeline(null))).toContain('PipelineStageID');
+        expect(names(pipeline(null))).toContain('Probability');
         expect(names(party(null))).toContain('AccountID');
     });
 
@@ -390,5 +390,37 @@ describe('the related sections on a new deal', () => {
         const body = PANELS.slice(at, PANELS.indexOf('</mj-collapsible-panel>', at));
         expect(body).toContain('} @else {');
         expect(body).toMatch(copy);
+    });
+});
+
+/**
+ * THE STAGE IS THE REP'S CHOICE, AND NOTHING ELSE MAKES IT.
+ *
+ * It was suppressed during creation on the reasoning that "the server derives it". That was half right
+ * and therefore wrong: `applyStageDefaults` fills PROBABILITY and FORECAST CATEGORY *from* a stage, and
+ * `planStageDefaults` returns null the moment `PipelineStageID` is null. Nothing picks the stage.
+ *
+ * The result was three blank fields from one missing control — no stage, so no probability, so no
+ * weighted amount — which is exactly how it was reported.
+ */
+describe('the stage a new deal starts in', () => {
+    const pipelineFields = (saved: boolean) => {
+        const p = Object.create(MJSDealPipelinePanel.prototype) as { Fields: Array<{ name: string }> };
+        Object.defineProperty(p, 'Record', { value: { IsSaved: saved }, configurable: true });
+        return p.Fields.map((f) => f.name);
+    };
+
+    it('is offered while creating, because nothing defaults it', () => {
+        expect(pipelineFields(false)).toContain('PipelineStageID');
+    });
+
+    /**
+     * The two the stage genuinely DOES decide stay out. This is the distinction the original change
+     * missed: derived-from-the-stage is not the same as derived-without-one.
+     */
+    it('still withholds the fields the stage itself decides', () => {
+        const shown = pipelineFields(false);
+        expect(shown).not.toContain('Probability');
+        expect(shown).not.toContain('ForecastCategoryTypeID');
     });
 });
