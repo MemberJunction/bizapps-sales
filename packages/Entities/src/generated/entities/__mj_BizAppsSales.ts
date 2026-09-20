@@ -967,6 +967,46 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: Order
         * * Display Name: Order
         * * SQL Data Type: nvarchar(40)`),
+    WinOutcome: z.number().nullable().describe(`
+        * * Field Name: WinOutcome
+        * * Display Name: Win Outcome
+        * * SQL Data Type: int
+        * * Description: Target column: 1 for Won, 0 for Lost, NULL for Open`),
+    DaysToExpectedClose: z.number().nullable().describe(`
+        * * Field Name: DaysToExpectedClose
+        * * Display Name: Days To Expected Close
+        * * SQL Data Type: int
+        * * Description: Number of days between deal creation and expected close date`),
+    HasPaymentSchedule: z.number().describe(`
+        * * Field Name: HasPaymentSchedule
+        * * Display Name: Has Payment Schedule
+        * * SQL Data Type: int
+        * * Description: 1 if payment schedule milestones exist, 0 otherwise`),
+    TeamMemberCount: z.number().describe(`
+        * * Field Name: TeamMemberCount
+        * * Display Name: Team Member Count
+        * * SQL Data Type: int
+        * * Description: Number of team members on deal`),
+    HasPartnerInvolved: z.number().describe(`
+        * * Field Name: HasPartnerInvolved
+        * * Display Name: Has Partner Involved
+        * * SQL Data Type: int
+        * * Description: 1 if partner account involved, 0 otherwise`),
+    IsEnterpriseTier: z.number().describe(`
+        * * Field Name: IsEnterpriseTier
+        * * Display Name: Is Enterprise Tier
+        * * SQL Data Type: int
+        * * Description: 1 if enterprise amount threshold reached, 0 otherwise`),
+    AutoRenewFlag: z.number().describe(`
+        * * Field Name: AutoRenewFlag
+        * * Display Name: Auto Renew Flag
+        * * SQL Data Type: int
+        * * Description: 1 if deal auto renews, 0 otherwise`),
+    StandardAgreementModifiedFlag: z.number().describe(`
+        * * Field Name: StandardAgreementModifiedFlag
+        * * Display Name: Standard Agreement Modified Flag
+        * * SQL Data Type: int
+        * * Description: 1 if custom agreement terms apply, 0 otherwise`),
 });
 
 export type mjBizAppsSalesDealEntityType = z.infer<typeof mjBizAppsSalesDealSchema>;
@@ -4371,6 +4411,86 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     */
     get Order(): string | null {
         return this.Get('Order');
+    }
+
+    /**
+    * * Field Name: WinOutcome
+    * * Display Name: Win Outcome
+    * * SQL Data Type: int
+    * * Description: Target column: 1 for Won, 0 for Lost, NULL for Open
+    */
+    get WinOutcome(): number | null {
+        return this.Get('WinOutcome');
+    }
+
+    /**
+    * * Field Name: DaysToExpectedClose
+    * * Display Name: Days To Expected Close
+    * * SQL Data Type: int
+    * * Description: Number of days between deal creation and expected close date
+    */
+    get DaysToExpectedClose(): number | null {
+        return this.Get('DaysToExpectedClose');
+    }
+
+    /**
+    * * Field Name: HasPaymentSchedule
+    * * Display Name: Has Payment Schedule
+    * * SQL Data Type: int
+    * * Description: 1 if payment schedule milestones exist, 0 otherwise
+    */
+    get HasPaymentSchedule(): number {
+        return this.Get('HasPaymentSchedule');
+    }
+
+    /**
+    * * Field Name: TeamMemberCount
+    * * Display Name: Team Member Count
+    * * SQL Data Type: int
+    * * Description: Number of team members on deal
+    */
+    get TeamMemberCount(): number {
+        return this.Get('TeamMemberCount');
+    }
+
+    /**
+    * * Field Name: HasPartnerInvolved
+    * * Display Name: Has Partner Involved
+    * * SQL Data Type: int
+    * * Description: 1 if partner account involved, 0 otherwise
+    */
+    get HasPartnerInvolved(): number {
+        return this.Get('HasPartnerInvolved');
+    }
+
+    /**
+    * * Field Name: IsEnterpriseTier
+    * * Display Name: Is Enterprise Tier
+    * * SQL Data Type: int
+    * * Description: 1 if enterprise amount threshold reached, 0 otherwise
+    */
+    get IsEnterpriseTier(): number {
+        return this.Get('IsEnterpriseTier');
+    }
+
+    /**
+    * * Field Name: AutoRenewFlag
+    * * Display Name: Auto Renew Flag
+    * * SQL Data Type: int
+    * * Description: 1 if deal auto renews, 0 otherwise
+    */
+    get AutoRenewFlag(): number {
+        return this.Get('AutoRenewFlag');
+    }
+
+    /**
+    * * Field Name: StandardAgreementModifiedFlag
+    * * Display Name: Standard Agreement Modified Flag
+    * * SQL Data Type: int
+    * * Description: 1 if custom agreement terms apply, 0 otherwise
+    */
+    get StandardAgreementModifiedFlag(): number {
+        return this.Get('StandardAgreementModifiedFlag');
     }
 }
 

@@ -2360,6 +2360,30 @@ export class mjBizAppsSalesDeal_ {
     @MaxLength(40)
     Order?: string;
         
+    @Field(() => Int, {nullable: true, description: `Target column: 1 for Won, 0 for Lost, NULL for Open`}) 
+    WinOutcome?: number;
+        
+    @Field(() => Int, {nullable: true, description: `Number of days between deal creation and expected close date`}) 
+    DaysToExpectedClose?: number;
+        
+    @Field(() => Int, {nullable: true, description: `1 if payment schedule milestones exist, 0 otherwise`}) 
+    HasPaymentSchedule?: number;
+        
+    @Field(() => Int, {nullable: true, description: `Number of team members on deal`}) 
+    TeamMemberCount?: number;
+        
+    @Field(() => Int, {nullable: true, description: `1 if partner account involved, 0 otherwise`}) 
+    HasPartnerInvolved?: number;
+        
+    @Field(() => Int, {nullable: true, description: `1 if enterprise amount threshold reached, 0 otherwise`}) 
+    IsEnterpriseTier?: number;
+        
+    @Field(() => Int, {nullable: true, description: `1 if deal auto renews, 0 otherwise`}) 
+    AutoRenewFlag?: number;
+        
+    @Field(() => Int, {nullable: true, description: `1 if custom agreement terms apply, 0 otherwise`}) 
+    StandardAgreementModifiedFlag?: number;
+        
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
         

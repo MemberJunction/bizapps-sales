@@ -4,16 +4,16 @@
       "MLModelID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23013",
       "RecordProcessID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23050",
       "TargetEntityID": "79148DE5-7F99-44AC-ACD4-5EE7BA93D354",
-      "TargetColumn": "PredictedWinProbability",
-      "Mode": "Materialized",
+      "TargetColumn": null,
+      "Mode": "Scheduled",
       "SkipEmbeddings": false
     },
     "primaryKey": {
       "ID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23060"
     },
     "sync": {
-      "lastModified": "2026-09-19T19:49:42.418Z",
-      "checksum": "0f942ae82eb29088571094da96dd726b2010f3e03b0fa39ae0dd884c899ec118"
+      "lastModified": "2026-09-20T23:03:53.767Z",
+      "checksum": "3502e6d1e44eed78bc26adb71875a538d1088678ecd38f599273076774fcc495"
     }
   }
 ]

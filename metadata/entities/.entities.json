@@ -258,6 +258,10 @@
         }
       ]
     },
+    "fields": {
+      "BaseViewGenerated": false,
+      "GeneratedBaseViewName": "vwDealsGenerated"
+    },
     "primaryKey": {
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deals"
     },

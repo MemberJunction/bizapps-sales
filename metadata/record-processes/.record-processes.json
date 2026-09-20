@@ -2,7 +2,7 @@
   {
     "fields": {
       "Name": "Score MJ_BizApps_Sales: Deals with model C1A02E75-4C6E-49B0-96F3-79D1A8E23013 (Monthly)",
-      "Description": "Scores open deals for Win Propensity materialized into PredictedWinProbability and PredictedWinRiskBand",
+      "Description": "Scores open deals for Win Propensity",
       "EntityID": "79148DE5-7F99-44AC-ACD4-5EE7BA93D354",
       "Status": "Active",
       "WorkType": "ML Model",
@@ -13,7 +13,7 @@
       "CronExpression": "0 0 1 * *",
       "Timezone": "UTC",
       "OnDemandEnabled": true,
-      "OutputMapping": "{\"fields\":{\"PredictedWinProbability\":\"$.score\",\"PredictedWinScoredAt\":\"$.scoredAt\"}}",
+      "OutputMapping": null,
       "SkipUnchanged": true,
       "BatchSize": 100,
       "MaxConcurrency": 1,
@@ -24,8 +24,8 @@
       "ID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23050"
     },
     "sync": {
-      "lastModified": "2026-09-19T19:49:50.569Z",
-      "checksum": "4a3ee08b732b6617af64b002d6d439e0eba2b5dbcad26c8cd4ed5faa45e1fa75"
+      "lastModified": "2026-09-20T23:03:53.747Z",
+      "checksum": "11db8b7ac54fa1a45172eaab02f16b07048a2ce435e5113c3f2d7f20b41a892c"
     }
   }
 ]
