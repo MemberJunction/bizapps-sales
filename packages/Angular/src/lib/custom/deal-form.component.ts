@@ -44,8 +44,11 @@ import {
     ResolveDealLockState,
 } from '@mj-biz-apps/sales-entities';
 import type { ValidationResult } from '@memberjunction/core';
+import { RunView } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
+import { MJS_ENTITIES } from '../data/entity-names';
+import { ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
 
 /** See `deal-stage-event-form.component.ts` for why the priority is explicit rather than import-order. */
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Sales: Deals', 2)
@@ -132,6 +135,60 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             OrderID: this.record.Get('OrderID') as string | null | undefined,
         });
         this.StaleAmountNotice = freshness.Notice;
+    }
+
+    /**
+     * Fills the selling company from the pipeline before the save is validated.
+     *
+     * WHY IT IS HERE AND NOT IN `Validate()`. `SaveRecord` calls `Validate()` and returns early when it
+     * fails, so a stamp applied inside validation would be racing the thing it exists to satisfy. This
+     * runs before `super.SaveRecord()` — which is what puts it ahead of the validator.
+     *
+     * `company-from-pipeline.ts` holds the decision and the reasoning, including why the client is
+     * allowed to write a server-owned field at all. This method owns only the lookup.
+     *
+     * A pipeline that cannot be read is NOT an error here. The stamp is best-effort: if it fails, the
+     * save proceeds and validation refuses exactly as it did before, which is the behaviour this is
+     * replacing rather than something it makes worse. Swallowing a real problem is the risk, so the
+     * refusal the user then sees still names `CompanyID`.
+     */
+    public override async SaveRecord(StopEditModeAfterSave: boolean): Promise<boolean> {
+        await this.stampCompanyFromPipeline();
+        return super.SaveRecord(StopEditModeAfterSave);
+    }
+
+    /** Reads the chosen pipeline's company and writes it to the deal. See `SaveRecord` for why. */
+    private async stampCompanyFromPipeline(): Promise<void> {
+        const record = this.record;
+        const should = ShouldStampCompanyFromPipeline({
+            HasRecord: !!record,
+            PipelineID: (record?.Get('PipelineID') as string | null | undefined) ?? null,
+            CompanyID: (record?.Get('CompanyID') as string | null | undefined) ?? null,
+        });
+        if (!should || !record) {
+            return;
+        }
+
+        /**
+         * `ResultType: 'simple'` returns plain rows, which is what is wanted: CodeGen generates no
+         * `PipelineEntity` subclass, and nothing here mutates the pipeline — only reads one column off it.
+         */
+        const rv = new RunView();
+        const result = await rv.RunView<PipelineCompanyRow>({
+            EntityName: MJS_ENTITIES.Pipeline,
+            ExtraFilter: `ID='${String(record.Get('PipelineID')).replace(/'/g, "''")}'`,
+            ResultType: 'simple',
+            Fields: ['CompanyID'],
+        });
+        // RunView does not throw — a failed read leaves the deal exactly as it was.
+        if (!result.Success) {
+            return;
+        }
+
+        const companyID = result.Results?.[0]?.CompanyID ?? null;
+        if (companyID) {
+            record.Set('CompanyID', companyID);
+        }
     }
 
     /**

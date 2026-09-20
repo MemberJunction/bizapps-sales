@@ -53,7 +53,14 @@ describe("the What's being sold panel always says something", () => {
         // and the instruction must sit inside that branch, not merely somewhere in the file
         const next = t.indexOf('@else', branch + 1);
         const body = t.slice(branch, next === -1 ? undefined : next);
-        expect(body).toContain('Save the deal first');
+        /**
+         * Asserted on WHAT IT TELLS THEM, not on one sentence. golive#216 is that a rep found no way to
+         * add products and no message saying why, so the requirement is that this branch names the
+         * action (save) and the thing it unblocks (products). Pinning the exact wording made a copy
+         * edit look like a regression, which is how a test starts getting updated without being read.
+         */
+        expect(body, 'must name the action').toMatch(/\bSave this deal\b/i);
+        expect(body, 'must say what saving unblocks').toMatch(/\bproducts?\b/i);
     });
 
     it('does NOT tell a saved deal to save, which is what the defect did', () => {

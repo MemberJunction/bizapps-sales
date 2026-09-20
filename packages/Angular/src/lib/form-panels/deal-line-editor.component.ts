@@ -56,8 +56,9 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectorRef, Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Metadata } from '@memberjunction/core';
 import { FormsModule } from '@angular/forms';
 import type { mjBizAppsOrdersOrderLineEntity as OrderLineEntity } from '@mj-biz-apps/orders-entities';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
@@ -66,6 +67,7 @@ import {
     DiscountPercentToFraction,
     EffectiveTermStart,
     HasExplicitTermStart as StoresOwnTermStart,
+    ResolveDealLockState,
     RoundDiscountPercent,
     ShouldOfferTermStart,
     type ProductLookup,
@@ -79,6 +81,38 @@ function toDateInput(d: Date | string | null | undefined): string | null {
         ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
         : String(d).slice(0, 10);
     return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null;
+}
+
+/**
+ * `Orders.PriceOrder`, narrowed to what this dialog sends and reads.
+ *
+ * Declared here rather than imported: the operation lives in `orders-core-entities-server`, which pulls
+ * node built-ins and cannot be bundled for a browser — the same reason the lock refusal copy is
+ * repeated rather than imported. What crosses the wire is a contract, so it is stated as one.
+ */
+interface PriceOrderInput {
+    CompanyID: string;
+    Lines: Array<{
+        ProductID: string;
+        Quantity: number;
+        DiscountPct?: number | null;
+        ServicePeriodStart?: string | null;
+        ServicePeriodEnd?: string | null;
+    }>;
+}
+
+interface PriceOrderOutput {
+    Success: boolean;
+    Message?: string | null;
+    Lines: Array<{ ProductID: string; UnitPrice: number; LineTotalNet: number }>;
+}
+
+/** `RouteOperation` is on `ProviderBase`, not on the `IMetadataProvider` interface. */
+interface RemoteOperationRouter {
+    RouteOperation<TInput, TOutput>(
+        operationKey: string,
+        input: TInput,
+    ): Promise<{ Success: boolean; Output?: TOutput; ErrorMessage?: string }>;
 }
 
 @Component({
@@ -107,7 +141,8 @@ function toDateInput(d: Date | string | null | undefined): string | null {
                              NOT filtered by company: a deal may sell any company's product, and the LINE
                              takes its company from whichever is chosen. Each option names its owner
                              because two companies can both sell an "Onboarding Fee". -->
-                        <select [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)">
+                        <select [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
+                                [disabled]="IsLocked" [title]="BlockedReason">
                             <option [ngValue]="null">— choose a product —</option>
                             @for (p of Products; track p.ID) {
                                 <option [ngValue]="p.ID">{{ ProductOptionLabel(p) }}</option>
@@ -122,7 +157,9 @@ function toDateInput(d: Date | string | null | undefined): string | null {
                                  floor of zero offers the one value the database forbids. Negative is
                                  legal to orders as its reversal mechanism, but a reversal is not
                                  something a deal line expresses. -->
-                            <input type="number" min="1" step="1" [(ngModel)]="Working.Quantity" />
+                            <input type="number" min="1" step="1" [ngModel]="Working.Quantity"
+                                   (ngModelChange)="SetQuantity($event)"
+                                   [disabled]="IsLocked" [title]="BlockedReason" />
                         </label>
 
                         <label class="mjs-le__field">
@@ -131,7 +168,8 @@ function toDateInput(d: Date | string | null | undefined): string | null {
                                  OrderLine.DiscountPct DECIMAL(7,4) holds: a hundredth of one percent.
                                  The conversion refuses an ambiguous value rather than guessing. -->
                             <input type="number" min="0" max="100" step="0.01"
-                                   [ngModel]="DiscountPercent" (ngModelChange)="SetDiscountPercent($event)" />
+                                   [ngModel]="DiscountPercent" (ngModelChange)="SetDiscountPercent($event)"
+                                   [disabled]="IsLocked" [title]="BlockedReason" />
                             @if (DiscountRefusal) {
                                 <span class="mjs-le__error">{{ DiscountRefusal }}</span>
                             }
@@ -141,7 +179,8 @@ function toDateInput(d: Date | string | null | undefined): string | null {
                     @if (ShowTermStart) {
                         <label class="mjs-le__field">
                             <span class="mjs-le__label">Term start</span>
-                            <input type="date" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)" />
+                            <input type="date" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
+                                   [disabled]="IsLocked" [title]="BlockedReason" />
                             @if (!HasExplicitTermStart) {
                                 <small class="mjs-le__hint">order date</small>
                             }
@@ -153,14 +192,18 @@ function toDateInput(d: Date | string | null | undefined): string | null {
                     <div class="mjs-le__readonly">
                         <div>
                             <span class="mjs-le__label">Unit price</span>
-                            <span class="mjs-le__ro-val">{{ Money(Working.UnitPrice) }}</span>
+                            <span class="mjs-le__ro-val">{{ Pricing ? '…' : Money(DisplayUnitPrice) }}</span>
                         </div>
                         <div>
                             <span class="mjs-le__label">Line total</span>
-                            <span class="mjs-le__ro-val">{{ Money(Working.LineTotalNet) }}</span>
+                            <span class="mjs-le__ro-val">{{ Pricing ? '…' : Money(DisplayLineTotal) }}</span>
                         </div>
                         <p class="mjs-le__muted">
-                            Priced by Orders. Change the price with a discount — it is recorded as one.
+                            @if (PricingNote) {
+                                {{ PricingNote }}
+                            } @else {
+                                Priced by Orders. Change the price with a discount — it is recorded as one.
+                            }
                         </p>
                     </div>
 
@@ -176,6 +219,31 @@ function toDateInput(d: Date | string | null | undefined): string | null {
                     <button type="button" class="mjs-le__btn" [disabled]="Saving" (click)="Cancel()">Cancel</button>
                     @if (!CanSave && !Saving) {
                         <span class="mjs-le__muted">{{ BlockedReason }}</span>
+                    }
+                    <!--
+                         REMOVE SITS APART FROM THE PAIR ABOVE, pushed right by its own margin. Confirm
+                         left and cancel right is the rule for the two choices that END this dialog
+                         normally; a destructive third option next to Save is how a rep removes a
+                         product they meant to keep.
+
+                         OFFERED ONLY FOR A LINE THAT EXISTS. A line being composed has nothing to
+                         remove — Cancel already discards it.
+                    -->
+                    @if (CanRemove) {
+                        @if (Confirming) {
+                            <span class="mjs-le__confirm">
+                                <span class="mjs-le__muted">Remove this product?</span>
+                                <button type="button" class="mjs-le__btn mjs-le__btn--danger"
+                                        [disabled]="Saving" (click)="Remove()">
+                                    {{ Saving ? 'Removing…' : 'Remove' }}
+                                </button>
+                                <button type="button" class="mjs-le__btn" [disabled]="Saving"
+                                        (click)="Confirming = false">Keep</button>
+                            </span>
+                        } @else {
+                            <button type="button" class="mjs-le__btn mjs-le__btn--quiet"
+                                    [disabled]="Saving" (click)="Confirming = true">Remove</button>
+                        }
                     }
                 </footer>
             }
@@ -244,12 +312,17 @@ function toDateInput(d: Date | string | null | undefined): string | null {
             color: #fff;
         }
         .mjs-le__btn[disabled] { opacity: .55; cursor: not-allowed; }
+        .mjs-le__btn--quiet { margin-left: auto; color: var(--mj-status-error, #b3261e); }
+        .mjs-le__btn--danger {
+            background: var(--mj-status-error, #b3261e); color: #fff; border-color: transparent;
+        }
+        .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
         @media (max-width: 480px) {
             .mjs-le__row { flex-direction: column; }
         }
     `],
 })
-export class MJSDealLineEditorComponent implements OnInit {
+export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     /**
      * The DEAL whose order this line belongs to.
      *
@@ -261,6 +334,22 @@ export class MJSDealLineEditorComponent implements OnInit {
     @Input() LineID: string | null = null;
 
     /** Emitted after a successful save, so the panel can refresh its grid. */
+    /**
+     * Whether the deal's PERSISTED status locks it, resolved by this component from the deal it was
+     * handed — deliberately not an `@Input`.
+     *
+     * An input would have to be remembered by every caller, and the defect this closes was exactly a
+     * caller that did not: the deal form's lines grid renders outside its own `@if (!IsLocked)` block,
+     * so a row double-click opened this editor on a closed deal with all four fields typeable. The
+     * save was then refused by `DealLockOrderLineVeto` — offered, taken, refused, which is the shape
+     * golive#206 exists to delete.
+     *
+     * Resolving it here means the guard travels with the component. A second entry point added later
+     * inherits the refusal instead of reopening the hole, which is the failure this repo keeps
+     * finding: a check that was true at the one exit that had it.
+     */
+    public IsLocked = false;
+
     @Output() Saved = new EventEmitter<void>();
     /** Emitted when the dialog should close without saving. */
     @Output() Closed = new EventEmitter<void>();
@@ -282,6 +371,15 @@ export class MJSDealLineEditorComponent implements OnInit {
 
     public async ngOnInit(): Promise<void> {
         try {
+            /**
+             * THE PERSISTED STATUS, matching the server and the deal form: a deal being closed right
+             * now still has an open status in the database, and reading the in-memory value would make
+             * a deal impossible to close. `ResolveDealLockState` is the shared rule, so this editor and
+             * the form cannot answer the question differently.
+             */
+            const persisted = this.Deal?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
+            this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
+
             this.Products = await this.service.LoadProducts();
             const order = this.Deal?.OrderID_EnsureObject();
             if (!order) {
@@ -332,6 +430,7 @@ export class MJSDealLineEditorComponent implements OnInit {
      * validation runs where that server subclass does not exist.
      */
     public OnProductChange(productID: string | null): void {
+        this.SchedulePrice();   // a priced input changed — ask Orders again
         if (!this.Working) return;
         this.Working.ProductID = productID ?? '';
         const product = this.Products.find((p) => p.ID === productID) ?? null;
@@ -347,6 +446,7 @@ export class MJSDealLineEditorComponent implements OnInit {
     }
 
     public SetDiscountPercent(percent: number | null): void {
+        this.SchedulePrice();   // a priced input changed — ask Orders again
         if (!this.Working) return;
         // An unchanged value is not a new claim, so a re-render must not resurrect a cleared refusal.
         if (percent !== null && RoundDiscountPercent(percent) === this.DiscountPercent) {
@@ -386,6 +486,7 @@ export class MJSDealLineEditorComponent implements OnInit {
     }
 
     public SetTermStart(value: string): void {
+        this.SchedulePrice();   // a priced input changed — ask Orders again
         if (!this.Working) return;
         // An emptied control means "use the order date", which is NULL in the column -- not the epoch.
         this.Working.ServicePeriodStart = value ? new Date(`${value}T00:00:00Z`) : null;
@@ -396,15 +497,227 @@ export class MJSDealLineEditorComponent implements OnInit {
         return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
     }
 
+    /* ── What the line comes to, answered by Orders (S2) ─────────────────────────── */
+
+    /**
+     * SALES ASKS; IT DOES NOT WORK IT OUT. `Orders.PriceOrder` runs `OrderPricingService` — the same
+     * service `OrderEntityServer.Save()` runs — and persists nothing, so the figure on screen and the
+     * figure in the ledger come from one implementation. Multiplying quantity by price here would be
+     * the second implementation CLAUDE.md's first rule exists to prevent.
+     *
+     * WHY THE DIALOG WAS BLANK. `UnitPrice` and `LineTotalNet` are resolved during the ORDER's save,
+     * so on a line being composed they are null — and the caption underneath read "Priced by Orders",
+     * which a rep reasonably took to mean the price should already be there. The values were not
+     * missing; they did not exist yet.
+     *
+     * An earlier `Orders.PreviewOrder` could not have fixed this: it ran the real save in a transaction
+     * that always rolled back, so it fired the whole booking walk on every keystroke. Orders withdrew it
+     * and shipped `PriceOrder` — the decide step without the write — which is what makes asking cheap
+     * enough to do while someone types.
+     */
+    public Pricing = false;
+    private pricedUnit: number | null = null;
+    private pricedTotal: number | null = null;
+    public PricingNote: string | null = null;
+    private priceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /** Orders' answer when there is one, otherwise whatever the saved line already carries. */
+    public get DisplayUnitPrice(): number | null {
+        return this.pricedUnit ?? (this.Working?.UnitPrice as number | null | undefined) ?? null;
+    }
+
+    public get DisplayLineTotal(): number | null {
+        return this.pricedTotal ?? (this.Working?.LineTotalNet as number | null | undefined) ?? null;
+    }
+
+    /**
+     * Cancels a pending price request when the dialog goes away.
+     *
+     * The debounce timer was only ever cleared by RESCHEDULING it, so a rep who typed a quantity and
+     * clicked Cancel within 350ms left a timer that fired against a destroyed component: a pointless
+     * `Orders.PriceOrder` round trip, and a `detectChanges()` on a view Angular had already torn down.
+     * The dialog lives inside `@if (EditorOpen)`, so it is genuinely destroyed on both Save and Cancel.
+     *
+     * `Saving` is not reset here on purpose — the component is going away, and an in-flight `Remove`
+     * or `Save` owns its own `finally`.
+     */
+    public ngOnDestroy(): void {
+        if (this.priceTimer) {
+            clearTimeout(this.priceTimer);
+            this.priceTimer = null;
+        }
+    }
+
+    /** Quantity is a priced input, so it cannot be a plain two-way binding. */
+    public SetQuantity(value: number | null): void {
+        if (!this.Working) return;
+        this.Working.Quantity = Number(value);
+        this.SchedulePrice();
+    }
+
+    /**
+     * Debounced because a rep types: a quantity of 12 passes through 1 on its way there, and three
+     * round trips to price a number nobody meant is three chances to show them a figure for it.
+     */
+    public SchedulePrice(): void {
+        if (this.priceTimer) clearTimeout(this.priceTimer);
+        this.priceTimer = setTimeout(() => { void this.refreshPrice(); }, 350);
+    }
+
+    /**
+     * Asks Orders what this line comes to.
+     *
+     * NOTHING IS WRITTEN TO THE LINE. These are display values; the order's own save resolves the real
+     * ones. Writing them here would make this a second author of a priced figure, and a stale one the
+     * moment the rep changed anything.
+     *
+     * Every failure is silent in the sense that matters — it never blocks the save. A price nobody
+     * could fetch is shown as unknown, which is honest; refusing to let a rep record what they sold
+     * because a pricing call timed out would not be.
+     */
+    private async refreshPrice(): Promise<void> {
+        const line = this.Working;
+        const companyID = this.Deal?.CompanyID as string | null | undefined;
+        if (!line?.ProductID || !companyID) {
+            this.pricedUnit = null;
+            this.pricedTotal = null;
+            this.PricingNote = null;
+            this.cdr.detectChanges();
+            return;
+        }
+
+        this.Pricing = true;
+        this.PricingNote = null;
+        this.cdr.detectChanges();
+        try {
+            const router = Metadata.Provider as unknown as RemoteOperationRouter;
+            const envelope = await router.RouteOperation<PriceOrderInput, PriceOrderOutput>(
+                'Orders.PriceOrder',
+                {
+                    CompanyID: companyID,
+                    Lines: [{
+                        ProductID: String(line.ProductID),
+                        Quantity: Number(line.Quantity) || 1,
+                        DiscountPct: (line.DiscountPct as number | null | undefined) ?? null,
+                        ServicePeriodStart: this.IsoOrNull(line.ServicePeriodStart),
+                        ServicePeriodEnd: this.IsoOrNull(line.ServicePeriodEnd),
+                    }],
+                },
+            );
+
+            /**
+             * TWO LAYERS OF SUCCESS. The envelope says the operation RAN; `Output.Success` says pricing
+             * worked. Checking only the outer one is a mistake this repo has already made once, on the
+             * contracts seam, where it reported a contract that was never written.
+             */
+            const priced = envelope.Success ? envelope.Output : null;
+            const row = priced?.Success ? priced.Lines?.[0] : null;
+            if (!row) {
+                this.pricedUnit = null;
+                this.pricedTotal = null;
+                this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
+                return;
+            }
+            this.pricedUnit = row.UnitPrice;
+            this.pricedTotal = row.LineTotalNet;
+        } catch {
+            this.pricedUnit = null;
+            this.pricedTotal = null;
+            this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
+        } finally {
+            this.Pricing = false;
+            this.cdr.detectChanges();
+        }
+    }
+
+    /** Dates cross the wire as `yyyy-MM-dd`; a Date instance does not survive the trip. */
+    private IsoOrNull(value: unknown): string | null {
+        if (!value) return null;
+        const d = value instanceof Date ? value : new Date(String(value));
+        return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    }
+
     public get CanSave(): boolean {
+        if (this.IsLocked) return false;
         return !!this.Working?.ProductID && !this.DiscountRefusal && !!this.Deal?.OrderID_Object;
     }
 
-    /** Why Save is disabled, in the words a rep needs. */
+    /**
+     * Why Save is disabled, in the words a rep needs.
+     *
+     * THE LOCK IS TESTED FIRST, because it is the reason that outranks the others: on a closed deal a
+     * missing product is not what the rep has to fix, and telling them to choose one invites work the
+     * save would refuse anyway.
+     *
+     * The sentence is `DealLockRefusal('update')`'s, word for word, and is repeated rather than
+     * imported: that function lives in `sales-core-entities-server`, which pulls `node:crypto` and
+     * cannot be bundled for a browser — the same reason the deal workspace carries its own copy. The
+     * three copies are pinned by `deal-lock-refusal-copy` so they cannot drift apart silently.
+     */
     public get BlockedReason(): string {
+        if (this.IsLocked) return 'This deal is closed. Set the status back to Open before changing what was sold.';
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
         return this.DiscountRefusal ?? '';
+    }
+
+    /**
+     * Whether this line can be taken off the deal.
+     *
+     * A line being COMPOSED is not removable — there is nothing to remove, and Cancel already discards
+     * it. A locked deal refuses for the same reason it refuses every other change to what was sold, and
+     * golive#206 item 1 names deleting alongside adding and editing.
+     */
+    public get CanRemove(): boolean {
+        return !!this.LineID && !this.IsLocked && !!this.Deal?.OrderID_Object;
+    }
+
+    /** Two-step, because removing a product a rep meant to keep costs them a re-entry. */
+    public Confirming = false;
+
+    /**
+     * Takes the line off the ORDER, which is the only thing that can take it off the deal.
+     *
+     * THROUGH THE COLLECTION, NOT A DIRECT DELETE. `order.Lines.Remove()` then `order.Save()` is the
+     * path orders drains: `OrderEntityServer` reads `Lines.Removed` during its save, renumbers the
+     * survivors and recomputes the header. Deleting the `OrderLine` record straight from a grid skips
+     * all of it — which is why the grid's own delete button stays off, the same reason its New does.
+     *
+     * THIS BECAME POSSIBLE ONLY RECENTLY. Orders did not drain `Lines.Removed` at all, so a removal was
+     * silently dropped and then, once it started refusing, cost the rep every other edit staged beside
+     * it. Sales carried a blanket refusal for that (`ShouldRefuseLineRemoval`, still in the unmounted
+     * workspace). The orders fix landed with golive#187, and `save-deal.SD6` is the tripwire that said
+     * so.
+     *
+     * It emits `Saved` rather than a removal-specific event: what the panel has to do afterwards is
+     * identical — re-read the grid and force a deal save so the amount follows the order down.
+     */
+    public async Remove(): Promise<void> {
+        const order = this.Deal?.OrderID_Object;
+        if (!this.Working || !this.CanRemove || !order) {
+            return;
+        }
+        this.Saving = true;
+        this.Error = null;
+        this.cdr.detectChanges();
+        try {
+            order.Lines.Remove(this.Working);
+            const ok = await order.Save();
+            if (!ok) {
+                // Put it back: a refused save must not leave the collection claiming a removal that
+                // did not happen, or the next save would retry it against a rep who has moved on.
+                await order.Lines.Load(true);
+                this.Error = order.LatestResult?.Message || 'The product could not be removed.';
+                return;
+            }
+            this.Saved.emit();
+        } catch (err) {
+            this.Error = err instanceof Error ? err.message : String(err);
+        } finally {
+            this.Saving = false;
+            this.Confirming = false;
+            this.cdr.detectChanges();
+        }
     }
 
     public async Save(): Promise<void> {

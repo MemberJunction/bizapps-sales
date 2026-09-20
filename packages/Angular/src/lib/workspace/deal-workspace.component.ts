@@ -994,9 +994,17 @@ export class DealWorkspaceComponent implements OnInit {
      * Nothing here can fix that and nothing here should try: deleting orders' rows from this component
      * would put a second app in charge of them. What this component CAN do is decline the gesture, so a
      * saved line is never staged for removal and the rest of the save keeps working. That is what
-     * `RemoveLine` does below; the reasoning is in `ShouldRefuseLineRemoval`. The fix belongs in orders,
-     * `save-deal.SD6` is the tripwire that goes red the day it lands, and `DECISIONS-NEEDED.md` DN-6 is
-     * the open decision.
+     * `RemoveLine` does below; the reasoning is in `ShouldRefuseLineRemoval`.
+     *
+     * ⚠️ ALL OF THE ABOVE IS HISTORY AS OF 2026-09-20. Orders drains `Lines.Removed` now — it renumbers
+     * the survivors and recomputes the header — so KI-20 is closed, golive#187 is closed, and the deal
+     * FORM offers removal through `Lines.Remove()` + `order.Save()`. `save-deal.SD6` was the tripwire
+     * and it did go red; it was simply not read for some weeks.
+     *
+     * The refusal below is therefore obsolete and is kept only because this component is mounted by no
+     * template. See the note on `ShouldRefuseLineRemoval`; whoever settles re-mount-or-retire should
+     * delete both. (`DECISIONS-NEEDED.md` DN-6 was cited here and that file does not exist in this
+     * repo — the pointer was already dangling.)
      */
     public RemoveLine(line: OrderLineEntity): void {
         /**

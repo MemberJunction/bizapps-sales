@@ -39,6 +39,22 @@ function panel(Ctor: new () => { FieldEditable(n: string): boolean }, locked: bo
     return p;
 }
 
+/**
+ * Source with comments removed, because these assertions are about BINDINGS and a comment that
+ * discusses one is not a binding.
+ *
+ * Added after a doc comment explaining why a bare `[EditMode]="EditMode"` is dangerous made this fail
+ * — the guard reported an unguarded binding that did not exist, in the file whose comment was warning
+ * against it. A check that cannot tell code from prose about code is asserting on the wrong text; the
+ * same fault, in the other direction, would let a real binding hide inside a commented-out block.
+ */
+function code(source: string): string {
+    return source
+        .replace(/\/\*[\s\S]*?\*\//g, '')   // block and JSDoc comments
+        .replace(/^\s*\/\/.*$/gm, '')          // line comments
+        .replace(/<!--[\s\S]*?-->/g, '');       // template comments
+}
+
 describe('an OPEN deal edits exactly as before', () => {
     for (const [name, Ctor] of PANELS) {
         it(`${name}: every field stays editable`, () => {
@@ -85,7 +101,7 @@ describe('the binding is wired, not just the helper', () => {
     it('every field binding asks FieldEditable', () => {
         // A correct rule nothing calls is the defect this whole round keeps finding. `EditableFieldNames`
         // on the form component was exported, documented, and had no caller for the same reason.
-        const bindings = source.match(/\[EditMode\]="[^"]*"/g) ?? [];
+        const bindings = code(source).match(/\[EditMode\]="[^"]*"/g) ?? [];
         const fieldBindings = bindings.filter((x) => x.includes('EditMode &&') || x === '[EditMode]="EditMode"');
         const unguarded = fieldBindings.filter((x) => x === '[EditMode]="EditMode"');
         expect(unguarded, `these bind EditMode without asking the lock: ${unguarded.join(', ')}`).toEqual([]);
@@ -117,7 +133,7 @@ describe('the header is part of item 3, not just the panels', () => {
          * which is the exact behaviour item 3 removes. The file list is the assertion.
          */
         for (const [name, source] of [['panels', PANELS], ['hero', HERO]] as const) {
-            const unguarded = (source.match(/\[EditMode\]="EditMode"/g) ?? []);
+            const unguarded = (code(source).match(/\[EditMode\]="EditMode"/g) ?? []);
             expect(unguarded, `${name}: ${unguarded.length} field(s) bind EditMode without asking the lock`)
                 .toEqual([]);
         }
