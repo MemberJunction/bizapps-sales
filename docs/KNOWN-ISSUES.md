@@ -824,7 +824,32 @@ grep -A3 'dynamicPackages' mj.config.cjs      # orders-server must be listed
 
 ---
 
-## 🔴 KI-20 — Removing a line from an order FAILS THE WHOLE SAVE (updated 2026-08-21: it used to be silent)
+## 🟢 KI-20 — Removing a line from an order FAILS THE WHOLE SAVE — ✅ CLOSED 2026-09-20
+
+> ### ✅ FIXED IN ORDERS. The entry below describes a defect that no longer exists.
+>
+> `OrderEntityServer.Save()` now drains the removals — `this.Lines.Removed.filter((line) => line.IsSaved)`
+> — renumbering the survivors and recomputing the header, with `OrderLineRemoval.test.ts` asserting both
+> of the failures this entry records. The UAT issue is closed: **bc-aidp-next-golive#187**.
+>
+> **`save-deal.SD6` is the tripwire that announced it**, and it did its job: SD6 was reported failing on
+> `next` in the mutation runs (`docs/CHECK-MUTATION-EVIDENCE.md` records it as "the KI-20 tripwire
+> firing"). Nobody acted on it for some weeks, which is the part worth learning from — a red tripwire
+> nobody reads is the same as no tripwire.
+>
+> **What this changed in sales.** Removal is now offered on the deal form's restricted line editor,
+> going through `Lines.Remove()` + `order.Save()` — the path orders drains. The blanket refusal written
+> for this entry, `ShouldRefuseLineRemoval` in `deal-workspace.validation.ts`, is therefore OBSOLETE. It
+> is still present and still declines every saved line, but only in the deal workspace, which no
+> template has mounted since 9d6ef9e. It is annotated at the source rather than deleted: removing it
+> would change the behaviour of a component nobody can reach, on a surface whose fate — re-mount or
+> retire — is still open.
+>
+> The original entry is kept below because the reasoning is still worth reading, and because the
+> *shape* of it recurs: a downstream app's save path silently skipping a companion-collection step.
+
+### The original entry (historical — the defect is fixed)
+
 
 > ### ⚠️ THE SYMPTOM CHANGED, AND THE TITLE BELOW DESCRIBES THE OLD ONE
 >

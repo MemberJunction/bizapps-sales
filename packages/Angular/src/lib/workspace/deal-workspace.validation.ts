@@ -248,6 +248,24 @@ export function DiscountRefusalIssues(
  * The fix belongs in orders and stays there; `save-deal.SD6` is the tripwire that goes red the day it
  * lands, and this refusal is what a rep meets in the meantime.
  */
+/**
+ * ⚠️ OBSOLETE SINCE 2026-09-20 — the defect it works around is fixed.
+ *
+ * This declined every SAVED line because orders' `OrderEntityServer.Save()` never drained
+ * `Lines.Removed`: a removal was first dropped silently, then refused outright on a unique-key
+ * violation that cost the rep every other edit staged beside it. Declining at the gesture kept the rest
+ * of the save working.
+ *
+ * Orders now drains removals, renumbers the survivors and recomputes the header, with its own
+ * `OrderLineRemoval.test.ts` covering both failures. KI-20 is closed, golive#187 is closed, and the
+ * deal FORM offers removal through `Lines.Remove()` + `order.Save()`.
+ *
+ * IT IS ANNOTATED RATHER THAN DELETED, deliberately. Its only caller is the deal workspace, which no
+ * template has mounted since 9d6ef9e — so removing it would change the behaviour of a component nobody
+ * can reach, and cannot be tested end to end, on a surface whose fate is still open. Whoever settles
+ * that question should delete this with it; until then this comment is what stops the next reader
+ * concluding, as one did, that sales cannot remove a line.
+ */
 export function ShouldRefuseLineRemoval(line: { IsSaved: boolean } | null | undefined): boolean {
     return !!line?.IsSaved;
 }

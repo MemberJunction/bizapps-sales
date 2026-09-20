@@ -70,6 +70,9 @@ describe('the workspace Add-product button on a closed deal', () => {
 describe('removal needs no second rule here', () => {
     it('already declines every SAVED line, whatever the lock says', () => {
         // `ShouldRefuseLineRemoval` is `!!line.IsSaved`, for KI-20's reasons rather than the lock's.
+        // KI-20 is CLOSED (orders drains Lines.Removed since 2026-09-20) and this refusal is obsolete;
+        // it is asserted here only because the unmounted workspace still calls it. The deal FORM offers
+        // removal — see `deal-line-removal.test.ts`, which is where the live behaviour is pinned.
         // A rep on a closed deal meets the same wall either way, and a second rule would be two
         // messages for one refusal. Asserted so that if KI-20 is ever fixed and this relaxes, the
         // lock gap it currently hides becomes a failing test rather than a silent regression.

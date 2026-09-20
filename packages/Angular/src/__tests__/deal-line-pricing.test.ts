@@ -1,5 +1,5 @@
 import '@angular/compiler';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { Metadata } from '@memberjunction/core';
 import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.component';
 
@@ -67,7 +67,15 @@ const ok = (UnitPrice: number, LineTotalNet: number) => ({
     Output: { Success: true, Lines: [{ ProductID: PRODUCT, UnitPrice, LineTotalNet }] },
 });
 
+/**
+ * `Metadata.Provider` is a SINGLETON, and `editor()` replaces it. Restoring it after each test keeps
+ * that out of any file that shares a worker — this suite went red once on a test that never touches
+ * pricing, then passed on the next two runs, which is what shared global state looks like before it
+ * becomes a recurring mystery.
+ */
+const REAL_PROVIDER = Metadata.Provider;
 beforeEach(() => { vi.useRealTimers(); });
+afterEach(() => { Metadata.Provider = REAL_PROVIDER; });
 
 describe('what the line comes to', () => {
     it('asks Orders rather than working it out', async () => {
