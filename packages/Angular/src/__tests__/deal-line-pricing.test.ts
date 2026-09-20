@@ -2,6 +2,7 @@ import '@angular/compiler';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { Metadata } from '@memberjunction/core';
 import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.component';
+import { MJSDealLinesPanel } from '../lib/form-panels/deal-form.panels';
 
 /**
  * THE ADD-PRODUCT DIALOG SHOWED NO PRICE.
@@ -196,8 +197,13 @@ describe('asking politely', () => {
  * amount while its order carried a real total.
  */
 describe('after a line is saved', () => {
+    /**
+     * Statically imported, like every other test here. This was the only dynamic `await import()` in
+     * the suite, and this test failed twice in full runs that could not afterwards be reproduced in
+     * twelve attempts. The cause was never identified — so this is not a fix presented as one, it is
+     * the removal of the single construct that made this test different from its neighbours.
+     */
     it('forces a deal save, because the deal itself is not dirty', async () => {
-        const { MJSDealLinesPanel } = await import('../lib/form-panels/deal-form.panels');
         const saved: Array<{ IgnoreDirtyState?: boolean }> = [];
         const p = Object.create(MJSDealLinesPanel.prototype) as {
             OnLineSaved(): Promise<void>;
