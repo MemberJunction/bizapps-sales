@@ -56,7 +56,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectorRef, Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Metadata } from '@memberjunction/core';
 import { FormsModule } from '@angular/forms';
@@ -322,7 +322,7 @@ interface RemoteOperationRouter {
         }
     `],
 })
-export class MJSDealLineEditorComponent implements OnInit {
+export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     /**
      * The DEAL whose order this line belongs to.
      *
@@ -528,6 +528,24 @@ export class MJSDealLineEditorComponent implements OnInit {
 
     public get DisplayLineTotal(): number | null {
         return this.pricedTotal ?? (this.Working?.LineTotalNet as number | null | undefined) ?? null;
+    }
+
+    /**
+     * Cancels a pending price request when the dialog goes away.
+     *
+     * The debounce timer was only ever cleared by RESCHEDULING it, so a rep who typed a quantity and
+     * clicked Cancel within 350ms left a timer that fired against a destroyed component: a pointless
+     * `Orders.PriceOrder` round trip, and a `detectChanges()` on a view Angular had already torn down.
+     * The dialog lives inside `@if (EditorOpen)`, so it is genuinely destroyed on both Save and Cancel.
+     *
+     * `Saving` is not reset here on purpose — the component is going away, and an in-flight `Remove`
+     * or `Save` owns its own `finally`.
+     */
+    public ngOnDestroy(): void {
+        if (this.priceTimer) {
+            clearTimeout(this.priceTimer);
+            this.priceTimer = null;
+        }
     }
 
     /** Quantity is a priced input, so it cannot be a plain two-way binding. */

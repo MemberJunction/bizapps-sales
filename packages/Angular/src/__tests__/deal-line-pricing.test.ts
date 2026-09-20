@@ -231,3 +231,27 @@ describe('after a line is saved', () => {
         expect(p.EditorOpen, 'and the dialog closes').toBe(false);
     });
 });
+
+/**
+ * A PENDING PRICE REQUEST MUST NOT OUTLIVE THE DIALOG.
+ *
+ * The debounce timer was cleared only by RESCHEDULING it, so typing a quantity and clicking Cancel
+ * within 350ms left a timer firing against a destroyed component — a pointless round trip to Orders,
+ * and a `detectChanges()` on a view Angular had already torn down. The dialog sits inside
+ * `@if (EditorOpen)`, so it really is destroyed on both Save and Cancel.
+ */
+describe('when the dialog closes mid-type', () => {
+    it('cancels the pending price request', async () => {
+        vi.useFakeTimers();
+        const e = editor({ reply: ok(100, 270) });
+        e.SchedulePrice();
+        e.ngOnDestroy();
+        await vi.advanceTimersByTimeAsync(400);
+        expect(e.Routed, 'nothing may be asked for after destroy').toEqual([]);
+        vi.useRealTimers();
+    });
+
+    it('is safe to call with nothing pending', () => {
+        expect(() => editor({ reply: ok(1, 1) }).ngOnDestroy()).not.toThrow();
+    });
+});
