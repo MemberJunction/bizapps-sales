@@ -1,0 +1,52 @@
+[
+  {
+    "_comments": [
+      "bc-aidp-next-golive#226 item 3: Contract ID and Renews Contract ID rendered as raw GUIDs in",
+      "text boxes with no link. The cause is structural, not cosmetic. Both columns are SOFT",
+      "references — their own column descriptions say so — because the link points DOWN the",
+      "dependency graph and contracts knows nothing about sales. No database FK means CodeGen sets no",
+      "RelatedEntityID, and mj-form-field with no related entity has no name to show and nowhere to",
+      "go, so it falls back to printing the id.",
+      "",
+      "MJ's answer to exactly this is a SOFT FOREIGN KEY: RelatedEntityID + RelatedEntityFieldName",
+      "with IsSoftForeignKey=1, which is what protects the pair from being cleared by the next schema",
+      "sync (AutoUpdateRelatedEntityInfo=0 is the other half — it tells CodeGen this is ours, not",
+      "something to re-derive from a constraint that does not exist).",
+      "",
+      "WHAT THIS DOES NOT DO: it creates no constraint, no cascade, and nothing to violate. The",
+      "database is untouched. A contract can still be deleted out from under a deal exactly as it",
+      "could yesterday — the shared chip row and mj-form-field both already handle an id that names",
+      "no row, by showing nothing rather than a dead link.",
+      "",
+      "Contracts is a declared dependency in mj-app.json, so naming its entity here is legitimate. The",
+      "matching declaration in codegen-schema-info.json is what re-applies this on every rebuild, and",
+      "it SKIPS with a warning on a host where contracts is absent rather than failing."
+    ],
+    "fields": {
+      "RelatedEntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Contracts: Contracts",
+      "RelatedEntityFieldName": "ID",
+      "IsSoftForeignKey": true,
+      "AutoUpdateRelatedEntityInfo": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ContractID"
+    }
+  },
+  {
+    "_comments": [
+      "The renewal chain's other end. Same soft reference, same reason, and this is the one a REP",
+      "types: DealType.RequiresRenewalSource makes it mandatory on a renewal deal, and until now the",
+      "only way to fill it was to paste a UUID. With the related entity set, mj-form-field offers an",
+      "FK search instead."
+    ],
+    "fields": {
+      "RelatedEntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Contracts: Contracts",
+      "RelatedEntityFieldName": "ID",
+      "IsSoftForeignKey": true,
+      "AutoUpdateRelatedEntityInfo": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=RenewsContractID"
+    }
+  }
+]

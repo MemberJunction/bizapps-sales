@@ -266,9 +266,16 @@ const MUTATIONS = [
       to: '            && true;' },
     // The refusal goes back to being log-only. Every other close-deal check still passes, because
     // they all read the boolean; CD30 is the only one that reads the MESSAGE.
+    // RE-AIMED. The old anchor was the registration line plus its `return false`, which stopped being
+    // unique the moment `reportPostSaveFailure` was added beside `refuseSave` -- same shape, different
+    // semantics. Two matches means the driver SKIPS and exits 1, so CD30 would have lost its proof
+    // while reading exactly as it does now. Aimed instead at the one line only `refuseSave` has, and
+    // at what CD30 actually claims: that the refusal's SENTENCE reaches the caller. Emptying the
+    // message leaves the registration intact and the result still failed, so this isolates the text
+    // rather than the mechanism.
     { id: 'M-CD30', file: DES, expect: ['CD30'],
-      from: '        this.RegisterResultHistoryEntry(failed);\n        return false;',
-      to: '        void failed;\n        return false;' },
+      from: '        failed.Message = message;',
+      to: "        failed.Message = '';" },
     // The Team allow-list is what lets a roster change through the lock. Dropping it freezes the
     // team panel on every closed deal -- golive#206 item 2 in reverse, and the SILENT direction:
     // nobody reports being unable to do a thing they were told was frozen anyway.

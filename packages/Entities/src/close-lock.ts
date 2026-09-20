@@ -115,9 +115,35 @@ const DEAL_FIELD_LABELS: Readonly<Record<string, string>> = {
     DealStatusTypeID: 'Deal Status',
 };
 
-/** The on-screen label for a deal field, or the field name when nothing better is known. */
+/**
+ * Splits a column name into words and drops a trailing `ID`: `ExpectedCloseDate` -> `Expected Close
+ * Date`, `BillingContactID` -> `Billing Contact`.
+ *
+ * THIS EXISTS BECAUSE THE MAP ABOVE COVERS THE WRONG HALF OF THE RULE. It holds the fields the lock
+ * leaves EDITABLE -- what row 16 lists. Row 18 names the FROZEN fields, and there are far more of
+ * those, none of them in the map: `Amount`, `ExpectedCloseDate`, `AnnualIncreasePctOverride` and every
+ * other column a form or an importer can set. Falling back to the raw field name meant row 18 read
+ * "ExpectedCloseDate, AnnualIncreasePctOverride cannot be changed" -- the exact "NextStep being a
+ * column name that appears nowhere on the form" complaint the map was added to answer, on the message
+ * a user is far more likely to see.
+ *
+ * Deriving rather than hand-listing the frozen set, because a hand list would have to be extended
+ * every time a column is added and would read correctly right up until somebody forgot -- the same
+ * shape as the gap it is replacing. The map stays for the two labels a split cannot produce
+ * (`LeadSourceTypeID` -> "Lead Source", not "Lead Source Type") and is now an override rather than
+ * the only source of a label.
+ */
+function SplitFieldName(fieldName: string): string {
+    return fieldName
+        .replace(/ID$/, '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .trim();
+}
+
+/** The on-screen label for a deal field: the override if there is one, else the field name split into words. */
 export function DealFieldLabel(fieldName: string): string {
-    return DEAL_FIELD_LABELS[fieldName] ?? fieldName;
+    return DEAL_FIELD_LABELS[fieldName] ?? SplitFieldName(fieldName);
 }
 
 /**
@@ -168,6 +194,27 @@ export interface DealLockState {
      * a closed deal is the cheaper mistake.
      */
     IsLost: boolean;
+    /**
+     * Whether the PERSISTED status carries `IsWon` — the outcome, not the lock.
+     *
+     * UNLIKE EVERY OTHER MEMBER HERE, THIS IS NOT GATED ON `LocksDeal`, and the difference is the
+     * whole reason it exists. The rest of this shape answers "what may still be edited", a question
+     * only a locked deal has. `IsWon` answers "did we win", which an OPEN deal can also answer, and
+     * golive#226 asks the Deal header for chips that appear on a won deal and on no other. Gating it
+     * on the lock would tie a header decision to a field-editing one, so a deployment whose winning
+     * status does not freeze the deal would lose its Order and Contract chips with nothing on screen
+     * to explain it.
+     *
+     * Read off the status ROW by FLAG, like its siblings. Nothing anywhere compares a status name —
+     * a deployment may call its winning status "Signed" (§3), and `test:vocabulary-gate` enforces it.
+     *
+     * `false` when the status cannot be read: a chip that is missing costs a click, and one that
+     * should not be there says a deal was won when it was not.
+     *
+     * golive#231's outcome tiles read it too, and are unaffected by the ungating: every one of those
+     * getters tests the CLOSE STAMPS first, so an open won-status deal still reads "Closes".
+     */
+    IsWon: boolean;
     /** A ready-to-render explanation, or null when the deal is open. */
     Notice: string | null;
 }
@@ -194,23 +241,33 @@ export async function ResolveDealLockState(
     persistedStatusID: string | null | undefined,
     contextUser?: UserInfo,
 ): Promise<DealLockState> {
-    const open: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, Notice: null };
+    const open: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, IsWon: false, Notice: null };
     if (!persistedStatusID) {
         return open;
     }
 
-    const result = await new RunView().RunView<{ LocksDeal: boolean; Name: string; IsLost: boolean }>(
+    const result = await new RunView().RunView<{ LocksDeal: boolean; Name: string; IsLost: boolean; IsWon: boolean }>(
         {
             EntityName: E_DEAL_STATUS_TYPE,
             ExtraFilter: `ID = '${String(persistedStatusID).replace(/'/g, "''")}'`,
             ResultType: 'simple',
-            Fields: ['LocksDeal', 'Name', 'IsLost'],
+            Fields: ['LocksDeal', 'Name', 'IsLost', 'IsWon'],
         },
         contextUser,
     );
     const row = result?.Success ? (result.Results ?? [])[0] : undefined;
+
+    /**
+     * THE OUTCOME SURVIVES THE EARLY RETURN, THE LOCK DOES NOT.
+     *
+     * `IsWon` is a fact about the status itself, so it is carried out of every exit below rather than
+     * being reset to `false` by the unlocked one. The cost of getting this backwards is silent: the
+     * header would simply draw no chips on a won-but-unlocked deal, which looks exactly like a deal
+     * with no order and no contract.
+     */
+    const isWon = row?.IsWon === true;
     if (!row?.LocksDeal) {
-        return open;
+        return { ...open, IsWon: isWon };
     }
 
     /**
@@ -231,6 +288,7 @@ export async function ResolveDealLockState(
         IsLocked: true,
         StatusName: row.Name,
         IsLost: isLost,
+        IsWon: isWon,
         Notice:
             `This deal is closed (${row.Name}). Only ${editable} can be edited. ` +
             'To change anything else, set the status back to Open.',

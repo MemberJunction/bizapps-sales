@@ -474,6 +474,11 @@ export class mjBizAppsSalesDealContactRole_ {
     Deal?: string;
         
     @Field({nullable: true}) 
+    @MaxLength(704)
+    SalesContact?: string;
+        
+    @Field({nullable: true}) 
+
     @MaxLength(200)
     BuyingRoleType?: string;
         
@@ -2178,7 +2183,8 @@ export class mjBizAppsSalesDeal_ {
     @Field({nullable: true}) 
     AmountComputedAt?: Date;
         
-    @Field({nullable: true, description: `Fingerprint of the embedded order's line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say "this figure is stale, reprice" instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.`}) 
+    @Field({nullable: true, description: `Fingerprint of the embedded order's line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say the products changed after the amount was calculated, instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.`}) 
+
     @MaxLength(128)
     AmountSourceHash?: string;
         
@@ -2296,6 +2302,7 @@ export class mjBizAppsSalesDeal_ {
     @Field({nullable: true, description: `Timestamp when the deal was last scored by the predictive deal win propensity model.`}) 
     PredictedWinScoredAt?: Date;
         
+
     @Field({nullable: true}) 
     @MaxLength(200)
     Pipeline?: string;
@@ -2317,6 +2324,15 @@ export class mjBizAppsSalesDeal_ {
     Account?: string;
         
     @Field({nullable: true}) 
+    @MaxLength(704)
+    PrimaryContact?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(704)
+    BillingContact?: string;
+        
+    @Field({nullable: true}) 
+
     @MaxLength(50)
     Company?: string;
         
@@ -2498,6 +2514,7 @@ export class CreatemjBizAppsSalesDealInput {
     @Field({ nullable: true })
     PredictedWinScoredAt: Date | null;
 
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -2651,6 +2668,7 @@ export class UpdatemjBizAppsSalesDealInput {
 
     @Field({ nullable: true })
     PredictedWinScoredAt?: Date | null;
+
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -4866,6 +4884,11 @@ export class mjBizAppsSalesSalesContact_ {
     @MaxLength(200)
     LeadSourceType?: string;
         
+    @Field({nullable: true, description: `The contact's display name, followed by their primary email in brackets when they have one. Derived in vwSalesContacts; this is what lookups to a Sales Contact show instead of a GUID.`}) 
+    @MaxLength(704)
+    DisplayNameAndEmail?: string;
+        
+
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
         

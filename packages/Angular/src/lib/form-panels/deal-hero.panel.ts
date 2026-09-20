@@ -8,14 +8,21 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, ViewEncapsulation, inject } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CompositeKey, RunView } from '@memberjunction/core';
+import { CompositeKey } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
 import { RegisterClassEx } from '@memberjunction/global';
-import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
-import { DealEntity, IsDealFieldEditableWhileLocked, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
+import { BaseFormPanel, BaseFormsModule, FormChromeCoordinator } from '@memberjunction/ng-base-forms';
+import { RelatedChipsComponent, type BizAppsRelatedLink } from '@mj-biz-apps/common-ng';
+import {
+    DealEntity,
+    IsDealFieldEditableWhileLocked,
+    ResolveDealAmountFreshness,
+    ResolveDealLockState,
+} from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
+import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
 
 
 /**
@@ -49,7 +56,6 @@ export function ShouldPlaceCursorInName(state: {
     if (state.FocusAlreadyElsewhere) return false;
     return true;
 }
-const E_ORDER_LINE = MJS_FOREIGN_ENTITIES.OrderLine;
 const COLLAPSE_SETTING = 'mj.identityHeader.collapsed.deal';
 
 function money(n: number | null | undefined): string {
@@ -71,7 +77,7 @@ function money(n: number | null | undefined): string {
     selector: 'mjs-deal-hero-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, BaseFormsModule],
+    imports: [CommonModule, BaseFormsModule, RelatedChipsComponent],
     template: `
         <div class="mjs-deal-hero" [class.mjs-deal-hero--collapsed]="Collapsed">
             <div class="mjs-deal-hero__identity">
@@ -115,6 +121,26 @@ function money(n: number | null | undefined): string {
                     <i [class]="Collapsed ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-up'"></i>
                 </button>
             </div>
+            <!--
+                 THE RELATED ROW IS SHARED, NOT OURS (golive#225, #226).
+
+                 All this hero decides is WHICH relationships a deal has - the rule is in
+                 deal-related-links.ts, where a test can reach it. Reading each record's NAME, and
+                 deciding when a chip must not be drawn at all (the app is not installed here, the
+                 record is not there, the user may not read it), belongs to bizapps-related-chips
+                 in common. Sales, contracts and orders each had their own answer to that or none,
+                 which is the divergence golive#225 built the shared row to end.
+
+                 OUTSIDE THE COLLAPSED REGION, for the reason the Name editor below is: Collapsed
+                 is a persisted per-user setting, and these chips are now the ONLY route from a won
+                 deal to its order - the Motion panel's order link came off with them (#226 item 4).
+                 Gating them would mean anyone who had ever collapsed the header could not reach the
+                 order at all, which is the bug this issue reported, reintroduced one fold deeper.
+            -->
+            <bizapps-related-chips
+                [Links]="RelatedLinks"
+                [Provider]="FormComponent.ProviderToUse"
+                (Navigate)="FormComponent.OnFormNavigate($event)" />
             <!-- OUTSIDE the collapsed region, deliberately. Collapsing hides the BRIEFING - the
                  account/owner/stage stats - not the control that names the record. The Pipeline
                  panel used to carry a second Name box, so a collapsed header still left somewhere
@@ -130,7 +156,31 @@ function money(n: number | null | undefined): string {
                     </div>
                 </div>
             }
-            @if (!Collapsed) {
+            <!--
+                 A NEW DEAL GETS GUIDANCE INSTEAD OF A BRIEFING.
+
+                 Products live on the ORDER a deal mints when it is first saved, so there is nothing to
+                 add them to until then. The "What's being sold" panel says so, but it is collapsed by
+                 default and a rep reported no way to add products and no message saying why
+                 (golive#216) — a hint nobody opens is not a hint. It is repeated here, where a new deal
+                 already is, so the sequence is visible before the search for a missing button starts.
+
+                 Outside the collapsed region for the same reason the Name editor is: Collapsed is a
+                 persisted per-user setting, and this is the one instruction that makes the form usable.
+            -->
+            @if (!Record.IsSaved) {
+                <div class="mjs-flag mjs-flag--guide">
+                    Save this deal to create its order. Products are added after that.
+                </div>
+            }
+            <!--
+                 THE BRIEFING IS FOR A DEAL THAT EXISTS. Account, owner, amount, stage and next step are
+                 all empty on a record nobody has saved, so an unsaved deal rendered a grid of dashes
+                 under the name it was still being given. IsSaved, not EditMode: a saved deal being
+                 edited still has all of this to show, and hiding it there would take the briefing away
+                 from the only person who needs it.
+            -->
+            @if (!Collapsed && Record.IsSaved) {
                 <div class="mjs-deal-hero__summary">
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Account</span>
@@ -160,9 +210,12 @@ function money(n: number | null | undefined): string {
                         <span class="mjs-deal-hero__stat-label">Weighted</span>
                         <span class="mjs-deal-hero__stat-val">{{ WeightedText }}</span>
                     </div>
+                    <!-- A CLOSED DEAL REPORTS, IT DOES NOT FORECAST (golive#231 item 4). This stat
+                         showed ExpectedCloseDate whatever had happened, so a deal that closed in March
+                         still announced a February expectation under a label that reads as fact. -->
                     <div class="mjs-deal-hero__stat">
-                        <span class="mjs-deal-hero__stat-label">Close</span>
-                        <span class="mjs-deal-hero__stat-val">{{ (Record.ExpectedCloseDate | date: 'd MMM y') || '—' }}</span>
+                        <span class="mjs-deal-hero__stat-label">{{ CloseStatLabel }}</span>
+                        <span class="mjs-deal-hero__stat-val">{{ CloseStatValue }}</span>
                     </div>
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Pipeline</span>
@@ -256,6 +309,12 @@ function money(n: number | null | undefined): string {
             background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text);
             border-color: var(--mj-status-warning);
         }
+        /* The chip row brings its own styling — design tokens, its own class prefix — so the hero
+           only places it. 'display: contents' rather than a margin because the hero is a COLUMN FLEX
+           WITH A GAP: a host box that renders nothing still takes a gap, so every open deal (no
+           chips at all) would grow a band of dead space under its title. With 'contents' the host
+           makes no box, and an empty row contributes no flex item and therefore no gap. */
+        .mjs-deal-hero bizapps-related-chips { display: contents; }
         .mjs-deal-hero__toggle {
             display: inline-flex; align-items: center; justify-content: center;
             flex: none; width: 32px; height: 32px; margin-left: auto; padding: 0;
@@ -312,6 +371,21 @@ function money(n: number | null | undefined): string {
             padding: var(--mj-space-2) var(--mj-space-3); font-size: var(--mj-text-xs);
             color: var(--mj-status-warning-text); border-radius: 0 var(--mj-radius-sm) var(--mj-radius-sm) 0;
         }
+        /**
+         * Guidance, not a warning. .mjs-flag is the warning tone -- correct for a lock or a stale
+         * amount, wrong for "here is the next step", which would otherwise tell a rep that naming a new
+         * deal had gone wrong.
+         *
+         * Each token carries a fallback because only --mj-status-info-bg is in use anywhere in this
+         * package; an undefined --mj-status-info would silently paint a transparent border and this
+         * would read as an unstyled paragraph.
+         */
+        .mjs-flag--guide {
+            background: var(--mj-status-info-bg, var(--mj-color-surface-raised));
+            border-left-color: var(--mj-status-info, var(--mj-color-primary));
+            color: var(--mj-status-info-text, var(--mj-color-text-primary));
+            margin-top: var(--mj-space-2);
+        }
         .mjs-deal-hero--collapsed { padding: 12px 20px; gap: 0; margin-bottom: var(--mj-space-3); }
         .mjs-deal-hero--collapsed .mjs-deal-hero__avatar { width: 42px; height: 42px; border-radius: var(--mj-radius-md, 10px); font-size: 1.05rem; }
         .mjs-deal-hero--collapsed .mjs-deal-hero__name { font-size: 1.15rem; }
@@ -321,7 +395,7 @@ function money(n: number | null | undefined): string {
         }
     `],
 })
-export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit {
+export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit, DoCheck {
     private readonly cdr = inject(ChangeDetectorRef);
     private readonly host = inject(ElementRef<HTMLElement>);
     /** The record the cursor has already been placed for, so it is never taken twice. */
@@ -330,6 +404,13 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     public IsLocked = false;
     /** Whether the locking status is a LOSS. Only Loss Notes turns on it (golive#206). */
     public IsLost = false;
+    /** Whether the PERSISTED status is a WIN — its own flag, never `!IsLost`. Decides the Order and
+     *  Contract chips (golive#226); the Overview's outcome tiles read it too (golive#231). */
+    public IsWon = false;
+
+    /** The links last published to the chip row, and the state they were built from. */
+    private relatedFor: string | null = null;
+    private relatedLinks: BizAppsRelatedLink[] = [];
 
     /**
      * May the deal's Name be typed into right now? (bc-aidp-next-golive#206 item 3)
@@ -367,6 +448,49 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
      */
     public override OnRecordRefreshed(_record: DealEntity): void {
         void this.refreshNotices();
+    }
+
+    /**
+     * WHERE A DEAL GOES ONCE IT EXISTS.
+     *
+     * A NEW deal opens on Pipeline — the Pipeline panel declares `leadsWhenUnsaved`, deliberately
+     * (golive#188), because a summary of a record with no data is a page of blanks. Once it is saved
+     * that reasoning inverts: the summary now has something to summarise, and the rep has just
+     * finished the thing Pipeline was for.
+     *
+     * MJ persists the active group only for a SAVED record (`ShouldPersistChromeActiveGroup`), so
+     * nothing moved the rail on that transition and a rep was left looking at the form they had just
+     * completed.
+     *
+     * ── WHY THE HERO AND NOT THE PIPELINE PANEL ─────────────────────────────────────────────────
+     *
+     * Two reasons, and the second is the load-bearing one. The hero is rendered for every section, so
+     * it sees the save whichever rail item the rep happens to be on. And `MJSDealPipelinePanel`
+     * deliberately avoids `inject()` — its own comment records that a `ChangeDetectorRef` would need
+     * an injection context and `new MJSDealPipelinePanel()` would stop working in its tests.
+     *
+     * ── THE CROSSING IS THE WHOLE RULE ──────────────────────────────────────────────────────────
+     *
+     * Keyed on the TRANSITION, not on `IsSaved`: a deal that is already saved must never be dragged to
+     * Overview, or a rep could not stay on any other section for the rest of its life. That single
+     * test also makes it fire once — after the crossing `wasSaved` is true, so every later pass
+     * returns. A separate once-per-record flag was written here first and a mutation proved it inert:
+     * it guarded nothing the transition did not already guard, while reading as though it did.
+     */
+    private wasSaved: boolean | null = null;
+    private readonly chrome = inject(FormChromeCoordinator, { optional: true });
+
+    public ngDoCheck(): void {
+        const record = this.Record;
+        if (!record) return;
+
+        const saved = !!record.IsSaved;
+        const was = this.wasSaved;
+        this.wasSaved = saved;
+
+        // Only the crossing counts, and only once for this record.
+        if (was !== false || !saved) return;
+        this.chrome?.SetActiveGroup('overview');
     }
 
     public ngAfterViewInit(): void {
@@ -446,6 +570,32 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     public get PipelineName(): string { return String(this.Record?.Pipeline ?? this.Record?.Get?.('Pipeline') ?? ''); }
     public get TypeName(): string { return String(this.Record?.DealType ?? this.Record?.Get?.('DealType') ?? ''); }
 
+    /**
+     * Has the deal actually closed? (golive#231)
+     *
+     * The CLOSE STAMPS, not the status — the same rule the Overview's `IsClosed` uses and for the same
+     * reason: the stamps are what the server writes when the close really runs, so keying on the status
+     * would report a deal closed the moment somebody picked Won. Either stamp counts; a legacy row may
+     * carry only one.
+     */
+    public get IsClosed(): boolean {
+        return !!(this.Record?.ClosedAt ?? this.Record?.ActualCloseDate);
+    }
+
+    /** "Closed" once it has happened, "Close" while it is still a forecast. */
+    public get CloseStatLabel(): string { return this.IsClosed ? 'Closed' : 'Close'; }
+
+    /** The date it closed on, or the date it is expected to. */
+    public get CloseStatValue(): string {
+        const when = this.IsClosed
+            ? (this.Record?.ActualCloseDate ?? this.Record?.ClosedAt)
+            : this.Record?.ExpectedCloseDate;
+        if (!when) return '—';
+        return new Date(when).toLocaleDateString(undefined, {
+            day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+        });
+    }
+
     public get AmountText(): string { return money(this.Record?.Amount); }
     public get WeightedText(): string {
         const a = Number(this.Record?.Amount);
@@ -459,6 +609,30 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         if (s.includes('won') || s === 'open' || s.includes('active')) return 'success';
         if (s.includes('lost') || s.includes('dead') || s.includes('disqual') || this.IsLocked) return 'warning';
         return 'muted';
+    }
+
+    /**
+     * The relationships this deal offers, as descriptors for the shared chip row.
+     *
+     * RETURNS A STABLE ARRAY. `bizapps-related-chips` re-resolves whenever `Links` is a new
+     * reference and reads the input on every change-detection pass, so a getter that built a fresh
+     * array each pass would hold it in a permanent re-read loop. The key changes exactly when the
+     * answer would, including on the record id — a form container reuses this panel across records,
+     * and stale chips offer a click that opens the previous deal's order.
+     */
+    public get RelatedLinks(): BizAppsRelatedLink[] {
+        const state = {
+            IsWon: this.IsWon,
+            OrderID: this.Record?.OrderID,
+            ContractID: this.Record?.ContractID,
+            RenewsContractID: this.Record?.RenewsContractID,
+        };
+        const key = DealRelatedLinksKey(this.Record?.ID, state);
+        if (this.relatedFor !== key) {
+            this.relatedFor = key;
+            this.relatedLinks = DealRelatedLinks(state);
+        }
+        return this.relatedLinks;
     }
 
     public OpenAccount(event: MouseEvent): void {
@@ -490,25 +664,25 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         const lock = await ResolveDealLockState(persisted ?? this.Record?.DealStatusTypeID);
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
+        this.IsWon = lock.IsWon;
         this.LockNotice = lock.Notice;
     }
 
+    /**
+     * Whether the cached amount still matches its order — through the SHARED rule, so this panel and the
+     * Deal form cannot disagree. See `amount-freshness.ts` for why it is no longer a timestamp test
+     * (golive#230), and note the ordering: `refreshNotices()` resolves the lock first, so `IsLocked` is
+     * settled before it is passed here and a closed deal never warns.
+     */
     private async resolveStale(): Promise<void> {
         this.StaleAmountNotice = null;
-        const computedAt = this.Record?.AmountComputedAt;
-        if (!this.Record?.AmountIsComputed || !computedAt || !this.Record.OrderID) return;
-        const rv = new RunView();
-        const result = await rv.RunView<{ __mj_UpdatedAt: string | Date }>({
-            EntityName: E_ORDER_LINE,
-            ExtraFilter: `OrderHeaderID = '${String(this.Record.OrderID).replace(/'/g, "''")}'`,
-            OrderBy: '__mj_UpdatedAt DESC',
-            ResultType: 'simple',
-            Fields: ['__mj_UpdatedAt'],
+        if (!this.Record) return;
+        const freshness = await ResolveDealAmountFreshness({
+            IsLocked: this.IsLocked,
+            AmountIsComputed: this.Record.AmountIsComputed,
+            Amount: this.Record.Amount,
+            OrderID: this.Record.OrderID,
         });
-        const newest = result?.Success ? (result.Results ?? [])[0]?.__mj_UpdatedAt : undefined;
-        if (newest && new Date(newest).getTime() > new Date(computedAt).getTime()) {
-            this.StaleAmountNotice =
-                'A line has changed since this amount was last priced. Reprice the order to update the total.';
-        }
+        this.StaleAmountNotice = freshness.Notice;
     }
 }

@@ -315,9 +315,36 @@ examined; a pass is not. So the highest-value question about any check is not "d
 - Chosen to avoid every other MJ environment: MJ core 4001/4201, common 4101/4301,
   accounting 4102/4302, orders 4103/4303, contracts 4151/4351.
 
-### The migration loop — BASELINE-IN-PLACE (pre-production)
-Schema changes **edit the baseline migration in place**; do not stack fix-up migrations. That is only
-safe because rebuilding from zero is routine:
+### The migration loop — ADDITIVE-ONLY (this repo has published)
+
+> **⛔ BASELINE-IN-PLACE IS OVER. CLOSED 2026-09-18.** Schema changes are **new migration files**. Do
+> not edit an applied one, and that includes the baseline.
+>
+> **Why, in one sentence:** an applied migration's content is part of its checksum, so editing it makes
+> Flyway refuse the whole run on every host that already has it — and there are such hosts now, the UAT
+> environment among them, which nobody is going to rebuild to accommodate a doc edit.
+>
+> **How to tell this switch had already happened, which is the part that was missed:** `migrations/`
+> holds five additive files after the baseline, including `V202608251930__v5.2.x__Metadata_Sync.sql`.
+> The bullet below always said *"switch to additive-only at first publish"*; the first publish was
+> `V202608251930`, three weeks before this note. The directory was the evidence and the rule was read
+> instead of the directory — which is how a corrected `AmountSourceHash` description was first written
+> as an edit to `V202608042101` (#108) before being redone as a new migration.
+>
+> `V202609020650`'s own header already states the discipline: it is numbered before its partner
+> deliberately, *"so no already-computed migration checksum changes."* Follow that file, not this
+> section's history.
+>
+> **What this changes in practice:** a schema change is a new `V<YYYYMMDDHHMM>__v<X.Y>.x__<Name>.sql`,
+> idempotent where it can be, guarded where it cannot. `scripts/rebuild-db.sh` is still how you get a
+> clean local database and still how a release seed is generated — it is the EDITING of the baseline
+> that is retired, not rebuilding.
+
+The original note is kept below, because its reasoning is still the reasoning for the phase it
+described — and because the condition it depended on is exactly what stopped being true:
+
+**(Historical — pre-publish.)** Schema changes **edit the baseline migration in place**; do not stack
+fix-up migrations. That is only safe because rebuilding from zero is routine:
 
 ```bash
 CONFIRM_DROP=<database> scripts/rebuild-db.sh   # drop+create, MJ core, bizapps-common, this app's DDL
@@ -357,7 +384,46 @@ scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped al
   metadata. Pass 2 emits them, and `--skipdb` (`npm run mj:codegen:files`) restricts it to TypeScript,
   Angular and GraphQL files.
 
-  > ### ⚠️ A FULL SECOND CODEGEN PASS CORRUPTS THE DATABASE. Measured, not theoretical.
+  > ### ⚠️ CODEGEN LAGS BY ONE PASS WHEN A NEW VIRTUAL COLUMN APPEARS — ✅ CORRECTED 2026-09-20
+  >
+  > **This block used to read "A FULL SECOND CODEGEN PASS CORRUPTS THE DATABASE", and that rule is
+  > backwards.** Measured on 2026-09-20, after giving `Sales Contacts` a name field — which makes every
+  > view with an FK to it gain a name column:
+  >
+  > | | Deals | Deal Contact Roles | CodeGen said |
+  > |---|---|---|---|
+  > | after pass 1 | 59 fields / **61** columns | 10 / **11** | `success: false` |
+  > | after pass 2 | **61 / 61** | **11 / 11** | `success: true` |
+  >
+  > The **first** pass left the corruption; the **second** repaired it. `createNewEntityFieldsFromSchema`
+  > builds `EntityField` rows by reading the base view's columns, so on the pass that CREATES those
+  > columns they are not yet visible to it. The next pass sees them and registers them.
+  >
+  > The original incident below is the same lag seen from the other side: pass 1 could not resolve the
+  > IsA-derived `Account` join, pass 2 added the column, and metadata was one pass behind *then*. One
+  > mechanism, not two rules.
+  >
+  > **So the rule is: run CodeGen until it reports `success: true` AND per-entity parity is clean.**
+  > Not "never run it twice" — that wording is why this repo went weeks unable to pick up the contact
+  > name columns at all. Verify explicitly; the integrity check is not sufficient on its own:
+  >
+  > ```sql
+  > SELECT e.Name, e.BaseView,
+  >   (SELECT COUNT(*) FROM __mj.EntityField f WHERE f.EntityID = e.ID) AS Fields,
+  >   (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS c
+  >     WHERE c.TABLE_SCHEMA = e.SchemaName AND c.TABLE_NAME = e.BaseView) AS ViewCols
+  > FROM __mj.Entity e WHERE e.SchemaName = '__mj_BizAppsSales';   -- every row must match
+  > ```
+  >
+  > **`entityFieldsSequenceCheck` points at the wrong entity.** On the failing pass it reported a
+  > sequence mismatch on `Deal Contact Roles` and said *nothing* about `Deals` being 59-vs-61 — the one
+  > that breaks inserts. A `success: false` naming one entity is not a statement about the others.
+  >
+  > **And `git checkout` is not an undo.** Pass 1 writes views, sprocs and `EntityField` rows. Take a
+  > `BACKUP DATABASE` first and `RESTORE VERIFYONLY` it; that is what made the 2026-09-20 run safe.
+  >
+  > The original entry, kept because the failure it describes is real and the mechanism is worth
+  > reading — only its *rule* was wrong:
   >
   > Running plain `mj:codegen` a second time regenerated `vwDeals` with **eleven** virtual lookup
   > columns where pass 1 produced ten — it added an `Account` join, derived from the `SalesAccount`
@@ -369,14 +435,22 @@ scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped al
   > transaction that then aborts. It also silently drifts the live DB away from the baseline, because
   > `append-codegen.sh` is (correctly) not re-run.
   >
-  > A single pass is self-consistent; two full passes are not. This is an IsA-ordering effect, so it
-  > will bite hardest on `SalesAccount`/`SalesContact` and anything else extending a parent entity.
+  > ~~A single pass is self-consistent; two full passes are not.~~ (Corrected above: the lag is one
+  > pass, in whichever direction the new column appears.) This is an IsA-ordering effect, so it will
+  > bite hardest on `SalesAccount`/`SalesContact` and anything else extending a parent entity — which
+  > is exactly where it bit again in 2026-09-20.
+  >
+  > One detail in the paragraph above is worth stating precisely, because it misleads: the `Deal`
+  > TABLE never changes. `spCreateDeal` ends in `SELECT * FROM vwDeals`, and the provider declares
+  > `@ResultTable` with one column per `EntityField`, filled by a POSITIONAL `INSERT ... EXEC`. It is
+  > the save-capture *width* that fails, not anything about the table.
 
   **Do NOT re-run `append-codegen.sh` after pass 2** either: with the generated half already in place
   a full pass emits only a delta, which the script rightly refuses — and with `--skipdb` there is no
   SQL to fold in at all.
 - Never add `__mj_CreatedAt`/`__mj_UpdatedAt` columns or FK indexes — CodeGen does both.
-- Switch to **additive-only** migrations at first publish.
+- ~~Switch to **additive-only** migrations at first publish.~~ **Done — at
+  `V202608251930__v5.2.x__Metadata_Sync.sql`.** See the block at the top of this section.
 - **Author for PostgreSQL from day one.** Production is PG; keep the T-SQL converter-friendly and
   avoid reserved words as column names (this is why `ForecastSnapshot` has `CommitAmount`, not
   `Commit`). Run the conversion once the baseline is stable.
@@ -410,20 +484,52 @@ PW_HEADLESS=1 pnpm run test:explorer   # unattended
   and view-vs-edit-mode traps that cost real time to find.
 
 ### CI (`.github/workflows/ci.yml`)
-Two hard gates on every PR and every push to `next`:
+**EIGHT gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
+listed the first and third; five more have been added since and went unrecorded. That understatement is
+not harmless — a reviewer who believes CI only greps and builds will reason that a template change, a
+copy change or a query comment cannot be caught by it, and will hand-check things CI already covers
+while trusting things it does not:
 
-1. **`npm run test:vocabulary-gate`** — the master plan §3 grep. This is what makes "enforced by a CI
+1. **`pnpm run test:vocabulary-gate`** — the master plan §3 grep. This is what makes "enforced by a CI
    grep" true rather than aspirational. Audited against injected violations: it catches 7 of 8, and its
    one measured blind spot is documented in the script.
-2. **`npm run build`** — all 8 turbo tasks including the Angular Explorer.
+2. **`pnpm run test:money-gate`** — sales records intent; orders computes the number.
+3. **`pnpm run build`** — all turbo tasks including the Angular Explorer.
+4. **`pnpm run test:discount-gate`** — percent vs fraction, both directions.
+5. **`pnpm run test:validation-gate`** — pane attribution, and what blocks a save.
+6. **`python3 scripts/assert-no-comment-drift.py`** — a documented column that is not returned.
+7. **`npm run test:spec-gate`** — Playwright specs typecheck (it does NOT run them).
+8. **Unit tests**, guarded on any existing.
+
+Plus a non-blocking changeset presence check.
+
+**What CI still does NOT cover**, and the distinction matters more than the count: `test:spec-gate`
+COMPILES the Playwright specs, it does not execute them. A spec asserting a string the app no longer
+renders typechecks perfectly and passes this gate. That is not hypothetical — sales#79 shipped exactly
+that, and only a local harness run would have caught it.
 
 The Explorer UI harness is deliberately **not** in CI: it needs a live database, running servers and a
 one-time interactive human login. Run it locally before merging.
 
 ### Changesets
-**A PR that adds or edits anything under `migrations/`, or changes a published package, must carry a
-changeset with at least a `minor` bump** — `npx changeset`. CI warns rather than fails, so treat the
-warning as a review item. `baseBranch` is `next`.
+**Every PR that changes a published package must carry a changeset** — `npx changeset`. CI warns rather
+than fails, so treat the warning as a review item. `baseBranch` is `next`.
+
+**The bump level follows semver, and `minor` is required for exactly two things:** anything under
+`migrations/`, and any change to a package's public API — a removed or renamed export, a changed
+exported signature, a new required argument. Everything else is `patch`: user-facing copy, UI
+behaviour, and server-side fixes that keep their signatures. `major` is for a break a consumer cannot
+absorb by reading the CHANGELOG.
+
+> This paragraph used to read *"or changes a published package, must carry a changeset with at least a
+> `minor` bump"*, which is stricter than MJ's rule and stricter than what this repo actually merges —
+> `deal-hero-focus-new-record`, `deal-hero-number-collapsed`, `deal-pipeline-leads-when-unsaved` and
+> `deal-hero-drop-dead-focus-call` all landed as `patch` with no migration. It produced one wrong
+> review finding on sales#79/#80 before anyone checked it against practice. Andrew's `minor` call on
+> sales#72 was right for the OTHER reason: it removed an exported symbol.
+
+`fixed: [["@mj-biz-apps/*"]]` in `.changeset/config.json` means the whole family versions together, so
+the level you pick drives the CHANGELOG's accuracy rather than which packages move.
 
 ---
 

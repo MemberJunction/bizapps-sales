@@ -23,25 +23,32 @@
  *
  * `Deal.Amount` is a CACHED ANSWER from Orders, stamped with `AmountIsComputed` / `AmountComputedAt` /
  * `AmountSourceHash`. Sales never recomputes it — this form does not add, multiply or round anything. It
- * only COMPARES timestamps: if a line has been touched since the amount was computed, the amount on
- * screen predates the line set it claims to describe, and the form says so.
+ * only COMPARES the cached figure with the order's current total: if they differ, the number on screen
+ * no longer describes the order it claims to, and the form says so.
  *
  * That comparison is not pricing. It is the difference between showing a number and vouching for one.
+ *
+ * It compares the NUMBER, not a timestamp, and `amount-freshness.ts` records why: the timestamp test
+ * asked whether a line had been touched, and closing a deal touches every line without moving a price —
+ * so every Won deal warned forever about an amount it was simultaneously forbidden to change
+ * (golive#230).
  *
  * @module @mj-biz-apps/sales-ng
  */
 import { Component } from '@angular/core';
-import { RunView } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
-import { DealFieldsEditableWhileLocked, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
+import {
+    DealFieldsEditableWhileLocked,
+    ResolveDealAmountFreshness,
+    ResolveDealLockState,
+} from '@mj-biz-apps/sales-entities';
 import type { ValidationResult } from '@memberjunction/core';
+import { RunView } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
-
-// The lines whose freshness the stale-amount notice checks are ORDER lines now (S-US4), reached
-// through the deal's embedded order rather than by DealID -- see the filter below.
-const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
+import { MJS_ENTITIES } from '../data/entity-names';
+import { ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
 
 /** See `deal-stage-event-form.component.ts` for why the priority is explicit rather than import-order. */
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Sales: Deals', 2)
@@ -62,10 +69,20 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     public IsLost = false;
 
+    /**
+     * Whether the PERSISTED status is a WIN — read as its own flag, never inferred from `!IsLost`.
+     *
+     * golive#226: the Order and Contract chips belong on a won deal and on no other, because an open
+     * deal's order is still a draft nobody should be editing directly. golive#231's outcome tiles read
+     * the same flag. Resolved with the lock, from the same status row; the panels read it here rather
+     * than asking again.
+     */
+    public IsWon = false;
+
     /** Shown when locked, so the greyed-out-ness the form cannot render is at least explained. */
     public LockNotice: string | null = null;
 
-    /** Set when `Deal.Amount` predates its line set. Null when the amount is trustworthy or absent. */
+    /** Set when `Deal.Amount` no longer matches its order's total. Null when trustworthy, absent or locked. */
     public StaleAmountNotice: string | null = null;
 
     public override async ngOnInit(): Promise<void> {
@@ -91,52 +108,86 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         const lock = await ResolveDealLockState(persisted);
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
+        this.IsWon = lock.IsWon;
         this.LockNotice = lock.Notice;
     }
 
     /**
-     * Compares the amount's stamp against the lines it claims to describe. No arithmetic.
+     * Compares the cached amount against the order it claims to describe. No arithmetic.
+     *
+     * The rule lives in `ResolveDealAmountFreshness` so this form and the deal hero cannot answer it
+     * differently — the same reason `ResolveDealLockState` is shared. Read that file's header for why
+     * this is no longer a timestamp comparison (golive#230).
+     *
+     * ORDER MATTERS: `resolveCloseLock()` runs first in `ngOnInit`, so `IsLocked` is settled before it
+     * is passed here. A locked deal never warns.
      */
     private async resolveAmountFreshness(): Promise<void> {
-        const computedAt = this.record?.Get?.('AmountComputedAt') as string | Date | null | undefined;
-        const isComputed = this.record?.Get?.('AmountIsComputed') as boolean | null | undefined;
-        if (!isComputed || !computedAt || !this.record?.Get?.('ID')) {
+        this.StaleAmountNotice = null;
+        if (!this.record?.Get?.('ID')) {
             return;
         }
 
-        // No order means no lines, so nothing can have gone stale.
-        const orderID = this.record.Get('OrderID');
-        if (!orderID) {
-            return;
-        }
-
-        const rv = new RunView();
-        /**
-         * `__mj_UpdatedAt` is typed as `string | Date` because BOTH arrive.
-         *
-         * MJ v6 hands back real `Date` objects where v5 handed back ISO strings, and this repo has already
-         * been caught by that once (`7e55bae`, "dates arrive as Date, not string — the Sales UI assumed
-         * string"). Typing it `string` compiles perfectly and would be wrong at runtime the moment the
-         * value is used as one. `new Date()` accepts either, so the comparison below is safe on both.
-         */
-        const result = await rv.RunView<{ __mj_UpdatedAt: string | Date }>({
-            EntityName: E_ORDER_LINE,
-            // BY OrderHeaderID, NOT DealID. An order line carries no DealID -- the deal reaches its lines
-            // through OrderID. Filtering on the deal's own key would have matched nothing and the notice
-            // would simply never appear again: a warning that silently stops warning.
-            ExtraFilter: `OrderHeaderID = '${String(orderID).replace(/'/g, "''")}'`,
-            OrderBy: '__mj_UpdatedAt DESC',
-            ResultType: 'simple',
-            Fields: ['__mj_UpdatedAt'],
+        const freshness = await ResolveDealAmountFreshness({
+            IsLocked: this.IsLocked,
+            AmountIsComputed: this.record.Get('AmountIsComputed') as boolean | null | undefined,
+            Amount: this.record.Get('Amount') as number | string | null | undefined,
+            OrderID: this.record.Get('OrderID') as string | null | undefined,
         });
-        const newest = result?.Success ? (result.Results ?? [])[0]?.__mj_UpdatedAt : undefined;
-        if (!newest) {
+        this.StaleAmountNotice = freshness.Notice;
+    }
+
+    /**
+     * Fills the selling company from the pipeline before the save is validated.
+     *
+     * WHY IT IS HERE AND NOT IN `Validate()`. `SaveRecord` calls `Validate()` and returns early when it
+     * fails, so a stamp applied inside validation would be racing the thing it exists to satisfy. This
+     * runs before `super.SaveRecord()` — which is what puts it ahead of the validator.
+     *
+     * `company-from-pipeline.ts` holds the decision and the reasoning, including why the client is
+     * allowed to write a server-owned field at all. This method owns only the lookup.
+     *
+     * A pipeline that cannot be read is NOT an error here. The stamp is best-effort: if it fails, the
+     * save proceeds and validation refuses exactly as it did before, which is the behaviour this is
+     * replacing rather than something it makes worse. Swallowing a real problem is the risk, so the
+     * refusal the user then sees still names `CompanyID`.
+     */
+    public override async SaveRecord(StopEditModeAfterSave: boolean): Promise<boolean> {
+        await this.stampCompanyFromPipeline();
+        return super.SaveRecord(StopEditModeAfterSave);
+    }
+
+    /** Reads the chosen pipeline's company and writes it to the deal. See `SaveRecord` for why. */
+    private async stampCompanyFromPipeline(): Promise<void> {
+        const record = this.record;
+        const should = ShouldStampCompanyFromPipeline({
+            HasRecord: !!record,
+            PipelineID: (record?.Get('PipelineID') as string | null | undefined) ?? null,
+            CompanyID: (record?.Get('CompanyID') as string | null | undefined) ?? null,
+        });
+        if (!should || !record) {
             return;
         }
 
-        if (new Date(newest).getTime() > new Date(computedAt).getTime()) {
-            this.StaleAmountNotice =
-                'A line has changed since this amount was last priced. Reprice the order to update the total.';
+        /**
+         * `ResultType: 'simple'` returns plain rows, which is what is wanted: CodeGen generates no
+         * `PipelineEntity` subclass, and nothing here mutates the pipeline — only reads one column off it.
+         */
+        const rv = new RunView();
+        const result = await rv.RunView<PipelineCompanyRow>({
+            EntityName: MJS_ENTITIES.Pipeline,
+            ExtraFilter: `ID='${String(record.Get('PipelineID')).replace(/'/g, "''")}'`,
+            ResultType: 'simple',
+            Fields: ['CompanyID'],
+        });
+        // RunView does not throw — a failed read leaves the deal exactly as it was.
+        if (!result.Success) {
+            return;
+        }
+
+        const companyID = result.Results?.[0]?.CompanyID ?? null;
+        if (companyID) {
+            record.Set('CompanyID', companyID);
         }
     }
 

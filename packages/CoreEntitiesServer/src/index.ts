@@ -107,6 +107,7 @@ export type {
  * FORECAST SNAPSHOTS (#40). A seam, a factory whose default reads nothing, and an Action a
  * scheduled job calls.
  */
+export * from './DealLockOrderLineVeto.js';
 export * from './forecast/ForecastSource.js';
 export * from './forecast/FixtureForecastSource.js';
 export * from './forecast/QueryForecastSource.js';

@@ -405,12 +405,28 @@ describe('the reopen actually reaches the screen', () => {
     const codeOnly = (text: string): string =>
         text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
-    const confirmReopen = codeOnly(
-        (() => {
-            const start = source.indexOf('public async ConfirmReopen(): Promise<void> {');
-            return source.slice(start, source.indexOf('\n    }', start));
-        })(),
-    );
+    /**
+     * EVERY `ConfirmReopen`, NOT THE FIRST ONE.
+     *
+     * `indexOf` returned the Pipeline panel's copy, so the Close panel's identical method was
+     * invisible to the assertions below -- permanently, and silently. That is how the Close panel
+     * shipped a reopen which never left edit mode, under a green test named for exactly that: the
+     * reload ran inside edit mode, `canRefreshRecord()` was false, and the form kept showing a deal
+     * the server had already reopened.
+     *
+     * Finding the rows and asserting about each, rather than indexing one and asserting about it,
+     * is the shape CLAUDE.md rule 8 prescribes -- and it covers a third panel nobody has written yet.
+     */
+    const confirmReopens = ((): { panel: string; body: string }[] => {
+        const needle = 'public async ConfirmReopen(): Promise<void> {';
+        const found: { panel: string; body: string }[] = [];
+        for (let at = source.indexOf(needle); at !== -1; at = source.indexOf(needle, at + needle.length)) {
+            const owner = source.lastIndexOf('export class ', at);
+            const panel = source.slice(owner).match(/^export class (\w+)/)?.[1] ?? `offset ${at}`;
+            found.push({ panel, body: codeOnly(source.slice(at, source.indexOf('\n    }', at))) });
+        }
+        return found;
+    })();
 
     it('leaves edit mode BEFORE reloading, because the reload is a no-op inside it', () => {
         /**
@@ -419,19 +435,36 @@ describe('the reopen actually reaches the screen', () => {
          * mode. Without this the reload returned false and the form kept showing a Won, locked deal
          * the server had already reopened. Observed in Explorer, not inferred.
          */
-        const endedAt = confirmReopen.indexOf('EndEditMode()');
-        const refreshedAt = confirmReopen.indexOf('RefreshRecord()');
-        expect(endedAt, 'ConfirmReopen must end edit mode').toBeGreaterThan(-1);
-        expect(refreshedAt, 'ConfirmReopen must reload').toBeGreaterThan(-1);
-        expect(endedAt, 'edit mode ends before the reload, or the reload does nothing').toBeLessThan(
-            refreshedAt,
-        );
+        // Anti-vacuity: a needle that matches nothing looks exactly like a suite that passed.
+        // Guarded on `> 0` rather than on a panel count, which a fourth panel would outgrow.
+        expect(confirmReopens.length, 'no ConfirmReopen found -- the needle has gone stale').toBeGreaterThan(0);
+        for (const { panel, body } of confirmReopens) {
+            const endedAt = body.indexOf('EndEditMode()');
+            // EITHER SPELLING OF THE RELOAD. The Pipeline panel calls `RefreshRecord()` directly;
+            // the Close panel goes through `refreshQuietly()`, which wraps it so a reload failure
+            // cannot rewrite the outcome. Pinning one spelling would have failed the panel that
+            // does it correctly -- the requirement is that it reloads, not how it spells it.
+            const reloads = ['RefreshRecord()', 'refreshQuietly()']
+                .map((call) => body.indexOf(call))
+                .filter((at) => at > -1);
+            const refreshedAt = reloads.length ? Math.min(...reloads) : -1;
+            expect(endedAt, `${panel}.ConfirmReopen must end edit mode`).toBeGreaterThan(-1);
+            expect(refreshedAt, `${panel}.ConfirmReopen must reload`).toBeGreaterThan(-1);
+            expect(
+                endedAt,
+                `${panel}: edit mode ends before the reload, or the reload does nothing`,
+            ).toBeLessThan(refreshedAt);
+        }
     });
 
     it('does NOT end edit mode by saving, which would refuse a legal reopen', () => {
         // `ConfirmClose` uses `SaveRecord(true)`; a reopen must not, because the close lock refuses
         // the save on the very deal being reopened. The Close panel's own reopen says the same.
-        expect(confirmReopen).not.toMatch(/SaveRecord\(/);
+        for (const { panel, body } of confirmReopens) {
+            expect(body, `${panel}.ConfirmReopen must not save its way out of edit mode`).not.toMatch(
+                /SaveRecord\(/,
+            );
+        }
     });
 });
 
