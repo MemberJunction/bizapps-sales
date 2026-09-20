@@ -220,6 +220,31 @@ interface RemoteOperationRouter {
                     @if (!CanSave && !Saving) {
                         <span class="mjs-le__muted">{{ BlockedReason }}</span>
                     }
+                    <!--
+                         REMOVE SITS APART FROM THE PAIR ABOVE, pushed right by its own margin. Confirm
+                         left and cancel right is the rule for the two choices that END this dialog
+                         normally; a destructive third option next to Save is how a rep removes a
+                         product they meant to keep.
+
+                         OFFERED ONLY FOR A LINE THAT EXISTS. A line being composed has nothing to
+                         remove — Cancel already discards it.
+                    -->
+                    @if (CanRemove) {
+                        @if (Confirming) {
+                            <span class="mjs-le__confirm">
+                                <span class="mjs-le__muted">Remove this product?</span>
+                                <button type="button" class="mjs-le__btn mjs-le__btn--danger"
+                                        [disabled]="Saving" (click)="Remove()">
+                                    {{ Saving ? 'Removing…' : 'Remove' }}
+                                </button>
+                                <button type="button" class="mjs-le__btn" [disabled]="Saving"
+                                        (click)="Confirming = false">Keep</button>
+                            </span>
+                        } @else {
+                            <button type="button" class="mjs-le__btn mjs-le__btn--quiet"
+                                    [disabled]="Saving" (click)="Confirming = true">Remove</button>
+                        }
+                    }
                 </footer>
             }
         </div>
@@ -287,6 +312,11 @@ interface RemoteOperationRouter {
             color: #fff;
         }
         .mjs-le__btn[disabled] { opacity: .55; cursor: not-allowed; }
+        .mjs-le__btn--quiet { margin-left: auto; color: var(--mj-status-error, #b3261e); }
+        .mjs-le__btn--danger {
+            background: var(--mj-status-error, #b3261e); color: #fff; border-color: transparent;
+        }
+        .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
         @media (max-width: 480px) {
             .mjs-le__row { flex-direction: column; }
         }
@@ -611,6 +641,65 @@ export class MJSDealLineEditorComponent implements OnInit {
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
         return this.DiscountRefusal ?? '';
+    }
+
+    /**
+     * Whether this line can be taken off the deal.
+     *
+     * A line being COMPOSED is not removable — there is nothing to remove, and Cancel already discards
+     * it. A locked deal refuses for the same reason it refuses every other change to what was sold, and
+     * golive#206 item 1 names deleting alongside adding and editing.
+     */
+    public get CanRemove(): boolean {
+        return !!this.LineID && !this.IsLocked && !!this.Deal?.OrderID_Object;
+    }
+
+    /** Two-step, because removing a product a rep meant to keep costs them a re-entry. */
+    public Confirming = false;
+
+    /**
+     * Takes the line off the ORDER, which is the only thing that can take it off the deal.
+     *
+     * THROUGH THE COLLECTION, NOT A DIRECT DELETE. `order.Lines.Remove()` then `order.Save()` is the
+     * path orders drains: `OrderEntityServer` reads `Lines.Removed` during its save, renumbers the
+     * survivors and recomputes the header. Deleting the `OrderLine` record straight from a grid skips
+     * all of it — which is why the grid's own delete button stays off, the same reason its New does.
+     *
+     * THIS BECAME POSSIBLE ONLY RECENTLY. Orders did not drain `Lines.Removed` at all, so a removal was
+     * silently dropped and then, once it started refusing, cost the rep every other edit staged beside
+     * it. Sales carried a blanket refusal for that (`ShouldRefuseLineRemoval`, still in the unmounted
+     * workspace). The orders fix landed with golive#187, and `save-deal.SD6` is the tripwire that said
+     * so.
+     *
+     * It emits `Saved` rather than a removal-specific event: what the panel has to do afterwards is
+     * identical — re-read the grid and force a deal save so the amount follows the order down.
+     */
+    public async Remove(): Promise<void> {
+        const order = this.Deal?.OrderID_Object;
+        if (!this.Working || !this.CanRemove || !order) {
+            return;
+        }
+        this.Saving = true;
+        this.Error = null;
+        this.cdr.detectChanges();
+        try {
+            order.Lines.Remove(this.Working);
+            const ok = await order.Save();
+            if (!ok) {
+                // Put it back: a refused save must not leave the collection claiming a removal that
+                // did not happen, or the next save would retry it against a rep who has moved on.
+                await order.Lines.Load(true);
+                this.Error = order.LatestResult?.Message || 'The product could not be removed.';
+                return;
+            }
+            this.Saved.emit();
+        } catch (err) {
+            this.Error = err instanceof Error ? err.message : String(err);
+        } finally {
+            this.Saving = false;
+            this.Confirming = false;
+            this.cdr.detectChanges();
+        }
     }
 
     public async Save(): Promise<void> {
