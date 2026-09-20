@@ -8,12 +8,12 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, ViewEncapsulation, inject } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
 import { RegisterClassEx } from '@memberjunction/global';
-import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
+import { BaseFormPanel, BaseFormsModule, FormChromeCoordinator } from '@memberjunction/ng-base-forms';
 import { RelatedChipsComponent, type BizAppsRelatedLink } from '@mj-biz-apps/common-ng';
 import {
     DealEntity,
@@ -395,7 +395,7 @@ function money(n: number | null | undefined): string {
         }
     `],
 })
-export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit {
+export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit, DoCheck {
     private readonly cdr = inject(ChangeDetectorRef);
     private readonly host = inject(ElementRef<HTMLElement>);
     /** The record the cursor has already been placed for, so it is never taken twice. */
@@ -448,6 +448,49 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
      */
     public override OnRecordRefreshed(_record: DealEntity): void {
         void this.refreshNotices();
+    }
+
+    /**
+     * WHERE A DEAL GOES ONCE IT EXISTS.
+     *
+     * A NEW deal opens on Pipeline — the Pipeline panel declares `leadsWhenUnsaved`, deliberately
+     * (golive#188), because a summary of a record with no data is a page of blanks. Once it is saved
+     * that reasoning inverts: the summary now has something to summarise, and the rep has just
+     * finished the thing Pipeline was for.
+     *
+     * MJ persists the active group only for a SAVED record (`ShouldPersistChromeActiveGroup`), so
+     * nothing moved the rail on that transition and a rep was left looking at the form they had just
+     * completed.
+     *
+     * ── WHY THE HERO AND NOT THE PIPELINE PANEL ─────────────────────────────────────────────────
+     *
+     * Two reasons, and the second is the load-bearing one. The hero is rendered for every section, so
+     * it sees the save whichever rail item the rep happens to be on. And `MJSDealPipelinePanel`
+     * deliberately avoids `inject()` — its own comment records that a `ChangeDetectorRef` would need
+     * an injection context and `new MJSDealPipelinePanel()` would stop working in its tests.
+     *
+     * ── THE CROSSING IS THE WHOLE RULE ──────────────────────────────────────────────────────────
+     *
+     * Keyed on the TRANSITION, not on `IsSaved`: a deal that is already saved must never be dragged to
+     * Overview, or a rep could not stay on any other section for the rest of its life. That single
+     * test also makes it fire once — after the crossing `wasSaved` is true, so every later pass
+     * returns. A separate once-per-record flag was written here first and a mutation proved it inert:
+     * it guarded nothing the transition did not already guard, while reading as though it did.
+     */
+    private wasSaved: boolean | null = null;
+    private readonly chrome = inject(FormChromeCoordinator, { optional: true });
+
+    public ngDoCheck(): void {
+        const record = this.Record;
+        if (!record) return;
+
+        const saved = !!record.IsSaved;
+        const was = this.wasSaved;
+        this.wasSaved = saved;
+
+        // Only the crossing counts, and only once for this record.
+        if (was !== false || !saved) return;
+        this.chrome?.SetActiveGroup('overview');
     }
 
     public ngAfterViewInit(): void {
