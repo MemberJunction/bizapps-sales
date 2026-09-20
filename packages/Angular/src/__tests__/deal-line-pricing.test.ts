@@ -188,9 +188,9 @@ describe('asking politely', () => {
  * amount while its order carried a real total.
  */
 describe('after a line is saved', () => {
-    it('saves the deal, so the cached amount catches up', async () => {
+    it('forces a deal save, because the deal itself is not dirty', async () => {
         const { MJSDealLinesPanel } = await import('../lib/form-panels/deal-form.panels');
-        const saves: boolean[] = [];
+        const saved: Array<{ IgnoreDirtyState?: boolean }> = [];
         const p = Object.create(MJSDealLinesPanel.prototype) as {
             OnLineSaved(): Promise<void>;
             EditorOpen: boolean;
@@ -198,14 +198,22 @@ describe('after a line is saved', () => {
         };
         p.EditorOpen = true;
         p.EditingLineID = 'line-1';
-        Object.defineProperty(p, 'FormComponent', {
-            value: { SaveRecord: async (stop: boolean) => { saves.push(stop); return true; } },
+        Object.defineProperty(p, 'Record', {
+            value: { Save: async (o: { IgnoreDirtyState?: boolean }) => { saved.push(o); return true; } },
             configurable: true,
         });
         Object.defineProperty(p, 'linesGrid', { value: { Refresh: async () => {} }, configurable: true });
 
         await p.OnLineSaved();
-        expect(saves, 'the deal must be saved, staying in edit mode').toEqual([false]);
+
+        /**
+         * THE FLAG IS THE WHOLE FIX. The line changed the ORDER, so the deal's own columns are clean and
+         * `BaseEntity.Save()` skips the provider entirely when nothing is dirty — the earlier
+         * `SaveRecord(false)` was a silent no-op that never reached the entity server, which is why
+         * three rounds of fixing the amount guard changed nothing.
+         */
+        expect(saved, 'the deal must be saved exactly once').toHaveLength(1);
+        expect(saved[0]?.IgnoreDirtyState, 'without this the save is dropped before it is sent').toBe(true);
         expect(p.EditorOpen, 'and the dialog closes').toBe(false);
     });
 });

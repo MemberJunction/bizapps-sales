@@ -14,7 +14,7 @@
 import { ChangeDetectorRef, Component, ViewChild, ViewEncapsulation, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { CompositeKey, Metadata, RunView, type EntityInfo } from '@memberjunction/core';
+import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent } from '@memberjunction/ng-base-forms';
 import {
@@ -1862,7 +1862,20 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     public get Params() {
         const id = this.Record?.OrderID;
         if (!id) return null;
-        return { EntityName: MJS_FOREIGN_ENTITIES.OrderLine, ExtraFilter: `OrderHeaderID = '${String(id).replace(/'/g, "''")}'` };
+        return {
+            EntityName: MJS_FOREIGN_ENTITIES.OrderLine,
+            ExtraFilter: `OrderHeaderID = '${String(id).replace(/'/g, "''")}'`,
+            /**
+             * IN LINE-NUMBER ORDER, because without it the view's order is arbitrary and a rep saw
+             * 2, 3, 1 after adding three products.
+             *
+             * `LineNumber` rather than a created-at stamp: orders STAMPS it through the collection's
+             * `applySequence()` and re-stamps by array index when lines move, so it is the order the
+             * order itself considers the lines to be in. Sorting by creation time would show a
+             * resequenced order in the sequence it was typed rather than the sequence it now has.
+             */
+            OrderBy: 'LineNumber',
+        };
     }
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('lines', event.totalRowCount);
@@ -1958,7 +1971,27 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     public async OnLineSaved(): Promise<void> {
         this.CloseEditor();
         void this.linesGrid?.Refresh();
-        await this.FormComponent?.SaveRecord?.(false);
+
+        /**
+         * `IgnoreDirtyState`, AND IT IS THE WHOLE REASON THIS WORKS.
+         *
+         * The line changed the ORDER. The deal's own columns are untouched, so it is not dirty — and
+         * `BaseEntity.Save()` skips the provider entirely when nothing is dirty. `SaveRecord(false)`
+         * was therefore a silent no-op: the request never left the browser, the entity server never
+         * ran, and the amount guard it was meant to trigger never evaluated.
+         *
+         * Measured, which is the only reason this was found: deal `__mj_UpdatedAt` 00:32:43 against its
+         * order at 00:39:08 with three lines totalling 1057, and `Amount` still NULL. Three rounds of
+         * fixing the guard changed nothing because the save was being dropped before it got there.
+         *
+         * `Record.Save(options)` rather than `FormComponent.SaveRecord()`: the form's wrapper takes no
+         * `EntitySaveOptions` and so cannot ask for this. It is still a FULL deal save — the same entity
+         * server, the same lock checks, the same stamps — which is what refreshes `Amount` from the
+         * order and keeps that figure's single author.
+         */
+        const options = new EntitySaveOptions();
+        options.IgnoreDirtyState = true;
+        await this.Record?.Save(options);
     }
 }
 

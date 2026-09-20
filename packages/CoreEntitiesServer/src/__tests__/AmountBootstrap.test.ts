@@ -19,14 +19,18 @@ import { readFileSync } from 'node:fs';
  * any of them shows up as a failure with the state named.
  */
 function amountMayHaveMoved(s: {
+    /** The IN-MEMORY embedded order. Null on most saves — nothing loads it unless asked. */
     hasOrder: boolean;
+    /** The FK. Present on any deal that has an order at all, loaded or not. */
+    orderID?: boolean;
     orderDirty?: boolean;
     linesDirty?: boolean;
     amountIsComputed?: boolean;
     amount?: number | null;
 }): boolean {
-    return !!s.hasOrder
-        && (!!s.orderDirty || !!s.linesDirty || s.amountIsComputed === true || (s.amount ?? null) === null);
+    const orderID = s.orderID ?? s.hasOrder;
+    return (!!s.hasOrder && (!!s.orderDirty || !!s.linesDirty))
+        || (!!orderID && (s.amountIsComputed === true || (s.amount ?? null) === null));
 }
 
 describe('when a deal re-reads its order total', () => {
@@ -53,7 +57,17 @@ describe('when a deal re-reads its order total', () => {
     });
 
     it('does nothing at all without an order', () => {
-        expect(amountMayHaveMoved({ hasOrder: false, amount: null })).toBe(false);
+        expect(amountMayHaveMoved({ hasOrder: false, orderID: false, amount: null })).toBe(false);
+    });
+
+    /**
+     * THE CASE THAT MADE THE WHOLE GUARD INERT. `OrderID_Object` is the in-memory embedded order and is
+     * null on a plain save from the form, so an `!!order &&` prefix short-circuited every other test.
+     * A deal with an order it has not loaded must still re-read.
+     */
+    it('re-reads a deal whose order is not loaded in this session', () => {
+        expect(amountMayHaveMoved({ hasOrder: false, orderID: true, amount: null })).toBe(true);
+        expect(amountMayHaveMoved({ hasOrder: false, orderID: true, amount: 229, amountIsComputed: true })).toBe(true);
     });
 });
 
@@ -68,7 +82,7 @@ describe('the table describes the code that actually runs', () => {
     const SOURCE = readFileSync(new URL('../DealEntityServer.ts', import.meta.url), 'utf8');
 
     it('pins each term of the shipped expression', () => {
-        const at = SOURCE.indexOf('const amountMayHaveMoved = !!order');
+        const at = SOURCE.indexOf('const amountMayHaveMoved =');
         expect(at, 'the guard must still exist under this name').toBeGreaterThan(-1);
         const expr = SOURCE.slice(at, SOURCE.indexOf(';', at));
         for (const term of [
@@ -76,6 +90,7 @@ describe('the table describes the code that actually runs', () => {
             'order.Lines.Dirty',
             'this.AmountIsComputed === true',
             'this.Amount === null',
+            'this.OrderID',   // the state tests must ask the FK, not the in-memory object
         ]) {
             expect(expr, `the guard no longer tests ${term}`).toContain(term);
         }
@@ -83,8 +98,8 @@ describe('the table describes the code that actually runs', () => {
 
     /** The bootstrap must be an OR beside the others, not a replacement for them. */
     it('adds the bootstrap without dropping what was there', () => {
-        const at = SOURCE.indexOf('const amountMayHaveMoved = !!order');
+        const at = SOURCE.indexOf('const amountMayHaveMoved =');
         const expr = SOURCE.slice(at, SOURCE.indexOf(';', at));
-        expect((expr.match(/\|\|/g) ?? []).length, 'four terms means three ORs').toBe(3);
+        expect((expr.match(/\|\|/g) ?? []).length, 'dirtiness pair, state pair, joined').toBe(3);
     });
 });

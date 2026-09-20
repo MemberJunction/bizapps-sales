@@ -15,6 +15,12 @@ It does **not** reintroduce polling, which the note in `Save()` rejects for good
 
 **And the deal is saved when a line commits**, so the figure appears while the rep is looking at it rather than after some later unrelated save. A full save rather than a targeted amount write: `Amount` has one author — `refreshAmountFromOrder`, where the provenance stamps are set together — and a panel reaching in to write it is how a cached figure and its fingerprint start disagreeing. The stated cost is that other unsaved edits commit with it, which is the right answer while composing.
 
-Neither half works alone. The guard without the seam only takes effect on some later save; the seam without the guard runs a save that refreshes nothing.
+**And the deal save had to be forced past the dirty check**, which is what made the first two attempts look like they had changed nothing. A line save changes the ORDER; the deal's own columns are untouched, so it is not dirty — and `BaseEntity.Save()` skips the provider entirely when nothing is dirty. `FormComponent.SaveRecord()` takes no `EntitySaveOptions` and so cannot ask otherwise, so the request never left the browser and the entity server never ran. The seam calls `Record.Save()` with `IgnoreDirtyState`, still a full deal save.
+
+**The guard also had to stop asking the wrong question.** `OrderID_Object` is the IN-MEMORY embedded order and is null on any save that did not load it — which is most of them — so an `!!order &&` prefix short-circuited every other test. The note claiming lined deals "re-read TotalGross on every save" was therefore true only when the order happened to be in memory. The dirtiness tests, which genuinely need the object, stay behind it; the state tests ask `OrderID` instead, which is all `refreshAmountFromOrder` needs.
+
+None of the three works alone: without the forced save nothing reaches the server, without the FK-keyed guard the save refreshes nothing, and without the bootstrap term a deal that never had an amount can never acquire one.
+
+Found by measurement rather than reading, after two confident and wrong diagnoses: deal `__mj_UpdatedAt` 00:32:43 against its order at 00:39:08 with three lines totalling 1057. A deal timestamp older than its order's says the save never ran, which no amount of studying the guard would have revealed.
 
 The guard's decision table is reproduced in tests rather than extracted — changing code to suit a test is its own problem — and a second test reads the shipped expression and asserts every term of it, so the copy cannot drift from the original unnoticed.

@@ -481,8 +481,25 @@ export class DealEntityServer extends DealEntity {
          * without touching a column. Drift caused by someone editing the order directly is still not
          * chased here; that is still what `AmountSourceHash` is for.
          */
-        const amountMayHaveMoved = !!order
-            && (order.Dirty || order.Lines.Dirty || this.AmountIsComputed === true || this.Amount === null);
+        /**
+         * ── AND THE TESTS SPLIT BY WHAT THEY ACTUALLY NEED ──────────────────────────────────────────
+         *
+         * `OrderID_Object` is the IN-MEMORY embedded order — `__embeddedOrder.Value` — which is null
+         * unless something in this session loaded or ensured it. A plain save arriving from the form
+         * has no order object at all, so an `!!order &&` prefix short-circuits the whole guard before
+         * any other test is reached.
+         *
+         * That is why the note above ("lined deals re-read TotalGross on every save") did not hold: it
+         * was true only when the order happened to be in memory, which is not most saves. Measured — a
+         * deal saved at 00:32:43 against its order updated at 00:33:08, with `Amount` still NULL.
+         *
+         * `refreshAmountFromOrder` needs only `this.OrderID`; it runs its own view. So the dirtiness
+         * tests, which genuinely require the object, stay behind it — and the state tests, which only
+         * need the deal's own columns, ask the FK instead.
+         */
+        const amountMayHaveMoved =
+            (!!order && (order.Dirty || order.Lines.Dirty))
+            || (!!this.OrderID && (this.AmountIsComputed === true || this.Amount === null));
 
         // The stage's forecast defaults, on the same trigger as the three above. Read here, applied
         // inside the scope, for the same reason the others are: work that might not be needed should not
