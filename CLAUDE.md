@@ -384,7 +384,46 @@ scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped al
   metadata. Pass 2 emits them, and `--skipdb` (`npm run mj:codegen:files`) restricts it to TypeScript,
   Angular and GraphQL files.
 
-  > ### ⚠️ A FULL SECOND CODEGEN PASS CORRUPTS THE DATABASE. Measured, not theoretical.
+  > ### ⚠️ CODEGEN LAGS BY ONE PASS WHEN A NEW VIRTUAL COLUMN APPEARS — ✅ CORRECTED 2026-09-20
+  >
+  > **This block used to read "A FULL SECOND CODEGEN PASS CORRUPTS THE DATABASE", and that rule is
+  > backwards.** Measured on 2026-09-20, after giving `Sales Contacts` a name field — which makes every
+  > view with an FK to it gain a name column:
+  >
+  > | | Deals | Deal Contact Roles | CodeGen said |
+  > |---|---|---|---|
+  > | after pass 1 | 59 fields / **61** columns | 10 / **11** | `success: false` |
+  > | after pass 2 | **61 / 61** | **11 / 11** | `success: true` |
+  >
+  > The **first** pass left the corruption; the **second** repaired it. `createNewEntityFieldsFromSchema`
+  > builds `EntityField` rows by reading the base view's columns, so on the pass that CREATES those
+  > columns they are not yet visible to it. The next pass sees them and registers them.
+  >
+  > The original incident below is the same lag seen from the other side: pass 1 could not resolve the
+  > IsA-derived `Account` join, pass 2 added the column, and metadata was one pass behind *then*. One
+  > mechanism, not two rules.
+  >
+  > **So the rule is: run CodeGen until it reports `success: true` AND per-entity parity is clean.**
+  > Not "never run it twice" — that wording is why this repo went weeks unable to pick up the contact
+  > name columns at all. Verify explicitly; the integrity check is not sufficient on its own:
+  >
+  > ```sql
+  > SELECT e.Name, e.BaseView,
+  >   (SELECT COUNT(*) FROM __mj.EntityField f WHERE f.EntityID = e.ID) AS Fields,
+  >   (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS c
+  >     WHERE c.TABLE_SCHEMA = e.SchemaName AND c.TABLE_NAME = e.BaseView) AS ViewCols
+  > FROM __mj.Entity e WHERE e.SchemaName = '__mj_BizAppsSales';   -- every row must match
+  > ```
+  >
+  > **`entityFieldsSequenceCheck` points at the wrong entity.** On the failing pass it reported a
+  > sequence mismatch on `Deal Contact Roles` and said *nothing* about `Deals` being 59-vs-61 — the one
+  > that breaks inserts. A `success: false` naming one entity is not a statement about the others.
+  >
+  > **And `git checkout` is not an undo.** Pass 1 writes views, sprocs and `EntityField` rows. Take a
+  > `BACKUP DATABASE` first and `RESTORE VERIFYONLY` it; that is what made the 2026-09-20 run safe.
+  >
+  > The original entry, kept because the failure it describes is real and the mechanism is worth
+  > reading — only its *rule* was wrong:
   >
   > Running plain `mj:codegen` a second time regenerated `vwDeals` with **eleven** virtual lookup
   > columns where pass 1 produced ten — it added an `Account` join, derived from the `SalesAccount`
@@ -396,8 +435,15 @@ scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped al
   > transaction that then aborts. It also silently drifts the live DB away from the baseline, because
   > `append-codegen.sh` is (correctly) not re-run.
   >
-  > A single pass is self-consistent; two full passes are not. This is an IsA-ordering effect, so it
-  > will bite hardest on `SalesAccount`/`SalesContact` and anything else extending a parent entity.
+  > ~~A single pass is self-consistent; two full passes are not.~~ (Corrected above: the lag is one
+  > pass, in whichever direction the new column appears.) This is an IsA-ordering effect, so it will
+  > bite hardest on `SalesAccount`/`SalesContact` and anything else extending a parent entity — which
+  > is exactly where it bit again in 2026-09-20.
+  >
+  > One detail in the paragraph above is worth stating precisely, because it misleads: the `Deal`
+  > TABLE never changes. `spCreateDeal` ends in `SELECT * FROM vwDeals`, and the provider declares
+  > `@ResultTable` with one column per `EntityField`, filled by a POSITIONAL `INSERT ... EXEC`. It is
+  > the save-capture *width* that fails, not anything about the table.
 
   **Do NOT re-run `append-codegen.sh` after pass 2** either: with the generated half already in place
   a full pass emits only a delta, which the script rightly refuses — and with `--skipdb` there is no
