@@ -380,9 +380,18 @@ DECLARE @s6 UNIQUEIDENTIFIER='91111111-0000-4000-A000-000000000006';
 -- confirming books journal entries, and which stage earns that is the one open question here — see
 -- DECISIONS-NEEDED.md DN-10. Changing it is one field on one row.
 --
--- Voided on Lost (S-US7). It is also what makes the reopen case in S-US8 behave: the order is Voided,
--- Voided is TERMINAL in orders, and a reopen into Proposal therefore asks for a move orders refuses.
--- The deal reopens anyway with a warning, which is the intended outcome and not a bug to route around.
+-- Voided on Lost (S-US7).
+--
+-- This used to add that "Voided is TERMINAL in orders", so a reopen into Proposal would ask for a move
+-- orders refuses and warn. That is not true: orders' `TRANSITIONS.Voided` is ['Draft', 'Quoted'], so
+-- `IsTerminal('Voided')` is FALSE and both moves are allowed -- `Confirmed` is the terminal status.
+-- A reopen into Proposal therefore brings the order back to Quoted cleanly, with nothing to warn about.
+--
+-- The case that DOES need handling is the opposite one, and it is why the NULLs above are safe: a deal
+-- lost from Discovery or Qualification reopens into a stage that asks the order for nothing, which left
+-- it Voided in silence (golive#205). That is fixed in the reopen path rather than here -- see
+-- `DealEntityServer.planReopenOrderRecovery` -- because declaring a status on these two stages would
+-- drag a live Quoted order back to Draft every time a deal slipped backwards.
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineStage WHERE ID=@s1)
   INSERT INTO __mj_BizAppsSales.PipelineStage (ID, PipelineID, Name, Code, DisplayOrder, Probability, ForecastCategoryTypeID, DealStatusTypeID, OrderStatusOnEntry, RottingDays, GuidanceMarkdown, IsActive) VALUES
    (@s1, @pipe1, N'Discovery',    N'DISC',  10, 10,  @fcPipe, @stOpen, NULL,        14, N'**What good looks like:** the economic buyer is named and the current cost of doing nothing is quantified.', 1),

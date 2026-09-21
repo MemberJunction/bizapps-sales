@@ -1179,10 +1179,21 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             await db.CommitTransaction();
             transactionOpen = false;
 
-            // The reopen SUCCEEDED even when the order refused to come back with it. That is the
-            // designed outcome, not a tolerated one: S-US8's reopen enters a stage asking for `Quoted`
-            // while the order sits at `Voided`, which orders treats as terminal. The deal reopens and
-            // says what did not happen.
+            // The reopen SUCCEEDS even when the order could not come back with it, and says what did
+            // not happen rather than failing (D-OS1).
+            //
+            // THE ORIGINAL REASON GIVEN HERE WAS WRONG, and it is worth recording why. This said the
+            // order "sits at `Voided`, which orders treats as terminal", so a reopen into a stage
+            // asking for `Quoted` was expected to be refused and warn. Orders says otherwise, by its
+            // own API: `TRANSITIONS.Voided` is `['Draft', 'Quoted']`, so `IsTerminal('Voided')` is
+            // FALSE and both moves are allowed -- `Confirmed` is the terminal one. Measured against
+            // the built package, not inferred.
+            //
+            // So the refusal this comment predicted never happens, and the case it described is not
+            // the case that bites. What bit was the opposite: a stage that declares NOTHING asks the
+            // order for nothing, so a voided order stayed voided in silence. `planReopenOrderRecovery`
+            // in `DealEntityServer` now returns it to `Draft`, and these Issues remain the channel for
+            // anything that still cannot move.
             return {
                 Success: true,
                 Issues: orderStatusIssues(deal),

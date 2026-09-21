@@ -58,7 +58,7 @@ import { RegisterClass } from '@memberjunction/global';
 // ORDERS' OWN RULE, imported rather than restated. `CanTransition` is the same function
 // `OrderEntityServer.passesStatusTransition()` consults, so a refusal here and a refusal there cannot
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
-import { CanTransition, type OrderStatus } from '@mj-biz-apps/orders-entities';
+import { CanTransition, IsBooked, IsEditable, type OrderStatus } from '@mj-biz-apps/orders-entities';
 import {
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
@@ -1538,9 +1538,64 @@ export class DealEntityServer extends DealEntity {
 
         const target = (result.Results ?? [])[0]?.OrderStatusOnEntry;
         if (!target) {
-            return null;   // this stage says nothing about the order. The common case.
+            // This stage says nothing about the order. The common case -- EXCEPT on a reopen, where
+            // saying nothing leaves a voided order voided. See `planReopenOrderRecovery`.
+            return this.planReopenOrderRecovery(stageID);
         }
         return { StageID: stageID, Target: target as OrderStatus };
+    }
+
+    /**
+     * A REOPENED deal must not be left pointing at a VOIDED order (bc-aidp-next-golive#205).
+     *
+     * ── WHAT THIS FIXES ────────────────────────────────────────────────────────────────────────────
+     *
+     * golive#205 asks, in so many words, that reopening "return the order to Quoted or Draft". The
+     * order follows `PipelineStage.OrderStatusOnEntry`, and a reopen restores the stage the deal was
+     * in BEFORE the close -- so the order comes back only if THAT stage declares something. On the
+     * seeded B2B pipeline, `Proposal`/`Negotiation`/`Signed` declare `Quoted` and do come back;
+     * `Discovery` and `Qualification` declare nothing, so a deal lost from an early stage reopened
+     * with its order still `Voided`, and NOTHING said so. Measured on this host before the fix:
+     * DEAL-9002, lost from Qualification, reopened Open with ORD-000293 left at `Voided`.
+     *
+     * That is the silent half of D-OS1 -- the deal neither followed nor complained.
+     *
+     * ── WHY THE STAGE DATA IS NOT THE PLACE TO FIX IT ──────────────────────────────────────────────
+     *
+     * Seeding `Draft` on Discovery and Qualification would fix the reopen and break the ordinary move:
+     * a deal slipping from Proposal back to Qualification would drag a live `Quoted` order back to
+     * `Draft`. Those stages are RIGHT to say nothing on the way forward. The asymmetry is real -- only
+     * the reopen has an order that a close put somewhere it should not stay -- so only the reopen
+     * carries the extra rule, and it is keyed on `_reopenInProgress`, which is set for exactly the one
+     * audited path through the lock.
+     *
+     * ── WHY `Draft` ────────────────────────────────────────────────────────────────────────────────
+     *
+     * #205 permits either. `Draft` is the conservative half: a deal back in Discovery or Qualification
+     * has no live quote in front of a customer, and `Draft` is the editable state that says so. A deal
+     * whose restored stage DOES want `Quoted` never reaches here -- the declaration above handles it.
+     *
+     * The one lossy case is a deal that held a `Quoted` order while sitting in an early stage (it had
+     * slipped back from Proposal): it returns as `Draft` rather than `Quoted`. That is a deliberate
+     * trade -- both satisfy #205, and neither leaves a live deal pointing at a voided order.
+     *
+     * ── AND IT IS NOT A NAME COMPARISON ────────────────────────────────────────────────────────────
+     *
+     * `IsEditable` and `IsBooked` are orders' own predicates over its own vocabulary (§3). The booked
+     * guard is belt-and-braces: `Sales.ReopenDeal` already refuses a booked order outright, so this
+     * cannot normally see one -- but attempting `Confirmed -> Draft` would earn a refusal warning on a
+     * path that has nothing to warn about, and a guard that costs one call is cheaper than explaining
+     * that warning later.
+     */
+    private planReopenOrderRecovery(stageID: string): StageOrderPlan | null {
+        if (!this._reopenInProgress) {
+            return null;
+        }
+        const status = this.OrderID_Object?.Status;
+        if (!status || IsEditable(status) || IsBooked(status)) {
+            return null;
+        }
+        return { StageID: stageID, Target: 'Draft' };
     }
 
     /**

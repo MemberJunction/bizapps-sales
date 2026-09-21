@@ -36,6 +36,7 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
+import { IsEditable } from '@mj-biz-apps/orders-entities';
 import {
     DealFieldsEditableWhileLocked,
     StubDownstreamSeam,
@@ -1386,12 +1387,12 @@ export const CloseDealChecks: NamedCheck[] = [
                     ctx,
                     `SELECT OrderStatusOnEntry FROM ${SALES_SCHEMA}.PipelineStage WHERE ID = '${startStage}'`,
                 );
+                const order = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
                 if (restored.OrderStatusOnEntry) {
-                    const order = await TxOne<{ Status: string }>(
-                        ctx,
-                        `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
-                          JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
-                    );
                     const followed =
                         String(order.Status).toLowerCase() === String(restored.OrderStatusOnEntry).toLowerCase();
                     Assert(
@@ -1399,6 +1400,31 @@ export const CloseDealChecks: NamedCheck[] = [
                         `the restored stage declares '${restored.OrderStatusOnEntry}' and the order is ` +
                             `'${order.Status}' — so the reopen owed a warning and reported none. Silence is ` +
                             'the one outcome D-OS1 forbids',
+                    );
+                } else {
+                    /**
+                     * THE BRANCH THAT USED TO NOT EXIST, and its absence is why golive#205's last item
+                     * shipped broken.
+                     *
+                     * This assertion lived inside `if (restored.OrderStatusOnEntry)`. A restored stage
+                     * that declares NOTHING therefore asserted nothing at all -- and that is precisely
+                     * the case where a LOST close had put the order somewhere it should not stay. The
+                     * check reported green over the one outcome D-OS1 forbids.
+                     *
+                     * WHAT IT ASSERTS IS EDITABILITY, not a particular status, and the distinction
+                     * matters: this setup closes WON into a stage declaring `Quoted`, and an order left
+                     * at `Quoted` is entirely healthy -- a reopened deal can carry straight on with it.
+                     * An earlier draft of this branch demanded the order differ from whatever the close
+                     * imposed and failed on exactly that case, which would have been a false alarm.
+                     * `IsEditable` is orders' own predicate over its own vocabulary (§3), and it draws
+                     * the line where the deal actually cares: can this order be worked on again.
+                     */
+                    Assert(
+                        IsEditable(String(order.Status)) || out.Issues.length > 0,
+                        `the restored stage declares nothing, so nothing asked the order to come back, ` +
+                            `and it is '${order.Status}' — a state the deal cannot be worked from. A ` +
+                            `reopened deal left pointing at the order its close put away, in silence, ` +
+                            `is the D-OS1 violation golive#205 asks to be fixed`,
                     );
                 }
             }),
@@ -2415,6 +2441,105 @@ export const CloseDealChecks: NamedCheck[] = [
                 Assert(
                     String(reopenEvent.Notes ?? '').length > 0,
                     'the reopen recorded a reason even though the caller gave none',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD31',
+        Name: 'CD31: reopening a LOST deal into a stage that declares nothing still returns the order',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205's LAST item: "return the order to Quoted or Draft".
+                 *
+                 * ── WHY CD18 DOES NOT ALREADY COVER THIS ───────────────────────────────────────────
+                 *
+                 * CD18 closes WON, so its order is never voided and its reopen has nothing to recover.
+                 * The failing shape needs all three of: a LOST close (which voids), a CLOSING stage
+                 * that declares the void, and a RESTORED stage that declares nothing -- and it is the
+                 * third that makes it silent, because a stage saying nothing asks the order for
+                 * nothing. Measured before the fix: DEAL-9002, lost from Qualification, reopened Open
+                 * with ORD-000293 still `Voided` and not one Issue raised.
+                 *
+                 * ── THE STAGES ARE RESOLVED BY DECLARATION, NEVER BY NAME (§3) ─────────────────────
+                 *
+                 * The start stage is any stage in the pipeline whose `OrderStatusOnEntry` is NULL; the
+                 * closing stage is the one the LOST status names. A deployment that renames Discovery,
+                 * or seeds a fourth early stage, changes nothing here.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+
+                const startStage = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE PipelineID = '${f.ContractPolicyPipelineID}' AND OrderStatusOnEntry IS NULL
+                        AND IsActive = 1 ORDER BY DisplayOrder ASC`,
+                );
+                Assert(
+                    !!startStage?.ID,
+                    'setup: this check needs a stage that declares NOTHING about the order — without ' +
+                        'one there is no silent case to test and passing here would mean nothing',
+                );
+
+                const lostStage = await TxOne<{ ID: string; OrderStatusOnEntry: string | null }>(
+                    ctx,
+                    `SELECT TOP 1 ID, OrderStatusOnEntry FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE PipelineID = '${f.ContractPolicyPipelineID}'
+                        AND DealStatusTypeID = '${f.LostStatusID}' AND IsActive = 1`,
+                );
+                Assert(
+                    !!lostStage?.OrderStatusOnEntry && !IsEditable(String(lostStage.OrderStatusOnEntry)),
+                    'setup: the losing stage must declare a NON-editable order status, or the close ' +
+                        'never puts the order anywhere the reopen has to bring it back from',
+                );
+
+                const dealID = await openDeal(
+                    ctx, f, f.ContractPolicyPipelineID, startStage.ID, 'CD31 lost from an early stage',
+                );
+
+                const closed = await close(ctx, {
+                    DealID: dealID,
+                    DealStatusTypeID: f.LostStatusID,
+                    ClosingStageID: lostStage.ID,
+                    LossReasonID: f.LossReasonPlainID,
+                });
+                Assert(closed.Success, `setup: the lost close failed — ${JSON.stringify(closed.Issues)}`);
+
+                const afterClose = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    !IsEditable(String(afterClose.Status)),
+                    'setup: the LOST close must have put the order into a non-editable state, or this ' +
+                        'check would pass without the recovery it exists to prove',
+                );
+
+                // No StageID: the operation derives the prior stage, which declares nothing.
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD31: reopening a lost deal.' });
+                Assert(out.Success, `the reopen failed — ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{ PipelineStageID: string }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(after.PipelineStageID).toLowerCase(),
+                    startStage.ID.toLowerCase(),
+                    'the reopen restored the early stage — the one that declares nothing',
+                );
+
+                const order = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    IsEditable(String(order.Status)),
+                    `the deal reopened but its order is still '${order.Status}'. golive#205 asks for it ` +
+                        `to come back to Quoted or Draft, and the restored stage declares nothing, so ` +
+                        `only the reopen itself can do it`,
                 );
             }),
     },
