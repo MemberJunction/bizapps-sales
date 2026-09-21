@@ -51,3 +51,16 @@ pinned EXACTLY at `5.44.0` across every manifest (`common-entities`, `common-ng`
 an exact dependency on `common-entities` of its own version — and two copies of `common-entities`
 means two `BusinessTimeZoneEngine` classes competing for one class-name key in `BaseSingleton`'s
 global store, which makes the resolved zone depend on import order.
+
+The exact pins do not reach `@mj-biz-apps/orders-entities`, which declares `common-entities` as a
+floating `>=5.37.0` (`>=5.43.0` at 5.14.0) and so cannot be constrained by a manifest anywhere in this
+repo. Measured: pnpm 10.33 and npm 11 both dedupe that range onto the pinned 5.44.0 whenever a pinned
+copy sits in the same graph, so the split does not occur today — but resolve `orders-entities` with no
+pinned sibling and the same pnpm takes `5.45.0`. A `pnpm.overrides` entry now makes the single copy a
+constraint instead of a resolver heuristic, for this workspace and for CI; consumers are still
+protected by the exact pins, since overrides are not published.
+
+The deal form's Overview panel now configures `BusinessTimeZoneEngine` in its own `ngOnInit` rather
+than relying on MJ's startup sequence having reached a lazily loaded `sales-ng` chunk. The engine fails
+open to UTC by design, so an unconfigured read is not a neutral default — it is silently the defect
+this release fixes, with one logged warning nobody reads.
