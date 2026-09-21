@@ -1,5 +1,117 @@
 # @mj-biz-apps/sales-entities
 
+## 6.6.0
+
+### Minor Changes
+
+- ad9191c: Regenerated code: `vwDeals` and `vwDealContactRoles` now carry the contact name columns.
+
+  Giving `Sales Contacts` a name field (`DisplayNameAndEmail`) means every view with a foreign key to it gains a name column — `PrimaryContact` and `BillingContact` on Deals, `SalesContact` on Deal Contact Roles. This is the CodeGen output that registers them, so metadata and the views agree.
+
+  **CodeGen lags by exactly one pass when a new FK-name column appears, and the second pass repairs it.** Measured:
+
+  |        | Deals                      | Deal Contact Roles | Result                        |
+  | ------ | -------------------------- | ------------------ | ----------------------------- |
+  | Pass 1 | 59 fields / **61** columns | 10 / **11**        | `success: false`              |
+  | Pass 2 | **61 / 61**                | **11 / 11**        | `success: true`, 0 mismatches |
+
+  `createNewEntityFieldsFromSchema` builds `EntityField` rows by reading the base view's columns, so on the pass that CREATES those columns they are not yet visible to it. The next pass sees them, registers them and fixes the sequences.
+
+  **This contradicts the warning in `CLAUDE.md`**, which says a full second pass corrupts the database. In this case the second pass is what repaired it; the first pass left the corruption. The documented incident is the same lag seen from the other side — whichever pass introduces a new virtual column leaves metadata one behind. The safe rule is _run until it reports success and field/column parity is clean_, verified per entity, not _never run twice_.
+
+  **Why the intermediate state is dangerous, stated precisely.** The `Deal` TABLE never changes. `spCreateDeal` ends in `SELECT * FROM vwDeals`, and the client-side provider declares a `@ResultTable` with one column per `EntityField`, filled by a POSITIONAL `INSERT ... EXEC`. A 61-column result into a 59-column table fails with _"Column name or number of supplied values does not match table definition"_ — so it is the save-capture width that breaks, not anything about the table.
+
+  CodeGen also moved the generated entities to a per-schema layout: `entity_subclasses.ts` is now a barrel re-exporting `entities/__mj_BizAppsSales.ts`, with the GraphQL schema split the same way.
+
+  Also converts the one dynamic `await import()` in the test suite to a static import. That test failed twice in full runs and could not be reproduced in twelve attempts afterwards; the cause was never identified, so this is not a fix presented as one — it removes the single construct that made the test different from its neighbours.
+
+- 2f1a3ea: Deal form: reach the order and the contract from a won deal's header, and stop offering the draft order on an open one (golive#226).
+
+  A tester closed a deal as Won and could not get from it to either the order or the contract. The header carried Account, Owner, Stage and Amount and nothing else; the Motion panel showed **Contract ID** and **Renews Contract ID** as raw GUIDs in text boxes; and the one order link on the form appeared on **open** deals too, where the order is still a draft nobody should be editing directly.
+
+  **The header row is not ours.** It is `bizapps-related-chips` from `@mj-biz-apps/common-ng` (golive#225), which is the row contracts and orders use as well. All this app decides is which relationships a deal has — Order and Contract on a won deal, the renewed contract at any status, because a rep needs to see what a renewal is renegotiating precisely while the deal is still open. Reading each record's name, and deciding when a chip must not be drawn at all (the sibling app is not installed, the record is not there, the user may not read it), belongs to the shared component and is tested there. That rule lives in `deal-related-links.ts` rather than in the panel, so a test can reach it without standing up DI.
+
+  **The GUIDs were structural, not cosmetic.** `Deal.ContractID` and `Deal.RenewsContractID` are deliberately soft references — the link points down the dependency graph and contracts knows nothing about sales — so there is no FK, `EntityField.RelatedEntity` was unset, and `mj-form-field` had no name to show and nowhere to go. They now ship as MJ **soft foreign keys**: declarative metadata under `metadata/entity-fields/`, plus a matching declaration in `codegen-schema-info.json` so a rebuild-from-zero re-applies them instead of silently regressing the form to GUIDs. No constraint, no cascade, nothing to violate — the database is untouched. Both fields now render the contract number as a link, and `RenewsContractID` gains an FK search in edit mode instead of asking a rep to paste a UUID.
+
+  **The order link came off the Motion panel entirely.** The header chip is the only route to the order now, and it is gated on the win, which is what item 4 asks for. Worth saying plainly in case it is ever read as more than it is: this is discoverability, not a lock. The draft order is still reachable by search, and anything that must actually refuse belongs in the entity server.
+
+  `ResolveDealLockState` gained `IsWon`, read off the same status row it already fetches, by flag — a deployment may call its winning status "Signed". It is the one member of that shape **not** gated on `LocksDeal`: the rest answer "what may still be edited", a question only a locked deal has, while this answers "did we win", and tying a header decision to a field-editing one would drop the chips on a won deal whose status does not freeze it, with nothing on screen to explain the absence.
+
+  20 tests. The one that matters most is a negative — no order chip on an open deal that holds an `OrderID` — because a rule that quietly started emitting it would look completely normal on the won deal everyone tests. Lost deals are asserted separately from open ones for the same reason: a future edit that gated on `IsLocked` instead of `IsWon` would pass every open-deal case and light both chips up on every lost deal.
+
+- c3b23cc: Add predictive deal win propensity outcome columns, engineered training features, and layered base views.
+
+  - Materializes `PredictedWinProbability`, `PredictedWinRiskBand`, and `PredictedWinScoredAt` on `Deal`.
+  - Adds layered base views `vwDealsGenerated` and application wrapper `vwDeals` computing engineered training features (`WinOutcome`, `DaysToExpectedClose`, `HasPaymentSchedule`, `TeamMemberCount`, `HasPartnerInvolved`, `IsEnterpriseTier`, `AutoRenewFlag`, `StandardAgreementModifiedFlag`).
+  - Configures scheduled scoring write-back binding targeting `PredictedWinProbability`.
+
+### Patch Changes
+
+- 40d8f7d: `Deal.AmountSourceHash`'s column description no longer names an action that does not exist.
+
+  Closes #107. It told the reader the UI says _"this figure is stale, reprice"_. The UI has not said that
+  since golive#230, and **no reprice control exists anywhere in this codebase** — the notice now reads
+  "The products on this deal changed after the amount was calculated. Save the deal to update it."
+
+  It matters because it is not prose. The description is a SQL extended property, which CodeGen syncs into
+  `__mj.EntityField.Description`, which regenerates into `generated.ts` as the **GraphQL field
+  description** — so a dead instruction reaches API consumers and Explorer tooltips.
+
+  **A new migration, not an edit to the baseline.** The property is set by `V202608042101`, which has been
+  applied to databases nobody will rebuild — the UAT host among them. Editing an applied migration changes
+  its checksum and Flyway refuses the run. The repo already states this: `V202609020650` was numbered
+  before its partner deliberately _"so no already-computed migration checksum changes"_. CLAUDE.md's
+  BASELINE-IN-PLACE loop is explicitly conditioned on being pre-publish, and this repo left that state at
+  `V202608251930`, the first `Metadata_Sync`.
+
+  **The extended property is the whole fix**, and that is measured rather than assumed:
+  `EntityField.AutoUpdateDescription` is 1 for this column, and the live row reads "the embedded order's
+  line set" — the extended property's wording, not the baseline's generated `EntityField` insert ("the
+  DealLine set"). The schema demonstrably wins, so the metadata row and the GraphQL description follow on
+  the next CodeGen run. Nothing is hand-written into `__mj.EntityField`: PUBLISHING.md reserves that for
+  the release `Metadata_Sync`.
+
+  Applied against a live database: the old wording is gone, the new wording is present, and a second run
+  is a clean no-op.
+
+  **CLAUDE.md's migration loop is corrected with it.** Its BASELINE-IN-PLACE section still read as current
+  instruction, and it is what this branch followed into editing an applied migration. The section now leads
+  with the switch, names the evidence that it had already happened — five additive migrations after the
+  baseline, the first publish at `V202608251930`, three weeks earlier — and keeps the original note below
+  as history, since its reasoning is still correct for the phase it described. The `switch to
+additive-only at first publish` bullet is struck through and dated.
+
+- f1ecd20: Deal Overview and header: a closed deal now reports what happened instead of forecasting (golive#231).
+
+  golive#206 item 4 fixed the tile VALUES on a closed deal and left the static labels alone, which produced
+  the worst of both: correct data under headings that promise something else. A won deal read
+  "Forecast: Won" — Won is not a forecast — and the Timing card showed a close DATE under a row labeled
+  "Days to close".
+
+  **Labels now move with the outcome.** The Close tile reads Won / Lost / Closes; the Forecast tile becomes
+  Outcome once there is one, with the stage the deal closed from beneath it. The header's Close stat, which
+  rendered `ExpectedCloseDate` unconditionally with no reference to the close stamps at all, becomes
+  "Closed" with the real date.
+
+  **The Timing card reports rather than counts.** A closed deal gains a "Closed won" / "Closed lost" row
+  and a **Sales cycle** (creation to close), and loses the countdown; "Expected close" is kept either way so
+  the variance stays legible, which is what the Close tile's new sub-line reports — "on time", "4 days
+  early", "3 days late". A lost deal gains a **Loss reason** row with its notes, and hides Term / Start /
+  Executed, which describe a deal being delivered — but never hides one that is actually set, since that
+  would conceal real data.
+
+  **Won and Lost are read as FLAGS, and `IsWon` is now carried on `DealLockState` rather than inferred.**
+  They are not complements: `Abandoned` carries `IsLost` alongside `Lost`, and a status can lock a deal
+  while carrying neither — so `!IsLost` would print "Won" over a deal nobody won, a lie that reads
+  perfectly. One check fails only against that inferred version. This keeps "Closed Won" a label a pipeline
+  can rename, per the vocabulary rule.
+
+  The open-deal countdown is also spelled out — "in 12 days", "today", "3 days overdue" rather than "12d"
+  and "3d past" — since the tile is read at a glance by someone not holding the convention in their head.
+
+  27 new checks. Each pins a label AND the value it sits over, as a pair: a check that looked at only one
+  of them would pass against exactly the half-fixed state this issue is about.
+
 ## 6.5.0
 
 ### Minor Changes

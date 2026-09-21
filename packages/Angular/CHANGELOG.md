@@ -1,5 +1,445 @@
 # @mj-biz-apps/sales-ng
 
+## 6.6.0
+
+### Minor Changes
+
+- ad9191c: Regenerated code: `vwDeals` and `vwDealContactRoles` now carry the contact name columns.
+
+  Giving `Sales Contacts` a name field (`DisplayNameAndEmail`) means every view with a foreign key to it gains a name column — `PrimaryContact` and `BillingContact` on Deals, `SalesContact` on Deal Contact Roles. This is the CodeGen output that registers them, so metadata and the views agree.
+
+  **CodeGen lags by exactly one pass when a new FK-name column appears, and the second pass repairs it.** Measured:
+
+  |        | Deals                      | Deal Contact Roles | Result                        |
+  | ------ | -------------------------- | ------------------ | ----------------------------- |
+  | Pass 1 | 59 fields / **61** columns | 10 / **11**        | `success: false`              |
+  | Pass 2 | **61 / 61**                | **11 / 11**        | `success: true`, 0 mismatches |
+
+  `createNewEntityFieldsFromSchema` builds `EntityField` rows by reading the base view's columns, so on the pass that CREATES those columns they are not yet visible to it. The next pass sees them, registers them and fixes the sequences.
+
+  **This contradicts the warning in `CLAUDE.md`**, which says a full second pass corrupts the database. In this case the second pass is what repaired it; the first pass left the corruption. The documented incident is the same lag seen from the other side — whichever pass introduces a new virtual column leaves metadata one behind. The safe rule is _run until it reports success and field/column parity is clean_, verified per entity, not _never run twice_.
+
+  **Why the intermediate state is dangerous, stated precisely.** The `Deal` TABLE never changes. `spCreateDeal` ends in `SELECT * FROM vwDeals`, and the client-side provider declares a `@ResultTable` with one column per `EntityField`, filled by a POSITIONAL `INSERT ... EXEC`. A 61-column result into a 59-column table fails with _"Column name or number of supplied values does not match table definition"_ — so it is the save-capture width that breaks, not anything about the table.
+
+  CodeGen also moved the generated entities to a per-schema layout: `entity_subclasses.ts` is now a barrel re-exporting `entities/__mj_BizAppsSales.ts`, with the GraphQL schema split the same way.
+
+  Also converts the one dynamic `await import()` in the test suite to a static import. That test failed twice in full runs and could not be reproduced in twelve attempts afterwards; the cause was never identified, so this is not a fix presented as one — it removes the single construct that made the test different from its neighbours.
+
+- 91ba029: Adding a product now updates the deal's amount and weighted amount.
+
+  `Deal.Amount` is a cached copy of its order's `TotalGross`, refreshed only during a DEAL save. The line dialog saves the ORDER, so adding a product left the deal reading no amount and no weighted amount while its order carried a real total. Measured on a test deal: order `TotalGross` 229, deal `Amount` NULL, and no subsequent save able to move it.
+
+  **The guard was a bootstrap failure, not a missing poll.** `amountMayHaveMoved` tested `order.Dirty`, `order.Lines.Dirty` and `AmountIsComputed === true` — and the last is what `refreshAmountFromOrder` _stamps_ once it has cached a figure. A deal that never had one is false on all three, permanently; by the time anything saves the deal, the order the dialog committed is clean.
+
+  The added term is `Amount === null` — the unbootstrapped state itself, not a comparison between the two figures. It costs one read per save for exactly that state and stops as soon as a figure is cached, because `AmountIsComputed` then carries it.
+
+  It does **not** reintroduce polling, which the note in `Save()` rejects for good reason. A header-only deal with a typed amount is non-null and never read; one with no amount reads an order whose `TotalGross` is NULL — `SUM` over no rows — and `refreshAmountFromOrder` returns without touching a column. Drift caused by someone editing the order directly is still not chased here; that remains what `AmountSourceHash` is for.
+
+  **And the deal is saved when a line commits**, so the figure appears while the rep is looking at it rather than after some later unrelated save. A full save rather than a targeted amount write: `Amount` has one author — `refreshAmountFromOrder`, where the provenance stamps are set together — and a panel reaching in to write it is how a cached figure and its fingerprint start disagreeing. The stated cost is that other unsaved edits commit with it, which is the right answer while composing.
+
+  **And the deal save had to be forced past the dirty check**, which is what made the first two attempts look like they had changed nothing. A line save changes the ORDER; the deal's own columns are untouched, so it is not dirty — and `BaseEntity.Save()` skips the provider entirely when nothing is dirty. `FormComponent.SaveRecord()` takes no `EntitySaveOptions` and so cannot ask otherwise, so the request never left the browser and the entity server never ran. The seam calls `Record.Save()` with `IgnoreDirtyState`, still a full deal save.
+
+  **The guard also had to stop asking the wrong question.** `OrderID_Object` is the IN-MEMORY embedded order and is null on any save that did not load it — which is most of them — so an `!!order &&` prefix short-circuited every other test. The note claiming lined deals "re-read TotalGross on every save" was therefore true only when the order happened to be in memory. The dirtiness tests, which genuinely need the object, stay behind it; the state tests ask `OrderID` instead, which is all `refreshAmountFromOrder` needs.
+
+  None of the three works alone: without the forced save nothing reaches the server, without the FK-keyed guard the save refreshes nothing, and without the bootstrap term a deal that never had an amount can never acquire one.
+
+  Found by measurement rather than reading, after two confident and wrong diagnoses: deal `__mj_UpdatedAt` 00:32:43 against its order at 00:39:08 with three lines totalling 1057. A deal timestamp older than its order's says the save never ran, which no amount of studying the guard would have revealed.
+
+  The guard's decision table is reproduced in tests rather than extracted — changing code to suit a test is its own problem — and a second test reads the shipped expression and asserts every term of it, so the copy cannot drift from the original unnoticed.
+
+- 10f3a5c: The New Deal form works, the Sales Contact picker shows people instead of GUIDs, and a closed deal's lines can no longer be edited from the form.
+
+  Four UAT defects (bc-aidp-next-golive#244) plus the half of golive#206 item 1 that sales#110 fixed on the wrong surface. `minor` rather than `patch` because two migrations ship with it.
+
+  **A new deal could not be saved at all.** `Deal.CompanyID` is `NOT NULL` with no default, the form renders it server-maintained — correctly, a rep must not choose the selling company — and `DealEntityServer.stampCompanyFromPipeline()` fills it on save. But `BaseFormComponent.SaveRecord` runs `Validate()` first and returns early when it fails, so the save never reached the server that was going to supply the value. Required, unsettable, filled too late.
+
+  It worked in the deal workspace, which stamped it client-side _"so the record validates locally"_. Unmounting the workspace (9d6ef9e) took that with it and the form was never given the equivalent. The form now resolves the pipeline's company and stamps it before the base save.
+
+  This is not the client deciding the company: it reads the same authority the server reads, and the server overwrites on arrival, so the two cannot disagree. `CompanyID` stays read-only and `server-owned-fields.ts` still refuses a user's edit to it. The rule is keyed on the CAUSE — an absent company with a pipeline to resolve it — not on `IsSaved`, so a path that creates a deal some other way is covered without anyone remembering to widen a guard.
+
+  **Products still need a saved deal, and now the form says so.** A deal mints its order on first save, so there is genuinely nowhere to put a product until then. Combined with the above that was a deadlock. The sequence is now stated twice: a guidance flag in the hero on any unsaved deal, and fuller copy in the panel. Styled as guidance, not the warning tone the lock uses — telling a rep in orange that naming a new deal has gone wrong is not the message.
+
+  **The Sales Contact picker showed raw GUIDs.** `Sales Contacts` had no name field at all — `IsNameField` false on all 30 registered fields — so every lookup to it rendered an id.
+
+  An IS-A asymmetry, not a missing setting: `vwSalesAccounts` inherits `Name` from Organization and CodeGen auto-marks it, while Person's name field is `DisplayName`, which is COMPUTED in `vwPeople` rather than stored on the Person table. The generated child view joins the TABLE, so the child inherited FirstName, LastName and Email and could not inherit the one column that names the person. CodeGen correctly found nothing to mark.
+
+  Two migrations move the entity to a layered base view (the pattern contracts established, MJ#3419): CodeGen owns `vwSalesContactsGenerated`, and sales owns `vwSalesContacts` as a wrapper adding `DisplayNameAndEmail` — the display name, plus the primary email in brackets when there is one.
+
+  It reads common's `vwPeople` rather than re-deriving either half, because `PrimaryEmail` is a contact-method lookup with a fallback and copying that into sales would drift the first time common changed it. `AutoUpdateIsNameField` is off, or the next CodeGen run would re-derive the flag from the schema — which is what produced no name field in the first place — and the pickers would go back to GUIDs with nothing in the diff to explain it. The string is built with `CONCAT`: `NULL + ' ('` is NULL in T-SQL, which would have produced a blank name field in the one case nobody seeds data for.
+
+  **The new-record header no longer briefs on a record that does not exist.** Account, owner, amount, stage and next step rendered as a grid of dashes under the name still being typed. Gated on `IsSaved`, not `EditMode` — a saved deal being edited still has all of it to show.
+
+  **A closed deal's lines can no longer be edited from the form.** sales#110 closed this on the deal WORKSPACE, a component no template has mounted since 9d6ef9e. The form still offered it: the lines grid renders outside the panel's `@if (!IsLocked)` block — deliberately, because a locked deal must still SHOW what was sold — so hiding the Add button did not take the row double-click with it. All four fields were typeable on a Won deal, and the refusal arrived from `DealLockOrderLineVeto` after Save. Offered, taken, refused: the shape golive#206 exists to delete.
+
+  Closed in two layers, because gating only the entry point is how this reopens. The panel declines to open the editor and says why where the Add button used to be; the editor refuses on its own account, resolving the lock itself from the deal it was handed rather than taking an `@Input` a future caller could forget. It reads the PERSISTED status, matching the server — a deal being closed right now still reads open.
+
+  The refusal sentence now exists on four surfaces, so `deal-lock-refusal-copy` derives it from `DealLockRefusal('update')` in the server source, as text, and checks every copy against it. Reading the file sidesteps the bundling problem that forces the duplication — `sales-core-entities-server` pulls `node:crypto` and cannot go in a browser bundle — and keeps the server the one that decides.
+
+  **Creating a deal happens on one screen — the one it opens on.** Pipeline, Deal Type, Account and both contacts now render together on the Pipeline section while the deal is unsaved. Left-nav shows one section at a time and opens a new deal on Pipeline, so composing one otherwise meant setting the name in the header, the pipeline in one rail item and the customer in another.
+
+  It also corrects something backwards: on a new deal that section used to show Forecast Category and Probability — which the server derives from the stage on create — and not the fields a rep actually chooses. Offering a derived field invites someone to set a value that is immediately overwritten, so those two are suppressed while unsaved.
+
+  `PipelineStageID` is offered, and briefly was not. It was suppressed on the same reasoning, which was half right and therefore wrong: `applyStageDefaults` fills probability and forecast category _from_ a stage, and `planStageDefaults` returns null the moment the stage is null. Nothing anywhere picks it. One missing control produced three blank fields — no stage, so no probability, so no weighted amount — which is how it was reported. Derived-from-the-stage is not the same as derived-without-one.
+
+  The party panel drops exactly the borrowed fields for as long as the Pipeline section shows them, filtered through the same shared lists that section iterates. Two separate lists would agree today and drift the first time somebody added a fourth contact field, which is the shape golive#189/#190 already cost a round of UAT — a test asks it as a set intersection, in BOTH saved and unsaved states, so neither direction can regress and a later addition is covered without anyone remembering.
+
+  The server-maintained stamps are never borrowed: a rep cannot set either, so two permanently-blank read-only boxes among the creation fields would ask a question with no answer. Routing these through the Pipeline panel also means they inherit the shared `FieldEditable` rule — server-maintained and close-lock handling — rather than a one-off copy.
+
+  Absence is not the same state as unsaved, and getting that wrong hid fields from a panel that had no deal at all. Both getters key on `!this.Record || this.Record.IsSaved`.
+
+  **The Amount / Weighted / Situation block is hidden until the deal exists**, for the reason the hero briefing is: on a record nobody has saved it renders zeroes and dashes under the fields still being filled in.
+
+  **Three rail items showed a blank page on a new deal.** Selecting "What's being sold", "Internal team" or "Buying team" rendered the header and nothing else. Each already carried an @else branch explaining that the deal must be saved first, and none of it was reachable: all three are `[DefaultExpanded]="false"`, and a collapsed panel in left-nav renders no body. The explanation existed and could not be read — a correct message nothing displays, which is the same defect class as a correct getter nothing consumes. They now open while the deal is unsaved and collapse as before once it is saved.
+
+  **What this does not fix.** The left nav still lists every section on a new record. MJ resolves section inclusion statically, with no notion of record state, and `BaseFormPolicy.DecorateChrome` is explicitly forbidden from changing membership — `plans/form-chrome-layering.md` makes inclusion a static `Primary | More | None` at all three layers. Filed upstream as MemberJunction/MJ#4618.
+
+- e2b93e7: The add-product dialog shows what the line comes to, before it is saved.
+
+  Unit price and line total sat blank under a caption reading "Priced by Orders", which a rep reasonably took to mean the price should already be there. The values were not missing: `UnitPrice` and `LineTotalNet` are resolved by `OrderPricingService` during the ORDER's save, so on a line still being composed they do not exist yet.
+
+  Sales may not work them out — multiplying quantity by price here would be the second implementation of pricing that the first rule in `CLAUDE.md` exists to prevent. So the dialog asks **`Orders.PriceOrder`**, which runs that same service and persists nothing. One implementation, so the figure on screen and the figure in the ledger cannot drift.
+
+  This was not possible until recently. The earlier `Orders.PreviewOrder` ran the real save inside a transaction that always rolled back, firing the whole booking walk — journal entries, subscription decisions, entitlement grants — on every keystroke and discarding all of it. Orders withdrew it and shipped `PriceOrder`, the decide step without the write, which is what makes asking cheap enough to do while somebody types.
+
+  It re-asks on every priced input (product, quantity, discount, term start), debounced: a quantity of 12 passes through 1 on its way there, and pricing each is a chance to show a figure for a number nobody meant.
+
+  **Nothing is written to the line.** These are display values; the order's own save resolves the real ones. Writing them here would make the dialog a second author of a priced figure, stale the moment the rep changed anything.
+
+  **No failure blocks the save.** An unreachable operation, a refused pricing run, or a thrown call all show "It is priced on save" and leave the figures unknown. Refusing to let a rep record what they sold because a pricing call timed out would not be honest about which of the two matters.
+
+  The two-layer result is checked: the envelope says the operation RAN, `Output.Success` says pricing worked. The test for that was written vacuously first — a failed output with no lines produced the same result either way, so a mutation dropping the inner check survived it. It now supplies a refused run that still carries a figure, which is the only shape that tells the two apart.
+
+- f4c780f: A product can be taken off a deal.
+
+  The third of golive#206 item 1's three verbs — _"adding, editing or deleting a line on a locked deal"_ — and the one that was impossible rather than merely ungated. There was no delete affordance anywhere on the deal form.
+
+  **It was blocked by orders, and no longer is.** `OrderEntityServer` did not drain `Lines.Removed` at all, so a removal was silently dropped, and once it started refusing it cost the rep every other edit staged beside it. Sales carried a blanket refusal for that — `ShouldRefuseLineRemoval`, which declines every saved line and still sits in the unmounted workspace. The orders fix landed with golive#187 and `OrderEntityServer` now reads `Lines.Removed`, renumbers the survivors and recomputes the header. `save-deal.SD6` is the tripwire that announced it.
+
+  **Through the collection, not a direct delete.** `Lines.Remove()` then `order.Save()` is the path orders drains. Deleting the `OrderLine` record straight from a grid skips the renumbering and the header recompute, which is why the grid's own delete button stays off — the same reason its New button does.
+
+  It lives on the restricted line editor rather than as a row control: that dialog already resolves the close lock for itself, so removal inherits the refusal instead of needing its own copy of it. Offered only for a line that exists — a line being composed has nothing to remove, and Cancel already discards it — and never on a closed deal.
+
+  Two-step, because removing a product a rep meant to keep costs them a re-entry, and placed apart from Save/Cancel: confirm-left-cancel-right is the rule for the two choices that end the dialog normally, and a destructive third option beside Save is how the wrong one gets clicked.
+
+  A refused save puts the line back by re-reading the collection. Leaving it claiming a removal that did not happen would mean the next save retries it against a rep who has moved on.
+
+  It emits the same `Saved` event an edit does, because what follows is identical: re-read the grid, and force a deal save so the cached amount follows the order down.
+
+- 2f1a3ea: Deal form: reach the order and the contract from a won deal's header, and stop offering the draft order on an open one (golive#226).
+
+  A tester closed a deal as Won and could not get from it to either the order or the contract. The header carried Account, Owner, Stage and Amount and nothing else; the Motion panel showed **Contract ID** and **Renews Contract ID** as raw GUIDs in text boxes; and the one order link on the form appeared on **open** deals too, where the order is still a draft nobody should be editing directly.
+
+  **The header row is not ours.** It is `bizapps-related-chips` from `@mj-biz-apps/common-ng` (golive#225), which is the row contracts and orders use as well. All this app decides is which relationships a deal has — Order and Contract on a won deal, the renewed contract at any status, because a rep needs to see what a renewal is renegotiating precisely while the deal is still open. Reading each record's name, and deciding when a chip must not be drawn at all (the sibling app is not installed, the record is not there, the user may not read it), belongs to the shared component and is tested there. That rule lives in `deal-related-links.ts` rather than in the panel, so a test can reach it without standing up DI.
+
+  **The GUIDs were structural, not cosmetic.** `Deal.ContractID` and `Deal.RenewsContractID` are deliberately soft references — the link points down the dependency graph and contracts knows nothing about sales — so there is no FK, `EntityField.RelatedEntity` was unset, and `mj-form-field` had no name to show and nowhere to go. They now ship as MJ **soft foreign keys**: declarative metadata under `metadata/entity-fields/`, plus a matching declaration in `codegen-schema-info.json` so a rebuild-from-zero re-applies them instead of silently regressing the form to GUIDs. No constraint, no cascade, nothing to violate — the database is untouched. Both fields now render the contract number as a link, and `RenewsContractID` gains an FK search in edit mode instead of asking a rep to paste a UUID.
+
+  **The order link came off the Motion panel entirely.** The header chip is the only route to the order now, and it is gated on the win, which is what item 4 asks for. Worth saying plainly in case it is ever read as more than it is: this is discoverability, not a lock. The draft order is still reachable by search, and anything that must actually refuse belongs in the entity server.
+
+  `ResolveDealLockState` gained `IsWon`, read off the same status row it already fetches, by flag — a deployment may call its winning status "Signed". It is the one member of that shape **not** gated on `LocksDeal`: the rest answer "what may still be edited", a question only a locked deal has, while this answers "did we win", and tying a header decision to a field-editing one would drop the chips on a won deal whose status does not freeze it, with nothing on screen to explain the absence.
+
+  20 tests. The one that matters most is a negative — no order chip on an open deal that holds an `OrderID` — because a rule that quietly started emitting it would look completely normal on the won deal everyone tests. Lost deals are asserted separately from open ones for the same reason: a future edit that gated on `IsLocked` instead of `IsWon` would pass every open-deal case and light both chips up on every lost deal.
+
+### Patch Changes
+
+- f1ecd20: Deal Overview and header: a closed deal now reports what happened instead of forecasting (golive#231).
+
+  golive#206 item 4 fixed the tile VALUES on a closed deal and left the static labels alone, which produced
+  the worst of both: correct data under headings that promise something else. A won deal read
+  "Forecast: Won" — Won is not a forecast — and the Timing card showed a close DATE under a row labeled
+  "Days to close".
+
+  **Labels now move with the outcome.** The Close tile reads Won / Lost / Closes; the Forecast tile becomes
+  Outcome once there is one, with the stage the deal closed from beneath it. The header's Close stat, which
+  rendered `ExpectedCloseDate` unconditionally with no reference to the close stamps at all, becomes
+  "Closed" with the real date.
+
+  **The Timing card reports rather than counts.** A closed deal gains a "Closed won" / "Closed lost" row
+  and a **Sales cycle** (creation to close), and loses the countdown; "Expected close" is kept either way so
+  the variance stays legible, which is what the Close tile's new sub-line reports — "on time", "4 days
+  early", "3 days late". A lost deal gains a **Loss reason** row with its notes, and hides Term / Start /
+  Executed, which describe a deal being delivered — but never hides one that is actually set, since that
+  would conceal real data.
+
+  **Won and Lost are read as FLAGS, and `IsWon` is now carried on `DealLockState` rather than inferred.**
+  They are not complements: `Abandoned` carries `IsLost` alongside `Lost`, and a status can lock a deal
+  while carrying neither — so `!IsLost` would print "Won" over a deal nobody won, a lie that reads
+  perfectly. One check fails only against that inferred version. This keeps "Closed Won" a label a pipeline
+  can rename, per the vocabulary rule.
+
+  The open-deal countdown is also spelled out — "in 12 days", "today", "3 days overdue" rather than "12d"
+  and "3d past" — since the tile is read at a glance by someone not holding the convention in their head.
+
+  27 new checks. Each pins a label AND the value it sits over, as a pair: a check that looked at only one
+  of them would pass against exactly the half-fixed state this issue is about.
+
+- 615e25a: Deal form: adding or editing a product line no longer opens the full Order Line form (golive#229).
+
+  "What's being sold" was an `mj-explorer-entity-data-grid` bound straight to `OrderLine`, so New and a row
+  double-click both fell through to whatever form is registered for that entity — in bizapps-orders, the
+  CodeGen-generated full-entity form. It shows Order Header, Reverses Order Line, Parent Order Line, Journal
+  Entry, Price Overridden, Fulfillment Status, the ship-to trio and about a dozen related sections, none of
+  which mean anything to a rep pricing a deal.
+
+  **And it renders Unit Price as a plain editable field.** A rep could type any price, with no discount
+  recorded and no override reason — the exact thing `docs/DECISIONS.md` D-DL2 says must be impossible:
+  _"S-US4 is explicit that no price field is enterable by the rep."_
+
+  A compact restricted editor now opens instead, offering exactly what the deal workspace allowed —
+  Product, Quantity, Discount percent, Term start — with unit price and line total as read-only displays,
+  and Order Header set from the deal and never shown.
+
+  **Both `ShowNewButton` and `NavigateOnDoubleClick` are off, and the pair is the fix**: either one left on
+  re-opens the generic form, and the tester reached it both ways.
+
+  **Why this is built in the form rather than reusing the deal workspace.** `deal-form.component.ts` says
+  composing a deal is the workspace's job and that duplicating it here would give us two surfaces that must
+  agree forever. That was right when written and no longer applies: commit `9d6ef9e` ("Replace the in-rail
+  deal workspace with Explorer OpenEntityRecord") unmounted `mjs-deal-workspace`, and the selector appears
+  in no template anywhere in the repo. **So D-DL2's guarantee has been enforced only in unreachable code
+  since 2026-08-31**, and the deal form is the only live surface — there is no second surface to disagree
+  with.
+
+  The RULES are not re-derived. Product eligibility, the percent/fraction discount conversion and the
+  term-start question all come from the same `@mj-biz-apps/sales-entities` helpers the workspace called;
+  only the markup is new. A discount stays a PERCENT and never an amount, per D-DL2 — `DiscountAmount` reads
+  0 exactly when a percentage discount exists.
+
+  #206's requirement that a locked deal offer no way to add a line is preserved and moved onto the new Add
+  button, since the binding it used to assert is now deliberately gone.
+
+  14 checks, including that no input anywhere binds `UnitPrice` or `LineTotalNet`.
+
+- ca01757: The deal's product lines are listed in line-number order.
+
+  The grid's view parameters carried no `OrderBy`, so rows arrived in whatever order the view produced — a rep who added three products saw them as 2, 3, 1.
+
+  Sorted by `LineNumber` rather than a created-at stamp: orders stamps it through the collection's `applySequence()` and re-stamps by array index when lines move, so it is the sequence the order itself considers its lines to be in. Sorting by creation time would show a resequenced order in the order it was typed rather than the order it now has.
+
+- 078824c: A deal moves to the Overview once it has been saved for the first time.
+
+  A new deal opens on Pipeline — that panel declares `leadsWhenUnsaved`, deliberately (golive#188), because a summary of a record with no data is a page of blanks. Once the deal is saved that reasoning inverts: the summary has something to summarise, and the rep has just finished what Pipeline was for.
+
+  MJ persists the active group only for a SAVED record (`ShouldPersistChromeActiveGroup`), so nothing moved the rail on that transition and a rep was left looking at the form they had just completed.
+
+  It lives in the hero rather than the Pipeline panel for two reasons, the second load-bearing: the hero renders for every section, so it sees the save wherever the rep is, and `MJSDealPipelinePanel` deliberately avoids `inject()` so `new MJSDealPipelinePanel()` keeps working in its tests.
+
+  Keyed on the unsaved→saved CROSSING, not on `IsSaved`: an already-saved deal must never be dragged to Overview, or a rep could not stay on another section for the rest of its life. That single test also makes it fire exactly once — a separate once-per-record flag was written first, and a mutation proved it inert.
+
+- e473a26: A new deal's "What's being sold" panel says what to do, instead of rendering nothing.
+
+  golive#216, the first half. A tester creating a deal reported: _"It is empty, with no add button and no
+  message"_ — and could not tell whether products were unavailable, broken, or somewhere else.
+
+  The panel had two branches:
+
+  ```
+  @if      (Record.IsSaved && Record.OrderID)  -> the lines grid
+  @else if (Record.IsSaved)                    -> "Save the deal to add products."
+  ```
+
+  So a **saved** deal was told to save, and a **brand-new** one — the only case that hint exists for —
+  matched neither branch and rendered empty. The condition was inverted against its own message.
+
+  Three branches now, covering every combination of the two fields it reads: the grid when there is a
+  saved deal and an order to hang lines on; _"Save the deal first. Products are added to the order it
+  creates."_ when it is not saved; and, for a saved deal with no order, a message that says that rather
+  than repeating the wrong instruction one case over. That last case is the legacy row that closed before
+  deals minted their own order — `DealEntityServer` deliberately does not mint one for a deal whose whole
+  point has passed — so telling that rep to save would be the same error again.
+
+  Five tests, four mutations all killed, including the defect restored exactly. The tests are anchored on
+  the branch conditions **and their order**, so a message moved under the wrong condition fails even
+  though every string is still present — which is the failure this panel actually had.
+
+  **This is the panel half of #216 only.** The other two halves are covered elsewhere and are not in this
+  PR: the silent `Save()` refusals that produce _"Unknown error creating record"_ are converted to
+  readable messages by #81, and the Owner and Company fields that the form offers while the server
+  refuses or overwrites them are made read-only by #92.
+
+- 3ac4c36: Records that KI-20 is fixed, and stops the workarounds written for it reading as current.
+
+  `docs/KNOWN-ISSUES.md` KI-20 described removing an order line as impossible — first silently dropped, later refused outright on a unique-key violation. Orders fixed it: `OrderEntityServer.Save()` drains `Lines.Removed`, renumbers the survivors and recomputes the header, with `OrderLineRemoval.test.ts` covering both failures. bc-aidp-next-golive#187 is closed.
+
+  `save-deal.SD6` was the tripwire for exactly this, and it worked — `docs/CHECK-MUTATION-EVIDENCE.md` records it firing on `next`. Nobody read it for some weeks, which is the part worth keeping: a red tripwire nobody reads is the same as no tripwire.
+
+  The entry is marked closed with the original kept below it, because the shape recurs — a downstream app's save path silently skipping a companion-collection step.
+
+  `ShouldRefuseLineRemoval` is annotated as obsolete rather than deleted. Its only caller is the deal workspace, which no template has mounted since 9d6ef9e, so removing it would change the behaviour of a component nobody can reach and cannot be tested end to end, on a surface whose fate is still open. The note says so, and says who should delete it. The same correction is applied where the workspace and its test describe the defect as live — including a citation of `DECISIONS-NEEDED.md` DN-6, a file that does not exist in this repo.
+
+  Also restores `Metadata.Provider` after each pricing test. It is a singleton the helper replaces, and the suite went red once on an unrelated test before passing on the next runs — shared global state, caught before it became a recurring mystery.
+
+- 3855966: Cancels a pending price request when the line dialog closes, and grants SELECT on the layered `vwSalesContacts`.
+
+  **The debounce timer outlived the dialog.** It was cleared only by being RESCHEDULED, so a rep who typed a quantity and clicked Cancel within 350ms left a timer firing against a destroyed component — a pointless `Orders.PriceOrder` round trip and a `detectChanges()` on a view Angular had already torn down. The dialog sits inside `@if (EditorOpen)`, so it is genuinely destroyed on both Save and Cancel. The component now implements `OnDestroy`.
+
+  **`vwSalesContacts` is granted explicitly.** The migration that creates the layered wrapper DROPs the previous view, and dropping a view discards its permissions.
+
+  This is insurance rather than a repair: CodeGen re-grants on exactly this kind of object — its own guard is described as being for _"objects CodeGen refreshes or GRANTS ON but does NOT create — specifically the application-owned outer view of a layered entity"_ — and a run duly restored all three roles. On the documented install sequence the grants arrive without this file. It ships for the window in between, and for any path that applies migrations without a CodeGen run afterwards, where no application role can read Sales Contacts. The failure is invisible to anyone testing as `sa`, which is how it went unnoticed. bizapps-contracts grants explicitly in its own layering migration for the same reason.
+
+  The grants live in the migration that creates the view, not a follow-up. That migration was written today and exists only on this branch — the additive-only rule protects migrations applied to databases you do not control, and there are none. Verified by re-applying it: the DROP discarded the grants and the new block restored them.
+
+- 1e12126: Show where an order came from, on the order form's header.
+
+  A UAT tester opened an order that had been raised from a deal and found nothing on it saying so
+  (`bc-aidp-next-golive#227`). The header names the status, type, company, dates and parties, and no
+  part of it pointed back at the deal that caused the order to exist, or at the contract that deal
+  produced.
+
+  A row of chips now sits above the order header: the **Deal**, and the **Contract** reached through
+  that deal. It is `bizapps-related-chips` from `@mj-biz-apps/common-ng` — the shared row built for
+  `golive#225` precisely so orders, sales and contracts would stop each solving a slice of this
+  differently — so the rules about when a chip must not be drawn at all come from there: nothing for
+  an entity this host does not have or this user cannot read, nothing for a record that is not there,
+  and never a raw id where a name belongs.
+
+  **Sales owns an order-form panel because the link only exists in one direction.** `Deal.OrderID` is
+  a foreign key into orders and `Deal.ContractID` a soft reference into contracts; `OrderHeader` holds
+  neither, and `mj-app.json` has sales depending on orders and contracts with neither depending on
+  sales. So the knowledge that an order HAS a deal is this app's, and the panel is contributed onto
+  the order form through MJ's `before-fields` slot rather than built into an app that must not know
+  this one exists. The orders repo is unmodified.
+
+  **One read, and the contract is why.** The chip row can find a record from a filter as happily as
+  from an id, so the deal chip alone would need no read here. The contract is a second hop — order →
+  deal → contract — that the row cannot take on a caller's behalf, and the only alternative would be a
+  filter carrying a subquery across into the sales schema. The panel reads the deal once for both ids
+  and hands over two ordinary forward links.
+
+  Which relationships an order has lives in `order-related-links.ts` as plain functions, testable
+  without Angular DI, the same split `deal-related-links.ts` and common's own `related-links.ts` use.
+  Both chips are ungated, unlike the deal form's: the order already exists and is being looked at, and
+  where it came from does not become truer at a later status.
+
+- 1783cef: Eight more related panels say what to do on an unsaved record, instead of rendering nothing.
+
+  golive#216 was filed about ONE panel: a tester creating a deal expanded "What's being sold" and found
+  it _"empty, with no add button and no message"_, and could not tell whether products were unavailable,
+  broken, or somewhere else. That panel is fixed separately.
+
+  **Eight sibling panels had exactly the same shape**, and were found by sweeping for it rather than by
+  waiting for the next ticket:
+
+  ```
+  @if (Record.IsSaved) { <grid> }     // ...and nothing at all otherwise
+  ```
+
+  | panel                     | an unsaved record now reads                            |
+  | ------------------------- | ------------------------------------------------------ |
+  | Internal team             | _Team members are recorded against it once it exists._ |
+  | Buying team               | _Contacts are linked to it once it exists._            |
+  | Activity                  | _Activity is logged against it from then on._          |
+  | Stage history             | _Stage changes are recorded from then on._             |
+  | Payment schedule          | _Payments are scheduled against it once it exists._    |
+  | Deals, on an organization | _Deals are linked to it once it exists._               |
+  | Deals, on a person        | _Deals are linked to them once they exist._            |
+  | Deal team, on a person    | _Their role on a deal is recorded once they exist._    |
+
+  Each opens with the instruction the lines panel uses — "Save the deal first." — so a rep meets one
+  voice across every panel on the form. The three on the Organization and Person forms name **those**
+  records rather than sales' own vocabulary: they are `MJ_BizApps_Common: Organizations` and `People`,
+  and a panel contributed onto someone else's form should not rename the record it is sitting on.
+
+  **Not one of the eight carried a comment saying the blank was deliberate**, which is what settles them
+  as the same defect rather than a design choice. The judgement was made per panel rather than by
+  find-and-replace; Activity is the one where a blank could be argued for, and it gets a message on the
+  same grounds as the rest — a rep cannot tell "nothing yet" from "broken" by looking at nothing.
+
+  **The style is part of the fix, not decoration.** `.mjs-deal-empty` is scoped per component under
+  emulated encapsulation, so a panel that gains the markup without the style renders the hint as
+  unstyled body text. `FIELD_STYLES` already records that happening once with `dw-field__hint`. Every
+  panel touched here therefore carries `EMPTY_STATE_STYLES` in its own decorator, and a test asserts it
+  per panel — a panel could otherwise pass every copy assertion and still look broken.
+
+  17 tests: the message and its branch ORDER for each of the eight, the style for each of the eight, and
+  a sweep tripwire for the shape itself.
+
+  **The tripwire reads the form-panels DIRECTORY, not the two files this changes**, and that distinction
+  is load-bearing. The next instance is most likely to arrive in a NEW file — which is exactly what
+  happened while this was open, when `order-related.panel.ts` landed from another PR. A tripwire pinned
+  to two hardcoded sources would have been watching the wrong place and still reported green. Proved by
+  dropping a new panel file written to the old shape into that directory: the tripwire fails and names
+  the file. (That panel is not itself an offender — it renders no labelled section when it has nothing,
+  so nobody expands it and finds a blank.)
+
+- 1853c4b: The deal workspace no longer offers Add product on a closed deal.
+
+  golive#206 item 1 asks for a line on a closed deal to be refused "whichever screen or API path it comes from", and names the deal **form's** grid for the affordance half. The workspace has its own Add button, which the issue never mentions, and it was gated only on the deal being saved — so a rep could add a product to a Won deal here while the form's grid refused the same gesture one screen over.
+
+  The server is the rule and orders enforces it: a line saved through the order graph outside booking is asked, and a frozen deal refuses. This is the affordance half. Without it the gesture is offered, taken, and then fails at save time as a thrown error, which is the shape item 1 exists to replace.
+
+  **Removal needs no second rule here.** `ShouldRefuseLineRemoval` is `!!line.IsSaved`, so every saved line is already declined at the gesture — for KI-20's reasons rather than the lock's, but a rep on a closed deal meets the same wall either way, and a second rule would be two messages for one refusal. That is asserted rather than assumed, so if KI-20 is ever fixed and this relaxes, the lock gap it currently hides surfaces as a failing test instead of a silent regression.
+
+  The message follows golive#207's voice and gives the same instruction as the header notice and the server refusal: _"This deal is closed. Set the status back to Open before adding a product."_ No template change — the button already binds `[disabled]="!CanAddLine"` and renders `AddLineBlockedReason` as its hint.
+
+  Six tests, three mutations all killed: removing the gate (which restores the defect exactly), never choosing the lock message, and blocking unconditionally. The third matters because without it a gate that always refused would pass every other assertion.
+
+- 7cd03e8: A closed deal's existing product lines can no longer be edited from the workspace.
+
+  **This is the half sales#84 missed, and its reviewer caught it.** #84 stopped this pane _offering_
+  Add on a closed deal. The review then pointed out that the same pane still let a rep change product,
+  quantity, discount and term start on one — and golive#206 item 1 covers edits, not just additions:
+  _"Adding, **editing** or deleting a line on a locked deal should be refused at the server, whichever
+  screen or API path it comes from."_
+
+  Those four inputs carried no `disabled` binding at all. `UnitPrice` and `LineTotalNet` were already
+  read-only — Sales must not price — so the gap was exactly the four a rep can type into.
+
+  **Not gated on `IsSaved`, deliberately, and that is the difference from `CanAddLine`.** Adding needs a
+  saved deal because the order is minted on first save. An unsaved deal is precisely where a rep
+  composes its lines, and nothing is frozen until a status locks it, so gating edits the same way would
+  break normal composition. A test pins that difference rather than leaving it to be re-derived.
+
+  **No second visible paragraph.** On a locked deal `AddLineBlockedReason` already renders _"This deal
+  is closed…"_ beneath this grid. A second sentence saying the same thing about a different gesture
+  would be two messages for one condition — the reasoning #84 used to leave removal alone. The refusal
+  reaches a rep who hovers a greyed field through `title`, and the pane-level explanation is already on
+  screen. The product select keeps `ProductLabel` while editable, since the product name is what is
+  wanted there, and falls back to the refusal only while locked.
+
+  The wording is `This deal is closed. Set the status back to Open before changing what was sold.` —
+  golive#207 row 17's sentence, shared with the deal form's field refusal and this pane's Add hint, and
+  word-for-word what the server-side `DealLockRefusal('update')` produces in sales#98. A rep meets one
+  sentence wherever the same lock refuses them.
+
+  **Removal still needs nothing here.** `ShouldRefuseLineRemoval` is `!!line?.IsSaved`, so every saved
+  line is already declined at the gesture — for KI-20's reasons rather than the lock's, but the wall is
+  the same either way.
+
+  **Two more ways into the same fields, found in review of this PR.** Disabling what a rep can _type
+  into_ left two controls that write without typing, and the requirement quoted above covers both:
+
+  - **The term-start reset.** The date input beside it was disabled; the button that clears it was not.
+    `ResetTermStart` nulls `ServicePeriodStart` **and** `ServicePeriodEnd`, so the one control this
+    change first missed was the one that wrote most. It now carries the same binding, keeping its own
+    hint while editable exactly as the product select keeps `ProductLabel`.
+  - **The full line detail.** `OpenLineDetail` opened the generated Order Line form with
+    `EditMode: true` unconditionally — the service period, term, product reference and description,
+    every one of them editable on a frozen line. It now passes `EditMode: this.CanEditLines`.
+
+    The button is still **offered** on a closed deal, and read-only rather than withheld: a closed deal
+    is what people go back and inspect, and those four fields have no other surface, so withholding it
+    would cost the reading to prevent the editing. `CreateRelated` already gated a `forms.Open` the same
+    way, stated the other way round — _a locked deal must not create a record it then cannot attach._
+
+    This stops the **workspace** from requesting edit on a frozen line. Whether the generated form's own
+    chrome still offers an Edit toggle in view mode is an MJ-level question, identical in every
+    read-only context; `DealLockOrderLineVeto` (sales#98) refuses the save either way.
+
+  13 tests, 8 mutations all killed, including the defect as reported and both ways of losing a binding.
+  **Five of the thirteen assert the bindings exist**, which is the point: unlike #84, where the button
+  already bound `[disabled]` and only a getter changed, these bindings are new — and a correct getter
+  that nothing consumes would pass every behavioural assertion while a rep edited a frozen line. The
+  slide-in is asserted on **behaviour** instead, because there the defect is not a missing binding but a
+  value handed to a service: a version that read `CanEditLines` and passed `true` anyway would survive
+  any grep of the template.
+
+- Updated dependencies [40d8f7d]
+- Updated dependencies [f1ecd20]
+- Updated dependencies [ad9191c]
+- Updated dependencies [2f1a3ea]
+- Updated dependencies [c3b23cc]
+  - @mj-biz-apps/sales-entities@6.6.0
+
 ## 6.5.0
 
 ### Minor Changes

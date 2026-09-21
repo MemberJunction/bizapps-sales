@@ -1,5 +1,115 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.6.0
+
+### Minor Changes
+
+- 91ba029: Adding a product now updates the deal's amount and weighted amount.
+
+  `Deal.Amount` is a cached copy of its order's `TotalGross`, refreshed only during a DEAL save. The line dialog saves the ORDER, so adding a product left the deal reading no amount and no weighted amount while its order carried a real total. Measured on a test deal: order `TotalGross` 229, deal `Amount` NULL, and no subsequent save able to move it.
+
+  **The guard was a bootstrap failure, not a missing poll.** `amountMayHaveMoved` tested `order.Dirty`, `order.Lines.Dirty` and `AmountIsComputed === true` — and the last is what `refreshAmountFromOrder` _stamps_ once it has cached a figure. A deal that never had one is false on all three, permanently; by the time anything saves the deal, the order the dialog committed is clean.
+
+  The added term is `Amount === null` — the unbootstrapped state itself, not a comparison between the two figures. It costs one read per save for exactly that state and stops as soon as a figure is cached, because `AmountIsComputed` then carries it.
+
+  It does **not** reintroduce polling, which the note in `Save()` rejects for good reason. A header-only deal with a typed amount is non-null and never read; one with no amount reads an order whose `TotalGross` is NULL — `SUM` over no rows — and `refreshAmountFromOrder` returns without touching a column. Drift caused by someone editing the order directly is still not chased here; that remains what `AmountSourceHash` is for.
+
+  **And the deal is saved when a line commits**, so the figure appears while the rep is looking at it rather than after some later unrelated save. A full save rather than a targeted amount write: `Amount` has one author — `refreshAmountFromOrder`, where the provenance stamps are set together — and a panel reaching in to write it is how a cached figure and its fingerprint start disagreeing. The stated cost is that other unsaved edits commit with it, which is the right answer while composing.
+
+  **And the deal save had to be forced past the dirty check**, which is what made the first two attempts look like they had changed nothing. A line save changes the ORDER; the deal's own columns are untouched, so it is not dirty — and `BaseEntity.Save()` skips the provider entirely when nothing is dirty. `FormComponent.SaveRecord()` takes no `EntitySaveOptions` and so cannot ask otherwise, so the request never left the browser and the entity server never ran. The seam calls `Record.Save()` with `IgnoreDirtyState`, still a full deal save.
+
+  **The guard also had to stop asking the wrong question.** `OrderID_Object` is the IN-MEMORY embedded order and is null on any save that did not load it — which is most of them — so an `!!order &&` prefix short-circuited every other test. The note claiming lined deals "re-read TotalGross on every save" was therefore true only when the order happened to be in memory. The dirtiness tests, which genuinely need the object, stay behind it; the state tests ask `OrderID` instead, which is all `refreshAmountFromOrder` needs.
+
+  None of the three works alone: without the forced save nothing reaches the server, without the FK-keyed guard the save refreshes nothing, and without the bootstrap term a deal that never had an amount can never acquire one.
+
+  Found by measurement rather than reading, after two confident and wrong diagnoses: deal `__mj_UpdatedAt` 00:32:43 against its order at 00:39:08 with three lines totalling 1057. A deal timestamp older than its order's says the save never ran, which no amount of studying the guard would have revealed.
+
+  The guard's decision table is reproduced in tests rather than extracted — changing code to suit a test is its own problem — and a second test reads the shipped expression and asserts every term of it, so the copy cannot drift from the original unnoticed.
+
+- 926ac7a: A new deal is born with an owner: the account's owner when it has one, otherwise whoever created it.
+
+  Nothing populated `DealTeamMember` — not the deal type, not the pipeline, not the account — so `stampOwnerFromTeam()` had nothing to derive from, and the Overview reported _"No owner assigned."_ on a deal created seconds earlier. The form's team panel is gated on the deal being saved, so at the moment of creation there was no way to supply one either: every new deal was unowned and stayed that way until somebody noticed.
+
+  **Why the entity and not the form.** `DealTeamMember` is the source of truth for who is on a deal and `Deal.OwnerEmployeeID` is a stamp derived from it, so a form that wrote either would be a second authority on membership. In `Save()`, an Action, an agent and the HubSpot importer all get the same default from the same code.
+
+  **Why the account first.** A deal on an existing customer belongs to whoever runs that customer, whether a rep, an SE or an admin typed it in — so it beats the creator, who is merely the person at the keyboard. The creator is the fallback for a deal with no account yet, or an account nobody owns.
+
+  It calls the existing `SetOwner()` rather than writing roster code: `DealTeamMember` is unique on _(deal, employee, role)_, so replacing an owner is a remove plus an add, and the collection contributes deletions before insertions. Restating that would have been a second implementation of the same intent.
+
+  **It is a default, not a rule.** Each of these leaves the deal exactly as the caller left it: an update rather than a create, a caller that already supplied a roster (guarded on `RosterDrivesThisSave`, the same test `stampOwnerFromTeam` uses, so the two cannot disagree), and nothing resolving at all — `System` and `Anonymous` have no linked Employee, and an unowned deal is the honest outcome. A failed read of the account is also not fatal. The one thing this must never do is cost someone a deal they were creating.
+
+  Two details worth recording. `UserInfo.EmployeeID` is typed `number` in `@memberjunction/core` while the column is a `uniqueidentifier` — verified against the database — so it is read as a string and anything else is ignored rather than written into a foreign key. And it does not reuse the veto's `SafeID`, which throws: that is right where ids arrive from Orders, and wrong on our own field on a deal somebody is creating.
+
+  Ten tests cover both resolution paths and every way it declines; all four guards are mutation-checked.
+
+- b15ec15: Sales answers Orders' question about order lines, so a closed deal's lines are actually frozen.
+
+  `orders-entities` asks whether an order line may be edited — `RegisterOrderLineEditVeto` — and refuses
+  nothing until something registers. Nothing ever has. The seam shipped inert on purpose, because Sales
+  resolves `orders-entities` from npm and could not call a function that had not been published yet.
+  This is the app with the stake answering, and it is what closes golive#206 item 1.
+
+  **By flag, never by name.** The lock is `DealStatusType.LocksDeal`, the same flag the board, the deal
+  form and `DealEntityServer` already read. Won, Lost and Abandoned all lock, a deployment may add
+  another, and a rule matching status names would quietly stop covering it. `vwDeals` exposes
+  `DealStatusType` as a string and it is deliberately unused.
+
+  **The refusal names the gesture**, because the seam passes create/update/delete: _"before adding a
+  product"_, _"before removing a product"_, _"before changing what was sold"_. Each opens with the
+  sentence golive#207 settled and the deal form and workspace already use, so a rep meets one voice
+  across three screens rather than three descriptions of one rule.
+
+  **A lookup that cannot answer is not an approval.** A failed read throws, and
+  `ResolveOrderLineEditRefusal` turns that into a refusal naming the fault. Returning null would let a
+  frozen line change because the thing guarding it was briefly unreachable — the same trade
+  `DealEntityServer.readStatusLockFlags` already makes for the close lock.
+
+  **Nothing is cached, and the cost is two reads per line.** Orders asks once per line, so a fifty-line
+  order graph save costs a hundred round trips. A memo of the verdict would be wrong: the registry holds
+  one instance for the life of the process, so it outlives the truth — a deal reopened a moment ago
+  would keep refusing, and a deal just closed would keep allowing. An earlier draft memoed only the
+  order-to-deal mapping, which cannot go stale that way; it also saved nothing, because the deal row
+  still has to be re-read for its current status. **The test asserting the cost is what caught that.**
+  If the cost ever bites, the fix belongs in the seam — asking once per save — not in a cache here that
+  has to be right about when a deal changed.
+
+  **Where the registration lives matters.** It is called from `sales-core-entities-server`, which
+  DECLARES `@mj-biz-apps/orders-entities`. `sales-server` does not, and resolves that name transitively
+  to whatever is published — measured locally, it resolves to the npm build while the declaring package
+  resolves to the workspace. Putting the import in the package that owns the dependency is what lets
+  the version requirement be stated at all.
+
+  **And it is now stated exactly.** orders#206 merged and published `orders-entities@5.13.0`, which
+  carries the seam; every `@mj-biz-apps/orders-entities` declaration in this repo -- the four packages
+  and the root -- is pinned at **`5.13.0`**, and the lockfile resolves a single copy.
+
+  **Exact, not a caret, and that is the load-bearing part.** The registry is a module-scoped
+  `let hostVeto` in `orders-entities`, so it is per-COPY rather than per-process: if Sales ever
+  resolved a different version than the `orders-core-entities-server` that reads it, the registration
+  would land in one copy and the lookup in the other, and the veto would refuse nothing while every
+  test here still passed. Every orders package pins `5.13.0` exactly; matching that is what keeps it
+  to one copy. A caret would compile and then silently do nothing, which is strictly worse than the
+  honest build failure this replaced. It was two copies for a moment during this change -- the four
+  package declarations moved first and the ROOT one was still `^5.2.1`, which the lockfile duly
+  resolved alongside 5.13.0 -- so this is measured rather than theoretical.
+
+  13 tests, 7 mutations all killed: the flag never locking (the defect), every status locking, an
+  order with no deal falling through, each of the two failed reads allowing instead of refusing, a
+  hostile id reaching the filter, and the create gesture getting the wrong words.
+
+  Driven end to end against a real database as well: a real deal and the order it owns, open then
+  closed, with the registered vetoer — the grid path refused, the order-graph path refused, a delete
+  refused, Orders' own writes still allowed, and a `ContextUser` on every call.
+
+### Patch Changes
+
+- Updated dependencies [40d8f7d]
+- Updated dependencies [f1ecd20]
+- Updated dependencies [ad9191c]
+- Updated dependencies [2f1a3ea]
+- Updated dependencies [c3b23cc]
+  - @mj-biz-apps/sales-entities@6.6.0
+
 ## 6.5.0
 
 ### Patch Changes
