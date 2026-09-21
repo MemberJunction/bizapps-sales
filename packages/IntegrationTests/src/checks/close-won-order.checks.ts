@@ -303,9 +303,12 @@ export const CloseWonOrderChecks: NamedCheck[] = [
                  * D-OS1's THIRD RULE, which is the one with teeth: *"The Deal stage is the salesperson's
                  * record of the sales process; it should never be held hostage by order-side rules."*
                  *
-                 * The refusal is not hypothetical and not an edge case — S-US8 GUARANTEES it. A lost deal
-                 * voids its order, `Voided` is terminal in orders, and reopening moves the deal into a
-                 * stage asking for `Quoted`. Orders says no. The deal must reopen anyway.
+                 * The refusal this check is about is an order that CANNOT take the status its stage
+                 * declares. Note what it is NOT: the intro here used to say a lost deal's order is
+                 * `Voided`, that `Voided` is terminal, and that reopening into a stage asking for
+                 * `Quoted` is therefore refused. That is false and the next block already says so —
+                 * `TRANSITIONS.Voided` is `['Draft','Quoted']`, `Confirmed` is the terminal status
+                 * (KI-27). The two halves of this comment have disagreed since that measurement.
                  *
                  * Set up here with the same shape and without needing the loss path: put the order at
                  * `Voided`, point the target stage at `Quoted`, and move. Three things must all hold —
