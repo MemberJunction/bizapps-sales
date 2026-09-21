@@ -119,6 +119,52 @@ function issue(Section: SalesCloseIssue['Section'], Message: string, Field: stri
  *
  * `Severity: 'warning'` is already in the published union, so this needs no contract change.
  */
+/**
+ * What a reopen must carry out of the loss fields before it clears them (golive#205).
+ *
+ * Returns a suffix for the reopen event's note, or '' when the deal was not lost. The reason is
+ * resolved to its NAME because an id in an audit note tells a reader nothing -- and by id rather than
+ * by name on the way in, so a renamed reason still resolves (§3).
+ *
+ * A lookup that fails is not allowed to fail the reopen: an audit note is worth less than the unlock
+ * the caller asked for. It degrades to the id, which is still recoverable by hand, rather than
+ * throwing away the only copy.
+ */
+async function lossTrailFor(
+    deal: DealEntityServer,
+    provider: IMetadataProvider,
+    user: UserInfo,
+): Promise<string> {
+    const reasonID = deal.LossReasonID;
+    const notes = deal.LossNotes?.trim();
+    if (!reasonID && !notes) {
+        return '';
+    }
+
+    let reason = reasonID ? `reason ${reasonID}` : 'no reason recorded';
+    if (reasonID) {
+        try {
+            const view = provider as unknown as IRunViewProvider;
+            const r = await view.RunView(
+                {
+                    EntityName: LOSS_REASON_ENTITY,
+                    ExtraFilter: `ID = '${reasonID}'`,
+                    ResultType: 'simple',
+                    Fields: ['Name'],
+                },
+                user,
+            );
+            const name = (r.Results ?? [])[0] as { Name?: string } | undefined;
+            if (r.Success && name?.Name) {
+                reason = String(name.Name);
+            }
+        } catch {
+            // keep the id form; see the note above about not failing the reopen for an audit string
+        }
+    }
+    return notes ? ` (was lost: ${reason} — ${notes})` : ` (was lost: ${reason})`;
+}
+
 function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
     return deal.OrderStatusWarnings.map((Message) => ({
         Section: 'deal' as const,
@@ -1146,7 +1192,10 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * A declared transition answers both — one row, and the defaults writer stands down because
              * the probability on a reopened deal is a human's judgement, not the pipeline's default.
              */
-            deal.DeclareTransition('Reopen', `REOPENED: ${input.Reason.trim()}`);
+            // The loss trail is read BEFORE the fields are cleared below, and folded into the one
+            // event that survives the reopen. See the clearing block for why it is cleared at all.
+            const lossTrail = await lossTrailFor(deal, provider, user);
+            deal.DeclareTransition('Reopen', `REOPENED: ${input.Reason.trim()}${lossTrail}`);
 
             deal.DealStatusTypeID = target.ID;
 
@@ -1168,6 +1217,30 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             deal.ClosedAt = null;
             deal.ClosedByUserID = null;
             deal.ActualCloseDate = null;
+
+            /**
+             * THE LOSS REASON IS A CLOSE STAMP TOO, and leaving it behind was not harmless
+             * (bc-aidp-next-golive#205).
+             *
+             * It stayed set on a REOPENED deal, which is wrong twice over. The form shows "LOSS REASON"
+             * on a deal that is Open -- a deal that has not been lost does not have a reason for being
+             * lost. And `validateClose` reads `input.LossReasonID ?? deal.LossReasonID`, so the stale
+             * value SATISFIED the next close: measured on this host, a deal closed Lost with a reason,
+             * reopened, then closed Lost again supplying NO reason succeeded silently and re-used
+             * `Price`. golive#205 asks that "Lost should require a loss reason" and `close-deal.CD8`
+             * asserts the refusal -- both were quietly bypassed for the whole life of the deal after
+             * its first loss.
+             *
+             * ── WHY THE TRAIL IS WRITTEN BEFORE CLEARING ───────────────────────────────────────────
+             *
+             * `DealStageEvent` has no loss columns and record-change tracking captured nothing for
+             * these fields on this host, so clearing them alone would destroy the reason outright
+             * rather than move it. The reopen event is where this app already keeps close context --
+             * the close writes its routing outcome there the same way -- so the reason and notes go
+             * into that one append-only row first, and only then leave the header.
+             */
+            deal.LossReasonID = null;
+            deal.LossNotes = null;
 
             // The save has to write the very row the lock protects, so it runs with the lock suspended
             // — scoped to this call and self-restoring.

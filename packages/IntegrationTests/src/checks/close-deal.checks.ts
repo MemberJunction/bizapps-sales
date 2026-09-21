@@ -2543,6 +2543,90 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-deal.CD32',
+        Name: 'CD32: a reopen clears the loss reason, into the event — so the NEXT close must ask again',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205: reopening "clears the close stamps", and "Lost should require a loss
+                 * reason". Those two met in a hole.
+                 *
+                 * `LossReasonID` was not cleared, so a reopened deal still displayed a loss reason
+                 * while Open -- and `validateClose` reads `input.LossReasonID ?? deal.LossReasonID`,
+                 * so the stale value SATISFIED the next close. Measured before the fix: closed Lost
+                 * with a reason, reopened, closed Lost again supplying NO reason -> Success, zero
+                 * Issues, reason silently re-used. CD8's refusal was bypassed for the rest of the
+                 * deal's life, which is why CD8 alone never caught it: it opens a fresh deal that has
+                 * never been lost.
+                 *
+                 * THE TRAIL IS ASSERTED TOO. `DealStageEvent` has no loss columns and record-change
+                 * tracking captured nothing for these fields, so a fix that only cleared them would
+                 * destroy the reason rather than move it. Clearing is only correct if the reopen event
+                 * carries it out first, and a check that did not say so would pass over the data loss.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD32 loss reason is a stamp',
+                );
+
+                const reason = await TxOne<{ ID: string; Name: string }>(
+                    ctx,
+                    `SELECT ID, Name FROM ${SALES_SCHEMA}.LossReason WHERE ID = '${f.LossReasonPlainID}'`,
+                );
+
+                Assert(
+                    (await close(ctx, {
+                        DealID: dealID,
+                        DealStatusTypeID: f.LostStatusID,
+                        LossReasonID: reason.ID,
+                    })).Success,
+                    'setup: the first lost close must succeed',
+                );
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD32: reopening.' });
+                Assert(out.Success, `the reopen failed — ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{ LossReasonID: string | null; LossNotes: string | null }>(
+                    ctx,
+                    `SELECT LossReasonID, LossNotes FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(
+                    after.LossReasonID === null,
+                    'a reopened deal is OPEN and must not still carry the reason it was lost for — ' +
+                        `it is still '${after.LossReasonID}'`,
+                );
+
+                // ...but the reason must not have been destroyed on the way out.
+                const event = await TxOne<{ Notes: string | null }>(
+                    ctx,
+                    `SELECT TOP 1 Notes FROM ${SALES_SCHEMA}.DealStageEvent WHERE DealID = '${dealID}' ` +
+                        `ORDER BY ChangedAt DESC`,
+                );
+                Assert(
+                    String(event.Notes ?? '').includes(reason.Name),
+                    `the reopen cleared the loss reason without recording it. The event note reads ` +
+                        `'${event.Notes}' and nothing else on this host stores it, so clearing alone ` +
+                        `loses it outright`,
+                );
+
+                /**
+                 * AND THE POINT OF ALL OF IT: the next close has to ask again. Supplying no reason
+                 * must now be refused, exactly as CD8 requires of a deal that was never lost.
+                 */
+                const second = await close(ctx, { DealID: dealID, DealStatusTypeID: f.LostStatusID });
+                Assert(
+                    !second.Success,
+                    'closing Lost a SECOND time with no loss reason must be refused — a stale reason ' +
+                        'from a previous close is not an answer for this one',
+                );
+                Assert(
+                    second.Issues.some((i) => String(i.Field) === 'LossReasonID'),
+                    `the refusal must name the field — got ${JSON.stringify(second.Issues)}`,
+                );
+            }),
+    },
 ];
 
 for (const check of CloseDealChecks) {
