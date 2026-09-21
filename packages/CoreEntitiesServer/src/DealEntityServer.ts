@@ -458,9 +458,48 @@ export class DealEntityServer extends DealEntity {
          * every unrelated deal save would be a read per keystroke for a guarantee the hash already gives.
          */
         const order = this.OrderID_Object;
-        // Lined deals (`AmountIsComputed`) re-read TotalGross on every save so a line edit made
-        // through the related grid still lands on the header the next time the deal is saved.
-        const amountMayHaveMoved = !!order && (order.Dirty || order.Lines.Dirty || this.AmountIsComputed === true);
+        /**
+         * Lined deals (`AmountIsComputed`) re-read TotalGross on every save so a line edit made through
+         * the related grid still lands on the header the next time the deal is saved.
+         *
+         * ── AND THE BOOTSTRAP, WHICH THAT SET COULD NOT REACH ───────────────────────────────────────
+         *
+         * `AmountIsComputed` is what `refreshAmountFromOrder` STAMPS once it has cached a figure, so a
+         * deal that has never had one is false — and the three tests above are then all false for it
+         * forever. Adding a product through the line dialog saves the ORDER, not the deal, so by the
+         * time anything saves the deal the order is clean and nothing triggers. Measured: an order with
+         * `TotalGross` 229 against a deal reading `Amount` NULL, and no save could move it.
+         *
+         * `Amount === null` is the bootstrap, and it is keyed on the cause — a deal with an order and no
+         * cached figure at all — rather than on a comparison that would poll. It costs one read per save
+         * for exactly that state and stops the moment a figure is cached, because `AmountIsComputed`
+         * then carries it.
+         *
+         * IT DOES NOT REINTRODUCE POLLING, which the note above rejects for good reason. A header-only
+         * deal with a typed amount has `Amount` non-null and is never read; one with no amount yet reads
+         * an order whose `TotalGross` is NULL — SUM over no rows — and `refreshAmountFromOrder` returns
+         * without touching a column. Drift caused by someone editing the order directly is still not
+         * chased here; that is still what `AmountSourceHash` is for.
+         */
+        /**
+         * ── AND THE TESTS SPLIT BY WHAT THEY ACTUALLY NEED ──────────────────────────────────────────
+         *
+         * `OrderID_Object` is the IN-MEMORY embedded order — `__embeddedOrder.Value` — which is null
+         * unless something in this session loaded or ensured it. A plain save arriving from the form
+         * has no order object at all, so an `!!order &&` prefix short-circuits the whole guard before
+         * any other test is reached.
+         *
+         * That is why the note above ("lined deals re-read TotalGross on every save") did not hold: it
+         * was true only when the order happened to be in memory, which is not most saves. Measured — a
+         * deal saved at 00:32:43 against its order updated at 00:33:08, with `Amount` still NULL.
+         *
+         * `refreshAmountFromOrder` needs only `this.OrderID`; it runs its own view. So the dirtiness
+         * tests, which genuinely require the object, stay behind it — and the state tests, which only
+         * need the deal's own columns, ask the FK instead.
+         */
+        const amountMayHaveMoved =
+            (!!order && (order.Dirty || order.Lines.Dirty))
+            || (!!this.OrderID && (this.AmountIsComputed === true || this.Amount === null));
 
         // The stage's forecast defaults, on the same trigger as the three above. Read here, applied
         // inside the scope, for the same reason the others are: work that might not be needed should not
@@ -502,6 +541,10 @@ export class DealEntityServer extends DealEntity {
          * the rep cleared it deliberately — SD37), and every create does unless one was supplied.
          */
         const needsStatusDefault = !this.IsSaved && !this.DealStatusTypeID;
+
+        // Staged BEFORE the save so the roster row travels in the same transaction, and so
+        // `stampOwnerFromTeam()` derives the stamp from it rather than being told the answer.
+        await this.seedOwnerOnCreate();
 
         const saved = this.IsSaved || this.DealNumber
             ? await this.saveWithinScope(options, {
@@ -2290,6 +2333,135 @@ export class DealEntityServer extends DealEntity {
      */
     private get RosterDrivesThisSave(): boolean {
         return this.Team.IsLoaded || this.Team.Count > 0;
+    }
+
+    /**
+     * Gives a NEW deal an owner: the account's owner when it has one, otherwise whoever is creating it.
+     *
+     * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────────────────────────
+     *
+     * Nothing populated `DealTeamMember`. Not the deal type, not the pipeline, not the account — a deal
+     * was born with an empty roster, `stampOwnerFromTeam()` had nothing to derive from, and the Overview
+     * then reported "No owner assigned." on a deal created seconds earlier. Worse, the form's team panel
+     * is gated on the deal being saved, so at the moment of creation there was no way to supply one
+     * either: every new deal was unowned and stayed that way until somebody noticed.
+     *
+     * ── WHY IT IS HERE AND NOT ON THE FORM ──────────────────────────────────────────────────────────
+     *
+     * `DealTeamMember` is the source of truth for who is on a deal and `Deal.OwnerEmployeeID` is a stamp
+     * derived from it, so a form that wrote either would be the second authority on membership. Putting
+     * it in `Save()` means an Action, an agent and the HubSpot importer all get the same default from
+     * the same code, which is the whole reason the owner rules live on the entity.
+     *
+     * ── THE ORDER OF PREFERENCE, AND WHY ────────────────────────────────────────────────────────────
+     *
+     * The ACCOUNT's owner first. A deal on an existing customer belongs to whoever runs that customer,
+     * and that is true whether a rep, an SE or an admin typed it in — so it beats the creator, who is
+     * merely the person at the keyboard. The creator is the fallback for a deal with no account yet, or
+     * an account nobody owns, where the person entering it is the best answer available.
+     *
+     * ── EVERY WAY THIS DECLINES TO ACT ──────────────────────────────────────────────────────────────
+     *
+     * It is a DEFAULT, not a rule, so each of these leaves the deal exactly as the caller left it:
+     *
+     *  - not a create. An update never needs one; re-deriving on every save would silently re-own a
+     *    deal whose owner had been deliberately removed.
+     *  - the caller already supplied a roster. `RosterDrivesThisSave` is the same guard
+     *    `stampOwnerFromTeam` uses, so an importer or an Action that sets its own team is never
+     *    second-guessed — and the two cannot disagree about what "the caller is managing this" means.
+     *  - nothing resolves. A context user with no linked Employee (`System` and `Anonymous` have none)
+     *    and no account owner leaves the deal unowned, which is exactly what happens today. Refusing the
+     *    save because we could not GUESS an owner would turn a working create into a broken one.
+     *
+     * A failure to READ the account is also not fatal, for the same reason: the deal still saves, just
+     * without a default. The one thing this must never do is cost someone a deal they were creating.
+     */
+    private async seedOwnerOnCreate(): Promise<void> {
+        if (this.IsSaved) {
+            return; // a default belongs to birth, not to every subsequent save
+        }
+        if (this.RosterDrivesThisSave) {
+            return; // the caller is managing the team; do not second-guess it
+        }
+
+        const employeeID = (await this.accountOwnerEmployeeID()) ?? this.creatorEmployeeID();
+        if (!employeeID) {
+            return; // nothing to default to — an unowned deal is the honest outcome
+        }
+
+        /**
+         * `SetOwner` owns the roster mechanics: unique on (deal, employee, role), so replacing an owner
+         * is a remove plus an add with deletions contributing first. Restating that here would be a
+         * second implementation of the same intent.
+         *
+         * WRAPPED BECAUSE `ResolveOwnerRoleID` THROWS. It refuses when no active `DealRole` carries
+         * `IsOwnerRole` — correct when someone deliberately assigns an owner, since silently doing
+         * nothing would be worse. But this is a DEFAULT nobody asked for, and letting it throw would
+         * mean a deployment that had not seeded that role could no longer create deals at all. A
+         * default that breaks creation is worse than no default, which is the one thing this must
+         * never do.
+         *
+         * The seeded role is the vocabulary rule, not a code branch: `metadata/deal-roles` ships
+         * `OWNER` with `IsOwnerRole = 1`, and a host missing it is misconfigured in a way the deal team
+         * panel will report the moment anyone opens it.
+         */
+        try {
+            await this.SetOwner(employeeID);
+        } catch (e) {
+            LogError(
+                `DealEntityServer: could not default the owner on create; the deal is saved without one. ${
+                    e instanceof Error ? e.message : String(e)
+                }`,
+            );
+        }
+    }
+
+    /** The owner of the account this deal is for, or null when there is no account or no owner. */
+    private async accountOwnerEmployeeID(): Promise<string | null> {
+        if (!this.AccountID) {
+            return null;
+        }
+        /**
+         * VALIDATED, NOT ESCAPED, AND IT RETURNS RATHER THAN THROWS.
+         *
+         * `DealLockOrderLineVeto` has a `SafeID` that throws, which is right there: those ids arrive
+         * from Orders and a malformed one is a bug worth stopping on. Here the id is our own field on a
+         * deal somebody is creating, and refusing the save because it did not look like a GUID would
+         * cost them the deal to protect a query that simply does not need to run. No id, no default.
+         */
+        if (!/^[0-9a-fA-F-]{36}$/.test(this.AccountID)) {
+            return null;
+        }
+
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await provider.RunView<{ OwnerEmployeeID: string | null }>(
+            {
+                EntityName: 'MJ_BizApps_Sales: Sales Accounts',
+                ExtraFilter: `ID='${this.AccountID}'`,
+                ResultType: 'simple',
+                Fields: ['OwnerEmployeeID'],
+            },
+            this.ContextCurrentUser,
+        );
+        // RunView does not throw. A failed read means no default, not a failed save.
+        if (!result.Success) {
+            return null;
+        }
+        return (result.Results ?? [])[0]?.OwnerEmployeeID ?? null;
+    }
+
+    /**
+     * The Employee behind the user doing the creating, or null when they have none.
+     *
+     * READ AS A STRING despite `UserInfo.EmployeeID` being typed `number` in `@memberjunction/core`.
+     * The column is a `uniqueidentifier` — verified against the database, where this user's value is a
+     * GUID — so the declared type is stale. Trusting it would coerce a GUID through a numeric type and
+     * produce `NaN` or a truncated id, which would then be written into a foreign key.
+     */
+    private creatorEmployeeID(): string | null {
+        const user = this.ContextCurrentUser as unknown as { EmployeeID?: string | number | null } | null;
+        const id = user?.EmployeeID;
+        return typeof id === 'string' && id.trim().length > 0 ? id : null;
     }
 
     private async stampOwnerFromTeam(): Promise<void> {

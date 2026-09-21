@@ -17,11 +17,22 @@ import { readFileSync } from 'node:fs';
  */
 const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
 
-/** The field-spec block of the Account & people panel, so a match elsewhere cannot satisfy these. */
+/**
+ * The field-spec block the Account & people panel renders, so a match elsewhere cannot satisfy these.
+ *
+ * FOUND BY ITS OWN NAME, not by slicing forward from the class. The specs moved to module scope when
+ * the Overview began borrowing the settable ones during creation — instance initializers do not run
+ * under `Object.create`, which is how these panels are built in tests — and a locator anchored to
+ * `export class MJSDealPartyPanel` then silently found nothing. It failed saying CompanyID was not
+ * declared, which was not true and not what this test is about.
+ *
+ * The panel still has to be the thing that renders them, so that is asserted rather than assumed.
+ */
 function partyPanelFields(): string {
-    const at = source.indexOf('export class MJSDealPartyPanel');
-    expect(at, 'MJSDealPartyPanel must exist — this test is scoped to it').toBeGreaterThan(-1);
-    const from = source.indexOf('Fields: DealFieldSpec[] = [', at);
+    expect(source, 'the party panel must render the shared spec list')
+        .toMatch(/export class MJSDealPartyPanel[\s\S]*?PARTY_FIELDS/);
+    const from = source.indexOf('const PARTY_FIELDS: readonly DealFieldSpec[] = [');
+    expect(from, 'PARTY_FIELDS must exist — this test is scoped to it').toBeGreaterThan(-1);
     return source.slice(from, source.indexOf('];', from));
 }
 

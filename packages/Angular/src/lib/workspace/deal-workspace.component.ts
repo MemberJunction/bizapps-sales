@@ -829,15 +829,72 @@ export class DealWorkspaceComponent implements OnInit {
      * everything before validation runs.
      */
     public get CanAddLine(): boolean {
-        return !!this.Deal?.IsSaved;
+        return !!this.Deal?.IsSaved && !this.Lock.IsLocked;
     }
 
-    /** Why the button is disabled, in the words a rep needs. Null when it is enabled. */
+    /**
+     * Why the button is disabled, in the words a rep needs. Null when it is enabled.
+     *
+     * ── THE LOCKED CASE IS golive#206 ITEM 1, ON THE SURFACE IT DID NOT NAME ─────────────
+     *
+     * Item 1 asks for a line on a closed deal to be refused "whichever screen or API path it comes
+     * from", and names the deal FORM's grid for the button half. The workspace has its own Add, and it
+     * was gated only on the deal being saved — so a rep could add a product to a Won deal here while
+     * the form's grid refused the same gesture one screen over.
+     *
+     * The server is the rule and orders now enforces it: a line saved through the order graph outside
+     * booking is asked, and a frozen deal refuses. This is the affordance half. Without it the gesture
+     * is offered, taken, and then fails at save time as a thrown error — which is the shape item 1
+     * exists to replace.
+     *
+     * REMOVAL NEEDS NOTHING HERE. `ShouldRefuseLineRemoval` is `!!line.IsSaved`, so every saved line is
+     * already declined at the gesture — for KI-20's reasons rather than the lock's, but the rep on a
+     * closed deal meets the same wall either way, and a second rule would just be two messages for one
+     * refusal.
+     */
     public get AddLineBlockedReason(): string | null {
         if (this.CanAddLine) {
             return null;
         }
+        if (this.Lock.IsLocked) {
+            return 'This deal is closed. Set the status back to Open before adding a product.';
+        }
         return 'Save the deal first — its order is created on the first save, and a product line needs it.';
+    }
+
+    /**
+     * May the rep change what is already on the order? Only the LOCK decides this.
+     *
+     * ── THE HALF sales#84 DID NOT COVER ─────────────────────────────────────────────────────────
+     *
+     * #84 stopped this pane OFFERING Add on a closed deal. Its review then pointed out that the same
+     * pane still let a rep edit product, quantity, discount and term start on one -- and golive#206
+     * item 1 covers edits, not just additions: "Adding, EDITING or deleting a line on a locked deal
+     * should be refused at the server, whichever screen or API path it comes from."
+     *
+     * NOT gated on `IsSaved`, unlike `CanAddLine`. A deal that has not been saved yet is exactly where
+     * a rep composes its lines, and nothing is frozen until a status locks it.
+     */
+    public get CanEditLines(): boolean {
+        return !this.Lock.IsLocked;
+    }
+
+    /**
+     * Why a line field is disabled, for the hover. Null when they are editable.
+     *
+     * NO SECOND VISIBLE PARAGRAPH, and that is deliberate. On a locked deal `AddLineBlockedReason`
+     * already renders "This deal is closed..." under this grid; a second sentence saying the same
+     * thing about a different gesture would be two messages for one condition -- the reasoning #84
+     * used to leave removal alone. The refusal reaches a rep who hovers a greyed field through
+     * `title`, and the pane-level explanation is already on screen.
+     *
+     * The wording matches `DealLockRefusal('update')` on the server side word for word, so the
+     * affordance and the refusal a save would produce say the same thing.
+     */
+    public get LineEditBlockedReason(): string | null {
+        return this.CanEditLines
+            ? null
+            : 'This deal is closed. Set the status back to Open before changing what was sold.';
     }
 
     public async AddLine(): Promise<void> {
@@ -937,9 +994,17 @@ export class DealWorkspaceComponent implements OnInit {
      * Nothing here can fix that and nothing here should try: deleting orders' rows from this component
      * would put a second app in charge of them. What this component CAN do is decline the gesture, so a
      * saved line is never staged for removal and the rest of the save keeps working. That is what
-     * `RemoveLine` does below; the reasoning is in `ShouldRefuseLineRemoval`. The fix belongs in orders,
-     * `save-deal.SD6` is the tripwire that goes red the day it lands, and `DECISIONS-NEEDED.md` DN-6 is
-     * the open decision.
+     * `RemoveLine` does below; the reasoning is in `ShouldRefuseLineRemoval`.
+     *
+     * ⚠️ ALL OF THE ABOVE IS HISTORY AS OF 2026-09-20. Orders drains `Lines.Removed` now — it renumbers
+     * the survivors and recomputes the header — so KI-20 is closed, golive#187 is closed, and the deal
+     * FORM offers removal through `Lines.Remove()` + `order.Save()`. `save-deal.SD6` was the tripwire
+     * and it did go red; it was simply not read for some weeks.
+     *
+     * The refusal below is therefore obsolete and is kept only because this component is mounted by no
+     * template. See the note on `ShouldRefuseLineRemoval`; whoever settles re-mount-or-retire should
+     * delete both. (`DECISIONS-NEEDED.md` DN-6 was cited here and that file does not exist in this
+     * repo — the pointer was already dangling.)
      */
     public RemoveLine(line: OrderLineEntity): void {
         /**
@@ -999,7 +1064,16 @@ export class DealWorkspaceComponent implements OnInit {
             EntityName: E_ORDER_LINE,
             RecordId: line.ID,
             Presentation: 'slide-in',
-            EditMode: true,
+            // READ-ONLY ON A LOCKED DEAL, rather than not offered at all. A closed deal is exactly what
+            // people go back and inspect, and the service period, term, product reference and description
+            // have no other surface -- so withholding the button would cost the reading to prevent the
+            // editing. `CreateRelated` gates the same way, for the same reason stated the other way round:
+            // a locked deal must not be offered a gesture it cannot complete.
+            //
+            // This stops the WORKSPACE from requesting edit on a frozen line. If the generated form's own
+            // chrome still offers an Edit toggle in view mode, that is MJ-level and identical in every
+            // read-only context; `DealLockOrderLineVeto` refuses the save either way.
+            EditMode: this.CanEditLines,
             Title: line.Product?.trim() || line.Description?.trim() || 'Order line',
         });
 
@@ -1258,7 +1332,7 @@ export class DealWorkspaceComponent implements OnInit {
      */
 
     /** True when the PERSISTED status locks the deal — resolved through the SHARED rule. */
-    public Lock: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, Notice: null };
+    public Lock: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, IsWon: false, Notice: null };
 
     public ClosePanelOpen = false;
     /** `null` until the user picks; drives which fields the panel demands. */

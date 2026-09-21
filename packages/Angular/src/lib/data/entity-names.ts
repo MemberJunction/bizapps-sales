@@ -11,6 +11,8 @@ export const MJS_ENTITIES = {
     DealContactRole: 'MJ_BizApps_Sales: Deal Contact Roles',
     DealStageEvent: 'MJ_BizApps_Sales: Deal Stage Events',
     DealPaymentSchedule: 'MJ_BizApps_Sales: Deal Payment Schedules',
+    /** Read to resolve the selling company a new deal must carry. See `company-from-pipeline.ts`. */
+    Pipeline: 'MJ_BizApps_Sales: Pipelines',
     SalesAccount: 'MJ_BizApps_Sales: Sales Accounts',
     SalesContact: 'MJ_BizApps_Sales: Sales Contacts',
 } as const;
@@ -20,7 +22,16 @@ export const MJS_FOREIGN_ENTITIES = {
     Organization: 'MJ_BizApps_Common: Organizations',
     Person: 'MJ_BizApps_Common: People',
     Employee: 'MJ: Employees',
+    OrderHeader: 'MJ_BizApps_Orders: Order Headers',
     OrderLine: 'MJ_BizApps_Orders: Order Lines',
+    /**
+     * Contracts' agreement. A deal holds TWO soft references to it — the contract the win produced
+     * and the contract a renewal renews — and neither is a database FK, which is what left both
+     * rendering as raw GUIDs until golive#226. Nothing resolves them in either direction, which is
+     * also why the contract behind an ORDER can only be reached through that order's deal
+     * (golive#227), by reading the deal row.
+     */
+    Contract: 'MJ_BizApps_Contracts: Contracts',
     Activity: 'MJ_BizApps_Common: Activities',
     ActivityLink: 'MJ_BizApps_Common: Activity Links',
 } as const;
