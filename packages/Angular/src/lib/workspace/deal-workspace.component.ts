@@ -1489,6 +1489,40 @@ export class DealWorkspaceComponent implements OnInit {
 
         this.Closing.set(true);
         try {
+            /**
+             * WHAT THE USER TYPED IS SAVED FIRST (bc-aidp-next-golive#224).
+             *
+             * `Description` and five other fields stay editable on a closed deal —
+             * `DealFieldsEditableWhileLocked` — and this button sits in the lock banner directly above
+             * them. Reopening went straight to the operation and then `ReloadActiveDeal()`, which
+             * replaces the `DealEntity` wholesale, so a half-typed note vanished. Worse than on the
+             * form, where the record at least stayed dirty: `ReloadActiveDeal()` also calls
+             * `store.MarkClean(tabId)`, so the tab-strip marker was cleared too and nothing on screen
+             * suggested anything had been lost.
+             *
+             * ── BEFORE THE OPERATION, NEVER AFTER ──────────────────────────────────────────────────
+             *
+             * The ordering is the load-bearing part, for the reason `MJSDealPipelinePanel.ConfirmReopen`
+             * already records: once `Sales.ReopenDeal` has committed it has moved the ROW, not this
+             * copy in the browser, which still holds the CLOSED status in both `Value` and `OldValue`.
+             * A save at that point writes the stale closing status straight back over the reopened row,
+             * and nothing would refuse it.
+             *
+             * ── AND A REFUSED SAVE STOPS THE REOPEN ───────────────────────────────────────────────
+             *
+             * Exactly as `ConfirmClose()` above does. The alternative — reopen anyway — is the silent
+             * loss this issue is about, just one step later. `Save()` has already put its reason on
+             * screen, so returning here leaves the user looking at it with their text still in the box.
+             */
+            const tabId = this.store.ActiveId;
+            const dirty = this.store.Tabs.find((t) => t.Id === tabId)?.Dirty === true;
+            if (dirty) {
+                await this.Save();
+                if (this.MessageIsError) {
+                    return; // the save was refused; its reason is already on screen
+                }
+            }
+
             const router = Metadata.Provider as unknown as RemoteOperationRouter;
             const envelope = await router.RouteOperation<
                 { DealID: string; Reason: string },
