@@ -156,15 +156,9 @@ SELECT
         WHEN g.ExpectedCloseDate IS NOT NULL THEN DATEDIFF(day, CAST(g.__mj_CreatedAt AS date), g.ExpectedCloseDate) 
         ELSE NULL 
     END AS [DaysToExpectedClose],
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM [${flyway:defaultSchema}].[DealPaymentSchedule] ps WHERE ps.DealID = g.ID) THEN 1 
-        ELSE 0 
-    END AS [HasPaymentSchedule],
-    ISNULL((SELECT COUNT(*) FROM [${flyway:defaultSchema}].[DealTeamMember] tm WHERE tm.DealID = g.ID), 0) AS [TeamMemberCount],
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM [${flyway:defaultSchema}].[DealTeamMember] tm JOIN [${flyway:defaultSchema}].[DealRole] r ON tm.DealRoleID = r.ID WHERE tm.DealID = g.ID AND r.Code = 'PARTNERMGR') THEN 1 
-        ELSE 0 
-    END AS [HasPartnerInvolved],
+    ISNULL(ps.HasPaymentSchedule, 0) AS [HasPaymentSchedule],
+    ISNULL(team.TeamMemberCount, 0) AS [TeamMemberCount],
+    ISNULL(team.HasPartnerInvolved, 0) AS [HasPartnerInvolved],
     CASE WHEN g.Amount >= 100000 THEN 1 ELSE 0 END AS [IsEnterpriseTier],
     CASE WHEN g.AutoRenew = 1 THEN 1 ELSE 0 END AS [AutoRenewFlag],
     CASE WHEN g.StandardAgreementModified = 1 THEN 1 ELSE 0 END AS [StandardAgreementModifiedFlag]
@@ -173,7 +167,21 @@ FROM
 LEFT OUTER JOIN
     [${flyway:defaultSchema}].[DealStatusType] AS mjBizAppsSalesDealStatusType_DealStatusTypeID
   ON
-    g.[DealStatusTypeID] = mjBizAppsSalesDealStatusType_DealStatusTypeID.[ID];
+    g.[DealStatusTypeID] = mjBizAppsSalesDealStatusType_DealStatusTypeID.[ID]
+LEFT OUTER JOIN (
+    SELECT DealID, 1 AS HasPaymentSchedule
+    FROM [${flyway:defaultSchema}].[DealPaymentSchedule]
+    GROUP BY DealID
+) AS ps ON ps.DealID = g.ID
+LEFT OUTER JOIN (
+    SELECT 
+        tm.DealID,
+        COUNT(*) AS TeamMemberCount,
+        MAX(CASE WHEN r.Code = 'PARTNERMGR' THEN 1 ELSE 0 END) AS HasPartnerInvolved
+    FROM [${flyway:defaultSchema}].[DealTeamMember] tm
+    JOIN [${flyway:defaultSchema}].[DealRole] r ON tm.DealRoleID = r.ID
+    GROUP BY tm.DealID
+) AS team ON team.DealID = g.ID;
 GO
 
 IF DATABASE_PRINCIPAL_ID('cdp_UI') IS NOT NULL
