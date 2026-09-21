@@ -13,7 +13,7 @@
       "CronExpression": "0 0 1 * *",
       "Timezone": "UTC",
       "OnDemandEnabled": true,
-      "OutputMapping": null,
+      "OutputMapping": "{\"PredictedWinProbability\":\"$.score\",\"PredictedWinRiskBand\":\"$.band\",\"PredictedWinScoredAt\":\"$.scoredAt\"}",
       "SkipUnchanged": true,
       "BatchSize": 100,
       "MaxConcurrency": 1,
