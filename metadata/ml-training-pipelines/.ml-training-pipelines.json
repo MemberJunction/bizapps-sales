@@ -1,0 +1,28 @@
+[
+  {
+    "fields": {
+      "Name": "Predict Deal Win Propensity",
+      "Description": "Predicts whether an open sales deal will be won or lost, using deal parameters, milestones, team size, and partner involvement while guarding against post-close leakage.",
+      "Version": 1,
+      "Status": "Draft",
+      "TargetEntityID": "79148DE5-7F99-44AC-ACD4-5EE7BA93D354",
+      "TargetVariable": "WinOutcome",
+      "ProblemType": "classification",
+      "AlgorithmID": "F966965D-3A87-4DD6-91E0-4F9D1AF17796",
+      "Hyperparameters": "{}",
+      "SourceBindings": "[{\"Kind\":\"Entity\",\"Ref\":\"MJ_BizApps_Sales: Deals\"}]",
+      "FeatureSteps": "{\"Steps\":[{\"Id\":\"select-features\",\"Kind\":\"select\",\"Columns\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"TeamMemberCount\",\"HasPartnerInvolved\",\"IsEnterpriseTier\",\"AutoRenewFlag\",\"StandardAgreementModifiedFlag\",\"DealType\",\"LeadSourceType\"]},{\"Id\":\"onehot-DealType\",\"Kind\":\"onehot\",\"Column\":\"DealType\"},{\"Id\":\"onehot-LeadSourceType\",\"Kind\":\"onehot\",\"Column\":\"LeadSourceType\"},{\"Id\":\"standardize-numerics\",\"Kind\":\"standardize\",\"Columns\":[\"Amount\",\"TermMonths\",\"DaysToExpectedClose\",\"TeamMemberCount\"]}]}",
+      "AsOfStrategy": "{\"Mode\":\"none\"}",
+      "LeakageGuard": "{\"DenyFields\":[\"ActualCloseDate\",\"ClosedAt\",\"ClosedByUserID\",\"LossReasonID\",\"LossReason\",\"LossNotes\",\"ContractID\",\"OrderID\",\"Order\",\"Probability\",\"PipelineStageID\",\"PipelineStage\",\"DealStatusTypeID\",\"DealStatusType\"],\"SingleFeatureDominanceThreshold\":0.85}",
+      "ValidationStrategy": "{\"Strategy\":\"train_test_split\",\"TestSize\":0.2,\"LockedHoldoutFraction\":0.15}",
+      "SkipEmbeddings": false
+    },
+    "primaryKey": {
+      "ID": "C1A02E75-4C6E-49B0-96F3-79D1A8E23001"
+    },
+    "sync": {
+      "lastModified": "2026-09-19T19:49:26.734Z",
+      "checksum": "fe1d45afd1339b16cd2ae4ba1ba16556f08d79913925663122944e6947f0ed71"
+    }
+  }
+]
