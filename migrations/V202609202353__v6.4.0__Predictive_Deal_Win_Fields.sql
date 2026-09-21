@@ -266,7 +266,7 @@ BEGIN
             (SELECT COALESCE(MAX([Sequence]), 0) + 1 FROM [${mjSchema}].[EntityField] WHERE [EntityID] = @dealEntityID),
             'PredictedWinProbability', 'Predicted Win Probability',
             '0.0000 to 1.0000 probability that the deal will close as Won.',
-            'decimal', 5, 5, 4, 1, NULL, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, NULL, GETUTCDATE(), GETUTCDATE()
+            'decimal', 5, 5, 4, 1, NULL, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 'Search', GETUTCDATE(), GETUTCDATE()
         );
     END
 
@@ -282,7 +282,7 @@ BEGIN
             (SELECT COALESCE(MAX([Sequence]), 0) + 1 FROM [${mjSchema}].[EntityField] WHERE [EntityID] = @dealEntityID),
             'PredictedWinRiskBand', 'Predicted Win Risk Band',
             'Categorical priority/risk tier derived from deal win probability: Low, Medium, High, Critical.',
-            'nvarchar', 20, 0, 0, 1, NULL, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, NULL, GETUTCDATE(), GETUTCDATE()
+            'nvarchar', 20, 0, 0, 1, NULL, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 'Search', GETUTCDATE(), GETUTCDATE()
         );
     END
 
@@ -298,7 +298,7 @@ BEGIN
             (SELECT COALESCE(MAX([Sequence]), 0) + 1 FROM [${mjSchema}].[EntityField] WHERE [EntityID] = @dealEntityID),
             'PredictedWinScoredAt', 'Predicted Win Scored At',
             'Timestamp when the deal was last scored by the predictive deal win propensity model.',
-            'datetimeoffset', 10, 34, 7, 1, NULL, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, NULL, GETUTCDATE(), GETUTCDATE()
+            'datetimeoffset', 10, 34, 7, 1, NULL, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 'Search', GETUTCDATE(), GETUTCDATE()
         );
     END
 
