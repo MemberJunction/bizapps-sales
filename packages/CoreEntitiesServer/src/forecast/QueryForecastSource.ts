@@ -15,6 +15,7 @@
  * @module @mj-biz-apps/sales-core-entities-server
  */
 import { LogError, RunQuery, type UserInfo } from '@memberjunction/core';
+import { ToCalendarDay } from '@mj-biz-apps/common-entities';
 
 import type {
     ForecastMeasureRow,
@@ -88,8 +89,8 @@ export class QueryForecastSource implements IForecastSource {
                     ...(this.categoryPath ? { CategoryPath: this.categoryPath } : {}),
                     /**
                      * The period is passed as PARAMETERS, so the query owns the measure definitions and
-                     * this owns the window. Dates as ISO date-only strings: everything stored is UTC, and a
-                     * full timestamp would invite a query to compare a date column against an instant.
+                     * this owns the window. Dates as ISO date-only strings: the bounds are calendar DAYS,
+                     * and a full timestamp would invite a query to compare a date column against an instant.
                      */
                     Parameters: {
                         PeriodStart: isoDate(period.PeriodStart),
@@ -176,7 +177,20 @@ function money(value: unknown): number | null {
     return Number.isFinite(n) ? n : null;
 }
 
-/** `YYYY-MM-DD` in UTC. Never a local-time getter — everything persisted is UTC. */
+/**
+ * `YYYY-MM-DD` for a stored calendar DAY — read from its UTC parts, never a local-time getter and
+ * never a zone conversion.
+ *
+ * The period bounds are calendar days that arrive as UTC midnight, which is how a `DATE` column
+ * round-trips. The business zone decides what day it is TODAY (#168); it has no business re-basing a
+ * day that has already been decided, and doing so would hand the query a window starting one day
+ * early for anyone west of Greenwich. `ForecastSnapshotJob` chooses WHICH month in the business zone,
+ * which is the question that does have a zone answer.
+ */
 function isoDate(when: Date): string {
-    return when.toISOString().slice(0, 10);
+    const day = ToCalendarDay(when);
+    if (day === null) {
+        throw new RangeError(`QueryForecastSource: not a readable date — ${String(when)}`);
+    }
+    return day;
 }

@@ -34,6 +34,7 @@
  */
 import { DatabaseProviderBase, RunView, type IMetadataProvider } from '@memberjunction/core';
 import { Assert, type IntegrationCheckContext } from '@memberjunction/testing-integration';
+import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 
 export const SALES_SCHEMA = '__mj_BizAppsSales';
 
@@ -379,4 +380,21 @@ export async function TxOne<T extends Record<string, unknown>>(
 /** The provider, typed for the operation call. */
 export function ProviderOf(ctx: IntegrationCheckContext): IMetadataProvider {
     return ctx.Provider;
+}
+
+/**
+ * Today, in the instance's business time zone (bc-aidp-next-golive#168).
+ *
+ * WHY IT LOADS THE ENGINE EVERY TIME RATHER THAN ONCE IN A SETUP HOOK. `Config(false)` is a no-op
+ * after the first call, so the cost is nothing — and a check written six months from now that reaches
+ * for "today" gets the zone without having to know a hook exists. A precondition that lives in the
+ * function the caller actually calls cannot be forgotten by the next caller, which is the rule this
+ * repo's CLAUDE.md states as "make the check happen where the claim is USED".
+ *
+ * A host with no `BizApps.BusinessTimeZone` row, or a user who cannot read it, resolves to UTC with a
+ * warning rather than failing — so a suite run against a bare database behaves as it did before.
+ */
+export async function businessToday(ctx: IntegrationCheckContext): Promise<CalendarDay> {
+    await BusinessTimeZoneEngine.Instance.Config(false, ctx.User, ctx.Provider);
+    return BusinessTimeZoneEngine.Instance.Today();
 }

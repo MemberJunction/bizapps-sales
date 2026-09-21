@@ -28,6 +28,7 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
+import { type CalendarDay } from '@mj-biz-apps/common-entities';
 import { E_ORDERS_PRODUCT, ProductFilterFor } from '@mj-biz-apps/sales-entities';
 
 import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture } from '../fixture.js';
@@ -48,12 +49,12 @@ type Ctx = Parameters<NamedCheck['Fn']>[0];
  * lets PP2 — the check that IS #29 — pass while a foreign product is wrongly excluded, so long as a
  * same-named local one is offered.
  */
-async function offered(ctx: Ctx, asOf: Date): Promise<string[]> {
+async function offered(ctx: Ctx, asOfDay: CalendarDay): Promise<string[]> {
     const rv = new RunView();
     const r = await rv.RunView<{ ID: string; Name: string }>(
         {
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(asOf),
+            ExtraFilter: ProductFilterFor(asOfDay),
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             Fields: ['ID', 'Name'],
@@ -121,7 +122,12 @@ async function sellingCompany(ctx: Ctx): Promise<string> {
     return f.PipelineCompanyID;
 }
 
-const TODAY = new Date('2026-08-15T00:00:00Z');
+/**
+ * The day these checks judge availability on. A calendar DAY now, not an instant (#168): the filter
+ * takes the day its caller means, rather than choosing the UTC day out of an instant — which is what
+ * made the picker offer tomorrow's products from 7 PM Central.
+ */
+const TODAY: CalendarDay = '2026-08-15';
 
 export const ProductPickerChecks: NamedCheck[] = [
     {
@@ -196,7 +202,7 @@ export const ProductPickerChecks: NamedCheck[] = [
                  * availability window, is what `ProductFilterFor` claims to mean; deriving it here and
                  * comparing against `names` is a real assertion about the picker.
                  */
-                const day = TODAY.toISOString().slice(0, 10);
+                const day = TODAY;
                 const sellableForeign = foreign.filter(
                     (x) => x.Status === 'Active' // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to Sales
                         && (!x.AvailableFrom || String(x.AvailableFrom).slice(0, 10) <= day)
@@ -250,13 +256,13 @@ export const ProductPickerChecks: NamedCheck[] = [
                 const company = await sellingCompany(ctx);
 
                 /**
-                 * The filter takes the date as an argument rather than reading the clock, which is what
+                 * The filter takes the day as an argument rather than reading the clock, which is what
                  * makes this checkable at all. It also pins a real behaviour: a deal quoted last year and
                  * one quoted next year do not see the same catalogue, and the picker must not pretend
                  * otherwise.
                  */
-                const during2025 = await offered(ctx, new Date('2025-06-01T00:00:00Z'));
-                const during2027 = await offered(ctx, new Date('2027-08-01T00:00:00Z'));
+                const during2025 = await offered(ctx, '2025-06-01');
+                const during2027 = await offered(ctx, '2027-08-01');
                 const catalogue = await all(ctx);
                 const expired = seedProductId(catalogue, 'Expired Promo Bundle');
                 const future = seedProductId(catalogue, 'Next Year Programme');

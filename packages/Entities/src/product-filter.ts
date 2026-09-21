@@ -48,6 +48,7 @@
  *
  * @module @mj-biz-apps/sales-entities
  */
+import { IsCalendarDay, type CalendarDay } from '@mj-biz-apps/common-entities';
 
 /** Orders' Products entity. A SOFT reference — no FK crosses the schema boundary (D-SW3). */
 export const E_ORDERS_PRODUCT = 'MJ_BizApps_Orders: Products';
@@ -140,19 +141,29 @@ const _everyLookupFieldIsRequested: MissingFromLookupFields extends never ? true
 void _everyLookupFieldIsRequested;
 
 /**
- * The filter that decides what a rep may select, as of `asOf`.
+ * The filter that decides what a rep may select, as of a calendar day.
  *
- * Built as a string because `RunView` takes SQL, and assembled here so the three conditions live beside
- * the comment explaining each. The date is passed in rather than read from the clock inside so the
- * behaviour is testable at a chosen instant.
+ * Built as a string because `RunView` takes SQL, and assembled here so the conditions live beside the
+ * comment explaining each. The DAY is passed in rather than read from the clock inside, so the
+ * behaviour is testable and so the CALLER, not this function, decides which zone "today" is in:
+ * `BusinessTimeZoneEngine.Instance.Today()` for the picker (bc-aidp-next-golive#168).
  *
- * @param asOf - The date the availability window is judged against. UTC, because everything stored is.
+ * IT USED TO TAKE AN INSTANT AND CHOOSE THE UTC DAY ITSELF, which is the defect. `AvailableFrom` and
+ * `AvailableTo` are `DATE` columns — calendar days with no zone — and from 7 PM Central onwards the
+ * UTC day is already tomorrow. So a product available from tomorrow was offered this evening, and one
+ * whose last day was today had already gone, with nothing on the screen to say the set had changed.
+ *
+ * @param asOfDay - `YYYY-MM-DD`. VALIDATED BEFORE INTERPOLATION, because this string is concatenated
+ *   into an `ExtraFilter` rather than parameterised: `RunView` takes SQL, so a day that arrived from
+ *   anywhere but the engine would otherwise be an injection point. Anything else throws.
  */
-export function ProductFilterFor(asOf: Date): string {
-    const day = `${asOf.getUTCFullYear()}-${String(asOf.getUTCMonth() + 1).padStart(2, '0')}-${String(asOf.getUTCDate()).padStart(2, '0')}`;
+export function ProductFilterFor(asOfDay: CalendarDay): string {
+    if (!IsCalendarDay(asOfDay)) {
+        throw new Error(`ProductFilterFor: expected a calendar day (YYYY-MM-DD), got ${JSON.stringify(asOfDay)}`);
+    }
     return (
         `Status = 'Active' ` +
-        `AND (AvailableFrom IS NULL OR AvailableFrom <= '${day}') ` +
-        `AND (AvailableTo IS NULL OR AvailableTo >= '${day}')`
+        `AND (AvailableFrom IS NULL OR AvailableFrom <= '${asOfDay}') ` +
+        `AND (AvailableTo IS NULL OR AvailableTo >= '${asOfDay}')`
     );
 }
