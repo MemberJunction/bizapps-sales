@@ -1,5 +1,5 @@
 ---
-'@mj-biz-apps/sales-entities': patch
+'@mj-biz-apps/sales-entities': minor
 ---
 
 `V202609202353__v6.4.0__Predictive_Deal_Win_Fields` could not apply on any host.
