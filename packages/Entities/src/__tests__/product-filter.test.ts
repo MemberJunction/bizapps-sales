@@ -20,7 +20,7 @@
 import { describe, expect, it } from 'vitest';
 import { CalendarDayIn, TodayIn, UTC_ZONE } from '@mj-biz-apps/common-entities';
 
-import { ProductFilterFor } from '../product-filter.js';
+import { ProductFilterFor, ProductWindowCovers } from '../product-filter.js';
 
 /** West of Greenwich, so the business day and the UTC day genuinely differ at the instant below. */
 const BUSINESS_ZONE = 'America/Chicago';
@@ -65,5 +65,77 @@ describe('the day the picker passes is the BUSINESS day, and that is not the UTC
         expect(sql).toContain("AvailableFrom <= '2026-08-31'");
         expect(sql).toContain("AvailableTo >= '2026-08-31'");
         expect(sql).not.toContain('2026-09-01');
+    });
+});
+
+/**
+ * ── THE EXPECTATION SIDE OF THE SAME RULE ───────────────────────────────────────────────────────
+ *
+ * `ProductWindowCovers` is what `product-picker.PP2` uses to work out, from the catalogue's own
+ * columns, which products the picker ought to have offered. It exists because PP2 open-coded that
+ * comparison and the comparison did not work:
+ *
+ *     String(new Date('2026-08-13T00:00:00Z')).slice(0, 10)  ===  'Thu Aug 13'
+ *
+ * — so `'Thu Aug 13' <= '2026-08-15'` was FALSE and `'Thu Aug 13' >= '2026-08-15'` was TRUE. Every
+ * row with a window was excluded from the expectation and `AvailableTo` never bound anything, which
+ * left PP2 asserting only about products whose window columns are both NULL. The check could not
+ * fail, and it said in its own comment that vacuity was the thing it had been rewritten to avoid.
+ *
+ * PP2 needs a live database and cannot run here. This can, so the derivation it depends on is proved
+ * here instead — with a `Date` on the bound, because that is the shape the driver actually hands back
+ * for a `DATE` column and the shape the defect was about.
+ */
+describe('ProductWindowCovers reads a DATE bound from its UTC parts', () => {
+    /**
+     * THE DEFECT, DIRECTLY. `2026-08-13` opened two days before the day being judged, so the window
+     * covers it. Under `String(...).slice(0, 10)` this answers 'Outside'.
+     */
+    it('a window that OPENED two days ago covers today, even when the bound arrives as a Date', () => {
+        expect(ProductWindowCovers(new Date('2026-08-13T00:00:00.000Z'), null, '2026-08-15')).toBe('Covers');
+    });
+
+    it('and the closing bound actually binds — which it never did while the day was unreadable', () => {
+        expect(ProductWindowCovers(null, new Date('2026-08-13T00:00:00.000Z'), '2026-08-15')).toBe('Outside');
+        expect(ProductWindowCovers(null, new Date('2026-08-20T00:00:00.000Z'), '2026-08-15')).toBe('Covers');
+    });
+
+    it('is INCLUSIVE at both ends, matching the SQL: the first and last day are both sellable', () => {
+        expect(ProductWindowCovers(new Date('2026-08-15T00:00:00.000Z'), null, '2026-08-15')).toBe('Covers');
+        expect(ProductWindowCovers(null, new Date('2026-08-15T00:00:00.000Z'), '2026-08-15')).toBe('Covers');
+    });
+
+    it('a window entirely in the future or entirely in the past is Outside', () => {
+        expect(ProductWindowCovers('2027-01-01', '2027-12-31', '2026-08-15')).toBe('Outside');
+        expect(ProductWindowCovers('2025-01-01', '2025-12-31', '2026-08-15')).toBe('Outside');
+    });
+
+    it('NULL at either end means that end is open, and both NULL means always available', () => {
+        expect(ProductWindowCovers(null, null, '2026-08-15')).toBe('Covers');
+        expect(ProductWindowCovers(undefined, undefined, '2026-08-15')).toBe('Covers');
+    });
+
+    /**
+     * A STRING BOUND IS TAKEN AS WRITTEN, never re-based. `2026-08-15T23:00:00-05:00` is the 15th as
+     * stored; parsing it and formatting in UTC would render the 16th and move the window a day.
+     */
+    it('a string bound is the day it begins with, not the day it re-parses to', () => {
+        expect(ProductWindowCovers('2026-08-15T23:00:00-05:00', null, '2026-08-15')).toBe('Covers');
+        expect(ProductWindowCovers(null, '2026-08-15T23:00:00-05:00', '2026-08-15')).toBe('Covers');
+    });
+
+    /**
+     * PRESENT BUT UNREADABLE IS ITS OWN ANSWER. Reading it as an open end is precisely how the old
+     * comparison hid: a bound nobody could parse behaved like a bound nobody had set.
+     */
+    it('reports Unreadable for a bound that is present and is not a day', () => {
+        expect(ProductWindowCovers('Thu Aug 13', null, '2026-08-15')).toBe('Unreadable');
+        expect(ProductWindowCovers(new Date('nonsense'), null, '2026-08-15')).toBe('Unreadable');
+        expect(ProductWindowCovers('2026-02-30', null, '2026-08-15')).toBe('Unreadable');
+    });
+
+    it('refuses a day that is not a zero-padded YYYY-MM-DD, as the filter builder does', () => {
+        expect(() => ProductWindowCovers(null, null, '2026-8-15')).toThrow(/calendar day/);
+        expect(() => ProductWindowCovers(null, null, '')).toThrow(/calendar day/);
     });
 });

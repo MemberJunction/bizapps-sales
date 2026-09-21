@@ -23,7 +23,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@mj-biz-apps/common-entities": "^5.43.0",
+    "@mj-biz-apps/common-entities": "5.44.0",
     "@mj-biz-apps/orders-entities": "5.13.0",
     "zod": "~3.24.4"
   },

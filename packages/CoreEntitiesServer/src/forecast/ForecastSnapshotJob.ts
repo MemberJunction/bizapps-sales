@@ -297,13 +297,40 @@ export async function RunForecastSnapshot(
             ],
         };
     }
-    /**
-     * The zone has to be loaded HERE as well as in `Capture`, because the period is chosen before
-     * `Capture` is entered. `Config` is idempotent, so the second call costs nothing.
-     */
+    return new ForecastSnapshotJob().Capture(
+        period ?? (await businessMonthPeriod(now, provider, contextUser)),
+        source,
+        provider,
+        contextUser,
+    );
+}
+
+/**
+ * The current business month — computed ONLY when no period was given.
+ *
+ * ── WHY THIS IS A FUNCTION AND NOT TWO LINES ABOVE THE CALL ──
+ *
+ * It was two lines above the call, and that silently removed the `??`'s short-circuit. `period ??
+ * fallback` still reads as "only if none was given", but `fallback` had already been COMPUTED by
+ * then: a caller naming its own window paid for the configuration read and for `CurrentMonthPeriod`,
+ * and — the part that is not merely wasteful — an unusable `now` threw a `RangeError` out of `Intl`
+ * for a run whose window was fully specified and did not need `now` at all. `RunForecastSnapshot(p,
+ * u, new Date(NaN), period)` is a legitimate call: an Action that knows its own quarter has no clock
+ * to offer.
+ *
+ * Behind an `await` the work is deferred again, so an explicit period does none of it. `Capture`
+ * calls `Config` itself, which is why nothing is lost by not loading the zone on this path.
+ *
+ * The zone has to be loaded here rather than left to `Capture`, because the period is chosen BEFORE
+ * `Capture` is entered. `Config` is idempotent, so `Capture`'s own call then costs nothing.
+ */
+async function businessMonthPeriod(
+    now: Date,
+    provider: IMetadataProvider,
+    contextUser: UserInfo,
+): Promise<ForecastPeriod> {
     await BusinessTimeZoneEngine.Instance.Config(false, contextUser, provider);
-    const fallback = CurrentMonthPeriod(now, BusinessTimeZoneEngine.Instance.Zone);
-    return new ForecastSnapshotJob().Capture(period ?? fallback, source, provider, contextUser);
+    return CurrentMonthPeriod(now, BusinessTimeZoneEngine.Instance.Zone);
 }
 
 /** The snapshot grain, lower-cased so a casing difference cannot look like a second grain. */

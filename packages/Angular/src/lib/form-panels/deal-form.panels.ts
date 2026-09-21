@@ -16,6 +16,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
+import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent } from '@memberjunction/ng-base-forms';
 import {
     EntityViewerModule,
@@ -283,16 +284,34 @@ function money(n: number | null | undefined): string {
     return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
+/**
+ * Whole days from TODAY to a stored day. Negative is in the past.
+ *
+ * ── TWO READS, AND ONLY ONE OF THEM HAS A ZONE (bc-aidp-next-golive#168) ────────────────────────
+ *
+ * The STORED side is a `DATE` column — a calendar day with no time and no zone, handed back as UTC
+ * midnight — so `ToCalendarDay` reads it from UTC parts and takes a string as written. That half was
+ * always right and has not moved.
+ *
+ * TODAY is the half that was wrong. It read `now.getUTC*()`, so the countdown rolled over at UTC
+ * midnight: from 19:00 Central every close clock, every "overdue" verdict and the next-step warning
+ * jumped a day early. A deal closing tomorrow read "today" all evening, and after #168 fixed the
+ * product picker the same screen carried two different ideas of what day it was.
+ *
+ * SYNCHRONOUS, like the getters that call it. `BusinessTimeZoneEngine` carries
+ * `@RegisterForStartup()` (not deferred), so MJ awaits its `Config()` during boot; and it fails open
+ * to UTC — unconfigured, no configuration row, or no permission to read it all resolve to UTC with
+ * one logged warning. So the worst case is the behaviour this replaced, never a throw out of a
+ * template binding.
+ *
+ * Both sides are converted through `FromCalendarDay`, i.e. UTC midnight, so the subtraction is whole
+ * days with no DST remainder to round away. `Math.round` is kept as a belt on that brace.
+ */
 function daysFrom(d: Date | string | null | undefined): number | null {
-    if (!d) return null;
-    const iso = d instanceof Date
-        ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-        : String(d).slice(0, 10);
-    const t = Date.parse(`${iso}T00:00:00Z`);
-    if (!Number.isFinite(t)) return null;
-    const now = new Date();
-    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    return Math.round((t - today) / 86_400_000);
+    const day = ToCalendarDay(d);
+    if (day === null) return null;
+    const today = BusinessTimeZoneEngine.Instance.Today();
+    return Math.round((FromCalendarDay(day).getTime() - FromCalendarDay(today).getTime()) / 86_400_000);
 }
 
 /**

@@ -70,6 +70,7 @@ import {
     type SalesNavBadges,
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
+import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 import { DealBoardComponent, DEFAULT_DISPLAY_CURRENCY } from '../board/deal-board.component';
 import {
     DealWorkspaceService,
@@ -84,7 +85,7 @@ import {
     ForecastSlices,
     OwnerCoverage,
     StageFunnel,
-    TodayUtc,
+    BusinessToday,
     WeightedOpen,
     type CloseBucket,
     type FunnelStage,
@@ -264,6 +265,17 @@ export class MJSSalesSectionComponent implements OnInit {
         this.cdr.detectChanges();
 
         /**
+         * THE BUSINESS ZONE IS LOADED BEFORE ANYTHING ASKS WHAT DAY IT IS (bc-aidp-next-golive#168).
+         *
+         * `this.Window` reads `BusinessToday()`, and so do the inspect filter and the close buckets.
+         * The engine fails open to UTC when it has not been configured, which is silently the old
+         * behaviour — so the call has to happen before the first read rather than be left to MJ's
+         * startup sequence, which is the only other thing that would have done it. `Config(false)` is
+         * idempotent and a no-op after the first call, so a refresh costs nothing.
+         */
+        await BusinessTimeZoneEngine.Instance.Config(false);
+
+        /**
          * THE FISCAL START IS READ BEFORE THE WINDOWED QUERIES, NOT ALONGSIDE THEM.
          *
          * It is what the window is computed FROM, so firing it in the same `Promise.all` would send
@@ -338,7 +350,7 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** The resolved bounds of the selected period. Recomputed rather than cached — it is arithmetic. */
     public get Window(): PeriodWindow {
-        return ResolvePeriod(this.Period, this.FiscalStart.Start, TodayUtc());
+        return ResolvePeriod(this.Period, this.FiscalStart.Start, BusinessToday());
     }
 
     /** "1 Jul 2026 – 30 Sep 2026" — the bounds spelled out, for a footnote. */
@@ -571,7 +583,7 @@ export class MJSSalesSectionComponent implements OnInit {
     public get InspectRows(): DealRosterRow[] {
         // The window is passed so the `won` slice lists exactly the deals the Won tile counted. Every
         // other slice ignores it -- they are about the open book, which the period does not bound.
-        return FilterInspect(this.Deals, this.InspectFilter, TodayUtc(), this.Window);
+        return FilterInspect(this.Deals, this.InspectFilter, BusinessToday(), this.Window);
     }
 
     public get InspectLabel(): string {
@@ -670,7 +682,7 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     public get Buckets(): CloseBucket[] {
-        return CloseBuckets(this.Deals, TodayUtc());
+        return CloseBuckets(this.Deals, BusinessToday());
     }
 
     public get Owners(): OwnerBar[] {
