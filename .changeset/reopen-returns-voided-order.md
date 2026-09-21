@@ -21,10 +21,18 @@ the reopen scope so the ordinary backwards move — Proposal to Qualification �
 `Quoted` order alone. Declaring a status on the early stages would have fixed the reopen and broken
 that move.
 
-This also corrects a premise recorded in three places: that "Voided is TERMINAL in orders", so a
+This also sweeps a premise recorded in **eight** places: that "Voided is TERMINAL in orders", so a
 reopen into `Proposal` would ask for a move orders refuses and warn. Orders says otherwise by its own
 API — `TRANSITIONS.Voided` is `['Draft', 'Quoted']`, `IsTerminal('Voided')` is false, and `Confirmed`
 is the terminal status. The refusal that rationale predicted never happens.
+
+The root cause is KI-27: orders collapsed its order lifecycle on 2026-08-25, which inverted which
+status is the dead end. Three checks were repaired at the time — `close-deal.CD24`,
+`close-won-order.CO5` and `71-lost-and-reopen`'s step 3 — but the prose around them was not, so two
+files ended up asserting the old premise a few paragraphs above the block that disproves it. The
+copies were in `CloseDealOperation`, `DealEntityServer`, the seed script's stage commentary, two in
+the deal workspace component, the `71-lost-and-reopen` header and its mutant recipe, the deal form's
+`ConfirmReopen`, and CO5's intro.
 
 ---
 
