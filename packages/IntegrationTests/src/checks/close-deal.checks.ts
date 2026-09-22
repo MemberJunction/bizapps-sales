@@ -2837,6 +2837,106 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-deal.CD35',
+        Name: 'CD35: the CLOSE event names the reason, and names the one actually closed with',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * `close-lock.ts` freezes `LossReasonID` on every deal because *"the close event records
+                 * which reason was chosen, and rewriting it would make that event dishonest"*. That was
+                 * the rationale for a rule that ships; the close event recorded no such thing.
+                 * `routingNote()` wrote the caller's note and the routing outcomes, so the only copy of
+                 * the reason was the deal header -- one mutable field, frozen on the strength of a
+                 * record that did not exist.
+                 *
+                 * CD32 covers the REOPEN event, and it is the easier half: that deal is being changed,
+                 * so somebody is looking. The deal this check is for is the one that stays LOST and is
+                 * never reopened -- it has no reopen event, so before this fix nothing anywhere recorded
+                 * what it was lost for at the moment it was lost.
+                 *
+                 * ── AND IT MUST BE THE REASON THIS CLOSE USED ──────────────────────────────────────
+                 *
+                 * `validateClose` accepts `input.LossReasonID ?? deal.LossReasonID`, so the id being
+                 * closed with is not always the id on the header -- and `LossReasonID` is an ordinary
+                 * editable field on an OPEN deal, so the two genuinely diverge in the product. A note
+                 * built from the denormalized `deal.LossReason` would name the reason the deal happened
+                 * to be carrying, which is the wrong one, and would be wrong in the direction nobody
+                 * checks: confidently, in a row that cannot be corrected.
+                 *
+                 * So this sets a DIFFERENT reason on the header first and asserts the other name is
+                 * absent as well as the right one present. Asserting only presence would pass on a note
+                 * that named both.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD35 the close event names it',
+                );
+
+                const closedWith = await TxOne<{ ID: string; Name: string }>(
+                    ctx,
+                    `SELECT ID, Name FROM ${SALES_SCHEMA}.LossReason WHERE ID = '${f.LossReasonPlainID}'`,
+                );
+                const onHeader = await TxOne<{ ID: string; Name: string }>(
+                    ctx,
+                    `SELECT ID, Name FROM ${SALES_SCHEMA}.LossReason WHERE ID = '${f.LossReasonNeedsNotesID}'`,
+                );
+                Assert(
+                    closedWith.Name !== onHeader.Name,
+                    'setup: the two fixture reasons must have DIFFERENT names or this check cannot tell ' +
+                        'them apart and would pass vacuously',
+                );
+
+                // A reason on the header of an OPEN deal -- settable, exactly as the close panel allows.
+                await TxExec(
+                    ctx,
+                    `UPDATE ${SALES_SCHEMA}.Deal SET LossReasonID = '${onHeader.ID}' WHERE ID = '${dealID}'`,
+                    'CD35: put a DIFFERENT reason on the header of the still-open deal',
+                );
+
+                Assert(
+                    (await close(ctx, {
+                        DealID: dealID,
+                        DealStatusTypeID: f.LostStatusID,
+                        LossReasonID: closedWith.ID,
+                    })).Success,
+                    'setup: the lost close must succeed',
+                );
+
+                /**
+                 * Keyed on the status the event LANDED ON, not on `TOP 1 ... ORDER BY ChangedAt DESC`.
+                 * Opening the deal writes an event of its own and both can share a timestamp, so an
+                 * ordering-based pick is a coin toss that usually lands right.
+                 */
+                const event = await TxOne<{ Notes: string | null }>(
+                    ctx,
+                    `SELECT Notes FROM ${SALES_SCHEMA}.DealStageEvent
+                      WHERE DealID = '${dealID}' AND ToDealStatusTypeID = '${f.LostStatusID}'`,
+                );
+                Assert(
+                    String(event.Notes ?? '').includes(closedWith.Name),
+                    `the CLOSE event must name the reason the deal was lost for. It reads ` +
+                        `'${event.Notes}', and on a deal that is never reopened the header is then the ` +
+                        `only copy -- which is what close-lock.ts freezes it on the strength of`,
+                );
+                Assert(
+                    !String(event.Notes ?? '').includes(onHeader.Name),
+                    `the event names '${onHeader.Name}', which is what the header happened to carry, ` +
+                        `not the reason this close supplied. A note built from the denormalized ` +
+                        `LossReason field fails exactly here`,
+                );
+
+                // And the deal really did stay lost -- no reopen ran, so no second event carried it.
+                const still = await TxOne<{ N: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.Deal d
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = d.DealStatusTypeID
+                      WHERE d.ID = '${dealID}' AND t.IsLost = 1`,
+                );
+                AssertEqual(Number(still.N), 1, 'setup: the deal must still be lost when this is asserted');
+            }),
+    },
 ];
 
 for (const check of CloseDealChecks) {

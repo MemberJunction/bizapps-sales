@@ -87,6 +87,19 @@ interface StatusFlags {
     LocksDeal: boolean;
 }
 
+/**
+ * What validation found, and the one fact it resolved on the way.
+ *
+ * `validate()` returned a bare issue array until the close event had to name the loss reason. It is the
+ * only place that reads the LossReason row, so carrying the name out of it is what makes stamping the
+ * event free; returning it separately keeps `Issues.length` from being the thing a caller tests.
+ */
+interface CloseValidation {
+    Issues: SalesCloseIssue[];
+    /** The reason's name for the close event's note, or null when this close is not a loss. */
+    LossReasonName: string | null;
+}
+
 /** Defaults applied when a pipeline's policy is silent on a key. */
 const POLICY_DEFAULTS: SalesCloseWonPolicy = {
     CreateContract: false,
@@ -358,8 +371,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
 
             // ── 2. Validate what this particular close requires ───────────────────
             const validation = await this.validate(deal, input, target, provider, user);
-            if (validation.length) {
-                return { ...empty, IsWon: target.IsWon, IsLost: target.IsLost, Issues: validation };
+            if (validation.Issues.length) {
+                return { ...empty, IsWon: target.IsWon, IsLost: target.IsLost, Issues: validation.Issues };
             }
 
             // ── 3. Resolve the effective policy, and route ────────────────────────
@@ -439,7 +452,15 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 ? null
                 : await this.closingStageForOutcome(deal.PipelineID, target, provider, user);
 
-            this.stampClose(deal, input, target, routing, user, derivedClosingStageID);
+            this.stampClose(
+                deal,
+                input,
+                target,
+                routing,
+                user,
+                derivedClosingStageID,
+                validation.LossReasonName,
+            );
 
             if (!(await deal.Save())) {
                 throw new Error(
@@ -591,30 +612,42 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         target: StatusFlags,
         provider: IMetadataProvider,
         user: UserInfo,
-    ): Promise<SalesCloseIssue[]> {
+    ): Promise<CloseValidation> {
         const issues: SalesCloseIssue[] = [];
+        let lossReasonName: string | null = null;
 
         if (target.IsLost) {
             const lossReasonID = input.LossReasonID ?? deal.LossReasonID;
             if (!lossReasonID) {
                 issues.push(issue('deal', 'A loss reason is required to close a deal as lost.', 'LossReasonID'));
             } else {
-                // Some reasons demand an explanation — the flag says which, never the reason's name.
+                /**
+                 * `RequiresNotes` decides; `Name` is carried out for the close event's note and decides
+                 * nothing. The rule stays what it was -- the FLAG says which reasons demand an
+                 * explanation, never the reason's name -- and reading one more column of a row this
+                 * method already fetches is what keeps `stampClose` from needing a lookup of its own.
+                 *
+                 * It is read HERE rather than from `deal.LossReason` because the id being closed with is
+                 * `input.LossReasonID ?? deal.LossReasonID`: when the caller supplies one, the
+                 * denormalized name still describes the reason the deal used to carry, not this one.
+                 */
                 const view = provider as unknown as IRunViewProvider;
                 const r = await view.RunView(
                     {
                         EntityName: LOSS_REASON_ENTITY,
                         ExtraFilter: `ID = '${lossReasonID}'`,
                         ResultType: 'simple',
-                        Fields: ['RequiresNotes'],
+                        Fields: ['RequiresNotes', 'Name'],
                     },
                     user,
                 );
-                const row = (r.Results ?? [])[0] as { RequiresNotes?: boolean } | undefined;
+                const row = (r.Results ?? [])[0] as { RequiresNotes?: boolean; Name?: string } | undefined;
                 const notes = input.LossNotes ?? deal.LossNotes;
                 if (r.Success && row?.RequiresNotes === true && !notes?.trim()) {
                     issues.push(issue('deal', 'This loss reason requires notes explaining the loss.', 'LossNotes'));
                 }
+                // The id is the fallback: an id in an audit note is recoverable by hand, a blank is not.
+                lossReasonName = row?.Name?.trim() || `reason ${lossReasonID}`;
             }
         }
 
@@ -622,7 +655,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             issues.push(issue('party', 'A won deal must be attached to a customer.', 'AccountID'));
         }
 
-        return issues;
+        return { Issues: issues, LossReasonName: lossReasonName };
     }
 
     /* ── Policy (§7.1) ──────────────────────────────────────────────────────── */
@@ -843,6 +876,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         routing: SalesCloseRoutingResult[],
         user: UserInfo,
         derivedClosingStageID: string | null,
+        lossReasonName: string | null,
     ): void {
         /**
          * ── DECLARED, NOT WRITTEN. THIS METHOD USED TO APPEND THE ROW ITSELF ────────────────────────
@@ -860,7 +894,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
          * The event id is no longer available here: it exists only once the save has appended the row.
          * The caller reads `deal.LastStageEventID` afterwards.
          */
-        deal.DeclareTransition('Close', this.routingNote(routing, input.Notes));
+        deal.DeclareTransition('Close', this.routingNote(routing, input.Notes, lossReasonName));
 
         // Everything stored is UTC — getUTC*, never local-time getters, for anything persisted.
         const now = new Date();
@@ -886,11 +920,37 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         );
     }
 
-    /** A human-readable record of what the policy routed, and what actually happened. */
-    private routingNote(routing: SalesCloseRoutingResult[], callerNote?: string | null): string {
+    /**
+     * A human-readable record of what the policy routed, and what actually happened.
+     *
+     * ── AND, ON A LOST CLOSE, WHICH REASON WAS CHOSEN ──────────────────────────────────────────────
+     *
+     * `close-lock.ts` freezes `LossReasonID` on every deal on the stated grounds that "the close event
+     * records which reason was chosen". It did not: this note carried the caller's text and the routing
+     * outcomes and nothing else, so the reason existed only on the deal header -- one mutable field, with
+     * no record of what it held at the moment of the loss. The rationale for the freeze was true of
+     * nothing.
+     *
+     * It belongs on the CLOSE row specifically, not the reopen row. golive#205 clears the header on
+     * reopen, which would otherwise mean a reopened deal loses the fact entirely; but the deal that
+     * matters most here is the one that STAYS lost and is never reopened, and that deal has no reopen
+     * event to carry it. The row that describes the loss is the one that should name it.
+     *
+     * `lossTrailFor` still puts it on the reopen event as well, and that is deliberate rather than
+     * overlooked: the reopen row records the CLEARING, and a reader asking why the header is empty
+     * should not have to find the close row to learn what was removed. Each row stays self-describing.
+     */
+    private routingNote(
+        routing: SalesCloseRoutingResult[],
+        callerNote?: string | null,
+        lossReasonName?: string | null,
+    ): string {
         const parts: string[] = [];
         if (callerNote?.trim()) {
             parts.push(callerNote.trim());
+        }
+        if (lossReasonName) {
+            parts.push(`Lost: ${lossReasonName}.`);
         }
         if (routing.length === 0) {
             parts.push('Closed. Policy routed nothing downstream.');

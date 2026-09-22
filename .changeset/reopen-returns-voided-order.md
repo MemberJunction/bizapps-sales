@@ -68,3 +68,27 @@ rather than the fallback. It is ticketed separately and fixes both halves. The r
 clearing on a measured, silent bypass of a field a rep cannot correct by hand; free text they can
 overwrite is not the same case. `close-deal.CD32` asserts the notes SURVIVE, so the tidier-looking rule
 cannot be reintroduced quietly.
+
+---
+
+**The close event now records which reason was chosen, which `close-lock.ts` already claimed it did.**
+
+`LossReasonID` is frozen on every lost deal on the stated grounds that *"the close event records which
+reason was chosen, and rewriting it would make that event dishonest"*. It did not. `routingNote()`
+wrote the caller's note and the routing outcomes and nothing else, so the only copy of the reason was
+the deal header — one field, frozen on the strength of a record that was never written.
+
+That matters most for the deal this issue does not otherwise touch: one that stays LOST and is never
+reopened. It has no reopen event, so before this change nothing recorded what it was lost for at the
+moment it was lost.
+
+The name is resolved where the reason is already validated — `validate()` is the only place that reads
+the `LossReason` row, so this adds a column to an existing query rather than a query. It is read there
+rather than from the denormalized `deal.LossReason` because the id being closed with is
+`input.LossReasonID ?? deal.LossReasonID`: when a caller supplies one, the denormalized name still
+describes the reason the deal happened to be carrying. `close-deal.CD35` closes with a reason that
+differs from the header's and asserts the other name is ABSENT as well as the right one present.
+
+`lossTrailFor` still puts the reason on the reopen event too. That is deliberate: the reopen row
+records the CLEARING, and a reader asking why the header is empty should not have to find the close row
+to learn what was removed.
