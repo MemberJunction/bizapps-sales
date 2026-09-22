@@ -172,9 +172,9 @@ and `OrderLine.ProductID` is a real FK.
 
 Ten of the eleven S-US issues are still OPEN in `bc-aidp-next-golive`, including **#35, #116, #117 and
 #121, which this audit calls met**, and now **#119**. The tracker understates what is done. Every
-remaining gap is upstream: order-line removal (KI-20) belongs to orders — terminal `Voided` did not, and
-is retired by D-OS4 — the two
-contract field gaps to contracts (D-9, D-10).
+remaining gap is upstream: order-line removal (KI-20) belongs to orders, and the two contract field
+gaps to contracts (D-9, D-10). Terminal `Voided` used to be listed here as a third; it is retired by
+D-OS4 and was never an upstream blocker at all.
 
 ---
 

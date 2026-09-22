@@ -21,7 +21,7 @@ the reopen scope so the ordinary backwards move — Proposal to Qualification �
 `Quoted` order alone. Declaring a status on the early stages would have fixed the reopen and broken
 that move.
 
-This also sweeps a premise recorded in **eight** places: that "Voided is TERMINAL in orders", so a
+This also sweeps a premise recorded in **eleven** places: that "Voided is TERMINAL in orders", so a
 reopen into `Proposal` would ask for a move orders refuses and warn. Orders says otherwise by its own
 API — `TRANSITIONS.Voided` is `['Draft', 'Quoted']`, `IsTerminal('Voided')` is false, and `Confirmed`
 is the terminal status. The refusal that rationale predicted never happens.
@@ -30,9 +30,14 @@ The root cause is KI-27: orders collapsed its order lifecycle on 2026-08-25, whi
 status is the dead end. Three checks were repaired at the time — `close-deal.CD24`,
 `close-won-order.CO5` and `71-lost-and-reopen`'s step 3 — but the prose around them was not, so two
 files ended up asserting the old premise a few paragraphs above the block that disproves it. The
-copies were in `CloseDealOperation`, `DealEntityServer`, the seed script's stage commentary, two in
-the deal workspace component, the `71-lost-and-reopen` header and its mutant recipe, the deal form's
-`ConfirmReopen`, and CO5's intro.
+copies were in `CloseDealOperation`, `DealEntityServer`, the seed script's stage commentary, two in the
+deal workspace component, the `71-lost-and-reopen` header plus its mutant recipe and its live
+rationale, two in the deal form, CO5's intro, `DECISIONS-NEEDED.md` DN-18, eight `STORY-AUDIT.md` rows,
+and — the one no count had reached — the `_comments` block on the **Lost stage row in shipped
+metadata**, which named it as the reason the reopen warns.
+
+The ruling is now recorded once, in `docs/DECISIONS.md` **D-OS4**, and the comments cite that rather
+than KI-27 — KI-27 is the lifecycle collapse that caused the inversion, not the transition fact.
 
 ---
 
