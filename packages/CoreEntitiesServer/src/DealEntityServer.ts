@@ -894,10 +894,16 @@ export class DealEntityServer extends DealEntity {
             if (work.needsStatusDefault && !this.DealStatusTypeID) {
                 this.DealStatusTypeID = await this.defaultOpeningStatusID();
             }
+            /**
+             * The delta, not the total: a refusal RECORDED BY THIS SAVE is what tells the recovery to
+             * stand down. Comparing against zero would also catch a warning left by an earlier save on
+             * the same entity instance.
+             */
+            const warningsBeforePlan = this.OrderStatusWarnings.length;
             if (work.stageOrder) {
                 await this.applyStageOrderStatus(work.stageOrder);
             }
-            await this.recoverOrderOnReopen();
+            await this.recoverOrderOnReopen(this.OrderStatusWarnings.length > warningsBeforePlan);
 
             const saved = await super.Save(options);
             if (!saved) {
@@ -1583,8 +1589,27 @@ export class DealEntityServer extends DealEntity {
      * savepoint, and records a refusal as a warning instead of a failure. A second copy of that would
      * be a second thing to keep honest.
      */
-    private async recoverOrderOnReopen(): Promise<void> {
+    private async recoverOrderOnReopen(stagePlanRefused: boolean): Promise<void> {
         if (this._declaredTransition?.Kind !== 'Reopen') {
+            return;
+        }
+        /**
+         * ── A STAGE THAT ASKED AND WAS REFUSED KEEPS ITS ANSWER ────────────────────────────────────
+         *
+         * This used to look only at the order's status, which is not enough to tell "nobody asked"
+         * from "somebody asked and orders said no". Those need opposite handling, and conflating them
+         * made the save contradict itself: with a stage declaring `Confirmed` -- legal under
+         * `CK_PipelineStage_OrderStatusOnEntry`, and unused only because DN-10 is still open --
+         * `CanTransition('Voided', 'Confirmed')` refuses, `applyStageOrderStatus` warns "its order
+         * stayed Voided", and this then moved it to `Draft` regardless. The order ended `Draft` while
+         * the reopen's own Issues told the user it stayed `Voided`.
+         *
+         * The recovery exists for the SILENT case -- nothing asked, so nothing reported. When the
+         * stage did ask and was refused, the refusal is the honest outcome and is already on screen:
+         * substituting `Draft` would discard a deliberate declaration and falsify the warning beside
+         * it. D-OS2's prohibition on overriding a refusal is exactly this, and it still stands.
+         */
+        if (stagePlanRefused) {
             return;
         }
         const status = this.OrderID_Object?.Status;

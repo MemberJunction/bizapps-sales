@@ -36,7 +36,7 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
-import { IsEditable } from '@mj-biz-apps/orders-entities';
+import { CanTransition, IsEditable } from '@mj-biz-apps/orders-entities';
 import {
     DealFieldsEditableWhileLocked,
     StubDownstreamSeam,
@@ -2733,6 +2733,107 @@ export const CloseDealChecks: NamedCheck[] = [
                     `the deal reopened with its order still '${after.Status}'. Nothing MOVED here — the ` +
                         `close and the reopen both landed on the stage the deal was already in — so only ` +
                         `a check that runs after the stage plan can put the order back`,
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD34',
+        Name: 'CD34: a stage that ASKED and was refused keeps its answer — the recovery stands down',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE OTHER HALF OF CD31, and the one that makes the recovery honest rather than eager.
+                 *
+                 * CD31 covers "nobody asked": a restored stage declaring nothing, so the order sat
+                 * voided in silence. This covers "somebody asked and orders said no", which needs the
+                 * OPPOSITE handling — and the two are indistinguishable if you look only at the order's
+                 * status, which is what the first version of the recovery did.
+                 *
+                 * With a stage declaring `Confirmed`, `CanTransition('Voided', 'Confirmed')` refuses,
+                 * `applyStageOrderStatus` warns "its order stayed Voided", and the recovery then moved
+                 * it to `Draft` anyway. The order ended `Draft` while the reopen's own Issues said it
+                 * stayed `Voided` — two outputs contradicting each other, and a deliberate stage
+                 * declaration silently replaced.
+                 *
+                 * `Confirmed` is legal under `CK_PipelineStage_OrderStatusOnEntry` and unused only
+                 * because DN-10 is open, so this sets it for the life of this check's transaction
+                 * rather than waiting for the seed to grow one.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const startStage = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE PipelineID = '${f.ContractPolicyPipelineID}' AND OrderStatusOnEntry IS NULL
+                        AND IsActive = 1 ORDER BY DisplayOrder ASC`,
+                );
+                Assert(!!startStage?.ID, 'setup: a stage that declares nothing is needed to start from');
+
+                const dealID = await openDeal(
+                    ctx, f, f.ContractPolicyPipelineID, startStage.ID, 'CD34 refused stage declaration',
+                );
+
+                const lostStage = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE PipelineID = '${f.ContractPolicyPipelineID}'
+                        AND DealStatusTypeID = '${f.LostStatusID}' AND IsActive = 1`,
+                );
+                Assert(
+                    (await close(ctx, {
+                        DealID: dealID,
+                        DealStatusTypeID: f.LostStatusID,
+                        ClosingStageID: lostStage.ID,
+                        LossReasonID: f.LossReasonPlainID,
+                    })).Success,
+                    'setup: the lost close must succeed',
+                );
+
+                const voided = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                       JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    !IsEditable(String(voided.Status)),
+                    `setup: the close must have voided the order — it is '${voided.Status}'`,
+                );
+
+                /**
+                 * Now make the stage the reopen will restore ask for something orders refuses FROM
+                 * `Voided`. Asserted rather than assumed: if orders ever permits this move the check
+                 * would be testing nothing, and should fail loudly rather than pass empty.
+                 */
+                Assert(
+                    !CanTransition(String(voided.Status), 'Confirmed').Allowed,
+                    'setup: orders must REFUSE this move, or there is no refusal for the recovery to ' +
+                        'defer to and this check proves nothing',
+                );
+                await TxExec(
+                    ctx,
+                    `UPDATE ${SALES_SCHEMA}.PipelineStage SET OrderStatusOnEntry = 'Confirmed'
+                      WHERE ID = '${startStage.ID}'`,
+                    'declare Confirmed on the stage the reopen will restore',
+                );
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD34: reopening into a refusal.' });
+                Assert(out.Success, `the reopen must still succeed — ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                       JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(after.Status).toLowerCase(),
+                    String(voided.Status).toLowerCase(),
+                    'the order must keep the status the refusal left it in — substituting Draft here ' +
+                        'would discard that declaration AND contradict the warning beside it',
+                );
+                Assert(
+                    out.Issues.length > 0,
+                    'and the refusal must be REPORTED — a stage that asked and was refused with nothing ' +
+                        'on screen is the silence D-OS1 forbids, arrived at the other way',
                 );
             }),
     },
