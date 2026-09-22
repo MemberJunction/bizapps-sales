@@ -17,7 +17,7 @@
   ],
   "__mj_BizAppsSales": [
     {
-      "_comment": "SOFT FOREIGN KEYS — metadata only. CodeGen sets RelatedEntityID + RelatedEntityFieldName + IsSoftForeignKey=1 and clears AutoUpdateRelatedEntityInfo, which is what stops the next schema sync re-deriving the pair from a constraint that does not exist. It creates NO database constraint: Deal.ContractID and Deal.RenewsContractID stay deliberately FK-free, because the link points DOWN the dependency graph and contracts knows nothing about sales (see the column descriptions). What the metadata buys is the UI half — mj-form-field can then show the contract NUMBER as a link instead of the raw GUID a UAT tester reported (bc-aidp-next-golive#226 item 3), and offers an FK search in edit mode for RenewsContractID, which a rep has to set on every renewal. This declaration is the durable half: metadata/entity-fields/.deal-contract-soft-fk.json is what SHIPS, and this is what re-applies it after a rebuild-from-zero, which would otherwise silently regress the form to GUIDs. On a host where contracts is absent, applySoftPKFKConfig logs 'Related entity not found' and skips — it does not fail.",
+      "_comment": "SOFT FOREIGN KEYS — metadata only. CodeGen sets RelatedEntityID + RelatedEntityFieldName + IsSoftForeignKey=1 and clears AutoUpdateRelatedEntityInfo, which is what stops the next schema sync re-deriving the pair from a constraint that does not exist. It creates NO database constraint: Deal.ContractID and Deal.RenewsContractID stay deliberately FK-free, because the link points DOWN the dependency graph and contracts knows nothing about sales (see the column descriptions). What the metadata buys is the UI half — mj-form-field can then show the contract NUMBER as a link instead of the raw GUID a UAT tester reported (bc-aidp-next-golive#226 item 3), and offers an FK search in edit mode for RenewsContractID, which a rep has to set on every renewal. This declaration is the durable half: metadata/entity-fields/.deal-contract-soft-fk.json is what SHIPS, and this is what re-applies it after a rebuild-from-zero, which would otherwise silently regress the form to GUIDs. On a host where contracts is absent, applySoftPKFKConfig logs 'Related entity not found' and skips — it does not fail. CurrencyID joins them for the same reason and from the same UAT round (bc-aidp-next-golive#259 item 3): currency reference data is ACCOUNTING's, which is also below sales in the dependency graph, so the column is soft too and the Commercial section rendered it as an empty text box. Its metadata half is metadata/entity-fields/.deal-currency-soft-fk.json.",
       "TableName": "Deal",
       "ForeignKeys": [
         {
@@ -33,6 +33,13 @@
           "RelatedTable": "Contract",
           "RelatedField": "ID",
           "Description": "SOFT reference (no FK) to the contract this deal RENEWS."
+        },
+        {
+          "FieldName": "CurrencyID",
+          "SchemaName": "__mj_BizAppsAccounting",
+          "RelatedTable": "Currency",
+          "RelatedField": "ID",
+          "Description": "SOFT reference (no FK) to the currency this deal is denominated in."
         }
       ]
     }
