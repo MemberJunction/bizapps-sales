@@ -1267,7 +1267,7 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             //
             // So the refusal this comment predicted never happens, and the case it described is not
             // the case that bites. What bit was the opposite: a stage that declares NOTHING asks the
-            // order for nothing, so a voided order stayed voided in silence. `planReopenOrderRecovery`
+            // order for nothing, so a voided order stayed voided in silence. `recoverOrderOnReopen`
             // in `DealEntityServer` now returns it to `Draft`, and these Issues remain the channel for
             // anything that still cannot move.
             return {

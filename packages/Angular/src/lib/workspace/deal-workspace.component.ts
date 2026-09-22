@@ -1526,7 +1526,7 @@ export class DealWorkspaceComponent implements OnInit {
              * `IsTerminal('Voided')` is FALSE and `Confirmed` is the terminal status. That refusal
              * never happens; the cases that DO leave an order behind are a booked order, which the
              * reopen refuses outright, and a restored stage that declares nothing -- fixed in
-             * `DealEntityServer.planReopenOrderRecovery` on this branch.
+             * `DealEntityServer.recoverOrderOnReopen` on this branch.
              */
             this.SurfaceOperationIssues(out.Issues ?? []);
         } finally {

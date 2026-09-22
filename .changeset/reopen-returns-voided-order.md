@@ -14,7 +14,7 @@ Measured before the fix: DEAL-9002, lost from Qualification, reopened `Open` wit
 `Voided` and zero Issues raised. That is the silent half of D-OS1 — the deal neither followed nor
 complained.
 
-`DealEntityServer.planReopenOrderRecovery` now returns the order to `Draft` when a restored stage
+`DealEntityServer.recoverOrderOnReopen` now returns the order to `Draft` when a restored stage
 declares nothing, a reopen is in progress, and the order is neither editable nor booked. It lives in
 the entity server so the form, the status field, an importer and an agent all get it, and is keyed on
 the reopen scope so the ordinary backwards move — Proposal to Qualification — still leaves a live
