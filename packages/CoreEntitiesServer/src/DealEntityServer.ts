@@ -108,6 +108,36 @@ const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
 /**
+ * Accounting's two currency entities — READ, never written, and never assumed present.
+ *
+ * `mj-app.json` already declares `mj-bizapps-accounting` as a dependency, so naming them is not a new
+ * coupling; the deal workspace reads the same profile entity for the fiscal year start. Every read
+ * below is still gated on metadata, because sales is built to run standalone and a host without
+ * accounting must create deals exactly as it does today.
+ */
+const ACCOUNTING_COMPANY_PROFILE_ENTITY = 'MJ_BizApps_Accounting: Accounting Company Profiles';
+const CURRENCY_ENTITY = 'MJ_BizApps_Accounting: Currencies';
+
+/**
+ * The currency a deal falls back to when its selling company names none.
+ *
+ * A CODE, NOT AN ID, deliberately. The seeded USD row has a stable GUID in accounting's own metadata,
+ * and hardcoding it here would put a second app in charge of another app's primary key — correct until
+ * the day someone reseeds that table. A code is the stable fact; the id is looked up like any other.
+ */
+const FALLBACK_CURRENCY_CODE = 'USD';
+
+/** The one column the accounting-profile lookup selects. `NOT NULL` on the table, so a hit carries one. */
+interface AccountingCompanyCurrencyRow {
+    FunctionalCurrencyCode: string | null;
+}
+
+/** The one column the currency lookup selects. */
+interface CurrencyIDRow {
+    ID: string;
+}
+
+/**
  * The one column the pipeline lookup selects. `CompanyID` is NOT NULL on `Pipeline`, so a successful read
  * always carries one.
  */
@@ -399,6 +429,12 @@ export class DealEntityServer extends DealEntity {
         } catch (err) {
             return this.refuseSave(`could not resolve a server-maintained stamp: ${err}`);
         }
+
+        /**
+         * AFTER the company stamp, because the company is what decides the currency, and OUTSIDE the
+         * try above, because this one may not refuse a save. See {@link defaultCurrencyOnCreate}.
+         */
+        await this.defaultCurrencyOnCreate();
 
         /**
          * AFTER the company stamp, deliberately — and NOT AT ALL on a locked deal.
@@ -2376,6 +2412,124 @@ export class DealEntityServer extends DealEntity {
      * A failure to READ the account is also not fatal, for the same reason: the deal still saves, just
      * without a default. The one thing this must never do is cost someone a deal they were creating.
      */
+    /**
+     * Defaults `Deal.CurrencyID` on create, from the SELLING COMPANY'S functional currency.
+     *
+     * ── WHAT THIS FIXES (bc-aidp-next-golive#259 item 3) ────────────────────────────────────────
+     *
+     * "On Commercial section, Currency ID is blank. We should default to USD (ideally configurable by
+     * company or at least a global default)." Both halves of that are answered, and per-company is the
+     * one that actually ships: `AccountingCompanyProfile.FunctionalCurrencyCode` already records what
+     * a company sells in, keyed on the same id as `__mj.Company`, which is exactly what `CompanyID`
+     * was stamped to a few lines above. Reading it beats inventing a sales-side setting that would
+     * immediately be a second answer to a question accounting already answers.
+     *
+     * ── WHY A DERIVED DEFAULT AND NOT A COLUMN DEFAULT ─────────────────────────────────────────
+     *
+     * A `DEFAULT 'USD'` on the column, or a DefaultValue in metadata, is a CONSTANT — it cannot ask
+     * which company is selling. It would also apply to the importer and to every row a migration
+     * writes, which is a different decision from "a rep created a deal and did not pick a currency".
+     *
+     * ── THE THREE THINGS IT WILL NOT DO ────────────────────────────────────────────────────────
+     *
+     * 1. NOT ON UPDATE. `IsSaved` returns early: a default belongs to birth. A saved deal whose
+     *    currency is null is one somebody cleared, and re-filling it behind them is a write nobody
+     *    asked for -- the same reasoning `seedOwnerOnCreate` states for the owner.
+     * 2. NOT OVER A CALLER'S CHOICE. A supplied `CurrencyID` is left exactly as it is.
+     * 3. NEVER REFUSES THE SAVE. Every failure path returns and leaves the field null, which is the
+     *    state this method found. It sits outside the stamp try/catch for that reason: a *stamp* that
+     *    cannot be resolved is a broken deal and must refuse, but a DEFAULT that cannot be resolved is
+     *    just an unfilled field. A default that breaks creation is worse than no default.
+     *
+     * Absence of accounting is therefore ordinary, not exceptional: a host without it creates deals
+     * with no currency exactly as it did before this existed.
+     */
+    private async defaultCurrencyOnCreate(): Promise<void> {
+        if (this.IsSaved || this.CurrencyID) {
+            return;
+        }
+        if (!this.CompanyID) {
+            return; // no selling company resolved, so nothing to ask
+        }
+
+        const code = (await this.companyFunctionalCurrencyCode()) ?? FALLBACK_CURRENCY_CODE;
+        const currencyID = await this.currencyIDForCode(code);
+        if (currencyID) {
+            this.CurrencyID = currencyID;
+        }
+    }
+
+    /**
+     * The functional currency CODE of the selling company, or null when accounting is absent, has no
+     * profile for this company, or the read fails.
+     *
+     * Returning null rather than throwing is the contract {@link defaultCurrencyOnCreate} depends on.
+     */
+    private async companyFunctionalCurrencyCode(): Promise<string | null> {
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        if (!provider.Entities.find((e) => e.Name === ACCOUNTING_COMPANY_PROFILE_ENTITY)) {
+            return null; // accounting is not installed on this host
+        }
+        /**
+         * VALIDATED RATHER THAN ESCAPED, AND IT RETURNS RATHER THAN THROWS — the same judgement
+         * `accountOwnerEmployeeID` records: this id is our own stamped column, and refusing a deal
+         * because it did not look like a GUID would cost the rep their work to protect a query that
+         * simply does not need to run.
+         */
+        if (!/^[0-9a-fA-F-]{36}$/.test(this.CompanyID)) {
+            return null;
+        }
+
+        const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await viewProvider.RunView<AccountingCompanyCurrencyRow>(
+            {
+                EntityName: ACCOUNTING_COMPANY_PROFILE_ENTITY,
+                ExtraFilter: `ID='${this.CompanyID}'`,
+                ResultType: 'simple',
+                Fields: ['FunctionalCurrencyCode'],
+            },
+            this.ContextCurrentUser,
+        );
+        // RunView does not throw. A failed read means no default, not a failed save.
+        if (!result.Success) {
+            return null;
+        }
+        const code = (result.Results ?? [])[0]?.FunctionalCurrencyCode;
+        return typeof code === 'string' && code.trim().length > 0 ? code.trim() : null;
+    }
+
+    /** The id of the active currency carrying `code`, or null when there is none to point at. */
+    private async currencyIDForCode(code: string): Promise<string | null> {
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        if (!provider.Entities.find((e) => e.Name === CURRENCY_ENTITY)) {
+            return null;
+        }
+        /**
+         * THE CODE IS CONSTRAINED, AND IS STILL CHECKED. `Currency.Code` is `CHAR(3)` with a
+         * `CK_Currency_Code` uppercase constraint, so a legitimate value cannot carry a quote — but
+         * this one arrives from another app's table rather than from this code, and "the constraint
+         * makes it safe" is an argument about the schema as it is today, not about the string in hand.
+         */
+        if (!/^[A-Za-z]{3}$/.test(code)) {
+            return null;
+        }
+
+        const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await viewProvider.RunView<CurrencyIDRow>(
+            {
+                EntityName: CURRENCY_ENTITY,
+                ExtraFilter: `Code='${code.toUpperCase()}' AND IsActive=1`,
+                ResultType: 'simple',
+                Fields: ['ID'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            return null;
+        }
+        return (result.Results ?? [])[0]?.ID ?? null;
+    }
+
     private async seedOwnerOnCreate(): Promise<void> {
         if (this.IsSaved) {
             return; // a default belongs to birth, not to every subsequent save
