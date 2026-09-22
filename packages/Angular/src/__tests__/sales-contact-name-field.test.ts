@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { newestViewDefiner, viewBody } from './helpers/view-definer';
+import { migrationFiles, newestViewDefiner, viewBody } from './helpers/view-definer';
 
 /**
  * THE SALES CONTACT PICKER SHOWED GUIDS.
@@ -38,6 +38,19 @@ import { newestViewDefiner, viewBody } from './helpers/view-definer';
  * later carries view DDL naming it without matching. `layered-view-guard.test.ts` covers the
  * layered-view invariants; every assertion this file already made is kept below, and several now
  * read the executable view body instead of the whole file, which is strictly harder to satisfy.
+ *
+ * TWO THINGS THAT REPOINTING GOT WRONG, AND HOW THEY READ NOW:
+ *
+ *   - NOT EVERY ASSERTION BELONGS TO THE VIEW. `AutoUpdateIsNameField` is written by a ONE-TIME
+ *     `EntityField` INSERT, not by the view; reading it off the newest VIEW definer only passed
+ *     because both happen to sit in the same migration today, and would have failed — unfixably —
+ *     on the first legitimate re-creation of `vwSalesContacts`. Each assertion now resolves the
+ *     migration that actually carries the statement it is about.
+ *   - FILENAME ORDER IS NOT APPLY ORDER. "The flags must precede the wrapper" was a `<` between two
+ *     filenames. Flyway runs every repeatable after every versioned migration, so an
+ *     `R__` flags migration passed that comparison while the database applied it AFTER the wrapper,
+ *     destroying the wrapper on a fresh install — precisely the failure the assertion exists to
+ *     prevent. It now compares positions in `migrationFiles`, which is Flyway's own order.
  */
 
 const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'migrations');
@@ -46,19 +59,34 @@ const VIEW = 'vwSalesContacts';
 /** The migration the database actually runs last for this view. Throws rather than guess. */
 const definer = newestViewDefiner(MIGRATIONS, VIEW);
 
-/**
- * The definer's RAW text, comments included. Needed by exactly one assertion below, which is
- * deliberately about a COMMENT — `0,   -- AutoUpdateIsNameField` is how the positional INSERT says
- * which column that zero belongs to, and stripping comments would take the only label with it.
- */
-const definerSql = readFileSync(join(MIGRATIONS, definer.file), 'utf8');
-
 /** The `CREATE VIEW` body, comments stripped, so prose quoting a rule cannot satisfy one. */
 const definerBody = viewBody(definer.code, VIEW);
 
-/** Sorted, so "must precede the wrapper" is a real ordering claim and not a directory accident. */
-function migrations(): string[] {
-    return readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort();
+/**
+ * IN THE ORDER FLYWAY APPLIES THEM, which is not the order the filenames sort in. A repeatable
+ * (`R__`) sorts before every `V__` and runs after all of them, and a `V<ts>.1__` hotfix sorts before
+ * `V<ts>__` because `.` < `_` — so a filename comparison is a claim about the directory listing,
+ * not about the database.
+ */
+const APPLY_ORDER = migrationFiles(MIGRATIONS);
+
+/** The raw text of one migration, comments included. */
+function migrationSql(file: string): string {
+    return readFileSync(join(MIGRATIONS, file), 'utf8');
+}
+
+/**
+ * The LAST migration in apply order whose text matches every marker — last, because a marker
+ * present in several migrations is decided by which one the database runs last, never by which one
+ * a directory listing happens to hand back first.
+ */
+function migrationCarrying(what: string, ...markers: string[]): string {
+    const hits = APPLY_ORDER.filter((file) => {
+        const sql = migrationSql(file);
+        return markers.every((marker) => sql.includes(marker));
+    });
+    expect(hits, `a migration must ${what}`).not.toEqual([]);
+    return hits[hits.length - 1];
 }
 
 /**
@@ -66,12 +94,31 @@ function migrations(): string[] {
  * `[BaseViewGenerated] = 0` alone now matches the Deals layering migration too.
  */
 function flagsMigration(): string {
-    const hit = migrations().find((f) => {
-        const sql = readFileSync(join(MIGRATIONS, f), 'utf8');
-        return sql.includes('[BaseViewGenerated] = 0') && sql.includes("'MJ_BizApps_Sales: Sales Contacts'");
-    });
-    expect(hit, 'a migration must set BaseViewGenerated = 0 for Sales Contacts').toBeDefined();
-    return hit as string;
+    return migrationCarrying(
+        'set BaseViewGenerated = 0 for Sales Contacts',
+        '[BaseViewGenerated] = 0',
+        "'MJ_BizApps_Sales: Sales Contacts'",
+    );
+}
+
+/**
+ * The migration that REGISTERS the DisplayNameAndEmail field — a ONE-TIME `EntityField` INSERT, and
+ * the only place `AutoUpdateIsNameField` is ever written for this entity.
+ *
+ * THIS USED TO READ THE NEWEST VIEW DEFINER, which was my mistake when I repointed this file at
+ * `newestViewDefiner`. The flag and the wrapper happen to live in the same migration TODAY, so the
+ * assertion passed — but they are different kinds of statement with different lifetimes. The view
+ * is re-created every time the schema changes; the `EntityField` row is inserted once and must
+ * never be inserted again. So the first legitimate re-creation of `vwSalesContacts` moves the
+ * newest definer to a migration that CANNOT contain this INSERT, and the assertion fails with no
+ * correct way to satisfy it — a guard that would have to be deleted to do the right thing.
+ */
+function nameFieldMigration(): string {
+    return migrationCarrying(
+        'register DisplayNameAndEmail with AutoUpdateIsNameField for Sales Contacts',
+        'AutoUpdateIsNameField',
+        "'MJ_BizApps_Sales: Sales Contacts'",
+    );
 }
 
 describe('the Sales Contact name field', () => {
@@ -87,8 +134,11 @@ describe('the Sales Contact name field', () => {
      * clears the flag and the pickers go back to GUIDs with nothing in the diff to explain it.
      */
     it('turns off the auto-update that would clear it on the next codegen', () => {
-        expect(definerSql).toMatch(/AutoUpdateIsNameField/);
-        expect(definerSql, 'the column must be written as 0, not left to its default of 1')
+        // Read RAW, comments included, and deliberately so: `0,   -- AutoUpdateIsNameField` is how
+        // the positional INSERT says which column that zero belongs to, and stripping comments
+        // would take the only label with it.
+        const sql = migrationSql(nameFieldMigration());
+        expect(sql, 'the column must be written as 0, not left to its default of 1')
             .toMatch(/0,\s*--\s*AutoUpdateIsNameField/);
     });
 
@@ -130,12 +180,22 @@ describe('the Sales Contact name field', () => {
      */
     it('hands CodeGen a private view name, in an earlier migration than the wrapper', () => {
         const flags = flagsMigration();
-        expect(flags < definer.file, 'the flags must sort before the wrapper').toBe(true);
+        // COMPARED IN APPLY ORDER, NOT BY FILENAME. `flags < definer.file` is a string comparison
+        // over names, and Flyway does not run migrations in that order: an `R__Layered_Views.sql`
+        // sorts before every `V__` and is applied after all of them, so moving the flags into a
+        // repeatable would have passed this test green while the database ran it AFTER the wrapper
+        // — the exact sequence this assertion exists to forbid.
+        const flagsAt = APPLY_ORDER.indexOf(flags);
+        const wrapperAt = APPLY_ORDER.indexOf(definer.file);
+        expect(flagsAt, `${flags} is not a migration Flyway applies`).toBeGreaterThanOrEqual(0);
+        expect(wrapperAt, `${definer.file} is not a migration Flyway applies`).toBeGreaterThanOrEqual(0);
+        expect(flagsAt, `Flyway applies ${flags} after the wrapper ${definer.file}`)
+            .toBeLessThan(wrapperAt);
     });
 
     /** Keyed by entity NAME: entity ids are minted per database, so a UUID stops matching on rebuild. */
     it('is keyed by entity name, never by a hardcoded id', () => {
-        const sql = readFileSync(join(MIGRATIONS, flagsMigration()), 'utf8');
+        const sql = migrationSql(flagsMigration());
         expect(sql).toContain("'MJ_BizApps_Sales: Sales Contacts'");
         expect(sql).not.toMatch(/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}/);
     });
