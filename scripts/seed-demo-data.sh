@@ -390,7 +390,7 @@ DECLARE @s6 UNIQUEIDENTIFIER='91111111-0000-4000-A000-000000000006';
 -- The case that DOES need handling is the opposite one, and it is why the NULLs above are safe: a deal
 -- lost from Discovery or Qualification reopens into a stage that asks the order for nothing, which left
 -- it Voided in silence (golive#205). That is fixed in the reopen path rather than here -- see
--- `DealEntityServer.planReopenOrderRecovery` -- because declaring a status on these two stages would
+-- `DealEntityServer.recoverOrderOnReopen` -- because declaring a status on these two stages would
 -- drag a live Quoted order back to Draft every time a deal slipped backwards.
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineStage WHERE ID=@s1)
   INSERT INTO __mj_BizAppsSales.PipelineStage (ID, PipelineID, Name, Code, DisplayOrder, Probability, ForecastCategoryTypeID, DealStatusTypeID, OrderStatusOnEntry, RottingDays, GuidanceMarkdown, IsActive) VALUES
