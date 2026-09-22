@@ -2,6 +2,7 @@ import '@angular/compiler';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Metadata, type IMetadataProvider } from '@memberjunction/core';
 import { DealWorkspaceComponent } from '../lib/workspace/deal-workspace.component';
+import { expectOrder } from './helpers/call-order';
 
 /**
  * REOPENING FROM THE WORKSPACE MUST NOT EAT WHAT THE USER TYPED (bc-aidp-next-golive#224).
@@ -39,21 +40,6 @@ import { DealWorkspaceComponent } from '../lib/workspace/deal-workspace.componen
 
 const REOPEN_OP = 'RouteOperation:Sales.ReopenDeal';
 const TAB = 'tab-1';
-
-/**
- * `before` happened, `after` happened, and they happened in that order.
- *
- * NOT a bare `indexOf(a) < indexOf(b)`: a call that never happened indexes to -1, and -1 is less than
- * everything, so that shape passes LOUDEST exactly when the step it guards has been deleted. Both
- * positions are proved present first. Borrowed verbatim from `deal-reopen-unsaved-edits`, which is
- * the form-side sibling of this file.
- */
-function expectOrder(calls: readonly string[], before: string, after: string): void {
-    expect(calls, `${before} must have happened`).toContain(before);
-    expect(calls, `${after} must have happened`).toContain(after);
-    expect(calls.indexOf(before), `${before} must come before ${after} — got ${JSON.stringify(calls)}`)
-        .toBeLessThan(calls.indexOf(after));
-}
 
 /** A reopen that reports success, recording that it was reached at all. */
 function providerStub(calls: string[], issues: unknown[] = []) {
