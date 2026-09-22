@@ -2571,6 +2571,7 @@ export const CloseDealChecks: NamedCheck[] = [
                     ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD32 loss reason is a stamp',
                 );
 
+                const LOSS_NOTES = 'CD32: the correction channel, which must outlive the reopen.';
                 const reason = await TxOne<{ ID: string; Name: string }>(
                     ctx,
                     `SELECT ID, Name FROM ${SALES_SCHEMA}.LossReason WHERE ID = '${f.LossReasonPlainID}'`,
@@ -2581,6 +2582,7 @@ export const CloseDealChecks: NamedCheck[] = [
                         DealID: dealID,
                         DealStatusTypeID: f.LostStatusID,
                         LossReasonID: reason.ID,
+                        LossNotes: LOSS_NOTES,
                     })).Success,
                     'setup: the first lost close must succeed',
                 );
@@ -2596,6 +2598,24 @@ export const CloseDealChecks: NamedCheck[] = [
                     after.LossReasonID === null,
                     'a reopened deal is OPEN and must not still carry the reason it was lost for — ' +
                         `it is still '${after.LossReasonID}'`,
+                );
+
+                /**
+                 * AND `LossNotes` SURVIVES, which is the half that looks like an oversight and is not.
+                 *
+                 * `close-lock.ts` keeps `LossNotes` — and only `LossNotes` — editable on a locked lost
+                 * deal, because *"notes are the channel for corrections"*. Clearing it would destroy
+                 * the one thing a rep is invited to write after a close, and with golive#224 merged the
+                 * workspace reopen SAVES an in-progress note first: the two together would save the
+                 * text and then immediately null it.
+                 *
+                 * Asserted rather than left implicit, because "clear the loss fields" reads as the
+                 * tidier rule and a later change would make it without knowing what it costs.
+                 */
+                Assert(
+                    (after.LossNotes ?? '') === LOSS_NOTES,
+                    'the loss NOTES must survive the reopen — they are the correction channel ' +
+                        `close-lock deliberately keeps open, and they now read '${after.LossNotes}'`,
                 );
 
                 // ...but the reason must not have been destroyed on the way out.

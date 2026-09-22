@@ -51,6 +51,20 @@ that "Lost should require a loss reason" and `close-deal.CD8` asserts that refus
 for the rest of the deal's life after its first loss, which is why CD8 never caught it — it opens a
 fresh deal that has never been lost.
 
-`DealStageEvent` has no loss columns and record-change tracking captured nothing for these fields, so
+`DealStageEvent` has no loss columns and record-change tracking captured nothing for this field, so
 clearing alone would have destroyed the reason rather than moved it. The reopen now folds the reason
-and notes into its own append-only event note first, then clears the header fields.
+into its own append-only event note first, then clears the header field.
+
+**`LossNotes` deliberately stays.** The symmetry is tempting and wrong: `close-lock.ts` keeps it — and
+only it — editable on a locked lost deal, because *"notes are the channel for corrections"*. Clearing
+it would destroy the one thing a rep is invited to write after a close, and alongside golive#224 it
+turns perverse: that change saves an in-progress note precisely because losing typed work is the bug
+it fixes, and this would then null it, leaving the text only in an event the rep never sees.
+
+The stale-value argument does not rescue it either. `validate()` reads
+`input.LossNotes ?? deal.LossNotes`, so a stale note can satisfy a `RequiresNotes` reason — but that is
+the **same** `??` fallback as the reason's, and clearing on reopen closes one route into a fallback
+rather than the fallback. It is ticketed separately and fixes both halves. The reason earned its
+clearing on a measured, silent bypass of a field a rep cannot correct by hand; free text they can
+overwrite is not the same case. `close-deal.CD32` asserts the notes SURVIVE, so the tidier-looking rule
+cannot be reintroduced quietly.

@@ -138,12 +138,12 @@ function issue(Section: SalesCloseIssue['Section'], Message: string, Field: stri
  */
 function lossTrailFor(deal: DealEntityServer): string {
     const reasonID = deal.LossReasonID;
-    const notes = deal.LossNotes?.trim();
-    if (!reasonID && !notes) {
+    if (!reasonID) {
         return '';
     }
-    const reason = deal.LossReason ?? (reasonID ? `reason ${reasonID}` : 'no reason recorded');
-    return notes ? ` (was lost: ${reason} — ${notes})` : ` (was lost: ${reason})`;
+    // The REASON only. `LossNotes` is not cleared, so it needs no rescuing -- carrying it here as well
+    // would duplicate onto an append-only row text that is still sitting on the deal.
+    return ` (was lost: ${deal.LossReason ?? `reason ${reasonID}`})`;
 }
 
 function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
@@ -1215,13 +1215,35 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * ── WHY THE TRAIL IS WRITTEN BEFORE CLEARING ───────────────────────────────────────────
              *
              * `DealStageEvent` has no loss columns and record-change tracking captured nothing for
-             * these fields on this host, so clearing them alone would destroy the reason outright
-             * rather than move it. The reopen event is where this app already keeps close context --
-             * the close writes its routing outcome there the same way -- so the reason and notes go
-             * into that one append-only row first, and only then leave the header.
+             * this field on this host, so clearing it alone would destroy the reason outright rather
+             * than move it. The reopen event is where this app already keeps close context -- the
+             * close writes its routing outcome there the same way -- so the reason goes into that one
+             * append-only row first, and only then leaves the header.
+             *
+             * ── AND `LossNotes` DELIBERATELY STAYS ─────────────────────────────────────────────────
+             *
+             * The symmetry is tempting and wrong. `close-lock.ts` keeps `LossNotes` -- and only
+             * `LossNotes` -- editable on a locked lost deal, and says what it is for: *"Notes are the
+             * channel for corrections."* Clearing it would destroy the one thing this app explicitly
+             * invites a rep to write after a close.
+             *
+             * With golive#224 merged that turns actively perverse: the workspace reopen saves an
+             * in-progress note first, precisely because losing typed work is the bug that fixes, and
+             * this would then null it -- leaving the text only in an event the rep never sees. Two
+             * correct changes combining into the silent loss both were written against.
+             *
+             * The bypass argument does not rescue it either. `validate()` reads
+             * `input.LossNotes ?? deal.LossNotes`, so a stale note can satisfy a `RequiresNotes`
+             * reason -- but that is the SAME `??` fallback as the reason's, and clearing on reopen
+             * closes one route into a fallback rather than the fallback. It is ticketed separately and
+             * fixes both halves; clearing here would cost a rep their text and buy a partial fix of
+             * something already scheduled.
+             *
+             * The reason earned its clearing on evidence -- a measured, silent validation bypass on a
+             * field a rep cannot correct by hand because it is frozen. Free text they can overwrite is
+             * not the same case.
              */
             deal.LossReasonID = null;
-            deal.LossNotes = null;
 
             // The save has to write the very row the lock protects, so it runs with the lock suspended
             // — scoped to this call and self-restoring.
