@@ -406,19 +406,24 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     }
 
     /**
-     * The three questions `mj-form-field` answers before it renders a value, asked here because
-     * drawing the field ourselves means inheriting its responsibilities, not just its markup.
+     * Whether a self-drawn money row appears at all: it hides while empty, exactly as every other
+     * empty field hides in read mode (`HideWhenEmptyInReadOnlyMode`, which defaults to true).
      *
-     * FIELD SECURITY IS THE ONE THAT MATTERS. A field the user may not read would be printed by a
-     * naive template — the shared control checks, so anything replacing it has to check too, or the
-     * replacement is a disclosure. The other two keep the row consistent with its neighbours: an empty
-     * money field hides in read mode exactly as every other empty field does.
+     * ── WHY THERE IS NO FIELD-SECURITY CHECK HERE, WHICH IS WORTH STATING ──────────────────────
+     *
+     * Drawing a field ourselves means inheriting the shared control's responsibilities, not just its
+     * markup — so the first version of this asked `EntityInfo.IsFieldReadableByUser` before printing
+     * a value. THAT METHOD DOES NOT EXIST IN THE MJ VERSION THIS APP PINS. It was read from a local
+     * MJ checkout sitting on a much newer branch; `@memberjunction/core@6.1.0-edge.5` has only
+     * entity-level `GetUserPermisions`, and the published `mj-form-field` of the same version carries
+     * no per-field read check either — verified by unpacking both tarballs, not inferred.
+     *
+     * So its absence here is not a gap against the shared control: at this version the two agree, and
+     * a check against an API that is not there would only have failed to compile. Per-field read
+     * security arrived in `6.1.0-edge.7`. WHEN THE PIN MOVES PAST IT, PUT THE CHECK BACK — this row
+     * prints a value, and a field somebody may not read is the one thing it must not print.
      */
     public ShowsMoney(f: DealFieldSpec): boolean {
-        const info = this.Record?.EntityInfo;
-        const user = (this.Record as unknown as { ProviderToUse?: { CurrentUser?: unknown } } | undefined)
-            ?.ProviderToUse?.CurrentUser;
-        if (info?.IsFieldReadableByUser(f.name, user as never) === false) return false;
         return this.MoneyValue(f) !== '';
     }
 

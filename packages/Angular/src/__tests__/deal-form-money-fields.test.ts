@@ -16,15 +16,12 @@ import { MJSDealCommercialPanel } from '../lib/form-panels/deal-form.panels';
 
 type RecordOpts = {
     values?: Record<string, unknown>;
-    /** Field names the user may NOT read. */
-    denied?: string[];
     displayNames?: Record<string, string>;
 };
 
 function panel(opts: { editMode?: boolean; locked?: boolean; record?: RecordOpts } = {}) {
     const r = opts.record ?? {};
     const values = r.values ?? {};
-    const denied = new Set(r.denied ?? []);
 
     const p = Object.create(MJSDealCommercialPanel.prototype) as MJSDealCommercialPanel;
 
@@ -36,7 +33,6 @@ function panel(opts: { editMode?: boolean; locked?: boolean; record?: RecordOpts
         value: {
             Get: (name: string) => values[name] ?? null,
             EntityInfo: {
-                IsFieldReadableByUser: (name: string) => !denied.has(name),
                 Fields: Object.entries(r.displayNames ?? {}).map(([Name, DisplayNameOrName]) => ({
                     Name, DisplayNameOrName,
                 })),
@@ -94,13 +90,15 @@ describe('what a self-drawn money field shows', () => {
 });
 
 describe('the responsibilities inherited from the control it replaced', () => {
-    it('WILL NOT PRINT A FIELD THE USER MAY NOT READ', () => {
-        // The shared control checks field security before rendering a value. Anything drawing a field
-        // in its place has to check too, or replacing it is a disclosure.
-        const p = panel({ record: { values: { MRR: 12500 }, denied: ['MRR'] } });
-        expect(p.ShowsMoney(MRR)).toBe(false);
-    });
-
+    /**
+     * THERE IS DELIBERATELY NO FIELD-SECURITY CASE HERE, and the omission is the finding.
+     *
+     * The first version of this file asserted that a field the user may not read is never printed.
+     * `EntityInfo.IsFieldReadableByUser` does not exist in the MJ version this app pins — it was read
+     * from a local checkout on a newer branch, and CI caught it. The published `mj-form-field` of the
+     * pinned version has no per-field read check either, so at this version the self-drawn row and the
+     * shared control agree. See `ShowsMoney` for when to put both the check and this test back.
+     */
     it('shows a readable field that has a value', () => {
         const p = panel({ record: { values: { MRR: 12500 } } });
         expect(p.ShowsMoney(MRR)).toBe(true);
