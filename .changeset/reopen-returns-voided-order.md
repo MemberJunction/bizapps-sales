@@ -21,7 +21,7 @@ the reopen scope so the ordinary backwards move — Proposal to Qualification �
 `Quoted` order alone. Declaring a status on the early stages would have fixed the reopen and broken
 that move.
 
-This also sweeps a premise recorded in **eleven** places: that "Voided is TERMINAL in orders", so a
+This also sweeps a premise recorded across **nine files**: that "Voided is TERMINAL in orders", so a
 reopen into `Proposal` would ask for a move orders refuses and warn. Orders says otherwise by its own
 API — `TRANSITIONS.Voided` is `['Draft', 'Quoted']`, `IsTerminal('Voided')` is false, and `Confirmed`
 is the terminal status. The refusal that rationale predicted never happens.
@@ -29,12 +29,19 @@ is the terminal status. The refusal that rationale predicted never happens.
 The root cause is KI-27: orders collapsed its order lifecycle on 2026-08-25, which inverted which
 status is the dead end. Three checks were repaired at the time — `close-deal.CD24`,
 `close-won-order.CO5` and `71-lost-and-reopen`'s step 3 — but the prose around them was not, so two
-files ended up asserting the old premise a few paragraphs above the block that disproves it. The
-copies were in `CloseDealOperation`, `DealEntityServer`, the seed script's stage commentary, two in the
-deal workspace component, the `71-lost-and-reopen` header plus its mutant recipe and its live
-rationale, two in the deal form, CO5's intro, `DECISIONS-NEEDED.md` DN-18, eight `STORY-AUDIT.md` rows,
-and — the one no count had reached — the `_comments` block on the **Lost stage row in shipped
-metadata**, which named it as the reason the reopen warns.
+files ended up asserting the old premise a few paragraphs above the block that disproves it.
+
+The files this branch corrects: eight rows in `docs/STORY-AUDIT.md`; the deal workspace component, the
+deal form, `71-lost-and-reopen` and `docs/DECISIONS.md` (D-OS2's ruling and its own escape clause), two
+lines each; and one each in `CloseDealOperation`, CO5's intro, `DECISIONS-NEEDED.md` DN-18, and — the
+one no count had reached — the `_comments` block on the **Lost stage row in shipped metadata**, which
+named it as the reason the reopen warns.
+
+**Stated as files because the earlier counts were wrong, which is this section's own defect.** The PR
+said "eight places" and this note said "eleven"; the enumeration named `DealEntityServer` and the seed
+script's stage commentary, and neither carried the premise at all — `DealEntityServer`'s entire diff
+against `next` is one changed import. "Places" was never checkable, and an unverifiable count is how
+the premise spread in the first place. Files are countable: `git diff next...HEAD` and grep.
 
 The ruling is now recorded once, in `docs/DECISIONS.md` **D-OS4**, and the comments cite that rather
 than KI-27 — KI-27 is the lifecycle collapse that caused the inversion, not the transition fact.
