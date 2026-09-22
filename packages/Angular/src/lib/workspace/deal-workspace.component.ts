@@ -902,6 +902,17 @@ export class DealWorkspaceComponent implements OnInit {
         // that, so an agent or an importer gets an order too. This stays for the UNSAVED deal: a rep
         // can add lines before the first save, and there is no order yet to add them to. Idempotent,
         // so on a saved deal it simply returns the peer that already exists.
+        //
+        // ...PROVIDED THE PEER IS THERE TO RETURN. `Ensure()` MINTS a blank order when the embedded
+        // record was never exposed, so on a saved deal whose peer did not hydrate it hands back a
+        // SECOND order rather than the deal's own -- DN-17, and the reason `79-embedded-order-refresh`
+        // exists. Here that is worse than an error: the header below is stamped with a company, so the
+        // save SUCCEEDS and silently writes the rep's line to an order nothing points at. Resolving the
+        // FK first is the whole fix, and it is a no-op both when the peer is already loaded and when the
+        // deal has no order at all -- which is the unsaved-deal case this method exists for.
+        if (this.Deal?.OrderID && !this.Deal.OrderID_Object) {
+            await this.Deal.OrderID_LoadObject();
+        }
         const order = this.Deal?.OrderID_EnsureObject();
 
         // The HEADER needs the same treatment as the line below, and for the same reason: an order that

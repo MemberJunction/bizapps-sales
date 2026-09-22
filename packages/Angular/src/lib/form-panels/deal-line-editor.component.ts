@@ -381,9 +381,50 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
 
             this.Products = await this.service.LoadProducts();
+
+            /**
+             * HYDRATE BEFORE ENSURING, because `Ensure()` MINTS when the peer is absent (DN-17).
+             *
+             * `OrderID_EnsureObject()` returns the real order only when `EmbeddedRecord` has been
+             * exposed -- by a load, a save, or a wire deserialize. Reached with a deal whose `OrderID`
+             * names a real row but whose peer never hydrated, it calls `NewRecord()` and hands back a
+             * BLANK order instead. Nothing about that is visible here: the dialog then prices a line
+             * against it, and the save inserts a SECOND header that has no `CompanyID`, dying two apps
+             * away on `Failed to save order header: Company cannot be null` while burning an order
+             * number. `DealEntity.Save()` already carries the same guard for the post-save path; this
+             * is the load path, which it cannot reach.
+             *
+             * So the FK is resolved first. `OrderID_LoadObject()` is the safe question -- it resolves a
+             * peer the FK already names, which `Ensure()` deliberately refuses to do.
+             */
+            if (this.Deal?.OrderID && !this.Deal.OrderID_Object) {
+                await this.Deal.OrderID_LoadObject();
+            }
+
             const order = this.Deal?.OrderID_EnsureObject();
             if (!order) {
                 this.Error = 'This deal has no order yet. Save the deal first.';
+                return;
+            }
+
+            /**
+             * AND REFUSE RATHER THAN MINT, when the deal names an order that did not come back.
+             *
+             * The load above fixes the case where the peer was merely unhydrated. What it cannot fix is
+             * an order this client genuinely cannot read -- a permissions refusal, or a generated type
+             * that no longer matches the entity metadata the client builds its query from
+             * (MemberJunction/bizapps-orders#238). In that case `Ensure()` has just minted a blank
+             * order, and going on would write a second header and orphan the rep's line on it.
+             *
+             * The test is `IsSaved`, not an error string: it asks whether the object in hand IS the
+             * persisted order, which is the thing the rest of this dialog depends on, rather than
+             * guessing at why it is not.
+             */
+            if (this.Deal?.OrderID && !order.IsSaved) {
+                this.Error =
+                    'This deal\'s order could not be loaded, so a product cannot be added to it. ' +
+                    'Reload the page and try again; if it persists, the order exists but this app ' +
+                    'cannot read it, and that needs an administrator rather than a retry.';
                 return;
             }
             // The collection must be populated before a line can be found in it OR appended to it.
