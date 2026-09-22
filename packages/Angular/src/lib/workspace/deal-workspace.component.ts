@@ -1422,13 +1422,8 @@ export class DealWorkspaceComponent implements OnInit {
         this.Message = '';
         this.cdr.detectChanges();
         try {
-            const tabId = this.store.ActiveId;
-            const dirty = this.store.Tabs.find((t) => t.Id === tabId)?.Dirty === true;
-            if (dirty) {
-                await this.Save();
-                if (this.MessageIsError) {
-                    return; // the save was refused; its reason is already on screen
-                }
+            if (!(await this.saveActiveTabIfDirty('close the deal'))) {
+                return; // the save was refused or is still running; the reason is already on screen
             }
 
             const input: SalesCloseDealInput = {
@@ -1510,17 +1505,14 @@ export class DealWorkspaceComponent implements OnInit {
              *
              * ── AND A REFUSED SAVE STOPS THE REOPEN ───────────────────────────────────────────────
              *
-             * Exactly as `ConfirmClose()` above does. The alternative — reopen anyway — is the silent
-             * loss this issue is about, just one step later. `Save()` has already put its reason on
-             * screen, so returning here leaves the user looking at it with their text still in the box.
+             * Exactly as `ConfirmClose()` above does, through the same helper. The alternative — reopen
+             * anyway — is the silent loss this issue is about, just one step later. The helper has
+             * already put the reason on screen, so returning here leaves the user looking at it with
+             * their text still in the box. It also refuses when a save is still IN FLIGHT, which the
+             * earlier inline version read as success; see `saveActiveTabIfDirty`.
              */
-            const tabId = this.store.ActiveId;
-            const dirty = this.store.Tabs.find((t) => t.Id === tabId)?.Dirty === true;
-            if (dirty) {
-                await this.Save();
-                if (this.MessageIsError) {
-                    return; // the save was refused; its reason is already on screen
-                }
+            if (!(await this.saveActiveTabIfDirty('reopen the deal'))) {
+                return;
             }
 
             const router = Metadata.Provider as unknown as RemoteOperationRouter;
@@ -1713,12 +1705,20 @@ export class DealWorkspaceComponent implements OnInit {
     /**
      * One transactional call. The deal either lands whole — header, lines, schedule and roster — or
      * nothing changes; there is no path here that leaves a numbered deal with nothing under it.
+     *
+     * ── IT REPORTS THE OUTCOME, RATHER THAN LEAVING CALLERS TO INFER IT ─────────────────────────
+     *
+     * `true` means this call saved the deal. Every other path returns `false`, including the two that
+     * write no message at all: no deal or no tab, and a save already in flight. A caller that read
+     * `MessageIsError` instead would be asking a side channel a question it cannot answer — the flag is
+     * whatever the LAST message left behind, so a silent early return reads as success. That is how a
+     * reopen could run while a save was still in the air (see `saveActiveTabIfDirty`).
      */
-    public async Save(): Promise<void> {
+    public async Save(): Promise<boolean> {
         const deal = this.Deal;
         const tabId = this.store.ActiveId;
         if (!deal || !tabId || this.Saving()) {
-            return;
+            return false;
         }
 
         // Client-side validation first, so an obviously incomplete record costs no round trip. It is the
@@ -1726,7 +1726,7 @@ export class DealWorkspaceComponent implements OnInit {
         this.Revalidate();
         if (!this.Validation.IsValid) {
             this.Fail('Fix the highlighted fields first.');
-            return;
+            return false;
         }
 
         this.Saving.set(true);
@@ -1747,7 +1747,7 @@ export class DealWorkspaceComponent implements OnInit {
                     ?? outcome.Validation.Issues[0]?.Message
                     ?? 'The deal could not be saved.',
                 );
-                return;
+                return false;
             }
 
             // The same instance now carries the server's IDs, so this tab becomes an EDIT of a real
@@ -1764,10 +1764,49 @@ export class DealWorkspaceComponent implements OnInit {
             this.MessageIsError = false;
             this.Message = outcome.Created ? 'Deal created.' : 'Deal saved.';
             this.Revalidate();
+            return true;
         } finally {
             this.Saving.set(false);
             this.cdr.detectChanges();
         }
+    }
+
+    /**
+     * Save the active tab if it has unsaved edits, and say whether it is now safe to proceed.
+     *
+     * `ConfirmClose()` and `ReopenDeal()` both have to flush pending edits BEFORE their operation runs:
+     * once `Sales.CloseDeal` or `Sales.ReopenDeal` has committed it has moved the ROW, while this copy
+     * in the browser still holds the pre-operation status in both `Value` and `OldValue`, so a save
+     * afterwards writes that stale status straight back and nothing refuses it.
+     *
+     * ── WHY A SHARED HELPER, AND WHY IT KEYS ON `Saving()` ─────────────────────────────────────────
+     *
+     * Both callers used to inline the same three lines and then test `this.MessageIsError` to decide
+     * whether the save had worked. That reads a side channel rather than the thing it cares about, and
+     * it has a hole: `Save()` returns at its re-entrancy guard WITHOUT writing a message, so an
+     * already-running save left the flag at whatever the previous message set — usually `false`, i.e.
+     * "fine, carry on".
+     *
+     * The sequence that exploited it: edit Description on a closed deal, press Save, then press Reopen
+     * before the first save resolves. The tab is still dirty, the inline `await this.Save()` returns
+     * instantly, the flag says no error, the reopen runs — and the in-flight save then lands on the
+     * REOPENED row and writes the closing status back over it. Precisely the failure the ordering above
+     * exists to prevent, reached from the other side.
+     *
+     * So this refuses out loud on `Saving()` instead of treating it as success, and every other outcome
+     * comes from `Save()`'s own return value. A clean tab is success with nothing to do.
+     */
+    private async saveActiveTabIfDirty(action: string): Promise<boolean> {
+        if (this.Saving()) {
+            this.Fail(`A save is already running. Wait for it to finish, then ${action}.`);
+            return false;
+        }
+        const tabId = this.store.ActiveId;
+        const dirty = this.store.Tabs.find((t) => t.Id === tabId)?.Dirty === true;
+        if (!dirty) {
+            return true;
+        }
+        return await this.Save();
     }
 
     /**

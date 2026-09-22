@@ -78,8 +78,16 @@ function fakeSignal<T>(initial: T) {
 interface Opts {
     /** Is the ACTIVE tab dirty? */
     dirty?: boolean;
-    /** Does `Save()` fail — i.e. leave `MessageIsError` true, the way a refused save does? */
+    /** Does `Save()` fail — returning `false` and leaving its reason on screen, as a refusal does? */
     saveFails?: boolean;
+    /**
+     * Is a save ALREADY IN FLIGHT when the button is pressed?
+     *
+     * The stub used to have no way to say so, and that gap hid a real defect: `Save()` returns at its
+     * re-entrancy guard without writing a message, so the old `if (this.MessageIsError)` test read an
+     * already-running save as "saved fine, carry on" and let the reopen through.
+     */
+    saving?: boolean;
 }
 
 function workspace(calls: string[], opts: Opts = {}) {
@@ -94,6 +102,7 @@ function workspace(calls: string[], opts: Opts = {}) {
     Object.defineProperty(c, 'Deal', { value: { ID: 'deal-1', IsSaved: true }, writable: true });
 
     c.Closing = fakeSignal(false);
+    c.Saving = fakeSignal(opts.saving === true);
     c.ReopenReason = 'a reason, because the workspace requires one';
     c.ReopenPanelOpen = true;
     c.CloseRouting = [];
@@ -113,13 +122,17 @@ function workspace(calls: string[], opts: Opts = {}) {
         },
     };
 
-    c.Save = async (): Promise<void> => {
+    // Returns a BOOLEAN, as the real one now does. It used to return void and signal failure only by
+    // setting `MessageIsError`, which is the side channel the production code stopped reading.
+    c.Save = async (): Promise<boolean> => {
         calls.push('Save');
         if (opts.saveFails) {
             // What a refused save actually leaves behind: the reason on screen, and this flag set.
             c.MessageIsError = true;
             c.Message = 'The deal could not be saved.';
+            return false;
         }
+        return true;
     };
 
     c.ReloadActiveDeal = async (): Promise<void> => {
@@ -253,6 +266,80 @@ describe('a save the server refuses abandons the reopen', () => {
 
         expect(c.ReopenPanelOpen, 'closing it would hide the reason and the retry').toBe(true);
         expect(c.ReopenReason, 'and the typed reason must not be cleared').not.toBe('');
+    });
+});
+
+/**
+ * A SAVE ALREADY IN FLIGHT, which is the ordering defeated from the other side.
+ *
+ * Saving first is only protective if the save actually happens. `Save()` returns at its re-entrancy
+ * guard — `if (!deal || !tabId || this.Saving())` — WITHOUT writing a message, so the original
+ * `await this.Save(); if (this.MessageIsError) return;` read that silent return as success: the tab is
+ * still dirty, no error was set, and the reopen proceeded.
+ *
+ * The sequence a rep can actually perform: edit Description on a closed deal, press Save, press Reopen
+ * before it resolves. Both controls are live at once — the save affordance is the tab strip's
+ * `(Confirm)`, the Reopen button was disabled only on `Closing()`. The in-flight save then lands on the
+ * REOPENED row and writes the closing status back over it, which is exactly the loss the ordering
+ * exists to prevent.
+ *
+ * Both halves are now closed and both are asserted here: the button is disabled on `Saving()` too, and
+ * `saveActiveTabIfDirty` refuses out loud rather than inferring success from a flag nobody set.
+ */
+describe('a save already in flight stops the reopen', () => {
+    it('does not run the operation', async () => {
+        const calls: string[] = [];
+        Metadata.Provider = providerStub(calls);
+        const c = workspace(calls, { dirty: true, saving: true });
+
+        await c.ReopenDeal();
+
+        expect(calls, 'the in-flight save owns this tab; a second one must not start').not.toContain(
+            'Save',
+        );
+        expect(
+            calls,
+            'and the reopen must NOT run — it would move the row out from under the save in flight',
+        ).not.toContain(REOPEN_OP);
+    });
+
+    it('says why, instead of failing silently', async () => {
+        const calls: string[] = [];
+        Metadata.Provider = providerStub(calls);
+        const c = workspace(calls, { dirty: true, saving: true });
+
+        await c.ReopenDeal();
+
+        expect(c.MessageIsError, 'a refusal the user cannot see is the same bug one layer up').toBe(
+            true,
+        );
+        expect(c.Message).toContain('save is already running');
+    });
+
+    it('does not reload, so nothing on screen is replaced mid-save', async () => {
+        const calls: string[] = [];
+        Metadata.Provider = providerStub(calls);
+        const c = workspace(calls, { dirty: true, saving: true });
+
+        await c.ReopenDeal();
+
+        expect(calls).not.toContain('ReloadActiveDeal');
+        expect(calls, 'the tab is still dirty until the save in flight says otherwise').not.toContain(
+            `MarkClean(${TAB})`,
+        );
+    });
+
+    it('refuses even on a CLEAN tab, because the save in flight is the hazard', async () => {
+        const calls: string[] = [];
+        Metadata.Provider = providerStub(calls);
+        // Nothing to flush, so a dirty-only guard would wave this through -- and the in-flight save
+        // would still land on the reopened row. The hazard is the save, not the dirty marker.
+        const c = workspace(calls, { dirty: false, saving: true });
+
+        await c.ReopenDeal();
+
+        expect(calls, 'a clean tab does not make an in-flight save safe').not.toContain(REOPEN_OP);
+        expect(c.MessageIsError).toBe(true);
     });
 });
 
