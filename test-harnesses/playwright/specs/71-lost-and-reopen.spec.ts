@@ -38,10 +38,14 @@
  *
  * ── HOW TO MAKE IT FAIL ─────────────────────────────────────────────────────────────────────────
  *
- * In `DealEntityServer.applyStageOrderStatus`, return before the `order.Save()` so the plan is computed
- * and never applied. The loss still voids the order, the reopen still succeeds, the log still holds both
- * events — and step 3 fails on the one thing this spec is for: the order did not follow the stage it was
- * restored into.
+ * In `DealEntityServer.planStageOrderStatus`, return `null` unconditionally so no plan is produced. The
+ * loss still voids the order, the reopen still succeeds, the log still holds both events — and step 3
+ * fails on the one thing this spec is for: the order did not follow the stage it was restored into.
+ *
+ * NOT "return before `order.Save()` in `applyStageOrderStatus`", which an earlier version of this note
+ * suggested. That method assigns `order.Status = plan.Target` BEFORE saving, and its own comment records
+ * that the deal's save graph writes the embedded order regardless — so the mutant may leave the spec
+ * green and prove nothing. Killing the PLAN is unambiguous; killing the write is not.
  *
  * NOT the old recipe, which was to blank the `_orderStatusWarnings.push(...)` in the refusal branch
  * (mutant `M-OS3`). That branch does not execute in this flow any more: the restored stage declares
@@ -75,7 +79,7 @@ test.describe('closed lost and reopen — what happens to the order', () => {
         await AssertBaseline();
     });
 
-    test('lost voids the order; reopen succeeds and SAYS the order could not follow', async ({ page }) => {
+    test('lost voids the order; reopen brings it back, or says why it could not', async ({ page }) => {
         test.setTimeout(600_000);
         const sink = captureConsoleErrors(page);
 
@@ -146,8 +150,9 @@ test.describe('closed lost and reopen — what happens to the order', () => {
          * (`closingStageForOutcome`), so the pre-move is redundant: closing as LOST lands the deal in the
          * losing stage, that stage declares `OrderStatusOnEntry = 'Voided'`, and the order is voided by
          * the same writer as before. The reopen then restores the stage the deal came FROM, that stage
-         * asks for `Quoted`, orders refuses because `Voided` is terminal — and the refusal is what this
-         * spec exists to see on screen.
+         * asks for `Quoted`, and orders PERMITS that move — `TRANSITIONS.Voided` is `['Draft', 'Quoted']`
+         * (D-OS4). So the order comes back, which is what step 3 derives rather than assumes. The
+         * warning this spec also guards is for a refusal that genuinely happens, and is gated on one.
          *
          * `losing` is still resolved above, and still asserted, because a pipeline with no losing stage
          * would make the derivation return null and this scenario unreachable.

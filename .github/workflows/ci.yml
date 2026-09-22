@@ -35,11 +35,10 @@ name: CI
 #   and `test:integration` runs whichever of them this host can support.
 #
 #   THE NUMBERS ARE NOT REPEATED HERE, and that is the fix rather than laziness. This paragraph used to
-#   list them, declare that JSON the source of truth in its closing sentence, and then drift from it:
-#   it claimed save-deal SD1-SD16 (it is SD1-SD41), close-deal CD1-CD14 (CD1-CD32), close-won-contract
-#   CT1-CT4 (CT1, CT4, CT5, CT6), and named close-won-handoff and close-won-d2c, two bundles that were
-#   RETIRED and replaced by close-won-order because they asserted the opposite behaviour. A second copy
-#   of a number beside its source of truth only ever becomes a lie.
+#   list every bundle's id range, declare that JSON the source of truth in its closing sentence, and then
+#   drift from it -- including naming two bundles that had been RETIRED. An earlier attempt at this fix
+#   made the point and then restated the ranges anyway, one of them already wrong again. A second copy of
+#   a number beside its source of truth only ever becomes a lie, so there is no second copy.
 #
 #   RUN_MUTATION_TESTS=1 is MANDATORY when you run them locally: the runner contains
 #   `c.RequiresMutation ? RUN_MUTATIONS : true`, so a run without it executes NOTHING and reports

@@ -897,6 +897,7 @@ export class DealEntityServer extends DealEntity {
             if (work.stageOrder) {
                 await this.applyStageOrderStatus(work.stageOrder);
             }
+            await this.recoverOrderOnReopen();
 
             const saved = await super.Save(options);
             if (!saved) {
@@ -1538,64 +1539,59 @@ export class DealEntityServer extends DealEntity {
 
         const target = (result.Results ?? [])[0]?.OrderStatusOnEntry;
         if (!target) {
-            // This stage says nothing about the order. The common case -- EXCEPT on a reopen, where
-            // saying nothing leaves a voided order voided. See `planReopenOrderRecovery`.
-            return this.planReopenOrderRecovery(stageID);
+            return null;   // this stage says nothing about the order. The common case.
         }
         return { StageID: stageID, Target: target as OrderStatus };
     }
 
+
     /**
      * A REOPENED deal must not be left pointing at a VOIDED order (bc-aidp-next-golive#205).
      *
-     * ── WHAT THIS FIXES ────────────────────────────────────────────────────────────────────────────
+     * ── WHY THIS IS A POST-CHECK AND NOT A FALLBACK INSIDE THE STAGE PLAN ──────────────────────────
      *
-     * golive#205 asks, in so many words, that reopening "return the order to Quoted or Draft". The
-     * order follows `PipelineStage.OrderStatusOnEntry`, and a reopen restores the stage the deal was
-     * in BEFORE the close -- so the order comes back only if THAT stage declares something. On the
-     * seeded B2B pipeline, `Proposal`/`Negotiation`/`Signed` declare `Quoted` and do come back;
-     * `Discovery` and `Qualification` declare nothing, so a deal lost from an early stage reopened
-     * with its order still `Voided`, and NOTHING said so. Measured on this host before the fix:
-     * DEAL-9002, lost from Qualification, reopened Open with ORD-000293 left at `Voided`.
+     * It was the latter, and that version was unreachable on the reopen that needs it most.
+     * `planStageOrderStatus` returns at its stage-did-not-move gate before it ever asks what the stage
+     * declares, so a reopen that lands on the stage the deal is ALREADY in never consulted the
+     * recovery at all.
      *
-     * That is the silent half of D-OS1 -- the deal neither followed nor complained.
+     * That is not a hypothetical corner. `save-deal.SD35` makes it ordinary: a plain save or a board
+     * drag into the losing stage leaves the deal OPEN -- `planStageDefaults` refuses to derive a
+     * locking status -- while `applyStageOrderStatus` voids the order on entry. Closing Lost then
+     * derives that same stage, so nothing moves and the close event records
+     * `FromStageID === ToStageID`. The reopen restores the stage the deal is already in, the gate
+     * returns null, and the deal comes back OPEN pointing at a `Voided` order with `Issues` empty.
      *
-     * ── WHY THE STAGE DATA IS NOT THE PLACE TO FIX IT ──────────────────────────────────────────────
+     * Measured on this host before this change: DEAL-9002 moved into the losing stage by a plain save,
+     * closed Lost, reopened -- `Success: true`, zero issues, ORD-000293 still `Voided`.
      *
-     * Seeding `Draft` on Discovery and Qualification would fix the reopen and break the ordinary move:
-     * a deal slipping from Proposal back to Qualification would drag a live `Quoted` order back to
-     * `Draft`. Those stages are RIGHT to say nothing on the way forward. The asymmetry is real -- only
-     * the reopen has an order that a close put somewhere it should not stay -- so only the reopen
-     * carries the extra rule, and it is keyed on `_reopenInProgress`, which is set for exactly the one
-     * audited path through the lock.
+     * TWO MECHANISMS SWALLOWED IT INDEPENDENTLY, which is why simply hoisting the old call above the
+     * gate would have fixed only half. Past the gate, the restored stage in that flow IS the losing
+     * stage, so the plan's target is `Voided`, and `applyStageOrderStatus` returns at its
+     * `from === plan.Target` no-op check without a warning. Running AFTER the plan has been applied is
+     * what makes the recovery independent of both.
      *
-     * ── WHY `Draft` ────────────────────────────────────────────────────────────────────────────────
+     * ── KEYED ON THE DECLARED TRANSITION, NOT ON THE LOCK BEING SUSPENDED ──────────────────────────
      *
-     * #205 permits either. `Draft` is the conservative half: a deal back in Discovery or Qualification
-     * has no live quote in front of a customer, and `Draft` is the editable state that says so. A deal
-     * whose restored stage DOES want `Quoted` never reaches here -- the declaration above handles it.
+     * `_reopenInProgress` means "the close lock is suspended", which is broader than "this is a
+     * reopen" and will drift further apart the moment anything else legitimately suspends it. The
+     * declaration is the statement of intent, and `Sales.ReopenDeal` already makes it.
      *
-     * The one lossy case is a deal that held a `Quoted` order while sitting in an early stage (it had
-     * slipped back from Proposal): it returns as `Draft` rather than `Quoted`. That is a deliberate
-     * trade -- both satisfy #205, and neither leaves a live deal pointing at a voided order.
+     * ── AND IT REUSES THE WRITER RATHER THAN REIMPLEMENTING IT ─────────────────────────────────────
      *
-     * ── AND IT IS NOT A NAME COMPARISON ────────────────────────────────────────────────────────────
-     *
-     * `IsEditable` and `IsBooked` are orders' own predicates over its own vocabulary (§3). The booked
-     * guard is belt-and-braces: `Sales.ReopenDeal` already refuses a booked order outright, so this
-     * cannot normally see one -- but attempting `Confirmed -> Draft` would earn a refusal warning on a
-     * path that has nothing to warn about, and a guard that costs one call is cheaper than explaining
-     * that warning later.
+     * `applyStageOrderStatus` already asks orders whether the move is legal, runs the write in its own
+     * savepoint, and records a refusal as a warning instead of a failure. A second copy of that would
+     * be a second thing to keep honest.
      */
-    private planReopenOrderRecovery(stageID: string): StageOrderPlan | null {
-        if (!this._reopenInProgress) {
-            return null;
+    private async recoverOrderOnReopen(): Promise<void> {
+        if (this._declaredTransition?.Kind !== 'Reopen') {
+            return;
         }
         const status = this.OrderID_Object?.Status;
         if (!status || IsEditable(status) || IsBooked(status)) {
-            return null;
+            return;
         }
-        return { StageID: stageID, Target: 'Draft' };
+        await this.applyStageOrderStatus({ StageID: this.PipelineStageID ?? '', Target: 'Draft' });
     }
 
     /**

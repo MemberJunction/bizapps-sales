@@ -2627,6 +2627,95 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-deal.CD33',
+        Name: 'CD33: a deal ALREADY parked in the losing stage still gets its order back on reopen',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE SHAPE CD19 NAMES AND DOES NOT COVER, and the one the first version of this
+                 * branch's recovery could not reach.
+                 *
+                 * CD19 asserts that a status-only close restores nothing and fires nothing. True, and
+                 * benign in ITS setup, because that deal parks in a winning stage whose order is left
+                 * at `Quoted` — editable, workable, nothing owed. Park the same shape in the LOSING
+                 * stage and the identical "nothing fires" becomes the D-OS1 violation:
+                 *
+                 *   1. `save-deal.SD35`: moving into a stage whose status locks does NOT close the
+                 *      deal, so it sits OPEN in the losing stage while `applyStageOrderStatus` voids
+                 *      the order on entry.
+                 *   2. Closing Lost derives that same stage, so nothing moves and the close event
+                 *      records `FromStageID === ToStageID`.
+                 *   3. The reopen restores the stage the deal is already in.
+                 *
+                 * Measured before the fix: the deal came back OPEN, `Issues` empty, order still
+                 * `Voided`. Two mechanisms swallowed it — `planStageOrderStatus` returns at its
+                 * stage-did-not-move gate, and even past that the restored stage IS the losing stage,
+                 * so the plan's target equals the order's status and the writer no-ops without a
+                 * warning. That is why the recovery runs AFTER the plan rather than inside it.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+
+                const losing = await TxOne<{ ID: string; OrderStatusOnEntry: string | null }>(
+                    ctx,
+                    `SELECT TOP 1 ID, OrderStatusOnEntry FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE PipelineID = '${f.ContractPolicyPipelineID}'
+                        AND DealStatusTypeID = '${f.LostStatusID}' AND IsActive = 1`,
+                );
+                Assert(
+                    !!losing?.OrderStatusOnEntry && !IsEditable(String(losing.OrderStatusOnEntry)),
+                    'setup: the losing stage must declare a NON-editable order status, or parking in it ' +
+                        'leaves nothing for the reopen to recover',
+                );
+
+                // Parked in the losing stage from birth. SD35 is what makes this an OPEN deal.
+                const dealID = await openDeal(
+                    ctx, f, f.ContractPolicyPipelineID, losing.ID, 'CD33 parked in the losing stage',
+                );
+
+                const parked = await TxOne<{ IsOpen: boolean; Status: string }>(
+                    ctx,
+                    `SELECT t.IsOpen, o.Status
+                       FROM ${SALES_SCHEMA}.Deal d
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = d.DealStatusTypeID
+                       JOIN ${ORDERS_SCHEMA}.OrderHeader o ON o.ID = d.OrderID
+                      WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    parked.IsOpen === true,
+                    'setup: SD35 says a locking STAGE must not close the deal — if this fails, the ' +
+                        'premise of this check is gone and SD35 is the thing to look at',
+                );
+                Assert(
+                    !IsEditable(String(parked.Status)),
+                    `setup: entering the losing stage must have voided the order — it is '${parked.Status}'`,
+                );
+
+                // No ClosingStageID: the close derives the stage the deal is already in, so nothing moves.
+                const closed = await close(ctx, {
+                    DealID: dealID,
+                    DealStatusTypeID: f.LostStatusID,
+                    LossReasonID: f.LossReasonPlainID,
+                });
+                Assert(closed.Success, `setup: the lost close failed — ${JSON.stringify(closed.Issues)}`);
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD33: reopening a parked loss.' });
+                Assert(out.Success, `the reopen failed — ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                       JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    IsEditable(String(after.Status)),
+                    `the deal reopened with its order still '${after.Status}'. Nothing MOVED here — the ` +
+                        `close and the reopen both landed on the stage the deal was already in — so only ` +
+                        `a check that runs after the stage plan can put the order back`,
+                );
+            }),
+    },
 ];
 
 for (const check of CloseDealChecks) {

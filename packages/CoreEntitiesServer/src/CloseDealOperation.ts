@@ -122,46 +122,27 @@ function issue(Section: SalesCloseIssue['Section'], Message: string, Field: stri
 /**
  * What a reopen must carry out of the loss fields before it clears them (golive#205).
  *
- * Returns a suffix for the reopen event's note, or '' when the deal was not lost. The reason is
- * resolved to its NAME because an id in an audit note tells a reader nothing -- and by id rather than
- * by name on the way in, so a renamed reason still resolves (§3).
+ * Returns a suffix for the reopen event's note, or '' when the deal was not lost.
  *
- * A lookup that fails is not allowed to fail the reopen: an audit note is worth less than the unlock
- * the caller asked for. It degrades to the id, which is still recoverable by hand, rather than
- * throwing away the only copy.
+ * ── READ FROM THE RECORD, NOT LOOKED UP ────────────────────────────────────────────────────────
+ *
+ * This ran a `RunView` against `MJ_BizApps_Sales: Loss Reasons` to turn the id into a name, wrapped
+ * in a try/catch that degraded to writing a raw GUID into an append-only row. None of that was
+ * needed: `vwDeals` projects `LossReason` and `DealEntity` exposes it, so `deal.Load()` has already
+ * populated the name by the time the reopen runs, and nothing mutates it before the clear below.
+ * CLAUDE.md prefers a denormalized view field over a separate lookup, and this removes the query,
+ * the provider cast and the failure mode in one go.
+ *
+ * The id remains the fallback for the case the name cannot be read at all, because an id in an audit
+ * note is still recoverable by hand and losing the only copy is not.
  */
-async function lossTrailFor(
-    deal: DealEntityServer,
-    provider: IMetadataProvider,
-    user: UserInfo,
-): Promise<string> {
+function lossTrailFor(deal: DealEntityServer): string {
     const reasonID = deal.LossReasonID;
     const notes = deal.LossNotes?.trim();
     if (!reasonID && !notes) {
         return '';
     }
-
-    let reason = reasonID ? `reason ${reasonID}` : 'no reason recorded';
-    if (reasonID) {
-        try {
-            const view = provider as unknown as IRunViewProvider;
-            const r = await view.RunView(
-                {
-                    EntityName: LOSS_REASON_ENTITY,
-                    ExtraFilter: `ID = '${reasonID}'`,
-                    ResultType: 'simple',
-                    Fields: ['Name'],
-                },
-                user,
-            );
-            const name = (r.Results ?? [])[0] as { Name?: string } | undefined;
-            if (r.Success && name?.Name) {
-                reason = String(name.Name);
-            }
-        } catch {
-            // keep the id form; see the note above about not failing the reopen for an audit string
-        }
-    }
+    const reason = deal.LossReason ?? (reasonID ? `reason ${reasonID}` : 'no reason recorded');
     return notes ? ` (was lost: ${reason} — ${notes})` : ` (was lost: ${reason})`;
 }
 
@@ -1194,7 +1175,7 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              */
             // The loss trail is read BEFORE the fields are cleared below, and folded into the one
             // event that survives the reopen. See the clearing block for why it is cleared at all.
-            const lossTrail = await lossTrailFor(deal, provider, user);
+            const lossTrail = lossTrailFor(deal);
             deal.DeclareTransition('Reopen', `REOPENED: ${input.Reason.trim()}${lossTrail}`);
 
             deal.DealStatusTypeID = target.ID;
