@@ -20,7 +20,7 @@
   "dependencies": {
     "@mj-biz-apps/common-entities": "^5.44.0",
     "@mj-biz-apps/common-ng": "^5.44.0",
-    "@mj-biz-apps/orders-entities": "5.14.0",
+    "@mj-biz-apps/orders-entities": "^5.14.0",
     "@mj-biz-apps/sales-entities": "6.7.1"
   },
   "peerDependencies": {

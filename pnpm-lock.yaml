@@ -34,7 +34,7 @@ importers:
   .:
     dependencies:
       '@mj-biz-apps/orders-entities':
-        specifier: 5.14.0
+        specifier: ^5.14.0
         version: 5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
     devDependencies:
       '@changesets/cli':
@@ -231,7 +231,7 @@ importers:
         specifier: 5.44.0
         version: 5.44.0(31ff898fe1277b9bc0d5e7b35cf24e7c)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.14.0
+        specifier: ^5.14.0
         version: 5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/sales-entities':
         specifier: 6.7.1
@@ -268,7 +268,7 @@ importers:
         specifier: 5.44.0
         version: 5.44.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.14.0
+        specifier: ^5.14.0
         version: 5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/sales-entities':
         specifier: 6.7.1
@@ -302,7 +302,7 @@ importers:
         specifier: 5.44.0
         version: 5.44.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.14.0
+        specifier: ^5.14.0
         version: 5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       zod:
         specifier: ^3.25.76
@@ -330,7 +330,7 @@ importers:
         specifier: 5.44.0
         version: 5.44.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.14.0
+        specifier: ^5.14.0
         version: 5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/sales-core-entities-server':
         specifier: 6.7.1

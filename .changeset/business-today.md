@@ -68,8 +68,9 @@ minted. A sibling's exact pin is correct only while its number happens to equal 
 nothing maintains that equality. The owner of a package may pin it exactly; a consumer in another repo
 should declare a range and let the owner's pin win.
 
-`@mj-biz-apps/orders-entities` stays exactly where `next` put it (5.14.0, golive#258) — that pin
-belongs to that fix, not this one.
+`@mj-biz-apps/orders-entities` is `^5.14.0`, which arrived from `next` in #126 — the same rule applied
+to the package where golive#258 actually happened. That pin belongs to that fix, not this one; this
+branch only carries it through the merge.
 
 `pnpm.overrides` holds all three `common-*` members at 5.44.0 for THIS workspace and CI. Exact is
 right there and wrong in a manifest for the same reason: overrides are not published. It forces a
