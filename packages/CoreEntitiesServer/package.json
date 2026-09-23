@@ -26,7 +26,7 @@
   "dependencies": {
     "@mj-biz-apps/common-activity-sync": "^5.43.0",
     "@mj-biz-apps/common-entities": "^5.43.0",
-    "@mj-biz-apps/orders-entities": "5.13.0",
+    "@mj-biz-apps/orders-entities": "5.14.0",
     "@mj-biz-apps/sales-entities": "6.7.0",
     "@mj-biz-apps/tasks-core": "^1.4.1",
     "@mj-biz-apps/tasks-entities": "^1.4.1"
