@@ -1,0 +1,64 @@
+[
+  {
+    "_comments": [
+      "bc-aidp-next-golive#259 item 1: 'When I create a new Primary Contact, and then search for that same",
+      "record under Billing Contact, the name appears twice.'",
+      "",
+      "WHAT THE DATABASE SAYS HAPPENED, because the report reads like a rendering bug and is not one.",
+      "vwSalesContacts returns exactly as many rows as it has distinct ids, so the view does not fan out,",
+      "and exactly one contact was created that day, so nothing was submitted twice. The two rows are two",
+      "REAL contacts: one created by the conversion two weeks earlier, one created by hand minutes before",
+      "the report, sharing a display name AND an email. The picker's name field is DisplayNameAndEmail, so",
+      "the pair collapses to ONE distinct string -- the rows were not similar, they were identical.",
+      "",
+      "WHY A SECOND ONE GOT CREATED AT ALL is not fixable from this repo. The shared FK picker searches",
+      "with an unordered LIKE capped at 20 rows, and on a directory of any real size a first name matches",
+      "far more than twenty. The contact that already existed was very unlikely to be on screen when the",
+      "picker offered to create a new one. That is a platform defect and is filed as one.",
+      "",
+      "WHAT THIS FILE FIXES is the half that IS ours: the picker rendered a single column, because",
+      "Sales Contacts had NO field flagged DefaultInView and the column plan is built from exactly that",
+      "flag (minus the name field, the primary key, and any raw foreign key). With one column and one",
+      "distinct value, two different people were genuinely indistinguishable -- there was nothing on",
+      "screen that could have told them apart, whatever the tester did. Three columns is the smallest",
+      "set that answers 'which of these two?' without turning a picker into a grid.",
+      "",
+      "THE FLAG GOES ON THE VIRTUAL NAME FIELDS, NOT THE FOREIGN KEYS, and that is not interchangeable:",
+      "the column plan drops any field carrying a RelatedEntityID, on the grounds that it would render a",
+      "raw GUID. Flagging LifecycleStageTypeID or OwnerEmployeeID would therefore assert cleanly and show",
+      "nothing. LifecycleStageType and OwnerEmployee are plain nvarchar columns the base view already",
+      "resolves, so they render as words.",
+      "",
+      "DELIBERATELY NOT Email: it is already inside DisplayNameAndEmail, so a column for it would repeat",
+      "the name column and buy no distinction -- which is precisely the case this issue is about."
+    ],
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=Title"
+    }
+  },
+  {
+    "_comments": [
+      "Lead or established customer contact -- which of two same-named rows is the live one."
+    ],
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=LifecycleStageType"
+    }
+  },
+  {
+    "_comments": [
+      "Who owns the contact, which is who to ask when the other two columns still do not settle it."
+    ],
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=OwnerEmployee"
+    }
+  }
+]

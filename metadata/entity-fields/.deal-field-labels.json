@@ -36,5 +36,109 @@
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ForecastCategoryType"
     }
+  },
+  {
+    "_comments": [
+      "bc-aidp-next-golive#259 item 7: 'Currency ID, Contract ID, Renews Contract ID, etc. won't have",
+      "\"ID\" in the label. There may be others too.' There are: measured against the database, every row",
+      "below reads with a trailing 'ID', and two acronyms read worse than that.",
+      "",
+      "THESE ARE THE FK ROWS THEMSELVES, WHICH IS THE OPPOSITE OF THE TWO ENTRIES ABOVE, and the",
+      "difference is not a style choice -- it is which row mj-form-field actually reads. It resolves an",
+      "FK's label through RelatedEntityNameFieldMap FIRST and only falls through to the field's own",
+      "DisplayName when there is no map. The two entries above relabel VIRTUAL NAME FIELDS because",
+      "DealStatusTypeID and ForecastCategoryTypeID both have one. Every field below has",
+      "RelatedEntityNameFieldMap = NULL, so its own DisplayName is what renders. Getting this backwards",
+      "asserts successfully and changes nothing anyone sees, in either direction.",
+      "",
+      "WHY THE MAP IS NULL ON EACH, because the reasons differ and one of them may not hold forever:",
+      "  - CurrencyID, ContractID, RenewsContractID are SOFT foreign keys. A soft FK gives the field a",
+      "    related entity but no virtual name column in the base view, so no map is ever produced.",
+      "    Verified on a database where the contract soft FK is already applied: still NULL.",
+      "  - CampaignID has no related entity at all.",
+      "  - PrimaryContactID and BillingContactID are HARD foreign keys with",
+      "    IncludeRelatedEntityNameFieldInBaseView = 1 -- CodeGen wants a name column and cannot produce",
+      "    one, because Sales Contacts' name field (DisplayNameAndEmail) is itself virtual, added by the",
+      "    app-owned wrapper view that the generated Deal view does not join. If that ever changes, these",
+      "    two labels go quiet and the virtual field becomes the row to set. Nothing warns; check the map",
+      "    before assuming a relabel here still lands.",
+      "",
+      "MRR and ARR are not FK fields and not about the 'ID' suffix at all. They are here because the same",
+      "audit found them: CodeGen's display-name derivation title-cases the column name, so the two figures",
+      "a rep reads most often render as 'Mrr' and 'Arr'.",
+      "",
+      "AutoUpdateDisplayName goes to 0 on every row for the reason the first entry gives: the label becomes",
+      "a deliberate choice rather than something re-derived from the column name."
+    ],
+    "fields": {
+      "DisplayName": "Primary Contact",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=PrimaryContactID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Billing Contact",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=BillingContactID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Currency",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=CurrencyID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Contract",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ContractID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Renews Contract",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=RenewsContractID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Campaign",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=CampaignID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "MRR",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=MRR"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "ARR",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ARR"
+    }
   }
 ]
