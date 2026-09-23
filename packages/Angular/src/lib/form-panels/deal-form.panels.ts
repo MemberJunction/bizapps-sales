@@ -105,7 +105,7 @@ interface ReopenOutcome {
  *
  * TWO LAYERS OF SUCCESS. `Success` on the envelope means the operation RAN; whether the deal reopened
  * is `Output.Success`. And a SUCCESSFUL reopen still carries issues worth showing: S-US8 reopens behind
- * an order orders treats as terminal, and that list is the only thing between the rep and a live deal
+ * an order the deal cannot be worked from, and that list is the only thing between the rep and a live deal
  * pointing at a dead order.
  */
 /**
@@ -2647,10 +2647,18 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
      * The audited way back through the lock (bc-aidp-next-golive#205).
      *
      * Mirrors {@link ConfirmClose}, including the part that is easy to drop: a reopen can return
-     * `Success: true` WITH issues, and those are the ones that matter most. S-US8's reopen asks the
-     * order to come back while it sits at `Voided`, which orders treats as terminal — the deal reopens
-     * regardless, because an order-side refusal must never block a stage change, so this list is the
-     * only thing standing between the rep and a live deal pointing at a dead order.
+     * `Success: true` WITH issues, and those are the ones that matter most. The deal reopens
+     * regardless of what the order does, because an order-side refusal must never block a stage
+     * change — so this list is the only thing standing between the rep and a live deal pointing at a
+     * dead order.
+     *
+     * THIS USED TO SAY the reopen "asks the order to come back while it sits at `Voided`, which orders
+     * treats as terminal". It does not: `TRANSITIONS.Voided` is `['Draft', 'Quoted']`, so
+     * `IsTerminal('Voided')` is FALSE and `Confirmed` is the terminal status. Recorded once in
+     * `docs/DECISIONS.md` D-OS4; KI-27 is the lifecycle collapse that caused it, not the transition
+     * fact itself. The cases that genuinely leave an order behind are a BOOKED order, which the reopen
+     * refuses outright, and — until golive#205 — a restored stage that declared nothing, which asked
+     * the order for nothing and said nothing either.
      *
      * IT DOES SAVE FIRST, which this comment used to say it must not. The old reasoning was that "a
      * locked deal has almost nothing editable, and the close lock would refuse the save anyway". Both

@@ -36,6 +36,7 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
+import { CanTransition, IsEditable } from '@mj-biz-apps/orders-entities';
 import {
     DealFieldsEditableWhileLocked,
     StubDownstreamSeam,
@@ -1386,12 +1387,12 @@ export const CloseDealChecks: NamedCheck[] = [
                     ctx,
                     `SELECT OrderStatusOnEntry FROM ${SALES_SCHEMA}.PipelineStage WHERE ID = '${startStage}'`,
                 );
+                const order = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
                 if (restored.OrderStatusOnEntry) {
-                    const order = await TxOne<{ Status: string }>(
-                        ctx,
-                        `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
-                          JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
-                    );
                     const followed =
                         String(order.Status).toLowerCase() === String(restored.OrderStatusOnEntry).toLowerCase();
                     Assert(
@@ -1399,6 +1400,31 @@ export const CloseDealChecks: NamedCheck[] = [
                         `the restored stage declares '${restored.OrderStatusOnEntry}' and the order is ` +
                             `'${order.Status}' — so the reopen owed a warning and reported none. Silence is ` +
                             'the one outcome D-OS1 forbids',
+                    );
+                } else {
+                    /**
+                     * THE BRANCH THAT USED TO NOT EXIST, and its absence is why golive#205's last item
+                     * shipped broken.
+                     *
+                     * This assertion lived inside `if (restored.OrderStatusOnEntry)`. A restored stage
+                     * that declares NOTHING therefore asserted nothing at all -- and that is precisely
+                     * the case where a LOST close had put the order somewhere it should not stay. The
+                     * check reported green over the one outcome D-OS1 forbids.
+                     *
+                     * WHAT IT ASSERTS IS EDITABILITY, not a particular status, and the distinction
+                     * matters: this setup closes WON into a stage declaring `Quoted`, and an order left
+                     * at `Quoted` is entirely healthy -- a reopened deal can carry straight on with it.
+                     * An earlier draft of this branch demanded the order differ from whatever the close
+                     * imposed and failed on exactly that case, which would have been a false alarm.
+                     * `IsEditable` is orders' own predicate over its own vocabulary (§3), and it draws
+                     * the line where the deal actually cares: can this order be worked on again.
+                     */
+                    Assert(
+                        IsEditable(String(order.Status)) || out.Issues.length > 0,
+                        `the restored stage declares nothing, so nothing asked the order to come back, ` +
+                            `and it is '${order.Status}' — a state the deal cannot be worked from. A ` +
+                            `reopened deal left pointing at the order its close put away, in silence, ` +
+                            `is the D-OS1 violation golive#205 asks to be fixed`,
                     );
                 }
             }),
@@ -2416,6 +2442,499 @@ export const CloseDealChecks: NamedCheck[] = [
                     String(reopenEvent.Notes ?? '').length > 0,
                     'the reopen recorded a reason even though the caller gave none',
                 );
+            }),
+    },
+    {
+        Id: 'close-deal.CD31',
+        Name: 'CD31: reopening a LOST deal into a stage that declares nothing still returns the order',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205's LAST item: "return the order to Quoted or Draft".
+                 *
+                 * ── WHY CD18 DOES NOT ALREADY COVER THIS ───────────────────────────────────────────
+                 *
+                 * CD18 closes WON, so its order is never voided and its reopen has nothing to recover.
+                 * The failing shape needs all three of: a LOST close (which voids), a CLOSING stage
+                 * that declares the void, and a RESTORED stage that declares nothing -- and it is the
+                 * third that makes it silent, because a stage saying nothing asks the order for
+                 * nothing. Measured before the fix: DEAL-9002, lost from Qualification, reopened Open
+                 * with ORD-000293 still `Voided` and not one Issue raised.
+                 *
+                 * ── THE STAGES ARE RESOLVED BY DECLARATION, NEVER BY NAME (§3) ─────────────────────
+                 *
+                 * The start stage is any stage in the pipeline whose `OrderStatusOnEntry` is NULL; the
+                 * closing stage is the one the LOST status names. A deployment that renames Discovery,
+                 * or seeds a fourth early stage, changes nothing here.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+
+                const startStage = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE PipelineID = '${f.ContractPolicyPipelineID}' AND OrderStatusOnEntry IS NULL
+                        AND IsActive = 1 ORDER BY DisplayOrder ASC`,
+                );
+                Assert(
+                    !!startStage?.ID,
+                    'setup: this check needs a stage that declares NOTHING about the order — without ' +
+                        'one there is no silent case to test and passing here would mean nothing',
+                );
+
+                const lostStage = await TxOne<{ ID: string; OrderStatusOnEntry: string | null }>(
+                    ctx,
+                    `SELECT TOP 1 ID, OrderStatusOnEntry FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE PipelineID = '${f.ContractPolicyPipelineID}'
+                        AND DealStatusTypeID = '${f.LostStatusID}' AND IsActive = 1`,
+                );
+                Assert(
+                    !!lostStage?.OrderStatusOnEntry && !IsEditable(String(lostStage.OrderStatusOnEntry)),
+                    'setup: the losing stage must declare a NON-editable order status, or the close ' +
+                        'never puts the order anywhere the reopen has to bring it back from',
+                );
+
+                const dealID = await openDeal(
+                    ctx, f, f.ContractPolicyPipelineID, startStage.ID, 'CD31 lost from an early stage',
+                );
+
+                const closed = await close(ctx, {
+                    DealID: dealID,
+                    DealStatusTypeID: f.LostStatusID,
+                    ClosingStageID: lostStage.ID,
+                    LossReasonID: f.LossReasonPlainID,
+                });
+                Assert(closed.Success, `setup: the lost close failed — ${JSON.stringify(closed.Issues)}`);
+
+                const afterClose = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    !IsEditable(String(afterClose.Status)),
+                    'setup: the LOST close must have put the order into a non-editable state, or this ' +
+                        'check would pass without the recovery it exists to prove',
+                );
+
+                // No StageID: the operation derives the prior stage, which declares nothing.
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD31: reopening a lost deal.' });
+                Assert(out.Success, `the reopen failed — ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{ PipelineStageID: string }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(after.PipelineStageID).toLowerCase(),
+                    startStage.ID.toLowerCase(),
+                    'the reopen restored the early stage — the one that declares nothing',
+                );
+
+                const order = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    IsEditable(String(order.Status)),
+                    `the deal reopened but its order is still '${order.Status}'. golive#205 asks for it ` +
+                        `to come back to Quoted or Draft, and the restored stage declares nothing, so ` +
+                        `only the reopen itself can do it`,
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD32',
+        Name: 'CD32: a reopen clears the loss reason, into the event — so the NEXT close must ask again',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive#205: reopening "clears the close stamps", and "Lost should require a loss
+                 * reason". Those two met in a hole.
+                 *
+                 * `LossReasonID` was not cleared, so a reopened deal still displayed a loss reason
+                 * while Open -- and `validateClose` reads `input.LossReasonID ?? deal.LossReasonID`,
+                 * so the stale value SATISFIED the next close. Measured before the fix: closed Lost
+                 * with a reason, reopened, closed Lost again supplying NO reason -> Success, zero
+                 * Issues, reason silently re-used. CD8's refusal was bypassed for the rest of the
+                 * deal's life, which is why CD8 alone never caught it: it opens a fresh deal that has
+                 * never been lost.
+                 *
+                 * THE TRAIL IS ASSERTED TOO. `DealStageEvent` has no loss columns and record-change
+                 * tracking captured nothing for these fields, so a fix that only cleared them would
+                 * destroy the reason rather than move it. Clearing is only correct if the reopen event
+                 * carries it out first, and a check that did not say so would pass over the data loss.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD32 loss reason is a stamp',
+                );
+
+                const LOSS_NOTES = 'CD32: the correction channel, which must outlive the reopen.';
+                const reason = await TxOne<{ ID: string; Name: string }>(
+                    ctx,
+                    `SELECT ID, Name FROM ${SALES_SCHEMA}.LossReason WHERE ID = '${f.LossReasonPlainID}'`,
+                );
+
+                Assert(
+                    (await close(ctx, {
+                        DealID: dealID,
+                        DealStatusTypeID: f.LostStatusID,
+                        LossReasonID: reason.ID,
+                        LossNotes: LOSS_NOTES,
+                    })).Success,
+                    'setup: the first lost close must succeed',
+                );
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD32: reopening.' });
+                Assert(out.Success, `the reopen failed — ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{ LossReasonID: string | null; LossNotes: string | null }>(
+                    ctx,
+                    `SELECT LossReasonID, LossNotes FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(
+                    after.LossReasonID === null,
+                    'a reopened deal is OPEN and must not still carry the reason it was lost for — ' +
+                        `it is still '${after.LossReasonID}'`,
+                );
+
+                /**
+                 * AND `LossNotes` SURVIVES, which is the half that looks like an oversight and is not.
+                 *
+                 * `close-lock.ts` keeps `LossNotes` — and only `LossNotes` — editable on a locked lost
+                 * deal, because *"notes are the channel for corrections"*. Clearing it would destroy
+                 * the one thing a rep is invited to write after a close, and with golive#224 merged the
+                 * workspace reopen SAVES an in-progress note first: the two together would save the
+                 * text and then immediately null it.
+                 *
+                 * Asserted rather than left implicit, because "clear the loss fields" reads as the
+                 * tidier rule and a later change would make it without knowing what it costs.
+                 */
+                Assert(
+                    (after.LossNotes ?? '') === LOSS_NOTES,
+                    'the loss NOTES must survive the reopen — they are the correction channel ' +
+                        `close-lock deliberately keeps open, and they now read '${after.LossNotes}'`,
+                );
+
+                // ...but the reason must not have been destroyed on the way out.
+                const event = await TxOne<{ Notes: string | null }>(
+                    ctx,
+                    `SELECT TOP 1 Notes FROM ${SALES_SCHEMA}.DealStageEvent WHERE DealID = '${dealID}' ` +
+                        `ORDER BY ChangedAt DESC`,
+                );
+                Assert(
+                    String(event.Notes ?? '').includes(reason.Name),
+                    `the reopen cleared the loss reason without recording it. The event note reads ` +
+                        `'${event.Notes}' and nothing else on this host stores it, so clearing alone ` +
+                        `loses it outright`,
+                );
+
+                /**
+                 * AND THE POINT OF ALL OF IT: the next close has to ask again. Supplying no reason
+                 * must now be refused, exactly as CD8 requires of a deal that was never lost.
+                 */
+                const second = await close(ctx, { DealID: dealID, DealStatusTypeID: f.LostStatusID });
+                Assert(
+                    !second.Success,
+                    'closing Lost a SECOND time with no loss reason must be refused — a stale reason ' +
+                        'from a previous close is not an answer for this one',
+                );
+                Assert(
+                    second.Issues.some((i) => String(i.Field) === 'LossReasonID'),
+                    `the refusal must name the field — got ${JSON.stringify(second.Issues)}`,
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD33',
+        Name: 'CD33: a deal ALREADY parked in the losing stage still gets its order back on reopen',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE SHAPE CD19 NAMES AND DOES NOT COVER, and the one the first version of this
+                 * branch's recovery could not reach.
+                 *
+                 * CD19 asserts that a status-only close restores nothing and fires nothing. True, and
+                 * benign in ITS setup, because that deal parks in a winning stage whose order is left
+                 * at `Quoted` — editable, workable, nothing owed. Park the same shape in the LOSING
+                 * stage and the identical "nothing fires" becomes the D-OS1 violation:
+                 *
+                 *   1. `save-deal.SD35`: moving into a stage whose status locks does NOT close the
+                 *      deal, so it sits OPEN in the losing stage while `applyStageOrderStatus` voids
+                 *      the order on entry.
+                 *   2. Closing Lost derives that same stage, so nothing moves and the close event
+                 *      records `FromStageID === ToStageID`.
+                 *   3. The reopen restores the stage the deal is already in.
+                 *
+                 * Measured before the fix: the deal came back OPEN, `Issues` empty, order still
+                 * `Voided`. Two mechanisms swallowed it — `planStageOrderStatus` returns at its
+                 * stage-did-not-move gate, and even past that the restored stage IS the losing stage,
+                 * so the plan's target equals the order's status and the writer no-ops without a
+                 * warning. That is why the recovery runs AFTER the plan rather than inside it.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+
+                const losing = await TxOne<{ ID: string; OrderStatusOnEntry: string | null }>(
+                    ctx,
+                    `SELECT TOP 1 ID, OrderStatusOnEntry FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE PipelineID = '${f.ContractPolicyPipelineID}'
+                        AND DealStatusTypeID = '${f.LostStatusID}' AND IsActive = 1`,
+                );
+                Assert(
+                    !!losing?.OrderStatusOnEntry && !IsEditable(String(losing.OrderStatusOnEntry)),
+                    'setup: the losing stage must declare a NON-editable order status, or parking in it ' +
+                        'leaves nothing for the reopen to recover',
+                );
+
+                // Parked in the losing stage from birth. SD35 is what makes this an OPEN deal.
+                const dealID = await openDeal(
+                    ctx, f, f.ContractPolicyPipelineID, losing.ID, 'CD33 parked in the losing stage',
+                );
+
+                const parked = await TxOne<{ IsOpen: boolean; Status: string }>(
+                    ctx,
+                    `SELECT t.IsOpen, o.Status
+                       FROM ${SALES_SCHEMA}.Deal d
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = d.DealStatusTypeID
+                       JOIN ${ORDERS_SCHEMA}.OrderHeader o ON o.ID = d.OrderID
+                      WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    parked.IsOpen === true,
+                    'setup: SD35 says a locking STAGE must not close the deal — if this fails, the ' +
+                        'premise of this check is gone and SD35 is the thing to look at',
+                );
+                Assert(
+                    !IsEditable(String(parked.Status)),
+                    `setup: entering the losing stage must have voided the order — it is '${parked.Status}'`,
+                );
+
+                // No ClosingStageID: the close derives the stage the deal is already in, so nothing moves.
+                const closed = await close(ctx, {
+                    DealID: dealID,
+                    DealStatusTypeID: f.LostStatusID,
+                    LossReasonID: f.LossReasonPlainID,
+                });
+                Assert(closed.Success, `setup: the lost close failed — ${JSON.stringify(closed.Issues)}`);
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD33: reopening a parked loss.' });
+                Assert(out.Success, `the reopen failed — ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                       JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    IsEditable(String(after.Status)),
+                    `the deal reopened with its order still '${after.Status}'. Nothing MOVED here — the ` +
+                        `close and the reopen both landed on the stage the deal was already in — so only ` +
+                        `a check that runs after the stage plan can put the order back`,
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD34',
+        Name: 'CD34: a stage that ASKED and was refused keeps its answer — the recovery stands down',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE OTHER HALF OF CD31, and the one that makes the recovery honest rather than eager.
+                 *
+                 * CD31 covers "nobody asked": a restored stage declaring nothing, so the order sat
+                 * voided in silence. This covers "somebody asked and orders said no", which needs the
+                 * OPPOSITE handling — and the two are indistinguishable if you look only at the order's
+                 * status, which is what the first version of the recovery did.
+                 *
+                 * With a stage declaring `Confirmed`, `CanTransition('Voided', 'Confirmed')` refuses,
+                 * `applyStageOrderStatus` warns "its order stayed Voided", and the recovery then moved
+                 * it to `Draft` anyway. The order ended `Draft` while the reopen's own Issues said it
+                 * stayed `Voided` — two outputs contradicting each other, and a deliberate stage
+                 * declaration silently replaced.
+                 *
+                 * `Confirmed` is legal under `CK_PipelineStage_OrderStatusOnEntry` and unused only
+                 * because DN-10 is open, so this sets it for the life of this check's transaction
+                 * rather than waiting for the seed to grow one.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const startStage = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE PipelineID = '${f.ContractPolicyPipelineID}' AND OrderStatusOnEntry IS NULL
+                        AND IsActive = 1 ORDER BY DisplayOrder ASC`,
+                );
+                Assert(!!startStage?.ID, 'setup: a stage that declares nothing is needed to start from');
+
+                const dealID = await openDeal(
+                    ctx, f, f.ContractPolicyPipelineID, startStage.ID, 'CD34 refused stage declaration',
+                );
+
+                const lostStage = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE PipelineID = '${f.ContractPolicyPipelineID}'
+                        AND DealStatusTypeID = '${f.LostStatusID}' AND IsActive = 1`,
+                );
+                Assert(
+                    (await close(ctx, {
+                        DealID: dealID,
+                        DealStatusTypeID: f.LostStatusID,
+                        ClosingStageID: lostStage.ID,
+                        LossReasonID: f.LossReasonPlainID,
+                    })).Success,
+                    'setup: the lost close must succeed',
+                );
+
+                const voided = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                       JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                Assert(
+                    !IsEditable(String(voided.Status)),
+                    `setup: the close must have voided the order — it is '${voided.Status}'`,
+                );
+
+                /**
+                 * Now make the stage the reopen will restore ask for something orders refuses FROM
+                 * `Voided`. Asserted rather than assumed: if orders ever permits this move the check
+                 * would be testing nothing, and should fail loudly rather than pass empty.
+                 */
+                Assert(
+                    !CanTransition(String(voided.Status), 'Confirmed').Allowed,
+                    'setup: orders must REFUSE this move, or there is no refusal for the recovery to ' +
+                        'defer to and this check proves nothing',
+                );
+                await TxExec(
+                    ctx,
+                    `UPDATE ${SALES_SCHEMA}.PipelineStage SET OrderStatusOnEntry = 'Confirmed'
+                      WHERE ID = '${startStage.ID}'`,
+                    'declare Confirmed on the stage the reopen will restore',
+                );
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD34: reopening into a refusal.' });
+                Assert(out.Success, `the reopen must still succeed — ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                       JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(after.Status).toLowerCase(),
+                    String(voided.Status).toLowerCase(),
+                    'the order must keep the status the refusal left it in — substituting Draft here ' +
+                        'would discard that declaration AND contradict the warning beside it',
+                );
+                Assert(
+                    out.Issues.length > 0,
+                    'and the refusal must be REPORTED — a stage that asked and was refused with nothing ' +
+                        'on screen is the silence D-OS1 forbids, arrived at the other way',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD35',
+        Name: 'CD35: the CLOSE event names the reason, and names the one actually closed with',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * `close-lock.ts` freezes `LossReasonID` on every deal because *"the close event records
+                 * which reason was chosen, and rewriting it would make that event dishonest"*. That was
+                 * the rationale for a rule that ships; the close event recorded no such thing.
+                 * `routingNote()` wrote the caller's note and the routing outcomes, so the only copy of
+                 * the reason was the deal header -- one mutable field, frozen on the strength of a
+                 * record that did not exist.
+                 *
+                 * CD32 covers the REOPEN event, and it is the easier half: that deal is being changed,
+                 * so somebody is looking. The deal this check is for is the one that stays LOST and is
+                 * never reopened -- it has no reopen event, so before this fix nothing anywhere recorded
+                 * what it was lost for at the moment it was lost.
+                 *
+                 * ── AND IT MUST BE THE REASON THIS CLOSE USED ──────────────────────────────────────
+                 *
+                 * `validateClose` accepts `input.LossReasonID ?? deal.LossReasonID`, so the id being
+                 * closed with is not always the id on the header -- and `LossReasonID` is an ordinary
+                 * editable field on an OPEN deal, so the two genuinely diverge in the product. A note
+                 * built from the denormalized `deal.LossReason` would name the reason the deal happened
+                 * to be carrying, which is the wrong one, and would be wrong in the direction nobody
+                 * checks: confidently, in a row that cannot be corrected.
+                 *
+                 * So this sets a DIFFERENT reason on the header first and asserts the other name is
+                 * absent as well as the right one present. Asserting only presence would pass on a note
+                 * that named both.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD35 the close event names it',
+                );
+
+                const closedWith = await TxOne<{ ID: string; Name: string }>(
+                    ctx,
+                    `SELECT ID, Name FROM ${SALES_SCHEMA}.LossReason WHERE ID = '${f.LossReasonPlainID}'`,
+                );
+                const onHeader = await TxOne<{ ID: string; Name: string }>(
+                    ctx,
+                    `SELECT ID, Name FROM ${SALES_SCHEMA}.LossReason WHERE ID = '${f.LossReasonNeedsNotesID}'`,
+                );
+                Assert(
+                    closedWith.Name !== onHeader.Name,
+                    'setup: the two fixture reasons must have DIFFERENT names or this check cannot tell ' +
+                        'them apart and would pass vacuously',
+                );
+
+                // A reason on the header of an OPEN deal -- settable, exactly as the close panel allows.
+                await TxExec(
+                    ctx,
+                    `UPDATE ${SALES_SCHEMA}.Deal SET LossReasonID = '${onHeader.ID}' WHERE ID = '${dealID}'`,
+                    'CD35: put a DIFFERENT reason on the header of the still-open deal',
+                );
+
+                Assert(
+                    (await close(ctx, {
+                        DealID: dealID,
+                        DealStatusTypeID: f.LostStatusID,
+                        LossReasonID: closedWith.ID,
+                    })).Success,
+                    'setup: the lost close must succeed',
+                );
+
+                /**
+                 * Keyed on the status the event LANDED ON, not on `TOP 1 ... ORDER BY ChangedAt DESC`.
+                 * Opening the deal writes an event of its own and both can share a timestamp, so an
+                 * ordering-based pick is a coin toss that usually lands right.
+                 */
+                const event = await TxOne<{ Notes: string | null }>(
+                    ctx,
+                    `SELECT Notes FROM ${SALES_SCHEMA}.DealStageEvent
+                      WHERE DealID = '${dealID}' AND ToDealStatusTypeID = '${f.LostStatusID}'`,
+                );
+                Assert(
+                    String(event.Notes ?? '').includes(closedWith.Name),
+                    `the CLOSE event must name the reason the deal was lost for. It reads ` +
+                        `'${event.Notes}', and on a deal that is never reopened the header is then the ` +
+                        `only copy -- which is what close-lock.ts freezes it on the strength of`,
+                );
+                Assert(
+                    !String(event.Notes ?? '').includes(onHeader.Name),
+                    `the event names '${onHeader.Name}', which is what the header happened to carry, ` +
+                        `not the reason this close supplied. A note built from the denormalized ` +
+                        `LossReason field fails exactly here`,
+                );
+
+                // And the deal really did stay lost -- no reopen ran, so no second event carried it.
+                const still = await TxOne<{ N: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.Deal d
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = d.DealStatusTypeID
+                      WHERE d.ID = '${dealID}' AND t.IsLost = 1`,
+                );
+                AssertEqual(Number(still.N), 1, 'setup: the deal must still be lost when this is asserted');
             }),
     },
 ];

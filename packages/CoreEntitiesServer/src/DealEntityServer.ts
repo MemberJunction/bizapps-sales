@@ -58,7 +58,7 @@ import { RegisterClass } from '@memberjunction/global';
 // ORDERS' OWN RULE, imported rather than restated. `CanTransition` is the same function
 // `OrderEntityServer.passesStatusTransition()` consults, so a refusal here and a refusal there cannot
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
-import { CanTransition, type OrderStatus } from '@mj-biz-apps/orders-entities';
+import { CanTransition, IsBooked, IsEditable, type OrderStatus } from '@mj-biz-apps/orders-entities';
 import {
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
@@ -930,9 +930,16 @@ export class DealEntityServer extends DealEntity {
             if (work.needsStatusDefault && !this.DealStatusTypeID) {
                 this.DealStatusTypeID = await this.defaultOpeningStatusID();
             }
+            /**
+             * The delta, not the total: a refusal RECORDED BY THIS SAVE is what tells the recovery to
+             * stand down. Comparing against zero would also catch a warning left by an earlier save on
+             * the same entity instance.
+             */
+            const warningsBeforePlan = this.OrderStatusWarnings.length;
             if (work.stageOrder) {
                 await this.applyStageOrderStatus(work.stageOrder);
             }
+            await this.recoverOrderOnReopen(this.OrderStatusWarnings.length > warningsBeforePlan);
 
             const saved = await super.Save(options);
             if (!saved) {
@@ -1577,6 +1584,75 @@ export class DealEntityServer extends DealEntity {
             return null;   // this stage says nothing about the order. The common case.
         }
         return { StageID: stageID, Target: target as OrderStatus };
+    }
+
+
+    /**
+     * A REOPENED deal must not be left pointing at a VOIDED order (bc-aidp-next-golive#205).
+     *
+     * ── WHY THIS IS A POST-CHECK AND NOT A FALLBACK INSIDE THE STAGE PLAN ──────────────────────────
+     *
+     * It was the latter, and that version was unreachable on the reopen that needs it most.
+     * `planStageOrderStatus` returns at its stage-did-not-move gate before it ever asks what the stage
+     * declares, so a reopen that lands on the stage the deal is ALREADY in never consulted the
+     * recovery at all.
+     *
+     * That is not a hypothetical corner. `save-deal.SD35` makes it ordinary: a plain save or a board
+     * drag into the losing stage leaves the deal OPEN -- `planStageDefaults` refuses to derive a
+     * locking status -- while `applyStageOrderStatus` voids the order on entry. Closing Lost then
+     * derives that same stage, so nothing moves and the close event records
+     * `FromStageID === ToStageID`. The reopen restores the stage the deal is already in, the gate
+     * returns null, and the deal comes back OPEN pointing at a `Voided` order with `Issues` empty.
+     *
+     * Measured on this host before this change: DEAL-9002 moved into the losing stage by a plain save,
+     * closed Lost, reopened -- `Success: true`, zero issues, ORD-000293 still `Voided`.
+     *
+     * TWO MECHANISMS SWALLOWED IT INDEPENDENTLY, which is why simply hoisting the old call above the
+     * gate would have fixed only half. Past the gate, the restored stage in that flow IS the losing
+     * stage, so the plan's target is `Voided`, and `applyStageOrderStatus` returns at its
+     * `from === plan.Target` no-op check without a warning. Running AFTER the plan has been applied is
+     * what makes the recovery independent of both.
+     *
+     * ── KEYED ON THE DECLARED TRANSITION, NOT ON THE LOCK BEING SUSPENDED ──────────────────────────
+     *
+     * `_reopenInProgress` means "the close lock is suspended", which is broader than "this is a
+     * reopen" and will drift further apart the moment anything else legitimately suspends it. The
+     * declaration is the statement of intent, and `Sales.ReopenDeal` already makes it.
+     *
+     * ── AND IT REUSES THE WRITER RATHER THAN REIMPLEMENTING IT ─────────────────────────────────────
+     *
+     * `applyStageOrderStatus` already asks orders whether the move is legal, runs the write in its own
+     * savepoint, and records a refusal as a warning instead of a failure. A second copy of that would
+     * be a second thing to keep honest.
+     */
+    private async recoverOrderOnReopen(stagePlanRefused: boolean): Promise<void> {
+        if (this._declaredTransition?.Kind !== 'Reopen') {
+            return;
+        }
+        /**
+         * ── A STAGE THAT ASKED AND WAS REFUSED KEEPS ITS ANSWER ────────────────────────────────────
+         *
+         * This used to look only at the order's status, which is not enough to tell "nobody asked"
+         * from "somebody asked and orders said no". Those need opposite handling, and conflating them
+         * made the save contradict itself: with a stage declaring `Confirmed` -- legal under
+         * `CK_PipelineStage_OrderStatusOnEntry`, and unused only because DN-10 is still open --
+         * `CanTransition('Voided', 'Confirmed')` refuses, `applyStageOrderStatus` warns "its order
+         * stayed Voided", and this then moved it to `Draft` regardless. The order ended `Draft` while
+         * the reopen's own Issues told the user it stayed `Voided`.
+         *
+         * The recovery exists for the SILENT case -- nothing asked, so nothing reported. When the
+         * stage did ask and was refused, the refusal is the honest outcome and is already on screen:
+         * substituting `Draft` would discard a deliberate declaration and falsify the warning beside
+         * it. D-OS2's prohibition on overriding a refusal is exactly this, and it still stands.
+         */
+        if (stagePlanRefused) {
+            return;
+        }
+        const status = this.OrderID_Object?.Status;
+        if (!status || IsEditable(status) || IsBooked(status)) {
+            return;
+        }
+        await this.applyStageOrderStatus({ StageID: this.PipelineStageID ?? '', Target: 'Draft' });
     }
 
     /**

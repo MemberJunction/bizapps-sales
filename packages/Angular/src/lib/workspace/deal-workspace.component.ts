@@ -1516,10 +1516,17 @@ export class DealWorkspaceComponent implements OnInit {
             /**
              * THE REOPEN'S OWN WARNINGS, which are the ones that matter most.
              *
-             * S-US8's reopen enters a stage asking for `Quoted` while the order sits at `Voided`, and
-             * orders treats Voided as terminal. The deal reopens anyway -- an order-side refusal must
-             * never block a stage change -- so the ONLY thing standing between the rep and a working
-             * deal pointing at a dead order is this line.
+             * A reopen can leave the order somewhere the deal cannot be worked from, and an order-side
+             * refusal must never block a stage change -- so this line is what stands between the rep
+             * and a working deal pointing at a dead order.
+             *
+             * THE REASON GIVEN HERE USED TO BE WRONG: that the reopen "enters a stage asking for
+             * `Quoted` while the order sits at `Voided`, and orders treats Voided as terminal". Orders
+             * says otherwise by its own API -- `TRANSITIONS.Voided` is `['Draft', 'Quoted']`, so
+             * `IsTerminal('Voided')` is FALSE and `Confirmed` is the terminal status. That refusal
+             * never happens; the cases that DO leave an order behind are a booked order, which the
+             * reopen refuses outright, and a restored stage that declares nothing -- fixed in
+             * `DealEntityServer.recoverOrderOnReopen` on this branch.
              */
             this.SurfaceOperationIssues(out.Issues ?? []);
         } finally {
@@ -1541,8 +1548,10 @@ export class DealWorkspaceComponent implements OnInit {
      * `Sales.CloseDeal` and `Sales.ReopenDeal` both return `Success: true` WITH issues attached, and
      * that is deliberate: a close whose contract seam is stubbed, a close-won that could not raise a
      * finance task because no assignee is configured, and above all a REOPEN whose order could not come
-     * back because `Voided` is terminal in orders — all of these are outcomes to report, not reasons to
-     * refuse an operation that has already succeeded.
+     * back — all of these are outcomes to report, not reasons to refuse an operation that has already
+     * succeeded. (This used to say the order could not come back "because `Voided` is terminal in
+     * orders". It is not: `TRANSITIONS.Voided` is `['Draft', 'Quoted']`. The real cases are a BOOKED
+     * order, which the reopen refuses outright, and a restored stage that declares nothing.)
      *
      * Both handlers dropped every one of them. `ApplyCloseIssues` was called only on the `!Success`
      * branch, so on the success path the rep got "Deal reopened. The close event remains in its history."
