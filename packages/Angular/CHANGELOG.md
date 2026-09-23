@@ -1,5 +1,40 @@
 # @mj-biz-apps/sales-ng
 
+## 6.7.1
+
+### Patch Changes
+
+- 52c10a4: Fix six field-level problems a tester hit creating a deal (bc-aidp-next-golive#259).
+
+  - A new deal now takes its currency from the selling company's `AccountingCompanyProfile.FunctionalCurrencyCode`, falling back to USD. Create-only, never over a supplied value, and it cannot refuse a save: a host without accounting creates deals with no currency exactly as before.
+  - `Deal.CurrencyID` ships a soft foreign key to accounting's currency table, so the Commercial section offers a picker and a name instead of an empty text box.
+  - `Amount`, `MRR` and `ARR` render as currency while reading. Editing still goes through `mj-form-field`; there is no currency type to ask it for, and the platform gap is filed separately.
+  - Six Deal labels drop their trailing "ID", and `MRR` / `ARR` stop reading as "Mrr" and "Arr".
+  - The native `<select>` controls the deal form draws itself — Status, and the two loss-reason pickers — match the shared control's typography and underline instead of the browser's defaults.
+  - Sales Contacts gains three picker columns, so two contacts with the same name and email can be told apart in a lookup.
+
+- cc8452e: Move the exact `@mj-biz-apps/orders-entities` pin from `5.13.0` to `5.14.0`, in all five
+  declarations.
+
+  The pin has to be exact — `orders-entities` keeps its order-line veto registry in a module-scoped
+  variable, so it is per-copy rather than per-process — and it has to match what orders pins inside
+  its own packages, or the host app resolves two copies. Orders published `5.14.0` and rewrote its
+  internal pins; this one is in another repo, so nothing moved it.
+
+  What the drift cost: npm cannot satisfy two exact pins from one copy, so it nested a second
+  `orders-entities` under the sales packages. That copy re-ran every module-scope `@RegisterClass` in
+  it, including the generated `OrderHeaderEntity` for `MJ_BizApps_Orders: Order Headers`. Registration
+  priority auto-increments, so the later copy outranked `OrderEntityServer` — and `OrderNumber`, which
+  only that server subclass mints, was never assigned. Every new order header then failed its NOT NULL
+  insert, on the Orders screen and on every Deal that provisions an embedded order.
+
+  No behaviour in this package changes. Verified against the published `5.14.0` tarball rather than the
+  version number: `order-line-edit-veto.js` is present and `index.d.ts` re-exports it, which is the path
+  this package imports through.
+
+- Updated dependencies [cc8452e]
+  - @mj-biz-apps/sales-entities@6.7.1
+
 ## 6.7.0
 
 ### Patch Changes

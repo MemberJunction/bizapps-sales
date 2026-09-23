@@ -87,6 +87,19 @@ interface StatusFlags {
     LocksDeal: boolean;
 }
 
+/**
+ * What validation found, and the one fact it resolved on the way.
+ *
+ * `validate()` returned a bare issue array until the close event had to name the loss reason. It is the
+ * only place that reads the LossReason row, so carrying the name out of it is what makes stamping the
+ * event free; returning it separately keeps `Issues.length` from being the thing a caller tests.
+ */
+interface CloseValidation {
+    Issues: SalesCloseIssue[];
+    /** The reason's name for the close event's note, or null when this close is not a loss. */
+    LossReasonName: string | null;
+}
+
 /** Defaults applied when a pipeline's policy is silent on a key. */
 const POLICY_DEFAULTS: SalesCloseWonPolicy = {
     CreateContract: false,
@@ -119,6 +132,33 @@ function issue(Section: SalesCloseIssue['Section'], Message: string, Field: stri
  *
  * `Severity: 'warning'` is already in the published union, so this needs no contract change.
  */
+/**
+ * What a reopen must carry out of the loss fields before it clears them (golive#205).
+ *
+ * Returns a suffix for the reopen event's note, or '' when the deal was not lost.
+ *
+ * ── READ FROM THE RECORD, NOT LOOKED UP ────────────────────────────────────────────────────────
+ *
+ * This ran a `RunView` against `MJ_BizApps_Sales: Loss Reasons` to turn the id into a name, wrapped
+ * in a try/catch that degraded to writing a raw GUID into an append-only row. None of that was
+ * needed: `vwDeals` projects `LossReason` and `DealEntity` exposes it, so `deal.Load()` has already
+ * populated the name by the time the reopen runs, and nothing mutates it before the clear below.
+ * CLAUDE.md prefers a denormalized view field over a separate lookup, and this removes the query,
+ * the provider cast and the failure mode in one go.
+ *
+ * The id remains the fallback for the case the name cannot be read at all, because an id in an audit
+ * note is still recoverable by hand and losing the only copy is not.
+ */
+function lossTrailFor(deal: DealEntityServer): string {
+    const reasonID = deal.LossReasonID;
+    if (!reasonID) {
+        return '';
+    }
+    // The REASON only. `LossNotes` is not cleared, so it needs no rescuing -- carrying it here as well
+    // would duplicate onto an append-only row text that is still sitting on the deal.
+    return ` (was lost: ${deal.LossReason ?? `reason ${reasonID}`})`;
+}
+
 function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
     return deal.OrderStatusWarnings.map((Message) => ({
         Section: 'deal' as const,
@@ -331,8 +371,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
 
             // ── 2. Validate what this particular close requires ───────────────────
             const validation = await this.validate(deal, input, target, provider, user);
-            if (validation.length) {
-                return { ...empty, IsWon: target.IsWon, IsLost: target.IsLost, Issues: validation };
+            if (validation.Issues.length) {
+                return { ...empty, IsWon: target.IsWon, IsLost: target.IsLost, Issues: validation.Issues };
             }
 
             // ── 3. Resolve the effective policy, and route ────────────────────────
@@ -412,7 +452,15 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 ? null
                 : await this.closingStageForOutcome(deal.PipelineID, target, provider, user);
 
-            this.stampClose(deal, input, target, routing, user, derivedClosingStageID);
+            this.stampClose(
+                deal,
+                input,
+                target,
+                routing,
+                user,
+                derivedClosingStageID,
+                validation.LossReasonName,
+            );
 
             if (!(await deal.Save())) {
                 throw new Error(
@@ -564,30 +612,42 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         target: StatusFlags,
         provider: IMetadataProvider,
         user: UserInfo,
-    ): Promise<SalesCloseIssue[]> {
+    ): Promise<CloseValidation> {
         const issues: SalesCloseIssue[] = [];
+        let lossReasonName: string | null = null;
 
         if (target.IsLost) {
             const lossReasonID = input.LossReasonID ?? deal.LossReasonID;
             if (!lossReasonID) {
                 issues.push(issue('deal', 'A loss reason is required to close a deal as lost.', 'LossReasonID'));
             } else {
-                // Some reasons demand an explanation — the flag says which, never the reason's name.
+                /**
+                 * `RequiresNotes` decides; `Name` is carried out for the close event's note and decides
+                 * nothing. The rule stays what it was -- the FLAG says which reasons demand an
+                 * explanation, never the reason's name -- and reading one more column of a row this
+                 * method already fetches is what keeps `stampClose` from needing a lookup of its own.
+                 *
+                 * It is read HERE rather than from `deal.LossReason` because the id being closed with is
+                 * `input.LossReasonID ?? deal.LossReasonID`: when the caller supplies one, the
+                 * denormalized name still describes the reason the deal used to carry, not this one.
+                 */
                 const view = provider as unknown as IRunViewProvider;
                 const r = await view.RunView(
                     {
                         EntityName: LOSS_REASON_ENTITY,
                         ExtraFilter: `ID = '${lossReasonID}'`,
                         ResultType: 'simple',
-                        Fields: ['RequiresNotes'],
+                        Fields: ['RequiresNotes', 'Name'],
                     },
                     user,
                 );
-                const row = (r.Results ?? [])[0] as { RequiresNotes?: boolean } | undefined;
+                const row = (r.Results ?? [])[0] as { RequiresNotes?: boolean; Name?: string } | undefined;
                 const notes = input.LossNotes ?? deal.LossNotes;
                 if (r.Success && row?.RequiresNotes === true && !notes?.trim()) {
                     issues.push(issue('deal', 'This loss reason requires notes explaining the loss.', 'LossNotes'));
                 }
+                // The id is the fallback: an id in an audit note is recoverable by hand, a blank is not.
+                lossReasonName = row?.Name?.trim() || `reason ${lossReasonID}`;
             }
         }
 
@@ -595,7 +655,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             issues.push(issue('party', 'A won deal must be attached to a customer.', 'AccountID'));
         }
 
-        return issues;
+        return { Issues: issues, LossReasonName: lossReasonName };
     }
 
     /* ── Policy (§7.1) ──────────────────────────────────────────────────────── */
@@ -816,6 +876,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         routing: SalesCloseRoutingResult[],
         user: UserInfo,
         derivedClosingStageID: string | null,
+        lossReasonName: string | null,
     ): void {
         /**
          * ── DECLARED, NOT WRITTEN. THIS METHOD USED TO APPEND THE ROW ITSELF ────────────────────────
@@ -833,7 +894,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
          * The event id is no longer available here: it exists only once the save has appended the row.
          * The caller reads `deal.LastStageEventID` afterwards.
          */
-        deal.DeclareTransition('Close', this.routingNote(routing, input.Notes));
+        deal.DeclareTransition('Close', this.routingNote(routing, input.Notes, lossReasonName));
 
         // Everything stored is UTC — getUTC*, never local-time getters, for anything persisted.
         const now = new Date();
@@ -859,11 +920,37 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         );
     }
 
-    /** A human-readable record of what the policy routed, and what actually happened. */
-    private routingNote(routing: SalesCloseRoutingResult[], callerNote?: string | null): string {
+    /**
+     * A human-readable record of what the policy routed, and what actually happened.
+     *
+     * ── AND, ON A LOST CLOSE, WHICH REASON WAS CHOSEN ──────────────────────────────────────────────
+     *
+     * `close-lock.ts` freezes `LossReasonID` on every deal on the stated grounds that "the close event
+     * records which reason was chosen". It did not: this note carried the caller's text and the routing
+     * outcomes and nothing else, so the reason existed only on the deal header -- one mutable field, with
+     * no record of what it held at the moment of the loss. The rationale for the freeze was true of
+     * nothing.
+     *
+     * It belongs on the CLOSE row specifically, not the reopen row. golive#205 clears the header on
+     * reopen, which would otherwise mean a reopened deal loses the fact entirely; but the deal that
+     * matters most here is the one that STAYS lost and is never reopened, and that deal has no reopen
+     * event to carry it. The row that describes the loss is the one that should name it.
+     *
+     * `lossTrailFor` still puts it on the reopen event as well, and that is deliberate rather than
+     * overlooked: the reopen row records the CLEARING, and a reader asking why the header is empty
+     * should not have to find the close row to learn what was removed. Each row stays self-describing.
+     */
+    private routingNote(
+        routing: SalesCloseRoutingResult[],
+        callerNote?: string | null,
+        lossReasonName?: string | null,
+    ): string {
         const parts: string[] = [];
         if (callerNote?.trim()) {
             parts.push(callerNote.trim());
+        }
+        if (lossReasonName) {
+            parts.push(`Lost: ${lossReasonName}.`);
         }
         if (routing.length === 0) {
             parts.push('Closed. Policy routed nothing downstream.');
@@ -1146,7 +1233,10 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * A declared transition answers both — one row, and the defaults writer stands down because
              * the probability on a reopened deal is a human's judgement, not the pipeline's default.
              */
-            deal.DeclareTransition('Reopen', `REOPENED: ${input.Reason.trim()}`);
+            // The loss trail is read BEFORE the fields are cleared below, and folded into the one
+            // event that survives the reopen. See the clearing block for why it is cleared at all.
+            const lossTrail = lossTrailFor(deal);
+            deal.DeclareTransition('Reopen', `REOPENED: ${input.Reason.trim()}${lossTrail}`);
 
             deal.DealStatusTypeID = target.ID;
 
@@ -1169,6 +1259,52 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             deal.ClosedByUserID = null;
             deal.ActualCloseDate = null;
 
+            /**
+             * THE LOSS REASON IS A CLOSE STAMP TOO, and leaving it behind was not harmless
+             * (bc-aidp-next-golive#205).
+             *
+             * It stayed set on a REOPENED deal, which is wrong twice over. The form shows "LOSS REASON"
+             * on a deal that is Open -- a deal that has not been lost does not have a reason for being
+             * lost. And `validateClose` reads `input.LossReasonID ?? deal.LossReasonID`, so the stale
+             * value SATISFIED the next close: measured on this host, a deal closed Lost with a reason,
+             * reopened, then closed Lost again supplying NO reason succeeded silently and re-used
+             * `Price`. golive#205 asks that "Lost should require a loss reason" and `close-deal.CD8`
+             * asserts the refusal -- both were quietly bypassed for the whole life of the deal after
+             * its first loss.
+             *
+             * ── WHY THE TRAIL IS WRITTEN BEFORE CLEARING ───────────────────────────────────────────
+             *
+             * `DealStageEvent` has no loss columns and record-change tracking captured nothing for
+             * this field on this host, so clearing it alone would destroy the reason outright rather
+             * than move it. The reopen event is where this app already keeps close context -- the
+             * close writes its routing outcome there the same way -- so the reason goes into that one
+             * append-only row first, and only then leaves the header.
+             *
+             * ── AND `LossNotes` DELIBERATELY STAYS ─────────────────────────────────────────────────
+             *
+             * The symmetry is tempting and wrong. `close-lock.ts` keeps `LossNotes` -- and only
+             * `LossNotes` -- editable on a locked lost deal, and says what it is for: *"Notes are the
+             * channel for corrections."* Clearing it would destroy the one thing this app explicitly
+             * invites a rep to write after a close.
+             *
+             * With golive#224 merged that turns actively perverse: the workspace reopen saves an
+             * in-progress note first, precisely because losing typed work is the bug that fixes, and
+             * this would then null it -- leaving the text only in an event the rep never sees. Two
+             * correct changes combining into the silent loss both were written against.
+             *
+             * The bypass argument does not rescue it either. `validate()` reads
+             * `input.LossNotes ?? deal.LossNotes`, so a stale note can satisfy a `RequiresNotes`
+             * reason -- but that is the SAME `??` fallback as the reason's, and clearing on reopen
+             * closes one route into a fallback rather than the fallback. It is ticketed separately and
+             * fixes both halves; clearing here would cost a rep their text and buy a partial fix of
+             * something already scheduled.
+             *
+             * The reason earned its clearing on evidence -- a measured, silent validation bypass on a
+             * field a rep cannot correct by hand because it is frozen. Free text they can overwrite is
+             * not the same case.
+             */
+            deal.LossReasonID = null;
+
             // The save has to write the very row the lock protects, so it runs with the lock suspended
             // — scoped to this call and self-restoring.
             const saved = await deal.BeginReopen(() => deal.Save());
@@ -1179,10 +1315,21 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             await db.CommitTransaction();
             transactionOpen = false;
 
-            // The reopen SUCCEEDED even when the order refused to come back with it. That is the
-            // designed outcome, not a tolerated one: S-US8's reopen enters a stage asking for `Quoted`
-            // while the order sits at `Voided`, which orders treats as terminal. The deal reopens and
-            // says what did not happen.
+            // The reopen SUCCEEDS even when the order could not come back with it, and says what did
+            // not happen rather than failing (D-OS1).
+            //
+            // THE ORIGINAL REASON GIVEN HERE WAS WRONG, and it is worth recording why. This said the
+            // order "sits at `Voided`, which orders treats as terminal", so a reopen into a stage
+            // asking for `Quoted` was expected to be refused and warn. Orders says otherwise, by its
+            // own API: `TRANSITIONS.Voided` is `['Draft', 'Quoted']`, so `IsTerminal('Voided')` is
+            // FALSE and both moves are allowed -- `Confirmed` is the terminal one. Measured against
+            // the built package, not inferred.
+            //
+            // So the refusal this comment predicted never happens, and the case it described is not
+            // the case that bites. What bit was the opposite: a stage that declares NOTHING asks the
+            // order for nothing, so a voided order stayed voided in silence. `recoverOrderOnReopen`
+            // in `DealEntityServer` now returns it to `Draft`, and these Issues remain the channel for
+            // anything that still cannot move.
             return {
                 Success: true,
                 Issues: orderStatusIssues(deal),

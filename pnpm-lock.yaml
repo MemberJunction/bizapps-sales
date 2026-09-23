@@ -21,6 +21,8 @@ overrides:
   '@memberjunction/core': ^6.1.0-edge.5
   '@memberjunction/global': ^6.1.0-edge.5
   '@mj-biz-apps/common-entities': 5.44.0
+  '@mj-biz-apps/common-ng': 5.44.0
+  '@mj-biz-apps/common-activity-sync': 5.44.0
   graphql: 16.14.2
   type-graphql: 2.0.0-beta.3
   reflect-metadata: 0.2.2
@@ -32,8 +34,8 @@ importers:
   .:
     dependencies:
       '@mj-biz-apps/orders-entities':
-        specifier: 5.13.0
-        version: 5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: 5.14.0
+        version: 5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
     devDependencies:
       '@changesets/cli':
         specifier: ^2.31.1
@@ -159,7 +161,7 @@ importers:
         specifier: ^6.1.0-edge.5
         version: 6.1.0-edge.5
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 6.7.0
+        specifier: 6.7.1
         version: link:../CoreEntitiesServer
       zod:
         specifier: ^3.25.76
@@ -229,10 +231,10 @@ importers:
         specifier: 5.44.0
         version: 5.44.0(31ff898fe1277b9bc0d5e7b35cf24e7c)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.13.0
-        version: 5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: 5.14.0
+        version: 5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/sales-entities':
-        specifier: 6.7.0
+        specifier: 6.7.1
         version: link:../Entities
     devDependencies:
       '@angular/compiler':
@@ -266,10 +268,10 @@ importers:
         specifier: 5.44.0
         version: 5.44.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.13.0
-        version: 5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: 5.14.0
+        version: 5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/sales-entities':
-        specifier: 6.7.0
+        specifier: 6.7.1
         version: link:../Entities
       '@mj-biz-apps/tasks-core':
         specifier: ^1.4.1
@@ -300,8 +302,8 @@ importers:
         specifier: 5.44.0
         version: 5.44.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.13.0
-        version: 5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: 5.14.0
+        version: 5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -328,16 +330,16 @@ importers:
         specifier: 5.44.0
         version: 5.44.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.13.0
-        version: 5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
+        specifier: 5.14.0
+        version: 5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 6.7.0
+        specifier: 6.7.1
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: 6.7.0
+        specifier: 6.7.1
         version: link:../Entities
       '@mj-biz-apps/sales-server':
-        specifier: 6.7.0
+        specifier: 6.7.1
         version: link:../Server
     devDependencies:
       '@mj-biz-apps/tasks-entities':
@@ -374,13 +376,13 @@ importers:
         specifier: ^6.1.0-edge.5
         version: 6.1.0-edge.5(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@mj-biz-apps/sales-actions':
-        specifier: 6.7.0
+        specifier: 6.7.1
         version: link:../Actions
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 6.7.0
+        specifier: 6.7.1
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: 6.7.0
+        specifier: 6.7.1
         version: link:../Entities
       class-validator:
         specifier: ^0.14.3
@@ -2778,8 +2780,8 @@ packages:
       '@memberjunction/ng-shared': ^6.1.0-edge.6
       '@memberjunction/ng-ui-components': ^6.1.0-edge.6
 
-  '@mj-biz-apps/orders-entities@5.13.0':
-    resolution: {integrity: sha512-sH5jzv31tnQokz1xFagwKRo6RNl4RDM3Fc5haSQlPJX1pb7Pz/nWJ5I+A/nYK2O7ld7fsygGpomkmtZSWzg7Lg==}
+  '@mj-biz-apps/orders-entities@5.14.0':
+    resolution: {integrity: sha512-Tvi4flQx6HnEuwiVrObBHygT9UmozyR/nvFAKCgrN9MHj9bDVZ8dVdMrnVeFmO6w7bCfMvuMTZr/qUUbJE5XnA==}
     peerDependencies:
       '@memberjunction/core': ^6.1.0-edge.5
       '@memberjunction/global': ^6.1.0-edge.5
@@ -16347,7 +16349,7 @@ snapshots:
       '@memberjunction/ng-ui-components': 6.1.0-edge.5(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(@angular/platform-browser@21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(rxjs@7.8.2)
       '@mj-biz-apps/common-entities': 5.44.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)
 
-  '@mj-biz-apps/orders-entities@5.13.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)':
+  '@mj-biz-apps/orders-entities@5.14.0(@memberjunction/core@6.1.0-edge.5)(@memberjunction/global@6.1.0-edge.5)':
     dependencies:
       '@memberjunction/core': 6.1.0-edge.5
       '@memberjunction/global': 6.1.0-edge.5

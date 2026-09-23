@@ -106,7 +106,7 @@ interface ReopenOutcome {
  *
  * TWO LAYERS OF SUCCESS. `Success` on the envelope means the operation RAN; whether the deal reopened
  * is `Output.Success`. And a SUCCESSFUL reopen still carries issues worth showing: S-US8 reopens behind
- * an order orders treats as terminal, and that list is the only thing between the rep and a live deal
+ * an order the deal cannot be worked from, and that list is the only thing between the rep and a live deal
  * pointing at a dead order.
  */
 /**
@@ -285,6 +285,28 @@ function money(n: number | null | undefined): string {
 }
 
 /**
+ * Money as a FIELD rather than as a headline — cents kept.
+ *
+ * A sibling of {@link money} rather than a parameter on it, because the two answer different
+ * questions. `money()` rounds to whole units on purpose: it feeds the Overview's summary figures,
+ * where four more characters of precision buy nothing. A rep reading MRR on the Commercial section is
+ * reading the number that goes on an invoice.
+ *
+ * USD IS THIS APP'S STANDING ASSUMPTION, not a new one introduced here — every money string the deal
+ * form renders already hardcodes it. It is worth naming now because the currency field beside these
+ * ones became real in the same change (bc-aidp-next-golive#259 item 3), so the assumption is visibly
+ * an assumption for the first time: a deal denominated in GBP will show its MRR with a dollar sign.
+ * Fixing that means resolving `CurrencyID` to a code before formatting, which is a lookup this panel
+ * does not do today; it is deliberately left rather than half-done.
+ */
+function moneyExact(n: number | null | undefined): string {
+    if (n == null || !Number.isFinite(Number(n))) return '';
+    return Number(n).toLocaleString(undefined, {
+        style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
+    });
+}
+
+/**
  * Whole days from TODAY to a stored day. Negative is in the past.
  *
  * ── TWO READS, AND ONLY ONE OF THEM HAS A ZONE (bc-aidp-next-golive#168) ────────────────────────
@@ -397,6 +419,49 @@ type DealFieldType =
 abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     /** The fields this panel renders, in order. */
     public abstract readonly Fields: DealFieldSpec[];
+
+    /**
+     * Whether a `currency` field should be drawn by the panel rather than by `mj-form-field`.
+     *
+     * Only ever true while READING. The moment the field is editable the shared control takes it back,
+     * so there is exactly one editable implementation of every field on this form.
+     */
+    public DrawsOwnMoney(f: DealFieldSpec): boolean {
+        return f.currency === true && !(this.EditMode && this.FieldEditable(f.name));
+    }
+
+    /**
+     * Whether a self-drawn money row appears at all: it hides while empty, exactly as every other
+     * empty field hides in read mode (`HideWhenEmptyInReadOnlyMode`, which defaults to true).
+     *
+     * ── WHY THERE IS NO FIELD-SECURITY CHECK HERE, WHICH IS WORTH STATING ──────────────────────
+     *
+     * Drawing a field ourselves means inheriting the shared control's responsibilities, not just its
+     * markup — so the first version of this asked `EntityInfo.IsFieldReadableByUser` before printing
+     * a value. THAT METHOD DOES NOT EXIST IN THE MJ VERSION THIS APP PINS. It was read from a local
+     * MJ checkout sitting on a much newer branch; `@memberjunction/core@6.1.0-edge.5` has only
+     * entity-level `GetUserPermisions`, and the published `mj-form-field` of the same version carries
+     * no per-field read check either — verified by unpacking both tarballs, not inferred.
+     *
+     * So its absence here is not a gap against the shared control: at this version the two agree, and
+     * a check against an API that is not there would only have failed to compile. Per-field read
+     * security arrived in `6.1.0-edge.7`. WHEN THE PIN MOVES PAST IT, PUT THE CHECK BACK — this row
+     * prints a value, and a field somebody may not read is the one thing it must not print.
+     */
+    public ShowsMoney(f: DealFieldSpec): boolean {
+        return this.MoneyValue(f) !== '';
+    }
+
+    /** The formatted value, or '' when there is nothing to show. */
+    public MoneyValue(f: DealFieldSpec): string {
+        return moneyExact(this.Record?.Get(f.name) as number | null | undefined);
+    }
+
+    /** The field's label, read from metadata so it tracks the same rows every other label does. */
+    public MoneyLabel(f: DealFieldSpec): string {
+        const info = this.Record?.EntityInfo?.Fields?.find((x) => x.Name === f.name);
+        return info?.DisplayNameOrName ?? f.name;
+    }
 
     /**
      * May this field be typed into right now?
@@ -547,6 +612,27 @@ interface DealFieldSpec {
      * Never hand-set them."
      */
     serverMaintained?: boolean;
+    /**
+     * A MONEY COLUMN: shown formatted as currency when reading, edited as a plain number.
+     *
+     * ── WHY THE PANEL DRAWS THIS ITSELF (bc-aidp-next-golive#259 item 5) ───────────────────────
+     *
+     * "MRR and ARR fields should be currency format." They are `DECIMAL(19,4)`, and there is no way
+     * to ask `mj-form-field` for a currency: its `FormatValue()` is `String(value)` for anything that
+     * is not a Date, `EntityField.ExtendedType` has no currency member, and core's own `FormatValue`
+     * only formats the `money` / `smallmoney` SQL types, which these are not. So `12500.0000` renders
+     * as `12500` and nothing about the field says it is money.
+     *
+     * The platform is the right home for this and a gap has been filed. Until it lands, the panel
+     * renders the read side the way the Status control already renders itself a few hundred lines up
+     * — this file's established answer to "the shared control cannot express what this field needs".
+     *
+     * EDIT MODE STAYS ON `mj-form-field`, which is the important half. Typing into a formatted string
+     * is a parsing problem nobody asked us to solve, and routing the edit through the shared control
+     * keeps its validation, its lock handling and its dirty tracking rather than reimplementing three
+     * things to change one.
+     */
+    currency?: boolean;
 }
 
 const EMPTY_STATE_STYLES =
@@ -592,6 +678,51 @@ const FIELD_STYLES = `
         text-transform: uppercase; color: var(--mj-text-muted);
     }
     .mjs-field .mj-forms-field--editing:hover { margin: 0; padding: 0; }
+    /* The NATIVE selects this file draws itself, brought into line with the shared control
+       (bc-aidp-next-golive#259 item 2: "Status drop-down list does not seem to be styled consistently
+       with rest of the app (shorter font)").
+
+       IT IS A NATIVE SELECT ON PURPOSE. mj-form-field renders a foreign key as an unfiltered dropdown
+       off the related entity, which offered Won and Lost and bypassed the audited close -- golive#205,
+       and the comment at the Status control says so. Opting out of the component meant opting out of
+       its CSS too, and nothing put that back: a bare select inherits the browser's own font, about a
+       point smaller than everything around it, which is exactly what was reported.
+
+       So this restates .mj-forms-field-input's typography and underline rather than swapping the
+       control back. The values are copied from that rule deliberately -- there is no shared token for
+       "a form control" to reference, and inventing one here would be this app's guess at a platform
+       decision.
+
+       NO appearance: none. The shared control is a div that draws its own chevron; a native select
+       stripped of its appearance would lose the arrow and have nothing to replace it, which is a worse
+       inconsistency than the one being fixed.
+
+       Scoped to this file's own classes because encapsulation is None on every panel that uses these
+       styles, so an unscoped bare-element rule would reach the whole application. All three selects the
+       deal form owns -- Status, and the loss reason on the pipeline and close panels -- sit inside one
+       of these two. */
+    .mjs-field select, .mjs-reopen__field select {
+        font-size: 14px; font-family: inherit; color: var(--mj-text-primary);
+        background: transparent; border: none;
+        border-bottom: 1.5px solid var(--mj-border-default);
+        padding: 4px 0; width: 100%; cursor: pointer; outline: none;
+        transition: border-color var(--mj-transition-base) ease,
+                    background var(--mj-transition-base) ease;
+    }
+    .mjs-field select:focus, .mjs-reopen__field select:focus {
+        border-bottom-color: var(--mj-brand-primary);
+        background: color-mix(in srgb, var(--mj-brand-primary) 8%, transparent);
+        border-radius: 4px 4px 0 0; padding: 4px 6px;
+    }
+    /* Matches .mj-forms-field--readonly, which is how the shared control shows a field it will not
+       let you change -- the Status select is disabled whenever the deal is locked. */
+    .mjs-field select:disabled, .mjs-reopen__field select:disabled {
+        opacity: 0.7; cursor: not-allowed;
+    }
+    /* A money field the panel drew itself. It carries .mj-forms-field-value too, so the size, colour
+       and row height are the shared control's rather than a second opinion about them; this adds only
+       what money specifically wants -- figures of equal width, so a column of amounts lines up. */
+    .mjs-field__money { font-variant-numeric: tabular-nums; }
 `;
 
 /* ── Overview ─────────────────────────────────────────────────────────────── */
@@ -1749,6 +1880,33 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
     }
 }
 
+/**
+ * The Commercial section's fields, at module scope for the reason `PARTY_FIELDS` is: `Object.create`
+ * -- how these panels are built in tests, because they inject nothing -- does NOT run property
+ * initializers, so an instance-level array reads as `undefined` there. A getter over a module constant
+ * has neither problem, and `FieldEditable` already guards with `this.Fields?.` because of it.
+ *
+ * `CurrencyID` CARRIES A LINK as of bc-aidp-next-golive#259 item 3. It rendered as a plain text box
+ * because the column is a SOFT reference to accounting's currency table and CodeGen therefore set no
+ * related entity; the soft FK now ships as metadata (`metadata/entity-fields/.deal-currency-soft-fk.json`),
+ * which is what lets `LinkType='Record'` resolve the currency's name here and offer a picker in edit
+ * mode instead of an empty box.
+ */
+const COMMERCIAL_FIELDS: DealFieldSpec[] = [
+    { name: 'Amount', type: 'number', currency: true },
+    { name: 'CurrencyID', type: 'textbox', link: 'Record' },
+    { name: 'TermMonths', type: 'number' },
+    { name: 'EstimatedProjectWeeks', type: 'number' },
+    { name: 'MRR', type: 'number', currency: true },
+    { name: 'ARR', type: 'number', currency: true },
+    { name: 'ExpectedCloseDate', type: 'datepicker' },
+    { name: 'StartDate', type: 'datepicker' },
+    { name: 'ExecutionDate', type: 'datepicker' },
+    { name: 'AutoRenew', type: 'checkbox' },
+    { name: 'PaymentMethod', type: 'textbox' },
+    { name: 'Description', type: 'textarea', span: true },
+];
+
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-commercial',
     skipNullKeyWarning: true,
@@ -1766,9 +1924,21 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
             <div class="mjs-fields">
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span">
-                        <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                            (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                        @if (DrawsOwnMoney(f)) {
+                            <!-- Read-only money. See DealFieldSpec.currency for why this is not
+                                 mj-form-field; the class names are the shared control's own, so the
+                                 row is indistinguishable from the ones around it. -->
+                            @if (ShowsMoney(f)) {
+                                <div class="mj-forms-field">
+                                    <label class="mj-forms-field-label">{{ MoneyLabel(f) }}</label>
+                                    <span class="mj-forms-field-value mjs-field__money">{{ MoneyValue(f) }}</span>
+                                </div>
+                            }
+                        } @else {
+                            <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
+                                [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                                (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                        }
                     </div>
                 }
             </div>
@@ -1776,20 +1946,7 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
     `,
 })
 export class MJSDealCommercialPanel extends MJSDealFieldPanel {
-    public readonly Fields: DealFieldSpec[] = [
-        { name: 'Amount', type: 'number' },
-        { name: 'CurrencyID', type: 'textbox' },
-        { name: 'TermMonths', type: 'number' },
-        { name: 'EstimatedProjectWeeks', type: 'number' },
-        { name: 'MRR', type: 'number' },
-        { name: 'ARR', type: 'number' },
-        { name: 'ExpectedCloseDate', type: 'datepicker' },
-        { name: 'StartDate', type: 'datepicker' },
-        { name: 'ExecutionDate', type: 'datepicker' },
-        { name: 'AutoRenew', type: 'checkbox' },
-        { name: 'PaymentMethod', type: 'textbox' },
-        { name: 'Description', type: 'textarea', span: true },
-    ];
+    public get Fields(): DealFieldSpec[] { return COMMERCIAL_FIELDS; }
 }
 
 @RegisterClassEx(BaseFormPanel, {
@@ -2563,10 +2720,18 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
      * The audited way back through the lock (bc-aidp-next-golive#205).
      *
      * Mirrors {@link ConfirmClose}, including the part that is easy to drop: a reopen can return
-     * `Success: true` WITH issues, and those are the ones that matter most. S-US8's reopen asks the
-     * order to come back while it sits at `Voided`, which orders treats as terminal — the deal reopens
-     * regardless, because an order-side refusal must never block a stage change, so this list is the
-     * only thing standing between the rep and a live deal pointing at a dead order.
+     * `Success: true` WITH issues, and those are the ones that matter most. The deal reopens
+     * regardless of what the order does, because an order-side refusal must never block a stage
+     * change — so this list is the only thing standing between the rep and a live deal pointing at a
+     * dead order.
+     *
+     * THIS USED TO SAY the reopen "asks the order to come back while it sits at `Voided`, which orders
+     * treats as terminal". It does not: `TRANSITIONS.Voided` is `['Draft', 'Quoted']`, so
+     * `IsTerminal('Voided')` is FALSE and `Confirmed` is the terminal status. Recorded once in
+     * `docs/DECISIONS.md` D-OS4; KI-27 is the lifecycle collapse that caused it, not the transition
+     * fact itself. The cases that genuinely leave an order behind are a BOOKED order, which the reopen
+     * refuses outright, and — until golive#205 — a restored stage that declared nothing, which asked
+     * the order for nothing and said nothing either.
      *
      * IT DOES SAVE FIRST, which this comment used to say it must not. The old reasoning was that "a
      * locked deal has almost nothing editable, and the close lock would refuse the save anyway". Both

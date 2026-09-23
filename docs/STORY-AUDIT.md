@@ -36,16 +36,17 @@ gap is now upstream** — nothing outstanding in this audit is ours.
 | **#34** S-US2 Contract + tasks | partially met | `ContractType` has no per-type renewal defaults; `ContractTemplate` has no `Status`, so the active template cannot be selected | contracts (D-9, D-10) |
 | **#35** S-US3 Order-review task | **met** | — | — |
 | **#114** S-US4 Deal line items | partially met | Removing an order line is silently dropped (KI-20) | orders |
-| **#115** S-US5 Order status follows | partially met | `Voided` is terminal, so a reopened lost deal's order cannot return | orders |
+| **#115** S-US5 Order status follows | **met** | Was "`Voided` is terminal, so a reopened lost deal's order cannot return". It is not — D-OS4. | — |
 | **#116** S-US6 Close as Won | **met** | — | — |
 | **#117** S-US7 Close as Lost | **met** | — | — |
-| **#118** S-US8 Reopen | partially met | The same terminal `Voided` | orders |
+| **#118** S-US8 Reopen | **met** | Was "the same terminal `Voided`" — retired by D-OS4; the reopen returns the order. | — |
 | **#121** S-US11 Board + dashboard | **met** | — | — |
 
 **Nothing outstanding is ours any more.** Stage-driven probability and forecast category were the last of
 it, and they now run in `DealEntityServer.saveWithinScope` beside the order-status writer, the stage event
 and the amount cache — same trigger, same transaction, filling rather than overwriting. Everything still
-open is one of three upstream facts: orders drops a line removal, orders treats `Voided` as terminal, and
+open is one of three upstream facts: orders drops a line removal, orders WAS thought to treat `Voided` as
+terminal (it does not — D-OS4), and
 contracts lacks two columns.
 
 **One verdict I nearly got wrong, and the check stopped me.** I drafted "#114 moves to met, KI-20 no longer
@@ -107,7 +108,8 @@ The rule for this pass was *prove met criteria against the database, not the scr
 | **#121** S-US11 Pipeline board and dashboard | **met** |
 
 Four of the nine are met outright. Every remaining gap but one is **upstream of this repo** — orders'
-line removal (KI-20), orders' terminal `Voided`, and two columns contracts does not have. The one that is
+line removal (KI-20), orders' supposedly terminal `Voided` (retired — D-OS4), and two columns contracts
+does not have. The one that is
 ours is #33's inline create-and-return.
 
 ---
@@ -170,8 +172,9 @@ and `OrderLine.ProductID` is a real FK.
 
 Ten of the eleven S-US issues are still OPEN in `bc-aidp-next-golive`, including **#35, #116, #117 and
 #121, which this audit calls met**, and now **#119**. The tracker understates what is done. Every
-remaining gap is upstream: order-line removal (KI-20) and terminal `Voided` belong to orders, the two
-contract field gaps to contracts (D-9, D-10).
+remaining gap is upstream: order-line removal (KI-20) belongs to orders, and the two contract field
+gaps to contracts (D-9, D-10). Terminal `Voided` used to be listed here as a third; it is retired by
+D-OS4 and was never an upstream blocker at all.
 
 ---
 
@@ -404,7 +407,7 @@ the reopen, and a pipeline can put the threshold wherever its own motion actuall
 | Agreement stage or higher → Quoted | **met** | `planStageOrderStatus()` `DealEntityServer.ts:583`, applied at `:646` inside `saveWithinScope()`. `close-won-order.CO3`. Seeded: Proposal, Negotiation and Signed all declare `Quoted` (`metadata/pipeline-stages/`). |
 | Closed Won → unchanged, order still editable | **met** | `close-won-order.CO4` (no second order), `CO5` (still editable). |
 | Closed Lost → Voided | **met** | E1: `DEAL-9006` stage `Lost`, order `Voided`. `CO3`. |
-| Reopened → Quoted or Draft per stage | **not met, blocked upstream** | `Voided` is terminal in orders' `CanTransition`, so a reopened lost deal's order stays voided. The reopen **succeeds and warns** rather than half-failing — `CloseDealOperation.ts:813-816`, `CO5`. That is the designed outcome, not a tolerated one, but the criterion as written is not met. |
+| Reopened → Quoted or Draft per stage | **met** | `Voided` is NOT terminal in orders' `CanTransition` (D-OS4), and a reopen now returns the order. Was: a reopened lost deal's order stays voided. The reopen **succeeds and warns** rather than half-failing — `CloseDealOperation.ts:813-816`, `CO5`. That is the designed outcome, not a tolerated one, but the criterion as written is not met. |
 | No manual path for the rep | **met** | No UI control writes order status; `custom/server-owned-fields.ts` keeps it off the generated form. |
 
 ### A gap E1 found that no check covered — now fixed
@@ -464,7 +467,7 @@ live in the same run: `WT6`/`WT7` assert the task warnings, `CO5` the order-stat
 | Reopening without a reason is refused | **met** | `close-deal.CD10`. |
 | The reopen is a new event; the close event remains intact | **met** | `close-deal.CD11` — clears the close stamps and **preserves** the close event. |
 | The deal is editable again | **met** | `CD11`; the lock is suppressed only inside `BeginReopen()` (`DealEntityServer.ts:863`), the one audited path, deliberately not public. |
-| The embedded order status is restored per S-US5 | **not met, blocked upstream** | As #115 — `Voided` is terminal in orders. |
+| The embedded order status is restored per S-US5 | **met** | As #115 — `Voided` is not terminal in orders (D-OS4). |
 
 The story's own open question — what happens to an already-created contract and tasks on reopen — is still
 open, and the code takes the proposed position by default: nothing automatic.
@@ -517,7 +520,8 @@ Still open, not ours — and this is most of what is left:
 
 9. **KI-20** — order-line removal is silently dropped. Cause diagnosed in orders' `savePendingLines`.
    Blocks #33 and #114.
-10. **`Voided` is terminal in orders** — so a reopened lost deal's order cannot return. Blocks #115 and
+10. ~~**`Voided` is terminal in orders**~~ — RETIRED, see D-OS4: `TRANSITIONS.Voided` is `['Draft',
+    'Quoted']`. Was said to block #115 and
     #118. The close warns rather than half-succeeding, which is the right behaviour for a rule this app
     does not own.
 11. **Contracts has no per-type renewal defaults and no `ContractTemplate.Status`** — blocks two of #34's

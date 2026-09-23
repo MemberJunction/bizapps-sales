@@ -45,20 +45,38 @@ CalendarDay)`, `DealWorkspaceService.LoadProducts(asOf?: Date)` is now
 The last one is a rename rather than an alias on purpose: a name stating a zone it no longer uses is
 worse than a compile error.
 
-Requires `@mj-biz-apps/common-entities` 5.44.0. The whole `@mj-biz-apps/common-*` family is now
-pinned EXACTLY at `5.44.0` across every manifest (`common-entities`, `common-ng`,
-`common-activity-sync`). A caret range on any one of the three re-splits the family — each publishes
-an exact dependency on `common-entities` of its own version — and two copies of `common-entities`
-means two `BusinessTimeZoneEngine` classes competing for one class-name key in `BaseSingleton`'s
-global store, which makes the resolved zone depend on import order.
+Requires `@mj-biz-apps/common-entities` 5.44.0, declared as `^5.44.0` — a floor with an upper
+bound, not an exact pin — in every manifest that names the `@mj-biz-apps/common-*` family
+(`common-entities`, `common-ng`, `common-activity-sync`).
 
-The exact pins do not reach `@mj-biz-apps/orders-entities`, which declares `common-entities` as a
-floating `>=5.37.0` (`>=5.43.0` at 5.14.0) and so cannot be constrained by a manifest anywhere in this
-repo. Measured: pnpm 10.33 and npm 11 both dedupe that range onto the pinned 5.44.0 whenever a pinned
-copy sits in the same graph, so the split does not occur today — but resolve `orders-entities` with no
-pinned sibling and the same pnpm takes `5.45.0`. A `pnpm.overrides` entry now makes the single copy a
-constraint instead of a resolver heuristic, for this workspace and for CI; consumers are still
-protected by the exact pins, since overrides are not published.
+An exact pin is what a SIBLING app must not use here, and that is measured rather than assumed. The
+family self-pins in lockstep: `common-ng@X` and `common-activity-sync@X` each declare
+`common-entities@X` EXACTLY. So a caret on all three is coherent — whichever version the resolver
+settles on, it drags `common-entities` to the matching one, and there is one copy. What splits the
+family is an exact `common-entities` held at one version while a sibling floats: orders ships
+`orders-ng`/`orders-core-entities-server` declaring `common-ng >=5.44.0` and `common-entities
+>=5.44.0`, so a host installing sales beside orders can resolve `common-ng` 5.46.0, which hard-requires
+`common-entities` 5.46.0 — irreconcilable with an exact 5.44.0, and the resolver nests a second copy.
+Two copies of `common-entities` is two `BusinessTimeZoneEngine` classes competing for one class-name
+key in `BaseSingleton`'s global store, which makes the resolved zone depend on import order: this
+release's own defect, arriving through the dependency graph instead of the code.
+
+That is bc-aidp-next-golive#258 in a different package. There, sales pinned `orders-entities` exactly
+at 5.13.0 while orders shipped 5.14.0; no resolver can satisfy two different exact pins from one copy,
+the nested copy re-ran every module-scope `@RegisterClass` in it, and `OrderNumber` stopped being
+minted. A sibling's exact pin is correct only while its number happens to equal the owner's, and
+nothing maintains that equality. The owner of a package may pin it exactly; a consumer in another repo
+should declare a range and let the owner's pin win.
+
+`@mj-biz-apps/orders-entities` stays exactly where `next` put it (5.14.0, golive#258) — that pin
+belongs to that fix, not this one.
+
+`pnpm.overrides` holds all three `common-*` members at 5.44.0 for THIS workspace and CI. Exact is
+right there and wrong in a manifest for the same reason: overrides are not published. It forces a
+single copy where a manifest range only permits one, it pins the version the 637-test suite is
+actually measured against, and all three move together so a caret can never pair `common-ng` 5.46.0
+with `common-entities` 5.44.0. What travels to a consumer is the range in each `package.json`, which
+is what lets a host dedupe instead of nesting.
 
 The deal form's Overview panel now configures `BusinessTimeZoneEngine` in its own `ngOnInit` rather
 than relying on MJ's startup sequence having reached a lazily loaded `sales-ng` chunk. The engine fails
