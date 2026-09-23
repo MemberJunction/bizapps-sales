@@ -407,11 +407,12 @@
                   @for (line of Lines; track line.ID; let i = $index) {
                     <tr [class.dw-row--bad]="IssuesForRow('lines', i).length > 0">
                       <td>
-                        <!-- Identity is Product.ID. The catalogue is filtered to Active status and today's
-                             availability window — NOT to a company, since #29: a deal may sell any company's
-                             product, and the LINE takes its company from whichever is chosen. That is why each
-                             option names its owner; see ProductOptionLabel. The predicate is ProductFilterFor
-                             in packages/Entities/src, which is what LoadProducts passes to RunView. -->
+                        <!-- Identity is Product.ID. The catalogue is filtered to Active status and the
+                             availability window as of TODAY IN THE BUSINESS TIME ZONE (#168) — NOT to a
+                             company, since #29: a deal may sell any company's product, and the LINE takes
+                             its company from whichever is chosen. That is why each option names its owner;
+                             see ProductOptionLabel. The predicate is ProductFilterFor in
+                             packages/Entities/src, which is what LoadProducts passes to RunView. -->
                         <select class="dw-cell-product" [ngModel]="line.ProductID"
                                 (ngModelChange)="OnProductChange(line, $event)"
                                 [disabled]="!CanEditLines"

@@ -75,6 +75,7 @@ import {
     ResolveSalesFixture,
     SALES_SCHEMA,
     TxOne,
+    businessToday,
     type SalesFixture,
 } from '../fixture.js';
 
@@ -263,7 +264,7 @@ async function sellableProducts(
              * The sibling helper in `close-won-order.fixture.ts` hit this and was fixed; this one was
              * not. Same fix, same reason.
              */
-            ExtraFilter: `CompanyID = '${companyID.replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())})`,
+            ExtraFilter: `CompanyID = '${companyID.replace(/'/g, "''")}' AND (${ProductFilterFor(await businessToday(ctx))})`,
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             Fields: ['ID'],

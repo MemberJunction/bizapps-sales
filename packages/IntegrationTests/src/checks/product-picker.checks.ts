@@ -28,7 +28,8 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
-import { E_ORDERS_PRODUCT, ProductFilterFor } from '@mj-biz-apps/sales-entities';
+import { type CalendarDay } from '@mj-biz-apps/common-entities';
+import { E_ORDERS_PRODUCT, ProductFilterFor, ProductWindowCovers } from '@mj-biz-apps/sales-entities';
 
 import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture } from '../fixture.js';
 import { type DealEntity } from '@mj-biz-apps/sales-entities';
@@ -48,12 +49,12 @@ type Ctx = Parameters<NamedCheck['Fn']>[0];
  * lets PP2 — the check that IS #29 — pass while a foreign product is wrongly excluded, so long as a
  * same-named local one is offered.
  */
-async function offered(ctx: Ctx, asOf: Date): Promise<string[]> {
+async function offered(ctx: Ctx, asOfDay: CalendarDay): Promise<string[]> {
     const rv = new RunView();
     const r = await rv.RunView<{ ID: string; Name: string }>(
         {
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(asOf),
+            ExtraFilter: ProductFilterFor(asOfDay),
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             Fields: ['ID', 'Name'],
@@ -70,8 +71,16 @@ interface CatalogueRow {
     Name: string;
     Status: string;
     CompanyID: string;
-    AvailableFrom: string | null;
-    AvailableTo: string | null;
+    /**
+     * THE WINDOW COLUMNS ARE `DATE`, AND THE DRIVER HANDS A `DATE` BACK AS A `Date`.
+     *
+     * These were declared `string | null`, which is not what arrives — and the declaration was what
+     * made the old comparison look sound. `String(aDate).slice(0, 10)` is `'Thu Aug 13'`, so every
+     * windowed row fell out of PP2's expectation and `AvailableTo` never bound anything. The type now
+     * says what a row actually holds, and `ProductWindowCovers` is what reads it.
+     */
+    AvailableFrom: string | Date | null;
+    AvailableTo: string | Date | null;
 }
 
 async function all(ctx: Ctx): Promise<CatalogueRow[]> {
@@ -115,13 +124,43 @@ function seedProductId(catalogue: { ID: string; Name: string }[], name: string):
     return String(hits[0].ID).toLowerCase();
 }
 
+/** Whether either availability bound is set at all. NULL at both ends means always available. */
+function hasBound(row: CatalogueRow): boolean {
+    return (row.AvailableFrom ?? null) !== null || (row.AvailableTo ?? null) !== null;
+}
+
+/**
+ * Whether a product's availability window covers `day`, REFUSING an unreadable bound where it is read.
+ *
+ * `ProductWindowCovers` reports three outcomes, and collapsing `Unreadable` into `false` is what the
+ * old open-coded comparison effectively did: a bound nobody could parse behaved exactly like a bound
+ * nobody had set, so the window half of this check quietly stopped existing. Asserting here rather
+ * than at the top means the refusal happens at the point the claim is USED, and names the row.
+ */
+function windowCovers(row: CatalogueRow, day: CalendarDay): boolean {
+    const verdict = ProductWindowCovers(row.AvailableFrom, row.AvailableTo, day);
+    Assert(
+        verdict !== 'Unreadable',
+        `'${row.Name}' has an availability bound that does not read as a calendar day `
+            + `(AvailableFrom=${JSON.stringify(row.AvailableFrom)}, AvailableTo=${JSON.stringify(row.AvailableTo)}). `
+            + 'No expectation can be derived from it. Check the seed, and check what the driver returns '
+            + 'for a DATE column — that is the defect this check was rewritten around.',
+    );
+    return verdict === 'Covers';
+}
+
 /** The company Sales' pipelines sell for — the same source the server stamps `Deal.CompanyID` from. */
 async function sellingCompany(ctx: Ctx): Promise<string> {
     const f = await ResolveSalesFixture(ctx);
     return f.PipelineCompanyID;
 }
 
-const TODAY = new Date('2026-08-15T00:00:00Z');
+/**
+ * The day these checks judge availability on. A calendar DAY now, not an instant (#168): the filter
+ * takes the day its caller means, rather than choosing the UTC day out of an instant — which is what
+ * made the picker offer tomorrow's products from 7 PM Central.
+ */
+const TODAY: CalendarDay = '2026-08-15';
 
 export const ProductPickerChecks: NamedCheck[] = [
     {
@@ -195,17 +234,56 @@ export const ProductPickerChecks: NamedCheck[] = [
                  * So the expectation comes from the CATALOGUE's own columns. Active, and today inside its
                  * availability window, is what `ProductFilterFor` claims to mean; deriving it here and
                  * comparing against `names` is a real assertion about the picker.
+                 *
+                 * ── AND THE DERIVATION HAS TO READ A DAY, WHICH IS WHERE IT WENT WRONG NEXT ──────
+                 *
+                 * The third mistake was the quietest. This compared `String(x.AvailableFrom).slice(0,
+                 * 10)` against the day — and `AvailableFrom` is a `DATE`, which the driver returns as a
+                 * `Date`. `String(aDate).slice(0, 10)` is `'Thu Aug 13'`, so `<=` was always false and
+                 * `>=` always true: every product WITH a window was dropped from the expectation and
+                 * `AvailableTo` bound nothing at all. PP2 was back to asserting only NULL-window rows —
+                 * the exact vacuity the paragraph above says it was rewritten to avoid, arrived at by a
+                 * different route.
+                 *
+                 * `ProductWindowCovers` reads each bound with `ToCalendarDay` (UTC parts of a `Date`, a
+                 * string as written) and is unit-tested against that `Date` case without a database. A
+                 * bound that is present and unreadable comes back `Unreadable`, which is REFUSED below
+                 * rather than counted either way: a `DATE` column that does not hold a day means the
+                 * seed or the driver changed, and neither answer about availability would be honest.
                  */
-                const day = TODAY.toISOString().slice(0, 10);
+                const day = TODAY;
                 const sellableForeign = foreign.filter(
                     (x) => x.Status === 'Active' // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to Sales
-                        && (!x.AvailableFrom || String(x.AvailableFrom).slice(0, 10) <= day)
-                        && (!x.AvailableTo || String(x.AvailableTo).slice(0, 10) >= day),
+                        && windowCovers(x, day),
                 );
                 Assert(
                     sellableForeign.length > 0,
                     'the seed must contain an ACTIVE product owned by another company, or this proves nothing',
                 );
+
+                /**
+                 * ── THE ANTI-VACUITY GUARD, KEYED ON A CAUSE RATHER THAN A COUNT ─────────────────
+                 *
+                 * Both seeded foreign products have NULL windows, so `sellableForeign` being non-empty
+                 * does not prove the window arithmetic ran on anything at all. That is exactly how the
+                 * broken comparison survived: it was never asked a question with a window in it.
+                 *
+                 * So the guard is about the CATALOGUE rather than about `foreign`. Somewhere in it there
+                 * is a product with a real bound — `Expired Promo Bundle` and `Next Year Programme` are
+                 * seeded precisely so, for PP3 — and every one of them must READ as a calendar day.
+                 * `windowCovers` refuses an unreadable bound at the point of use, so if the driver's
+                 * shape changes or the seed loses its windowed rows, this says so here instead of
+                 * letting PP2 narrow silently back to the NULL-window cases.
+                 */
+                const windowed = catalogue.filter((x) => hasBound(x));
+                Assert(
+                    windowed.length > 0,
+                    'the catalogue must contain at least one product with an availability bound, or the '
+                        + 'window half of this expectation is never exercised',
+                );
+                for (const x of windowed) {
+                    void windowCovers(x, day);
+                }
 
                 for (const p of sellableForeign) {
                     Assert(
@@ -250,13 +328,13 @@ export const ProductPickerChecks: NamedCheck[] = [
                 const company = await sellingCompany(ctx);
 
                 /**
-                 * The filter takes the date as an argument rather than reading the clock, which is what
+                 * The filter takes the day as an argument rather than reading the clock, which is what
                  * makes this checkable at all. It also pins a real behaviour: a deal quoted last year and
                  * one quoted next year do not see the same catalogue, and the picker must not pretend
                  * otherwise.
                  */
-                const during2025 = await offered(ctx, new Date('2025-06-01T00:00:00Z'));
-                const during2027 = await offered(ctx, new Date('2027-08-01T00:00:00Z'));
+                const during2025 = await offered(ctx, '2025-06-01');
+                const during2027 = await offered(ctx, '2027-08-01');
                 const catalogue = await all(ctx);
                 const expired = seedProductId(catalogue, 'Expired Promo Bundle');
                 const future = seedProductId(catalogue, 'Next Year Programme');

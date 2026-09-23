@@ -17,8 +17,16 @@
  * anyone west of Greenwich, which is how a stored 20 November renders as the 19th. That is not a
  * hypothetical — it shipped, and it was found by eye rather than by any test.
  *
+ * THE RULE IS NOW STATED ONCE FOR EVERY APP (bc-aidp-next-golive#168). `ToCalendarDay` and
+ * `FromCalendarDay` in `@mj-biz-apps/common-entities` are the same two rules this module had worked out
+ * for itself — UTC parts of a `Date`, a string taken as written, UTC midnight on the way back — so the
+ * functions below delegate rather than keep a second copy. What stays here is the part that belongs to
+ * this boundary and not to a calendar day: the `<input type="date">` contract that absent and corrupt are
+ * different things, which {@link IsUnparseableDate} exists to tell apart.
+ *
  * @module @mj-biz-apps/sales-ng
  */
+import { FromCalendarDay, IsCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 
 /**
  * The `yyyy-MM-dd` an `<input type="date">` binds to, from either shape a field can hold.
@@ -33,10 +41,17 @@
  * to display a value it cannot parse. {@link IsUnparseableDate} is the other half, and the caller is
  * expected to show something next to the field when it is true.
  *
- * THE STRING BRANCH STILL SLICES rather than parsing and reformatting, deliberately. A stored
- * `2026-09-30T23:00:00-05:00` is the 30th as written; parsing it and formatting with UTC getters
- * would render the 1st. The slice takes the date as written, so the test is only whether the value
- * BEGINS with a date — anything else is not a date this boundary can honestly narrow.
+ * THE STRING BRANCH STILL TAKES THE DATE AS WRITTEN rather than parsing and reformatting, and that
+ * rule now lives in `ToCalendarDay` rather than here. A stored `2026-09-30T23:00:00-05:00` is the 30th
+ * as written; parsing it and formatting with UTC getters would render the 1st. So the test is only
+ * whether the value BEGINS with a real day — anything else is not a date this boundary can honestly
+ * narrow. `2026-9-3` is rejected for the same reason it always was: the element accepts zero-padded
+ * `yyyy-MM-dd` only, so passing it through unchanged renders blank exactly like a corrupt value.
+ *
+ * THE TRIM IS THIS MODULE'S, DELIBERATELY. `ToCalendarDay` reads a string from its first character,
+ * which is right for a `date` column read back by a driver. A value that reached a FORM field can carry
+ * the whitespace a human left on it, and this boundary has always treated `'   '` as empty rather than
+ * as corrupt — {@link IsUnparseableDate}'s empty cases depend on it.
  *
  * @param value - A `Date`, an ISO string, or null.
  * @returns A `yyyy-MM-dd` string, or null for absent AND for unparseable.
@@ -45,20 +60,7 @@ export function ToDateInput(value: string | Date | null | undefined): string | n
     if (!value) {
         return null;
     }
-    if (value instanceof Date) {
-        if (Number.isNaN(value.getTime())) {
-            return null;
-        }
-        const y = value.getUTCFullYear();
-        const m = String(value.getUTCMonth() + 1).padStart(2, '0');
-        const d = String(value.getUTCDate()).padStart(2, '0');
-        return `${y}-${m}-${d}`;
-    }
-    const s = String(value).trim();
-    // `2026-9-3` is a real date and is REJECTED here on purpose: the element accepts zero-padded
-    // `yyyy-MM-dd` only, so passing it through unchanged renders blank exactly like a corrupt value.
-    // Better to be told the stored value is not in the shape this boundary reads.
-    return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+    return ToCalendarDay(value instanceof Date ? value : String(value).trim());
 }
 
 /**
@@ -89,8 +91,14 @@ export function IsUnparseableDate(value: string | Date | null | undefined): bool
  * A `Date` for an entity field, from what an `<input type="date">` produced.
  *
  * MIDNIGHT **UTC**, not local midnight. `new Date('2026-09-30')` already parses as UTC midnight, but
- * `new Date(2026, 8, 30)` does not, and the two differ by a day for most of the world — so the explicit
- * suffix says which one is meant rather than relying on a parsing rule nobody remembers.
+ * `new Date(2026, 8, 30)` does not, and the two differ by a day for most of the world — so
+ * `FromCalendarDay` says which one is meant rather than relying on a parsing rule nobody remembers.
+ *
+ * THE DAY IS CHECKED BEFORE IT IS CONVERTED, because `FromCalendarDay` THROWS a `RangeError` for
+ * anything that is not a zero-padded, real day — it is written for a caller that already holds a
+ * `CalendarDay`. This boundary holds whatever the element reported, so an unparseable value is
+ * discarded rather than raised: it would reach the database as a null anyway, and a throw out of a
+ * two-way field binding takes the form down instead of the field.
  *
  * @param value - What the input element reported. An empty string means the user cleared the field.
  * @returns A UTC-midnight `Date`, or null to clear the field.
@@ -99,8 +107,5 @@ export function FromDateInput(value: string | null | undefined): Date | null {
     if (!value) {
         return null; // '' from a cleared input means null, not the epoch
     }
-    const parsed = new Date(`${value}T00:00:00.000Z`);
-    // An unparseable value is discarded rather than written as `Invalid Date`, which would reach the
-    // database as a null anyway but validate and log confusingly on the way there.
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
+    return IsCalendarDay(value) ? FromCalendarDay(value) : null;
 }

@@ -10,7 +10,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import type { DealRosterRow } from '../workspace/deal-workspace.service';
-import { TodayUtc, UtcDatePart } from './dashboard-dates';
+import { BusinessToday, UtcDatePart } from './dashboard-dates';
 import { WithinWindow, type PeriodWindow } from './dashboard-period';
 
 /**
@@ -18,7 +18,7 @@ import { WithinWindow, type PeriodWindow } from './dashboard-period';
  * definitions moved to `dashboard-dates.ts` to break the inspect <-> period import cycle -- see that
  * file's header for what the cycle would have cost.
  */
-export { TodayUtc, UtcDatePart };
+export { BusinessToday, UtcDatePart };
 
 /**
  * Whether a WON deal falls inside the dashboard's selected period.
@@ -102,7 +102,7 @@ export function ClosingSoon(deals: readonly DealRosterRow[], limit = 8): DealRos
 export function FilterInspect(
     deals: readonly DealRosterRow[],
     key: InspectKey,
-    today: string = TodayUtc(),
+    today: string = BusinessToday(),
     window?: PeriodWindow,
 ): DealRosterRow[] {
     const weekEnd = addDays(today, 7);
@@ -228,7 +228,7 @@ export interface CloseBucket {
     Tone?: 'warn';
 }
 
-export function CloseBuckets(deals: readonly DealRosterRow[], today: string = TodayUtc()): CloseBucket[] {
+export function CloseBuckets(deals: readonly DealRosterRow[], today: string = BusinessToday()): CloseBucket[] {
     const sum = (rows: DealRosterRow[]): { Count: number; Amount: number } => ({
         Count: rows.length,
         Amount: rows.reduce((n, d) => n + amount(d), 0),
