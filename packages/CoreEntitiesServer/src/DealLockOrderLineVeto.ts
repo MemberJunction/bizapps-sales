@@ -157,34 +157,27 @@ function SafeID(id: string): string {
  *
  * It lives HERE rather than in `sales-server` because this is the package that declares
  * `@mj-biz-apps/orders-entities`. `sales-server` resolves that name transitively to whatever is
- * published, so a call from there compiles only by accident of hoisting — and not at all until orders
- * ships the version carrying the seam. Keeping the import in the package that owns the dependency is
- * what lets the version requirement be stated here at all, and it is now stated exactly: `5.14.0`,
- * pinned without a caret.
+ * published, so a call from there compiles only by accident of hoisting. Keeping the import in the
+ * package that owns the dependency is what lets the version requirement be stated here at all.
  *
- * THE EXACT PIN IS LOAD-BEARING. `hostVeto` is a module-scoped variable, so the registry is
- * per-COPY, not per-process. Resolving a different version here than the `orders-core-entities-server`
- * that reads it would put the registration in one copy and the lookup in another -- the veto would
- * refuse nothing, and every test in this package would still pass. Orders pins `orders-entities`
- * exactly in all of its own packages; matching that version is what keeps this to one copy.
+ * ── WHY A CARET, AND WHY THIS WAS ONCE AN EXACT PIN ─────────────────────────────────────────────
  *
- * ── AND THAT MATCH IS NOT SELF-MAINTAINING, WHICH IS HOW IT BROKE ───────────────────────────────
+ * This used to be an exact pin, because the veto registry was a module-scoped variable: per COPY of
+ * `orders-entities`, not per process. A different version here than the `orders-core-entities-server`
+ * that reads it would have put the registration in one copy and the lookup in another.
  *
- * Orders' release rewrites its own internal pins on every version. This one lives in another repo,
- * so nothing moves it, and no repo's CI can see the drift: sales resolves one copy of whatever it
- * pins, orders is internally consistent, and both are green. The duplicate appears only in the host
- * app that installs BOTH, where npm cannot satisfy two exact pins from one copy and nests a second
- * `orders-entities` under this package.
+ * The exact pin then caused the failure it was guarding against. Orders' release moves its own
+ * internal pins on every version; this one lives in another repo, so nothing moved it. A host
+ * installing both could not satisfy two exact pins from one copy and nested a second
+ * `orders-entities` under this package. That copy re-ran every module-scope `@RegisterClass`,
+ * including the generated `OrderHeaderEntity`, which outranked `OrderEntityServer` -- so
+ * `OrderNumber` was never minted and every new order header failed its NOT NULL insert
+ * (bc-aidp-next-golive#258).
  *
- * THE DAMAGE IS NOT LIMITED TO THE VETO. That nested copy re-runs every module-scope
- * `@RegisterClass` in `orders-entities`, including the generated `OrderHeaderEntity` for
- * `MJ_BizApps_Orders: Order Headers`. `ClassFactory` auto-increments priority, so the later
- * registration outranks `OrderEntityServer` -- and `OrderNumber`, which only that server subclass
- * mints, is never assigned. Every new order header then fails its NOT NULL insert: the Orders
- * screen, and every Deal that provisions an embedded order. It is silent, because the collision
- * warning compares class NAMES and both copies are `OrderHeaderEntity`.
- *
- * So when orders publishes a new version, this pin moves with it in the same pass.
+ * The registry now lives in MJ's global object store, shared by every copy, so the pin is no longer
+ * needed for the veto. A caret is what keeps the host to ONE copy: it dedupes with whatever orders
+ * pins internally, for as long as orders stays on this major. The floor is the first version with the
+ * shared registry; do not lower it.
  *
  * Last-call-wins in the registry, so a host that boots twice in one process ends up with one vetoer.
  */
