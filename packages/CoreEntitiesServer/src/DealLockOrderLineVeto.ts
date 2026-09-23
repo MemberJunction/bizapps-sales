@@ -159,32 +159,46 @@ function SafeID(id: string): string {
  * `@mj-biz-apps/orders-entities`. `sales-server` resolves that name transitively to whatever is
  * published, so a call from there compiles only by accident of hoisting — and not at all until orders
  * ships the version carrying the seam. Keeping the import in the package that owns the dependency is
- * what lets the version requirement be stated here at all, and it is now stated exactly: `5.14.0`,
- * pinned without a caret.
+ * what lets the version requirement be stated here at all: `^5.14.0` -- 5.14.0 is the first version
+ * whose tarball carries the seam, and `<6.0.0` is the ceiling.
  *
- * THE EXACT PIN IS LOAD-BEARING. `hostVeto` is a module-scoped variable, so the registry is
- * per-COPY, not per-process. Resolving a different version here than the `orders-core-entities-server`
- * that reads it would put the registration in one copy and the lookup in another -- the veto would
- * refuse nothing, and every test in this package would still pass. Orders pins `orders-entities`
- * exactly in all of its own packages; matching that version is what keeps this to one copy.
+ * ONE COPY IS THE REQUIREMENT. ONE VERSION IS NOT, AND CONFLATING THEM IS WHAT BROKE IT TWICE.
  *
- * ── AND THAT MATCH IS NOT SELF-MAINTAINING, WHICH IS HOW IT BROKE ───────────────────────────────
+ * `hostVeto` is a module-scoped variable, so the registry is per-COPY, not per-process. Resolving a
+ * different copy here than the `orders-core-entities-server` that reads it would put the registration
+ * in one and the lookup in the other -- the veto would refuse nothing, and every test in this package
+ * would still pass.
  *
- * Orders' release rewrites its own internal pins on every version. This one lives in another repo,
- * so nothing moves it, and no repo's CI can see the drift: sales resolves one copy of whatever it
- * pins, orders is internally consistent, and both are green. The duplicate appears only in the host
- * app that installs BOTH, where npm cannot satisfy two exact pins from one copy and nests a second
- * `orders-entities` under this package.
+ * This file used to say the fix for that was to pin EXACTLY, matching the version orders pins inside
+ * its own packages. That reasoning inverts. Orders OWNS `orders-entities` and pins it exactly in
+ * `orders-ng`, `orders-server` and `orders-core-entities-server`; a SIBLING app that also pins it
+ * exactly is correct only while its number happens to equal orders', and nothing maintains that
+ * equality. Orders' release rewrites its own pins; this declaration lives in another repo, so nothing
+ * moves it, and no repo's CI can see the drift -- sales resolves one copy of whatever it pins, orders
+ * is internally consistent, and both are green. Two different exact pins is precisely what no
+ * resolver can satisfy from one copy.
  *
- * THE DAMAGE IS NOT LIMITED TO THE VETO. That nested copy re-runs every module-scope
- * `@RegisterClass` in `orders-entities`, including the generated `OrderHeaderEntity` for
- * `MJ_BizApps_Orders: Order Headers`. `ClassFactory` auto-increments priority, so the later
- * registration outranks `OrderEntityServer` -- and `OrderNumber`, which only that server subclass
- * mints, is never assigned. Every new order header then fails its NOT NULL insert: the Orders
- * screen, and every Deal that provisions an embedded order. It is silent, because the collision
- * warning compares class NAMES and both copies are `OrderHeaderEntity`.
+ * A RANGE HERE DEFERS TO THE OWNER'S PIN, which is what actually produces one copy. Measured in a
+ * host install against orders 5.16.0:
  *
- * So when orders publishes a new version, this pin moves with it in the same pass.
+ *     sales declares `5.14.0`   ->  2 copies  (5.14.0 nested under sales, 5.16.0 at the root)
+ *     sales declares `^5.14.0`  ->  1 copy    (5.16.0)
+ *
+ * THE DAMAGE FROM THAT SECOND COPY IS NOT LIMITED TO THE VETO, which is why this is worth the space.
+ * The nested copy re-runs every module-scope `@RegisterClass` in `orders-entities`, including the
+ * generated `OrderHeaderEntity` for `MJ_BizApps_Orders: Order Headers`. `ClassFactory`
+ * auto-increments priority, so the later registration outranks `OrderEntityServer` -- and
+ * `OrderNumber`, which only that server subclass mints, is never assigned. Every new order header
+ * then fails its NOT NULL insert: the Orders screen, and every Deal that provisions an embedded
+ * order. It is silent, because the collision warning compares class NAMES and both copies are
+ * `OrderHeaderEntity`.
+ *
+ * That is bc-aidp-next-golive#258. It was first fixed by moving the exact pin from 5.13.0 to 5.14.0,
+ * and it had recurred within two days -- orders shipped 5.15.0 and then 5.16.0, and nothing here
+ * moved. A fix that needs a human to chase every orders release is the part the range removes.
+ *
+ * The seam is verified present and identically exported in the tarballs of 5.13.0, 5.14.0, 5.15.0
+ * and 5.16.0, so the floor is where the seam starts rather than where a resolver happened to land.
  *
  * Last-call-wins in the registry, so a host that boots twice in one process ends up with one vetoer.
  */
