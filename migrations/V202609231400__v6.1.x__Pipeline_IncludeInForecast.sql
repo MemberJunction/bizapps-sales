@@ -40,6 +40,55 @@ GO
 EXEC sp_refreshview '[${flyway:defaultSchema}].[vwPipelines]';
 GO
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 -- =============================================================================
 -- CODEGEN OUTPUT — GENERATED CODE BELOW THIS LINE. DO NOT EDIT BY HAND.
 -- =============================================================================
