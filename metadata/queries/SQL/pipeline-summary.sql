@@ -12,6 +12,11 @@
 -- on the deal (applied from the stage), so this multiplies two stored values to answer a likelihood
 -- question.
 --
+-- PIPELINES FLAGGED OUT OF THE FORECAST ARE LEFT OUT, UNLESS ASKED FOR BY ID. Pipeline.IncludeInForecast
+-- = 0 marks a pipeline that holds historical deals, whose open rows would otherwise be counted beside
+-- the live ones. Naming the pipeline in PipelineID is an explicit request for it, so the flag steps
+-- aside; an unfiltered run can never pick it up by accident.
+--
 -- AMOUNT PROVENANCE TRAVELS WITH THE FIGURE. StatedAmount / PricedAmount split the same total by
 -- Deal.AmountIsComputed, because a hand-typed number and an orders-engine answer are different kinds
 -- of fact and a consumer that cannot tell them apart will present both as settled. On today's data
@@ -34,6 +39,8 @@ FROM [__mj_BizAppsSales].vwDeals d
 INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
        AND st.IsOpen = 1
+INNER JOIN [__mj_BizAppsSales].Pipeline p
+        ON p.ID = d.PipelineID
 LEFT OUTER JOIN [__mj_BizAppsSales].PipelineStage ps
         ON ps.ID = d.PipelineStageID
 WHERE 1 = 1
@@ -42,6 +49,8 @@ WHERE 1 = 1
   {% endif %}
   {% if PipelineID %}
   AND d.PipelineID = {{ PipelineID | sqlString }}
+  {% else %}
+  AND p.IncludeInForecast = 1
   {% endif %}
   {% if PeriodStart %}
   AND d.ExpectedCloseDate >= {{ PeriodStart | sqlString }}

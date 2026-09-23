@@ -10,6 +10,7 @@
  * @module @mj-biz-apps/sales-integration-tests
  */
 import { RunQuery, RunView } from '@memberjunction/core';
+import type { mjBizAppsSalesPipelineEntity } from '@mj-biz-apps/sales-entities';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import {
     CurrentForecastSourceFactory,
@@ -115,6 +116,19 @@ function utcDay(value: unknown): string {
     }
     return String(value).slice(0, 10);
 }
+
+/** A named Sales query's rows, failing the check if it did not run. */
+async function queryRows(ctx: Ctx, name: string, parameters?: Record<string, string>): Promise<Record<string, unknown>[]> {
+    const r = await new RunQuery().RunQuery({ QueryName: name, ...(parameters ? { Parameters: parameters } : {}) }, ctx.User);
+    Assert(r?.Success === true, `'${name}' did not run — ${r?.ErrorMessage ?? 'no reason given'}`);
+    return (r.Results ?? []) as Record<string, unknown>[];
+}
+
+const samePipeline = (pipelineID: string) => (r: Record<string, unknown>): boolean =>
+    String(r['PipelineID'] ?? '').toLowerCase() === pipelineID.toLowerCase();
+
+const total = (rs: Record<string, unknown>[], column: string): number =>
+    rs.reduce((n, r) => n + Number(r[column] ?? 0), 0);
 
 const job = new ForecastSnapshotJob();
 
@@ -683,6 +697,68 @@ export const ForecastChecks: NamedCheck[] = [
                     + 'shipping the daily job Active',
             );
         },
+    },
+    {
+        Id: 'forecast.FS14',
+        Name: 'FS14: a pipeline flagged out of the forecast loses its OPEN deals from the current-book queries and keeps its wins',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * A pipeline that holds historical deals stays visible, but its open rows must not be
+                 * counted beside the live ones (golive#257). Measured before and after flipping the flag
+                 * on a real pipeline, so the check proves the queries read the flag rather than proving a
+                 * fixture has no open deals.
+                 */
+                const before = await queryRows(ctx, 'Sales: Pipeline Summary');
+                const target = before.find((r) => Number(r['DealCount'] ?? 0) > 0);
+                Assert(!!target, 'setup: no pipeline has an open deal on this host. Seed demo data first.');
+                const pipelineID = String(target['PipelineID']);
+                const openBefore = before.filter(samePipeline(pipelineID));
+
+                const forecastBefore = (await queryRows(ctx, FORECAST_QUERY)).filter(samePipeline(pipelineID));
+                const dashboardBefore = (await queryRows(ctx, 'Sales: Dashboard Summary'))[0];
+
+                const pipe = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesPipelineEntity>(
+                    'MJ_BizApps_Sales: Pipelines',
+                    ctx.User,
+                );
+                Assert(await pipe.Load(pipelineID), `setup: could not load pipeline ${pipelineID}`);
+                AssertEqual(pipe.IncludeInForecast, true, 'setup: a pipeline counts toward the forecast by default');
+                pipe.IncludeInForecast = false;
+                Assert(await pipe.Save(), `setup: could not save the pipeline — ${pipe.LatestResult?.Message}`);
+
+                const after = await queryRows(ctx, 'Sales: Pipeline Summary');
+                AssertEqual(after.filter(samePipeline(pipelineID)).length, 0, 'Pipeline Summary drops the flagged pipeline');
+
+                const byID = await queryRows(ctx, 'Sales: Pipeline Summary', { PipelineID: pipelineID });
+                AssertEqual(
+                    total(byID, 'OpenAmount'),
+                    total(openBefore, 'OpenAmount'),
+                    'asking for the pipeline by ID still returns its open amount — an explicit request is not an accident',
+                );
+
+                const forecastAfter = (await queryRows(ctx, FORECAST_QUERY)).filter(samePipeline(pipelineID));
+                AssertEqual(total(forecastAfter, 'OpenDealCount'), 0, 'Forecast by Category counts none of its open deals');
+                AssertEqual(total(forecastAfter, 'PipelineAmount'), 0, 'and puts none of their amount in any bucket');
+                AssertEqual(
+                    total(forecastAfter, 'ClosedWonAmount'),
+                    total(forecastBefore, 'ClosedWonAmount'),
+                    'its won deals still count — a win in a historical pipeline is still a win',
+                );
+
+                const dashboardAfter = (await queryRows(ctx, 'Sales: Dashboard Summary'))[0];
+                AssertEqual(
+                    Number(dashboardAfter['OpenCount']),
+                    Number(dashboardBefore['OpenCount']) - total(openBefore, 'DealCount'),
+                    'the dashboard open-deal tile drops exactly that pipeline\'s open deals',
+                );
+                AssertEqual(
+                    Number(dashboardAfter['WonCount']),
+                    Number(dashboardBefore['WonCount']),
+                    'and the won tile is unchanged',
+                );
+            }),
     },
 ];
 

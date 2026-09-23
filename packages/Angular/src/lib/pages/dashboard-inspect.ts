@@ -21,6 +21,19 @@ import { WithinWindow, type PeriodWindow } from './dashboard-period';
 export { BusinessToday, UtcDatePart };
 
 /**
+ * The rows the dashboard's current-book figures read: every closed deal, plus every open deal whose
+ * pipeline counts toward the forecast (`Pipeline.IncludeInForecast`).
+ *
+ * A pipeline that holds historical deals is flagged out so its open rows cannot be counted beside the
+ * live ones. Its closed deals stay: a win there is still a win. The board does NOT go through this --
+ * it shows every deal, so such a pipeline is still viewable. `dashboard-summary.sql` applies the same
+ * rule to the headline tiles.
+ */
+export function InForecast(deals: readonly DealRosterRow[]): DealRosterRow[] {
+    return deals.filter((d) => !d.IsOpen || d.PipelineIncludeInForecast);
+}
+
+/**
  * Whether a WON deal falls inside the dashboard's selected period.
  *
  * ── ONE PREDICATE, TWO CALLERS, ON PURPOSE ──────────────────────────────────────────────────────
