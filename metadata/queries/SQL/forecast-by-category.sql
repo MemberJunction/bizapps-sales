@@ -14,6 +14,10 @@
 --
 -- DATE DIMENSION: ExpectedCloseDate — a forecast is about the period a deal is expected to land in.
 --
+-- PIPELINES FLAGGED OUT OF THE FORECAST. Pipeline.IncludeInForecast = 0 drops that pipeline's OPEN
+-- deals from every bucket; its won deals still count toward ClosedWonAmount. This is the query the
+-- daily ForecastSnapshot job reads, so the snapshot history inherits the same rule.
+--
 -- CLOSED IS REPORTED ALONGSIDE, NOT MIXED IN. ClosedAmount sums won deals in the same period, using
 -- ActualCloseDate, so a forecast review can see attainment against the same window without a second
 -- query. It is a different date column on purpose and is labelled as such.
@@ -32,6 +36,8 @@ SELECT
 FROM [__mj_BizAppsSales].vwDeals d
 INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
+INNER JOIN [__mj_BizAppsSales].Pipeline p
+        ON p.ID = d.PipelineID
 LEFT OUTER JOIN [__mj_BizAppsSales].ForecastCategoryType fc
         ON fc.ID = d.ForecastCategoryTypeID
        AND fc.IsActive = 1
@@ -41,6 +47,10 @@ WHERE 1 = 1
   {% endif %}
   {% if PipelineID %}
   AND d.PipelineID = {{ PipelineID | sqlString }}
+  {% else %}
+  -- A pipeline flagged out of the forecast keeps its WON deals here (they are attainment) and loses
+  -- its open ones (they are not the current book). Asking for the pipeline by ID includes it.
+  AND (st.IsOpen = 0 OR p.IncludeInForecast = 1)
   {% endif %}
   -- Open deals are placed by EXPECTED close; won deals by ACTUAL close. Same window, and each row
   -- uses the date that actually answers its question.

@@ -130,13 +130,17 @@ SELECT
 FROM [__mj_BizAppsSales].Deal d
 INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
+INNER JOIN [__mj_BizAppsSales].Pipeline p
+        ON p.ID = d.PipelineID
 LEFT OUTER JOIN [__mj_BizAppsSales].ForecastCategoryType fc
         ON fc.ID = d.ForecastCategoryTypeID
        AND fc.IsActive = 1
 WHERE
     -- Open deals belong to the period they are EXPECTED to close in; won deals to the period they
     -- ACTUALLY closed in. Two date columns because they answer two questions, per §9.2.
-    (st.IsOpen = 1 AND d.ExpectedCloseDate BETWEEN @PeriodStart AND @PeriodEnd)
+    -- Open deals in a pipeline flagged out of the forecast (Pipeline.IncludeInForecast = 0) are
+    -- left out, matching `Sales: Forecast by Category`.
+    (st.IsOpen = 1 AND p.IncludeInForecast = 1 AND d.ExpectedCloseDate BETWEEN @PeriodStart AND @PeriodEnd)
  OR (st.IsWon  = 1 AND d.ActualCloseDate   BETWEEN @PeriodStart AND @PeriodEnd)
 GROUP BY
     d.CompanyID, d.PipelineID, d.OwnerEmployeeID;

@@ -124,6 +124,12 @@ export interface DealRosterRow {
     PipelineID: string | null;
     PipelineStageID: string | null;
     /**
+     * `Pipeline.IncludeInForecast`. False for a pipeline that only holds historical deals: its open
+     * deals still render on the board but are left out of every current-book figure on the dashboard.
+     * See `InForecast`.
+     */
+    PipelineIncludeInForecast: boolean;
+    /**
      * STATUS FLAGS, APPLIED SERVER-SIDE, so no consumer has to resolve them from a second fetch.
      *
      * `Sales: Deal Roster` returns these per row. Before, the section loaded every DealStatusType
@@ -417,6 +423,7 @@ export class DealWorkspaceService {
             DealStatusTypeID: (d['DealStatusTypeID'] as string | null) ?? null,
             PipelineID: (d['PipelineID'] as string | null) ?? null,
             PipelineStageID: (d['PipelineStageID'] as string | null) ?? null,
+            PipelineIncludeInForecast: bool(d['PipelineIncludeInForecast']),
             CurrencyID: (d['CurrencyID'] as string | null) ?? null,
             IsOpen: bool(d['IsOpen']),
             IsWon: bool(d['IsWon']),
