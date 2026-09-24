@@ -31,6 +31,7 @@ import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.
  */
 
 const ORDER_ID = '762de12a-0000-4000-8000-000000000001';
+const BLANK_ID = 'bbbbbbbb-0000-4000-8000-00000000000b';
 
 interface Harness {
     e: MJSDealLineEditorComponent;
@@ -75,7 +76,21 @@ function harness(opts: { orderID?: string | null; hydrated?: boolean; loadSuccee
         },
         OrderID_EnsureObject: () => {
             calls.push('EnsureObject');
-            // Faithful to EmbeddedRecord.Ensure(): the real peer only when exposed, else a blank.
+            /**
+             * `Ensure()` IS NOT A READ, and modelling it as one is how this suite lied.
+             *
+             * The real one mints when the peer is not exposed: `NewRecord()` generates a `uuidv4()` for
+             * a single uniqueidentifier primary key, and `stampOwnerKey()` writes that id into the
+             * OWNER's foreign key before returning. So calling it MUTATES `deal.OrderID`.
+             *
+             * An earlier version of this mock returned a blank without stamping, and LE5 passed for the
+             * wrong reason: a guard phrased as "the FK is set and the order is not saved" cannot fire on
+             * a deal that started with no FK, because the mock never gave it one. Against the real
+             * `Ensure()` it does, and the legitimate unsaved-deal case would have been refused.
+             */
+            if (!exposed) {
+                deal.OrderID = BLANK_ID;
+            }
             return exposed ? realOrder : blankOrder;
         },
         // Status is unread here, so ResolveDealLockState short-circuits without a provider.
@@ -165,5 +180,30 @@ describe('the add-product dialog resolves the deal’s own order before it can m
         expect(calls, 'there is no FK to resolve').not.toContain('LoadObject');
         expect(e.Error, 'an in-memory order is not a failure').toBeFalsy();
         expect(calls, 'and the line is composed as before').toContain('Lines.Create');
+    });
+
+    it('LE6: a refusal leaves Deal.OrderID pointing where it did, and never calls Ensure', async () => {
+        /**
+         * THE REASON THE ORDER OF THE TWO CHECKS IS THE FIX, rather than a tidier arrangement of it.
+         *
+         * `Ensure()` stamps the owner's FK (see the mock). Refusing AFTER it would therefore leave the
+         * `DealEntity` this dialog SHARES with the form repointed at a blank, unsaved order — so the
+         * user reads "the order could not be loaded", closes the dialog, edits the deal name, saves,
+         * and gets `Company cannot be null` against an order they never saw. That is the same error
+         * this guard exists to prevent, moved one screen away and made harder to trace.
+         *
+         * So the assertion is not "an error was set". It is that the deal came out UNTOUCHED.
+         */
+        const { e, calls } = harness({ hydrated: false, loadSucceeds: false });
+        const deal = e.Deal as unknown as { OrderID: string | null };
+
+        await e.ngOnInit();
+
+        expect(e.Error, 'the refusal still happens').toBeTruthy();
+        expect(deal.OrderID, 'the deal must still name its own order, not a blank').toBe(ORDER_ID);
+        expect(
+            calls,
+            'Ensure() mints and stamps, so reaching it at all is the defect — the decision comes first',
+        ).not.toContain('EnsureObject');
     });
 });

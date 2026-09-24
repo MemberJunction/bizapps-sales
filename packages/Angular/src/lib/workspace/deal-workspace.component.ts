@@ -910,6 +910,12 @@ export class DealWorkspaceComponent implements OnInit {
         // save SUCCEEDS and silently writes the rep's line to an order nothing points at. Resolving the
         // FK first is the whole fix, and it is a no-op both when the peer is already loaded and when the
         // deal has no order at all -- which is the unsaved-deal case this method exists for.
+        //
+        // No refusal here, unlike the add-product dialog: composing lines on an in-memory order before
+        // the first save is this method's purpose, and the header below is stamped with a company so
+        // that save succeeds. Upstream: MemberJunction/MJ#4739 tracks the two core behaviours -- a
+        // swallowed peer-load failure, and `Ensure()` repointing the owner's FK -- that make the
+        // resolve-first step necessary at all. This guard can come out when that lands.
         if (this.Deal?.OrderID && !this.Deal.OrderID_Object) {
             await this.Deal.OrderID_LoadObject();
         }
