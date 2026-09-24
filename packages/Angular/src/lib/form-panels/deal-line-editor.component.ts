@@ -137,10 +137,11 @@ interface RemoteOperationRouter {
                 <div class="mjs-le__body">
                     <label class="mjs-le__field">
                         <span class="mjs-le__label">Product</span>
-                        <!-- Filtered to Active and today's availability window by ProductFilterFor, and
-                             NOT filtered by company: a deal may sell any company's product, and the LINE
-                             takes its company from whichever is chosen. Each option names its owner
-                             because two companies can both sell an "Onboarding Fee". -->
+                        <!-- Filtered by ProductFilterFor to Active and to the availability window as of
+                             today IN THE BUSINESS TIME ZONE (#168), and NOT filtered by company: a deal
+                             may sell any company's product, and the LINE takes its company from whichever
+                             is chosen. Each option names its owner because two companies can both sell an
+                             "Onboarding Fee". -->
                         <select [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
                                 [disabled]="IsLocked" [title]="BlockedReason">
                             <option [ngValue]="null">— choose a product —</option>

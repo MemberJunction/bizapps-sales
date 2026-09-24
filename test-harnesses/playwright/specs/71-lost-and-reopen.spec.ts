@@ -11,30 +11,46 @@
  *
  *   Closed Lost -> the embedded order is VOIDED, because a lost deal's order must stop being something
  *                  finance might act on.
- *   Reopened    -> the order CANNOT come back, because `Voided` is terminal in orders' own transition
- *                  table, and the reopen SURFACES A WARNING saying so.
+ *   Reopened    -> the order COMES BACK when the restored stage declares a status orders allows from
+ *                  `Voided`, and when it cannot the reopen SURFACES A WARNING saying so.
  *
- * ── THE WARNING IS THE ASSERTION, NOT AN INCONVENIENCE ──────────────────────────────────────────
+ * ── THE SECOND RULE USED TO BE WRITTEN THE OTHER WAY ROUND, AND IT WAS WRONG ────────────────────
  *
- * ⚠️ **THIS SPEC IS RED ON PURPOSE — see DN-18 and step 4.** Everything up to the final assertion passes:
- * the loss voids the order, the reopen succeeds, the append-only log keeps both events, and the order
- * stays `Voided`. What fails is the last claim — that the screen SAYS the order could not follow. It does
- * not, because the workspace's reopen never asks for a stage, so nothing attempts the restore and there is
- * no refusal to report. Asserted rather than relaxed, so it goes green when the gap is closed.
+ * This header said the order "CANNOT come back, because `Voided` is terminal in orders' own transition
+ * table", and that the spec was therefore RED ON PURPOSE waiting for a warning that could never be
+ * avoided. Orders says otherwise, by its own API: `TRANSITIONS.Voided` is `['Draft', 'Quoted']`, so
+ * `IsTerminal('Voided')` is FALSE and `Confirmed` is the terminal status. Step 3 below had already been
+ * repaired on 2026-08-26 after measuring exactly that ("expected Voided, got Quoted") — so the file has
+ * been arguing with itself since, its header asserting the premise its body disproves.
  *
- * S-US8 wants the order restored on reopen and orders will not allow it. The designed outcome is that the
- * deal reopens ANYWAY and the refusal is reported: a stage change must never be blocked by an order-side
- * refusal. **A silent reopen is the bug** — it leaves a working deal pointing at a voided order with
- * nothing on screen saying so, and the next person to look finds it weeks later.
+ * WHICH WAY THIS SPEC ACTUALLY GOES depends on the stage the reopen restores, and that is why the setup
+ * below advances the deal to a QUOTING stage before losing it rather than leaving it where `ComposeDeal`
+ * put it. The restored stage then declares `Quoted`, orders permits `Voided -> Quoted`, and the order
+ * follows. Step 3 derives that expectation from the stage and from `CanTransition` rather than naming a
+ * status, so it tracks orders' table instead of re-encoding a snapshot of it.
  *
- * So this spec fails in two directions: if the order is not voided on loss, and if the reopen says
- * nothing about it.
+ * **A silent reopen is still the bug** — a working deal pointing at a voided order with nothing on
+ * screen saying so. That tripwire is kept, gated on whether orders actually refused: demanding a warning
+ * about a refusal that did not happen would be asserting the old premise a second time.
+ *
+ * So this spec fails in two directions: if the order is not voided on loss, and if the reopen neither
+ * brings the order back nor says why it could not.
  *
  * ── HOW TO MAKE IT FAIL ─────────────────────────────────────────────────────────────────────────
  *
- * In `DealEntityServer`, replace the `_orderStatusWarnings.push(...)` in the refusal branch with a local
- * that is never read (mutant `M-OS3` does exactly this). The reopen still succeeds, the order is still
- * voided, and only the warning assertion fails.
+ * In `DealEntityServer.planStageOrderStatus`, return `null` unconditionally so no plan is produced. The
+ * loss still voids the order, the reopen still succeeds, the log still holds both events — and step 3
+ * fails on the one thing this spec is for: the order did not follow the stage it was restored into.
+ *
+ * NOT "return before `order.Save()` in `applyStageOrderStatus`", which an earlier version of this note
+ * suggested. That method assigns `order.Status = plan.Target` BEFORE saving, and its own comment records
+ * that the deal's save graph writes the embedded order regardless — so the mutant may leave the spec
+ * green and prove nothing. Killing the PLAN is unambiguous; killing the write is not.
+ *
+ * NOT the old recipe, which was to blank the `_orderStatusWarnings.push(...)` in the refusal branch
+ * (mutant `M-OS3`). That branch does not execute in this flow any more: the restored stage declares
+ * `Quoted`, orders permits the move, so there is no refusal to warn about and the warning assertion is
+ * gated off. A mutant aimed at a branch the spec no longer reaches proves nothing about the spec.
  */
 import { expect, test } from '@playwright/test';
 
@@ -63,7 +79,7 @@ test.describe('closed lost and reopen — what happens to the order', () => {
         await AssertBaseline();
     });
 
-    test('lost voids the order; reopen succeeds and SAYS the order could not follow', async ({ page }) => {
+    test('lost voids the order; reopen brings it back, or says why it could not', async ({ page }) => {
         test.setTimeout(600_000);
         const sink = captureConsoleErrors(page);
 
@@ -134,8 +150,9 @@ test.describe('closed lost and reopen — what happens to the order', () => {
          * (`closingStageForOutcome`), so the pre-move is redundant: closing as LOST lands the deal in the
          * losing stage, that stage declares `OrderStatusOnEntry = 'Voided'`, and the order is voided by
          * the same writer as before. The reopen then restores the stage the deal came FROM, that stage
-         * asks for `Quoted`, orders refuses because `Voided` is terminal — and the refusal is what this
-         * spec exists to see on screen.
+         * asks for `Quoted`, and orders PERMITS that move — `TRANSITIONS.Voided` is `['Draft', 'Quoted']`
+         * (D-OS4). So the order comes back, which is what step 3 derives rather than assumes. The
+         * warning this spec also guards is for a refusal that genuinely happens, and is gated on one.
          *
          * `losing` is still resolved above, and still asserted, because a pipeline with no losing stage
          * would make the derivation return null and this scenario unreachable.

@@ -344,6 +344,13 @@ export const ForecastChecks: NamedCheck[] = [
              * timezone behind Greenwich still says March. A run on a UTC host sees no difference either,
              * which is why the second instant below covers the other direction.
              */
+            /**
+             * THESE CALLS PASS NO ZONE, WHICH IS THE POINT. `CurrentMonthPeriod` gained an optional
+             * zone at #168 — `RunForecastSnapshot` passes the business one, so a nightly job in the
+             * evening no longer rolls into next month early. The default is still UTC, and that is
+             * what the four assertions below pin: the zone-aware path is proved by the unit test
+             * `ForecastBusinessMonth.test.ts`, which pins America/Chicago explicitly.
+             */
             const justAfterUtcMonthStart = new Date('2026-04-01T00:30:00.000Z');
             const period = CurrentMonthPeriod(justAfterUtcMonthStart);
 

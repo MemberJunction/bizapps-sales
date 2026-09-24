@@ -128,8 +128,10 @@
   {
     "_comments": [
       "VOIDING THE ORDER IS THE POINT OF THIS ROW (S-US7). A lost deal's order has to stop being",
-      "something finance might act on, and Voided is terminal in orders — which is also what makes the",
-      "reopen case in S-US8 warn rather than silently half-succeed."
+      "something finance might act on. This used to add that Voided is terminal in orders, and that",
+      "this is what makes the S-US8 reopen warn. Neither holds: TRANSITIONS.Voided is",
+      "[Draft, Quoted], so a reopen returns the order to Draft instead of warning about it",
+      "(docs/DECISIONS.md D-OS4)."
     ],
     "fields": {
       "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=B2B",

@@ -11,9 +11,11 @@ name: CI
 #      Until this workflow existed, that grep was a script nobody ran — the plan claimed an enforcement
 #      that did not exist, which is worse than no rule at all. Now it fails the build.
 #
-#   2. THE BUILD — all 8 turbo tasks, including the Angular Explorer. This is what catches a broken
-#      generated-code import, a package that does not typecheck, or a tsconfig that only worked because
-#      of something stale in a local node_modules.
+#   2. THE BUILD — every turbo build task in packages/, including the Angular package. This is what
+#      catches a broken generated-code import, a package that does not typecheck, or a tsconfig that
+#      only worked because of something stale in a local node_modules.
+#      (It said "all 8 turbo tasks, including the Angular Explorer". There are 6, and there is no
+#      Explorer here to build — apps/ was retired, as the note further down already says.)
 #
 # WHAT IT CANNOT COVER, stated plainly rather than faked:
 #
@@ -28,11 +30,15 @@ name: CI
 #       pnpm run test:explorer:auth      # once, you log in
 #       pnpm run test:explorer
 #
-#   INTEGRATION CHECKS need a live database, so they are not run here either. There are 30 that need
-#   only sales (save-deal SD1-SD16, close-deal CD1-CD14) and 16 more that need a linked sibling —
-#   product-picker PP1-PP4, close-won-handoff CW1-CW4 and close-won-d2c D1-D4 need orders,
-#   close-won-contract CT1-CT4 needs contracts. `test:integration` runs whichever of those this host
-#   can support; scripts/expected-check-counts.json is the source of truth for the numbers.
+#   INTEGRATION CHECKS need a live database, so they are not run here either. Every bundle, its check
+#   count, its id range and the sibling app it requires live in scripts/expected-check-counts.json,
+#   and `test:integration` runs whichever of them this host can support.
+#
+#   THE NUMBERS ARE NOT REPEATED HERE, and that is the fix rather than laziness. This paragraph used to
+#   list every bundle's id range, declare that JSON the source of truth in its closing sentence, and then
+#   drift from it -- including naming two bundles that had been RETIRED. An earlier attempt at this fix
+#   made the point and then restated the ranges anyway, one of them already wrong again. A second copy of
+#   a number beside its source of truth only ever becomes a lie, so there is no second copy.
 #
 #   RUN_MUTATION_TESTS=1 is MANDATORY when you run them locally: the runner contains
 #   `c.RequiresMutation ? RUN_MUTATIONS : true`, so a run without it executes NOTHING and reports

@@ -24,7 +24,7 @@ import { RunView } from '@memberjunction/core';
 import { Assert, type NamedCheck } from '@memberjunction/testing-integration';
 import { E_ORDERS_PRODUCT, ProductFilterFor, type DealEntity } from '@mj-biz-apps/sales-entities';
 
-import { ProviderOf, type SalesFixture } from '../fixture.js';
+import { ProviderOf, businessToday, type SalesFixture } from '../fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -67,7 +67,7 @@ async function sellableProducts(ctx: Ctx, companyID: string, count: number): Pro
     if (count === 0) {
         return [];
     }
-    const scoped = `CompanyID = '${companyID.replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())})`;
+    const scoped = `CompanyID = '${companyID.replace(/'/g, "''")}' AND (${ProductFilterFor(await businessToday(ctx))})`;
     const r = await new RunView().RunView<{ ID: string; Name: string }>(
         {
             EntityName: E_ORDERS_PRODUCT,

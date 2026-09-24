@@ -1,0 +1,41 @@
+[
+  {
+    "_comments": [
+      "bc-aidp-next-golive#259 item 3: the Commercial section's Currency renders as an empty text box,",
+      "and would render a raw GUID if anything ever filled it. Same structural cause as the two contract",
+      "fields, and the same remedy.",
+      "",
+      "Deal.CurrencyID is a SOFT reference -- its own column comment says so -- because currency reference",
+      "data belongs to ACCOUNTING, which sits below sales in the dependency graph and knows nothing about",
+      "deals. No database FK means CodeGen sets no RelatedEntityID, and mj-form-field with no related",
+      "entity has no name to show, nowhere to go, and no picker to offer. It falls back to a text box.",
+      "",
+      "IsSoftForeignKey=1 plus AutoUpdateRelatedEntityInfo=0 is the pair that makes this stick: the first",
+      "declares the link deliberate, the second tells CodeGen not to re-derive it from a constraint that",
+      "does not exist and will never exist.",
+      "",
+      "WHAT THIS DOES NOT DO: it creates no constraint and nothing to violate. The database is untouched.",
+      "It also does not SET a currency on anything -- a deal created tomorrow still arrives with the field",
+      "null. Defaulting it is server-side work (DealEntityServer), deliberately separate, because a picker",
+      "that works and a value that is chosen for you are two different fixes and only one of them belongs",
+      "in metadata.",
+      "",
+      "Accounting is a declared dependency in mj-app.json, so naming its entity here is legitimate. The",
+      "matching declaration in codegen-schema-info.json is what re-applies this after a rebuild-from-zero,",
+      "and it SKIPS with a warning on a host where accounting is absent rather than failing.",
+      "",
+      "The related entity's name field is Name ('US Dollar'), with Code, Symbol and Decimal Places already",
+      "flagged DefaultInView -- so the picker reads as a currency list, not a list of ids, with no further",
+      "metadata needed on the accounting side."
+    ],
+    "fields": {
+      "RelatedEntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Accounting: Currencies",
+      "RelatedEntityFieldName": "ID",
+      "IsSoftForeignKey": true,
+      "AutoUpdateRelatedEntityInfo": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=CurrencyID"
+    }
+  }
+]
