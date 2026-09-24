@@ -20,6 +20,10 @@ import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.
  *   - On the WORKSPACE the header IS stamped with a company, so the save SUCCEEDS and the rep's line
  *     lands on an order nothing points at. `79-embedded-order-refresh.spec.ts` guards that half.
  *
+ * THESE CHECKS COVER THE DIALOG ONLY. `DealWorkspaceComponent` is not instantiated here and is not
+ * changed by this branch -- it is rendered by no template, and fixing `AddLine()` needs more than the
+ * resolve-first step (the embedded load does not bring `Lines`, which is `Load: 'explicit'`).
+ *
  * `DealEntity.Save()` already resolves the peer after a SAVE. Neither of the above goes through a save,
  * so that guard cannot reach them -- this is the LOAD path, and it needs its own.
  *
@@ -168,10 +172,17 @@ describe('the add-product dialog resolves the deal’s own order before it can m
         /**
          * The second control, and the one that stops the refusal being too broad.
          *
-         * A deal with no `OrderID` has an order that exists only in memory, and that is legitimate --
-         * the workspace composes lines on one before the first save. Keying the refusal on `IsSaved`
-         * ALONE would refuse exactly that case. It is keyed on `Deal.OrderID` being set as well, which
-         * is the statement "this deal names an order that should have come back".
+         * Keying the refusal on `IsSaved` alone would refuse a deal that simply has no order yet, and
+         * `Ensure()` is what makes that reachable: it stamps the owner's FK, so AFTER it a deal that
+         * named no order names one, and an `IsSaved`-only guard fires on the ordinary create case.
+         *
+         * Keyed on `Deal.OrderID` instead, and asked BEFORE `Ensure()`, it says the one thing that is
+         * actually load-bearing: this deal names an order that should have come back.
+         *
+         * An earlier version of this comment justified the control by saying the workspace composes
+         * lines on an in-memory order before the first save. That is not true -- `CanAddLine` requires
+         * `Deal.IsSaved`, so the button is disabled there -- and the control is worth keeping on its
+         * own terms regardless.
          */
         const { e, calls } = harness({ orderID: null });
 
