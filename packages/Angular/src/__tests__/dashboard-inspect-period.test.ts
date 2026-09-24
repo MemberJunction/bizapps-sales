@@ -41,6 +41,7 @@ function deal(overrides: Partial<DealRosterRow>): DealRosterRow {
         DealStatusTypeID: null,
         PipelineID: null,
         PipelineStageID: null,
+        PipelineIncludeInForecast: true,
         IsOpen: false,
         IsWon: false,
         IsLost: false,

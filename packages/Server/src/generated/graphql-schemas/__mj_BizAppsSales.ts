@@ -4193,6 +4193,9 @@ export class mjBizAppsSalesPipeline_ {
     @Field(() => Boolean, {nullable: true}) 
     IsActive?: boolean;
         
+    @Field(() => Boolean, {description: `Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless.`}) 
+    IncludeInForecast: boolean;
+        
     @Field() 
     _mj__CreatedAt: Date;
         
@@ -4257,6 +4260,9 @@ export class CreatemjBizAppsSalesPipelineInput {
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
 
+    @Field(() => Boolean, { nullable: true })
+    IncludeInForecast?: boolean;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -4302,6 +4308,9 @@ export class UpdatemjBizAppsSalesPipelineInput {
 
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
+
+    @Field(() => Boolean, { nullable: true })
+    IncludeInForecast?: boolean;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

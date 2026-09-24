@@ -1515,6 +1515,12 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    IncludeInForecast: z.boolean().describe(`
+        * * Field Name: IncludeInForecast
+        * * Display Name: Include In Forecast
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless.`),
     Company: z.string().describe(`
         * * Field Name: Company
         * * Display Name: Company
@@ -5866,6 +5872,20 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     */
     get __mj_UpdatedAt(): Date {
         return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: IncludeInForecast
+    * * Display Name: Include In Forecast
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless.
+    */
+    get IncludeInForecast(): boolean {
+        return this.Get('IncludeInForecast');
+    }
+    set IncludeInForecast(value: boolean) {
+        this.Set('IncludeInForecast', value);
     }
 
     /**
