@@ -32,7 +32,7 @@
  */
 // From the leaf date module, NOT from `dashboard-inspect` -- importing it here would close an
 // ES-module cycle, because inspect imports `WithinWindow` from this file. See `dashboard-dates.ts`.
-import { TodayUtc, UtcDatePart } from './dashboard-dates';
+import { BusinessToday, UtcDatePart } from './dashboard-dates';
 
 /** The four windows the dashboard offers. `alltime` is unbounded, not a very wide bound. */
 export type PeriodKey = 'quarter' | 'lastquarter' | 'year' | 'alltime';
@@ -256,16 +256,21 @@ export function FiscalQuarterOf(today: string, fiscalYear: number, start: Fiscal
 }
 
 /**
- * The window a period key selects, as inclusive UTC date-only bounds.
+ * The window a period key selects, as inclusive `YYYY-MM-DD` bounds.
  *
  * `alltime` returns nulls rather than a very wide pair of dates. A wide bound still excludes a row
  * with a NULL close date and still hides a badly-dated row outside it; no bound at all is the
  * question the tile is actually asking.
+ *
+ * `today` DEFAULTS TO THE BUSINESS DAY, not the UTC one (bc-aidp-next-golive#168) — which quarter it
+ * is is a "today" question, so a zone decides it. The BOUNDS the function returns are calendar days
+ * and stay zone-free; they are compared against `DATE` columns read from their UTC parts. Callers
+ * that pass `today` explicitly (every test here does) are unaffected.
  */
 export function ResolvePeriod(
     key: PeriodKey,
     start: FiscalYearStart = CALENDAR_YEAR_START,
-    today: string = TodayUtc(),
+    today: string = BusinessToday(),
 ): PeriodWindow {
     const Label = labelFor(key);
     if (key === 'alltime') {

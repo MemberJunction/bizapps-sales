@@ -9,6 +9,7 @@
  * @module @mj-biz-apps/sales-core-entities-server
  */
 import { LogStatus, RunView, type IMetadataProvider, type UserInfo } from '@memberjunction/core';
+import { BusinessTimeZoneEngine, CalendarDayIn, ToCalendarDay, UTC_ZONE } from '@mj-biz-apps/common-entities';
 import type { mjBizAppsSalesForecastSnapshotEntity } from '@mj-biz-apps/sales-entities';
 
 import type { ForecastPeriod, IForecastSource } from './ForecastSource.js';
@@ -53,7 +54,7 @@ export function CurrentForecastSourceFactory(): ForecastSourceFactory {
 }
 
 /**
- * The period a snapshot covers, when nobody says otherwise: the current calendar month, in UTC.
+ * The period a snapshot covers, when nobody says otherwise: the current calendar month.
  *
  * ── WHY THE CALENDAR MONTH, AND WHY THAT IS A CHOICE RATHER THAN A FACT ──
  *
@@ -62,12 +63,25 @@ export function CurrentForecastSourceFactory(): ForecastSourceFactory {
  * invented configuration. It is very likely right (most forecasting is monthly) and it is definitely
  * not derived from anything, which is why it is recorded as D-28 rather than presented as the model.
  *
- * Computed with `getUTC*` throughout. A local-time month boundary would put the whole first and last day
- * of every month in the wrong period for anyone west of Greenwich.
+ * ── TWO SEPARATE ZONE QUESTIONS, AND ONLY ONE OF THEM HAS A ZONE ANSWER (#168) ──
+ *
+ * WHICH MONTH `now` falls in is a "today" question, so `zone` decides it. This read `getUTCMonth()`,
+ * and a nightly job runs in the evening: on the last day of every month UTC had already rolled over
+ * while the business was still in the old one, so the snapshot for the month just ending was never
+ * taken — the job was already measuring the next.
+ *
+ * WHERE THE BOUNDARIES SIT has no zone answer at all. `PeriodStart`/`PeriodEnd` land in `DATE`
+ * columns, which are calendar days, and UTC midnight is the shape such a column round-trips as. So
+ * they are built with `Date.UTC` regardless of `zone` — using the instant the month began in `zone`
+ * would read back a day early from the UTC parts every reader of a `DATE` column uses.
+ *
+ * @param zone - IANA name; `BusinessTimeZoneEngine.Instance.Zone` at the call sites. UTC by default,
+ *   which is what this function did before and what every caller that passes nothing still gets.
  */
-export function CurrentMonthPeriod(now: Date): ForecastPeriod {
-    const year = now.getUTCFullYear();
-    const month = now.getUTCMonth();
+export function CurrentMonthPeriod(now: Date, zone: string = UTC_ZONE): ForecastPeriod {
+    const day = CalendarDayIn(now, zone);
+    const year = Number(day.slice(0, 4));
+    const month = Number(day.slice(5, 7)) - 1;
     return {
         PeriodStart: new Date(Date.UTC(year, month, 1)),
         // Day 0 of the NEXT month is the last day of this one, without a leap-year table.
@@ -97,6 +111,13 @@ export class ForecastSnapshotJob {
         provider: IMetadataProvider,
         contextUser: UserInfo,
     ): Promise<ForecastSnapshotResult> {
+        /**
+         * The zone is loaded before anything asks what day it is. One cached instance-configuration
+         * row; a second call is a no-op, and a missing or unreadable row falls back to UTC with one
+         * warning rather than throwing — a snapshot in the wrong zone beats no snapshot.
+         */
+        await BusinessTimeZoneEngine.Instance.Config(false, contextUser, provider);
+
         const result: ForecastSnapshotResult = {
             Success: false,
             Measured: 0,
@@ -202,9 +223,14 @@ export class ForecastSnapshotJob {
     /**
      * The grains already captured for this period TODAY.
      *
-     * Compared on the UTC date of `CapturedAt`, read back in code rather than filtered in SQL: a
+     * Compared on the BUSINESS date of `CapturedAt`, read back in code rather than filtered in SQL: a
      * `CAST(CapturedAt AS DATE)` in an `ExtraFilter` would be both non-portable and non-sargable, and the
      * row count for one period is small.
+     *
+     * `CapturedAt` is an INSTANT, which is the one thing a zone legitimately converts (#168) — and it
+     * has to be the same zone on both sides or the guard compares two different calendars. Under UTC a
+     * capture taken at 8 PM Central and one taken at 9 AM the next morning are different days, so the
+     * job would have written a second capture of the same period the morning after every evening run.
      */
     private async capturedToday(period: ForecastPeriod, contextUser: UserInfo): Promise<Set<string>> {
         const r = await new RunView().RunView<{
@@ -223,7 +249,7 @@ export class ForecastSnapshotJob {
             contextUser,
         );
 
-        const today = isoDate(new Date());
+        const today = businessDay(new Date());
         const seen = new Set<string>();
         if (!r.Success) {
             /**
@@ -235,7 +261,7 @@ export class ForecastSnapshotJob {
             return seen;
         }
         for (const row of r.Results ?? []) {
-            if (isoDate(new Date(row.CapturedAt)) === today) {
+            if (businessDay(new Date(row.CapturedAt)) === today) {
                 seen.add(grainKey(row.CompanyID, row.PipelineID, row.OwnerEmployeeID));
             }
         }
@@ -271,7 +297,40 @@ export async function RunForecastSnapshot(
             ],
         };
     }
-    return new ForecastSnapshotJob().Capture(period ?? CurrentMonthPeriod(now), source, provider, contextUser);
+    return new ForecastSnapshotJob().Capture(
+        period ?? (await businessMonthPeriod(now, provider, contextUser)),
+        source,
+        provider,
+        contextUser,
+    );
+}
+
+/**
+ * The current business month — computed ONLY when no period was given.
+ *
+ * ── WHY THIS IS A FUNCTION AND NOT TWO LINES ABOVE THE CALL ──
+ *
+ * It was two lines above the call, and that silently removed the `??`'s short-circuit. `period ??
+ * fallback` still reads as "only if none was given", but `fallback` had already been COMPUTED by
+ * then: a caller naming its own window paid for the configuration read and for `CurrentMonthPeriod`,
+ * and — the part that is not merely wasteful — an unusable `now` threw a `RangeError` out of `Intl`
+ * for a run whose window was fully specified and did not need `now` at all. `RunForecastSnapshot(p,
+ * u, new Date(NaN), period)` is a legitimate call: an Action that knows its own quarter has no clock
+ * to offer.
+ *
+ * Behind an `await` the work is deferred again, so an explicit period does none of it. `Capture`
+ * calls `Config` itself, which is why nothing is lost by not loading the zone on this path.
+ *
+ * The zone has to be loaded here rather than left to `Capture`, because the period is chosen BEFORE
+ * `Capture` is entered. `Config` is idempotent, so `Capture`'s own call then costs nothing.
+ */
+async function businessMonthPeriod(
+    now: Date,
+    provider: IMetadataProvider,
+    contextUser: UserInfo,
+): Promise<ForecastPeriod> {
+    await BusinessTimeZoneEngine.Instance.Config(false, contextUser, provider);
+    return CurrentMonthPeriod(now, BusinessTimeZoneEngine.Instance.Zone);
 }
 
 /** The snapshot grain, lower-cased so a casing difference cannot look like a second grain. */
@@ -279,7 +338,23 @@ function grainKey(companyID: string, pipelineID: string | null, ownerID: string 
     return [companyID, pipelineID ?? '-', ownerID ?? '-'].map((v) => String(v).toLowerCase()).join('|');
 }
 
-/** `YYYY-MM-DD` in UTC. */
+/**
+ * `YYYY-MM-DD` for a stored calendar DAY — read from its UTC parts, with no zone anywhere near it.
+ *
+ * The period boundaries are `DATE` values: a calendar day carries no time and no zone, and the driver
+ * hands one back as UTC midnight. Rendering that instant in a zone west of Greenwich yields the day
+ * BEFORE, so every period would be labelled and filtered one day early. The business zone belongs to
+ * "today" questions only (#168); see {@link businessDay}, which is the other half of that split.
+ */
 function isoDate(when: Date): string {
-    return when.toISOString().slice(0, 10);
+    const day = ToCalendarDay(when);
+    if (day === null) {
+        throw new RangeError(`ForecastSnapshotJob: not a readable date — ${String(when)}`);
+    }
+    return day;
+}
+
+/** `YYYY-MM-DD` for an INSTANT, in the business zone: which day a capture happened ON. */
+function businessDay(instant: Date): string {
+    return CalendarDayIn(instant, BusinessTimeZoneEngine.Instance.Zone);
 }

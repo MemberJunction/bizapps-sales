@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Metadata, type IMetadataProvider } from '@memberjunction/core';
 import type { DealEntity, DealStatusOption } from '@mj-biz-apps/sales-entities';
 import { MJSDealClosePanel, MJSDealPipelinePanel } from '../lib/form-panels/deal-form.panels';
+import { expectOrder } from './helpers/call-order';
 
 /**
  * REOPENING MUST NOT EAT WHAT THE USER TYPED (the #73 review's non-blocking item).
@@ -82,20 +83,6 @@ function providerStub(calls: string[], operationSucceeds = true) {
             return { Success: true, Output: { Success: operationSucceeds, Issues: [] } };
         },
     } as unknown as IMetadataProvider;
-}
-
-/**
- * `before` happened, `after` happened, and they happened in that order.
- *
- * NOT a bare `indexOf(a) < indexOf(b)`, which is the vacuous shape this repo keeps finding: a call
- * that never happened indexes to -1, and -1 is less than everything, so the assertion passes LOUDEST
- * exactly when the step it guards has been deleted. Both positions are proved present first.
- */
-function expectOrder(calls: readonly string[], before: string, after: string): void {
-    expect(calls, `${before} must have happened`).toContain(before);
-    expect(calls, `${after} must have happened`).toContain(after);
-    expect(calls.indexOf(before), `${before} must come before ${after} — got ${JSON.stringify(calls)}`)
-        .toBeLessThan(calls.indexOf(after));
 }
 
 /**

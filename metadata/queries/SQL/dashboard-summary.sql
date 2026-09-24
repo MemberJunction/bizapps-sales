@@ -56,6 +56,12 @@
 -- time" option on the dashboard selects.
 --
 -- Company and pipeline remain the only slices that apply to the whole row.
+--
+-- ── PIPELINES FLAGGED OUT OF THE FORECAST ───────────────────────────────────────────────────────
+--
+-- Pipeline.IncludeInForecast = 0 marks a pipeline that holds historical deals. Its OPEN deals are
+-- left out of every tile, TotalCount included, so "of N total" stays the denominator of the figures
+-- beside it. Its won and lost deals stay. Naming the pipeline in PipelineID includes it.
 SELECT
     -- TILE 1 — open pipeline. A SUM of stored answers, not pricing arithmetic.
     SUM(CASE WHEN st.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END)              AS OpenAmount,
@@ -118,10 +124,14 @@ FROM [__mj_BizAppsSales].Deal d
  */
 LEFT OUTER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
+INNER JOIN [__mj_BizAppsSales].Pipeline p
+        ON p.ID = d.PipelineID
 WHERE 1 = 1
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
   {% endif %}
   {% if PipelineID %}
   AND d.PipelineID = {{ PipelineID | sqlString }}
+  {% else %}
+  AND (ISNULL(st.IsOpen, 0) = 0 OR p.IncludeInForecast = 1)
   {% endif %};

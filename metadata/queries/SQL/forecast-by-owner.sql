@@ -72,6 +72,8 @@ SELECT
 FROM [__mj_BizAppsSales].vwDeals d
 INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
+INNER JOIN [__mj_BizAppsSales].Pipeline p
+        ON p.ID = d.PipelineID
 LEFT OUTER JOIN [__mj_BizAppsSales].ForecastCategoryType fc
         ON fc.ID = d.ForecastCategoryTypeID
        AND fc.IsActive = 1
@@ -83,6 +85,10 @@ WHERE 1 = 1
   {% endif %}
   {% if PipelineID %}
   AND d.PipelineID = {{ PipelineID | sqlString }}
+  {% else %}
+  -- A pipeline flagged out of the forecast keeps its WON deals here (they are attainment) and loses
+  -- its open ones (they are not the current book). Asking for the pipeline by ID includes it.
+  AND (st.IsOpen = 0 OR p.IncludeInForecast = 1)
   {% endif %}
   {% if OwnerEmployeeID %}
   AND d.OwnerEmployeeID = {{ OwnerEmployeeID | sqlString }}

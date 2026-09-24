@@ -28,6 +28,10 @@ SELECT
     d.Account                                   AS AccountName,
     d.PipelineID,
     d.Pipeline                                  AS PipelineName,
+    -- Whether this pipeline's OPEN deals belong in the current-book figures. The roster itself keeps
+    -- every deal, because the board must still show a pipeline that holds historical deals; the
+    -- dashboard's aggregates drop open rows where this is 0.
+    p.IncludeInForecast                         AS PipelineIncludeInForecast,
     d.PipelineStageID,
     d.PipelineStage                             AS StageName,
     ps.DisplayOrder                             AS StageOrder,
@@ -90,6 +94,8 @@ FROM [__mj_BizAppsSales].vwDeals d
  */
 LEFT OUTER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
+INNER JOIN [__mj_BizAppsSales].Pipeline p
+        ON p.ID = d.PipelineID
 LEFT OUTER JOIN [__mj_BizAppsSales].PipelineStage ps
         ON ps.ID = d.PipelineStageID
 LEFT OUTER JOIN [__mj_BizAppsSales].ForecastCategoryType fc

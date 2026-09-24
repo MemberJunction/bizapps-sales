@@ -33,6 +33,7 @@ import {
     ProjectValidation,
     type DealWorkspaceValidation,
 } from './deal-workspace.validation';
+import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 import { E_ORDERS_PRODUCT, PRODUCT_LOOKUP_FIELDS, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
     PeriodParameters,
@@ -122,6 +123,12 @@ export interface DealRosterRow {
     /** Grouping keys for the board. Names render; IDs group. */
     PipelineID: string | null;
     PipelineStageID: string | null;
+    /**
+     * `Pipeline.IncludeInForecast`. False for a pipeline that only holds historical deals: its open
+     * deals still render on the board but are left out of every current-book figure on the dashboard.
+     * See `InForecast`.
+     */
+    PipelineIncludeInForecast: boolean;
     /**
      * STATUS FLAGS, APPLIED SERVER-SIDE, so no consumer has to resolve them from a second fetch.
      *
@@ -416,6 +423,7 @@ export class DealWorkspaceService {
             DealStatusTypeID: (d['DealStatusTypeID'] as string | null) ?? null,
             PipelineID: (d['PipelineID'] as string | null) ?? null,
             PipelineStageID: (d['PipelineStageID'] as string | null) ?? null,
+            PipelineIncludeInForecast: bool(d['PipelineIncludeInForecast']),
             CurrencyID: (d['CurrencyID'] as string | null) ?? null,
             IsOpen: bool(d['IsOpen']),
             IsWon: bool(d['IsWon']),
@@ -461,8 +469,18 @@ export class DealWorkspaceService {
      * Returns an empty list on failure rather than throwing: a picker that cannot load should offer
      * nothing and let the rest of the line editor keep working. The consequence — a rep unable to select
      * a product — is visible, whereas a half-loaded catalogue silently missing rows is not.
+     *
+     * THE AVAILABILITY WINDOW IS JUDGED ON THE BUSINESS DAY (bc-aidp-next-golive#168). It took a `Date`
+     * defaulting to `new Date()` and `ProductFilterFor` read the UTC day out of it, so from 7 PM Central
+     * the picker was already offering tomorrow's products and had dropped today's last ones. The engine
+     * reads one instance configuration row and caches it; `Config(false)` is a no-op after the first
+     * call, and it falls back to UTC rather than throwing when the row is missing, so a host that has
+     * not set a zone behaves exactly as this did before.
+     *
+     * @param asOfDay - The day to judge availability on. Defaults to today in the business zone; passed
+     *   explicitly only by a caller that means a different day, which is what makes this testable.
      */
-    public async LoadProducts(asOf: Date = new Date()): Promise<ProductLookup[]> {
+    public async LoadProducts(asOfDay?: CalendarDay): Promise<ProductLookup[]> {
         /**
          * ORDERS MAY NOT BE PRESENT AT ALL, and that is a supported state rather than an error.
          *
@@ -481,10 +499,13 @@ export class DealWorkspaceService {
             return [];
         }
 
+        await BusinessTimeZoneEngine.Instance.Config(false);
+        const day = asOfDay ?? BusinessTimeZoneEngine.Instance.Today();
+
         const rv = new RunView();
         const result = await rv.RunView<ProductLookup>({
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(asOf),
+            ExtraFilter: ProductFilterFor(day),
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             // Shared with the check that guards it, so the two cannot drift — see PRODUCT_LOOKUP_FIELDS.

@@ -16,6 +16,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
+import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent } from '@memberjunction/ng-base-forms';
 import {
     EntityViewerModule,
@@ -105,7 +106,7 @@ interface ReopenOutcome {
  *
  * TWO LAYERS OF SUCCESS. `Success` on the envelope means the operation RAN; whether the deal reopened
  * is `Output.Success`. And a SUCCESSFUL reopen still carries issues worth showing: S-US8 reopens behind
- * an order orders treats as terminal, and that list is the only thing between the rep and a live deal
+ * an order the deal cannot be worked from, and that list is the only thing between the rep and a live deal
  * pointing at a dead order.
  */
 /**
@@ -305,16 +306,40 @@ function moneyExact(n: number | null | undefined): string {
     });
 }
 
+/**
+ * Whole days from TODAY to a stored day. Negative is in the past.
+ *
+ * ── TWO READS, AND ONLY ONE OF THEM HAS A ZONE (bc-aidp-next-golive#168) ────────────────────────
+ *
+ * The STORED side is a `DATE` column — a calendar day with no time and no zone, handed back as UTC
+ * midnight — so `ToCalendarDay` reads it from UTC parts and takes a string as written. That half was
+ * always right and has not moved.
+ *
+ * TODAY is the half that was wrong. It read `now.getUTC*()`, so the countdown rolled over at UTC
+ * midnight: from 19:00 Central every close clock, every "overdue" verdict and the next-step warning
+ * jumped a day early. A deal closing tomorrow read "today" all evening, and after #168 fixed the
+ * product picker the same screen carried two different ideas of what day it was.
+ *
+ * SYNCHRONOUS, like the getters that call it — so IT DOES NOT CONFIGURE THE ENGINE, and must never be
+ * reached before something else has. `MJSDealOverviewPanel.ngOnInit` is that something else, and
+ * {@link MJSDealOverviewPanel.daysFromToday} is the only way in; call this directly from a new panel
+ * and you get UTC.
+ *
+ * The reasoning this replaces said `@RegisterForStartup()` made the boot sequence enough, and that the
+ * UTC fallback made the worst case harmless. Both halves were wrong together: `sales-ng` is a lazily
+ * loaded chunk, and the UTC fallback IS the defect #168 fixes — falling open to it here restores the
+ * old close clock silently, with one logged warning nobody reads. Failing open is still the right
+ * contract (a date default that throws out of a template binding is worse), which is exactly why the
+ * `Config()` has to be arranged for rather than assumed.
+ *
+ * Both sides are converted through `FromCalendarDay`, i.e. UTC midnight, so the subtraction is whole
+ * days with no DST remainder to round away. `Math.round` is kept as a belt on that brace.
+ */
 function daysFrom(d: Date | string | null | undefined): number | null {
-    if (!d) return null;
-    const iso = d instanceof Date
-        ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-        : String(d).slice(0, 10);
-    const t = Date.parse(`${iso}T00:00:00Z`);
-    if (!Number.isFinite(t)) return null;
-    const now = new Date();
-    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    return Math.round((t - today) / 86_400_000);
+    const day = ToCalendarDay(d);
+    if (day === null) return null;
+    const today = BusinessTimeZoneEngine.Instance.Today();
+    return Math.round((FromCalendarDay(day).getTime() - FromCalendarDay(today).getTime()) / 86_400_000);
 }
 
 /**
@@ -931,8 +956,56 @@ const FIELD_STYLES = `
     `],
 })
 export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
+    /**
+     * HAS THE BUSINESS ZONE BEEN LOADED? (bc-aidp-next-golive#168)
+     *
+     * A SIGNAL, for the reason the Pipeline panel's `statuses` is one: the host is OnPush and nothing
+     * marks this panel dirty when `Config()` resolves, so the four getters below would paint their
+     * first values from the unconfigured engine and keep them. Read inside {@link daysFromToday},
+     * which every one of them goes through, so the template's read of any countdown registers the
+     * dependency and re-runs once the zone lands. `inject(ChangeDetectorRef)` would also do it and
+     * would cost `new MJSDealOverviewPanel()` in a unit test.
+     *
+     * `?.()` because the suites construct panels with `Object.create(prototype)`, which runs no field
+     * initialisers — an absent signal means "not marked", never a throw out of a template binding.
+     */
+    private readonly businessZoneLoaded = signal(false);
 
+    /**
+     * THE ZONE IS LOADED BEFORE THIS PANEL IS ASKED WHAT DAY IT IS (bc-aidp-next-golive#168).
+     *
+     * `BusinessTimeZoneEngine` FAILS OPEN TO UTC when it has not been configured — that is its
+     * documented contract, and it is silently the exact defect #168 exists to fix, so an unconfigured
+     * read is not a neutral default but the old close clock wearing the new code. `@RegisterForStartup()`
+     * means MJ's boot sequence configures it, but `sales-ng` is a lazily-loaded chunk that a deal form
+     * can mount before or without that sequence having run here, and the two other `Today()` call sites
+     * in this app (`deal-workspace.service.ts`, `sales-section.component.ts`) already refuse to rely on
+     * it. This one was left relying on it.
+     *
+     * `Config(false)` is idempotent and a no-op once loaded, so mounting the panel costs nothing after
+     * the first time, and the engine resolves to UTC rather than throwing when no configuration row
+     * exists — a host that has not set a zone behaves exactly as it did before.
+     *
+     * BaseFormPanel declares no lifecycle hook, so there is nothing to chain to.
+     */
+    public async ngOnInit(): Promise<void> {
+        await BusinessTimeZoneEngine.Instance.Config(false);
+        this.businessZoneLoaded.set(true);
+    }
 
+    /**
+     * {@link daysFrom}, read through the load signal above.
+     *
+     * Every today-relative getter on this panel goes through here rather than calling `daysFrom`
+     * directly, so there is ONE place that both marks the zone dependency and can be pointed at when
+     * asking "what configured the engine for this figure?" — a second call site that skipped it would
+     * paint a UTC countdown next to a business-day one on the same tile, which is the disagreement
+     * #168 was filed about in the first place.
+     */
+    private daysFromToday(d: Date | string | null | undefined): number | null {
+        this.businessZoneLoaded?.();
+        return daysFrom(d);
+    }
 
     public G(field: string): string {
         const v = this.Record?.Get?.(field);
@@ -967,7 +1040,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      * a claim about a caller that no longer exists, and the next reader has no way to tell.
      */
     public get DaysToCloseLabel(): string {
-        const n = daysFrom(this.Record?.ExpectedCloseDate);
+        const n = this.daysFromToday(this.Record?.ExpectedCloseDate);
         if (n === null) return '—';
         if (n < 0) return `${dayCount(Math.abs(n))} overdue`;
         if (n === 0) return 'today';
@@ -995,7 +1068,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     }
 
     public get CloseClock(): { label: string; tone: 'success' | 'warning' | 'muted' } {
-        const n = daysFrom(this.Record?.ExpectedCloseDate);
+        const n = this.daysFromToday(this.Record?.ExpectedCloseDate);
         // A closed deal shows WHEN it closed. Counting days against an expected date it already met
         // (or missed) is advice on a decision nobody can take any more.
         if (this.IsClosed) {
@@ -1123,7 +1196,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     public get NextStepOverdue(): boolean {
         // Nothing is overdue on a deal that is finished.
         if (this.IsClosed) return false;
-        const n = daysFrom(this.Record?.NextStepDate);
+        const n = this.daysFromToday(this.Record?.NextStepDate);
         return n !== null && n < 0;
     }
     public get Health(): string[] {
@@ -1137,7 +1210,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         // A closed deal is not coached. Every line below asks someone to do something about a deal
         // that is finished -- re-date it, assign it, give it a next step -- and none of it applies.
         if (this.IsClosed) return out;
-        const days = daysFrom(this.Record.ExpectedCloseDate);
+        const days = this.daysFromToday(this.Record.ExpectedCloseDate);
         if (days !== null && days < 0 && !this.Record.ActualCloseDate) {
             out.push('The expected close date has passed. Update the date or close the deal.');
         }
@@ -2647,10 +2720,18 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
      * The audited way back through the lock (bc-aidp-next-golive#205).
      *
      * Mirrors {@link ConfirmClose}, including the part that is easy to drop: a reopen can return
-     * `Success: true` WITH issues, and those are the ones that matter most. S-US8's reopen asks the
-     * order to come back while it sits at `Voided`, which orders treats as terminal — the deal reopens
-     * regardless, because an order-side refusal must never block a stage change, so this list is the
-     * only thing standing between the rep and a live deal pointing at a dead order.
+     * `Success: true` WITH issues, and those are the ones that matter most. The deal reopens
+     * regardless of what the order does, because an order-side refusal must never block a stage
+     * change — so this list is the only thing standing between the rep and a live deal pointing at a
+     * dead order.
+     *
+     * THIS USED TO SAY the reopen "asks the order to come back while it sits at `Voided`, which orders
+     * treats as terminal". It does not: `TRANSITIONS.Voided` is `['Draft', 'Quoted']`, so
+     * `IsTerminal('Voided')` is FALSE and `Confirmed` is the terminal status. Recorded once in
+     * `docs/DECISIONS.md` D-OS4; KI-27 is the lifecycle collapse that caused it, not the transition
+     * fact itself. The cases that genuinely leave an order behind are a BOOKED order, which the reopen
+     * refuses outright, and — until golive#205 — a restored stage that declared nothing, which asked
+     * the order for nothing and said nothing either.
      *
      * IT DOES SAVE FIRST, which this comment used to say it must not. The old reasoning was that "a
      * locked deal has almost nothing editable, and the close lock would refuse the save anyway". Both

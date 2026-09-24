@@ -48,11 +48,14 @@ attempted. A legal-but-failing move (confirming books journal entries and needs 
 `BeginEntityTransaction` scope, which joins the ambient transaction as a savepoint, so rolling it back
 leaves the deal's own transaction intact.
 
-**This makes S-US8's reopen warn every time, and that is correct.** A lost deal voids its order,
-`Voided` is terminal in orders, and reopening asks for `Quoted`. The deal reopens; the order does not
-come back. **Do not special-case it and do not write an un-void workaround.** Amith is considering
-making `Voided` non-terminal for never-confirmed orders; if he allows it, the same code starts
-succeeding instead of warning, with no change here.
+**This used to make S-US8's reopen warn every time.** The reasoning was: a lost deal voids its order,
+`Voided` is terminal in orders, and reopening asks for `Quoted`, so the deal reopens and the order does
+not come back — *"do not special-case it and do not write an un-void workaround."* It closed by naming
+its own escape clause: *"Amith is considering making `Voided` non-terminal for never-confirmed orders;
+if he allows it, the same code starts succeeding instead of warning, with no change here."*
+
+**That condition has been met.** See **D-OS4**. The prohibition on overriding a refusal still stands
+and is not weakened; what changed is that the refusal it was written about no longer happens.
 
 ### D-OS3 — the writer lives on the WRITE PATH
 
@@ -63,6 +66,45 @@ rest of the deal's life.
 **Not in the UI**, because a stage change arrives from the board's drag, an importer, an agent or a raw
 `BaseEntity.Save()`. This is the same argument as the close lock, and the third time this repo has
 reached for it.
+
+### D-OS4 — `Voided` is NOT terminal, and a reopen owes the order a way back
+
+**Superseding the closing paragraph of D-OS2**, whose escape clause this satisfies.
+
+**The measured fact.** Orders publishes, in `OrderStatusBehavior.ts`:
+
+```
+TRANSITIONS.Voided      = ['Draft', 'Quoted']
+IsTerminal('Voided')    === false
+IsTerminal('Confirmed') === true
+```
+
+Read from the built `@mj-biz-apps/orders-entities` this repo resolves, not from its source. `Confirmed`
+is the dead end; `Voided` is reopenable for a never-confirmed order, which is precisely the change
+D-OS2 anticipated. The root cause is **KI-27** — orders collapsed its lifecycle on 2026-08-25 — but
+KI-27 records the `IsBooked` narrowing and the status CHECK, not this. It is recorded here so there is
+one place to cite.
+
+**What D-OS2 still forbids, and what this permits.** D-OS2 forbids *overriding a refusal* — asking
+orders for a move, being told no, and writing it anyway. That stands. Nothing here overrides anything:
+every write still goes through `CanTransition`, and a refusal is still a warning rather than a failure.
+
+What D-OS2 never contemplated is the case where **orders is never asked at all**. The order's status
+follows `PipelineStage.OrderStatusOnEntry`, so a reopen that restores a stage declaring nothing — or
+declaring the status the order is already in — asks for nothing, and the deal comes back open pointing
+at a voided order with no warning, because there was no refusal to report. That is the silent outcome
+D-OS1 forbids, arrived at from the opposite direction.
+
+**The ruling.** After the stage plan has been applied, a reopen whose order is neither editable nor
+booked returns it to `Draft`. `Draft` rather than `Quoted` because a reopened deal has no live quote in
+front of a customer; both satisfy golive#205's *"return the order to Quoted or Draft"*.
+
+**Mechanically:** `DealEntityServer.recoverOrderOnReopen()`, keyed on the declared transition being a
+`Reopen` rather than on the close lock being suspended, and reusing `applyStageOrderStatus` so orders is
+still asked and a refusal still warns. It runs AFTER the plan, not inside it: `planStageOrderStatus`
+returns at its stage-did-not-move gate, and a reopen landing on the stage the deal is already in — which
+`save-deal.SD35` makes ordinary — never reaches the plan at all. Pinned by `close-deal.CD31` and
+`close-deal.CD33`.
 
 ---
 

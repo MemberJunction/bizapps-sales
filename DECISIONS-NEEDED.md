@@ -1917,15 +1917,20 @@ Any run that hits this leaks an order.
 
 ## DN-18 — A reopen never asks for the order back, so there is nothing to report
 
-**Found by `71-lost-and-reopen` on 2026-08-21.** The spec is red on purpose and goes green when this is
-decided; it is not a broken test.
+**Found by `71-lost-and-reopen` on 2026-08-21. RESOLVED — see `docs/DECISIONS.md` D-OS4.** Kept for the
+diagnosis below, which is still accurate and still worth reading; the framing above it was not.
 
-### What is true today
+### What was true then, and what was wrong with how it was written
 
 Close a deal as lost into a stage declaring `OrderStatusOnEntry = 'Voided'`, then reopen it. The deal
-reopens, the append-only log keeps both events, and the order stays `Voided` — **and the screen says
-nothing about the order at all.** S-US8 describes the opposite: a reopen that enters a stage, asks the
-order to come back, and reports that orders refused because `Voided` is terminal.
+reopened, the append-only log kept both events, and the order stayed `Voided` — **and the screen said
+nothing about the order at all.**
+
+The diagnosis of the SILENCE was right. The reason given for it was not: this said S-US8 wants a reopen
+that "reports that orders refused because `Voided` is terminal". Orders refuses no such thing —
+`TRANSITIONS.Voided` is `['Draft', 'Quoted']` and `Confirmed` is the terminal status (D-OS4). There was
+never a refusal to report, which is exactly why nothing was reported. The order now comes back on
+reopen, and a refusal that genuinely happens still warns.
 
 ### Where it is NOT broken, which took two fixes to establish
 
