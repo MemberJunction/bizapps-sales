@@ -1,5 +1,193 @@
 # @mj-biz-apps/sales-ng
 
+## 6.8.0
+
+### Minor Changes
+
+- 17bd633: Product availability and forecast periods are judged on the business day (bc-aidp-next-golive#168).
+
+  `ProductFilterFor` took an instant and chose the UTC day inside, so at 8 PM Central a product
+  available from tomorrow was already offered and one whose last day was today had already gone. It now
+  takes a calendar day — validated before it is interpolated into SQL — and `LoadProducts` passes today
+  in the instance's business time zone from bizapps-common's `BusinessTimeZoneEngine`, defaulting to it
+  rather than to `new Date()`.
+
+  `CurrentMonthPeriod` chose the month with `getUTCMonth()`, so a nightly forecast job running in the
+  evening of the last day of a month had already rolled over to the next one and the closing month was
+  never snapshotted. It now takes an optional zone (UTC by default, which is what every existing caller
+  gets) and `RunForecastSnapshot` passes the business zone. The re-run guard compares `CapturedAt` on
+  the business day for the same reason.
+
+  The period BOUNDARIES are unchanged and deliberately so: `PeriodStart`/`PeriodEnd` are `DATE` values,
+  which are calendar days, and they are still built and read as UTC midnight. A zone conversion applied
+  to a stored day moves it back one day west of Greenwich.
+
+  The deal workspace's date boundary (`ToDateInput` / `IsUnparseableDate` / `FromDateInput`) delegates
+  to the shared calendar-day helpers with its contract unchanged and its tests untouched; it is now
+  also strict about days that do not exist, so a stored `2026-02-30` reports as unreadable instead of
+  rendering an empty box.
+
+  The dashboard and the deal form move onto the same day. `TodayUtc()` rolled over at UTC midnight, so
+  from 19:00 Central the fiscal window, the close buckets and the inspect lists were already on
+  tomorrow — and once the picker was fixed they disagreed with it on the same screen. The deal form's
+  close countdown, its close clock and its next-step-overdue flag measured from the UTC day for the
+  same reason, so a deal closing today read "1 day overdue" all evening.
+
+  New: `ProductWindowCovers(from, to, day)` on `sales-entities` — the TypeScript reading of the same
+  availability rule `ProductFilterFor` emits as SQL, for a caller holding the window's two columns.
+  It exists because the integration check that derives PP2's expectation open-coded that comparison
+  against a `DATE` column returned as a `Date`, where `String(value).slice(0, 10)` is `'Thu Aug 13'`:
+  every windowed product fell out of the expectation and `AvailableTo` never bound anything.
+
+  Breaking for direct callers: `ProductFilterFor(asOf: Date)` is now `ProductFilterFor(asOfDay:
+CalendarDay)`, `DealWorkspaceService.LoadProducts(asOf?: Date)` is now
+  `LoadProducts(asOfDay?: CalendarDay)`, and `TodayUtc()` is removed in favour of `BusinessToday()`.
+  The last one is a rename rather than an alias on purpose: a name stating a zone it no longer uses is
+  worse than a compile error.
+
+  Requires `@mj-biz-apps/common-entities` 5.44.0, declared as `^5.44.0` — a floor with an upper
+  bound, not an exact pin — in every manifest that names the `@mj-biz-apps/common-*` family
+  (`common-entities`, `common-ng`, `common-activity-sync`).
+
+  An exact pin is what a SIBLING app must not use here, and that is measured rather than assumed. The
+  family self-pins in lockstep: `common-ng@X` and `common-activity-sync@X` each declare
+  `common-entities@X` EXACTLY. So a caret on all three is coherent — whichever version the resolver
+  settles on, it drags `common-entities` to the matching one, and there is one copy. What splits the
+  family is an exact `common-entities` held at one version while a sibling floats: orders ships
+  `orders-ng`/`orders-core-entities-server` declaring `common-ng >=5.44.0` and `common-entities
+
+  > =5.44.0`, so a host installing sales beside orders can resolve `common-ng`5.46.0, which hard-requires`common-entities`5.46.0 — irreconcilable with an exact 5.44.0, and the resolver nests a second copy.
+Two copies of`common-entities`is two`BusinessTimeZoneEngine`classes competing for one class-name
+key in`BaseSingleton`'s global store, which makes the resolved zone depend on import order: this
+  > release's own defect, arriving through the dependency graph instead of the code.
+
+  That is bc-aidp-next-golive#258 in a different package. There, sales pinned `orders-entities` exactly
+  at 5.13.0 while orders shipped 5.14.0; no resolver can satisfy two different exact pins from one copy,
+  the nested copy re-ran every module-scope `@RegisterClass` in it, and `OrderNumber` stopped being
+  minted. A sibling's exact pin is correct only while its number happens to equal the owner's, and
+  nothing maintains that equality. The owner of a package may pin it exactly; a consumer in another repo
+  should declare a range and let the owner's pin win.
+
+  `@mj-biz-apps/orders-entities` is `^5.14.0`, which arrived from `next` in #126 — the same rule applied
+  to the package where golive#258 actually happened. That pin belongs to that fix, not this one; this
+  branch only carries it through the merge.
+
+  `pnpm.overrides` holds all three `common-*` members at 5.44.0 for THIS workspace and CI. Exact is
+  right there and wrong in a manifest for the same reason: overrides are not published. It forces a
+  single copy where a manifest range only permits one, it pins the version the 637-test suite is
+  actually measured against, and all three move together so a caret can never pair `common-ng` 5.46.0
+  with `common-entities` 5.44.0. What travels to a consumer is the range in each `package.json`, which
+  is what lets a host dedupe instead of nesting.
+
+  The deal form's Overview panel now configures `BusinessTimeZoneEngine` in its own `ngOnInit` rather
+  than relying on MJ's startup sequence having reached a lazily loaded `sales-ng` chunk. The engine fails
+  open to UTC by design, so an unconfigured read is not a neutral default — it is silently the defect
+  this release fixes, with one logged warning nobody reads.
+
+- a8716f3: A pipeline can be flagged out of the forecast (bc-aidp-next-golive#257).
+
+  New column `Pipeline.IncludeInForecast` (default 1). When it is 0, that pipeline's open deals are left
+  out of `Sales: Pipeline Summary`, `Sales: Forecast by Category`, `Sales: Forecast by Owner`,
+  `Sales: Dashboard Summary` and the dashboard's forecast stack, funnel, close buckets and open counts. The
+  daily forecast snapshot reads `Sales: Forecast by Category`, so it follows. Won and lost deals in the
+  pipeline still count toward bookings, win rate and the closed figures, and the board still shows the
+  pipeline. Passing the pipeline's ID as `PipelineID` includes it.
+
+  Previously no query read `Pipeline.IsActive`, so there was no way to keep a pipeline that holds
+  historical deals out of the live forecast.
+
+### Patch Changes
+
+- 9852aae: `@mj-biz-apps/orders-entities` is declared as `^5.14.0` rather than pinned exactly, so the pin stops
+  needing a human to chase orders' releases (bc-aidp-next-golive#258).
+
+  WHY THE EXACT PIN CANNOT HOLD. Orders OWNS `orders-entities` and pins it exactly inside `orders-ng`,
+  `orders-server` and `orders-core-entities-server`, rewriting those pins on every release. Sales'
+  declaration lives in another repo, so nothing moves it. Two different exact pins is precisely what no
+  resolver can satisfy from one copy: it nests a second `orders-entities` under the sales packages, that
+  copy re-runs every module-scope `@RegisterClass` in it, `ClassFactory` auto-increments priority so the
+  duplicate `OrderHeaderEntity` outranks `OrderEntityServer`, and `OrderNumber` is never minted. Every
+  new order header then fails its NOT NULL insert — the Orders screen, and every Deal that provisions an
+  embedded order. It is silent, because the collision warning compares class NAMES.
+
+  No repo's CI can see that drift. Sales resolves one copy of whatever it pins, orders is internally
+  consistent, and both are green; the duplicate exists only in a host that installs BOTH.
+
+  THE DRIFT HAD ALREADY RECURRED. #258 was fixed on 2026-09-22 by moving the pin 5.13.0 → 5.14.0. Orders
+  has since shipped 5.15.0 and 5.16.0 and pins 5.16.0 internally, so a host installing today's published
+  sales beside today's published orders nests three copies. Measured:
+
+      sales declares `5.14.0`   ->  2 copies  (5.14.0 nested under sales, 5.16.0 at the root)
+      sales declares `^5.14.0`  ->  1 copy    (5.16.0)
+
+  A range defers to the owner's pin, which is what actually produces the single copy. The general rule,
+  and the reason this is worth stating beyond one package: the OWNER of a package may pin it exactly; a
+  CONSUMER in another repo declares a range and lets the owner's pin win. `mj-app.json` already declared
+  its app-level dependencies this way (`mj-bizapps-orders: ">=5.1.0 <6.0.0"`); only the npm manifests
+  had diverged.
+
+  The floor is 5.14.0 because that is where the order-line veto seam was verified, not where a resolver
+  happened to land — `dist/order-line-edit-veto.js`, its three exports and the `index.d.ts` re-export are
+  present and identical in the 5.13.0, 5.14.0, 5.15.0 and 5.16.0 tarballs. `LoadDealLockOrderLineVeto`'s
+  own documentation argued for the exact pin and is rewritten; leaving it would have left the repo's
+  stated rule contradicting its manifests.
+
+  The lockfile is deliberately NOT moved: this changes policy, not versions, so the only churn is the
+  five specifier strings. Verified separately that `orders-entities` 5.16.0 builds and passes all 587
+  tests with every other package held constant, so the range is safe across its whole span.
+
+- 3745db8: Reopening a deal from the workspace no longer throws away what the user typed.
+
+  golive#224. `ReopenDeal()` went straight to `Sales.ReopenDeal` and then `ReloadActiveDeal()`, which
+  replaces the `DealEntity` wholesale — so a half-typed `Description` vanished. A locked deal is not a
+  read-only deal: `DealFieldsEditableWhileLocked` keeps six fields open, seven on a lost one, and the
+  Reopen button sits in the lock banner directly above them.
+
+  Worse than the version sales#78 fixed on the deal form. There the edit was lost but the record stayed
+  dirty; here `ReloadActiveDeal()` also calls `store.MarkClean(tabId)`, so the tab-strip marker was
+  cleared too and nothing on screen suggested anything had been pending. sales#78's changeset was
+  amended at the time to say the workspace was still uncovered rather than imply the class was closed —
+  this closes it.
+
+  It now mirrors the workspace's own `ConfirmClose()`: check the active tab's dirty flag, save, and
+  abandon the reopen if that save is refused, leaving the reason on screen and the typing in the box.
+
+  The save runs **before** the operation, and that ordering is the load-bearing part: once
+  `Sales.ReopenDeal` has committed it has moved the row, not the copy in the browser, which still holds
+  the closed status in both `Value` and `OldValue`. A save at that point would write the closing status
+  back over the reopened row, and nothing would refuse it.
+
+  ***
+
+  **A save already in flight stops the reopen, and the close.**
+
+  Saving first only protects anything if the save actually happens. `Save()` returned at its re-entrancy
+  guard — `if (!deal || !tabId || this.Saving())` — without writing a message, and both callers decided
+  whether it had worked by reading `MessageIsError`, which is whatever the last message left behind. A
+  silent early return therefore read as success.
+
+  The sequence: edit Description on a closed deal, press Save, press Reopen before it resolves. Both
+  controls are live at once — the save affordance is the tab strip's, and Reopen was disabled only while
+  closing. The reopen ran, and the in-flight save then landed on the reopened row and wrote the closing
+  status back over it, which is the loss the ordering exists to prevent, reached from the other side.
+
+  `Save()` now reports a boolean, and `ConfirmClose()` and `ReopenDeal()` share one
+  `saveActiveTabIfDirty()` that keys on `Saving()` and refuses out loud. Both confirm buttons are
+  disabled while a save is running.
+
+  ***
+
+  **Where to see it: nowhere, yet.** `mjs-deal-workspace` appears in no template — commit `9d6ef9e`
+  ("Replace the in-rail deal workspace with Explorer OpenEntityRecord") unmounted it on 2026-08-31 and
+  nothing has rendered it since, so this surface is currently unreachable in the running app. The fix is
+  real and the checks are real; a tester should not go hunting for the repro in the UI. The deal FORM's
+  equivalent paths were fixed separately in sales#78.
+
+- Updated dependencies [17bd633]
+- Updated dependencies [9852aae]
+- Updated dependencies [a8716f3]
+  - @mj-biz-apps/sales-entities@6.8.0
+
 ## 6.7.1
 
 ### Patch Changes
