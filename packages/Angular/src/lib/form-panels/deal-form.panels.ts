@@ -1269,7 +1269,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
                 @for (f of Fields; track f.name) {
-                    <div class="mjs-field" [class.mjs-field--span]="f.span">
+                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
@@ -1282,11 +1282,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      the close running. The deal workspace has never offered them; this brings the form
                      into line with it rather than the other way round. One door, and it is the audited
                      one. -->
-                <div class="mjs-field">
+                <div class="mjs-field" data-field="DealStatusTypeID">
                     <div class="mj-forms-field">
                         <label class="mj-forms-field-label">Status</label>
                         @if (EditMode) {
-                            <select [ngModel]="Record.DealStatusTypeID"
+                            <select [ngModel]="Record.DealStatusTypeID" data-testid="deal-status"
                                     (ngModelChange)="SetStatus($event)"
                                     [compareWith]="CompareStatus"
                                     [disabled]="!StatusIsEditable">
@@ -1306,11 +1306,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                 <!-- golive#205: "Changing Deal Status to Won or Lost should close the
                                      deal properly." Picking it does not WRITE it -- the close has to
                                      run, and a Lost close needs a reason the dropdown cannot carry. -->
-                                <div class="mjs-reopen">
+                                <div class="mjs-reopen" data-testid="status-close-panel">
                                     @if (PendingCloseStatus?.IsLost) {
                                         <label class="mjs-reopen__field">
                                             <span>Loss reason</span>
-                                            <select [(ngModel)]="LossReasonID" (ngModelChange)="OnLossReasonChange()"
+                                            <select data-testid="status-close-loss-reason" [(ngModel)]="LossReasonID" (ngModelChange)="OnLossReasonChange()"
                                                     [disabled]="Busy">
                                                 <option [ngValue]="null">— choose —</option>
                                                 @for (r of LossReasons(); track r.ID) {
@@ -1321,16 +1321,16 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                         @if (LossReasonRequiresNotes) {
                                             <label class="mjs-reopen__field">
                                                 <span>Loss notes <em>(required for this reason)</em></span>
-                                                <textarea rows="2" [(ngModel)]="LossNotes" [disabled]="Busy"></textarea>
+                                                <textarea data-testid="status-close-loss-notes" rows="2" [(ngModel)]="LossNotes" [disabled]="Busy"></textarea>
                                             </label>
                                         }
                                     }
                                     <label class="mjs-reopen__field">
                                         <span>Notes <em>(optional)</em></span>
-                                        <textarea rows="2" [(ngModel)]="CloseNotes" [disabled]="Busy"></textarea>
+                                        <textarea data-testid="status-close-notes" rows="2" [(ngModel)]="CloseNotes" [disabled]="Busy"></textarea>
                                     </label>
                                     <div class="mjs-reopen__row">
-                                        <button type="button" class="mjs-reopen__confirm"
+                                        <button type="button" class="mjs-reopen__confirm" data-testid="status-close-confirm"
                                                 [disabled]="!CanConfirmClose" (click)="ConfirmClose()">
                                             {{ Busy ? 'Closing\u2026' : 'Close as ' + PendingCloseStatusName }}
                                         </button>
@@ -1351,13 +1351,13 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                      plan 7.3 requires undoing a lock to be explainable, and an
                                      unexplained reopen in the audit trail is what that rule is against.
                                      Not prompting is not the same as not recording. -->
-                                <div class="mjs-reopen">
+                                <div class="mjs-reopen" data-testid="status-reopen-panel">
                                     <label class="mjs-reopen__field">
                                         <span>Reopen as {{ PendingReopenStatusName }} — reason <em>(optional)</em></span>
-                                        <textarea rows="2" [(ngModel)]="ReopenReason" [disabled]="Busy"></textarea>
+                                        <textarea data-testid="status-reopen-reason" rows="2" [(ngModel)]="ReopenReason" [disabled]="Busy"></textarea>
                                     </label>
                                     <div class="mjs-reopen__row">
-                                        <button type="button" class="mjs-reopen__confirm"
+                                        <button type="button" class="mjs-reopen__confirm" data-testid="status-reopen-confirm"
                                                 [disabled]="!CanConfirmReopen" (click)="ConfirmReopen()">
                                             {{ Busy ? 'Reopening…' : 'Reopen deal' }}
                                         </button>
@@ -1842,7 +1842,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
                 @for (f of Fields; track f.name) {
-                    <div class="mjs-field" [class.mjs-field--span]="f.span">
+                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
@@ -1923,7 +1923,7 @@ const COMMERCIAL_FIELDS: DealFieldSpec[] = [
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
                 @for (f of Fields; track f.name) {
-                    <div class="mjs-field" [class.mjs-field--span]="f.span">
+                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         @if (DrawsOwnMoney(f)) {
                             <!-- Read-only money. See DealFieldSpec.currency for why this is not
                                  mj-form-field; the class names are the shared control's own, so the
@@ -1967,7 +1967,7 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
                      (golive#229). Hidden on a locked deal for the same reason the grid's New was. -->
                 @if (!IsLocked) {
                     <div class="mjs-deal-lines__bar">
-                        <button type="button" class="mjs-deal-lines__add" (click)="AddLine()">
+                        <button type="button" class="mjs-deal-lines__add" data-testid="lines-add" (click)="AddLine()">
                             <i class="fa-solid fa-plus" aria-hidden="true"></i> Add a product
                         </button>
                     </div>
@@ -2241,7 +2241,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
                 @for (f of Fields; track f.name) {
-                    <div class="mjs-field" [class.mjs-field--span]="f.span">
+                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
@@ -2308,7 +2308,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
             @if (CanClose) {
                 <div class="mjs-close-action">
                     @if (!PanelOpen) {
-                        <button type="button" class="mjs-close-action__start" (click)="OpenPanel()">
+                        <button type="button" class="mjs-close-action__start" data-testid="close-open" (click)="OpenPanel()">
                             <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i> Close this deal
                         </button>
                         <small class="mjs-close-action__hint">
@@ -2316,7 +2316,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                             the contract and finance tasks.
                         </small>
                     } @else {
-                        <div class="mjs-close-action__form">
+                        <div class="mjs-close-action__form" data-testid="close-panel">
                             <!-- The real closing statuses, by name, from the flags. A Won/Lost pair
                                  could not express a deployment with more than one losing status, and
                                  this one has two: Lost and Abandoned both carry IsLost, so resolving
@@ -2325,7 +2325,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                             <div class="mjs-close-action__row">
                                 @for (s of ClosingStatuses; track s.ID) {
                                     <label>
-                                        <input type="radio" name="dealCloseTarget" [value]="s.ID"
+                                        <input type="radio" name="dealCloseTarget" data-testid="close-target" [value]="s.ID"
                                                [(ngModel)]="TargetStatusID" (ngModelChange)="OnTargetChange()"
                                                [disabled]="Closing" /> {{ s.Name }}
                                     </label>
@@ -2335,7 +2335,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                             @if (SelectedStatus?.IsLost) {
                                 <label class="mjs-close-action__field">
                                     <span>Loss reason</span>
-                                    <select [(ngModel)]="LossReasonID" (ngModelChange)="OnLossReasonChange()"
+                                    <select data-testid="close-loss-reason" [(ngModel)]="LossReasonID" (ngModelChange)="OnLossReasonChange()"
                                             [disabled]="Closing">
                                         <option [ngValue]="null">— choose —</option>
                                         @for (r of LossReasons(); track r.ID) {
@@ -2346,18 +2346,18 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                                 @if (LossReasonRequiresNotes) {
                                     <label class="mjs-close-action__field">
                                         <span>Loss notes <em>(required for this reason)</em></span>
-                                        <textarea rows="2" [(ngModel)]="LossNotes" [disabled]="Closing"></textarea>
+                                        <textarea data-testid="close-loss-notes" rows="2" [(ngModel)]="LossNotes" [disabled]="Closing"></textarea>
                                     </label>
                                 }
                             }
 
                             <label class="mjs-close-action__field">
                                 <span>Notes <em>(optional)</em></span>
-                                <textarea rows="2" [(ngModel)]="Notes" [disabled]="Closing"></textarea>
+                                <textarea data-testid="close-notes" rows="2" [(ngModel)]="Notes" [disabled]="Closing"></textarea>
                             </label>
 
                             <div class="mjs-close-action__row">
-                                <button type="button" class="mjs-close-action__confirm"
+                                <button type="button" class="mjs-close-action__confirm" data-testid="close-confirm"
                                         [disabled]="!CanConfirm" (click)="ConfirmClose()">
                                     {{ Closing ? 'Closing…' : 'Close deal' }}
                                 </button>
@@ -2378,7 +2378,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
             @if (CanReopen) {
                 <div class="mjs-close-action">
                     @if (!ReopenPanelOpen) {
-                        <button type="button" class="mjs-close-action__start" (click)="OpenReopenPanel()">
+                        <button type="button" class="mjs-close-action__start" data-testid="reopen-open" (click)="OpenReopenPanel()">
                             <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reopen this deal
                         </button>
                         <small class="mjs-close-action__hint">
@@ -2386,13 +2386,13 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                             the order to the pipeline. Refused if the order has already booked.
                         </small>
                     } @else {
-                        <div class="mjs-close-action__form">
+                        <div class="mjs-close-action__form" data-testid="reopen-panel">
                             <label class="mjs-close-action__field">
                                 <span>Reason <em>(optional)</em></span>
-                                <textarea rows="2" [(ngModel)]="ReopenReason" [disabled]="Closing"></textarea>
+                                <textarea data-testid="reopen-reason" rows="2" [(ngModel)]="ReopenReason" [disabled]="Closing"></textarea>
                             </label>
                             <div class="mjs-close-action__row">
-                                <button type="button" class="mjs-close-action__confirm"
+                                <button type="button" class="mjs-close-action__confirm" data-testid="reopen-confirm"
                                         [disabled]="!CanConfirmReopen" (click)="ConfirmReopen()">
                                     {{ Closing ? 'Reopening…' : 'Reopen deal' }}
                                 </button>
@@ -2414,7 +2414,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
             @if (Message || Issues.length) {
                 <div class="mjs-close-action">
                     @if (Message) {
-                        <div class="mjs-close-action__msg" [class.is-error]="MessageIsError">{{ Message }}</div>
+                        <div class="mjs-close-action__msg" data-testid="close-message" [class.is-error]="MessageIsError">{{ Message }}</div>
                     }
                     <!-- Tracked by index: the operation pushes one issue per task, so two tasks
                          failing the same way produce two identical strings, and tracking by the string
@@ -2427,7 +2427,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
 
             <div class="mjs-fields">
                 @for (f of Fields; track f.name) {
-                    <div class="mjs-field" [class.mjs-field--span]="f.span">
+                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
