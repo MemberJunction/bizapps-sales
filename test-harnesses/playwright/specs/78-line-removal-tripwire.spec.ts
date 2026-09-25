@@ -1,55 +1,73 @@
 /**
- * @fileoverview KI-20 TRIPWIRE — the delete-line button does not work, and this asserts that.
+ * @fileoverview Removing a line through the Deal form takes it off the order, and re-sequences the rest.
  *
- * ── READ THIS BEFORE "FIXING" THE SPEC ──────────────────────────────────────────────────────────
+ * ── THE TRIPWIRE FIRED, AND THIS IS IT BEING ANSWERED ───────────────────────────────────────────
  *
- * Removing a line from an order is SILENTLY DROPPED. The collection accepts the removal, the save
- * returns TRUE, and the row survives. The cause is in orders' `savePendingLines`, which contributes
- * inserts and updates and never asks the collection for its pending removals — diagnosed and written up
- * as KI-20, and not fixable from this repo.
+ * This spec used to assert the BROKEN behaviour of KI-20 on purpose: orders' `savePendingLines` never
+ * drained the collection's pending removals, so a removed line survived, and later the whole save was
+ * refused. It said it must fail the day orders fixed that, and be rewritten to three assertions.
  *
- * So this spec asserts the BROKEN behaviour on purpose. **It must fail the day orders fixes this**, and
- * that failure is the signal to rewrite it into the three assertions it should have carried all along:
+ * Orders fixed it (KI-20 closed; bc-aidp-next-golive#187), and the deal workspace that carried the
+ * interim gesture-level decline is no longer mounted (#88). Removal is now offered by the Deal form's
+ * restricted line editor, through `order.Lines.Remove()` + `order.Save()` — the path orders drains. So
+ * these are the three assertions the header prescribed:
  *
- *     expect(after.length).toBe(1);                                  // the removal took
- *     const survivor = after.find((r) => r.ProductID === survivorID);
- *     expect(survivor, 'the RIGHT row survived').toBeTruthy();        // identify, do not index
- *     expect(Number(survivor.LineNumber)).toBe(1);                    // and it was re-sequenced
+ *     the removal took · the RIGHT row survived (identified, not indexed) · it was re-sequenced to 1
  *
- * The `find` is deliberate. This list used to read `after[0].ProductID` — index a collection, then
- * assert which row it is. That shape has been found and fixed twice already (WT1, AC13); pasting it
- * back the day orders fixes KI-20 would reintroduce it. Identify the row first.
+ * The integration suite carries the entity-layer half at `save-deal.SD6`. This one is the browser half:
+ * the button a rep clicks is what reaches the order.
  *
- * The integration suite carries the same tripwire at `save-deal.SD6`. This one is worth having beside it
- * because SD6 drives the entity layer directly: it proves the SALES side does its part. Only a browser
- * can show that the button a rep actually clicks does nothing — the UI reports success, the grid redraws
- * with one line, and the row is still there. A rep discovers that when the invoice arrives.
- *
- * ── WHY NOT SKIP IT ─────────────────────────────────────────────────────────────────────────────
- *
- * A skipped spec is invisible; an asserted defect is a countdown. `test.fixme` would also hide it from
- * the run's own tally, and this project has already been bitten five times by things that looked like
- * passes.
+ * DROPPED, with the workspace: the gesture-level "already saved and cannot be removed" decline, and the
+ * check that no raw `UQ_OrderLine_OrderHeader_LineNumber` text surfaced. The decline no longer exists by
+ * design; the editor's own error channel (`.mjs-le__error`) is asserted empty in its place.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AddLines, AssertBaseline, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
-import { OpenPane, SaveDeal } from '../lib/workspace';
+import { DealForm, OpenSection } from '../lib/deal-form';
 
 const RUN = `PW-KI20-${Date.now().toString(36)}`;
 let dealID = '';
 let orderID = '';
 
-test.describe('KI-20 tripwire — removing an order line through the UI', () => {
+interface LineRow extends Record<string, unknown> {
+    ID: string;
+    LineNumber: number;
+    Quantity: number;
+}
+
+async function orderLines(id: string): Promise<LineRow[]> {
+    return QueryAll<LineRow>(
+        `SELECT CONVERT(varchar(36), ID) AS ID, LineNumber, Quantity
+           FROM __mj_BizAppsOrders.OrderLine WHERE OrderHeaderID = '${id}' ORDER BY LineNumber`,
+    );
+}
+
+/**
+ * Opens the line editor for the first row of the lines grid (an MJ entity data grid) by double-click.
+ *
+ * Which line that is, is NOT assumed from the row's position: the caller reads the editor's quantity
+ * back and matches it to a database row.
+ */
+async function openFirstLine(page: Page): Promise<void> {
+    await OpenSection(page, 'lines');
+    const row = DealForm(page)
+        .locator('.mj-forms-panel[data-section-key="lines"] .ag-center-cols-container .ag-row')
+        .first();
+    await expect(row, 'the lines grid must render the deal\'s lines').toBeVisible({ timeout: 30_000 });
+    await row.dblclick();
+}
+
+test.describe('removing an order line through the Deal form', () => {
     test.afterAll(async () => {
         if (dealID) {
             await PurgeDeal(dealID, orderID || null);
-            // And by NAME: a failure inside ComposeDeal means dealID was never returned, so the
-            // purge above runs on an empty string while a real deal sits in the database.
-            await PurgeByPrefix(RUN.split(' ')[0]);
         }
+        // And by NAME: a failure inside ComposeDeal means dealID was never returned, so the purge
+        // above runs on an empty string while a real deal sits in the database.
+        await PurgeByPrefix(RUN);
         const left = await QueryOne<{ N: number }>(
             `SELECT COUNT(*) AS N FROM __mj_BizAppsSales.Deal WHERE Name LIKE '${RUN}%'`,
         );
@@ -57,9 +75,7 @@ test.describe('KI-20 tripwire — removing an order line through the UI', () => 
         await AssertBaseline();
     });
 
-    test('the row SURVIVES a delete — asserted deliberately, and must fail when orders is fixed', async ({
-        page,
-    }) => {
+    test('a removed line leaves the order, the right line survives, and it is re-sequenced', async ({ page }) => {
         test.setTimeout(600_000);
         const sink = captureConsoleErrors(page);
 
@@ -68,125 +84,60 @@ test.describe('KI-20 tripwire — removing an order line through the UI', () => 
         orderID = composed.OrderID;
 
         const added = await AddLines(page, orderID, 2);
-        expect(added, 'two lines are needed, or a removal has nothing to be dropped from').toBe(2);
+        expect(added, 'two lines are needed, or a removal has nothing to be taken from').toBe(2);
+        const before = await orderLines(orderID);
 
-        // ── The delete affordance, then a save the UI reports as successful ──
-        await OpenPane(page, 'Product lines');
-        const remove = page.getByRole('button', { name: /Remove|Delete/i }).first();
-        await expect(remove, 'the Product lines grid must offer a per-line remove control').toBeVisible({
-            timeout: 20_000,
-        });
-        await remove.click();
-        await page.waitForTimeout(600);
+        await openFirstLine(page);
+        const editor = page.locator('[data-testid="line-editor"]:visible').first();
+        await expect(editor, 'a row double-click must open the line editor').toBeVisible({ timeout: 20_000 });
 
         /**
-         * CAPTURED HERE, BEFORE THE SAVE, AND THAT ORDERING IS THE REPAIR.
+         * ── FIND THE ROW, THEN ASSERT ABOUT IT ──────────────────────────────────────────────────────
          *
-         * The decline is held in the component as a Set keyed on the LINE OBJECT. A save reloads the
-         * deal, the line objects are new instances, nothing in the Set matches a current row any more,
-         * and the issue stops rendering. So reading it after `SaveDeal` -- which is where this spec read
-         * it -- can only ever see an empty list, whatever the guard did.
-         *
-         * That is not a bug in the guard: once the save has happened there is nothing outstanding to
-         * warn about. It does mean the gesture-level decline is only observable between the click and
-         * the save, which is exactly where a rep sees it too.
+         * `AddLines` gives each line a different quantity (1, 2, ...), and products can repeat when the
+         * catalogue is short, so the quantity is the handle that tells the two apart. The line being
+         * removed is the one whose quantity the editor shows; the survivor is the other.
          */
-        const declined = (await page.locator('.dw-issues li:visible, .dw-field-error:visible')
-            .allTextContents())
-            .map((t) => t.replace(/\s+/g, ' ').trim());
+        const quantity = editor.locator('[data-testid="line-quantity"]');
+        await expect(quantity, 'the editor must show the line\'s quantity').toBeVisible({ timeout: 20_000 });
+        const shown = Number(await quantity.inputValue());
+        const removed = before.filter((l) => Number(l.Quantity) === shown);
+        expect(removed.length, `exactly one line must carry quantity ${shown}: ${JSON.stringify(before)}`).toBe(1);
+        const survivor = before.find((l) => l.ID !== removed[0].ID);
+        expect(survivor, 'the other line must exist before the removal').toBeTruthy();
+
+        await editor.locator('[data-testid="line-remove"]').click();
+        await editor.locator('[data-testid="line-remove-confirm"]').click();
 
         /**
-         * THE UI'S OWN CLAIM, ASSERTED FIRST. The grid drops to one row and the save succeeds — that is
-         * what makes the defect dangerous rather than merely broken. A rep sees exactly what success
-         * looks like.
+         * The editor closes on a saved removal and stays open, with its error, on a refused one — so a
+         * timeout here reports the editor's own text rather than a bare "still visible".
          */
-        await SaveDeal(page);
-        /**
-         * ASSERTED ON THE TEXT, NOT ON A COUNT.
-         *
-         * `.first()` plus `toHaveCount(0)` is a contradiction dressed as an assertion — `.first()` is a
-         * one-element locator, so the count is 0 or 1 and the failure says "Expected 0, Received 1"
-         * without ever telling you WHAT matched. On a loose regex over the whole page that is close to
-         * useless: it took a rerun to learn the match was the workspace's own visible text rather than an
-         * error at all. Collecting the strings makes the failure name itself.
-         *
-         * Scoped to the workspace's message and validation channels for the same reason — the regex was
-         * matching page furniture, and the claim is about what the SURFACE reports after the save.
-         */
-        const reported = (await page.locator('.dw-msg:visible, .dw-issues li:visible, .dw-field-error:visible')
-            .allTextContents())
-            .map((t) => t.replace(/\s+/g, ' ').trim())
-            // WIDENED to include 'cannot'. The interim's decline reads "This line is already saved and
-            // cannot be removed yet" -- no 'could not', no 'failed', no 'error' -- so the old filter
-            // dropped the very message this spec now exists to see, and `reported` came back empty.
-            .filter((t) => /could not|cannot|failed|error|refused|declined/i.test(t));
+        const closed = await expect(editor)
+            .toBeHidden({ timeout: 30_000 })
+            .then(() => true)
+            .catch(() => false);
+        if (!closed) {
+            const said = await editor.locator('.mjs-le__error').allInnerTexts().catch(() => []);
+            throw new Error(
+                `the removal did not save — the line editor is still open. It says: ${
+                    said.map((t) => t.trim()).filter(Boolean).join(' | ') || '(no error text)'
+                }`,
+            );
+        }
+
+        // ── THE DATABASE ─────────────────────────────────────────────────────
+        const after = await orderLines(orderID);
+        expect(after.length, 'the removal must take the line off the order').toBe(1);
+
+        const kept = after.find((l) => l.ID.toLowerCase() === survivor!.ID.toLowerCase());
+        expect(kept, 'the RIGHT line must survive — the one that was not removed').toBeTruthy();
+        expect(Number(kept!.LineNumber), 'and orders must re-sequence it to line 1').toBe(1);
 
         /**
-         * ── KI-20'S SYMPTOM HAS CHANGED: IT IS NO LONGER SILENT ─────────────────────────────────────
-         *
-         * This asserted `toEqual([])` — "the UI must report NO error", because KI-20's whole hazard was
-         * that a dropped removal LOOKED like success. That assertion was passing for the wrong reason: it
-         * searched `.dw-issue` and `.msg`, neither of which exists (the real classes are `.dw-issues li`
-         * and `.dw-msg`), so it matched nothing and could never fail. Fixing the selector is what revealed
-         * the change.
-         *
-         * What actually happens now, measured:
-         *
-         *     Save failed for OrderID_Object: Failed to save order line 1: Violation of UNIQUE KEY
-         *     constraint 'UQ_OrderLine_OrderHeader_LineNumber'. The duplicate key value is (…, 1).
-         *
-         * Orders renumbers the SURVIVING line from 2 to 1 while the removed row still holds 1, so the
-         * update collides with the row it is supposed to be replacing. The removal is no longer dropped
-         * quietly — the whole save is refused.
-         *
-         * That is a DIFFERENT defect from the one KI-20 records, and arguably a better one: loud beats
-         * silent. But it means a rep cannot remove a line at all, and it is still orders' to fix.
-         * Asserted as it is, so that this spec goes red the day the behaviour changes in either direction.
+         * Console errors are tolerated NARROWLY. Reloading a collection after a removal can log a known
+         * BaseEntity.Load complaint; anything else still fails the spec.
          */
-        /**
-         * ── THE TRIPWIRE FIRED, AND THIS IS IT BEING ANSWERED ───────────────────────────────────
-         *
-         * It asserted a `UQ_OrderLine_OrderHeader_LineNumber` violation and said, correctly, that if
-         * that stopped being true the behaviour had changed and KI-20 needed re-reading. It has
-         * changed: the KI-20 interim declines a saved line's removal AT THE GESTURE, so the database
-         * is never reached and there is no constraint name to see. `reported` came back empty.
-         *
-         * The underlying limit is unchanged -- a saved line still cannot be removed -- so the tripwire
-         * is still worth having. What moved is WHERE it is refused, and the difference is the whole
-         * point of the interim: a rep now reads a sentence about the line instead of a constraint name.
-         *
-         * Asserted on the gesture-level decline, and still in both directions: this goes red if the
-         * decline disappears (removal silently allowed) AND if a raw constraint name ever reappears,
-         * which would mean the gesture-level guard had been bypassed.
-         */
-        expect(
-            declined.some((m) => /already saved and cannot be removed/i.test(m)),
-            'a saved line must have its removal declined at the GESTURE, with a sentence a rep can read '
-                + `— KI-20's interim moved this off the database. Saw: ${JSON.stringify(declined).slice(0, 300)}`,
-        ).toBe(true);
-
-        expect(
-            reported.some((m) => /UQ_OrderLine_OrderHeader_LineNumber/i.test(m)),
-            'and NO raw constraint name should surface any more — one here means the gesture-level '
-                + 'decline was bypassed and the save reached the database after all',
-        ).toBe(false);
-
-        // ── THE DATABASE, which disagrees ───────────────────────────────────
-        const after = await QueryAll<{ ID: string; LineNumber: number }>(
-            `SELECT ID, LineNumber FROM __mj_BizAppsOrders.OrderLine WHERE OrderHeaderID = '${orderID}'
-              ORDER BY LineNumber`,
-        );
-
-        expect(
-            after.length,
-            'KI-20: BOTH rows are still there. If this now reads 1, orders has fixed savePendingLines() — ' +
-                'rewrite this spec to the three assertions in the header comment and close KI-20',
-        ).toBe(2);
-
-        /**
-         * Console errors are tolerated NARROWLY here, not waved through. Reloading a collection after a
-         * dropped removal logs a known BaseEntity.Load complaint; anything else still fails the spec.
-         */
-        expectOnlyKnownErrors(sink, [/Error in BaseEntity\.Load\(MJ_BizApps_Sales:/], 'KI-20 tripwire');
+        expectOnlyKnownErrors(sink, [/Error in BaseEntity\.Load\(MJ_BizApps_Sales:/], 'line removal');
     });
 });

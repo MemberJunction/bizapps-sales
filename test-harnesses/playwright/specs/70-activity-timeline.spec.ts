@@ -29,6 +29,12 @@
  *
  * A timeline row appearing is compatible with a half-written activity. Only the rows tell them apart.
  *
+ * ── THE SURFACE IS THE DEAL FORM'S ACTIVITY PANEL (#88) ─────────────────────────────────────────
+ *
+ * This opened the deal in the workspace, which nothing mounts any more. The same timeline component
+ * now sits in the Deal form's Activity panel in compose-only mode, with an entity viewer beneath it
+ * listing the deal's activities; the deal is opened by its record route.
+ *
  * ── CLEANUP ─────────────────────────────────────────────────────────────────────────────────────
  *
  * Activities are titled `AT-<base36 timestamp>` so re-runs cannot collide. To clear them:
@@ -37,28 +43,27 @@
  *    WHERE ActivityID IN (SELECT ID FROM __mj_BizAppsCommon.Activity WHERE Title LIKE 'AT-%');
  *   DELETE FROM __mj_BizAppsCommon.Activity WHERE Title LIKE 'AT-%';
  */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, drain, shot } from '../lib/explorer';
 import { CloseDb, QueryAll, QueryOne } from '../lib/db';
+import { DealForm, OpenSection } from '../lib/deal-form';
 
-const SALES_APP_ROUTE = '/app/sales';
 const RUN_TAG = `AT-${Date.now().toString(36).toUpperCase()}`;
 
-type Page = import('@playwright/test').Page;
-
-const railItem = (page: Page, label: string) =>
-    page.locator('mj-left-nav').getByRole('button', { name: new RegExp(`^${label}`, 'i') }).first();
-
 /**
- * A timeline field addressed by its LABEL, scoped to the pane.
+ * The activity timeline inside the Deal form's Activity panel.
  *
- * `getByLabel` is not usable here: the workspace reuses short labels ("Type", "Notes") across panes, so a
- * document-wide lookup is ambiguous and would silently bind to whichever matched first.
+ * Scoped to the panel because the form renders other `mj-forms-panel`s with short labels of their own
+ * ("Notes" is also a Close-panel field), so a form-wide lookup could bind to the wrong one.
  */
-const timelineField = (page: Page, label: string) =>
-    page.locator('.dat__form label.dat__field', { hasText: new RegExp(`^\\s*${label}`) });
+const timeline = (page: Page): Locator =>
+    DealForm(page).locator('.mj-forms-panel[data-section-key="activity"] mjs-deal-activity-timeline').first();
+
+/** A timeline field addressed by its LABEL, scoped to the timeline's compose form. */
+const timelineField = (page: Page, label: string): Locator =>
+    timeline(page).locator('.dat__form label.dat__field', { hasText: new RegExp(`^\\s*${label}`) });
 
 /** The deal this run works against, chosen from real data rather than created. */
 interface Subject {
@@ -128,25 +133,22 @@ async function linksFor(activityID: string): Promise<
         FROM __mj_BizAppsCommon.ActivityLink WHERE ActivityID = '${activityID}'`);
 }
 
-/** Opens the workspace with a deal loaded, ready for the timeline. */
-async function openDealInWorkspace(page: Page, deal: Subject): Promise<void> {
-    await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`);
-    /**
-     * NO 'Deals' HOP. `mj-left-nav` renders the SUB-PAGES of the sales section — Dashboard, All deals,
-     * Board, Workspace (`sales-nav.model.ts:75-78`). The 'Deals' entry at line 64 of that same file is
-     * the APP-level item and lives on a different surface entirely, so clicking for it inside
-     * `mj-left-nav` waits thirty seconds and times out. The route already lands in the section.
-     */
-    await railItem(page, 'All deals').click();
-    /**
-     * SCOPED TO THE ALL-DEALS TABLE. Every page in the sales section is rendered and switched with
-     * `[hidden]` rather than `@if`, so the dashboard's "Closing soonest" table is still in the DOM with
-     * the same deal names in it. An unscoped `getByText(...).first()` resolves to that HIDDEN row and
-     * then spends thirty seconds reporting "element is not visible" about a cell nobody can click.
-     */
-    await page.locator('.wrap--list table.wl tbody tr').filter({ hasText: deal.Name }).first().click();
+/**
+ * Opens a deal's record tab by its database ID and expands the Activity panel.
+ *
+ * By id rather than by name or list row: `ReopenRecord` resolves a NAME back to an id, and a seeded name
+ * is not guaranteed unique, so the deal opened could differ from the one the assertions were chosen
+ * against. The route is the one `ReopenRecord` uses — MJ's composite-key form, `ID|<guid>`.
+ */
+async function openDealByID(page: Page, deal: Subject): Promise<void> {
+    const entity = encodeURIComponent('MJ_BizApps_Sales: Deals');
+    await page.goto(`${EXPLORER_BASE_URL}/resource/record/${entity}/${encodeURIComponent(`ID|${deal.ID}`)}`, {
+        waitUntil: 'domcontentloaded',
+    });
+    await expect(DealForm(page), `the deal "${deal.Name}" must open as a record form`).toBeVisible({ timeout: 60_000 });
+    await OpenSection(page, 'activity');
     // The timeline renders only for a SAVED deal — it needs an ID to link an activity to.
-    await expect(page.locator('.dat')).toBeVisible({ timeout: 20_000 });
+    await expect(timeline(page), 'the Activity panel must render the timeline').toBeVisible({ timeout: 20_000 });
 }
 
 test.describe('deal activity timeline — S-US9 through the UI', () => {
@@ -181,22 +183,29 @@ test.describe('deal activity timeline — S-US9 through the UI', () => {
         const deal = await subjectDeal();
         const title = `${RUN_TAG} discovery call`;
 
-        await openDealInWorkspace(page, deal);
+        await openDealByID(page, deal);
 
-        await page.locator('.dat__add').click();
+        await timeline(page).locator('.dat__add').click();
         await timelineField(page, 'Type').locator('select').selectOption('Call');
         await timelineField(page, 'Subject').locator('input').fill(title);
         await timelineField(page, 'Notes').locator('textarea').fill('Logged by 70-activity-timeline.spec.ts');
-        await page.locator('.dat__save').click();
+        await timeline(page).locator('.dat__save').click();
 
         /**
          * The form closing is the UI's claim of success. It is a precondition for the real assertions, not
          * a substitute: the old code showed an error here, so this alone would have caught the original
          * defect and nothing since.
          */
-        await expect(page.locator('.dat__error')).toHaveCount(0);
-        await expect(page.locator('.dat__form')).toHaveCount(0, { timeout: 20_000 });
-        await expect(page.locator('.dat__subject', { hasText: title })).toBeVisible();
+        await expect(timeline(page).locator('.dat__error')).toHaveCount(0);
+        await expect(timeline(page).locator('.dat__form')).toHaveCount(0, { timeout: 20_000 });
+        /**
+         * THE NEW ROW IS LISTED. On the form the timeline composes only (`ComposeOnly`), and the panel's
+         * entity viewer beneath it lists the deal's activities, re-read when the timeline emits `Logged`.
+         */
+        await expect(
+            DealForm(page).locator('.mj-forms-panel[data-section-key="activity"] .mjs-deal-activity__viewer'),
+            'the logged activity must appear in the Activity panel',
+        ).toContainText(title, { timeout: 20_000 });
         await shot(page, 'activity-logged');
 
         // ── THE ROW ─────────────────────────────────────────────────────────
@@ -267,7 +276,7 @@ test.describe('deal activity timeline — S-US9 through the UI', () => {
         const deal = await subjectDeal();
         const title = `${RUN_TAG} will be refused`;
 
-        await openDealInWorkspace(page, deal);
+        await openDealByID(page, deal);
 
         const before = await QueryAll(
             `SELECT ID FROM __mj_BizAppsCommon.Activity WHERE Title LIKE '${RUN_TAG}%'`,
@@ -285,7 +294,7 @@ test.describe('deal activity timeline — S-US9 through the UI', () => {
          * below leaves the field empty, the Action treats that as "now", and the log SUCCEEDS. That is why
          * the assertion is on the INVARIANT — no half-written activity — rather than on seeing an error.
          */
-        await page.locator('.dat__add').click();
+        await timeline(page).locator('.dat__add').click();
         await timelineField(page, 'Subject').locator('input').fill(title);
         const when = timelineField(page, 'When').locator('input');
         await when.fill('');
@@ -293,7 +302,7 @@ test.describe('deal activity timeline — S-US9 through the UI', () => {
             el.value = 'not-a-date';
             el.dispatchEvent(new Event('input', { bubbles: true }));
         });
-        await page.locator('.dat__save').click();
+        await timeline(page).locator('.dat__save').click();
         await page.waitForTimeout(2_000);
         await shot(page, 'activity-refused');
 
@@ -333,8 +342,8 @@ test.describe('deal activity timeline — S-US9 through the UI', () => {
      * able to write 'customer asked about renewal' without reopening the deal and falsifying its
      * provenance". Description and NextStep stay open for exactly that.
      *
-     * An activity is the same kind of thing -- the workspace template calls the timeline "a record of
-     * what happened rather than a part of the draft" -- so logging must stay available. This asserts
+     * An activity is the same kind of thing -- a record of what happened rather than a part of the
+     * draft -- so logging must stay available. This asserts
      * that, and asserts the lock is genuinely ON first, so a green result cannot come from having
      * opened an OPEN deal by accident.
      */
@@ -353,36 +362,40 @@ test.describe('deal activity timeline — S-US9 through the UI', () => {
             'the host needs a CLOSED deal with an account and a contact, or this criterion cannot be exercised',
         ).toBeTruthy();
 
-        await openDealInWorkspace(page, locked as Subject);
+        await openDealByID(page, locked as Subject);
 
-        await expect(page.locator('.dat'), 'a closed deal must still show its activity timeline').toBeVisible({
+        await expect(timeline(page), 'a closed deal must still show its activity timeline').toBeVisible({
             timeout: 20_000,
         });
 
-        /** PROVE THE LOCK IS ON, so everything below is not a green result on an open deal. */
+        /**
+         * PROVE THE LOCK IS ON, so everything below is not a green result on an open deal. The hero's
+         * Locked chip renders from the same `ResolveDealLockState` the field lock uses, and outside the
+         * collapsible briefing, so it shows whatever the viewer's persisted Collapsed setting is.
+         */
         await expect(
-            page.locator('.dw-field', { hasText: 'Deal name' }).first().locator('input').first(),
-            'the deal name sits OUTSIDE the editable-while-locked set, so it must be frozen -- if this is '
-                + 'enabled the deal is not actually locked and the rest of this test proves nothing',
-        ).toBeDisabled({ timeout: 20_000 });
+            DealForm(page).locator('.mjs-deal-hero__chip .fa-lock').first(),
+            'the form must show this deal as locked -- if it does not, the deal is not actually locked and '
+                + 'the rest of this test proves nothing',
+        ).toBeVisible({ timeout: 20_000 });
 
         await expect(
-            page.locator('.dat__add'),
+            timeline(page).locator('.dat__add'),
             'logging must stay available on a closed deal, the same way Description and NextStep do',
         ).toBeEnabled({ timeout: 20_000 });
 
         /** AND IT MUST LAND. An offered button that writes nothing is the worse failure of the two. */
         const title = `${RUN_TAG} post-close note`;
-        await page.locator('.dat__add').click();
+        await timeline(page).locator('.dat__add').click();
         await timelineField(page, 'Type').locator('select').selectOption('Note');
         await timelineField(page, 'Subject').locator('input').fill(title);
         await timelineField(page, 'Notes').locator('textarea').fill('Logged against a CLOSED deal by 70-activity-timeline.spec.ts');
-        await page.locator('.dat__save').click();
+        await timeline(page).locator('.dat__save').click();
 
-        await expect(page.locator('.dat__error'), 'logging on a closed deal must not error').toHaveCount(0, {
+        await expect(timeline(page).locator('.dat__error'), 'logging on a closed deal must not error').toHaveCount(0, {
             timeout: 20_000,
         });
-        await expect(page.locator('.dat__form')).toHaveCount(0, { timeout: 20_000 });
+        await expect(timeline(page).locator('.dat__form')).toHaveCount(0, { timeout: 20_000 });
 
         const row = await activityByTitle(title);
         expect(row, 'the activity must exist in the database, not merely on the screen').toBeTruthy();

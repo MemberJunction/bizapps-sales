@@ -2,27 +2,34 @@
  * PHASE 2 DEFINITION OF DONE #1 — `/app/sales` has the family's general layout, and the roster opens a
  * deal as an Explorer record tab.
  *
- * WHAT THIS IS FOR. Phase 1 shipped a workspace that could CREATE a deal but nothing that could OPEN
- * one, so edit mode was unreachable through the UI. This spec covers the surface that closes that gap,
- * and it checks the two things that can silently be wrong about a shell:
+ * WHAT THIS IS FOR. It checks the two things that can silently be wrong about a shell:
  *
  *   1. **The nav item resolves.** `ResourceType: 'Custom'` + `DriverClass` only works if a class is
  *      registered under that exact key AND survives tree-shaking. When it does not, Explorer mounts a
  *      BLANK TAB with no error in the console, no failed request, and nothing in the server log — which
  *      is the single most misleading failure in this stack.
- *   2. **A row actually opens an Explorer record.** Row click is `OpenEntityRecord`, not an in-rail
- *      workspace. Contracts records that its version was once a bare `return` on load failure,
- *      indistinguishable from a dead control.
+ *   2. **A row actually opens an Explorer record.** Opening is `OpenEntityRecord`, rendering
+ *      `mjs-deal-form` in a record tab. Contracts records that its version was once a bare `return` on
+ *      load failure, indistinguishable from a dead control.
  *
  * It also asserts the structural pieces the layout brief is about — the MJ page chrome, the left rail,
- * and all three rail items — because "matches the general layout" is otherwise an opinion.
+ * exactly the rail items `nav/sales-nav.model.ts` declares, and the header's New deal — because
+ * "matches the general layout" is otherwise an opinion.
  *
- * READ-ONLY. It opens an existing demo deal rather than creating one, so it leaves nothing behind and is
- * safe to re-run. Creating and saving is already covered by `40-deal-workspace.spec.ts`.
+ * ── WHAT CHANGED (#88) ──────────────────────────────────────────────────────────────────────────
+ *
+ * The Workspace rail is gone and All deals is now MJ's `mj-entity-viewer` rather than a hand-built
+ * table, so the roster steps read the viewer's grid rows. The KI-8 customer-name check went with the
+ * hand-built table: the service-side account join it guarded no longer renders anything. The new
+ * checks are that no Workspace item is offered and that New deal opens the Deal record form.
+ *
+ * READ-ONLY apart from New deal, which opens an UNSAVED form and is never saved, so it leaves nothing
+ * behind and is safe to re-run. Creating and saving is covered by `70-lifecycle.spec.ts`.
  */
 import { expect, test } from '@playwright/test';
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, expectOnlyKnownErrors, KNOWN_POST_DELETE_ERRORS, shot } from '../lib/explorer';
+import { DEAL_FORM_ROOT, DealForm, OpenNewDeal } from '../lib/deal-form';
 
 const SALES_APP = '/app/sales';
 
@@ -67,16 +74,18 @@ test.describe('sales shell — Phase 2 layout', () => {
       // The header's own content, and the refresh + primary action beside it.
       const body = await page.locator('body').innerText();
       expect(body, 'the page header must carry the section title').toContain('Sales');
-      await expect(
-        page.locator('button', { hasText: /^\s*New deal\s*$/ }).first(),
-        'the header primary action must be present',
-      ).toBeVisible({ timeout: 15_000 });
+      const primary = page.locator('[data-testid="sales-primary"]:visible').first();
+      await expect(primary, 'the header primary action must be present').toBeVisible({ timeout: 15_000 });
+      await expect(primary, 'and on the Deals section it must be New deal').toHaveText(/New deal/i);
 
       // Every rail item from the nav model. See `railItem` for why this is by ROLE and by PREFIX — an
       // earlier text-based locator matched 33 hidden switcher-label spans and picked chrome instead.
       for (const label of RAIL_ITEMS) {
         await expect(railItem(page, label), `the rail must offer "${label}"`).toBeVisible({ timeout: 15_000 });
       }
+      // Removed in #88: records are Explorer tabs, so a rail item for an in-section workspace would
+      // mount a page nothing renders.
+      await expect(railItem(page, 'Workspace'), 'the rail must not offer a Workspace item').toHaveCount(0);
       await shot(page, '50-02-chrome');
     });
 
@@ -102,41 +111,26 @@ test.describe('sales shell — Phase 2 layout', () => {
     });
 
     // ── 4. The roster ───────────────────────────────────────────────────────
-    let firstDealName = '';
+    /**
+     * MJ's entity viewer, scoped to the LIST page. Every page stays in the DOM (hidden, not removed),
+     * and the dashboard's Inspect card is an entity viewer too — unscoped, the rows below could be
+     * Inspect's. The centre container only, because AG Grid repeats each row in its pinned containers.
+     */
+    const rosterRows = page.locator('.wrap--list mj-entity-viewer .ag-center-cols-container .ag-row');
     await test.step('All deals lists the demo deals', async () => {
       await railItem(page, 'All deals').click();
-      await page.waitForTimeout(2500);
+      await expect(rosterRows.first(), 'the roster must list the seeded deals').toBeVisible({ timeout: 30_000 });
 
-      // SCOPED TO THE LIST PAGE. Every page stays in the DOM (hidden, not removed) so the workspace's
-      // open documents survive a page change — which means `.wl` alone matches the dashboard's
-      // "Closing soonest" table too and trips strict mode. Scope by page, always.
-      const rows = page.locator('.wrap--list .wl tbody tr');
-      const count = await rows.count();
-      expect(count, 'the roster must list the seeded deals').toBeGreaterThan(0);
-
-      // The customer name is the KI-8 case: a Deal row cannot resolve it, so the service joins accounts
-      // in memory. If that ever regresses, every row shows "—" and this catches it.
-      const firstRow = rows.first();
-      firstDealName = ((await firstRow.locator('td').first().innerText()) || '').trim();
-      expect(firstDealName.length, 'the first row must name a deal').toBeGreaterThan(0);
-
-      const rosterText = await page.locator('.wrap--list .wl').innerText();
-      expect(rosterText, 'at least one row must resolve a customer name (KI-8 join)').toMatch(/[A-Za-z]{3,}/);
+      const firstRowText = ((await rosterRows.first().innerText()) || '').trim();
+      expect(firstRowText.length, 'the first row must render its values').toBeGreaterThan(0);
       await shot(page, '50-04-roster');
     });
 
     // ── 5. A row opens an Explorer record tab ───────────────────────────────
-    await test.step('clicking a row opens that deal as an Explorer record', async () => {
-      await page.locator('.wrap--list .wl tbody tr').first().click();
-      await page.waitForTimeout(8000);
-
-      await expect(
-        page.locator('mjs-deal-workspace'),
-        'the in-rail workspace must not be the destination',
-      ).toHaveCount(0);
-
-      const form = page.locator('mjs-deal-form, gen-mjbizappssalesdeal-form').first();
-      await expect(form, 'Explorer must mount the deal form').toBeVisible({ timeout: 40_000 });
+    await test.step('opening a row opens that deal as an Explorer record', async () => {
+      // The entity viewer opens a record on DOUBLE-click; a single click selects the row.
+      await rosterRows.first().dblclick();
+      await expect(DealForm(page), 'Explorer must mount the Deal record form').toBeVisible({ timeout: 40_000 });
       await shot(page, '50-05-opened-as-record');
     });
 
@@ -148,6 +142,16 @@ test.describe('sales shell — Phase 2 layout', () => {
       }
       await expect(page.locator('mjs-sales-section'), 'the Sales section must still exist').toBeAttached();
       await shot(page, '50-06-section-still-there');
+    });
+
+    // ── 6. New deal opens the Deal record form ──────────────────────────────
+    await test.step('New deal opens an unsaved Deal record form', async () => {
+      await OpenNewDeal(page);
+      await expect(
+        page.locator(`${DEAL_FORM_ROOT}:visible`),
+        'exactly one Deal form must be on screen — the new record, not a hidden tab behind it',
+      ).toHaveCount(1);
+      await shot(page, '50-07-new-deal');
     });
 
     // ── 7. The keystone ─────────────────────────────────────────────────────
