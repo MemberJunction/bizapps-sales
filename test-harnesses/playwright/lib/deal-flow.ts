@@ -1,5 +1,5 @@
 /**
- * @fileoverview Composing a deal through the workspace — shared by the lifecycle and tripwire specs.
+ * @fileoverview Composing a deal through the Deal form — shared by the lifecycle and tripwire specs.
  *
  * Both need the same opening moves: a new deal with a pipeline, a customer and two catalogue lines. The
  * lifecycle spec then drives it to close-won; the tripwire spec removes a line. Keeping the composition
@@ -9,13 +9,17 @@ import { expect, type Page } from '@playwright/test';
 
 import { QueryAll, QueryOne } from './db';
 import {
-    OpenPane,
-    OpenWorkspace,
+    ByTestId,
+    DealForm,
+    FirstOpenStatus,
+    OpenNewDeal,
+    OpenSection,
+    PickLookup,
     SaveDeal,
-    SelectByLabel,
-    SelectFirstReal,
-    SetField,
-} from './workspace';
+    SetStatusByID,
+    SetText,
+} from './deal-form';
+import { EXPLORER_BASE_URL } from './env';
 
 export interface ComposedDeal {
     Name: string;
@@ -24,43 +28,28 @@ export interface ComposedDeal {
 }
 
 /**
- * Creates a deal through the workspace and returns its ids from the DATABASE.
+ * Creates a deal through the Deal form and returns its ids from the DATABASE.
  *
  * Reads the ids back rather than scraping them off the page: the point of every spec that calls this is
  * to compare the screen against rows, and taking the id from the screen would make both sides of that
  * comparison the same source.
  */
 export async function ComposeDeal(page: Page, name: string, pipeline?: string): Promise<ComposedDeal> {
-    await OpenWorkspace(page);
-    await SetField(page, 'Deal name', name);
-
-    if (pipeline) {
-        await SelectByLabel(page, 'Pipeline', pipeline);
-    } else {
-        await SelectFirstReal(page, 'Pipeline');
-    }
-    await SelectFirstReal(page, 'Customer');
+    await OpenNewDeal(page);
+    await SetText(page, 'Name', name);
+    await PickLookup(page, 'PipelineID', pipeline);
+    await PickLookup(page, 'AccountID');
 
     /**
-     * ── THE STATUS, WHICH THIS HELPER USED TO LEAVE NULL ────────────────────────────────────────
+     * ── THE STATUS, SET EXPLICITLY ──────────────────────────────────────────────────────────────
      *
-     * `DealWorkspaceService.NewDeal()` is `NewRecord()` and nothing else — no status is seeded — and
-     * `Deal.DealStatusTypeID` is NULLABLE with no column default. So a deal saved without touching the
-     * Status select lands with a NULL status, and every measure that reads the status through
-     * `JOIN DealStatusType` silently does not count it. That is how spec 71 came to fail with
-     * `Cannot read properties of undefined (reading 'IsLost')`: the row existed, the JOIN dropped it,
-     * and the non-null assertion blamed the field instead of the join.
-     *
-     * Worth stating plainly because it is a REAL GAP and not only a harness omission: nothing in the
-     * write path requires a status. Recorded as a finding rather than fixed here — defaulting to the
-     * first open status is a product decision, not a test fixture's call.
+     * `Deal.DealStatusTypeID` is NULLABLE with no column default, and a new record seeds none. A deal
+     * saved without a status is dropped by every measure that reads it through `JOIN DealStatusType` —
+     * which is how spec 71 once failed with `Cannot read properties of undefined (reading 'IsLost')`.
+     * So the first open status is chosen by FLAG, from the database, never by name.
      */
-    const openStatus = await QueryOne<{ Name: string }>(
-        `SELECT TOP 1 Name FROM __mj_BizAppsSales.DealStatusType
-          WHERE IsActive = 1 AND IsOpen = 1 ORDER BY DisplayRank`,
-    );
-    expect(openStatus?.Name, 'the host needs an active OPEN status for a deal to start in').toBeTruthy();
-    await SelectByLabel(page, 'Status', String(openStatus!.Name));
+    const open = await FirstOpenStatus();
+    await SetStatusByID(page, open.ID);
 
     await SaveDeal(page);
 
@@ -108,14 +97,14 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
     /**
      * ── NO RELOAD HERE ANY MORE. DN-17 IS FIXED AT THE ENTITY ───────────────────────────────────
      *
-     * This used to reopen the deal from the roster before returning, to get past DN-17: a line added
+     * This used to reopen the deal from the list before returning, to get past DN-17: a line added
      * straight after a create landed on a second, orphaned order. `DealEntity.Save()` now hydrates the
      * embedded peer from the `OrderID` the server wrote, so a freshly created deal is genuinely an edit
      * of a real record and the workaround is not just unnecessary — it would be actively harmful to
      * keep. A reload here would mask a DN-17 regression in every spec except 79.
      *
-     * `79-embedded-order-refresh.spec.ts` is the guard, and `ReopenFromRoster` stays available because
-     * reopening from the roster is a path worth driving in its own right.
+     * `79-embedded-order-refresh.spec.ts` is the guard, and `ReopenRecord` stays available because
+     * reopening a deal is a path worth driving in its own right.
      */
     /**
      * ── THIS ASSERTION WAS UNREACHABLE, AND THAT IS WHY CAUSE 2 LOOKED LIKE STALE SPECS ──────────
@@ -148,60 +137,52 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
 }
 
 /**
- * Adds catalogue lines on the Product lines pane and returns how many the order holds afterwards.
+ * Adds catalogue lines through the "What's being sold" panel and returns how many the order holds after.
  *
- * The picker is the live orders catalogue across the app boundary, so a host whose products are absent
- * or out of window offers nothing — and adding zero lines while reporting success is precisely the
- * vacuous pass this suite exists to catch. Hence the throw.
+ * Each line is composed in the restricted line editor and saved by it, onto the order's line
+ * collection — the deal itself is not re-saved. The picker is the live orders catalogue, so a host whose
+ * products are absent or out of window offers nothing, and adding zero lines while reporting success is
+ * the vacuous pass this suite exists to catch. Hence the throw.
  */
 export async function AddLines(page: Page, orderID: string, count: number): Promise<number> {
-    await OpenPane(page, 'Product lines');
+    await OpenSection(page, 'lines');
 
     for (let i = 0; i < count; i += 1) {
-        const add = page.getByRole('button', { name: /Add line|Add product/i }).first();
-        await expect(add, 'the Product lines pane must offer an add control').toBeVisible({ timeout: 20_000 });
+        const add = ByTestId(page, 'lines-add');
+        await expect(add, 'a saved, open deal must offer Add a product').toBeVisible({ timeout: 30_000 });
         await add.click();
-        await page.waitForTimeout(400);
 
-        // The newest row's product picker. Scoped to the grid so it cannot match a header select.
-        const pickers = page.locator('.dw-lines select, table select');
-        const last = pickers.nth((await pickers.count()) - 1);
-        const options = await last.locator('option').allTextContents();
-        const real = options.map((o) => o.trim()).filter((o) => o && !o.startsWith('—'));
-        if (real.length === 0) {
+        const editor = page.locator('[data-testid="line-editor"]:visible').first();
+        await expect(editor, 'Add a product must open the line editor').toBeVisible({ timeout: 20_000 });
+
+        const product = editor.locator('[data-testid="line-product"]');
+        await expect(product, 'the line editor must offer a product picker').toBeVisible({ timeout: 20_000 });
+        const labels = (await product.locator('option').allTextContents())
+            .map((o) => o.trim())
+            .filter((o) => o && !o.startsWith('—'));
+        if (labels.length === 0) {
             throw new Error(
                 'the product picker offered nothing — the orders catalogue did not load, and adding a ' +
                     'line with no product would make this spec pass while testing nothing',
             );
         }
-        await last.selectOption({ label: real[Math.min(i, real.length - 1)] });
-        await page.waitForTimeout(400);
+        await product.selectOption({ label: labels[Math.min(i, labels.length - 1)] });
 
         /**
-         * ── AND THE QUANTITY, WHICH THIS HELPER USED TO OMIT ────────────────────────────────────────
-         *
-         * `AddLine()` seeds `CompanyID` (orders stamps it in a SERVER class the browser does not have)
-         * but deliberately does NOT seed `Quantity` -- stating how many is the rep's job. So a freshly
-         * added line is invalid until somebody types a number, `CanSave` stays false, and Save sits
-         * disabled with `title="Quantity cannot be null"`.
-         *
-         * The first version of this helper picked a product and clicked Save. It timed out for 30
-         * seconds against a disabled button and the failure named `save.click()`, not the empty field --
-         * which is a fair description of the harness's mistake and a poor one of the cause. The tooltip
-         * was carrying the answer the whole time.
-         *
-         * Quantity is the FIRST numeric input in the row: unit price and line total are read-only cells
-         * (sales states intent, orders states price), and discount is the second input.
+         * Quantity is the rep's to state and is not seeded, so a line without it cannot save — Save
+         * stays disabled with the reason beside it. Filled every time for that reason.
          */
-        const row = page.locator('.dw-lines tbody tr, table tbody tr').last();
-        const quantity = row.locator('input[type="number"]').first();
-        await expect(quantity, 'the new line row must offer a quantity input').toBeVisible({ timeout: 10_000 });
+        const quantity = editor.locator('[data-testid="line-quantity"]');
         await quantity.fill(String(i + 1));
         await quantity.blur();
-        await page.waitForTimeout(400);
-    }
 
-    await SaveDeal(page);
+        const save = editor.locator('[data-testid="line-save"]');
+        await expect(save, 'the line must become saveable once product and quantity are set').toBeEnabled({
+            timeout: 20_000,
+        });
+        await save.click();
+        await expect(editor, 'the line editor must close once the line saves').toBeHidden({ timeout: 30_000 });
+    }
 
     const rows = await QueryAll<{ ID: string }>(
         `SELECT ID FROM __mj_BizAppsOrders.OrderLine WHERE OrderHeaderID = '${orderID}'`,
@@ -210,106 +191,125 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
 }
 
 /**
- * ── CLOSING IS AN EXPLICIT ACT, AND THE PANEL HAS TESTIDS FOR IT ────────────────────────────────
+ * ── CLOSING IS AN EXPLICIT ACT, THROUGH THE CLOSE PANEL ─────────────────────────────────────────
  *
- * The first version of specs 70 and 71 closed a deal by selecting a winning or losing STAGE and
- * pressing Save. That cannot work, and the reason is a rule this app exists to uphold: a stage change
- * is a stage change. `DealEntityServer` moves the stage, applies the stage's forecast defaults and
- * stamps the order status — and deliberately does NOT change the deal's status, because closing is
- * `Sales.CloseDeal` and stays an explicit act even when the stage a deal enters is the one a pipeline
- * calls "Signed". The specs were asserting a rule the app is designed not to have.
- *
- * The workspace exposes the real flow behind `data-testid` attributes, which is what these use:
- * `close-open` -> `close-panel` -> `close-won` / `close-lost` -> (`close-loss-reason`,
- * `close-loss-notes`) -> `close-confirm`, and `reopen-open` -> `reopen-reason` -> `reopen-confirm`.
- * Selecting by testid rather than by button text also keeps the vocabulary rule honest: these controls
- * are found by their role in the flow, never by a status NAME.
+ * A stage change is a stage change: `DealEntityServer` moves the stage and deliberately does NOT
+ * change the status, because closing is `Sales.CloseDeal` even when the stage a deal enters is the one
+ * a pipeline calls "Signed". The Close panel is that act, behind `data-testid`s:
+ * `close-open` -> `close-panel` -> `close-target` (one radio per closing status, valued by its ID) ->
+ * (`close-loss-reason`, `close-loss-notes`) -> `close-confirm`, and `reopen-open` -> `reopen-reason`
+ * -> `reopen-confirm`. The target is chosen by the status's FLAGS, read from the database, so no
+ * status name appears here.
  */
 async function openClosePanel(page: Page): Promise<void> {
-    const open = page.locator('[data-testid="close-open"]:visible').first();
-    await expect(open, 'the workspace must offer an explicit close action').toBeVisible({ timeout: 30_000 });
+    await OpenSection(page, 'close');
+    const open = ByTestId(page, 'close-open');
+    await expect(open, 'an open, saved deal must offer Close this deal').toBeVisible({ timeout: 30_000 });
     await open.click();
-    await expect(
-        page.locator('[data-testid="close-panel"]:visible').first(),
-        'the close panel must open',
-    ).toBeVisible({ timeout: 20_000 });
+    await expect(ByTestId(page, 'close-panel'), 'the close panel must open').toBeVisible({ timeout: 20_000 });
 }
 
-/** Closes the open deal as WON. Returns once the operation has had time to settle. */
+/** The first active closing status carrying the given flag, by rank. */
+async function closingStatus(flag: 'IsWon' | 'IsLost'): Promise<string> {
+    const row = await QueryOne<{ ID: string }>(
+        `SELECT TOP 1 ID FROM __mj_BizAppsSales.DealStatusType
+          WHERE IsActive = 1 AND ${flag} = 1 AND LocksDeal = 1 ORDER BY DisplayRank`,
+    );
+    expect(row?.ID, `the host needs an active locking status with ${flag} = 1`).toBeTruthy();
+    return String(row!.ID);
+}
+
+/** Checks the close-target radio for a status ID, matched case-insensitively. */
+async function chooseTarget(page: Page, statusID: string): Promise<void> {
+    const radios = ByTestId(page, 'close-panel').locator('[data-testid="close-target"]');
+    const values = await radios.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+    const index = values.findIndex((v) => v.toLowerCase() === statusID.toLowerCase());
+    if (index < 0) {
+        throw new Error(`the close panel offers no target for status ${statusID}. It offers: ${values.join(', ') || '(none)'}`);
+    }
+    await radios.nth(index).check();
+}
+
+/**
+ * Confirms, then waits for the outcome the panel reports.
+ *
+ * The confirmation and any warnings render OUTSIDE the close and reopen gates, so they survive the
+ * refresh that locks the deal. An error there fails with the panel's own text.
+ */
+async function confirmAndSettle(page: Page, confirmTestId: string, settledTestId: string): Promise<void> {
+    await ByTestId(page, confirmTestId).click();
+    const settled = ByTestId(page, settledTestId);
+    const error = DealForm(page).locator('[data-testid="close-message"].is-error:visible');
+    await expect(settled.or(error), 'the operation must report an outcome').toBeVisible({ timeout: 60_000 });
+    if (await error.isVisible().catch(() => false)) {
+        throw new Error(`the operation was refused: ${(await error.innerText()).trim()}`);
+    }
+}
+
+/** Closes the open deal as WON. Returns once the panel offers Reopen, i.e. the deal is locked. */
 export async function CloseWon(page: Page, notes?: string): Promise<void> {
     await openClosePanel(page);
-    await page.locator('[data-testid="close-won"]:visible').first().click();
+    await chooseTarget(page, await closingStatus('IsWon'));
     if (notes) {
-        await page.locator('[data-testid="close-notes"]:visible').first().fill(notes);
+        await ByTestId(page, 'close-notes').fill(notes);
     }
-    await page.locator('[data-testid="close-confirm"]:visible').first().click();
-    await page.waitForTimeout(8_000);
+    await confirmAndSettle(page, 'close-confirm', 'reopen-open');
 }
 
 /**
  * Closes the open deal as LOST, with the mandatory reason.
  *
- * The reason is chosen by LABEL from the panel's own select rather than by id, because that select is
- * what a rep uses; a spec that set the id directly would not prove the picker offers it.
+ * The reason is chosen by LABEL from the panel's own select, because that select is what a rep uses;
+ * setting the id directly would not prove the picker offers it.
  */
 export async function CloseLost(page: Page, lossReason: string, lossNotes?: string): Promise<void> {
     await openClosePanel(page);
-    await page.locator('[data-testid="close-lost"]:visible').first().click();
+    await chooseTarget(page, await closingStatus('IsLost'));
 
-    const reason = page.locator('[data-testid="close-loss-reason"]:visible').first();
+    const reason = ByTestId(page, 'close-loss-reason');
     await expect(reason, 'closing as lost must demand a loss reason').toBeVisible({ timeout: 20_000 });
     await reason.selectOption({ label: lossReason });
 
-    // Only rendered when the chosen reason declares RequiresNotes -- so it is filled if present and
-    // not demanded if absent. Asserting its presence unconditionally would pin the wrong rule.
-    const notesBox = page.locator('[data-testid="close-loss-notes"]:visible').first();
+    // Rendered only when the chosen reason declares RequiresNotes — filled if present, never demanded.
+    const notesBox = ByTestId(page, 'close-loss-notes');
     if (lossNotes && (await notesBox.isVisible().catch(() => false))) {
         await notesBox.fill(lossNotes);
     }
 
-    await page.locator('[data-testid="close-confirm"]:visible').first().click();
-    await page.waitForTimeout(8_000);
+    await confirmAndSettle(page, 'close-confirm', 'reopen-open');
 }
 
-/** Reopens a closed deal with the reason `Sales.ReopenDeal` requires. */
+/** Reopens a closed deal through the Close panel, recording the reason `Sales.ReopenDeal` keeps. */
 export async function ReopenDeal(page: Page, reason: string): Promise<void> {
-    const open = page.locator('[data-testid="reopen-open"]:visible').first();
-    await expect(open, 'a closed deal must offer a reopen action').toBeVisible({ timeout: 30_000 });
+    await OpenSection(page, 'close');
+    const open = ByTestId(page, 'reopen-open');
+    await expect(open, 'a closed deal must offer Reopen this deal').toBeVisible({ timeout: 30_000 });
     await open.click();
 
-    const box = page.locator('[data-testid="reopen-reason"]:visible').first();
-    await expect(box, 'the reopen panel must demand a reason').toBeVisible({ timeout: 20_000 });
+    const box = ByTestId(page, 'reopen-reason');
+    await expect(box, 'the reopen panel must open').toBeVisible({ timeout: 20_000 });
     await box.fill(reason);
-    await page.locator('[data-testid="reopen-confirm"]:visible').first().click();
-    await page.waitForTimeout(8_000);
+    await confirmAndSettle(page, 'reopen-confirm', 'close-open');
 }
 
 /**
- * Closes the workspace tab and reopens the deal from the All-deals roster, so the client re-reads it.
+ * Opens a deal's record tab afresh from the database id, so the client re-reads it.
  *
- * Goes through the ROSTER rather than a URL, because that is the path a rep takes and it exercises the
- * roster row -> workspace handoff at the same time.
+ * Goes by the record route and the database id rather than by a list row: the All-deals page is an
+ * entity viewer whose rows are virtualised, and a row-text match there is a statement about scroll
+ * position, not about the deal. The segment is MJ's composite-key form, `ID|<guid>`.
  */
-export async function ReopenFromRoster(page: Page, name: string): Promise<void> {
-    await page.locator('.mj-left-nav, nav').getByText('All deals', { exact: false }).first().click();
-    await page.waitForTimeout(2_500);
-
-    /**
-     * REFRESHED FIRST, and this is not belt-and-braces.
-     *
-     * `SalesSectionComponent` loads `Deals` once and every page is rendered behind `[hidden]` rather
-     * than `@if` — so switching to "All deals" swaps CSS, it does not re-query. A deal created after
-     * that load is genuinely absent from the table, and the first version of this helper failed with
-     * "the roster must list ..." on a deal that was sitting in the database. The header's refresh
-     * control is the same one a rep would reach for.
-     */
-    await page.getByRole('button', { name: 'Refresh this page' }).first().click();
-    await page.waitForTimeout(3_000);
-
-    const row = page.locator('.wrap--list table.wl tbody tr').filter({ hasText: name }).first();
-    await expect(row, `the roster must list "${name}" so it can be reopened`).toBeVisible({ timeout: 30_000 });
-    await row.click();
-    await page.waitForTimeout(5_000);
+export async function ReopenRecord(page: Page, name: string): Promise<void> {
+    const row = await QueryOne<{ ID: string }>(`SELECT ID FROM __mj_BizAppsSales.Deal WHERE Name = '${name}'`);
+    expect(row?.ID, `the deal "${name}" must exist to be reopened`).toBeTruthy();
+    const entity = encodeURIComponent('MJ_BizApps_Sales: Deals');
+    await page.goto(`${EXPLORER_BASE_URL}/resource/record/${entity}/${encodeURIComponent(`ID|${row!.ID}`)}`, {
+        waitUntil: 'domcontentloaded',
+    });
+    await expect(DealForm(page), `the deal "${name}" must reopen as a record form`).toBeVisible({ timeout: 60_000 });
+    await expect(DealForm(page), 'the reopened form must be the deal asked for').toContainText(name, {
+        timeout: 30_000,
+    });
 }
 
 /**

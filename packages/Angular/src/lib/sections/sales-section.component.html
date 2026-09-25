@@ -17,7 +17,7 @@
         <i class="fa-solid fa-arrow-rotate-right" aria-hidden="true"></i>
       </button>
       @if (PrimaryAction; as action) {
-        <button type="button" mjButton variant="primary" (click)="StartPrimary()">
+        <button type="button" mjButton variant="primary" data-testid="sales-primary" (click)="StartPrimary()">
           <i [class]="action.Icon" aria-hidden="true"></i> {{ action.Label }}
         </button>
       }
