@@ -103,7 +103,17 @@ type ActionableStatusTransition = StatusTransitionPlanFields & { Kind: 'Close' |
  */
 type UnreadableStatusTransition = StatusTransitionPlanFields & { Kind: 'Unreadable' };
 
-type StatusTransitionPlan = ActionableStatusTransition | UnreadableStatusTransition;
+/**
+ * `PriorMissing` is not a transition either: the target locks, but the status the deal points at now
+ * has no row, so nothing can say whether the deal was already closed. Running a close on it could
+ * derive a second contract and order from a deal that has them, so the save is refused.
+ */
+type PriorMissingStatusTransition = StatusTransitionPlanFields & { Kind: 'PriorMissing' };
+
+type StatusTransitionPlan =
+    | ActionableStatusTransition
+    | UnreadableStatusTransition
+    | PriorMissingStatusTransition;
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
@@ -354,6 +364,14 @@ export class DealEntityServer extends DealEntity {
                 'The deal status could not be read, so this save cannot tell whether it closes the ' +
                     'deal. Nothing was changed. Try again, and if it persists check that the Deal ' +
                     'Status Types list is readable.',
+            );
+        }
+
+        if (transition?.Kind === 'PriorMissing') {
+            return this.refuseSave(
+                `This deal's current status (${transition.PriorStatusID}) no longer exists, so whether ` +
+                    'the deal is already closed cannot be told. Nothing was changed. Set the status to ' +
+                    'an open one first, then close the deal.',
             );
         }
 
@@ -668,7 +686,22 @@ export class DealEntityServer extends DealEntity {
             return { Kind: 'Unreadable', TargetStatusID: target, PriorStatusID: priorID, TargetIsLost: false };
         }
 
-        const priorLocks = priorID ? await this.statusLocksDeal(priorID) : false;
+        const priorFlags = priorID ? await this.readStatusLockFlags(priorID) : null;
+
+        /**
+         * A PRIOR STATUS WITH NO ROW IS NOT A LOCKING ONE HERE, and cannot be closed from.
+         *
+         * `checkCloseLock` treats that deal as locked, but this reads it as NOT locking on purpose: that
+         * is what lets a save move it to an open status as an ordinary write, which is the repair path
+         * for an orphaned status. Read as locking, that move would plan a Reopen instead.
+         *
+         * Moving it to a LOCKING status is refused. Nothing says whether the deal was already closed,
+         * and a close run on one that was would derive a second contract and order.
+         */
+        if (priorFlags?.Absent && targetFlags.LocksDeal) {
+            return { Kind: 'PriorMissing', TargetStatusID: target, PriorStatusID: priorID, TargetIsLost: false };
+        }
+        const priorLocks = priorFlags?.LocksDeal ?? false;
 
         if (targetFlags.LocksDeal && !priorLocks) {
             return {
@@ -2165,7 +2198,7 @@ export class DealEntityServer extends DealEntity {
             return null;
         }
         const persisted = await this.readStatusLockFlags(persistedStatusID);
-        if (!persisted.LocksDeal) {
+        if (!persisted.LocksDeal && !persisted.Absent) {
             return null;
         }
 
@@ -2198,9 +2231,21 @@ export class DealEntityServer extends DealEntity {
          * is what stops the two from disagreeing again. It grants nothing a caller could exploit:
          * `stampOwnerFromTeam` re-derives the value from the roster a moment later.
          */
+        /**
+         * A PERSISTED STATUS WITH NO ROW LOCKS THE DEAL, and its status may still be written.
+         *
+         * Nothing can prove the deal is open, so it refuses more, never less — the same rule a read
+         * FAILURE already follows, with the same editable set (`IsLost` is `false`).
+         *
+         * `DealStatusTypeID` is exempt so the orphan can be repaired. The exemption only ever sees a move
+         * to a NON-locking status: a locking target is planned as `PriorMissing` and refused before this
+         * runs, and a target with no row is refused as `Unreadable`.
+         */
+        const statusRepair = (name: string): boolean => persisted.Absent && name === 'DealStatusTypeID';
         const frozen = (f: { Dirty: boolean; Name: string }): boolean =>
             f.Dirty
             && !editable.has(f.Name)
+            && !statusRepair(f.Name)
             && !(f.Name === 'OwnerEmployeeID' && this.RosterDrivesThisSave);
         const changed = this.Fields.filter(frozen).map((f) => f.Name);
 
@@ -2268,17 +2313,13 @@ export class DealEntityServer extends DealEntity {
          * taking the notice down.
          */
         const named = JoinLabels(all.map(DealFieldLabel));
+        if (persisted.Absent) {
+            return (
+                `This deal's status (${persistedStatusID}) could not be found, so it is treated as closed. ` +
+                `${named} cannot be changed until the status is set to an open one.`
+            );
+        }
         return `This deal is closed. ${named} cannot be changed until the status is set back to Open.`;
-    }
-
-    /**
-     * Whether a status carries `LocksDeal`.
-     *
-     * THE FLAG, never the name — a deployment may call its winning status "Signed", and this must keep
-     * working. It is also why the lock is a property of the STATUS TYPE rather than of the stage.
-     */
-    private async statusLocksDeal(statusID: string): Promise<boolean> {
-        return (await this.readStatusLockFlags(statusID)).LocksDeal;
     }
 
     /**
@@ -2301,10 +2342,17 @@ export class DealEntityServer extends DealEntity {
      * turns a transient read failure into a REAL CLOSE — stage event, contract, finance tasks, a voided
      * order — on a save that asked for none of it. One default cannot serve both readings, so callers
      * are told whether the row was actually read and decide for themselves.
+     *
+     * ── `Absent` IS THE READ THAT SUCCEEDED AND FOUND NOTHING ─────────────────────────────────
+     *
+     * Reported apart from a failure because the two call for different handling of a PRIOR status:
+     * a failure fails closed through `LocksDeal`, while an absent row reports `LocksDeal: false` so
+     * `planStatusTransition` can let the status be repaired, and `checkCloseLock` locks on `Absent`
+     * itself. The flag is read off the row, never assumed: `LocksDeal` and `IsLost` stay `false`.
      */
     private async readStatusLockFlags(
         statusID: string,
-    ): Promise<{ LocksDeal: boolean; IsLost: boolean; Read: boolean }> {
+    ): Promise<{ LocksDeal: boolean; IsLost: boolean; Read: boolean; Absent: boolean }> {
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
             {
@@ -2319,10 +2367,10 @@ export class DealEntityServer extends DealEntity {
             LogError(
                 `DealEntityServer.readStatusLockFlags: could not read status ${statusID}: ${result.ErrorMessage}`,
             );
-            return { LocksDeal: true, IsLost: false, Read: false };
+            return { LocksDeal: true, IsLost: false, Read: false, Absent: false };
         }
         const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean } | undefined;
-        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row };
+        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row, Absent: !row };
     }
 
     /* ── Selling company ────────────────────────────────────────────────────── */

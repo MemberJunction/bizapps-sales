@@ -258,6 +258,26 @@ export async function ResolveDealLockState(
     const row = result?.Success ? (result.Results ?? [])[0] : undefined;
 
     /**
+     * A STATUS ROW THAT IS ABSENT LOCKS THE DEAL, as `DealEntityServer.checkCloseLock` does.
+     *
+     * The read succeeded and found nothing, so nothing can prove the deal is open. The server locks it
+     * with the ordinary editable set of a deal that is not lost, and this reports the same so no surface
+     * offers a field the server then refuses. Setting the status to an open one is the way out.
+     */
+    if (result?.Success && !row) {
+        const editable = JoinLabels(DealFieldsListedAsEditable(false).map(DealFieldLabel));
+        return {
+            IsLocked: true,
+            StatusName: null,
+            IsLost: false,
+            IsWon: false,
+            Notice:
+                `This deal's status could not be found, so it is treated as closed. Only ${editable} can be ` +
+                'edited. To change anything else, set the status to an open one.',
+        };
+    }
+
+    /**
      * THE OUTCOME SURVIVES THE EARLY RETURN, THE LOCK DOES NOT.
      *
      * `IsWon` is a fact about the status itself, so it is carried out of every exit below rather than
