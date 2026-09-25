@@ -339,6 +339,42 @@ export const CloseWonContractChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-won-contract.CT7',
+        Name: 'CT7: a contract of a type that requires a template saves, carrying contracts\' current template',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * golive #269. The seam sends no `ContractTemplateID`, and Order Form carries
+                 * `TemplateRequired = 1`, so every Closed Won contract was refused on save until contracts
+                 * defaulted the template on the server. This asserts the save succeeds AND that the
+                 * template it carries is one contracts chose — sales still supplies none.
+                 *
+                 * The type is found by its flags, never by name: `TemplateRequired = 1` is the case under
+                 * test, and `MustBeChild = 0` because a close-won contract has no parent.
+                 */
+                requireContracts();
+                const [type] = await rows(ctx, E_CONTRACT_TYPE, `Status = 'Active' AND TemplateRequired = 1 AND MustBeChild = 0`);
+                Assert(!!type, 'contracts has no active standalone type that requires a template — nothing to prove');
+                const published = await rows(ctx, 'MJ_BizApps_Contracts: Contract Templates', `Status = 'Published' AND IsUsable = 1`);
+                Assert(
+                    published.length > 0,
+                    'contracts has no Published, usable template on this host, so it has nothing to default and ' +
+                        'the save is correctly refused — seed one before reading this as a regression',
+                );
+
+                const result = await createContract(ctx, String(type.Name));
+                Assert(result.Success, `the contract was not created — ${result.Message}`);
+
+                const [contract] = await rows(ctx, E_CONTRACT, `ID = '${result.ContractID}'`);
+                Assert(!!contract?.ContractTemplateID, 'the contract carries the template contracts defaulted');
+                Assert(
+                    published.some((t) => String(t.ID).toLowerCase() === String(contract.ContractTemplateID).toLowerCase()),
+                    'and it is a Published, usable one',
+                );
+            }),
+    },
 ];
 
 for (const check of CloseWonContractChecks) {

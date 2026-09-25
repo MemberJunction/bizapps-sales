@@ -368,6 +368,28 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     ],
                 };
             }
+            /**
+             * A CURRENT STATUS THAT CANNOT BE ANSWERED FOR IS NOT AN OPEN ONE.
+             *
+             * `loadStatusFlags` returns null both when the read fails and when the row is gone, and
+             * either way nothing says whether this deal is already closed. Closing it anyway could derive
+             * a second contract and order from a deal that has them. `DealEntityServer` locks the same
+             * deal and lets its status be set to an open one, which is the way out named here.
+             */
+            if (deal.DealStatusTypeID && !current) {
+                return {
+                    ...empty,
+                    Issues: [
+                        issue(
+                            'deal',
+                            `This deal's current status (${deal.DealStatusTypeID}) could not be read or no longer ` +
+                                'exists, so whether it is already closed cannot be told. Set the status to an ' +
+                                'open one first, then close the deal.',
+                            'DealStatusTypeID',
+                        ),
+                    ],
+                };
+            }
 
             // ── 2. Validate what this particular close requires ───────────────────
             const validation = await this.validate(deal, input, target, provider, user);
