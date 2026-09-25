@@ -382,6 +382,59 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
 
             this.Products = await this.service.LoadProducts();
+
+            /**
+             * RESOLVE THE FK, AND DECIDE, BEFORE `Ensure()` IS ALLOWED TO RUN (DN-17).
+             *
+             * `OrderID_EnsureObject()` returns the deal's real order only when `EmbeddedRecord` has
+             * been exposed -- by a load, a save, or a wire deserialize. Reached with a deal whose
+             * `OrderID` names a real row but whose peer never hydrated, it calls `NewRecord()` and
+             * hands back a BLANK order instead. The dialog then prices a line against it and the save
+             * inserts a SECOND header with no `CompanyID`, dying two apps away on `Failed to save order
+             * header: Company cannot be null` while burning an order number.
+             *
+             * ── WHY THE DECISION CANNOT COME AFTER `Ensure()` ──────────────────────────────────────
+             *
+             * Because `Ensure()` is not a read. `NewRecord()` mints a `uuidv4()` for a single
+             * uniqueidentifier primary key, and `stampOwnerKey()` then writes that id into the OWNER's
+             * foreign key -- `this.Deal.OrderID` -- before returning. So by the time a post-`Ensure()`
+             * guard could refuse, the deal this dialog SHARES with the form is already repointed at a
+             * blank, unsaved order. Closing the dialog and saving the deal then fails on `CompanyID`,
+             * against an order the user never saw: exactly the error this guard exists to prevent,
+             * moved one screen away.
+             *
+             * The same stamping is why the test for a deal with NO order has to model it. A deal that
+             * arrives with a null `OrderID` acquires one from `Ensure()`, so a guard phrased as "the FK
+             * is set and the order is not saved" fires on the legitimate unsaved-deal case too. Asking
+             * BEFORE `Ensure()` cannot: at that point `OrderID` still means what the caller meant by it.
+             *
+             * `DealEntity.Save()` already carries the equivalent guard for the post-save path; this is
+             * the load path, which it cannot reach. `OrderID_LoadObject()` is the safe question --
+             * it resolves a peer the FK already names, which `Ensure()` deliberately refuses to do.
+             *
+             * Upstream: MemberJunction/MJ#4739 tracks the two core behaviours this works around.
+             */
+            if (this.Deal?.OrderID && !this.Deal.OrderID_Object) {
+                await this.Deal.OrderID_LoadObject();
+            }
+
+            /**
+             * Still unresolved means this client genuinely cannot read the order -- a permissions
+             * refusal, or a generated type that no longer matches the entity metadata the client builds
+             * its query from (MemberJunction/bizapps-orders#238). Refuse while `Deal.OrderID` still
+             * points where it did.
+             *
+             * The test is the PEER, not the object `Ensure()` would hand back: it asks "did the order
+             * this deal names come back", which is the thing the rest of this dialog depends on.
+             */
+            if (this.Deal?.OrderID && !this.Deal.OrderID_Object) {
+                this.Error =
+                    'This deal\'s order could not be loaded, so a product cannot be added to it. ' +
+                    'Reload the page and try again; if it persists, the order exists but this app ' +
+                    'cannot read it, and that needs an administrator rather than a retry.';
+                return;
+            }
+
             const order = this.Deal?.OrderID_EnsureObject();
             if (!order) {
                 this.Error = 'This deal has no order yet. Save the deal first.';
