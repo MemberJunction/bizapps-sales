@@ -131,6 +131,13 @@ jobs:
       - name: Spec typecheck gate (Playwright compiles specs without checking them)
         run: npm run test:spec-gate
 
+      # A SPEC THAT WAITS FOR A COMPONENT NOTHING MOUNTS STILL COMPILES. 26 of 33 specs failed in setup
+      # against the removed deal workspace (#88) while the typecheck above stayed green. This checks that
+      # every testid, field, component tag and app class the harness names is declared in a template
+      # that is actually mounted. Needs no browser, database or login.
+      - name: Harness selector gate (the harness only targets markup the app renders)
+        run: npm run test:selector-gate
+
       # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
       # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a
       # permanent red X asserting nothing. Guarded rather than omitted, so the first real test file

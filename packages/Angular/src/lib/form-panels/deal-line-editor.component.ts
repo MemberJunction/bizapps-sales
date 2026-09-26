@@ -121,7 +121,7 @@ interface RemoteOperationRouter {
     imports: [CommonModule, FormsModule],
     template: `
         <div class="mjs-le__scrim" (click)="Cancel()"></div>
-        <div class="mjs-le" role="dialog" aria-modal="true" [attr.aria-label]="Title">
+        <div class="mjs-le" role="dialog" aria-modal="true" data-testid="line-editor" [attr.aria-label]="Title">
             <header class="mjs-le__head">
                 <h2>{{ Title }}</h2>
                 <button type="button" class="mjs-le__x" (click)="Cancel()" aria-label="Close">
@@ -142,7 +142,7 @@ interface RemoteOperationRouter {
                              may sell any company's product, and the LINE takes its company from whichever
                              is chosen. Each option names its owner because two companies can both sell an
                              "Onboarding Fee". -->
-                        <select [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
+                        <select data-testid="line-product" [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
                                 [disabled]="IsLocked" [title]="BlockedReason">
                             <option [ngValue]="null">— choose a product —</option>
                             @for (p of Products; track p.ID) {
@@ -158,7 +158,7 @@ interface RemoteOperationRouter {
                                  floor of zero offers the one value the database forbids. Negative is
                                  legal to orders as its reversal mechanism, but a reversal is not
                                  something a deal line expresses. -->
-                            <input type="number" min="1" step="1" [ngModel]="Working.Quantity"
+                            <input type="number" data-testid="line-quantity" min="1" step="1" [ngModel]="Working.Quantity"
                                    (ngModelChange)="SetQuantity($event)"
                                    [disabled]="IsLocked" [title]="BlockedReason" />
                         </label>
@@ -168,7 +168,7 @@ interface RemoteOperationRouter {
                             <!-- Percent in, FRACTION stored. step is 0.01 because that is what
                                  OrderLine.DiscountPct DECIMAL(7,4) holds: a hundredth of one percent.
                                  The conversion refuses an ambiguous value rather than guessing. -->
-                            <input type="number" min="0" max="100" step="0.01"
+                            <input type="number" data-testid="line-discount" min="0" max="100" step="0.01"
                                    [ngModel]="DiscountPercent" (ngModelChange)="SetDiscountPercent($event)"
                                    [disabled]="IsLocked" [title]="BlockedReason" />
                             @if (DiscountRefusal) {
@@ -180,7 +180,7 @@ interface RemoteOperationRouter {
                     @if (ShowTermStart) {
                         <label class="mjs-le__field">
                             <span class="mjs-le__label">Term start</span>
-                            <input type="date" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
+                            <input type="date" data-testid="line-term-start" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
                                    [disabled]="IsLocked" [title]="BlockedReason" />
                             @if (!HasExplicitTermStart) {
                                 <small class="mjs-le__hint">order date</small>
@@ -213,7 +213,7 @@ interface RemoteOperationRouter {
 
                 <!-- Confirm LEFT, cancel RIGHT (CLAUDE.md). -->
                 <footer class="mjs-le__foot">
-                    <button type="button" class="mjs-le__btn mjs-le__btn--primary"
+                    <button type="button" class="mjs-le__btn mjs-le__btn--primary" data-testid="line-save"
                             [disabled]="!CanSave || Saving" (click)="Save()">
                         {{ Saving ? 'Saving…' : 'Save' }}
                     </button>
@@ -234,7 +234,7 @@ interface RemoteOperationRouter {
                         @if (Confirming) {
                             <span class="mjs-le__confirm">
                                 <span class="mjs-le__muted">Remove this product?</span>
-                                <button type="button" class="mjs-le__btn mjs-le__btn--danger"
+                                <button type="button" class="mjs-le__btn mjs-le__btn--danger" data-testid="line-remove-confirm"
                                         [disabled]="Saving" (click)="Remove()">
                                     {{ Saving ? 'Removing…' : 'Remove' }}
                                 </button>
@@ -242,7 +242,7 @@ interface RemoteOperationRouter {
                                         (click)="Confirming = false">Keep</button>
                             </span>
                         } @else {
-                            <button type="button" class="mjs-le__btn mjs-le__btn--quiet"
+                            <button type="button" class="mjs-le__btn mjs-le__btn--quiet" data-testid="line-remove"
                                     [disabled]="Saving" (click)="Confirming = true">Remove</button>
                         }
                     }

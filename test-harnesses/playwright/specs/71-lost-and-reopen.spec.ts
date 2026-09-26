@@ -58,7 +58,7 @@ import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { CanTransition } from '@mj-biz-apps/orders-entities';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AssertBaseline, CloseLost, ComposeDeal, PurgeByPrefix, PurgeDeal, ReopenDeal } from '../lib/deal-flow';
-import { SaveDeal, SelectByLabel } from '../lib/workspace';
+import { DealForm, EditDeal, PickLookup, SaveDeal } from '../lib/deal-form';
 
 const RUN = `PW-LOST-${Date.now().toString(36)}`;
 let dealID = '';
@@ -86,16 +86,9 @@ test.describe('closed lost and reopen — what happens to the order', () => {
         /**
          * THE PIPELINE BY THE RULE THIS SPEC EXERCISES, not by whichever option is first.
          *
-         * This called ComposeDeal with no pipeline, which falls through to SelectFirstReal('Pipeline')
-         * -- it takes whatever option the select happens to list first. Only B2B has a losing stage
-         * declaring Voided; D2C has no losing stage at all. So on a D2C pick the lookup below returned
-         * undefined and the spec failed at its own precondition with "the pipeline needs a losing stage
-         * that declares Voided", which reads as a seed gap. The seed is correct -- B2B/Lost/Voided is
-         * present and matches every condition. The spec was choosing by position.
-         *
-         * Same shape 70-lifecycle already guards against, and its wording applies here unchanged:
-         * picking the pipeline by its label "would silently test the D2C path the day the seed
-         * reorders them". Resolved by the property instead, so it cannot drift.
+         * Only a pipeline with a losing stage declaring Voided can exercise it; on any other the
+         * precondition below fails and reads as a seed gap. Picking by label would silently test the
+         * wrong pipeline the day the seed reorders them, so it is resolved by the property instead.
          */
         const pipeline = await QueryOne<{ Name: string }>(`
             SELECT TOP 1 p.Name
@@ -169,21 +162,34 @@ test.describe('closed lost and reopen — what happens to the order', () => {
          * deal gets quoted, is then lost, and is later reopened — and it is the only shape in which the
          * order has something to refuse.
          */
-        const quoting = await QueryOne<{ Name: string }>(`
-            SELECT TOP 1 s.Name
+        /**
+         * The Stage field is an MJ type-ahead over every stage and the pick is by the row's text, so
+         * the stage must be the only active one carrying its name; the move is then confirmed by ID.
+         */
+        const quoting = await QueryOne<{ ID: string; Name: string }>(`
+            SELECT TOP 1 s.ID, s.Name
               FROM __mj_BizAppsSales.PipelineStage s
               JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = s.DealStatusTypeID
              WHERE s.PipelineID = (SELECT PipelineID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}')
                AND s.IsActive = 1 AND s.OrderStatusOnEntry IS NOT NULL AND t.LocksDeal = 0
+               AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineStage o
+                                WHERE o.IsActive = 1 AND o.Name = s.Name AND o.ID <> s.ID)
              ORDER BY s.DisplayOrder`);
         expect(
             quoting?.Name,
-            'the pipeline needs a non-closing stage that declares an OrderStatusOnEntry, or the order has ' +
-                'nothing to refuse on the way back',
+            'the pipeline needs a uniquely named, non-closing stage that declares an OrderStatusOnEntry, ' +
+                'or the order has nothing to refuse on the way back',
         ).toBeTruthy();
-        await SelectByLabel(page, 'Stage', String(quoting!.Name));
+        await EditDeal(page);
+        await PickLookup(page, 'PipelineStageID', String(quoting!.Name));
         await SaveDeal(page);
-        await page.waitForTimeout(2_000);
+        const moved = await QueryOne<{ PipelineStageID: string | null }>(
+            `SELECT PipelineStageID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'`,
+        );
+        expect(
+            String(moved?.PipelineStageID ?? '').toLowerCase(),
+            'the deal must be in the quoting stage before it is lost',
+        ).toBe(String(quoting!.ID).toLowerCase());
 
         const reason = await QueryOne<{ Name: string }>(
             `SELECT TOP 1 Name FROM __mj_BizAppsSales.LossReason WHERE IsActive = 1 AND RequiresNotes = 0
@@ -277,58 +283,25 @@ test.describe('closed lost and reopen — what happens to the order', () => {
         ).toBe(expectedStatus);
 
         /**
-         * ── 4. AND THE SCREEN SAYS SO. THIS IS A TRIPWIRE AND IT IS RED — DN-18 ─────────────────
+         * ── 4. AND THE SCREEN SAYS SO — DN-18 ───────────────────────────────────────────────────
          *
-         * A silent reopen is the bug, and today the reopen IS silent. The diagnosis, which took two
-         * fixes to reach and neither of them was this one:
+         * A silent reopen is the bug: the deal comes back open while its order stayed behind, and
+         * nothing on screen says so. `Sales.ReopenDeal` returns the order's refusal in `Issues`, and
+         * the Close panel renders its message and each issue outside the reopen gate, so they survive
+         * the refresh that unlocks the deal.
          *
-         *   · `Sales.ReopenDeal` is not at fault. Its success output carries
-         *     `Issues: orderStatusIssues(deal)` — it reports the refusal properly.
-         *   · The WORKSPACE dropped those issues: `ApplyCloseIssues` ran only on the `!Success` branch,
-         *     so every warning on a successful close or reopen was discarded. **Fixed** — both handlers
-         *     now call `SurfaceOperationIssues` after the reload.
-         *   · The reopen NOW DERIVES its landing stage from the close event's `FromStageID`
-         *     (DN-18, `close-deal.CD18`), so `input.StageID` is an override rather than a requirement and
-         *     an agent gets the same restoration a rep does.
-         *   · **And it still cannot help THIS flow, for a reason worth stating.** This spec moves the deal
-         *     into the losing stage with a PLAIN SAVE and only then closes it through the panel. So the
-         *     close never moved the stage, its event holds `FromStageID === ToStageID`, and the reopen
-         *     correctly derives the stage the deal is already in — `CD19`'s case exactly. Nothing is
-         *     restored because nothing moved, and nothing warns because nothing was attempted.
-         *   · Which exposes the remaining half: **`DealWorkspaceComponent.ConfirmClose()` sends no
-         *     `ClosingStageID` either.** No close driven from the browser ever moves the stage, so no
-         *     reopen driven from the browser can restore one. The mechanism works — `CD18` proves it
-         *     end to end — and the UI cannot reach it. That is the mirror image of the reopen's missing
-         *     `StageID`, and closing it is the same kind of decision: derive the closing stage in the
-         *     operation from the pipeline stage whose declared status matches the outcome, or ask the rep.
-         *     Recorded in DN-18; deliberately not guessed at here.
-         *
-         * S-US8 describes a reopen that enters a stage and reports what the order refused. The operation
-         * can do that; the UI never asks it to. Closing the gap is a design decision — re-apply the
-         * current stage's `OrderStatusOnEntry` on reopen, or offer the rep a stage on the reopen panel —
-         * and it is recorded in `DECISIONS-NEEDED.md` DN-18 rather than guessed at here.
-         *
-         * Kept as an ASSERTION OF THE INTENT, the same way `78` was for KI-20 and `79` was for DN-17:
-         * both of those went green the day their defect was fixed, without anyone having to remember to
-         * come back and re-tighten a spec that had been relaxed to match a bug.
-         */
-        /**
-         * ── THE TRIPWIRE ONLY FIRES WHEN THERE IS SOMETHING TO WARN ABOUT ───────────────────────
-         *
-         * DN-18 is about a SILENT reopen: the deal comes back open while its order stayed behind,
-         * and nothing on screen says so. That is still worth catching. But it presupposes the order
-         * could not follow, and as of orders making Voided non-terminal it now can -- in this flow
-         * it does, which is asserted above. Demanding a warning here would be demanding a warning
-         * about a refusal that did not happen.
-         *
-         * So it is gated on `legal`. If orders ever refuses the move again the tripwire returns on
-         * its own, which is the property specs 78 and 79 have and the reason this was kept red
-         * rather than relaxed. The else-branch is NOT a silent skip: it asserts the outcome that
-         * makes the tripwire inapplicable, so this block can never pass by simply doing nothing.
+         * GATED ON `legal`. Orders now permits `Voided -> Quoted`, so in this flow the order follows
+         * and there is nothing to warn about; demanding a warning would assert a refusal that did not
+         * happen. If orders ever refuses the move again the tripwire returns on its own. The
+         * else-branch asserts the outcome that makes it inapplicable, so this block can never pass by
+         * doing nothing.
          */
         if (!legal) {
             await expect(
-                page.locator('.dw-msg:visible, .dw-issues li:visible').filter({ hasText: /order|Voided|could not/i }).first(),
+                DealForm(page)
+                    .locator('[data-testid="close-message"]:visible, .mjs-close-action__issue:visible')
+                    .filter({ hasText: /order|Voided|could not/i })
+                    .first(),
                 'the reopen must SURFACE that the order could not follow — a silent success leaves a working ' +
                     'deal pointing at a voided order with nothing on screen saying so (DN-18)',
             ).toBeVisible({ timeout: 20_000 });

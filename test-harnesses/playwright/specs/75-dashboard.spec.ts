@@ -46,7 +46,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryOne } from '../lib/db';
-import { OpenWorkspace, SALES_APP_ROUTE } from '../lib/workspace';
+import { SALES_DEALS_ROUTE } from '../lib/deal-form';
 import { EXPLORER_BASE_URL } from '../lib/env';
 
 /** The digits of a rendered money/count string, so `$251,220` and `251220` compare equal. */
@@ -156,7 +156,7 @@ test.describe('dashboard — every tile against the database', () => {
         expect(Number(expected!.WonCount), 'the host needs at least one WON deal or the Won tile proves nothing')
             .toBeGreaterThan(0);
 
-        await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`, { waitUntil: 'domcontentloaded' });
+        await page.goto(`${EXPLORER_BASE_URL}${SALES_DEALS_ROUTE}`, { waitUntil: 'domcontentloaded' });
         const dash = page.locator('mj-left-nav').getByRole('button', { name: /^Dashboard/i });
         await expect(dash, 'the Sales left-nav must offer Dashboard').toBeVisible({ timeout: 90_000 });
         await dash.click();
