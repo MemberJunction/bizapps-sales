@@ -36,10 +36,19 @@ import { RegisterClass } from '@memberjunction/global';
  * ORDERS' OWN PREDICATE, imported rather than restated -- the same reason
  * `DealEntityServer` imports `CanTransition` from this module.
  *
- * `IsBooked` is `Confirmed | Posted | Fulfilled`, and orders documents it as "journal entries
- * exist and the receivable is real". Writing `status === 'Confirmed'` here instead would be a
- * vocabulary string-comparison against ANOTHER APP'S words -- exactly what the vocabulary gate
- * exists to catch -- and it would also be wrong twice over. See the refusal below.
+ * `IsBooked` is `status === 'Confirmed'` today, and orders documents it as "journal entries
+ * exist and the receivable is real".
+ *
+ * THIS COMMENT USED TO SAY `Confirmed | Posted | Fulfilled`, and argued that writing
+ * `status === 'Confirmed'` here would be "wrong twice over". Both halves were stale: `Posted`
+ * and `Fulfilled` stopped being order statuses when the lifecycle collapsed (KI-27), so the
+ * literal would in fact be exactly equivalent right now. The prose had drifted from the code it
+ * described, and it read convincingly either way -- which is why the drift survived.
+ *
+ * The import is still right, for the reason that does not depend on today's definition: this is
+ * a vocabulary string-comparison against ANOTHER APP'S words, which the vocabulary gate exists
+ * to catch, and if orders ever widens what counts as booked this follows without being edited.
+ * A literal would keep compiling and quietly mean the wrong thing. See the refusal below.
  */
 import { IsBooked } from '@mj-biz-apps/orders-entities';
 import {
