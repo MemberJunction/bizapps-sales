@@ -112,6 +112,7 @@ function harness(opts: { orderID?: string | null; hydrated?: boolean; loadSuccee
     // `Object.create` skips field initializers, so `Error` would start `undefined` rather than the
     // `null` the constructed component has. Restore it, or every no-error assertion tests the harness.
     e.Error = null;
+    Object.defineProperty(e, 'productPriceLabels', { value: new Map(), configurable: true });
 
     return { e, calls };
 }

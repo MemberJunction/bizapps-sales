@@ -39,7 +39,7 @@ function editor(over: { locked: boolean; productID?: string | null; hasOrder?: b
     const e = Object.create(MJSDealLineEditorComponent.prototype) as MJSDealLineEditorComponent;
     e.IsLocked = over.locked;
     Object.defineProperty(e, 'Working', {
-        value: { ProductID: over.productID === undefined ? 'prod-1' : over.productID },
+        value: { ProductID: over.productID === undefined ? 'prod-1' : over.productID, GetFieldByName: () => undefined },
         configurable: true, writable: true,
     });
     Object.defineProperty(e, 'Deal', {
@@ -139,6 +139,6 @@ describe('the restricted editor refuses on its own account', () => {
         expect(t.indexOf(marker, at + 1), 'and be unambiguous').toBe(-1);
         const openTag = t.lastIndexOf('<', at);
         const tagEnd = t.indexOf('>', at);
-        expect(t.slice(openTag, tagEnd)).toContain('[disabled]="IsLocked"');
+        expect(t.slice(openTag, tagEnd)).toMatch(/\[disabled\]="IsLocked\b/);
     });
 });
