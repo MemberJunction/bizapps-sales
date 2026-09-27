@@ -60,7 +60,8 @@ Pushing `main` starts `.github/workflows/publish.yml`, which:
    provenance needs it);
 2. runs the **distribution gate** — deliberately here as well as in its own paths-filtered
    workflow, so a `workflow_dispatch` release from a branch that touched no metadata cannot ship a
-   stale seed;
+   stale seed — and the **release seed gate** (`check:release-seed`, below), which refuses a release
+   whose metadata is ahead of its Metadata_Sync;
 3. reads the highest bump the pending changesets declare, and **refuses a patch release that
    carries a new migration**;
 4. runs `changeset version`, then asserts the resulting version is the one it predicted;
@@ -91,19 +92,32 @@ This follows MJ (`MJ/metadata/CLAUDE.md` §1b and §10):
 3. **Do not hand-author per-PR sync migrations.** They duplicate the release step, produce many
    small files instead of one per build, and drift from the real push output.
 
-`lint:distribution` is not a currency gate. The cheap, no-database proof that a metadata
-primaryKey has a matching seed statement is `pnpm run check:release-seed` — it walks every
-`primaryKey.ID` under `metadata/` and checks it appears in some `migrations/*.sql`. **It is a
-release-readiness check, not a PR gate:** it should be loud when you cut a release and silent
-the rest of the time. Do not add it to `verify` or the distribution-gate workflow.
+`lint:distribution` is not a currency gate. `pnpm run check:release-seed` is, without a database.
+It checks two things:
+
+1. every `primaryKey.ID` under `metadata/` appears in some `migrations/*.sql`;
+2. for every query, the SQL the **latest** migration seeds for its ID equals its `@file:` SQL.
+   Check 1 alone cannot see an edited query — its ID is in the migration that first created it — and
+   that gap is how 6.2.0–6.8.2 shipped query changes that never reached an installed database
+   (bizapps-sales#137).
+
+**It is a release gate, not a PR gate:** `publish.yml` runs it, so a release cannot ship metadata
+its migrations do not carry. Between releases it fails by design. Do not add it to `verify` or the
+distribution-gate workflow.
+
+Records deliberately left out of a release are listed in the script's `HELD_BACK` map, each with the
+issue that ships it. That issue's PR removes the entry.
 
 The property that still matters at install is "can a stranger install this app from migrations
 alone and get a working one?" — answered by a clean install from migrations, once per release
 (`scripts/rebuild-db.sh` / bootstrap-clean-db).
 
-The seed must be generated against a host where **this app's metadata has never been pushed**, so
-that every statement the generator emits is a `spCreate*` rather than an `spUpdate*`. Pushing to a
-host that already has the rows produces a file that updates rows a fresh install does not have.
+The seed must be generated against a host built **from migrations only**, where `mj sync push` has
+never run. Its rows are then exactly what a fresh install at the last release has, so the generator
+emits `spCreate*` for records no migration has seeded and `spUpdate*` for records an earlier seed
+created and `metadata/` has since changed (an edited query, for one). Both are correct on a fresh
+install and on an upgrade. Pushing to a host that has had other pushes produces updates against rows
+a fresh install does not have.
 
 ```bash
 # 1. A database built from MIGRATIONS ONLY. In dependency order:
@@ -127,15 +141,12 @@ DB_DATABASE=$DB pnpm exec mj sync push --dir metadata --ci
 #    Sibling schemas (`__mj_BizAppsTasks`, `__mj_BizAppsOrders`) stay literal — `mj app install`
 #    supplies only `${mjSchema}` and `${flyway:defaultSchema}`, and neither of those is theirs.
 
-# 4. Placeholders, then the release-readiness UUID check (not a PR gate).
+# 4. Placeholders, then the release seed gate publish.yml will run.
 pnpm run lint:distribution
 pnpm run check:release-seed
 ```
 
-`check:release-seed` currently fails on this tree for the records the next Metadata_Sync must
-pick up (DealLinker `A7C4E2B1-…`, the Sales.SyncActivities tombstones `5A1E5000-…101/102/201`).
-That is expected until the release push. Do not "fix" it by editing the table in this file —
-the script is the list.
+Do not list what `check:release-seed` currently reports in this file — the script is the list.
 
 ### Two things to check before you trust the result
 

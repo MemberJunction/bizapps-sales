@@ -19,6 +19,8 @@ import { Injectable } from '@angular/core';
 import { EntitySaveOptions, LogError, LogStatus, Metadata, RunQuery, RunView, RunViewParams, type RunViewResult } from '@memberjunction/core';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 
+import { AssertRosterColumns } from './deal-roster.columns';
+
 import {
     EmptyLookups,
     type DealLookup,
@@ -375,6 +377,10 @@ export class DealWorkspaceService {
             LogError(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
             return [];
         }
+        const rows = (result.Results ?? []) as Record<string, unknown>[];
+        // Throws on a query definition older than this mapper, rather than letting bool() read the
+        // absent column as false. See deal-roster.columns.ts.
+        AssertRosterColumns(rows);
 
         const bool = (v: unknown): boolean => v === true || v === 1 || v === '1';
         /**
@@ -401,7 +407,7 @@ export class DealWorkspaceService {
             // is reported as absent, which every consumer already handles.
             return Number.isFinite(n) ? n : null;
         };
-        return ((result.Results ?? []) as Record<string, unknown>[]).map<DealRosterRow>((d) => ({
+        return rows.map<DealRosterRow>((d) => ({
             ID: String(d['DealID'] ?? ''),
             DealNumber: (d['DealNumber'] as string | null) ?? null,
             Name: String(d['DealName'] ?? ''),

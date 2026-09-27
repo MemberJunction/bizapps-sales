@@ -295,7 +295,7 @@ export class MJSSalesSectionComponent implements OnInit {
         const window = this.Window;
 
         const [roster, lookups, summary, winRate] = await Promise.all([
-            this.service.LoadRoster(),
+            this.loadRoster(),
             // Still needed: the BOARD renders from these, and StatusTone reads them for the roster
             // pill. The KPI tiles no longer do -- their flags are applied server-side by the query.
             this.service.LoadLookups(),
@@ -305,9 +305,11 @@ export class MJSSalesSectionComponent implements OnInit {
             // on ActualCloseDate, the same dimension the Won tile now uses, so the two cannot drift.
             this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
         ]);
-        this.Deals = roster;
-        this.forecastDeals = InForecast(roster);
-        this.summary = summary;
+        this.Deals = roster ?? [];
+        this.forecastDeals = InForecast(this.Deals);
+        // No tiles beside a roster that could not be read: a summary with no deals under it is the
+        // two-tiles-disagree state this refusal exists to prevent.
+        this.summary = roster ? summary : null;
         this.Pipelines = lookups.Pipelines;
         this.Stages = lookups.Stages;
         this.DealStatusTypes = lookups.DealStatusTypes;
@@ -316,11 +318,28 @@ export class MJSSalesSectionComponent implements OnInit {
         await this.refreshInspectView();
         await this.refreshAllDealsView();
         this.Loading = false;
-        if (!roster.length) {
+        if (roster && !roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
             this.Message = '';
         }
         this.cdr.detectChanges();
+    }
+
+    /**
+     * The roster, or null when it could not be read, with the reason shown in `Message`.
+     *
+     * `LoadRoster` throws when the query definition is older than the app (bizapps-sales#137). Left to
+     * escape, that rejects `Refresh()` with `Loading` still set, and the page spins forever.
+     */
+    private async loadRoster(): Promise<DealRosterRow[] | null> {
+        try {
+            return await this.service.LoadRoster();
+        } catch (e) {
+            const reason = e instanceof Error ? e.message : String(e);
+            LogError(reason);
+            this.Message = reason;
+            return null;
+        }
     }
 
     /**

@@ -61,6 +61,12 @@ jobs:
       - name: Distribution gate (shipped SQL placeholders)
         run: node scripts/check-distribution-seed.mjs
 
+      # Refuses a release whose metadata is ahead of its Metadata_Sync: a record in no migration, or
+      # a query whose seeded SQL is older than its SQL file (bizapps-sales#137). Release-only by
+      # design — between releases it fails, so it is not in verify or distribution-gate.yml.
+      - name: Release seed gate (metadata shipped by migrations)
+        run: node scripts/check-release-seed-coverage.mjs
+
       - name: Configure git credentials
         run: |
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
