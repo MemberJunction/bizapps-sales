@@ -2,14 +2,20 @@
 /**
  * Release-readiness: is the metadata under metadata/ what shipped migrations/*.sql will write?
  *
- * Two checks:
+ * Three checks:
  *
- *   1. COVERAGE — every primaryKey UUID declared under metadata/ appears in some migration.
+ *   1. COVERAGE — every primaryKey UUID declared under metadata/ appears in some migration, and no
+ *      HELD_BACK ID does (an entry left behind after its issue shipped the record).
  *   2. QUERY SQL CURRENCY — for every record whose SQL is `@file:`, the SQL the LATEST migration
  *      seeds for that record's ID equals the file. Check 1 cannot see this: a query's ID is in the
  *      migration that first created it, so an edited query passes coverage forever while every
  *      installed database keeps the old SQL (bizapps-sales#137 — upgraded installs kept the 5.2.0
  *      roster, and the dashboard read Weighted open as $0).
+ *   3. NOTHING CHANGED SINCE THE LATEST SEED — every metadata record, whatever its key (a UUID or an
+ *      `@lookup:`), is compared with its state in the commit that added the latest
+ *      `*__Metadata_Sync.sql`. Checks 1 and 2 cannot see an edited label, description or status, or
+ *      any record keyed by lookup. `_comments` and `sync` blocks are ignored; `@file:` values are
+ *      compared by content. Needs git history (publish.yml checks out with fetch-depth: 0).
  *
  * A RELEASE GATE, NOT A PR GATE. PRs contribute JSON only; the build engineer generates one
  * Metadata_Sync per release, so between releases this fails by design. `publish.yml` runs it;
@@ -19,6 +25,7 @@
  *
  * Exit 1 lists what the next Metadata_Sync must carry.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -97,6 +104,11 @@ function uncoveredIds() {
     return missing;
 }
 
+/** HELD_BACK IDs a migration already carries: the entry outlived the issue that shipped the record. */
+function shippedHeldBack() {
+    return [...HELD_BACK].filter(([id]) => allSqlLower.includes(id.toLowerCase())).map(([id, issue]) => ({ id, issue }));
+}
+
 // ── 2. Query SQL currency ───────────────────────────────────────────────────────────────────
 
 /**
@@ -164,10 +176,120 @@ function staleQuerySql() {
     return stale;
 }
 
+// ── 3. Nothing changed since the latest seed ────────────────────────────────────────────────
+
+function git(args) {
+    return execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+}
+
+/**
+ * Every record node carrying any primaryKey.ID — a UUID or an `@lookup:` — at any depth, with its key.
+ * A child's key is prefixed with its parent's: `@lookup:...&EntityID=@parent:ID` is the same string
+ * under every parent, so on its own it would collide.
+ */
+function collectKeyedRecords(node, acc, parentKey = '') {
+    if (Array.isArray(node)) {
+        for (const item of node) collectKeyedRecords(item, acc, parentKey);
+        return;
+    }
+    if (!node || typeof node !== 'object') return;
+    let key = parentKey;
+    if (node.fields && typeof node.primaryKey?.ID === 'string') {
+        key = parentKey ? `${parentKey} > ${node.primaryKey.ID.trim()}` : node.primaryKey.ID.trim();
+        acc.push({ key, record: node });
+    }
+    for (const value of Object.values(node)) collectKeyedRecords(value, acc, key);
+}
+
+/** Sorted-key JSON, so key order in a file is not a change. */
+function stableStringify(value) {
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
+/**
+ * What a record writes: its fields and key, with `@file:` values replaced by the file's content.
+ * Children are compared as records of their own, so `relatedEntities` is left out here, as are
+ * `_comments` and `sync`, which no migration writes.
+ */
+function canonical(record, readRelative) {
+    const fields = {};
+    for (const [name, value] of Object.entries(record.fields)) {
+        fields[name] = typeof value === 'string' && value.startsWith('@file:') ? readRelative(value.slice(6)) : value;
+    }
+    return stableStringify({ fields, primaryKey: record.primaryKey });
+}
+
+const heldBackKey = (key) => HELD_BACK.has(key.trim().toUpperCase());
+
+function recordsByKey(files) {
+    const byKey = new Map();
+    for (const { path, text, readRelative } of files) {
+        const records = [];
+        collectKeyedRecords(JSON.parse(text), records);
+        for (const { key, record } of records) {
+            if (heldBackKey(record.primaryKey.ID)) continue;
+            // Keyed by file as well: one record can be updated from several files, each setting
+            // different fields (Deals is in both entities/.entities.json and entities/.form-chrome.json).
+            // A record moved between files therefore reads as removed and added, which is worth a look.
+            byKey.set(`${path} :: ${key}`, { path, key, value: canonical(record, readRelative) });
+        }
+    }
+    return byKey;
+}
+
+const isMetadataJson = (path) =>
+    path.endsWith('.json') && !path.endsWith('/.mj-sync.json') && !path.split('/').some((part) => IGNORED_DIRS.has(part));
+
+/**
+ * Records added, changed or removed since the commit that added the latest Metadata_Sync. Returns
+ * `{ skipped }` when that seed is not committed yet — the release engineer checking a seed just
+ * generated from this tree, which is by construction current.
+ */
+function changedSinceSeed() {
+    const seeds = migrations.map((m) => m.name).filter((n) => n.endsWith('__Metadata_Sync.sql'));
+    if (!seeds.length) return { changes: [], seed: null };
+    const seed = seeds[seeds.length - 1];
+    if (git(['rev-parse', '--is-shallow-repository']).trim() === 'true') {
+        throw new Error('shallow clone: check 3 needs full history (actions/checkout fetch-depth: 0)');
+    }
+    const commit = git(['log', '-1', '--diff-filter=A', '--format=%H', '--', `migrations/${seed}`]).trim();
+    if (!commit) return { changes: [], seed, skipped: true };
+
+    const show = (path) => git(['show', `${commit}:${path}`]);
+    const thenFiles = git(['ls-tree', '-r', '--name-only', commit, '--', 'metadata'])
+        .split('\n')
+        .filter(isMetadataJson)
+        .map((path) => ({ path, text: show(path), readRelative: (ref) => show(`${dirname(path)}/${ref}`) }));
+    const nowFiles = jsonFiles.map(({ file }) => ({
+        path: relativePath(file),
+        text: readFileSync(file, 'utf8'),
+        readRelative: (ref) => readFileSync(join(dirname(file), ref), 'utf8'),
+    }));
+
+    const then = recordsByKey(thenFiles);
+    const now = recordsByKey(nowFiles);
+    const changes = [];
+    for (const [id, record] of now) {
+        const before = then.get(id);
+        if (!before) changes.push({ kind: 'added', key: record.key, path: record.path });
+        else if (before.value !== record.value) changes.push({ kind: 'changed', key: record.key, path: record.path });
+    }
+    for (const [id, record] of then) {
+        if (!now.has(id)) changes.push({ kind: 'removed', key: record.key, path: record.path });
+    }
+    return { changes, seed, commit };
+}
+
 // ── Report ──────────────────────────────────────────────────────────────────────────────────
 
 const missing = uncoveredIds();
+const leftBehind = shippedHeldBack();
 const stale = staleQuerySql();
+const sinceSeed = changedSinceSeed();
 
 if (missing.length) {
     console.error('Release seed coverage — these metadata primaryKeys appear in no migration:\n');
@@ -177,15 +299,29 @@ if (missing.length) {
     }
     console.error('');
 }
+if (leftBehind.length) {
+    console.error('Held back, but already in a migration — remove these entries from HELD_BACK:\n');
+    for (const row of leftBehind) console.error(`  ❌ ${row.id} (${row.issue})`);
+    console.error('');
+}
 if (stale.length) {
     console.error('Release seed currency — installed databases would keep older SQL for these queries:\n');
     for (const row of stale) console.error(`  ❌ ${row.name}: ${row.reason}`);
     console.error('');
 }
-if (missing.length || stale.length) {
+if (sinceSeed.changes.length) {
+    console.error(
+        `Release seed currency — metadata changed since ${sinceSeed.seed} was added (${sinceSeed.commit.slice(0, 7)}); ` +
+            'installed databases would not receive:\n',
+    );
+    for (const row of sinceSeed.changes) console.error(`  ❌ ${row.kind}: ${row.path} — ${row.key}`);
+    console.error('');
+}
+if (missing.length || leftBehind.length || stale.length || sinceSeed.changes.length) {
     console.error('Generate the release Metadata_Sync (docs/PUBLISHING.md), then re-run.');
     process.exit(1);
 }
 
 const held = HELD_BACK.size ? ` ${HELD_BACK.size} record(s) held back: ${[...new Set(HELD_BACK.values())].join(', ')}.` : '';
-console.log(`Release seed passed — every metadata primaryKey is in migrations/ and every query's SQL is current.${held}`);
+const since = sinceSeed.skipped ? ` Check 3 skipped: ${sinceSeed.seed} is not committed yet.` : '';
+console.log(`Release seed passed — metadata matches what migrations/ writes.${held}${since}`);

@@ -99,14 +99,23 @@ It checks two things:
 2. for every query, the SQL the **latest** migration seeds for its ID equals its `@file:` SQL.
    Check 1 alone cannot see an edited query — its ID is in the migration that first created it — and
    that gap is how 6.2.0–6.8.2 shipped query changes that never reached an installed database
-   (bizapps-sales#137).
+   (bizapps-sales#137);
+3. no metadata record has been added, changed or removed since the commit that added the latest
+   `*__Metadata_Sync.sql`. This is the one that covers everything else: an edited label, description
+   or status, and every record keyed by `@lookup:` rather than a UUID, which checks 1 and 2 cannot
+   see. `_comments` and `sync` blocks are ignored and `@file:` values are compared by content. It
+   reads git history, so it needs a full clone; a shallow one fails the check rather than passing it.
+   While the newest seed is still uncommitted — you have just generated it from this tree — check 3
+   is skipped and says so.
 
-**It is a release gate, not a PR gate:** `publish.yml` runs it, so a release cannot ship metadata
-its migrations do not carry. Between releases it fails by design. Do not add it to `verify` or the
-distribution-gate workflow.
+**It is a release gate, not a PR gate:** `publish.yml` runs it whenever there are changesets to
+publish, so a release cannot ship metadata its migrations do not carry. Between releases it fails by
+design. Do not add it to `verify` or the distribution-gate workflow. A PR that changes `metadata/`
+therefore has to reach `main` in the same release as the Metadata_Sync that carries it.
 
 Records deliberately left out of a release are listed in the script's `HELD_BACK` map, each with the
-issue that ships it. That issue's PR removes the entry.
+issue that ships it. That issue's PR removes the entry; the check fails while an entry names an ID a
+migration already carries.
 
 The property that still matters at install is "can a stranger install this app from migrations
 alone and get a working one?" — answered by a clean install from migrations, once per release

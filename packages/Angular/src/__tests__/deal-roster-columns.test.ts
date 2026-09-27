@@ -5,8 +5,11 @@
  * new `Sales: Deal Roster` SQL returns rows with no `PipelineIncludeInForecast`. The mapper read that as
  * `false`, `InForecast` dropped every open deal, and Weighted open read $0 with no error anywhere.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { TileSummary } from '../lib/pages/dashboard-inspect';
 import {
     AssertRosterColumns,
     DEAL_ROSTER_COLUMNS,
@@ -46,5 +49,36 @@ describe('AssertRosterColumns', () => {
 
     it('does not check an empty roster, which has nothing to mis-compute', () => {
         expect(() => AssertRosterColumns([])).not.toThrow();
+    });
+});
+
+describe('TileSummary', () => {
+    const summary = { OpenAmount: 1_200_000, OpenCount: 40 };
+
+    it('shows the summary while the roster loads', () => {
+        expect(TileSummary(summary, null)).toBe(summary);
+    });
+
+    it('shows no summary while the roster is refused, whichever load produced it', () => {
+        // A refresh and a period change both set the summary through this. Before, the period change
+        // assigned it directly and put figures back above a refused, empty roster.
+        expect(TileSummary(summary, 'Sales: Deal Roster returned no PipelineIncludeInForecast column.')).toBeNull();
+    });
+});
+
+describe('the dashboard sets its summary only through TileSummary', () => {
+    /**
+     * TileSummary only helps where it is called, and the defect it fixes was a second assignment that
+     * bypassed the rule. Scans the component so an assignment added later cannot bypass it either.
+     */
+    const source = readFileSync(join(__dirname, '../lib/sections/sales-section.component.ts'), 'utf8');
+    const assignments = [...source.matchAll(/this\.summary\s*=\s*([^;]+);/g)].map((m) => m[1].trim());
+
+    it('finds the assignments it is checking', () => {
+        expect(assignments.filter((a) => a.startsWith('TileSummary(')).length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('assigns nothing but TileSummary(...) or null', () => {
+        expect(assignments.filter((a) => a !== 'null' && !a.startsWith('TileSummary('))).toEqual([]);
     });
 });

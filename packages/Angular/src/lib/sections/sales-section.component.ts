@@ -84,6 +84,7 @@ import {
     FilterInspect,
     ForecastSlices,
     InForecast,
+    TileSummary,
     OwnerCoverage,
     StageFunnel,
     BusinessToday,
@@ -164,8 +165,13 @@ export class MJSSalesSectionComponent implements OnInit {
      * out of the forecast. See `InForecast`.
      */
     private forecastDeals: DealRosterRow[] = [];
-    /** Set when the roster could not be read, or a row could not be opened. Shown verbatim. */
+    /** Set when a row could not be opened. Shown verbatim. The roster's refusal is `RosterError`. */
     public Message = '';
+    /**
+     * Why the roster was refused, or null. Separate from `Message` because navigating clears that, and
+     * the dashboard keeps its tiles unavailable for as long as this is set (see `TileSummary`).
+     */
+    public RosterError: string | null = null;
     /** Which slice the inspect grid is showing. Default is closing-soonest (the DB-oracle spec). */
     public InspectFilter: InspectKey = 'closing';
     /**
@@ -307,9 +313,7 @@ export class MJSSalesSectionComponent implements OnInit {
         ]);
         this.Deals = roster ?? [];
         this.forecastDeals = InForecast(this.Deals);
-        // No tiles beside a roster that could not be read: a summary with no deals under it is the
-        // two-tiles-disagree state this refusal exists to prevent.
-        this.summary = roster ? summary : null;
+        this.summary = TileSummary(summary, this.RosterError);
         this.Pipelines = lookups.Pipelines;
         this.Stages = lookups.Stages;
         this.DealStatusTypes = lookups.DealStatusTypes;
@@ -326,18 +330,19 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     /**
-     * The roster, or null when it could not be read, with the reason shown in `Message`.
+     * The roster, or null when it could not be read, with the reason kept in `RosterError`.
      *
      * `LoadRoster` throws when the query definition is older than the app (bizapps-sales#137). Left to
      * escape, that rejects `Refresh()` with `Loading` still set, and the page spins forever.
      */
     private async loadRoster(): Promise<DealRosterRow[] | null> {
         try {
-            return await this.service.LoadRoster();
+            const roster = await this.service.LoadRoster();
+            this.RosterError = null;
+            return roster;
         } catch (e) {
-            const reason = e instanceof Error ? e.message : String(e);
-            LogError(reason);
-            this.Message = reason;
+            this.RosterError = e instanceof Error ? e.message : String(e);
+            LogError(this.RosterError);
             return null;
         }
     }
@@ -433,7 +438,7 @@ export class MJSSalesSectionComponent implements OnInit {
             if (token !== this.periodToken) {
                 return;
             }
-            this.summary = summary;
+            this.summary = TileSummary(summary, this.RosterError);
             this.applyWinRate(winRate);
             // The Won slice is period-bound, so a narrowing period changes which deals Inspect should
             // be listing. Refreshing the view keeps the grid showing the set the tile just counted.
