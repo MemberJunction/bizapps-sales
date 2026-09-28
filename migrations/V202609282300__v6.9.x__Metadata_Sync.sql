@@ -36,7 +36,13 @@
 --
 -- -- TRANSFORMS APPLIED TO THE GENERATOR'S OUTPUT ---------------------------------------------
 --   `EXEC [${flyway:defaultSchema}]` -> `EXEC [${mjSchema}]` (122, the generator's core name).
---   Schema names inside query SQL text are data and stay exactly as metadata/ declares them.
+--   Inside query SQL text the rule is V202608251930's: a core-schema reference follows the host's
+--   core schema, so the generator's `[${flyway:defaultSchema}].Employee` in Forecast by Owner
+--   (metadata: `[__mj].Employee`) is `[${mjSchema}].Employee` -- ${flyway:defaultSchema} would
+--   resolve to __mj_BizAppsSales, which has no Employee table. That is the only placeholder in
+--   query text. This app's and sibling apps' schema names stay literal, as metadata/ declares
+--   them. Checked: every seeded query's SQL, resolved as a host resolves it, equals its
+--   metadata/queries/SQL file byte for byte (7 of 7).
 --   Every spCreate is guarded on ID OR the table's unique key, and each child's QueryID is
 --   re-resolved on the host by query name, so a host that ran `mj sync push` is not broken.
 --   Idempotent: re-running it is a no-op.
@@ -2758,7 +2764,7 @@ INNER JOIN [__mj_BizAppsSales].Pipeline p
 LEFT OUTER JOIN [__mj_BizAppsSales].ForecastCategoryType fc
         ON fc.ID = d.ForecastCategoryTypeID
        AND fc.IsActive = 1
-LEFT OUTER JOIN [${flyway:defaultSchema}].Employee emp
+LEFT OUTER JOIN [${mjSchema}].Employee emp
         ON emp.ID = d.OwnerEmployeeID
 WHERE 1 = 1
   {% if CompanyID %}
