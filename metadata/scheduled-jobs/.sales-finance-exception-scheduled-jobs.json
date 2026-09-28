@@ -12,7 +12,12 @@
       "    dedupe key makes that harmless, but there is no reason to invite it.",
       "  · MissedRunPolicy `RunOnce` — each run re-reads every qualifying deal, so one catch-up run",
       "    covers any number of missed nights.",
-      "  · RunImmediatelyIfNeverRun `false` — the first run waits for the schedule."
+      "  · RunImmediatelyIfNeverRun `false` — the first run waits for the schedule.",
+      "",
+      "SEEDED Disabled, like the orders finance-exception jobs. Enable it once every deal owner's employee",
+      "record is linked to a login (the query \"Sales: Deal Owners Without a Linked Login\" lists the ones",
+      "that are not); until then each such deal raises a row that cannot be cleared. Linking a login",
+      "later does unlock it: the next run re-raises the deal and accounting refreshes an Open row's creator."
     ],
     "fields": {
       "Name": "Sales — Won Deals With Unconfirmed Orders (nightly)",
@@ -20,7 +25,7 @@
       "JobTypeID": "3B94DD43-E961-4D85-B7F4-B6783D748766",
       "CronExpression": "0 30 2 * * *",
       "Timezone": "UTC",
-      "Status": "Active",
+      "Status": "Disabled",
       "ConcurrencyMode": "Skip",
       "MissedRunPolicy": "RunOnce",
       "RunImmediatelyIfNeverRun": false,

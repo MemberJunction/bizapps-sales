@@ -61,6 +61,7 @@ interface WonDealRow {
     DealNumber: string | null;
     CompanyID: string;
     OwnerEmployeeID: string | null;
+    OwnerName: string | null;
     CloseDate: string | null;
     DaysSinceClose: number | null;
     DealAmount: number | null;
@@ -135,6 +136,7 @@ export function ReadWonDealRow(raw: Record<string, unknown>): WonDealRow | null 
         DealNumber: text(raw.DealNumber),
         CompanyID: companyID,
         OwnerEmployeeID: text(raw.OwnerEmployeeID),
+        OwnerName: text(raw.OwnerName),
         CloseDate: dayText(raw.CloseDate),
         DaysSinceClose: numberOrNull(raw.DaysSinceClose),
         DealAmount: numberOrNull(raw.DealAmount),
@@ -143,7 +145,11 @@ export function ReadWonDealRow(raw: Record<string, unknown>): WonDealRow | null 
     };
 }
 
-/** Plain description of the defect in the data: the deal number, never the deal or account name. */
+/**
+ * Plain description of the defect in the data: the deal number, never the deal or account name.
+ * When the owner's login cannot be resolved the owner is named, because accounting shows this
+ * summary when it refuses to clear the row, and whoever sees it needs to know whose login to link.
+ */
 export function BuildWonDealSummary(row: WonDealRow, creator: CreatorResolution): string {
     const deal = row.DealNumber ? `Deal ${row.DealNumber}` : `Deal ${row.DealID}`;
     const closed = row.CloseDate
@@ -155,11 +161,12 @@ export function BuildWonDealSummary(row: WonDealRow, creator: CreatorResolution)
           ? `has an order that is ${row.OrderStatus}, not Confirmed`
           : 'has an order that could not be read';
     let summary = `${deal}${closed} and ${order}, so it will not be billed.`;
+    const owner = row.OwnerName ? `The deal owner, ${row.OwnerName},` : 'The deal owner';
     if (creator.LinkedLogins > 1) {
-        summary += ` The deal owner is linked to ${creator.LinkedLogins} logins, so the creator could not be `
-            + 'resolved to one.';
+        summary += ` ${owner} is linked to ${creator.LinkedLogins} logins, so the creator could not be resolved to one; `
+            + 'leave exactly one login linked to their employee record.';
     } else if (creator.Unresolved) {
-        summary += ' The deal owner has no linked login.';
+        summary += ` ${owner} has no linked login; link their employee record to their login.`;
     }
     return summary.length > SUMMARY_MAX ? `${summary.slice(0, SUMMARY_MAX - 1)}…` : summary;
 }

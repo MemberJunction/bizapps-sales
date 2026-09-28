@@ -262,12 +262,13 @@ describe('raising one exception per deal', () => {
 
     it('marks an owner with no linked login as unresolved', async () => {
         activeType();
-        queryReturns([row(DEAL_C, EMP_NO_LOGIN)]);
+        queryReturns([row(DEAL_C, EMP_NO_LOGIN, { OwnerName: 'Pat Example' })]);
         usersReturn();
         const result = await DetectWonDealsWithUnconfirmedOrders(PROVIDER, USER);
         const sent = accounting.RaiseCalls[0].Exceptions[0];
         expect(sent).toMatchObject({ SourceCreatedByUserID: null, CreatorUnresolved: true });
-        expect(sent.Summary).toMatch(/owner has no linked login/);
+        // Named, because accounting shows this summary when it refuses to clear the row.
+        expect(sent.Summary).toContain('The deal owner, Pat Example, has no linked login; link their employee record to their login.');
         expect(result.CreatorUnresolved).toBe(1);
     });
 
@@ -279,6 +280,8 @@ describe('raising one exception per deal', () => {
         const sent = accounting.RaiseCalls[0].Exceptions[0];
         expect(sent).toMatchObject({ SourceCreatedByUserID: null, CreatorUnresolved: true });
         expect(sent.Summary).toMatch(/linked to 2 logins/);
+        // No OwnerName in the row: the summary still reads, without a name.
+        expect(sent.Summary).toContain('The deal owner is linked to 2 logins');
     });
 
     it('sends no creator and no unresolved flag for a deal with no owner, and skips the lookup', async () => {
