@@ -37,6 +37,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=Title"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.816Z",
+      "checksum": "3980a054b5d6fcb2805ae6a0b030e114ef8da0fb49036cc2ea1cd1b3823228cd"
     }
   },
   {
@@ -48,6 +52,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=LifecycleStageType"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.869Z",
+      "checksum": "3980a054b5d6fcb2805ae6a0b030e114ef8da0fb49036cc2ea1cd1b3823228cd"
     }
   },
   {
@@ -59,6 +67,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=OwnerEmployee"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.922Z",
+      "checksum": "3980a054b5d6fcb2805ae6a0b030e114ef8da0fb49036cc2ea1cd1b3823228cd"
     }
   }
 ]
