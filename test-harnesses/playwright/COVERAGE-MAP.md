@@ -22,6 +22,37 @@ default, so unattended runs are unchanged.
 
 ---
 
+## #88 — the specs now drive the Deal form, not the deal workspace
+
+The Workspace rail was removed when deals became Explorer record tabs, and 26 of 33 specs were failing
+in setup against it. Every spec now drives `mjs-deal-form` through `lib/deal-form.ts`. **None of the rows
+below has been executed against a live host yet.** Where the sections further down describe workspace
+panes, `.dw-*` cells or the roster table, they record the suite as it was before #88.
+`test:selector-gate` now fails CI when the harness names a testid, field, component or app class that
+no mounted template declares.
+
+| Spec | Now |
+|---|---|
+| `20-demo-tour` | The Product lines step asserts the Deal form's lines panel and the line editor's read-only price and total. |
+| `40-deal-form` (was `40-deal-workspace`) | New deal opens the Deal form with its six working panels; header fields persist (checked in the DB); two lines added through the line editor are priced by the engine; the record reopens by route with Pipeline/Account names and both lines. Payment schedule and pane-switch state removed with the workspace. |
+| `41-deal-roundtrip` | Lines (product, quantity) and header dates come back bound after reopening by route; a saved line removed through the line editor is gone from the order and stays gone. Instalment and owner round trips removed with the workspace. |
+| `50-sales-shell` | All deals is the entity viewer and rows open on double-click into `mjs-deal-form`; no Workspace item; New deal opens the Deal form. |
+| `60-close-deal` | Close through the Close panel; the routing summary and "Status frozen" checks are dropped (Status is the reopen route, golive#205); a lost close without a reason is a disabled confirm. |
+| `70-activity-timeline` | Timeline driven in the Deal form's Activity panel (compose-only); the new row is checked in the panel's viewer; the lock is proven by the hero's Locked chip. |
+| `70-lifecycle` | Stage advance through the Stage type-ahead, checked by ID; close-won through the Close panel. |
+| `71-lost-and-reopen` | Runs on the Deal form; the DN-18 warning is read from the Close panel's message and issues. |
+| `72-inline-create` | The Account type-ahead's Create footer opens MJ's dialog; selection-back is proven by the saved deal's AccountID; option-list counts dropped (a type-ahead has none). |
+| `73-lock-across-tabs` | The lock is per Explorer record tab, checked with `FieldIsEditable('Name')` in edit mode; inline-create button checks dropped. |
+| `75-dashboard` | No behaviour change. |
+| `78-line-removal-tripwire` | KI-20 is closed: asserts the removal took, the right line survived, and it was renumbered to 1, through the line editor's Remove. |
+| `79-embedded-order-refresh` | The first line is added through the line editor straight after create; assertions unchanged. |
+| `80-board-drag` | Setup through `ComposeDeal` on the Deal form; the lock title matches source; its deals are purged in teardown so later `AssertBaseline()` checks see a clean host. |
+| `80-cross-company-products` | The foreign product is chosen in the line editor; line Save replaces Save deal; database assertions unchanged. |
+| `82-term-start` | Term start checked in the line editor; the Reset button is gone (emptying the control is the reset). |
+| `90-workspace-tab-state` | Deleted. The shared state it guarded does not exist on record tabs; the line-company check is covered by 80-cross, the new-deal-after-locked case by 73. |
+
+---
+
 ## 10-deal-crud — "Deal CRUD through the Explorer UI"
 
 The full create → read → update → delete walk for two entities, driven entirely through generated forms.
@@ -116,7 +147,7 @@ demo path is in better shape than the red tick suggests, and the one genuinely n
 
 ---
 
-## 40-deal-workspace — the deal workspace, five panes, one transactional save
+## 40-deal-workspace — the deal workspace, five panes, one transactional save (before #88)
 
 The richest spec in the suite and the one closest to what a rep actually does: build a deal in the
 workspace, give it product lines, save once, read it back. It is also where the embedded order lives, so

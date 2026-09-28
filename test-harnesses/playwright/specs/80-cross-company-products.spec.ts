@@ -17,7 +17,13 @@
  *
  * So this spec asserts the two things only a browser can:
  *   1. the picker OFFERS a product owned by another company, and
- *   2. choosing it leaves the deal SAVEABLE, and the saved line books to that product's company.
+ *   2. choosing it leaves the line SAVEABLE, and the saved line books to that product's company.
+ *
+ * ── THE PICKER IS THE DEAL FORM'S LINE EDITOR NOW (#88) ──
+ *
+ * It was the deal workspace's lines grid, which nothing mounts any more. The same `OnProductChange`
+ * stamp lives in the Deal form's restricted line editor, whose Save writes the line onto the order
+ * directly — so "saveable" is now the editor's Save, not a deal save.
  *
  * ── THE COMPANIES ARE DISCOVERED, NOT ASSUMED ──
  *
@@ -36,7 +42,7 @@ import { expect, test } from '@playwright/test';
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AssertBaseline, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
-import { OpenPane, RealOptionLabels, SaveDeal } from '../lib/workspace';
+import { ByTestId, OpenSection } from '../lib/deal-form';
 
 const RUN = `PW-X29-${Date.now().toString(36)}`;
 let dealID = '';
@@ -91,18 +97,24 @@ test.describe('#29 — products from another company are sellable on a deal', ()
         ).toBeGreaterThan(0);
         const target = foreign[0];
 
-        await OpenPane(page, 'Product lines');
-
-        const add = page.locator('.dw-addbtn', { hasText: 'Add line' }).first();
-        await expect(add, 'Add line must be enabled once the deal is saved').toBeEnabled({ timeout: 20_000 });
+        await OpenSection(page, 'lines');
+        const add = ByTestId(page, 'lines-add');
+        await expect(add, 'a saved, open deal must offer Add a product').toBeVisible({ timeout: 30_000 });
         await add.click();
-        await page.waitForTimeout(500);
 
-        const picker = page.locator('.dw-table tbody tr').first().locator('select.dw-cell-product');
+        const editor = page.locator('[data-testid="line-editor"]:visible').first();
+        await expect(editor, 'Add a product must open the line editor').toBeVisible({ timeout: 20_000 });
+        const picker = editor.locator('[data-testid="line-product"]');
         await expect(picker, 'the line must offer a product picker').toBeVisible({ timeout: 20_000 });
 
         // ── 1. the picker OFFERS it ──────────────────────────────────────────────────────────────
-        const offered = await RealOptionLabels(picker);
+        /**
+         * Found by CONTAINMENT: an option reads `Name (SKU) — Company`, naming its owner because two
+         * companies can sell an identically-named product.
+         */
+        const offered = (await picker.locator('option').allTextContents())
+            .map((o) => o.trim())
+            .filter((o) => o && !o.startsWith('—'));
         const match = offered.find((o) => o.includes(target.Name));
         expect(
             match,
@@ -110,61 +122,53 @@ test.describe('#29 — products from another company are sellable on a deal', ()
                 `Offered: ${offered.slice(0, 12).join(' | ')}`,
         ).toBeTruthy();
 
-        // ── 2. choosing it leaves the deal SAVEABLE ──────────────────────────────────────────────
+        // ── 2. choosing it leaves the line SAVEABLE ──────────────────────────────────────────────
         await picker.selectOption({ label: match as string });
-        await page.waitForTimeout(300);
 
         /**
-         * Fill AND blur. `AddLines` does both, and the blur is not decoration — the quantity binding
-         * commits on change, so a filled-but-unblurred input can leave the entity holding the old value
-         * while the DOM shows the new one.
+         * Fill AND blur. The quantity binding commits on change, so a filled-but-unblurred input can
+         * leave the entity holding the old value while the DOM shows the new one.
          */
-        const qty = page.locator('.dw-table tbody tr').first().locator('input[type="number"]').first();
-        await expect(qty, 'the new line row must offer a quantity input').toBeVisible({ timeout: 10_000 });
+        const qty = editor.locator('[data-testid="line-quantity"]');
+        await expect(qty, 'the line editor must offer a quantity input').toBeVisible({ timeout: 10_000 });
         await qty.fill('1');
         await qty.blur();
-        await page.waitForTimeout(400);
 
         /**
-         * The assertion the entity layer cannot make. If `OnProductChange` failed to stamp the company,
-         * `deal.Validate()` fails in the browser and this button is disabled — naming a column the rep
-         * cannot see, let alone fill.
+         * The assertion the entity layer cannot make: the button a rep clicks is enabled once a foreign
+         * product is chosen.
          */
-        const save = page.getByRole('button', { name: /^Save deal/i }).first();
+        const save = editor.locator('[data-testid="line-save"]');
         await expect(
             save,
-            'Save deal must be enabled after choosing a product — if it is not, OnProductChange did not ' +
-                'stamp CompanyID and the rep is stuck on an invisible required column',
+            'the line Save must be enabled after choosing a product — if it is not, the rep is stuck on a ' +
+                'line whose every reachable field is filled',
         ).toBeEnabled({ timeout: 20_000 });
+        await save.click();
 
-        await SaveDeal(page);
+        /**
+         * A refused save keeps the editor open with its reason. The OnProductChange failure this spec
+         * guards reads "Company ID cannot be null" there, so that text is carried into the failure.
+         */
+        const closed = await expect(editor)
+            .toBeHidden({ timeout: 30_000 })
+            .then(() => true)
+            .catch(() => false);
+        const onScreen = closed
+            ? []
+            : await editor.locator('.mjs-le__error').allTextContents().catch(() => [] as string[]);
 
         // ── 3. the saved line books to the PRODUCT's company, not the deal's ─────────────────────
-        /**
-         * POLLED, not read once. `SaveDeal` clicks and waits a fixed 2.5s without asserting the save
-         * landed, so a single reading conflates "the save failed" with "the save had not finished".
-         * Those need different fixes, and an earlier version of this spec reported 0 lines without
-         * being able to say which it was.
-         */
-        let lines: { CompanyID: string; ProductID: string }[] = [];
-        for (let attempt = 0; attempt < 10; attempt += 1) {
-            lines = await QueryAll<{ CompanyID: string; ProductID: string }>(
-                `SELECT CompanyID, ProductID FROM __mj_BizAppsOrders.OrderLine WHERE OrderHeaderID = '${orderID}'`,
-            );
-            if (lines.length > 0) break;
-            await page.waitForTimeout(1_000);
-        }
-
-        if (lines.length !== 1) {
-            // Say WHY before failing on the count. The console is where a refused save explains itself.
-            const banner = await page
-                .locator('.dw-error, .k-notification, [role="alert"]')
-                .allTextContents()
-                .catch(() => [] as string[]);
+        const lines = await QueryAll<{ CompanyID: string; ProductID: string }>(
+            `SELECT CompanyID, ProductID FROM __mj_BizAppsOrders.OrderLine WHERE OrderHeaderID = '${orderID}'`,
+        );
+        if (!closed || lines.length !== 1) {
+            // Say WHY before failing on the count.
             throw new Error(
                 `expected exactly one saved line, found ${lines.length}.\n` +
+                    `  editor closed: ${closed}\n` +
+                    `  editor errors: ${onScreen.length ? onScreen.join(' | ') : '(none)'}\n` +
                     `  console errors: ${sink.errors.length ? sink.errors.join(' | ') : '(none)'}\n` +
-                    `  on-screen alerts: ${banner.length ? banner.join(' | ') : '(none)'}\n` +
                     `  orderID=${orderID} dealID=${dealID} product=${target.Name} (${target.ID})`,
             );
         }

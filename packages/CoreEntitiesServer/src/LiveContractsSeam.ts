@@ -111,9 +111,9 @@ export class LiveContractsSeam {
      * **No `ContractNumber`.** Minted by `ContractEntityServer.Save()` under a lock. Supplying one
      * would either collide or bypass the sequence.
      *
-     * **No `ContractTemplateID`.** Not merely unimplemented: contracts' own column description says a
-     * contract created automatically at Closed Won HAS none "until finance reads the PDF". Selection
-     * is honoured if a caller ever supplies one, and is not attempted here. See `templateID()`.
+     * **No `ContractTemplateID`.** Contracts owns which template is current: `ContractEntityServer.Save()`
+     * fills an empty one with the newest Published, usable template when the type requires one
+     * (golive #269). A template a caller supplies is honoured. See `templateID()`.
      *
      * **No `CustomerPersonID`, no `OwnerUserID`.** Neither column exists in v2, and
      * `CK_Contract_CustomerXor` — the constraint the old seam bent itself around — is gone with them.
@@ -311,21 +311,12 @@ export class LiveContractsSeam {
     }
 
     /**
-     * The template to incorporate, when a caller supplies one — and it is nobody's job to guess.
+     * The template to incorporate, when a caller supplies one — otherwise contracts chooses.
      *
-     * Two independent reasons, either sufficient on its own:
-     *
-     *   1. Contracts says so. `ContractTemplateID` is "nullable because a contract created
-     *      automatically at Closed Won has none until finance reads the PDF". That describes exactly
-     *      this call site. A template arrives when a human establishes which one was signed.
-     *
-     *   2. There is no way to pick one that is not a guess. `ContractTemplate` carries Name,
-     *      VersionLabel, `IntroducedDate` and SourceURL — and no `Status`. Choosing the newest by
-     *      `IntroducedDate` is precisely the date-guessing that the `Status` column Andrew asked for
-     *      exists to eliminate, and it would silently attach next year's paper to this year's deal
-     *      the day someone loads a draft template.
-     *
-     * So: honoured if supplied, never selected. Nothing in sales supplies one today. See D-10.
+     * Order Form and Payment Link carry `TemplateRequired = 1`, so a contract saved with no template
+     * would be refused. Contracts defaults it on the server, using the same rule as its Agreement panel
+     * (the newest `Published` template with `IsUsable = 1`). Selecting here instead would copy that rule
+     * into sales, which reads contracts through entity names only. Nothing in sales supplies one today.
      */
     private templateID(input: CreateFromDealInput): string | null {
         return input.ContractTemplateID ?? null;

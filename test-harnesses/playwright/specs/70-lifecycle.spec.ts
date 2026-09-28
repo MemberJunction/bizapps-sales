@@ -32,7 +32,7 @@ import { expect, test } from '@playwright/test';
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AddLines, AssertBaseline, CloseWon, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
-import { SelectFor, SelectByLabel, SaveDeal, OpenPane } from '../lib/workspace';
+import { EditDeal, PickLookup, SaveDeal } from '../lib/deal-form';
 
 const RUN = `PW-LIFE-${Date.now().toString(36)}`;
 let dealID = '';
@@ -121,17 +121,34 @@ test.describe('lifecycle — create, price, advance, close won', () => {
          * The target stage is chosen by what it DECLARES, not by being called Proposal: the mechanism is
          * `PipelineStage.OrderStatusOnEntry`, and a spec keyed on the label would stop testing it the
          * moment a deployment renamed the stage — which is the whole point of the vocabulary rule.
+         *
+         * The Stage field is an MJ type-ahead over every stage, not only this pipeline's, and the pick
+         * is by the row's text. So the stage must also be the only active one carrying its name, and
+         * the move is then confirmed by ID from the database rather than trusted from the pick.
          */
-        const quoting = await QueryOne<{ Name: string }>(`
-            SELECT TOP 1 Name FROM __mj_BizAppsSales.PipelineStage
-             WHERE PipelineID = (SELECT PipelineID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}')
-               AND IsActive = 1 AND OrderStatusOnEntry = 'Quoted'
-             ORDER BY DisplayOrder`);
-        expect(quoting?.Name, 'the pipeline must have a stage that declares Quoted').toBeTruthy();
+        const quoting = await QueryOne<{ ID: string; Name: string }>(`
+            SELECT TOP 1 s.ID, s.Name FROM __mj_BizAppsSales.PipelineStage s
+             WHERE s.PipelineID = (SELECT PipelineID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}')
+               AND s.IsActive = 1 AND s.OrderStatusOnEntry = 'Quoted'
+               AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineStage o
+                                WHERE o.IsActive = 1 AND o.Name = s.Name AND o.ID <> s.ID)
+             ORDER BY s.DisplayOrder`);
+        expect(
+            quoting?.Name,
+            'the pipeline must have a uniquely named stage that declares Quoted',
+        ).toBeTruthy();
 
-        await OpenPane(page, 'Party info');
-        await SelectByLabel(page, 'Stage', quoting!.Name);
+        await EditDeal(page);
+        await PickLookup(page, 'PipelineStageID', String(quoting!.Name));
         await SaveDeal(page);
+
+        const moved = await QueryOne<{ PipelineStageID: string | null }>(
+            `SELECT PipelineStageID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'`,
+        );
+        expect(
+            String(moved?.PipelineStageID ?? '').toLowerCase(),
+            'the deal must be in the stage that was picked',
+        ).toBe(String(quoting!.ID).toLowerCase());
 
         const afterMove = await QueryOne<{ Status: string }>(
             `SELECT Status FROM __mj_BizAppsOrders.OrderHeader WHERE ID = '${orderID}'`,
@@ -144,16 +161,10 @@ test.describe('lifecycle — create, price, advance, close won', () => {
         /**
          * ── 4. CLOSE WON, THROUGH THE PANEL THAT ACTUALLY CLOSES A DEAL ─────────────────────────
          *
-         * This used to fish for a button by text and then guess at an outcome `<select>`. Both were
-         * wrong: the close panel is behind `data-testid="close-open"`, the outcome is a pair of BUTTONS
-         * (`close-won` / `close-lost`) rather than a status dropdown, and `close-confirm` is what
-         * invokes `Sales.CloseDeal`. The old version clicked whatever matched `/Close/i` first, which on
-         * this shell can be an unrelated control, and then asserted against a deal nothing had closed.
-         *
-         * The outcome is chosen by ROLE IN THE FLOW, never by a status name — which is also what keeps
-         * this spec on the right side of the vocabulary rule.
+         * The Close panel's `close-confirm` is what invokes `Sales.CloseDeal`; a stage change alone does
+         * not close a deal. The target status is chosen by its flags from the database, never by name.
          */
-        await CloseWon(page, 'Explorer pass: closing won through the workspace panel.');
+        await CloseWon(page, 'Explorer pass: closing won through the Close panel.');
 
         const closed = await QueryOne<{ IsWon: boolean; OrderStatus: string; ContractID: string | null }>(`
             SELECT t.IsWon, o.Status AS OrderStatus, d.ContractID

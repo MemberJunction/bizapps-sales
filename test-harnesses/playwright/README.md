@@ -106,15 +106,17 @@ below stops matching — it is the map, and it is cheaper than guessing.
 | `lib/global-teardown.ts` | Unconditional cleanup, so a failed run never poisons the next one. |
 | `lib/cleanup.mjs` | FK-ordered SQL delete of every `PW-VERIFY*` row. Also runnable directly. |
 | `lib/explorer.ts` | The console-error **keystone**, navigation, and the generated-form helpers. |
+| `lib/deal-form.ts` | Drives the Deal record form: fields by `data-field`, actions by `data-testid`, panels expanded before use. |
+| `lib/deal-flow.ts` | Compose, add lines, close, reopen and purge a deal through the Deal form. |
 | `auth.setup.ts` | One-time interactive auth capture + a recon dump. |
 | `specs/00-recon.spec.ts` | Living diagnostic: maps shell → app → entity → form. |
 | `specs/01-probe-form-dom.spec.ts` | Dumps form DOM around known labels (`PW_PROBE=1`). |
 | `specs/02-probe-delete-affordance.spec.ts` | Enumerates delete controls with geometry (`PW_PROBE=1`). |
 | `specs/10-deal-crud.spec.ts` | **The actual verification** — CRUD through the *generated* entity browser. |
-| `specs/40-deal-workspace.spec.ts` | Composes a deal across all five workspace panes and reads it back through a **different** surface. |
-| `specs/41-deal-roundtrip.spec.ts` | **The related-record-collection round trip** — save, RE-OPEN, and prove the lines, instalment, dates and owner all came back; then remove a line and prove the removal survives another re-open. |
-| `specs/50-sales-shell.spec.ts` | The Phase 2 section layout, the rail, and the roster opening the workspace. |
-| `specs/70-activity-timeline.spec.ts` | **NEVER RUN.** Logs an activity from the workspace and asserts the `Activity` row, its `LoggedByUserID`, and the deal/account/contact links the `Sales.LogActivity` Action attaches. Plus: a refused log leaves no unreachable activity. |
+| `specs/40-deal-form.spec.ts` | Composes a deal across the Deal form's panels, adds priced lines, and reads it back through a **different** surface. |
+| `specs/41-deal-roundtrip.spec.ts` | **The related-record-collection round trip** — save, RE-OPEN, and prove the lines and dates came back; then remove a line and prove the removal survives another re-open. |
+| `specs/50-sales-shell.spec.ts` | The section layout, the rail (no Workspace item), New deal opening the Deal form, and All-deals rows opening records. |
+| `specs/70-activity-timeline.spec.ts` | **NEVER RUN.** Logs an activity from the Deal form's Activity panel and asserts the `Activity` row, its `LoggedByUserID`, and the deal/account/contact links the `Sales.LogActivity` Action attaches. Plus: a refused log leaves no unreachable activity. |
 | `specs/80-board-drag.spec.ts` | **NEVER RUN.** Drags a card between stages and asserts the stage change, exactly one append-only event stamped with the DEPARTING probability and amount, and the order following the new stage. Plus: a drop onto a closing column is refused with a hint. |
 
 ### Two specs are written and have never been executed

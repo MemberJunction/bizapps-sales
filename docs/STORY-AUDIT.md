@@ -33,7 +33,7 @@ gap is now upstream** — nothing outstanding in this audit is ours.
 | Issue | Verdict | The remaining gap | Whose |
 |---|---|---|---|
 | **#33** S-US1 Create a deal | partially met | Line removal only (KI-20). Stage-driven probability/forecast **was** the one gap that was ours; it is now on the write path — `BD5`, `BD6`, mutants `M-BD1`/`M-BD2`/`M-BD3` | orders |
-| **#34** S-US2 Contract + tasks | partially met | `ContractType` has no per-type renewal defaults; `ContractTemplate` has no `Status`, so the active template cannot be selected | contracts (D-9, D-10) |
+| **#34** S-US2 Contract + tasks | partially met | `ContractType` has no per-type renewal defaults | contracts (D-9) |
 | **#35** S-US3 Order-review task | **met** | — | — |
 | **#114** S-US4 Deal line items | partially met | Removing an order line is silently dropped (KI-20) | orders |
 | **#115** S-US5 Order status follows | **met** | Was "`Voided` is terminal, so a reopened lost deal's order cannot return". It is not — D-OS4. | — |
@@ -172,8 +172,8 @@ and `OrderLine.ProductID` is a real FK.
 
 Ten of the eleven S-US issues are still OPEN in `bc-aidp-next-golive`, including **#35, #116, #117 and
 #121, which this audit calls met**, and now **#119**. The tracker understates what is done. Every
-remaining gap is upstream: order-line removal (KI-20) belongs to orders, and the two contract field
-gaps to contracts (D-9, D-10). Terminal `Voided` used to be listed here as a third; it is retired by
+remaining gap is upstream: order-line removal (KI-20) belongs to orders, and the contract renewal-field
+gap to contracts (D-9). Terminal `Voided` used to be listed here as a third; it is retired by
 D-OS4 and was never an upstream blocker at all.
 
 ---
@@ -352,12 +352,11 @@ alone. Re-running the probe now reports `save returned false` with the stamp sti
 | A finance contract-processing **Task** | **met** | `CloseWonTaskService`, called at `CloseDealOperation.ts:340`. Task types now resolve by **`Code`** rather than `Name` — `close-won-tasks.WT12` proves the lookup uses `Code` where the column exists and falls back to `Name` only where it does not, so the vocabulary rule holds across the app boundary that KI/PR-#42 previously left open. **`close-won-tasks.WT4`** proves a contract-creating policy raises BOTH tasks; **`WT5`** proves the contract task falls back to the DEAL when no contract exists yet rather than going missing; **`WT6`** proves a missing task type is refused with a reason while the order review still lands. **E4** confirms the `Contract Processing` type exists outside a rolled-back transaction. |
 | An order-review **Task** | **met** | See #35. |
 | `AutoRenew`, `RenewalNoticeDays`, `CancellationWindowDays`, `AnnualIncreasePercent` defaulted **from the Contract Type record** | **not met, and not buildable from here** | Contracts' `ContractType` is `ID, Name, Description, RequiresExecutedDocument, Status, ParentStatusRequirement` — there are no per-type stored defaults to read. Sales sets three of the four only when the deal carries an explicit override (`setNegotiatedTerms`), and deliberately declines `RenewalNoticeDays` because contracts warns those two fields are not interchangeable. **An upstream ask on contracts**, independently recorded there as `D-9`. |
-| `ContractTemplateID` — the `ContractTemplate` where `Status = Active` | **not met** | `LiveContractsSeam.ts:319` returns `input.ContractTemplateID ?? null`; nothing resolves the active template. Contracts' `ContractTemplate` has no `Status` column to select on — recorded upstream as `D-10`. |
+| `ContractTemplateID` — the current template | **met, by contracts** | The seam sends none. `ContractEntityServer.Save()` defaults an empty template to the newest `Published`, usable one when the type requires it (golive #269) — before that, every Order Form from Closed Won was refused on save. **`close-won-contract.CT7`** asserts the save succeeds and carries a Published template. |
 
 **What changed from pass 2:** everything about tasks. Pass 2 reported "no task creation exists anywhere in
-this repo" — true of the tree it read, false of the app. The two remaining gaps are both *columns another
-app does not have*, which is a materially different kind of not-met from "unbuilt", and both are already
-recorded on the contracts side.
+this repo" — true of the tree it read, false of the app. The remaining gap is a *column another app does
+not have*, which is a different kind of not-met from "unbuilt", and it is recorded on the contracts side.
 
 ---
 
@@ -524,7 +523,7 @@ Still open, not ours — and this is most of what is left:
     'Quoted']`. Was said to block #115 and
     #118. The close warns rather than half-succeeding, which is the right behaviour for a rule this app
     does not own.
-11. **Contracts has no per-type renewal defaults and no `ContractTemplate.Status`** — blocks two of #34's
-    field criteria. Recorded on the contracts side as `D-9` and `D-10`.
+11. **Contracts has no per-type renewal defaults** — blocks one of #34's field criteria. Recorded on the
+    contracts side as `D-9`. (`ContractTemplateID`, formerly `D-10`, is defaulted by contracts — golive #269.)
 12. **bizapps-tasks PR #42** — `TaskType.Code`. Until it lands, task types resolve by `Name`, so renaming
     one breaks the resolution. The service says so out loud; it cannot do better from here.

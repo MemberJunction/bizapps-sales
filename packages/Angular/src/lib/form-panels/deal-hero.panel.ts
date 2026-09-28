@@ -149,7 +149,7 @@ function money(n: number | null | undefined): string {
                  header would otherwise have had no way to name a deal at all. -->
             @if (EditMode) {
                 <div class="mjs-deal-hero__edit">
-                    <div class="mjs-deal-hero__field">
+                    <div class="mjs-deal-hero__field" data-field="Name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" FieldName="Name"
                             Type="textbox" [EditMode]="EditMode && NameEditable"
                             [FormContext]="FormContext"></mj-form-field>

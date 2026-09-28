@@ -54,13 +54,37 @@
  * when a percentage discount exists, so showing it would be a lie). Nothing here multiplies, discounts,
  * prorates, sums or rounds: the read-only figures are whatever orders last wrote.
  *
+ * ── CHOOSING AMONG ORDERS' OWN PRICES (golive#270) ──────────────────────────────────────────────
+ *
+ * A product can carry several named prices — a default plus overrides. The rep may pick one of them
+ * with orders' shared `mjo-line-price-picker`, the same control the order line uses, gated by the same
+ * `MJ.BizApps.Orders.Price.OverrideList` / `OverrideAny` grants. `AllowCustomAmount` is off: choosing
+ * one of orders' rules is not entering a price, and a typed amount would be (D-DL2). A pick away from
+ * the default asks for a reason, and the ORDER's save refuses a flagged line without one. The picker's
+ * list, its default and the figures beside it all come from orders; this file only passes them through.
+ *
  * @module @mj-biz-apps/sales-ng
  */
 import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Metadata } from '@memberjunction/core';
 import { FormsModule } from '@angular/forms';
-import type { mjBizAppsOrdersOrderLineEntity as OrderLineEntity } from '@mj-biz-apps/orders-entities';
+import {
+    AsDateValue,
+    IsLinePriceOverridden,
+    LineNeedsOverrideReason,
+    ListApplicablePrices,
+    LoadOrdersEngine,
+    OrdersEngine,
+    TodayAsDateValue,
+    loadApplicabilityContext,
+    userPriceOverrideKind,
+    type ApplicablePrice,
+    type LineEngineDefault,
+    type PriceOverrideKind,
+    type mjBizAppsOrdersOrderLineEntity as OrderLineEntity,
+} from '@mj-biz-apps/orders-entities';
+import { MJOLinePricePickerComponent } from '@mj-biz-apps/orders-ng';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountFractionToPercent,
@@ -92,9 +116,14 @@ function toDateInput(d: Date | string | null | undefined): string | null {
  */
 interface PriceOrderInput {
     CompanyID: string;
+    BillToPersonID?: string | null;
+    BillToOrganizationID?: string | null;
+    OrderDate?: string | null;
     Lines: Array<{
         ProductID: string;
         Quantity: number;
+        /** Omitted to have orders resolve it; supplied, it PINS the price, exactly as on a real line. */
+        UnitPrice?: number | null;
         DiscountPct?: number | null;
         ServicePeriodStart?: string | null;
         ServicePeriodEnd?: string | null;
@@ -104,7 +133,13 @@ interface PriceOrderInput {
 interface PriceOrderOutput {
     Success: boolean;
     Message?: string | null;
-    Lines: Array<{ ProductID: string; UnitPrice: number; LineTotalNet: number }>;
+    Lines: Array<{
+        ProductID: string;
+        UnitPrice: number;
+        LineTotalNet: number;
+        /** What the rules say for the line regardless of a pinned price — the picker's Default row. */
+        Default?: LineEngineDefault | null;
+    }>;
 }
 
 /** `RouteOperation` is on `ProviderBase`, not on the `IMetadataProvider` interface. */
@@ -118,10 +153,10 @@ interface RemoteOperationRouter {
 @Component({
     selector: 'mjs-deal-line-editor',
     standalone: true,
-    imports: [CommonModule, FormsModule],
+    imports: [CommonModule, FormsModule, MJOLinePricePickerComponent],
     template: `
         <div class="mjs-le__scrim" (click)="Cancel()"></div>
-        <div class="mjs-le" role="dialog" aria-modal="true" [attr.aria-label]="Title">
+        <div class="mjs-le" role="dialog" aria-modal="true" data-testid="line-editor" [attr.aria-label]="Title">
             <header class="mjs-le__head">
                 <h2>{{ Title }}</h2>
                 <button type="button" class="mjs-le__x" (click)="Cancel()" aria-label="Close">
@@ -142,8 +177,11 @@ interface RemoteOperationRouter {
                              may sell any company's product, and the LINE takes its company from whichever
                              is chosen. Each option names its owner because two companies can both sell an
                              "Onboarding Fee". -->
-                        <select [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
-                                [disabled]="IsLocked" [title]="BlockedReason">
+                        <!-- Locked while the price is off its default: a pick belongs to one product's
+                             rules, and carrying it onto another product would pin a price nobody chose. -->
+                        <select data-testid="line-product" [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
+                                [disabled]="IsLocked || ProductLockedByPrice"
+                                [title]="ProductLockedByPrice ? 'Put the price back on Default before changing the product.' : BlockedReason">
                             <option [ngValue]="null">— choose a product —</option>
                             @for (p of Products; track p.ID) {
                                 <option [ngValue]="p.ID">{{ ProductOptionLabel(p) }}</option>
@@ -158,7 +196,7 @@ interface RemoteOperationRouter {
                                  floor of zero offers the one value the database forbids. Negative is
                                  legal to orders as its reversal mechanism, but a reversal is not
                                  something a deal line expresses. -->
-                            <input type="number" min="1" step="1" [ngModel]="Working.Quantity"
+                            <input type="number" data-testid="line-quantity" min="1" step="1" [ngModel]="Working.Quantity"
                                    (ngModelChange)="SetQuantity($event)"
                                    [disabled]="IsLocked" [title]="BlockedReason" />
                         </label>
@@ -168,7 +206,7 @@ interface RemoteOperationRouter {
                             <!-- Percent in, FRACTION stored. step is 0.01 because that is what
                                  OrderLine.DiscountPct DECIMAL(7,4) holds: a hundredth of one percent.
                                  The conversion refuses an ambiguous value rather than guessing. -->
-                            <input type="number" min="0" max="100" step="0.01"
+                            <input type="number" data-testid="line-discount" min="0" max="100" step="0.01"
                                    [ngModel]="DiscountPercent" (ngModelChange)="SetDiscountPercent($event)"
                                    [disabled]="IsLocked" [title]="BlockedReason" />
                             @if (DiscountRefusal) {
@@ -177,10 +215,28 @@ interface RemoteOperationRouter {
                         </label>
                     </div>
 
+                    @if (ShowPricePicker) {
+                        <div class="mjs-le__field">
+                            <span class="mjs-le__label">Price</span>
+                            <!-- Orders' named prices only. AllowCustomAmount is off because a typed amount
+                                 is a price field in the rep's hands (D-DL2); a named rule is not. -->
+                            <mjo-line-price-picker
+                                [Line]="Working"
+                                [OverrideKind]="OverrideKind"
+                                [AllowCustomAmount]="false"
+                                [Applicable]="Applicable"
+                                [EngineDefault]="EngineDefault"
+                                [DefaultUnit]="DefaultUnit"
+                                [PriceSource]="EngineDefault?.PriceName ?? null"
+                                [PricedUnit]="DisplayUnitPrice"
+                                (PriceChanged)="SchedulePrice()"></mjo-line-price-picker>
+                        </div>
+                    }
+
                     @if (ShowTermStart) {
                         <label class="mjs-le__field">
                             <span class="mjs-le__label">Term start</span>
-                            <input type="date" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
+                            <input type="date" data-testid="line-term-start" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
                                    [disabled]="IsLocked" [title]="BlockedReason" />
                             @if (!HasExplicitTermStart) {
                                 <small class="mjs-le__hint">order date</small>
@@ -202,6 +258,8 @@ interface RemoteOperationRouter {
                         <p class="mjs-le__muted">
                             @if (PricingNote) {
                                 {{ PricingNote }}
+                            } @else if (ShowPricePicker) {
+                                Priced by Orders. Choose another of the product's prices above, or record a discount.
                             } @else {
                                 Priced by Orders. Change the price with a discount — it is recorded as one.
                             }
@@ -213,7 +271,7 @@ interface RemoteOperationRouter {
 
                 <!-- Confirm LEFT, cancel RIGHT (CLAUDE.md). -->
                 <footer class="mjs-le__foot">
-                    <button type="button" class="mjs-le__btn mjs-le__btn--primary"
+                    <button type="button" class="mjs-le__btn mjs-le__btn--primary" data-testid="line-save"
                             [disabled]="!CanSave || Saving" (click)="Save()">
                         {{ Saving ? 'Saving…' : 'Save' }}
                     </button>
@@ -234,7 +292,7 @@ interface RemoteOperationRouter {
                         @if (Confirming) {
                             <span class="mjs-le__confirm">
                                 <span class="mjs-le__muted">Remove this product?</span>
-                                <button type="button" class="mjs-le__btn mjs-le__btn--danger"
+                                <button type="button" class="mjs-le__btn mjs-le__btn--danger" data-testid="line-remove-confirm"
                                         [disabled]="Saving" (click)="Remove()">
                                     {{ Saving ? 'Removing…' : 'Remove' }}
                                 </button>
@@ -242,7 +300,7 @@ interface RemoteOperationRouter {
                                         (click)="Confirming = false">Keep</button>
                             </span>
                         } @else {
-                            <button type="button" class="mjs-le__btn mjs-le__btn--quiet"
+                            <button type="button" class="mjs-le__btn mjs-le__btn--quiet" data-testid="line-remove"
                                     [disabled]="Saving" (click)="Confirming = true">Remove</button>
                         }
                     }
@@ -359,6 +417,14 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     private readonly cdr = inject(ChangeDetectorRef);
 
     public Products: ProductLookup[] = [];
+    /** Each product's catalog price, for the picker label — read from orders, keyed by product id. */
+    private readonly productPriceLabels = new Map<string, string>();
+    /** The signed-in rep's price-override grant; `'none'` hides the price picker. */
+    public OverrideKind: PriceOverrideKind = 'none';
+    /** The product's applicable named prices, from orders' `ListApplicablePrices`. */
+    public Applicable: ApplicablePrice[] = [];
+    /** The rules' answer for this line, from the last `Orders.PriceOrder`. Undefined until one reports it. */
+    public EngineDefault: LineEngineDefault | null | undefined = undefined;
     public Working: OrderLineEntity | null = null;
     public Loading = true;
     public Saving = false;
@@ -382,6 +448,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
 
             this.Products = await this.service.LoadProducts();
+            await this.loadProductPriceLabels();
+            this.OverrideKind = this.resolveOverrideKind();
 
             /**
              * RESOLVE THE FK, AND DECIDE, BEFORE `Ensure()` IS ALLOWED TO RUN (DN-17).
@@ -457,6 +525,12 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                 // legal value rather than at the one the database refuses.
                 this.Working.Quantity = 1;
             }
+            if (this.ShowPricePicker) {
+                // The picker's Default row needs orders' answer before anything is changed, and its list
+                // needs the applicable prices; a saved line otherwise opens with Default disabled.
+                void this.refreshApplicable();
+                this.SchedulePrice();
+            }
         } catch (err) {
             this.Error = `This line could not be opened: ${err instanceof Error ? err.message : String(err)}`;
         } finally {
@@ -467,9 +541,49 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
 
     public ProductOptionLabel(p: ProductLookup): string {
         const sku = p.SKU ? ` (${p.SKU})` : '';
-        // The company is named because two companies can each sell an identically-named product, and
-        // the choice decides which company's books the revenue lands in.
-        return p.Company ? `${p.Name}${sku} — ${p.Company}` : `${p.Name}${sku}`;
+        // The price is named because two products can share a name and differ only in their price band
+        // (golive#270); the company because the choice decides which company's books the revenue lands in.
+        const price = this.productPriceLabels.get(p.ID);
+        const name = price ? `${p.Name}${sku} · ${price}` : `${p.Name}${sku}`;
+        return p.Company ? `${name} — ${p.Company}` : name;
+    }
+
+    /**
+     * The rep's price-override grant. A grant that cannot be read hides the picker rather than
+     * stopping the line from opening: the picker is optional, the line is not.
+     */
+    private resolveOverrideKind(): PriceOverrideKind {
+        try {
+            return userPriceOverrideKind(Metadata.Provider.CurrentUser, Metadata.Provider);
+        } catch {
+            return 'none';
+        }
+    }
+
+    /**
+     * Each product's catalog price, as orders' catalog holds it — its active base-channel
+     * `ProductPrice` rows. One row reads as its amount, several as "From" the lowest.
+     *
+     * READ, NOT COMPUTED: these are the catalog's own amounts, chosen between, never multiplied or
+     * adjusted. A failed read only drops the prices from the labels; the picker still works.
+     */
+    private async loadProductPriceLabels(): Promise<void> {
+        this.productPriceLabels.clear();
+        if (!this.Products.length) return;
+        try {
+            await LoadOrdersEngine(Metadata.Provider, Metadata.Provider.CurrentUser);
+            for (const p of this.Products) {
+                const amounts = OrdersEngine.Instance.BaseProductPrices(p.ID)
+                    .map((row) => Number(row.Amount))
+                    .filter((n) => Number.isFinite(n));
+                if (!amounts.length) continue;
+                const lowest = Math.min(...amounts);
+                const label = this.Money(lowest);
+                this.productPriceLabels.set(p.ID, amounts.every((n) => n === lowest) ? label : `From ${label}`);
+            }
+        } catch {
+            this.productPriceLabels.clear();
+        }
     }
 
     private get SelectedProduct(): ProductLookup | null {
@@ -491,7 +605,83 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (product) {
             this.Working.CompanyID = product.CompanyID;
         }
+        // The previous product's default and named prices say nothing about this one.
+        this.EngineDefault = undefined;
+        this.Applicable = [];
+        void this.refreshApplicable();
         this.cdr.detectChanges();
+    }
+
+    /* ── Choosing among orders' prices (golive#270) ─────────────────────────────── */
+
+    /** Offered to a rep holding an override grant, on an open deal, once a product is chosen. */
+    public get ShowPricePicker(): boolean {
+        return !this.IsLocked && this.OverrideKind !== 'none' && !!this.Working?.ProductID;
+    }
+
+    /** True while the line's price is off its default — see the product select. */
+    public get ProductLockedByPrice(): boolean {
+        return !!this.Working && IsLinePriceOverridden(this.Working, this.EngineDefault);
+    }
+
+    /** The default unit price: orders' answer when it has given one, else the unpinned priced figure. */
+    public get DefaultUnit(): number | null {
+        if (this.EngineDefault !== undefined) return this.EngineDefault?.UnitPrice ?? null;
+        return this.ProductLockedByPrice ? null : this.DisplayUnitPrice;
+    }
+
+    /**
+     * The product's applicable named prices, asked of orders with the order's own parties and date —
+     * the same context the order line's picker uses, so the two list the same rules.
+     */
+    private async refreshApplicable(): Promise<void> {
+        const line = this.Working;
+        const order = this.Deal?.OrderID_Object;
+        const user = Metadata.Provider.CurrentUser;
+        if (!this.ShowPricePicker || !line?.ProductID || !order || !user) {
+            this.Applicable = [];
+            return;
+        }
+        const productID = String(line.ProductID);
+        try {
+            await LoadOrdersEngine(Metadata.Provider, user);
+            const product = OrdersEngine.Instance.ProductByID(productID);
+            const companyID = product?.CompanyID ?? order.CompanyID;
+            if (!companyID) return;
+            const applicable = await ListApplicablePrices(
+                {
+                    ProductID: productID,
+                    ProductCategoryID: product?.ProductCategoryID ?? null,
+                    CompanyID: companyID,
+                    Quantity: Number(line.Quantity ?? 0),
+                    AsOf: AsDateValue(order.OrderDate) ?? TodayAsDateValue(),
+                    OrganizationID: order.BillToOrganizationID ?? null,
+                    PersonID: order.BillToPersonID ?? null,
+                    ApplicabilityContext: await loadApplicabilityContext(
+                        {
+                            OrderHeaderID: order.IsSaved ? order.ID : null,
+                            ProductID: productID,
+                            BillToPersonID: order.BillToPersonID ?? null,
+                            BillToOrganizationID: order.BillToOrganizationID ?? null,
+                            ShipToPersonID: order.ShipToPersonID ?? null,
+                            ShipToOrganizationID: order.ShipToOrganizationID ?? null,
+                            BillToAddressID: order.BillToAddressID ?? null,
+                            ShipToAddressID: order.ShipToAddressID ?? null,
+                        },
+                        Metadata.Provider,
+                        user,
+                    ),
+                },
+                Metadata.Provider,
+                user,
+            );
+            // A reply for a product the rep has since moved off is dropped rather than shown.
+            if (this.Working?.ProductID === productID) this.Applicable = applicable;
+        } catch {
+            this.Applicable = [];
+        } finally {
+            this.cdr.detectChanges();
+        }
     }
 
     /** Stored as a fraction, shown as a percent. */
@@ -607,6 +797,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (!this.Working) return;
         this.Working.Quantity = Number(value);
         this.SchedulePrice();
+        // A named price can be banded by quantity, so the list is asked for again.
+        void this.refreshApplicable();
     }
 
     /**
@@ -632,9 +824,11 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     private async refreshPrice(): Promise<void> {
         const line = this.Working;
         const companyID = this.Deal?.CompanyID as string | null | undefined;
+        const order = this.Deal?.OrderID_Object;
         if (!line?.ProductID || !companyID) {
             this.pricedUnit = null;
             this.pricedTotal = null;
+            this.EngineDefault = undefined;
             this.PricingNote = null;
             this.cdr.detectChanges();
             return;
@@ -649,9 +843,17 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                 'Orders.PriceOrder',
                 {
                     CompanyID: companyID,
+                    // The buyer and the date steer which rule is the default, so they are sent: without
+                    // them the picker's Default row could name a different rule than the order's save.
+                    BillToPersonID: order?.BillToPersonID ?? null,
+                    BillToOrganizationID: order?.BillToOrganizationID ?? null,
+                    OrderDate: this.IsoOrNull(order?.OrderDate),
                     Lines: [{
                         ProductID: String(line.ProductID),
                         Quantity: Number(line.Quantity) || 1,
+                        // A picked price PINS the line, as it will on the order's save; otherwise orders
+                        // resolves it.
+                        UnitPrice: IsLinePriceOverridden(line, this.EngineDefault) ? Number(line.UnitPrice) : null,
                         DiscountPct: (line.DiscountPct as number | null | undefined) ?? null,
                         ServicePeriodStart: this.IsoOrNull(line.ServicePeriodStart),
                         ServicePeriodEnd: this.IsoOrNull(line.ServicePeriodEnd),
@@ -669,14 +871,17 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             if (!row) {
                 this.pricedUnit = null;
                 this.pricedTotal = null;
+                this.EngineDefault = undefined;
                 this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
                 return;
             }
             this.pricedUnit = row.UnitPrice;
             this.pricedTotal = row.LineTotalNet;
+            this.EngineDefault = row.Default;
         } catch {
             this.pricedUnit = null;
             this.pricedTotal = null;
+            this.EngineDefault = undefined;
             this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
         } finally {
             this.Pricing = false;
@@ -693,7 +898,12 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
 
     public get CanSave(): boolean {
         if (this.IsLocked) return false;
-        return !!this.Working?.ProductID && !this.DiscountRefusal && !!this.Deal?.OrderID_Object;
+        return (
+            !!this.Working?.ProductID &&
+            !this.DiscountRefusal &&
+            !!this.Deal?.OrderID_Object &&
+            !LineNeedsOverrideReason(this.Working, this.EngineDefault)
+        );
     }
 
     /**
@@ -712,6 +922,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (this.IsLocked) return 'This deal is closed. Set the status back to Open before changing what was sold.';
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
+        if (LineNeedsOverrideReason(this.Working, this.EngineDefault)) return 'Enter a reason for the price override.';
         return this.DiscountRefusal ?? '';
     }
 

@@ -60,7 +60,7 @@ import { expect, test } from '@playwright/test';
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, drain, shot } from '../lib/explorer';
 import { CloseDb, QueryAll, QueryOne } from '../lib/db';
-import { ComposeDeal } from '../lib/deal-flow';
+import { ComposeDeal, PurgeDeal } from '../lib/deal-flow';
 
 const SALES_APP_ROUTE = '/app/sales';
 /**
@@ -125,10 +125,10 @@ async function stagesOf(pipelineID: string): Promise<StageRow[]> {
  * prefix, so `cleanup.mjs` reaches it, and its events go with it when it is deleted — provenance for a
  * deal that no longer exists is not a problem, provenance welded to demo data is.
  *
- * ── CREATED THROUGH THE WORKSPACE, NOT BY INSERT ───────────────────────────────────────────────────
+ * ── CREATED THROUGH THE DEAL FORM, NOT BY INSERT ───────────────────────────────────────────────────
  *
- * `ComposeDeal` drives the real UI, so the deal arrives with the embedded order that
- * `DealEntityServer.Save()` provisions. A raw INSERT would be faster and would produce a deal with no
+ * `ComposeDeal` drives the real UI — the Deal form, since the workspace was unmounted (#88) — so the
+ * deal arrives with the embedded order that `DealEntityServer.Save()` provisions. A raw INSERT would be faster and would produce a deal with no
  * order — and this spec asserts that a drag MOVES THE ORDER, so it would pass while testing nothing,
  * which is exactly the failure mode the old helper's own error message warned about.
  */
@@ -180,7 +180,7 @@ async function openBoard(page: Page): Promise<void> {
     await page.goto(`${EXPLORER_BASE_URL}${SALES_APP_ROUTE}`);
     /**
      * NO 'Deals' HOP. `mj-left-nav` renders the SUB-PAGES of the sales section — Dashboard, All deals,
-     * Board, Workspace (`sales-nav.model.ts:75-78`). The 'Deals' entry at line 64 of that same file is
+     * Board (`DEALS_SUB_PAGES` in `sales-nav.model.ts`). The 'Deals' entry in `SALES_SECTIONS` there is
      * the APP-level item and lives on a different surface entirely, so clicking for it inside
      * `mj-left-nav` waits thirty seconds and times out. The route already lands in the section.
      */
@@ -228,7 +228,18 @@ async function dragCardTo(page: Page, card: ReturnType<typeof cardNamed>, target
 }
 
 test.describe('pipeline board — a drag writes three things, and never closes a deal', () => {
+    /**
+     * PURGED HERE, not left to the global teardown. Specs run serially and 80-cross-company-products and
+     * 82-term-start open with `AssertBaseline()`, which counts every deal on the host — so this run's
+     * deals would fail them two files later, for a reason unrelated to either.
+     */
     test.afterAll(async () => {
+        const mine = await QueryAll<{ ID: string; OrderID: string | null }>(
+            `SELECT ID, OrderID FROM __mj_BizAppsSales.Deal WHERE Name LIKE '${RUN_TAG}%'`,
+        );
+        for (const d of mine) {
+            await PurgeDeal(d.ID, d.OrderID ? String(d.OrderID) : null);
+        }
         await CloseDb();
     });
 
@@ -366,8 +377,8 @@ test.describe('pipeline board — a drag writes three things, and never closes a
 
         /**
          * THE HINT MUST NAME THE WAY TO DO IT PROPERLY. A bare refusal teaches nothing and invites a second
-         * attempt; the message points at the workspace and the explicit close, so the win or loss is
-         * recorded deliberately.
+         * attempt; the column's title points at the deal form, where the explicit close lives, so the win
+         * or loss is recorded deliberately.
          */
         /**
          * ── THE BOARD PREVENTS THE DROP; IT DOES NOT REFUSE IT AFTERWARDS ────────────────────────────
@@ -398,8 +409,9 @@ test.describe('pipeline board — a drag writes three things, and never closes a
             'the closing column must carry the lock affordance — it is the standing hint that replaces the '
                 + 'message a prevented drop never produces',
         ).toBeVisible();
+        // The board renders "Deals cannot be moved here. Close a deal from the deal form."
         await expect(lockHint).toHaveAttribute('title', /cannot be moved/i);
-        await expect(lockHint).toHaveAttribute('title', /form/i);
+        await expect(lockHint).toHaveAttribute('title', /deal form/i);
 
         // And no transient message either, because nothing was dropped.
         await expect(
@@ -488,8 +500,8 @@ test.describe('pipeline board — a drag writes three things, and never closes a
  *    → the second test must fail — and it should fail on the STAGE assertion, not only on the missing
  *    message, which proves the guard was load-bearing rather than cosmetic.
  *
- * 6. **The hint loses its pointer.** Shorten the refusal message to `'Not allowed.'`.
- *    → the `workspace` text assertion must fail while the stage assertion still passes. That separation
+ * 6. **The hint loses its pointer.** Shorten the closing column's lock title to `'Not allowed.'`.
+ *    → the `deal form` title assertion must fail while the stage assertion still passes. That separation
  *    is deliberate: it distinguishes "the guard works" from "the guard explains itself".
  *
  * A mutation that leaves the suite green marks a decorative assertion. Fix it before trusting the spec —

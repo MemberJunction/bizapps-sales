@@ -42,6 +42,8 @@ function editor(opts: {
             ServicePeriodEnd: null,
             UnitPrice: opts.saved?.UnitPrice ?? null,
             LineTotalNet: opts.saved?.LineTotalNet ?? null,
+            // No price field reads as overridden, so the line is priced on orders' own rules.
+            GetFieldByName: () => undefined,
         },
         writable: true, configurable: true,
     });
