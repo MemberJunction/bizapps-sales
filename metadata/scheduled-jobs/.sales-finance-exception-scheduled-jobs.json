@@ -1,0 +1,38 @@
+[
+  {
+    "_comments": [
+      "NIGHTLY FINANCE EXCEPTION CHECK, TYPE 3 (golive #279). Runs the Action in",
+      "`.sales-finance-exception-actions.json`. Own file, as with the forecast job.",
+      "",
+      "02:30 UTC, after the forecast snapshot and after the close of business in every zone the",
+      "business day is judged in. The exception date is the business day, from the business time zone,",
+      "not the UTC day the job fires on.",
+      "",
+      "  · ConcurrencyMode `Skip` — two concurrent runs would race on the same deals; accounting's",
+      "    dedupe key makes that harmless, but there is no reason to invite it.",
+      "  · MissedRunPolicy `RunOnce` — each run re-reads every qualifying deal, so one catch-up run",
+      "    covers any number of missed nights.",
+      "  · RunImmediatelyIfNeverRun `false` — the first run waits for the schedule."
+    ],
+    "fields": {
+      "Name": "Sales — Won Deals With Unconfirmed Orders (nightly)",
+      "Description": "Raises a WON_DEAL_ORDER_NOT_CONFIRMED finance exception for each won deal whose order is missing or not Confirmed. Skips when the exception type is missing or inactive.",
+      "JobTypeID": "3B94DD43-E961-4D85-B7F4-B6783D748766",
+      "CronExpression": "0 30 2 * * *",
+      "Timezone": "UTC",
+      "Status": "Active",
+      "ConcurrencyMode": "Skip",
+      "MissedRunPolicy": "RunOnce",
+      "RunImmediatelyIfNeverRun": false,
+      "MaxRuntimeMinutes": 15,
+      "NotifyOnSuccess": false,
+      "NotifyOnFailure": false,
+      "NotifyViaEmail": false,
+      "NotifyViaInApp": false,
+      "Configuration": "{\"ActionID\":\"A5EDE4FB-14FF-4BC3-9EAC-CE8B5B89F8B9\",\"Params\":[]}"
+    },
+    "primaryKey": {
+      "ID": "FEB6F8D5-17B0-4AE6-BD8A-F0495F7CE36F"
+    }
+  }
+]
