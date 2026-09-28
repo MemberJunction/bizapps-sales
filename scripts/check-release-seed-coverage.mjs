@@ -12,6 +12,7 @@
  * Exit 1 lists the JSON files whose IDs are in no migration. That is the table
  * docs/PUBLISHING.md used to maintain by hand.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -114,6 +115,92 @@ function reportUnchecked(log) {
     }
 }
 
+/**
+ * HAS metadata/ MOVED SINCE THE LAST RELEASE SEED?
+ *
+ * The scan above greps migrations for UUIDs, which a `@lookup:`-addressed row does not have -- so
+ * those get reported as NOT CHECKED and the question stops there. This asks a different one that
+ * covers both kinds: was this file's content in the seed at all?
+ *
+ * It is answerable without guessing. `Metadata_Sync` migrations are generated one per release from
+ * the whole `metadata/` directory, so anything committed there AFTER the newest one was committed is
+ * necessarily absent from it. Anchored to that migration's own commit rather than its filename
+ * timestamp, because the filename encodes when the build engineer generated it and the commit is
+ * when it actually entered the history the comparison runs against.
+ *
+ * Reported rather than failed. Metadata changing between releases is the NORMAL state -- the seed is
+ * cut at release time, not per PR, and `check:release-seed` is explicitly not a PR gate. The point is
+ * that whoever cuts the next release can see what is waiting, instead of finding out when a database
+ * built from migrations comes up missing a label.
+ */
+function metadataChangedSinceSeed() {
+    const seeds = readdirSync(MIGRATIONS)
+        .filter((f) => /Metadata_Sync.*\.sql$/i.test(f))
+        .sort();
+    if (!seeds.length) return { seed: null, files: [], ok: true };
+    const seed = seeds[seeds.length - 1];
+
+    const git = (args) => {
+        try {
+            return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        } catch {
+            return null;
+        }
+    };
+
+    const path = join('migrations', seed).replace(/\\/g, '/');
+    const sha = git(['log', '-1', '--format=%H', '--', path]);
+    if (!sha || !sha.trim()) return { seed, files: [], ok: false };
+
+    /**
+     * A COMMIT RANGE, NOT `--since=<date>`.
+     *
+     * `--since` includes commits AT that timestamp, so the seed's own commit counted -- and a release
+     * commit normally carries the metadata the seed was generated FROM, which then showed up as
+     * "changed since the seed" on the very run that sealed it. Measured: it reported
+     * `metadata/actions/.sales-actions.json`, committed in the same commit as the seed.
+     */
+    const changed = git(['log', `${sha.trim()}..HEAD`, '--name-only', '--format=', '--', 'metadata/']);
+    if (changed === null) return { seed, files: [], ok: false };
+
+    const when = git(['log', '-1', '--format=%cI', '--', path]) ?? '';
+
+    const files = [...new Set(
+        changed
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter((l) => l.endsWith('.json') && l.startsWith('metadata/')),
+    )].sort();
+
+    return { seed, files, ok: true, since: when.trim().slice(0, 16) };
+}
+
+const staleness = metadataChangedSinceSeed();
+
+/** Printed on both paths: it qualifies a pass at least as much as it qualifies a failure. */
+function reportStaleness(log) {
+    if (!staleness.seed) {
+        log('');
+        log('NO Metadata_Sync MIGRATION EXISTS, so nothing under metadata/ has ever been sealed into');
+        log('one. Every file below reaches a database only through a manual push.');
+        return;
+    }
+    if (!staleness.ok) {
+        log('');
+        log(`Could not read git history, so whether metadata/ has moved since ${staleness.seed}`);
+        log('is unknown. Not the same as unchanged.');
+        return;
+    }
+    if (!staleness.files.length) return;
+    log('');
+    log(`${staleness.files.length} metadata file(s) changed since the newest release seed`);
+    log(`(${staleness.seed}, committed ${staleness.since}). None of that content is in any`);
+    log('migration, so a database built from migrations alone does not have it:');
+    for (const f of staleness.files.slice(0, 15)) log(`  ~  ${f}`);
+    if (staleness.files.length > 15) log(`  ... and ${staleness.files.length - 15} more`);
+    log('Generating the next Metadata_Sync picks all of them up.');
+}
+
 if (missing.length) {
     console.error('Release seed coverage — these metadata primaryKeys appear in no migration:\n');
     for (const row of missing) {
@@ -121,6 +208,7 @@ if (missing.length) {
         console.error(`       e.g. ${row.unseen[0]}`);
     }
     reportUnchecked(console.error);
+    reportStaleness(console.error);
     console.error('\nGenerate the release Metadata_Sync, then re-run.');
     process.exit(1);
 }
@@ -132,3 +220,4 @@ if (missing.length) {
  */
 console.log(`Release seed coverage — ${checkedIds} ID-addressed primaryKey(s) appear in migrations/.`);
 reportUnchecked(console.log);
+reportStaleness(console.log);
