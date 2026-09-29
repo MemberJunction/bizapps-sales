@@ -43,6 +43,7 @@ const E = MJS_ENTITIES.Deal;
 
 /** Sales' loss-reason table. Named here so the close action has one spelling of it. */
 const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
+const E_PIPELINE_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
 
 /** One pickable loss reason, with the flag that decides whether notes are mandatory. */
 export interface LossReasonOption {
@@ -73,6 +74,59 @@ async function LoadLossReasons(): Promise<LossReasonOption[]> {
         ID: String(r.ID),
         Name: String(r.Name),
         RequiresNotes: r.RequiresNotes === true,
+    }));
+}
+
+/** One pipeline the deal may sit in. */
+export interface PipelineOption {
+    ID: string;
+    Name: string;
+}
+
+/** One stage, carrying the pipeline that owns it — the whole point of the list. */
+export interface PipelineStageOption {
+    ID: string;
+    Name: string;
+    PipelineID: string;
+}
+
+/** Every active pipeline, for the picker that also decides which stages are offered. */
+async function LoadPipelines(): Promise<PipelineOption[]> {
+    const result = await new RunView().RunView<{ ID: string; Name: string }>({
+        EntityName: MJS_ENTITIES.Pipeline,
+        ExtraFilter: 'IsActive = 1',
+        OrderBy: 'Name ASC',
+        ResultType: 'simple',
+        Fields: ['ID', 'Name'],
+    });
+    if (!result?.Success) return [];
+    return (result.Results ?? []).map((r) => ({ ID: String(r.ID), Name: String(r.Name) }));
+}
+
+/**
+ * Every active stage ACROSS every pipeline, filtered for display by `StagesForCurrentPipeline`.
+ *
+ * Loaded whole rather than re-queried per pipeline: the list is small, the pipeline can change while
+ * the form is open, and a fetch inside the change handler would make an empty dropdown read as a
+ * timeout rather than as a pipeline with no stages configured. `deal-workspace.service.ts` loads it
+ * the same way for the same reason.
+ *
+ * `DisplayOrder` first, because a sales process has an order and sorting by name would present it
+ * alphabetically -- Discovery, Lost, Negotiation, Proposal, Qualification, Signed.
+ */
+async function LoadPipelineStages(): Promise<PipelineStageOption[]> {
+    const result = await new RunView().RunView<{ ID: string; Name: string; PipelineID: string }>({
+        EntityName: E_PIPELINE_STAGE,
+        ExtraFilter: 'IsActive = 1',
+        OrderBy: 'DisplayOrder ASC, Name ASC',
+        ResultType: 'simple',
+        Fields: ['ID', 'Name', 'PipelineID'],
+    });
+    if (!result?.Success) return [];
+    return (result.Results ?? []).map((r) => ({
+        ID: String(r.ID),
+        Name: String(r.Name),
+        PipelineID: String(r.PipelineID),
     }));
 }
 
@@ -578,7 +632,12 @@ const CREATION_PARTY_FIELDS: readonly string[] = ['AccountID', 'PrimaryContactID
  * The status control stays out too — it routes to close/reopen, meaningless on a deal that does not
  * exist yet.
  */
-const CREATION_PIPELINE_FIELDS: readonly string[] = ['PipelineID', 'PipelineStageID', 'DealTypeID'];
+/**
+ * Pipeline and stage are no longer in `PIPELINE_FIELDS`, so naming them here would filter for fields
+ * that are not in the list. The dedicated controls render on a new deal unconditionally, which is
+ * what this subset existed to arrange for them.
+ */
+const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID'];
 
 /**
  * Every field the party panel owns, at module scope rather than as an instance initializer.
@@ -1276,6 +1335,60 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                     </div>
                 }
 
+                <!-- PIPELINE AND STAGE ARE NOT GENERIC FIELDS HERE, for the reason Status is not:
+                     <mj-form-field> renders a foreign key as an unfiltered dropdown off the related
+                     entity. Stage therefore listed EVERY stage in the system — D2C's three and sixteen
+                     legacy pipelines' alongside B2B's six — so a B2B deal could be positioned in D2C's
+                     process, and the server then took that stage's probability, forecast category and
+                     status from it (bc-aidp-next-golive#291).
+
+                     Pipeline is here too because choosing one chooses which stages exist; a plain
+                     binding gives nowhere to clear a stage that has just become meaningless. The deal
+                     workspace has always done both, which is why testers were told to use it. -->
+                <div class="mjs-field" data-field="PipelineID">
+                    <div class="mj-forms-field">
+                        <label class="mj-forms-field-label">Pipeline</label>
+                        @if (EditMode && FieldEditable('PipelineID')) {
+                            <select [ngModel]="Record.PipelineID" data-testid="deal-pipeline"
+                                    (ngModelChange)="SetPipeline($event)"
+                                    [compareWith]="CompareID">
+                                <option [ngValue]="null" [disabled]="Record.IsSaved">— choose —</option>
+                                @for (p of PipelineOptions; track p.ID) {
+                                    <option [ngValue]="p.ID">{{ p.Name }}</option>
+                                }
+                            </select>
+                        } @else {
+                            <div class="mj-forms-field-value">{{ CurrentPipelineName ?? '—' }}</div>
+                        }
+                    </div>
+                </div>
+
+                <div class="mjs-field" data-field="PipelineStageID">
+                    <div class="mj-forms-field">
+                        <label class="mj-forms-field-label">Pipeline Stage</label>
+                        @if (EditMode && FieldEditable('PipelineStageID')) {
+                            <select [ngModel]="Record.PipelineStageID" data-testid="deal-stage"
+                                    (ngModelChange)="SetStage($event)"
+                                    [compareWith]="CompareID"
+                                    [disabled]="!StageIsEditable">
+                                <option [ngValue]="null">— choose —</option>
+                                @for (st of StagesForCurrentPipeline; track st.ID) {
+                                    <option [ngValue]="st.ID">{{ st.Name }}</option>
+                                }
+                            </select>
+                            @if (!StageIsEditable) {
+                                <!-- Says which of the two it is. An empty disabled control otherwise
+                                     reads as "broken" whether the pipeline is unset or has no stages. -->
+                                <div class="mjs-hint" data-testid="stage-hint">
+                                    {{ Record.PipelineID ? 'This pipeline has no active stages.' : 'Choose a pipeline first.' }}
+                                </div>
+                            }
+                        } @else {
+                            <div class="mj-forms-field-value">{{ CurrentStageName ?? '—' }}</div>
+                        }
+                    </div>
+                </div>
+
                 <!-- STATUS IS NOT A GENERIC FIELD HERE, and the reason is the whole of golive#205.
                      MJ's <mj-form-field> renders a foreign key as an unfiltered dropdown off the related
                      entity, so it offered Won and Lost — and picking one wrote the status without any of
@@ -1420,10 +1533,19 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
      */
     private readonly statuses = signal<DealStatusOption[]>([]);
 
+    /** Signals for the same reason `statuses` is one — see the note above it. */
+    private readonly pipelines = signal<PipelineOption[]>([]);
+    private readonly stages = signal<PipelineStageOption[]>([]);
+
     public async ngOnInit(): Promise<void> {
         // BaseFormPanel declares no lifecycle hook, so there is nothing to chain to. Angular calls this
         // on the component regardless of whether the base class has one.
-        const settled = await Promise.allSettled([LoadDealStatusOptions(), LoadLossReasons()]);
+        const settled = await Promise.allSettled([
+            LoadDealStatusOptions(),
+            LoadLossReasons(),
+            LoadPipelines(),
+            LoadPipelineStages(),
+        ]);
         const valueOf = <T>(r: PromiseSettledResult<T>): T | null =>
             r.status === 'fulfilled' ? r.value : null; // vocabulary-grep-allow: PromiseSettledResult discriminant, not a domain status
         const loadedStatuses = valueOf(settled[0] as PromiseSettledResult<DealStatusOption[]>);
@@ -1434,10 +1556,105 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         if (loadedReasons) {
             this.LossReasons.set(loadedReasons);
         }
-        if (!loadedStatuses || !loadedReasons) {
+
+        const loadedPipelines = valueOf(settled[2] as PromiseSettledResult<PipelineOption[]>);
+        const loadedStages = valueOf(settled[3] as PromiseSettledResult<PipelineStageOption[]>);
+        if (loadedPipelines) {
+            this.pipelines.set(loadedPipelines);
+        }
+        if (loadedStages) {
+            this.stages.set(loadedStages);
+        }
+
+        if (!loadedStatuses || !loadedReasons || !loadedPipelines || !loadedStages) {
             this.ActionFailed = true;
             this.ActionMessage = 'Some of this panel could not load. Reload the page before closing this deal.';
         }
+    }
+
+    /* ── Pipeline and stage (bc-aidp-next-golive#291) ───────────────────────── */
+
+    /** Every pipeline that may be chosen. */
+    public get PipelineOptions(): PipelineOption[] {
+        return this.pipelines();
+    }
+
+    /**
+     * The stages of the deal's CURRENT pipeline, and nothing else.
+     *
+     * MJ's `<mj-form-field>` renders a foreign key as an unfiltered dropdown off the related entity,
+     * so Stage listed every stage in the system — D2C's three and sixteen legacy pipelines' alongside
+     * B2B's six. A deal could be positioned in another pipeline's process, and the server then took
+     * that stage's probability, forecast category and status. Same defect as golive#205's status
+     * dropdown, same answer: a control that offers only what is valid.
+     *
+     * Empty until a pipeline is chosen, which is what keeps the control disabled on a new deal — the
+     * workspace behaves the same way and it is the reason testers were told to use it instead.
+     */
+    public get StagesForCurrentPipeline(): PipelineStageOption[] {
+        const pipelineID = this.Record?.PipelineID;
+        if (!pipelineID) return [];
+        const key = String(pipelineID).toLowerCase();
+        return this.stages().filter((s) => s.PipelineID.toLowerCase() === key);
+    }
+
+    /** No pipeline, or a pipeline whose stages have not loaded, leaves nothing to pick from. */
+    public get StageIsEditable(): boolean {
+        return this.StagesForCurrentPipeline.length > 0;
+    }
+
+    /**
+     * Choosing a pipeline also chooses which stages exist, so it cannot be a plain field binding —
+     * the same sentence `deal-workspace.component.ts` carries above `SelectPipeline`, and the reason
+     * the form had this bug while the workspace did not.
+     *
+     * `CompanyID` is NOT set here, unlike the workspace's version. `DealEntityServer` forces it from
+     * the pipeline on every save, ignoring whatever a caller supplies, so writing it here would be
+     * stating something this form has no standing to know. The workspace sets it only so its own
+     * header can display it before the round trip.
+     */
+    public SetPipeline(pipelineID: string | null): void {
+        if (!this.Record) return;
+        this.Record.PipelineID = pipelineID as string;
+
+        // A stage from the previous pipeline is meaningless now. Cleared rather than remapped: there
+        // is no honest translation from one pipeline's process to another's, which is the same
+        // reasoning that makes the server REFUSE a mismatch instead of correcting it.
+        const stages = this.StagesForCurrentPipeline;
+        if (!stages.some((st) => st.ID.toLowerCase() === String(this.Record?.PipelineStageID ?? '').toLowerCase())) {
+            this.Record.PipelineStageID = null as unknown as string;
+        }
+    }
+
+    /**
+     * The stage's `Probability` and `ForecastCategoryTypeID` are the SERVER's to apply, and this does
+     * not write them — `applyStageDefaults` guards a rep-typed probability that this would destroy
+     * before the server ever saw it. `OnStageChange` in the workspace records the same decision.
+     */
+    public SetStage(stageID: string | null): void {
+        if (!this.Record) return;
+        this.Record.PipelineStageID = stageID as unknown as string;
+    }
+
+    /** Ids round-trip through JSON in both cases, so the select compares them the way the rest does. */
+    public CompareID = (a: unknown, b: unknown): boolean =>
+        String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
+
+    /**
+     * What the read-only rendering shows. Resolved from the loaded lists rather than from the record's
+     * virtual name column, so a stage belonging to ANOTHER pipeline still reads as its own name rather
+     * than as a blank — a deal in that state is exactly the one whose stage a reader needs to see.
+     */
+    public get CurrentPipelineName(): string | null {
+        const id = String(this.Record?.PipelineID ?? '').toLowerCase();
+        if (!id) return null;
+        return this.pipelines().find((p) => p.ID.toLowerCase() === id)?.Name ?? null;
+    }
+
+    public get CurrentStageName(): string | null {
+        const id = String(this.Record?.PipelineStageID ?? '').toLowerCase();
+        if (!id) return null;
+        return this.stages().find((st) => st.ID.toLowerCase() === id)?.Name ?? null;
     }
 
     /**
@@ -1819,8 +2036,9 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         // renders Name as an editable field in edit mode, and shows DealNumber beneath the title once
         // the server has assigned one. Listing them again gave the form two inputs bound to the same
         // column, and offered an empty textbox for a value the user does not get to choose.
-        { name: 'PipelineID', type: 'textbox', link: 'Record' },
-        { name: 'PipelineStageID', type: 'textbox', link: 'Record' },
+        // PipelineID and PipelineStageID are NOT here: both are rendered as dedicated controls in
+        // the template above, for the reason stated there (golive#291). Listing them here too would
+        // give the panel two controls bound to one column, the way Name and DealNumber once were.
         { name: 'DealTypeID', type: 'textbox', link: 'Record' },
         { name: 'ForecastCategoryTypeID', type: 'textbox', link: 'Record' },
         { name: 'Probability', type: 'number' },
