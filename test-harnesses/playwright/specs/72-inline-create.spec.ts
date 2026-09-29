@@ -26,7 +26,16 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
-import { Field, FirstOpenStatus, OpenNewDeal, PickLookup, SaveDeal, SetStatusByID, SetText } from '../lib/deal-form';
+import {
+    Field,
+    FirstOpenStatus,
+    FirstPipeline,
+    OpenNewDeal,
+    SaveDeal,
+    SetPipelineByID,
+    SetStatusByID,
+    SetText,
+} from '../lib/deal-form';
 import { PurgeByPrefix } from '../lib/deal-flow';
 
 /** Unique per run, and prefixed so a leak is identifiable and removable by one predicate. */
@@ -139,7 +148,9 @@ test.describe('inline create — the record comes back to the field it was launc
          * case-insensitively for that same reason.
          */
         await SetText(page, 'Name', DEAL_NAME);
-        await PickLookup(page, 'PipelineID');
+        // A named pipeline rather than whichever option rendered first: golive#291 made this a
+        // dedicated select, and `FirstPipeline` reads the same IsActive/Name ordering it loads.
+        await SetPipelineByID(page, (await FirstPipeline()).ID);
         await SetStatusByID(page, (await FirstOpenStatus()).ID);
         await SaveDeal(page);
 

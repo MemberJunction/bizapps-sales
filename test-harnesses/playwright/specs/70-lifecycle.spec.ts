@@ -32,7 +32,7 @@ import { expect, test } from '@playwright/test';
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AddLines, AssertBaseline, CloseWon, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
-import { EditDeal, PickLookup, SaveDeal } from '../lib/deal-form';
+import { EditDeal, SaveDeal, SetStageByID } from '../lib/deal-form';
 
 const RUN = `PW-LIFE-${Date.now().toString(36)}`;
 let dealID = '';
@@ -122,24 +122,23 @@ test.describe('lifecycle — create, price, advance, close won', () => {
          * `PipelineStage.OrderStatusOnEntry`, and a spec keyed on the label would stop testing it the
          * moment a deployment renamed the stage — which is the whole point of the vocabulary rule.
          *
-         * The Stage field is an MJ type-ahead over every stage, not only this pipeline's, and the pick
-         * is by the row's text. So the stage must also be the only active one carrying its name, and
-         * the move is then confirmed by ID from the database rather than trusted from the pick.
+         * The Stage select offers only THIS pipeline's stages since golive#291, and the pick is by the
+         * option's ID rather than its text -- so the stage no longer has to be the only active one
+         * carrying its name. The move is still confirmed by ID from the database rather than trusted
+         * from the pick.
          */
         const quoting = await QueryOne<{ ID: string; Name: string }>(`
             SELECT TOP 1 s.ID, s.Name FROM __mj_BizAppsSales.PipelineStage s
              WHERE s.PipelineID = (SELECT PipelineID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}')
                AND s.IsActive = 1 AND s.OrderStatusOnEntry = 'Quoted'
-               AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineStage o
-                                WHERE o.IsActive = 1 AND o.Name = s.Name AND o.ID <> s.ID)
              ORDER BY s.DisplayOrder`);
         expect(
             quoting?.Name,
-            'the pipeline must have a uniquely named stage that declares Quoted',
+            'the pipeline must have a stage that declares Quoted',
         ).toBeTruthy();
 
         await EditDeal(page);
-        await PickLookup(page, 'PipelineStageID', String(quoting!.Name));
+        await SetStageByID(page, quoting!.ID);
         await SaveDeal(page);
 
         const moved = await QueryOne<{ PipelineStageID: string | null }>(

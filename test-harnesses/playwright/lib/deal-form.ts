@@ -149,6 +149,46 @@ export async function SetStatusByID(page: Page, statusID: string): Promise<void>
 }
 
 /**
+ * The Pipeline panel's Pipeline control.
+ *
+ * A dedicated `<select>` since golive#291 rather than an MJ lookup, because choosing a pipeline also
+ * chooses which stages exist. `PickLookup` targets `.mj-fk-search` and no longer reaches this.
+ */
+export async function PipelineSelect(page: Page): Promise<Locator> {
+    await Field(page, 'PipelineID');
+    return ByTestId(page, 'deal-pipeline');
+}
+
+/**
+ * Selects a pipeline by the ID of its row (see `SelectOptionByID`).
+ *
+ * Choosing a pipeline CLEARS a stage that does not belong to it -- the point of golive#291 -- so a
+ * stage is picked AFTER this, never before.
+ */
+export async function SetPipelineByID(page: Page, pipelineID: string): Promise<void> {
+    await SelectOptionByID(await PipelineSelect(page), pipelineID, 'Pipeline');
+    await page.waitForTimeout(300);
+}
+
+/**
+ * The Pipeline panel's Stage control.
+ *
+ * Offers only the CURRENT pipeline's stages. It was an MJ type-ahead over every stage in the system
+ * -- the defect golive#291 reports -- so a spec picking a stage by its text is picking from a list
+ * that no longer exists.
+ */
+export async function StageSelect(page: Page): Promise<Locator> {
+    await Field(page, 'PipelineStageID');
+    return ByTestId(page, 'deal-stage');
+}
+
+/** Selects a stage by the ID of its row (see `SelectOptionByID`). */
+export async function SetStageByID(page: Page, stageID: string): Promise<void> {
+    await SelectOptionByID(await StageSelect(page), stageID, 'Stage');
+    await page.waitForTimeout(300);
+}
+
+/**
  * Selects the option carrying a record ID in a `[ngValue]` select.
  *
  * Angular writes the DOM value as `"<index>: <guid>"`, so a bare GUID matches nothing. The option is
@@ -174,6 +214,21 @@ export async function FirstOpenStatus(): Promise<{ ID: string; Name: string }> {
           WHERE IsActive = 1 AND IsOpen = 1 ORDER BY DisplayRank`,
     );
     expect(row?.ID, 'the host needs an active OPEN status for a deal to start in').toBeTruthy();
+    return { ID: String(row!.ID), Name: String(row!.Name) };
+}
+
+/**
+ * The first active pipeline by name -- the one the Pipeline select offers first.
+ *
+ * `LoadPipelines` filters `IsActive = 1` and orders by `Name`, so this row is guaranteed to BE in the
+ * dropdown. A spec needing "any pipeline" takes this rather than whichever option rendered first.
+ */
+export async function FirstPipeline(): Promise<{ ID: string; Name: string }> {
+    const row = await QueryOne<{ ID: string; Name: string }>(
+        `SELECT TOP 1 ID, Name FROM __mj_BizAppsSales.Pipeline
+          WHERE IsActive = 1 ORDER BY Name`,
+    );
+    expect(row?.ID, 'the host needs an active pipeline for a deal to be created in').toBeTruthy();
     return { ID: String(row!.ID), Name: String(row!.Name) };
 }
 

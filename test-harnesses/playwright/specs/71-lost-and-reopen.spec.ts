@@ -58,7 +58,7 @@ import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { CanTransition } from '@mj-biz-apps/orders-entities';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AssertBaseline, CloseLost, ComposeDeal, PurgeByPrefix, PurgeDeal, ReopenDeal } from '../lib/deal-flow';
-import { DealForm, EditDeal, PickLookup, SaveDeal } from '../lib/deal-form';
+import { DealForm, EditDeal, SaveDeal, SetStageByID } from '../lib/deal-form';
 
 const RUN = `PW-LOST-${Date.now().toString(36)}`;
 let dealID = '';
@@ -163,8 +163,9 @@ test.describe('closed lost and reopen — what happens to the order', () => {
          * order has something to refuse.
          */
         /**
-         * The Stage field is an MJ type-ahead over every stage and the pick is by the row's text, so
-         * the stage must be the only active one carrying its name; the move is then confirmed by ID.
+         * The Stage select offers only THIS pipeline's stages since golive#291 and the pick is by ID,
+         * so the stage no longer has to be the only active one carrying its name; the move is still
+         * confirmed by ID.
          */
         const quoting = await QueryOne<{ ID: string; Name: string }>(`
             SELECT TOP 1 s.ID, s.Name
@@ -172,16 +173,14 @@ test.describe('closed lost and reopen — what happens to the order', () => {
               JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = s.DealStatusTypeID
              WHERE s.PipelineID = (SELECT PipelineID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}')
                AND s.IsActive = 1 AND s.OrderStatusOnEntry IS NOT NULL AND t.LocksDeal = 0
-               AND NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineStage o
-                                WHERE o.IsActive = 1 AND o.Name = s.Name AND o.ID <> s.ID)
              ORDER BY s.DisplayOrder`);
         expect(
             quoting?.Name,
-            'the pipeline needs a uniquely named, non-closing stage that declares an OrderStatusOnEntry, ' +
+            'the pipeline needs a non-closing stage that declares an OrderStatusOnEntry, ' +
                 'or the order has nothing to refuse on the way back',
         ).toBeTruthy();
         await EditDeal(page);
-        await PickLookup(page, 'PipelineStageID', String(quoting!.Name));
+        await SetStageByID(page, quoting!.ID);
         await SaveDeal(page);
         const moved = await QueryOne<{ PipelineStageID: string | null }>(
             `SELECT PipelineStageID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'`,
