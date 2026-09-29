@@ -30,6 +30,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ContractID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:52.605Z",
+      "checksum": "ed12ffd1b4d55111bba83d765561790562333fca69df7af0d2d4929d60c5230a"
     }
   },
   {
@@ -47,6 +51,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=RenewsContractID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:52.702Z",
+      "checksum": "ed12ffd1b4d55111bba83d765561790562333fca69df7af0d2d4929d60c5230a"
     }
   }
 ]
