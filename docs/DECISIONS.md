@@ -585,6 +585,14 @@ pricing walk is theirs, and the derivation already handles both channels.
 Do **not** bind `DiscountAmount` and call it the discount. Derive it (`list − net`) or ask orders for the
 figure. The column is not the number you want, and it will be zero exactly when a discount exists.
 
+### Choosing one of orders' named prices is not entering one (golive#270)
+
+The deal line editor hosts orders' shared `mjo-line-price-picker`, so a rep with an override grant can
+put a line on one of the product's named prices. That stays inside this decision: the rep picks among
+rules orders already holds, and orders resolves the figure. The picker's typed **Custom amount** is
+switched off (`AllowCustomAmount = false`), because a typed amount is the price field this decision
+keeps out of the rep's hands. Allowing it is a change to D-DL2, not to the editor.
+
 ---
 
 ## D-FY1 — The fiscal year start is READ from accounting, never stored in sales

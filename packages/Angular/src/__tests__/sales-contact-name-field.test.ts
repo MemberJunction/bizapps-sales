@@ -112,10 +112,15 @@ function flagsMigration(): string {
  * never be inserted again. So the first legitimate re-creation of `vwSalesContacts` moves the
  * newest definer to a migration that CANNOT contain this INSERT, and the assertion fails with no
  * correct way to satisfy it — a guard that would have to be deleted to do the right thing.
+ *
+ * KEYED ON THE INSERT ITSELF. A release Metadata_Sync passes `@AutoUpdateIsNameField` to every
+ * `spUpdateEntityField` it emits and names `MJ_BizApps_Sales: Sales Contacts` on `spUpdateEntity`,
+ * so the two markers alone resolve to the newest seed, which carries no positional INSERT to check.
  */
 function nameFieldMigration(): string {
     return migrationCarrying(
         'register DisplayNameAndEmail with AutoUpdateIsNameField for Sales Contacts',
+        'INSERT INTO [${mjSchema}].[EntityField]',
         'AutoUpdateIsNameField',
         "'MJ_BizApps_Sales: Sales Contacts'",
     );

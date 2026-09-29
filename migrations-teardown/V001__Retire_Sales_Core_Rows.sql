@@ -94,6 +94,7 @@ INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-00000000000D', 0),  -- Sales: Deal Roster
     ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-00000000000E', 0),  -- Sales: Dashboard Summary
     ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-00000000000F', 0),  -- Sales: Forecast by Owner
+    ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-000000000010', 0),  -- Sales: Won Deals With Unconfirmed Orders
     ('${mjSchema}', 'QueryCategory',           '5A1E5000-0000-4000-A000-000000000001', 0),  -- Sales
     -- Remote operations. `RemoteOperation.CategoryID` is nullable, so the category is listed
     -- explicitly rather than left to a cascade that would only release the reference.

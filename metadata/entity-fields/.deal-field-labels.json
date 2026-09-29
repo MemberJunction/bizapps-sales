@@ -26,6 +26,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=DealStatusType"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:52.950Z",
+      "checksum": "4b87b30d4d79cbfd31ba94b3dd2eb7697eefb62b50a5b3129f5197227f8e0d13"
     }
   },
   {
@@ -35,6 +39,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ForecastCategoryType"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.023Z",
+      "checksum": "e8c5a90f1ebe85ee2063f861a38b6cc4e1e89119c051c2b57b0c1d2126532efd"
     }
   },
   {
@@ -76,6 +84,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=PrimaryContactID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.100Z",
+      "checksum": "5efac24869896d79482ee23196674c3ec97a679dec827ee8e54bf3e5f243b72a"
     }
   },
   {
@@ -85,6 +97,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=BillingContactID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.181Z",
+      "checksum": "59c15719a0e998d0fc47fbfc6544a4086781774c2ff91b985d2997e32483e18b"
     }
   },
   {
@@ -94,6 +110,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=CurrencyID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.266Z",
+      "checksum": "f05693273407dbdb71cf1f2721f8d092d769e54f70eab25fe65cf738e027b7eb"
     }
   },
   {
@@ -103,6 +123,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ContractID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.323Z",
+      "checksum": "09f60b4fd8fa6895068a1ef751ff976b46213267179d67395c7dcf13208a59bd"
     }
   },
   {
@@ -112,6 +136,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=RenewsContractID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.378Z",
+      "checksum": "126a14f30ce28644428192ae53779481cc2958f9741d410f95d2515a0bcba422"
     }
   },
   {
@@ -121,6 +149,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=CampaignID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.438Z",
+      "checksum": "73aca92488175a32a93cfe7f248ab3585c648ddb733dc97b835f48a6dadada9d"
     }
   },
   {
@@ -130,6 +162,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=MRR"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.497Z",
+      "checksum": "a6eb9c1729817859fa8e250a5caa310223a5d7223eca468ad1ea890b6afc9d96"
     }
   },
   {
@@ -139,6 +175,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ARR"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.563Z",
+      "checksum": "c610b42dee886142d1e160f5e4aa78bf92a766507556eb06629f8abedfa7afe2"
     }
   }
 ]

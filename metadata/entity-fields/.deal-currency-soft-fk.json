@@ -36,6 +36,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=CurrencyID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:52.779Z",
+      "checksum": "e4501b4affa60d1af3c8bf7d0a32acb9dbfdb7e0f2cbb9192a14e40f71379624"
     }
   }
 ]

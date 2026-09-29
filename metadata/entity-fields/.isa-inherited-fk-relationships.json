@@ -50,6 +50,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=OrganizationTypeID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.625Z",
+      "checksum": "f483a07df0446fcd63c5594d81405f8577f867634831581e146cedac76fd7164"
     }
   },
   {
@@ -67,6 +71,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=ParentID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.679Z",
+      "checksum": "74c8b0df9328026e5f8f92cd20b05078027f4241a090e1ef6ffec4cb8ec342ac"
     }
   },
   {
@@ -82,6 +90,10 @@
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=LinkedUserID"
+    },
+    "sync": {
+      "lastModified": "2026-09-28T21:43:53.750Z",
+      "checksum": "facb9f33b1b110068f30d7d2b1e89e6081a86f1c9594856449ad56ef79de92a9"
     }
   }
 ]
