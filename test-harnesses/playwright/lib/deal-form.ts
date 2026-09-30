@@ -209,15 +209,31 @@ export async function PickLookup(page: Page, fieldName: string, search?: string)
         await input.pressSequentially(search, { delay: 40 });
     }
 
-    const rows = field.locator('.mj-fk-grid-row:not(.mj-fk-grid-row--header)');
+    /**
+     * THE RESULT LIST IS NOT INSIDE THE FIELD. MJ renders the dropdown in an overlay, so scoping the
+     * row search to `[data-field]` finds nothing however well the lookup is working -- and then says
+     * "its entity did not load", which is a statement about where we looked rather than about the
+     * entity. That message cost a long time: it reads as a broken lookup, and the lookup is fine.
+     *
+     * Measured on a running Explorer: 3 rows in the document, 0 inside the field element.
+     * `lib/explorer.ts`'s `setLookup` already says the popup lives outside the container; this is the
+     * caller that never got the memo.
+     *
+     * `:visible` because a closed dropdown's markup can linger, and only the open one is offering.
+     */
+    const rows = page.locator('.mj-fk-grid-row:not(.mj-fk-grid-row--header):visible');
     const row = search ? rows.filter({ hasText: search }).first() : rows.first();
     const offered = await row
         .waitFor({ state: 'visible', timeout: 20_000 })
         .then(() => true)
         .catch(() => false);
     if (!offered) {
+        const anywhere = await page.locator('.mj-fk-grid-row:not(.mj-fk-grid-row--header)').count();
         throw new Error(
-            `lookup ${fieldName} offered no row${search ? ` containing "${search}"` : ''} — its entity did not load`,
+            `lookup ${fieldName} offered no row${search ? ` containing "${search}"` : ''}. `
+                + `${anywhere} row(s) exist in the document, so ${anywhere > 0
+                    ? 'the list rendered and the filter did not match'
+                    : 'the list never rendered'}.`,
         );
     }
     const text = ((await row.innerText()) ?? '').trim();
