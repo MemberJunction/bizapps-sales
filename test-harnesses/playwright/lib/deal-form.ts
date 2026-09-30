@@ -46,6 +46,41 @@ export function ByTestId(page: Page, testId: string): Locator {
  *
  * Waits on the FORM ROOT rather than on a field, so no spec is coupled to whichever field renders first.
  */
+/**
+ * Waits for the Deal form to stop REBUILDING, not merely to paint.
+ *
+ * The form root mounts, renders fields, and then re-creates its panels as the record and its
+ * metadata finish loading. A caller that reads a field in that window sees it satisfy
+ * `toHaveCount(1)` and then be absent for the whole of the next assertion -- which reports as "the
+ * field does not exist" and looks like a selector bug rather than a form still assembling itself.
+ *
+ * The settled signal is the field COUNT holding still across consecutive samples. A fixed sleep was
+ * the obvious alternative and is a guess: too short on a slow run, wasted on every fast one, and
+ * quietly wrong the next time startup changes.
+ */
+export async function WaitForFormSettled(page: Page, stableFor = 2, gapMs = 400): Promise<void> {
+    const fields = DealForm(page).locator('[data-field]');
+    await expect(fields.first(), 'the Deal form must render its fields, not just its shell').toBeVisible({
+        timeout: 60_000,
+    });
+
+    const deadline = Date.now() + 60_000;
+    let last = -1;
+    let repeats = 0;
+    while (Date.now() < deadline) {
+        const n = await fields.count();
+        // Zero means a rebuild is in flight: the previous panels are gone and the next are not up.
+        repeats = n > 0 && n === last ? repeats + 1 : 0;
+        last = n;
+        if (repeats >= stableFor) {
+            return;
+        }
+        await page.waitForTimeout(gapMs);
+    }
+    // Not fatal: the caller's own assertion is the one that should report what is missing, and with
+    // a better message than this could give. Falling through leaves that intact.
+}
+
 export async function OpenNewDeal(page: Page): Promise<void> {
     await page.goto(`${EXPLORER_BASE_URL}${SALES_DEALS_ROUTE}`, { waitUntil: 'domcontentloaded' });
     const primary = page.locator('[data-testid="sales-primary"]:visible').first();
@@ -58,18 +93,7 @@ export async function OpenNewDeal(page: Page): Promise<void> {
      * intermittently, and it surfaces as "must render field Name" with a count of 0, which reads
      * like the field does not exist rather than like a form still building itself.
      */
-    await expect(
-        DealForm(page).locator('[data-field]').first(),
-        'the Deal form must render its fields, not just its shell',
-    ).toBeVisible({ timeout: 60_000 });
-    // The chrome rail is built from the panels, so its items appearing means the panels have
-    // finished mounting -- fields attach once and are then re-created as that completes, which is
-    // how a field can satisfy toHaveCount and vanish before the next assertion reads it.
-    await expect(
-        page.locator('.mj-forms-chrome-rail-item').first(),
-        'the form chrome must have settled',
-    ).toBeVisible({ timeout: 60_000 });
-    await page.waitForTimeout(400);
+    await WaitForFormSettled(page);
 }
 
 /**
