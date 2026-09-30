@@ -45,7 +45,7 @@ const DEAL_NAME = `${RUN} deal`;
 /**
  * Types a name into an FK type-ahead and launches its inline create, then saves the dialog it opens.
  *
- * LOCAL HELPER. `.mj-fk-create-footer`, `mj-form-dialog` and the dialog's Save button are MJ markup
+ * LOCAL HELPER. The create footer, the dialog and its Save button are all MJ markup
  * (`@memberjunction/ng-base-forms`), not this app's. The footer is looked for page-wide because MJ
  * portals the type-ahead's dropdown out of the field.
  */
@@ -60,7 +60,20 @@ async function createFromLookup(page: Page, fieldName: string, name: string): Pr
     await expect(create, `the ${fieldName} lookup must offer to create "${name}"`).toBeVisible({ timeout: 20_000 });
     await create.click();
 
-    const dialog = page.locator('mj-form-dialog').last();
+    /**
+     * BY ROLE, not by element name.
+     *
+     * MJ's create footer does not open a dialog itself -- it emits a `create-related` Navigate event,
+     * and the presenter that answers it renders the nested form. The element it renders is
+     * `mj-dialog`, which the spec used to name as `mj-form-dialog`; but naming either is a trap,
+     * because the host is `display: inline` with a 0x0 box, so `mj-dialog:visible` matches nothing
+     * even while the dialog is plainly on screen.
+     *
+     * Measured after the click: `mj-dialog` 0x0 inline, and `[role="dialog"]` 760x648 carrying
+     * `.mj-dialog-container`, the heading "New Sales Accounts" and Save/Cancel. The role is what the
+     * user sees and what survives MJ renaming its components again.
+     */
+    const dialog = page.getByRole('dialog').last();
     await expect(dialog, 'inline create must open the related form in a dialog').toBeVisible({ timeout: 30_000 });
 
     // The typed text prefills the new record's name field; filled here only if it did not.
