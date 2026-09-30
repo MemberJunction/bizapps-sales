@@ -2553,7 +2553,13 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                             <div class="mjs-close-action__row">
                                 @for (s of ClosingStatuses; track s.ID) {
                                     <label>
+                                        <!-- data-status-id is an ATTRIBUTE binding on purpose. The value binding here
+                                             feeds Angular's radio value accessor, which declares its own value input, so
+                                             the id never reaches the DOM property -- anything reading input.value sees
+                                             the browser default "on". The attribute is how a test names WHICH status this
+                                             is without keying on the label, which is vocabulary. -->
                                         <input type="radio" name="dealCloseTarget" data-testid="close-target" [value]="s.ID"
+                                               [attr.data-status-id]="s.ID"
                                                [(ngModel)]="TargetStatusID" (ngModelChange)="OnTargetChange()"
                                                [disabled]="Closing" /> {{ s.Name }}
                                     </label>

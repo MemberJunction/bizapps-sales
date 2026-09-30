@@ -200,17 +200,31 @@ export async function RevealInForm(page: Page, target: Locator): Promise<void> {
 
     const items = rail.locator('.mj-forms-chrome-rail-item');
     const count = await items.count();
+
+    // Where we started, so a fruitless search can put the form back. Leaving it on whichever section
+    // happened to be last turns the next failure into one displaced from its cause.
+    let startedOn = -1;
     for (let i = 0; i < count; i += 1) {
-        const item = items.nth(i);
-        // The active one is where we already are, and clicking it again is not guaranteed a no-op.
-        if (await item.evaluate((el) => el.classList.contains('is-active')).catch(() => false)) {
-            continue;
+        if (await items.nth(i).evaluate((el) => el.classList.contains('is-active')).catch(() => false)) {
+            startedOn = i;
+            break;
         }
-        await item.click().catch(() => undefined);
+    }
+
+    for (let i = 0; i < count; i += 1) {
+        if (i === startedOn) {
+            continue; // Where we already are, and clicking it again is not guaranteed a no-op.
+        }
+        await items.nth(i).click().catch(() => undefined);
         await page.waitForTimeout(250);
         if (await target.isVisible().catch(() => false)) {
             return;
         }
+    }
+
+    if (startedOn >= 0) {
+        await items.nth(startedOn).click().catch(() => undefined);
+        await page.waitForTimeout(250);
     }
 }
 
@@ -219,9 +233,23 @@ export async function Field(page: Page, fieldName: string): Promise<Locator> {
     const selector = `[data-field="${fieldName}"]`;
     const field = DealForm(page).locator(selector).first();
     await expandPanelHolding(page, selector);
-    // Before the count assertion, not after: a section the rail is not showing has no markup at all,
-    // so `toHaveCount(1)` would fail describing a field that is simply elsewhere.
-    await RevealInForm(page, field);
+
+    /**
+     * Look HERE first, and only go hunting if it really is not here.
+     *
+     * A field that is merely slow to render on the current section must not trigger a walk through
+     * every other one -- that trades a wait for a tour, and leaves the form somewhere it was never
+     * asked to be. The rail walk is the fallback, after a short wait in place, and it runs before the
+     * count assertion because a section the rail is not showing has no markup to count.
+     */
+    const appearedHere = await field
+        .waitFor({ state: 'visible', timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false);
+    if (!appearedHere) {
+        await RevealInForm(page, field);
+    }
+
     await expect(field, `the Deal form must render field ${fieldName}`).toHaveCount(1, { timeout: 30_000 });
     await field.scrollIntoViewIfNeeded().catch(() => undefined);
     await expect(field, `field ${fieldName} must be visible`).toBeVisible({ timeout: 15_000 });

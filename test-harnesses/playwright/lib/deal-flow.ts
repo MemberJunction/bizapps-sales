@@ -231,8 +231,15 @@ async function closingStatus(flag: 'IsWon' | 'IsLost'): Promise<string> {
 
 /** Checks the close-target radio for a status ID, matched case-insensitively. */
 async function chooseTarget(page: Page, statusID: string): Promise<void> {
+    /**
+     * Read from the ATTRIBUTE, not the property. `[value]` on a radio with `ngModel` binds to
+     * Angular's value accessor rather than to the DOM, so `input.value` reads "on" for every option
+     * and the id is nowhere in the property. `data-status-id` carries it.
+     */
     const radios = ByTestId(page, 'close-panel').locator('[data-testid="close-target"]');
-    const values = await radios.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+    const values = await radios.evaluateAll((els) =>
+        els.map((e) => e.getAttribute('data-status-id') ?? (e as HTMLInputElement).value),
+    );
     const index = values.findIndex((v) => v.toLowerCase() === statusID.toLowerCase());
     if (index < 0) {
         throw new Error(`the close panel offers no target for status ${statusID}. It offers: ${values.join(', ') || '(none)'}`);
