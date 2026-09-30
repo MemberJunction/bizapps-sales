@@ -15,6 +15,7 @@ import {
     OpenNewDeal,
     OpenSection,
     PickLookup,
+    RevealInForm,
     PipelineByName,
     SaveDeal,
     SetPipelineByID,
@@ -154,6 +155,8 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
 
     for (let i = 0; i < count; i += 1) {
         const add = ByTestId(page, 'lines-add');
+        // Lines live in their own form section; the rail may be showing a different one.
+        await RevealInForm(page, add);
         await expect(add, 'a saved, open deal must offer Add a product').toBeVisible({ timeout: 30_000 });
         await add.click();
 
@@ -209,6 +212,8 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
 async function openClosePanel(page: Page): Promise<void> {
     await OpenSection(page, 'close');
     const open = ByTestId(page, 'close-open');
+    // The close panel is its own form section; the rail may be showing a different one.
+    await RevealInForm(page, open);
     await expect(open, 'an open, saved deal must offer Close this deal').toBeVisible({ timeout: 30_000 });
     await open.click();
     await expect(ByTestId(page, 'close-panel'), 'the close panel must open').toBeVisible({ timeout: 20_000 });

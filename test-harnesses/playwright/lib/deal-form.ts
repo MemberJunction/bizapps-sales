@@ -171,12 +171,58 @@ export async function OpenSection(page: Page, sectionKey: string): Promise<void>
     await panel.scrollIntoViewIfNeeded().catch(() => undefined);
 }
 
-/** A field's wrapper, with its panel expanded. */
+/**
+ * Brings a control into view by activating whichever form section owns it.
+ *
+ * The Deal form shows ONE section at a time from MJ's chrome rail, and an inactive section is not
+ * merely hidden -- its markup is absent, so a locator reports count 0 and the failure reads like the
+ * control was removed from the app. Nothing in the markup maps a control to its section, so this
+ * walks the rail: activate a section, look again, stop when the control appears.
+ *
+ * Leaves the form on whichever section revealed it, which is where the caller wants to be. If none
+ * does, it returns quietly and leaves the form on the last one tried -- the caller's own assertion
+ * names what it wanted and reports it better than a generic "not here either" could, and a run that
+ * gets this far is failing regardless.
+ */
+export async function RevealInForm(page: Page, target: Locator): Promise<void> {
+    if (await target.isVisible().catch(() => false)) {
+        return;
+    }
+    const rail = page.locator('.mj-forms-chrome-rail').first();
+    if ((await rail.count()) === 0) {
+        return; // Older stacked-panel form: every section is on the page already.
+    }
+    // A collapsed rail shows a spine instead of its items.
+    if (await rail.evaluate((el) => el.classList.contains('is-collapsed')).catch(() => false)) {
+        await rail.locator('.mj-forms-chrome-rail-spine').first().click().catch(() => undefined);
+        await page.waitForTimeout(250);
+    }
+
+    const items = rail.locator('.mj-forms-chrome-rail-item');
+    const count = await items.count();
+    for (let i = 0; i < count; i += 1) {
+        const item = items.nth(i);
+        // The active one is where we already are, and clicking it again is not guaranteed a no-op.
+        if (await item.evaluate((el) => el.classList.contains('is-active')).catch(() => false)) {
+            continue;
+        }
+        await item.click().catch(() => undefined);
+        await page.waitForTimeout(250);
+        if (await target.isVisible().catch(() => false)) {
+            return;
+        }
+    }
+}
+
+/** A field's wrapper, with its panel expanded, and its section showing. */
 export async function Field(page: Page, fieldName: string): Promise<Locator> {
     const selector = `[data-field="${fieldName}"]`;
     const field = DealForm(page).locator(selector).first();
-    await expect(field, `the Deal form must render field ${fieldName}`).toHaveCount(1, { timeout: 30_000 });
     await expandPanelHolding(page, selector);
+    // Before the count assertion, not after: a section the rail is not showing has no markup at all,
+    // so `toHaveCount(1)` would fail describing a field that is simply elsewhere.
+    await RevealInForm(page, field);
+    await expect(field, `the Deal form must render field ${fieldName}`).toHaveCount(1, { timeout: 30_000 });
     await field.scrollIntoViewIfNeeded().catch(() => undefined);
     await expect(field, `field ${fieldName} must be visible`).toBeVisible({ timeout: 15_000 });
     return field;
