@@ -136,13 +136,30 @@ export async function ShowSection(page: Page, title: string): Promise<void> {
         await rail.locator('.mj-forms-chrome-rail-spine').first().click();
         await page.waitForTimeout(300);
     }
-    const item = rail.locator('.mj-forms-chrome-rail-item', { hasText: title }).first();
+    /**
+     * Matched on the LABEL SPAN, and on the whole of it.
+     *
+     * `hasText: 'Pipeline'` would also match a "Pipeline History" section and silently activate the
+     * wrong one, reporting a missing field somewhere else entirely. Anchoring against the ITEM does
+     * not work either: a rail item also carries error, warning and row-count badges that render
+     * NUMBERS, so its text can be "Internal team2" and an anchored match would find nothing exactly
+     * where a section has a count. The label span holds the title and nothing else.
+     *
+     * The title is escaped because a section name is data, not a pattern.
+     */
+    const exact = new RegExp(`^\\s*${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`);
+    const item = rail
+        .locator('.mj-forms-chrome-rail-item')
+        .filter({ has: page.locator('.mj-forms-chrome-rail-label').filter({ hasText: exact }) })
+        .first();
     await expect(item, `the form rail must offer a "${title}" section`).toBeVisible({ timeout: 30_000 });
     if (await item.evaluate((el) => el.classList.contains('is-active')).catch(() => false)) {
         return;
     }
     await item.click();
-    await expect(item, `the "${title}" section must become active`).toHaveClass(/is-active/, { timeout: 15_000 });
+    await expect(item, `the "${title}" section must become active`).toHaveClass(/\bis-active\b/, {
+        timeout: 15_000,
+    });
     await page.waitForTimeout(300);
 }
 

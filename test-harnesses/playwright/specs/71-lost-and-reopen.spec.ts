@@ -58,7 +58,7 @@ import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { CanTransition } from '@mj-biz-apps/orders-entities';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AssertBaseline, CloseLost, ComposeDeal, PurgeByPrefix, PurgeDeal, ReopenDeal } from '../lib/deal-flow';
-import { DealForm, EditDeal, SaveDeal, SetStageByID } from '../lib/deal-form';
+import { DealForm, EditDeal, SaveDeal, SetStageByID, ShowSection } from '../lib/deal-form';
 
 const RUN = `PW-LOST-${Date.now().toString(36)}`;
 let dealID = '';
@@ -180,6 +180,9 @@ test.describe('closed lost and reopen — what happens to the order', () => {
                 'or the order has nothing to refuse on the way back',
         ).toBeTruthy();
         await EditDeal(page);
+        // Edit mode re-renders the form and drops the section that was showing, so Stage is present
+        // and hidden until the rail is pointed back at Pipeline. A no-op when it already is.
+        await ShowSection(page, 'Pipeline');
         await SetStageByID(page, quoting!.ID);
         await SaveDeal(page);
         const moved = await QueryOne<{ PipelineStageID: string | null }>(

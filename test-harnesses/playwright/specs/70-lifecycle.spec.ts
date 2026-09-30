@@ -32,7 +32,7 @@ import { expect, test } from '@playwright/test';
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AddLines, AssertBaseline, CloseWon, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
-import { EditDeal, SaveDeal, SetStageByID } from '../lib/deal-form';
+import { EditDeal, SaveDeal, SetStageByID, ShowSection } from '../lib/deal-form';
 
 const RUN = `PW-LIFE-${Date.now().toString(36)}`;
 let dealID = '';
@@ -138,6 +138,9 @@ test.describe('lifecycle — create, price, advance, close won', () => {
         ).toBeTruthy();
 
         await EditDeal(page);
+        // Edit mode re-renders the form and drops the section that was showing, so Stage is present
+        // and hidden until the rail is pointed back at Pipeline. A no-op when it already is.
+        await ShowSection(page, 'Pipeline');
         await SetStageByID(page, quoting!.ID);
         await SaveDeal(page);
 
