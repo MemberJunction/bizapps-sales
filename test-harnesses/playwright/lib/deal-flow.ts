@@ -153,6 +153,27 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
 export async function AddLines(page: Page, orderID: string, count: number): Promise<number> {
     await OpenSection(page, 'lines');
 
+    /**
+     * ── ONLY PRODUCTS THE ORDER CAN PRICE ───────────────────────────────────────────────────────
+     *
+     * A product with no price rule cannot be saved onto a line: the server refuses with "cannot be
+     * priced: no price rule was found for this product, and no UnitPrice was supplied", and the
+     * editor stays open to show it. The failure then reads "the line editor must close once the line
+     * saves", which says nothing about pricing and looks like a stuck editor.
+     *
+     * The picker offers every active product, most of which have no rule -- 6 of 28 here -- and the
+     * first alphabetically is one of them. Read the priceable set from the database rather than
+     * trusting the order of a dropdown.
+     */
+    const priceable = (
+        await QueryAll<{ Name: string }>(
+            `SELECT DISTINCT p.Name
+               FROM __mj_BizAppsOrders.Product p
+               JOIN __mj_BizAppsOrders.ProductPrice pp ON pp.ProductID = p.ID`,
+        )
+    ).map((r) => String(r.Name));
+    expect(priceable.length, 'the host needs at least one product carrying a price rule').toBeGreaterThan(0);
+
     for (let i = 0; i < count; i += 1) {
         const add = ByTestId(page, 'lines-add');
         // Lines live in their own form section; the rail may be showing a different one.
@@ -174,7 +195,16 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
                     'line with no product would make this spec pass while testing nothing',
             );
         }
-        await product.selectOption({ label: labels[Math.min(i, labels.length - 1)] });
+        // An option reads "Name (SKU) — Company", so match on the name the catalogue gave us.
+        const usable = labels.filter((l) => priceable.some((name) => l.startsWith(name)));
+        if (usable.length === 0) {
+            throw new Error(
+                `the picker offered ${labels.length} product(s) and none of them carries a price rule, so `
+                    + 'every line would be refused for pricing rather than for anything this spec is about. '
+                    + `Priceable products here: ${priceable.join(', ') || '(none)'}`,
+            );
+        }
+        await product.selectOption({ label: usable[Math.min(i, usable.length - 1)] });
 
         /**
          * Quantity is the rep's to state and is not seeded, so a line without it cannot save — Save
