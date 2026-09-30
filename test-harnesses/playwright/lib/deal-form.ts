@@ -223,6 +223,16 @@ export async function FirstOpenStatus(): Promise<{ ID: string; Name: string }> {
  * `LoadPipelines` filters `IsActive = 1` and orders by `Name`, so this row is guaranteed to BE in the
  * dropdown. A spec needing "any pipeline" takes this rather than whichever option rendered first.
  */
+export async function PipelineByName(name?: string): Promise<{ ID: string; Name: string }> {
+    if (!name) return FirstPipeline();
+    const row = await QueryOne<{ ID: string; Name: string }>(
+        `SELECT TOP 1 ID, Name FROM __mj_BizAppsSales.Pipeline
+          WHERE IsActive = 1 AND Name = '${name.replace(/'/g, "''")}' ORDER BY Name`,
+    );
+    expect(row?.ID, `the host needs an active pipeline named "${name}"`).toBeTruthy();
+    return { ID: String(row!.ID), Name: String(row!.Name) };
+}
+
 export async function FirstPipeline(): Promise<{ ID: string; Name: string }> {
     const row = await QueryOne<{ ID: string; Name: string }>(
         `SELECT TOP 1 ID, Name FROM __mj_BizAppsSales.Pipeline

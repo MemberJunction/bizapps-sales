@@ -1346,7 +1346,12 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      binding gives nowhere to clear a stage that has just become meaningless. The deal
                      workspace has always done both, which is why testers were told to use it. -->
                 <div class="mjs-field" data-field="PipelineID">
-                    <div class="mj-forms-field">
+                    <!-- The editing modifier class is MJ's own marker for a field it is currently
+                         letting you edit, and FieldIsEditable in the Explorer harness reads exactly
+                         that. A dedicated control that omits it reports frozen while perfectly
+                         editable, which turns a lock assertion into one that cannot fail. -->
+                    <div class="mj-forms-field"
+                         [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineID')">
                         <label class="mj-forms-field-label">Pipeline</label>
                         @if (EditMode && FieldEditable('PipelineID')) {
                             <select [ngModel]="Record.PipelineID" data-testid="deal-pipeline"
@@ -1364,7 +1369,12 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 </div>
 
                 <div class="mjs-field" data-field="PipelineStageID">
-                    <div class="mj-forms-field">
+                    <!-- The editing modifier class is MJ's own marker for a field it is currently
+                         letting you edit, and FieldIsEditable in the Explorer harness reads exactly
+                         that. A dedicated control that omits it reports frozen while perfectly
+                         editable, which turns a lock assertion into one that cannot fail. -->
+                    <div class="mj-forms-field"
+                         [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineStageID')">
                         <label class="mj-forms-field-label">Pipeline Stage</label>
                         @if (EditMode && FieldEditable('PipelineStageID')) {
                             <select [ngModel]="Record.PipelineStageID" data-testid="deal-stage"

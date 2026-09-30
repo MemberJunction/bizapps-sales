@@ -15,7 +15,9 @@ import {
     OpenNewDeal,
     OpenSection,
     PickLookup,
+    PipelineByName,
     SaveDeal,
+    SetPipelineByID,
     SetStatusByID,
     SetText,
 } from './deal-form';
@@ -37,7 +39,10 @@ export interface ComposedDeal {
 export async function ComposeDeal(page: Page, name: string, pipeline?: string): Promise<ComposedDeal> {
     await OpenNewDeal(page);
     await SetText(page, 'Name', name);
-    await PickLookup(page, 'PipelineID', pipeline);
+    // Pipeline is a dedicated `<select>` since golive#291, so `PickLookup` -- which waits on
+    // `.mj-fk-search` -- cannot reach it. Resolved by NAME through the database so a caller that asks
+    // for a specific pipeline still gets that one, and the id is what the option is matched on.
+    await SetPipelineByID(page, (await PipelineByName(pipeline)).ID);
     await PickLookup(page, 'AccountID');
 
     /**
