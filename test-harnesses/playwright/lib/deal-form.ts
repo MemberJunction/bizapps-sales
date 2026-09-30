@@ -52,6 +52,24 @@ export async function OpenNewDeal(page: Page): Promise<void> {
     await expect(primary, 'the Sales header must offer New deal').toBeVisible({ timeout: 90_000 });
     await primary.click();
     await expect(DealForm(page), 'a new deal must open as a Deal record form').toBeVisible({ timeout: 60_000 });
+    /**
+     * PRESENT IS NOT READY. The form root mounts before its panels render their fields, and every
+     * caller's next line addresses a field -- so returning here on the root alone loses a race
+     * intermittently, and it surfaces as "must render field Name" with a count of 0, which reads
+     * like the field does not exist rather than like a form still building itself.
+     */
+    await expect(
+        DealForm(page).locator('[data-field]').first(),
+        'the Deal form must render its fields, not just its shell',
+    ).toBeVisible({ timeout: 60_000 });
+    // The chrome rail is built from the panels, so its items appearing means the panels have
+    // finished mounting -- fields attach once and are then re-created as that completes, which is
+    // how a field can satisfy toHaveCount and vanish before the next assertion reads it.
+    await expect(
+        page.locator('.mj-forms-chrome-rail-item').first(),
+        'the form chrome must have settled',
+    ).toBeVisible({ timeout: 60_000 });
+    await page.waitForTimeout(400);
 }
 
 /**
@@ -70,6 +88,38 @@ async function expandPanelHolding(page: Page, inner: string): Promise<void> {
         await expect(collapsed, 'the panel must expand').toHaveCount(0, { timeout: 10_000 });
         await page.waitForTimeout(300);
     }
+}
+
+/**
+ * Activates a form section from MJ's chrome RAIL, by the title it shows.
+ *
+ * The rail displays one section at a time, so a control in another section is rendered and HIDDEN.
+ * `Field` expands a collapsed panel and `OpenSection` addresses the older stacked-panel form; neither
+ * can activate a rail section, and both return quietly when there is nothing to expand -- so a spec
+ * that needs another section fails on visibility with no hint as to why.
+ *
+ * Reads `is-active` before clicking, for the same reason `expandPanelHolding` reads the collapsed
+ * class: clicking a section that is already showing is not guaranteed to be a no-op. Returns quietly
+ * when the form has no rail, so this is safe to call on either layout.
+ */
+export async function ShowSection(page: Page, title: string): Promise<void> {
+    const rail = page.locator('.mj-forms-chrome-rail').first();
+    if ((await rail.count()) === 0) {
+        return; // Older layout: sections are stacked panels, and `Field` can reach them.
+    }
+    // A collapsed rail shows a spine instead of its items; expand it before looking for one.
+    if (await rail.evaluate((el) => el.classList.contains('is-collapsed')).catch(() => false)) {
+        await rail.locator('.mj-forms-chrome-rail-spine').first().click();
+        await page.waitForTimeout(300);
+    }
+    const item = rail.locator('.mj-forms-chrome-rail-item', { hasText: title }).first();
+    await expect(item, `the form rail must offer a "${title}" section`).toBeVisible({ timeout: 30_000 });
+    if (await item.evaluate((el) => el.classList.contains('is-active')).catch(() => false)) {
+        return;
+    }
+    await item.click();
+    await expect(item, `the "${title}" section must become active`).toHaveClass(/is-active/, { timeout: 15_000 });
+    await page.waitForTimeout(300);
 }
 
 /** Expands a form panel by its `SectionKey` (`pipeline`, `party`, `lines`, `close`, ...). */
