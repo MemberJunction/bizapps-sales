@@ -30,7 +30,8 @@
  *   4. The record reads back, fresh, with foreign keys resolved to NAMES.
  *   5. The console stays clean throughout.
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { CloseDb, OrderLinesForDeal, QueryAll, QueryOne } from '../lib/db';

@@ -41,7 +41,7 @@
  *
  * @module test-harnesses/playwright
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../lib/test';
 
 import { QueryAll, QueryOne } from '../lib/db';
 import { AddLines, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';

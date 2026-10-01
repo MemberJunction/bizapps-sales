@@ -30,7 +30,8 @@
  * with a message naming what is missing rather than failing. A red spec would say the feature is broken
  * when the truth is the host has nothing to exercise it with.
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { QueryAll, QueryOne } from '../lib/db';
 import { AssertBaseline, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';

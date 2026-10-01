@@ -17,7 +17,7 @@
  *
  * Screenshots land in artifacts/ — one per step, for the demo.
  */
-import { test, expect } from '@playwright/test';
+import { expect, test } from '../lib/test';
 import { ARTIFACTS_DIR, DEV_COMPANY_NAME, EXPLORER_BASE_URL, TEST_PREFIX } from '../lib/env';
 import {
   captureConsoleErrors,

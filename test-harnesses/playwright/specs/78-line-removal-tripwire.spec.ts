@@ -21,7 +21,8 @@
  * check that no raw `UQ_OrderLine_OrderHeader_LineNumber` text surfaced. The decline no longer exists by
  * design; the editor's own error channel (`.mjs-le__error`) is asserted empty in its place.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Page } from '@playwright/test';
 
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';

@@ -37,7 +37,7 @@
  * chosen relative to THAT. If no foreign product exists the spec FAILS rather than skips, because
  * "nothing to test" and "the seed no longer covers this" look identical from a green run.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../lib/test';
 
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';

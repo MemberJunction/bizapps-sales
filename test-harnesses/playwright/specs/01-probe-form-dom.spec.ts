@@ -6,7 +6,7 @@
  *
  * Skipped by default (PW_PROBE=1 to run) so it does not add time to every regression run.
  */
-import { test } from '@playwright/test';
+import { test } from '../lib/test';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { AUTH_DIR } from '../lib/env';

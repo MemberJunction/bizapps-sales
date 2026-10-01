@@ -27,7 +27,8 @@
  *
  * Every one of those looks like a working screen. The only way to catch them is to leave and come back.
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { CloseDb, OrderLinesForDeal, QueryAll } from '../lib/db';
 import { AddLines, ComposeDeal, PurgeDeal, ReopenRecord } from '../lib/deal-flow';

@@ -27,7 +27,7 @@
  * `CloseWonPolicy.ContractTypeCode` at a name contracts does not ship: the contract assertions fail with
  * the route's own reason. Both were used to prove this spec is not vacuous.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../lib/test';
 
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';

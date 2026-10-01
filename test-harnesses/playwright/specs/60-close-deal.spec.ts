@@ -31,7 +31,8 @@
  * Deals are tagged `Close CL-<base36 timestamp>` so re-runs cannot collide; `afterAll` removes this
  * run's deals.
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { captureConsoleErrors, expectOnlyKnownErrors, shot } from '../lib/explorer';
 import { CloseDb, DealByName, QueryAll, QueryOne, StageEventsFor } from '../lib/db';

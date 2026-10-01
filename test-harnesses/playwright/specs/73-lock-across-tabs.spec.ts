@@ -28,7 +28,8 @@
  * on the open one. The form has no such button: inline create is the FK type-ahead's own footer, which
  * a read-only field never renders, so the editability checks below already cover it.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Page } from '@playwright/test';
 
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryOne } from '../lib/db';

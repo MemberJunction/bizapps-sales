@@ -13,7 +13,7 @@
  *   PW_HEADLESS=1 npx playwright test --config test-harnesses/playwright/playwright.config.ts \
  *     --project crud --grep "demo tour"
  */
-import { test, expect } from '@playwright/test';
+import { expect, test } from '../lib/test';
 import { ARTIFACTS_DIR, EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, expectNoConsoleErrors, openAllEntities, openSalesApp, shot } from '../lib/explorer';
 import { QueryOne } from '../lib/db';

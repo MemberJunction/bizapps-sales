@@ -43,7 +43,8 @@
  *    WHERE ActivityID IN (SELECT ID FROM __mj_BizAppsCommon.Activity WHERE Title LIKE 'AT-%');
  *   DELETE FROM __mj_BizAppsCommon.Activity WHERE Title LIKE 'AT-%';
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, drain, shot } from '../lib/explorer';
