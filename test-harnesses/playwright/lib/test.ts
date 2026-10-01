@@ -50,9 +50,17 @@ export const test = base.extend({
      * therefore already set when `loadWorkspace` reads it during shell startup.
      */
     context: async ({ context }, use) => {
-        await context.addInitScript(() => {
-            (window as unknown as { __MJ_EPHEMERAL_WORKSPACE__?: boolean }).__MJ_EPHEMERAL_WORKSPACE__ = true;
-        });
+        /**
+         * PW_NO_EPHEMERAL=1 turns this OFF, so the flag can be measured against its own absence.
+         *
+         * It exists because this flag changes app behaviour suite-wide, and a suite-wide change that
+         * cannot be switched off cannot be ruled out as the cause of anything.
+         */
+        if (process.env.PW_NO_EPHEMERAL !== '1') {
+            await context.addInitScript(() => {
+                (window as unknown as { __MJ_EPHEMERAL_WORKSPACE__?: boolean }).__MJ_EPHEMERAL_WORKSPACE__ = true;
+            });
+        }
         await use(context);
     },
 });

@@ -194,12 +194,31 @@ export async function waitForAuthenticatedShell(page: Page, timeoutMs: number): 
   );
 }
 
-/** Save a named screenshot into artifacts/ and return its path. */
+/**
+ * Save a named screenshot into artifacts/ and return its path.
+ *
+ * NEVER FAILS THE RUN. A screenshot here is a diagnostic aid, not a precondition for anything, and
+ * Chrome genuinely refuses one sometimes -- `Protocol error (Page.captureScreenshot): Unable to
+ * capture screenshot` while a page is mid-redirect, which is exactly when auth.setup wants its
+ * `00-login-screen` shot during the MSAL hop.
+ *
+ * Measured cost of the old behaviour: one failed screenshot in auth-setup aborted the setup project,
+ * and because every spec depends on it, `31 did not run`. A whole suite lost to a picture. The
+ * authenticated shell was reachable the entire time.
+ *
+ * So the failure is reported and swallowed, and the empty string says no file was written.
+ */
 export async function shot(page: Page, name: string): Promise<string> {
   mkdirSync(ARTIFACTS_DIR, { recursive: true });
   const file = path.join(ARTIFACTS_DIR, `${name}.png`);
-  await page.screenshot({ path: file, fullPage: false });
-  return file;
+  try {
+    await page.screenshot({ path: file, fullPage: false });
+    return file;
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.log(`  (screenshot "${name}" failed, continuing: ${error instanceof Error ? error.message.slice(0, 120) : String(error)})`);
+    return '';
+  }
 }
 
 /**
