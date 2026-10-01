@@ -19,6 +19,7 @@ import '@mj-biz-apps/sales-core-entities-server';
 import { LoadDealLockOrderLineVeto, LoadSalesCoreEntitiesServer } from '@mj-biz-apps/sales-core-entities-server';
 import { LoadCaptureForecastSnapshotAction } from './custom/forecast-snapshot.action.js';
 import { LoadLogActivityAction } from './custom/log-activity.action.js';
+import { LoadDetectWonDealsWithUnconfirmedOrdersAction } from './custom/won-deal-order-detector.action.js';
 
 // Import generated GraphQL resolvers
 import './generated/generated.js';
@@ -77,6 +78,7 @@ export function LoadBizAppsSalesServer(): void {
 
     LoadCaptureForecastSnapshotAction();
     LoadLogActivityAction();
+    LoadDetectWonDealsWithUnconfirmedOrdersAction();
 
     // Referenced so the manifest import is not elided; MJ reads it during registration.
     void CLASS_REGISTRATIONS;
@@ -87,3 +89,7 @@ export {
     LoadCaptureForecastSnapshotAction,
 } from './custom/forecast-snapshot.action.js';
 export { LogActivityAction, LoadLogActivityAction } from './custom/log-activity.action.js';
+export {
+    DetectWonDealsWithUnconfirmedOrdersAction,
+    LoadDetectWonDealsWithUnconfirmedOrdersAction,
+} from './custom/won-deal-order-detector.action.js';

@@ -1,0 +1,27 @@
+[
+  {
+    "_comments": [
+      "FINANCE EXCEPTION CHECK, TYPE 3 (golive #279). Its own file for the same coordination reason as",
+      "`.sales-forecast-actions.json`: MetadataSync reads every dot-json here, so separate files do not",
+      "conflict.",
+      "",
+      "The threshold is not a parameter. It is MinDaysSinceClose on the WON_DEAL_ORDER_NOT_CONFIRMED",
+      "exception type, which accounting owns, so finance changes it in one place. A missing or inactive",
+      "type makes the run skip, which is what makes this safe to ship Active before accounting seeds it."
+    ],
+    "fields": {
+      "Name": "Detect Won Deals With Unconfirmed Orders",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Sales",
+      "Description": "Raise one finance exception (WON_DEAL_ORDER_NOT_CONFIRMED) per won deal whose order is missing or not Confirmed, older than the type's MinDaysSinceClose. Idempotent per deal: a deal already raised, in any status, is not raised again. Skips when the exception type is missing or inactive.",
+      "Type": "Custom",
+      "DriverClass": "Sales.DetectWonDealsWithUnconfirmedOrders",
+      "IconClass": "fa-solid fa-triangle-exclamation",
+      "UserPrompt": "Check for won deals whose order was never confirmed and raise finance exceptions for them.",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "A5EDE4FB-14FF-4BC3-9EAC-CE8B5B89F8B9"
+    }
+  }
+]
