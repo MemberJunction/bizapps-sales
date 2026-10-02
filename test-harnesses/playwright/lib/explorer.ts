@@ -810,12 +810,34 @@ export async function deleteRecordViaRecordView(page: Page, recordName: string):
   }
   await page.waitForTimeout(5500);
 
-  // The explicit record-level delete control, on the VISIBLE form — see the block above.
+  /**
+   * DELETE LIVES BEHIND "More actions" NOW, UNLESS THE USER PINNED IT.
+   *
+   * MJ's form toolbar renders Edit inline plus the user's PINNED actions, and sends everything else
+   * to an overflow menu. Delete declares `Placement: 'actions'` like Edit, but is not pinned by
+   * default, so it is not in the DOM at all until that menu opens.
+   *
+   * Measured on a saved deal: `button[title="Delete this Record"]` count 0 before opening the menu
+   * and 1 visible at 250x28 after. The gates were both open the whole time -- the toolbar component
+   * reported `UserCanDelete: true` and `ShowDeleteButton: true` -- so the old failure, "the record
+   * view must expose Delete this Record", was about a control the view exposes one click away.
+   *
+   * Opened only when Delete is not already on screen, so a pinned Delete still works and no menu is
+   * left hanging open for the next step.
+   */
   const del = page.locator('button[title="Delete this Record"]:visible').first();
+  if ((await del.count()) === 0) {
+    const more = page.locator('button[title="More actions"]:visible').first();
+    if ((await more.count()) > 0) {
+      await more.click({ timeout: 15_000 }).catch(() => undefined);
+      await page.waitForTimeout(800);
+    }
+  }
   await expect(
     del,
-    'the record view must expose "Delete this Record" — if this is not found, check the run screenshot '
-    + 'for a slide-in Details panel, which means the full record never opened',
+    'the record view must expose "Delete this Record", inline or under "More actions" — if this is '
+    + 'not found, check the run screenshot for a slide-in Details panel, which means the full record '
+    + 'never opened',
   ).toBeVisible({ timeout: 20_000 });
   await del.click({ timeout: 15_000 });
   await page.waitForTimeout(2000);
