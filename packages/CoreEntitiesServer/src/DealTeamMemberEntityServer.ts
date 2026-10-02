@@ -82,6 +82,30 @@ export class DealTeamMemberEntityServer extends mjBizAppsSalesDealTeamMemberEnti
         if (!saved) {
             return saved;
         }
+        /**
+         * UNCONDITIONAL ON PURPOSE — there is no "did anything owner-relevant change" gate here, and
+         * one should not be added from the snapshot above.
+         *
+         * `stampOwnerFromTeam()` derives the owner by finding the row whose `DealRoleID` is the owner
+         * role and taking its `EmployeeID`:
+         *
+         *     const owner = this.Team.Items.find((m) => m.DealRoleID === ownerRoleID);
+         *     this.OwnerEmployeeID = owner?.EmployeeID ?? null;
+         *
+         * So the fields that can change the answer are `DealID`, `DealRoleID` and `EmployeeID`.
+         * `priorSnapshot()` carries the first two and NOT the third, so a gate built from it would
+         * miss an employee swap: same deal, same role, different person, no re-stamp, and the deal
+         * keeps the old owner — which is the exact defect this class exists to fix, arriving through
+         * a different door.
+         *
+         * Re-deriving every time is therefore the cheap, correct choice: `restampDeal` loads the deal
+         * and saves it, so a team-row edit that cannot affect the owner still costs one deal save.
+         * That is paid knowingly. Gate it only after the snapshot captures everything the derivation
+         * reads — and then by comparing against the derivation, not against a hand-listed set.
+         *
+         * (`#146`'s stage/pipeline refusal does NOT fire on these saves: it returns early unless
+         * `PipelineStageID` or `PipelineID` is dirty, and a re-stamp dirties neither.)
+         */
         // Both the deal it was on and the deal it is on now: a row moved between deals changes two.
         await this.restampDeals([before.dealID, this.DealID ?? null]);
         return saved;
