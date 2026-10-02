@@ -36,7 +36,13 @@ import { DealForm, EditDeal, Field, OpenSection, SaveDeal, SetText } from '../li
 import { captureConsoleErrors, expectOnlyKnownErrors, KNOWN_POST_DELETE_ERRORS, shot } from '../lib/explorer';
 
 const RUN_TAG = `RT-${Date.now().toString(36).toUpperCase()}`;
-const DEAL_NAME = `Round trip ${RUN_TAG}`;
+/**
+ * THE PREFIX GOES FIRST, for the same reason cleanup.mjs records against its own history: every
+ * sweep and every count uses an ANCHORED LIKE, so a tag in the middle of the name is invisible to
+ * them. AssertBaseline then counts this deal as SEEDED and fails the baseline for whichever spec is
+ * running beside this one.
+ */
+const DEAL_NAME = `${RUN_TAG} round trip`;
 
 /**
  * Cleanup by name, handed to `PurgeDeal`, which removes children first. `PurgeByPrefix` refuses any

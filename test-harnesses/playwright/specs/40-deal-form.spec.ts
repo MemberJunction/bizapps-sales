@@ -48,7 +48,14 @@ import {
 
 /** Unique per run, so a re-run never collides with a leftover and cleanup can find its own rows. */
 const RUN_TAG = `PW-${Date.now().toString(36).toUpperCase()}`;
-const DEAL_NAME = `Deal form smoke ${RUN_TAG}`;
+/**
+ * THE PREFIX GOES FIRST. Everything that sweeps or counts this host's deals uses an ANCHORED
+ * `LIKE 'PW-%'`, so a tag in the middle of a name is invisible to all of it: cleanup.mjs records
+ * exactly this leak ("an anchored LIKE 'PW-%' matched none of them. That is why the host reached 37
+ * deals"), and AssertBaseline counts such a deal as SEEDED, which fails the baseline for whichever
+ * spec happens to be running beside this one.
+ */
+const DEAL_NAME = `${RUN_TAG} deal form smoke`;
 
 const TERM_MONTHS = 24;
 const EXECUTION_DATE = '2026-09-15';
