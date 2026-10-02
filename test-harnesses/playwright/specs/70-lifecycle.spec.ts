@@ -69,6 +69,52 @@ test.describe('lifecycle — create, price, advance, close won', () => {
              ORDER BY DisplayRank`);
         expect(pipeline?.Name, 'a contract-creating pipeline is required for the close-won half').toBeTruthy();
 
+        /**
+         * CAN THIS HOST ACTUALLY MINT THE CONTRACT THE POLICY ASKS FOR?
+         *
+         * The policy names a ContractType by name (`ContractTypeCode: "Order Form"`). If that type says
+         * `TemplateRequired` and the host has NO ContractTemplate rows, contracts refuses the save --
+         * `ResolveServerDefaultTemplate` finds no candidate, leaves the field empty, and ValidateAsync
+         * declines with the type's own message. Its comment is explicit: "NO CANDIDATE IS NOT AN ERROR
+         * HERE."
+         *
+         * That refusal is CORRECT and it is not silent: close-won reports a declined downstream route
+         * as a `warning` Issue without failing the won deal, and the close panel renders
+         * "— not created: {reason}". The deal is still won.
+         *
+         * So asserting the stamp unconditionally makes an unseeded host look like a product defect.
+         * Measured on MJ_V6_Rebuild: ContractType has 4 rows, ContractTemplate has 0, and "Order Form"
+         * is TemplateRequired -- so the contract half cannot pass here no matter what sales does.
+         *
+         * Checked rather than assumed, so a host that CAN mint contracts still runs the assertions.
+         * Seed one ContractTemplate row and this half comes back on its own.
+         */
+        const contractTypeName = String(
+            (await QueryOne<{ V: string | null }>(`
+                SELECT JSON_VALUE(CloseWonPolicy, '$.ContractTypeCode') AS V
+                  FROM __mj_BizAppsSales.Pipeline WHERE Name = '${pipeline!.Name}'`))?.V ?? '',
+        );
+        const contractsCanMint = Number(
+            (await QueryOne<{ N: number }>(`
+                IF OBJECT_ID('__mj_BizAppsContracts.ContractType', 'U') IS NULL
+                    SELECT 0 AS N
+                ELSE
+                    SELECT CASE
+                        WHEN NOT EXISTS (SELECT 1 FROM __mj_BizAppsContracts.ContractType
+                                          WHERE Name = '${contractTypeName}') THEN 0
+                        WHEN (SELECT TOP 1 ISNULL(TemplateRequired, 0) FROM __mj_BizAppsContracts.ContractType
+                               WHERE Name = '${contractTypeName}') = 0 THEN 1
+                        WHEN (SELECT COUNT(*) FROM __mj_BizAppsContracts.ContractTemplate) > 0 THEN 1
+                        ELSE 0 END AS N`))?.N ?? 0,
+        );
+        if (!contractsCanMint) {
+            console.log(
+                `  contract half SKIPPED: this host cannot mint a "${contractTypeName}" contract `
+                + '(type missing, or TemplateRequired with no ContractTemplate rows). '
+                + 'Seed a ContractTemplate to restore it.',
+            );
+        }
+
         // ── 1. CREATE ───────────────────────────────────────────────────────
         const composed = await ComposeDeal(page, `${RUN} lifecycle`, pipeline!.Name);
         dealID = composed.DealID;
@@ -199,44 +245,49 @@ test.describe('lifecycle — create, price, advance, close won', () => {
         ).toBeGreaterThan(0);
 
         // ── 6. THE CONTRACT ─────────────────────────────────────────────────
-        expect(closed!.ContractID, 'a contract-creating policy must stamp the contract onto the deal')
-            .toBeTruthy();
+        // Guarded by the precondition checked at the top: on a host that cannot mint this policy's
+        // contract type, close-won declines the route by design and the deal is still won. Asserting
+        // the stamp there would report an unseeded host as a sales defect.
+        if (contractsCanMint) {
+            expect(closed!.ContractID, 'a contract-creating policy must stamp the contract onto the deal')
+                .toBeTruthy();
 
-        const contract = await QueryOne<{
-            ContractNumber: string;
-            CreatingEntityID: string | null;
-            CreatingRecordID: string | null;
-            EffectiveDate: string | null;
-            ExecutedDate: string | null;
-            EndDate: string | null;
-            TerminatedDate: string | null;
-        }>(`
-            SELECT ContractNumber, CreatingEntityID, CreatingRecordID,
-                   EffectiveDate, ExecutedDate, EndDate, TerminatedDate
-              FROM __mj_BizAppsContracts.Contract WHERE ID = '${closed!.ContractID}'`);
-        expect(contract, 'and the contract row must be readable').toBeTruthy();
-        expect(
-            String(contract!.ContractNumber),
-            'CONTRACTS mints the number, not sales — two apps generating into one sequence is how a ' +
-                'duplicate contract number reaches a customer',
-        ).toMatch(/^CTR-/);
-        expect(
-            String(contract!.CreatingRecordID ?? '').toLowerCase(),
-            'and its provenance points at the deal that caused it',
-        ).toBe(dealID.toLowerCase());
-        expect(contract!.CreatingEntityID, 'with the entity half of the pair present too').toBeTruthy();
-
-        for (const [label, value] of Object.entries({
-            EffectiveDate: contract!.EffectiveDate,
-            ExecutedDate: contract!.ExecutedDate,
-            EndDate: contract!.EndDate,
-            TerminatedDate: contract!.TerminatedDate,
-        })) {
+            const contract = await QueryOne<{
+                ContractNumber: string;
+                CreatingEntityID: string | null;
+                CreatingRecordID: string | null;
+                EffectiveDate: string | null;
+                ExecutedDate: string | null;
+                EndDate: string | null;
+                TerminatedDate: string | null;
+            }>(`
+                SELECT ContractNumber, CreatingEntityID, CreatingRecordID,
+                       EffectiveDate, ExecutedDate, EndDate, TerminatedDate
+                  FROM __mj_BizAppsContracts.Contract WHERE ID = '${closed!.ContractID}'`);
+            expect(contract, 'and the contract row must be readable').toBeTruthy();
             expect(
-                value,
-                `${label} must be null — a contract has no stored status, so a new one displays Draft ` +
-                    'precisely because it carries no dates',
-            ).toBeNull();
+                String(contract!.ContractNumber),
+                'CONTRACTS mints the number, not sales — two apps generating into one sequence is how a ' +
+                    'duplicate contract number reaches a customer',
+            ).toMatch(/^CTR-/);
+            expect(
+                String(contract!.CreatingRecordID ?? '').toLowerCase(),
+                'and its provenance points at the deal that caused it',
+            ).toBe(dealID.toLowerCase());
+            expect(contract!.CreatingEntityID, 'with the entity half of the pair present too').toBeTruthy();
+
+            for (const [label, value] of Object.entries({
+                EffectiveDate: contract!.EffectiveDate,
+                ExecutedDate: contract!.ExecutedDate,
+                EndDate: contract!.EndDate,
+                TerminatedDate: contract!.TerminatedDate,
+            })) {
+                expect(
+                    value,
+                    `${label} must be null — a contract has no stored status, so a new one displays Draft ` +
+                        'precisely because it carries no dates',
+                ).toBeNull();
+            }
         }
 
         expectNoConsoleErrors(sink, 'lifecycle');
