@@ -35,6 +35,10 @@ type Opts = {
     saveRefuses?: string[];
     /** Deals whose Load() should fail, by id. */
     loadFails?: string[];
+    /** Make this row's role one that admits a single holder per deal (Owner / AE in the seed). */
+    singleHolderRole?: boolean;
+    /** The employee name already holding that role on this deal, if any. */
+    existingHolder?: string;
 };
 
 function member(opts: Opts) {
@@ -96,6 +100,30 @@ function member(opts: Opts) {
         },
         writable: true,
     });
+
+    /**
+     * `Fields` exists for `refuseSave`, which reads it to record what the refused save carried.
+     * Absent, a refusal throws while reporting the refusal, which hides the reason behind a TypeError.
+     */
+    Object.defineProperty(instance, 'Fields', { value: [], writable: true });
+    Object.defineProperty(instance, 'RegisterResultHistoryEntry', { value: () => undefined, writable: true });
+
+    /**
+     * The single-holder check reads `DealRole.AllowsMultiplePerDeal` and then the deal's rows in that
+     * role. Default is a role that ADMITS several, so every test written before that check existed
+     * still exercises the path it was written for; `singleHolderRole` and `existingHolder` opt in.
+     */
+    Object.defineProperty(instance, 'RunView', { value: undefined, writable: true });
+    const provider = (instance as unknown as { ProviderToUse: Record<string, unknown> }).ProviderToUse;
+    provider.RunView = async ({ EntityName }: { EntityName: string }) => {
+        if (EntityName === 'MJ_BizApps_Sales: Deal Roles') {
+            return {
+                Success: true,
+                Results: [{ Name: 'Owner / AE', AllowsMultiplePerDeal: !(opts.singleHolderRole ?? false) }],
+            };
+        }
+        return { Success: true, Results: opts.existingHolder ? [{ Employee: opts.existingHolder }] : [] };
+    };
 
     Object.defineProperty(instance, 'LoadedTeams', { get: () => loadedTeams });
     Object.defineProperty(instance, 'SavedDeals', { get: () => savedDeals });
@@ -215,5 +243,40 @@ describe('a row with no deal', () => {
         const m = member({ DealID: null, priorDealID: null });
         await runSave(m);
         expect(m.LoadedDeals).toEqual([]);
+    });
+});
+
+/**
+ * ONE HOLDER FOR A ROLE THAT SAYS SO — `DealRole.AllowsMultiplePerDeal = 0`.
+ *
+ * Raised in review on sales#147. The seed sets the flag false for Owner / AE and true for the other
+ * five roles, and nothing read it. A rep "taking" a deal added a SECOND Owner / AE row and the deal
+ * stayed with the first: `stampOwnerFromTeam` resolves with `find`, which returns the OLDEST match,
+ * so the grid showed the new rep while every rollup still credited the old one.
+ *
+ * These pin the flag's enforcement rather than Owner specifically, which is how it is written.
+ */
+describe('a role that admits only one holder per deal', () => {
+    it('refuses a second holder, and names who already has it', async () => {
+        const m = member({ singleHolderRole: true, existingHolder: 'Erica Chen', IsSaved: false });
+        expect(await runSave(m), 'the save must be refused').toBe(false);
+        expect(m.SavedDeals, 'and the deal must not be touched').toEqual([]);
+    });
+
+    it('allows the FIRST holder — there is nobody to collide with', async () => {
+        const m = member({ singleHolderRole: true, IsSaved: false });
+        expect(await runSave(m)).toBe(true);
+        expect(m.SavedDeals.length, 'and the owner stamp still refreshes').toBeGreaterThan(0);
+    });
+
+    it('allows a role that admits several, however many already hold it', async () => {
+        const m = member({ singleHolderRole: false, existingHolder: 'Erica Chen' });
+        expect(await runSave(m)).toBe(true);
+    });
+
+    it('does not refuse the EXISTING row its own seat', async () => {
+        // A saved row excludes itself, or every later edit to the owner row refuses itself.
+        const m = member({ singleHolderRole: true, IsSaved: true });
+        expect(await runSave(m)).toBe(true);
     });
 });

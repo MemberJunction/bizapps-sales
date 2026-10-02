@@ -48,13 +48,22 @@
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */
-import { BaseEntity, EntitySaveOptions, type EntityDeleteOptions, type IMetadataProvider, LogError } from '@memberjunction/core';
+import {
+    BaseEntity,
+    BaseEntityResult,
+    EntitySaveOptions,
+    type EntityDeleteOptions,
+    type IMetadataProvider,
+    type IRunViewProvider,
+    LogError,
+} from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { mjBizAppsSalesDealTeamMemberEntity } from '@mj-biz-apps/sales-entities';
 import { DealEntityServer } from './DealEntityServer.js';
 
 const DEAL_TEAM_MEMBER_ENTITY = 'MJ_BizApps_Sales: Deal Team Members';
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
+const DEAL_ROLE_ENTITY = 'MJ_BizApps_Sales: Deal Roles';
 
 @RegisterClass(BaseEntity, DEAL_TEAM_MEMBER_ENTITY)
 export class DealTeamMemberEntityServer extends mjBizAppsSalesDealTeamMemberEntity {
@@ -77,6 +86,37 @@ export class DealTeamMemberEntityServer extends mjBizAppsSalesDealTeamMemberEnti
     }
 
     public override async Save(options?: EntitySaveOptions): Promise<boolean> {
+        /**
+         * ONE HOLDER FOR A ROLE THAT SAYS SO (`DealRole.AllowsMultiplePerDeal = 0`).
+         *
+         * The seed sets this false for Owner / AE and true for every other role, and NOTHING read it.
+         * So a rep "taking" a deal added a SECOND Owner / AE row, saw themselves listed as owner, and
+         * the deal stayed with the first one — because `stampOwnerFromTeam()` resolves with
+         *
+         *     this.Team.Items.find((m) => m.DealRoleID === ownerRoleID)
+         *
+         * and `find` returns the OLDEST matching row. Reports, rollups and anything crediting the
+         * owner kept pointing at the previous rep while the grid showed the new one. Refusing here is
+         * what the flag already means, and it is read from the ROLE rather than keyed on Owner, so a
+         * future single-holder role is covered without another change.
+         *
+         * INACTIVE ROWS COUNT. `stampOwnerFromTeam` never reads `IsActive` — an inactive Owner / AE
+         * row still owns the deal — so an inactive row still holds the seat here. Counting it keeps
+         * this check and the derivation answering the same question. Whether ownership should respect
+         * `IsActive` at all is open and deliberately not decided here.
+         */
+        let duplicate: string | null;
+        try {
+            duplicate = await this.duplicateRoleRefusal();
+        } catch (err) {
+            // Fail closed on a READ failure, the same way the stage/pipeline check does: a lookup that
+            // errored proves nothing, and the message names the lookup rather than the row.
+            return this.refuseSave(`could not check this deal's team for a duplicate role: ${err}`);
+        }
+        if (duplicate) {
+            return this.refuseSave(duplicate);
+        }
+
         const before = this.priorSnapshot();
         const saved = await super.Save(options);
         if (!saved) {
@@ -119,6 +159,89 @@ export class DealTeamMemberEntityServer extends mjBizAppsSalesDealTeamMemberEnti
             await this.restampDeals([dealID]);
         }
         return deleted;
+    }
+
+    /**
+     * Refuses a second holder of a role the data says admits only one.
+     *
+     * Reads the rule from `DealRole.AllowsMultiplePerDeal` rather than naming Owner, so this is the
+     * flag's enforcement and not a special case — the seed already sets it false for Owner / AE and
+     * true for the other five roles.
+     *
+     * NULL means "no objection", and that includes a role row that cannot be read: a role lookup that
+     * comes back empty is not evidence of a duplicate, and refusing every team edit because a
+     * reference row is missing would be a worse failure than the one being prevented. A failed READ
+     * throws instead, and `Save` turns that into a refusal that names the lookup.
+     */
+    private async duplicateRoleRefusal(): Promise<string | null> {
+        const dealID = this.DealID;
+        const roleID = this.DealRoleID;
+        if (!dealID || !roleID) {
+            return null;
+        }
+
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+
+        const roleRead = await view.RunView<{ Name: string | null; AllowsMultiplePerDeal: boolean | null }>(
+            {
+                EntityName: DEAL_ROLE_ENTITY,
+                ExtraFilter: `ID = '${roleID}'`,
+                ResultType: 'simple',
+                Fields: ['Name', 'AllowsMultiplePerDeal'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!roleRead.Success) {
+            throw new Error(`could not read the deal role: ${roleRead.ErrorMessage}`);
+        }
+        const role = (roleRead.Results ?? [])[0];
+        // Truthy means the role admits several, which is the default for everything but Owner / AE.
+        if (!role || role.AllowsMultiplePerDeal) {
+            return null;
+        }
+
+        /**
+         * EXCLUDE SELF, or every later edit to the owner row refuses itself. `IsSaved` is the test
+         * rather than `ID`, because an unsaved row has no id to exclude and no row to collide with.
+         */
+        const notSelf = this.IsSaved && this.ID ? ` AND ID <> '${this.ID}'` : '';
+        const held = await view.RunView<{ Employee: string | null }>(
+            {
+                EntityName: DEAL_TEAM_MEMBER_ENTITY,
+                ExtraFilter: `DealID = '${dealID}' AND DealRoleID = '${roleID}'${notSelf}`,
+                ResultType: 'simple',
+                Fields: ['Employee'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!held.Success) {
+            throw new Error(`could not check the deal's existing ${role.Name ?? 'role'} rows: ${held.ErrorMessage}`);
+        }
+        const existing = (held.Results ?? [])[0];
+        if (!existing) {
+            return null;
+        }
+
+        const roleName = role.Name ?? 'that role';
+        const who = existing.Employee ? ` (${existing.Employee})` : '';
+        return (
+            `This deal already has a ${roleName}${who}. Change that row's employee instead of adding a `
+            + `second one.`
+        );
+    }
+
+    /** Mirrors `DealEntityServer.refuseSave`: log it, register a failed result, return false. */
+    private refuseSave(message: string): false {
+        LogError(`DealTeamMemberEntityServer.Save refused: ${message}`);
+        const failed = new BaseEntityResult();
+        failed.Success = false;
+        failed.Type = this.IsSaved ? 'update' : 'create';
+        failed.Message = message;
+        failed.StartedAt = new Date();
+        failed.EndedAt = new Date();
+        failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
+        this.RegisterResultHistoryEntry(failed);
+        return false;
     }
 
     /**
