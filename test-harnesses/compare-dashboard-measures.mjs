@@ -83,8 +83,9 @@ const hasFlag = (row, flag) => {
 /**
  * TODAY IS THE BUSINESS DAY (golive#168). The component takes it from BusinessTimeZoneEngine and the
  * queries from fnBusinessToday(); both read the same instance-configuration row. It used to be the UTC
- * day here and in the queries, which rolls over at 7 PM Central. Read from the function rather than
- * rebuilt in JS, so this harness cannot pick a different zone than the instance is configured with.
+ * day here and in the queries, which rolls over at 6 PM Central (7 PM in daylight time). Read from the
+ * function rather than rebuilt in JS, so this harness cannot pick a different zone than the instance
+ * is configured with.
  */
 const todayBusiness = (
     await pool.request().query('SELECT CONVERT(char(10), Today, 23) AS Today FROM __mj_BizAppsCommon.fnBusinessToday()')

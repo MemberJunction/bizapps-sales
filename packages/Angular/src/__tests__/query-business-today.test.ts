@@ -3,7 +3,7 @@
  * BUSINESS day, and cycle time starts on one (bc-aidp-next-golive#168).
  *
  * Both queries compared `ExpectedCloseDate < CAST(SYSUTCDATETIME() AS DATE)` — the UTC day, which is
- * already tomorrow from 7 PM Central — so every evening a deal due TODAY was counted past due on the
+ * already tomorrow from 6 PM Central (7 PM in daylight time) — so every evening a deal due TODAY was counted past due on the
  * dashboard tile, flagged on the roster, and badged in the nav. The client side of the same dashboard
  * already took "today" from `BusinessTimeZoneEngine`, so the tile and the list beside it disagreed.
  *

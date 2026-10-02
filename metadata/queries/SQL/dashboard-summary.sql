@@ -32,8 +32,8 @@
 -- the business day, the same "today" the dashboard's client side takes from BusinessTimeZoneEngine.
 -- Doing it in SQL keeps the browser's clock out of the question entirely.
 --
--- It used to compare against `CAST(SYSUTCDATETIME() AS DATE)`, the UTC day, which rolls over at 7 PM
--- Central: every evening a deal due TODAY counted as past its expected close (bc-aidp-next-golive#168).
+-- It used to compare against `CAST(SYSUTCDATETIME() AS DATE)`, the UTC day, which rolls over at 6 PM
+-- Central (7 PM in daylight time): every evening a deal due TODAY counted as past its expected close (bc-aidp-next-golive#168).
 -- ExpectedCloseDate itself is a DATE and is compared as one; only "today" needed the zone.
 --
 -- ── THE PERIOD WINDOW APPLIES TO ONE COLUMN, AND IT IS NOT IN THE `WHERE` ──────────────────────

@@ -3,9 +3,9 @@
  *
  * `stampClose` used to build `ActualCloseDate` from `now`'s UTC parts. `ActualCloseDate` is a `DATE` —
  * the day a win lands in, which is what bookings, win rate and every period window key on — and "what
- * day is it" is the one question the business zone answers. From 19:00 Central the UTC day is already
- * tomorrow, so a deal won on the evening of 30 September was stamped 1 October and counted in
- * October's figures.
+ * day is it" is the one question the business zone answers. From 18:00 Central (19:00 in daylight
+ * time) the UTC day is already tomorrow, so a deal won on the evening of 30 September was stamped
+ * 1 October and counted in October's figures.
  *
  * THE PINNED INSTANT IS WEST OF GREENWICH: `2026-10-01T02:30:00Z` is 21:30 on 30 September in
  * America/Chicago, and the last evening of a month, which is where the wrong day also moves the win
@@ -264,3 +264,57 @@ describe('Sales.CloseDeal configures the zone, then stamps and dates its tasks f
     });
 });
 
+/**
+ * The contracts hand-off carries `ExecutionDate` and `StartDate` as `YYYY-MM-DD`
+ * (bc-aidp-next-golive#168).
+ *
+ * It used to pass `String(date)`, the server's local rendering of the `DATE` column's UTC midnight:
+ * not `YYYY-MM-DD`, and on a server west of Greenwich its leading text names the PREVIOUS day ("Tue
+ * Sep 29 ..." for 30 September in Chicago). THE PROCESS ZONE IS PINNED to Chicago, because under
+ * `TZ=UTC` (which CI runs) `String(date)` at least names the right day.
+ */
+describe('buildContractInput hands contracts calendar days', () => {
+    const original = process.env.TZ;
+    beforeEach(() => {
+        process.env.TZ = BUSINESS_ZONE;
+    });
+    afterEach(() => {
+        process.env.TZ = original;
+    });
+
+    type Build = {
+        buildContractInput(
+            deal: Record<string, unknown>,
+            policy: Record<string, unknown>,
+            provider: unknown,
+            user: unknown,
+        ): Promise<{ ExecutionDate: string | null; StartDate: string | null }>;
+    };
+
+    const build = (over: Record<string, unknown>) =>
+        (Object.create(CloseDealOperation.prototype) as Build).buildContractInput(
+            { ID: 'd1', CompanyID: COMPANY, ExecutionDate: null, StartDate: null, ...over },
+            {},
+            {},
+            { ID: 'u1' },
+        );
+
+    it('premise: String() of 30 September\'s UTC midnight names the 29th in Chicago', () => {
+        expect(String(new Date('2026-09-30T00:00:00.000Z')).slice(0, 10)).toBe('Tue Sep 29');
+    });
+
+    it('passes ExecutionDate and StartDate as YYYY-MM-DD of the stored day', async () => {
+        const input = await build({
+            ExecutionDate: new Date('2026-09-30T00:00:00.000Z'),
+            StartDate: new Date('2026-10-01T00:00:00.000Z'),
+        });
+        expect(input.ExecutionDate).toBe('2026-09-30');
+        expect(input.StartDate).toBe('2026-10-01');
+    });
+
+    it('passes null for a date that is not set', async () => {
+        const input = await build({});
+        expect(input.ExecutionDate).toBeNull();
+        expect(input.StartDate).toBeNull();
+    });
+});

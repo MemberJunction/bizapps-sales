@@ -969,9 +969,10 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
          * ActualCloseDate is a DATE: the BUSINESS day the deal closed on, for the deal's company
          * (bc-aidp-next-golive#168).
          *
-         * It used to be the UTC day of `now`, which is a different day for every close after 19:00
-         * Central. A deal won on the evening of 30 September was stamped 1 October, so the win counted
-         * in October's bookings and win rate rather than September's. `ClosedAt` above is the instant
+         * It used to be the UTC day of `now`, which is a different day for every close in the
+         * evening Central (from 18:00, 19:00 in daylight time). A deal won on the evening of 30
+         * September was stamped 1 October, so the win counted in October's bookings and win rate
+         * rather than September's. `ClosedAt` above is the instant
          * and stays one; this is the calendar day, so "what day is it" is the business zone's question.
          *
          * `FromCalendarDay` hands the day back as UTC midnight, which is the shape a `DATE` column
@@ -1115,8 +1116,10 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              */
             /**
              * `YYYY-MM-DD`, read from the `DATE` column's UTC parts. `String(date)` produced the
-             * server's local rendering of UTC midnight ("Tue Sep 29 2026 19:00:00 GMT-0500 ..."), which
-             * names the PREVIOUS day west of Greenwich and is not a calendar day a reader can parse.
+             * server's local rendering of UTC midnight ("Tue Sep 29 2026 19:00:00 GMT-0500 ..."). That
+             * is not `YYYY-MM-DD`, and on a server west of Greenwich its leading text names the PREVIOUS
+             * day — "Tue Sep 29" for 30 September in Chicago — though `Date.parse` would still recover
+             * the instant.
              */
             ExecutionDate: ToCalendarDay(deal.ExecutionDate),
             StartDate: ToCalendarDay(deal.StartDate),

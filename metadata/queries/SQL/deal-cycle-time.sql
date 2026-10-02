@@ -31,8 +31,8 @@
 -- THE START IS A BUSINESS DAY, LIKE THE CLOSE. `ActualCloseDate` is stamped on the business day the
 -- deal closed (bc-aidp-next-golive#168), so the start instant is converted to a day in the SAME zone —
 -- `AT TIME ZONE bt.SqlZone`, the zone fnBusinessToday() resolved — before the two are subtracted. A
--- bare CAST took the UTC day, so a deal created after 7 PM Central started "tomorrow" and its cycle
--- read a day short, or was dropped as a close stamped before its own start. Both columns it reads
+-- bare CAST took the UTC day, so a deal created after 6 PM Central (7 PM in daylight time) started
+-- "tomorrow" and its cycle read a day short, or was dropped as a close stamped before its own start. Both columns it reads
 -- (`__mj_CreatedAt`, `DealStageEvent.ChangedAt`) are DATETIMEOFFSET, which AT TIME ZONE converts
 -- rather than reinterprets.
 --

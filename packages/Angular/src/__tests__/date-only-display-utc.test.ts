@@ -115,3 +115,54 @@ describe('DisplayDay gives the board one shape to format', () => {
         expect(DisplayDay('')).toBeNull();
     });
 });
+
+/**
+ * THE BOARD CARD'S OWN BINDING, evaluated rather than pattern-matched (golive#168 review follow-up).
+ *
+ * The block above proves `DisplayDay` is right; nothing proved the card CALLS it. Dropping it from the
+ * template leaves `'UTC'` in place, so the static check at the top still passes, and west of Greenwich
+ * (and under CI's `TZ=UTC`) the card still reads correctly. It breaks only EAST of Greenwich for a bare
+ * `YYYY-MM-DD`, which Angular parses as LOCAL midnight — in Tokyo that is 15:00 UTC the day before.
+ *
+ * So the card's interpolation is lifted out of the template and run: its pipe input is evaluated as
+ * the expression it is (with the component's `DisplayDay` and a roster row in scope), and formatted
+ * with the format and zone the template passes.
+ */
+describe('the board card renders a bare day correctly east of Greenwich', () => {
+    const original = process.env.TZ;
+    afterAll(() => {
+        process.env.TZ = original;
+    });
+
+    /** `COND ? (VALUE | date:'FMT':'ZONE') : 'FALLBACK'` inside the card's close-date span. */
+    function cardCloseBinding(): { value: string; format: string; zone: string | undefined } {
+        const span = BOARD.match(/class="db-card__close">\{\{([\s\S]*?)\}\}<\/span>/);
+        expect(span, 'the card must still render a close-date span').not.toBeNull();
+        const m = span![1].match(/\?\s*\((.+?)\|\s*date\s*:\s*'([^']+)'(?:\s*:\s*'([^']+)')?\s*\)\s*:/);
+        expect(m, 'the close date must still be a conditional date pipe').not.toBeNull();
+        return { value: m![1].trim(), format: m![2], zone: m![3] };
+    }
+
+    function renderCardClose(expectedCloseDate: string | Date): string {
+        const { value, format, zone } = cardCloseBinding();
+        // The template expression is plain JS here: a call and a property read.
+        const evaluate = new Function('DisplayDay', 'deal', `return (${value});`) as (
+            displayDay: typeof DisplayDay,
+            deal: { ExpectedCloseDate: string | Date },
+        ) => string | Date | null;
+        const input = evaluate(DisplayDay, { ExpectedCloseDate: expectedCloseDate });
+        return formatDate(input!, format, 'en-US', zone);
+    }
+
+    for (const zone of ['Asia/Tokyo', 'America/Chicago']) {
+        it(`shows a bare '2026-09-30' as Sep 30 in ${zone}`, () => {
+            process.env.TZ = zone;
+            expect(renderCardClose('2026-09-30')).toBe('Sep 30, 2026');
+        });
+
+        it(`shows a Date at UTC midnight on 30 September as Sep 30 in ${zone}`, () => {
+            process.env.TZ = zone;
+            expect(renderCardClose(new Date('2026-09-30T00:00:00.000Z'))).toBe('Sep 30, 2026');
+        });
+    }
+});

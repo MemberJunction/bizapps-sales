@@ -71,8 +71,8 @@ SELECT
     d.ExpectedCloseDate,
     d.ActualCloseDate,
     -- "Past its expected close and still open" — the slipped flag the dashboard shows. "Today" is
-    -- the BUSINESS day from fnBusinessToday(), not the UTC day: from 7 PM Central the UTC day is
-    -- already tomorrow, and a deal due today read as past due all evening (bc-aidp-next-golive#168).
+    -- the BUSINESS day from fnBusinessToday(), not the UTC day: from 6 PM Central (7 PM in daylight
+    -- time) the UTC day is already tomorrow, and a deal due today read as past due all evening (bc-aidp-next-golive#168).
     CASE WHEN ISNULL(st.IsOpen, 0) = 1
           AND d.ExpectedCloseDate IS NOT NULL
           AND d.ExpectedCloseDate < bt.Today

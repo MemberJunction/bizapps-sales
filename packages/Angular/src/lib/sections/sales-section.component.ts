@@ -552,8 +552,8 @@ export class MJSSalesSectionComponent implements OnInit {
      *
      * READS THE FLAG THE ROSTER QUERY ALREADY APPLIED. `Sales: Deal Roster` computes
      * `IsPastExpectedClose` against the business day from `fnBusinessToday()` (golive#168 -- it was the
-     * UTC day, which made a deal due today read as past due from 7 PM Central), so the comparison
-     * happens on the server against the server's clock.
+     * UTC day, which made a deal due today read as past due from 6 PM Central, 7 PM in daylight time),
+     * so the comparison happens on the server against the server's clock.
      *
      * That is a real improvement over what this replaced, not just a relocation. The old version built
      * a UTC date string here with `getUTC*` getters specifically to avoid the boundary moving a day
