@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-actions
 
+## 6.9.2
+
+### Patch Changes
+
+- Updated dependencies [bead3d7]
+  - @mj-biz-apps/sales-core-entities-server@6.9.2
+
 ## 6.9.1
 
 ### Patch Changes
