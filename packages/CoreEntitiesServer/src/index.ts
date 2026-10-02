@@ -114,6 +114,13 @@ export * from './forecast/FixtureForecastSource.js';
 export * from './forecast/QueryForecastSource.js';
 export * from './forecast/ForecastSnapshotJob.js';
 
+/**
+ * FINANCE EXCEPTIONS (golive #279). Accounting's operations reached by name, and the nightly
+ * won-deal detector (type 3) the `Sales.DetectWonDealsWithUnconfirmedOrders` Action calls.
+ */
+export * from './finance-exceptions/FinanceExceptionBridge.js';
+export * from './finance-exceptions/WonDealOrderDetector.js';
+
 import { LoadActivitySyncEngine } from '@mj-biz-apps/common-activity-sync';
 import { DealEntityServer } from './DealEntityServer.js';
 import { DealTeamMemberEntityServer } from './DealTeamMemberEntityServer.js';
