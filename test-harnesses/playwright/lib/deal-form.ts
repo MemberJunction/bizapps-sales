@@ -492,6 +492,12 @@ export async function FirstOpenStageOf(pipelineID: string): Promise<{ ID: string
           LEFT JOIN __mj_BizAppsSales.DealStatusType st ON st.ID = ps.DealStatusTypeID
          WHERE ps.PipelineID = '${pipelineID}'
            AND ISNULL(st.LocksDeal, 0) = 0
+           -- ACTIVE ONLY, to match what the control actually offers. The app loads stages with
+           -- ExtraFilter 'IsActive = 1' and OrderBy 'DisplayOrder ASC'; resolving an inactive stage
+           -- here would hand SetStageByID an id with no option to select, and the failure would read
+           -- as a broken dropdown. No inactive stages exist on this host today, which is precisely
+           -- why the omission went unnoticed -- it agreed with the UI by circumstance.
+           AND ISNULL(ps.IsActive, 1) = 1
          ORDER BY ps.DisplayOrder, ps.Name`);
     expect(
         row?.ID,
