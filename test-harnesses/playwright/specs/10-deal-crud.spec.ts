@@ -40,6 +40,7 @@ import {
   setLookup,
   shot,
 } from '../lib/explorer';
+import { PipelineByName, SetPipelineByID } from '../lib/deal-form';
 
 const PIPELINE_NAME = `${TEST_PREFIX} Pipeline`;
 const PIPELINE_CODE = `${TEST_PREFIX}-PIPE`;
@@ -132,8 +133,15 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
     expect(await isRequiredEmpty(page, 'Company'), 'Deal.Company is NOT NULL and must render required').toBe(true);
 
     await setField(page, 'Name', DEAL_NAME);
-    await setLookup(page, 'Pipeline', PIPELINE_NAME);
-    await setLookup(page, 'Company', DEV_COMPANY_NAME);
+    // A dedicated <select> since golive#291, not an FK lookup -- setLookup waits on
+    // .mj-fk-search input, which this control does not render. Resolved by NAME so this spec still
+    // gets the pipeline it just created, and matched on id the way the option is written.
+    await SetPipelineByID(page, (await PipelineByName(PIPELINE_NAME)).ID);
+    // NOT SET HERE. DealEntityServer forces Deal.CompanyID to the PIPELINE's company on every
+    // save, "ignoring whatever the caller supplied" -- so a typed value is discarded. The form
+    // reflects that by not offering the field: it exists only in the generic dump that the Overview
+    // panel replaces, on no section the rail shows. Verified on the host: 7 deals, 0 null companies,
+    // and ComposeDeal has never set one either.
     await setField(page, 'Amount', '120000');
     await setField(page, 'Probability', '20');
     await setField(page, 'Term Months', '12');

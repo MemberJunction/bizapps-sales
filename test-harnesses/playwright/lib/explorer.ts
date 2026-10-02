@@ -18,6 +18,7 @@ import { expect, type Page, type Locator } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { ARTIFACTS_DIR, EXPLORER_BASE_URL } from './env';
+import { RevealInForm } from './deal-form';
 
 /**
  * Benign console.error substrings — known framework noise, not app bugs. KEEP THIS TIGHT: the value
@@ -591,14 +592,37 @@ export function formField(page: Page, label: string): Locator {
     .first();
 }
 
-/** True when the form marks this field required-and-empty. */
+/**
+ * True when the form marks this field required-and-empty.
+ *
+ * READ WHEREVER THE FIELD LIVES, not only on the panel currently showing. MJ's chrome rail renders
+ * one section at a time, and a new deal leads on Pipeline -- so Company is present and correctly
+ * marked while `formField`'s `visible=true` filter matches nothing, the getAttribute throws, and the
+ * catch returns '' . That reads as "not marked required", which is a different claim entirely.
+ *
+ * The dangerous direction is the negative one: a caller asserting `.toBe(false)` after a save was
+ * satisfied by a field being on another panel rather than by it having a value.
+ *
+ * What these assertions are about is the MARKUP a NOT NULL column produces, not which section the
+ * rail is showing, so panel state is not part of the question. Revealing the section instead would
+ * leave the rail parked there, and the next line usually types into a field on a different one.
+ */
 export async function isRequiredEmpty(page: Page, label: string): Promise<boolean> {
-  const cls = (await formField(page, label).getAttribute('class').catch(() => '')) ?? '';
+  const anywhere = page
+    .locator(`.mj-forms-field:has(> label.mj-forms-field-label:text-is("${label}"))`)
+    .first();
+  if ((await anywhere.count()) === 0) {
+    return false; // genuinely absent, which is not the same as present-and-unmarked
+  }
+  const cls = (await anywhere.getAttribute('class').catch(() => '')) ?? '';
   return /mj-forms-field--required-empty/.test(cls);
 }
 
 /** Type into a plain text / number / date input. */
 export async function setField(page: Page, label: string, value: string): Promise<void> {
+  // MJ's chrome rail shows one section at a time; a field on another one is present and NOT
+  // visible, and formField filters on visible. No-op when it is already on screen.
+  await RevealInForm(page, formField(page, label));
   const input = formField(page, label).locator('input.mj-forms-field-input, textarea.mj-forms-field-input').first();
   await expect(input, `field "${label}" must be editable`).toBeVisible({ timeout: 15_000 });
   await input.click();
@@ -610,6 +634,9 @@ export async function setField(page: Page, label: string, value: string): Promis
 
 /** Read a field's current value. */
 export async function readField(page: Page, label: string): Promise<string> {
+  // MJ's chrome rail shows one section at a time; a field on another one is present and NOT
+  // visible, and formField filters on visible. No-op when it is already on screen.
+  await RevealInForm(page, formField(page, label));
   const input = formField(page, label).locator('input, textarea').first();
   if (await input.count()) return (await input.inputValue().catch(() => '')) || '';
   return (await formField(page, label).locator('.mj-forms-field-control').first().innerText().catch(() => '')).trim();
@@ -624,6 +651,9 @@ export async function readField(page: Page, label: string): Promise<string> {
  * untrustworthy rather than merely failing loudly.
  */
 export async function setLookup(page: Page, label: string, searchText: string): Promise<void> {
+  // MJ's chrome rail shows one section at a time; a field on another one is present and NOT
+  // visible, and formField filters on visible. No-op when it is already on screen.
+  await RevealInForm(page, formField(page, label));
   const input = formField(page, label).locator('.mj-fk-search input, input.mj-forms-field-input').first();
   await expect(input, `lookup "${label}" must be present`).toBeVisible({ timeout: 15_000 });
   await input.click();
