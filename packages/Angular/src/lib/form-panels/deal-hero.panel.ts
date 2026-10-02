@@ -231,7 +231,7 @@ function money(n: number | null | undefined): string {
                         <span class="mjs-deal-hero__stat-label">Next step</span>
                         <span class="mjs-deal-hero__next-val">{{ Record.NextStep }}</span>
                         @if (Record.NextStepDate) {
-                            <span class="mjs-deal-hero__next-when">{{ Record.NextStepDate | date: 'd MMM y' }}</span>
+                            <span class="mjs-deal-hero__next-when">{{ Record.NextStepDate | date: 'd MMM y' : 'UTC' }}</span>
                         }
                     </div>
                 }

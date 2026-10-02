@@ -28,6 +28,14 @@
 -- sales-cycle measure; time-to-lose is a qualification measure, and a team that loses fast is
 -- healthier than one that loses slowly. Averaging them together hides both.
 --
+-- THE START IS A BUSINESS DAY, LIKE THE CLOSE. `ActualCloseDate` is stamped on the business day the
+-- deal closed (bc-aidp-next-golive#168), so the start instant is converted to a day in the SAME zone —
+-- `AT TIME ZONE bt.SqlZone`, the zone fnBusinessToday() resolved — before the two are subtracted. A
+-- bare CAST took the UTC day, so a deal created after 7 PM Central started "tomorrow" and its cycle
+-- read a day short, or was dropped as a close stamped before its own start. Both columns it reads
+-- (`__mj_CreatedAt`, `DealStageEvent.ChangedAt`) are DATETIMEOFFSET, which AT TIME ZONE converts
+-- rather than reinterprets.
+--
 -- MEDIAN AS WELL AS MEAN. PERCENTILE_CONT is a window function, so it is computed in a subquery and
 -- then aggregated — one long-running enterprise deal moves a mean far more than it moves a median,
 -- and on the small deal counts a single company produces, that difference is most of the signal.
@@ -44,10 +52,11 @@ WITH closed AS (
     INNER JOIN [__mj_BizAppsSales].DealStatusType st
             ON st.ID = d.DealStatusTypeID
            AND st.IsClosed = 1
+    CROSS JOIN [__mj_BizAppsCommon].[fnBusinessToday]() AS bt
     CROSS APPLY (
         SELECT CAST(
-            CASE WHEN ev.FirstEventAt IS NOT NULL AND ev.FirstEventAt < d.__mj_CreatedAt
-                 THEN ev.FirstEventAt ELSE d.__mj_CreatedAt END AS DATE) AS StartedAt
+            (CASE WHEN ev.FirstEventAt IS NOT NULL AND ev.FirstEventAt < d.__mj_CreatedAt
+                  THEN ev.FirstEventAt ELSE d.__mj_CreatedAt END) AT TIME ZONE bt.SqlZone AS DATE) AS StartedAt
         FROM (
             SELECT MIN(e.ChangedAt) AS FirstEventAt
             FROM [__mj_BizAppsSales].DealStageEvent e

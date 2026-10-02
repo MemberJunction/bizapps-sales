@@ -10,7 +10,7 @@
  *
  * The browser path cannot be exercised here, so this reimplements it EXACTLY as
  * `sales-section.component.ts` computes it — same RunView, same flag lookup through a separate
- * statuses fetch, same UTC date string built with getUTC* getters, same reduce. That duplication is
+ * statuses fetch, same business-day "today" (golive#168), same reduce. That duplication is
  * deliberate and temporary: it is the control in the experiment, and it goes when the component's
  * client-side path goes.
  *
@@ -80,9 +80,15 @@ const hasFlag = (row, flag) => {
     return s ? s[flag] === true : false;
 };
 
-// The component's UTC date string, built the same way — this is the comparison the tile relies on.
-const now = new Date();
-const todayUtc = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
+/**
+ * TODAY IS THE BUSINESS DAY (golive#168). The component takes it from BusinessTimeZoneEngine and the
+ * queries from fnBusinessToday(); both read the same instance-configuration row. It used to be the UTC
+ * day here and in the queries, which rolls over at 7 PM Central. Read from the function rather than
+ * rebuilt in JS, so this harness cannot pick a different zone than the instance is configured with.
+ */
+const todayBusiness = (
+    await pool.request().query('SELECT CONVERT(char(10), Today, 23) AS Today FROM __mj_BizAppsCommon.fnBusinessToday()')
+).recordset[0].Today;
 const utcDatePart = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
 
 const open = deals.filter((d) => hasFlag(d, 'IsOpen'));
@@ -101,7 +107,7 @@ const won = deals.filter((d) => hasFlag(d, 'IsWon'));
  * "slipped" conventionally means the date moved and the query is the one using it correctly.
  */
 const pastDue = deals.filter(
-    (d) => hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate && utcDatePart(d.ExpectedCloseDate) < todayUtc,
+    (d) => hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate && utcDatePart(d.ExpectedCloseDate) < todayBusiness,
 );
 const client = {
     OpenAmount: open.reduce((sum, d) => sum + (d.Amount ?? 0), 0),

@@ -129,7 +129,7 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
                 <ol class="dat__list">
                     @for (row of Rows; track row.ID) {
                         <li class="dat__item">
-                            <div class="dat__when">{{ row.StartedAt | date: 'medium' : 'UTC' }}</div>
+                            <div class="dat__when">{{ row.StartedAt | date: 'medium' }}</div>
                             <div class="dat__body">
                                 <div class="dat__row">
                                     <span class="dat__type">{{ row.TypeName }}</span>

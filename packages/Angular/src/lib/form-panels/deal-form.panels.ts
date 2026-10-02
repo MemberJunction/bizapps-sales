@@ -876,7 +876,7 @@ const FIELD_STYLES = `
                         @if (Record.NextStep) {
                             <p class="mjs-ov-next">{{ Record.NextStep }}</p>
                             @if (Record.NextStepDate) {
-                                <div class="muted">Due {{ Record.NextStepDate | date: 'd MMM y' }}
+                                <div class="muted">Due {{ Record.NextStepDate | date: 'd MMM y' : 'UTC' }}
                                     @if (NextStepOverdue) { · overdue }
                                 </div>
                             }
