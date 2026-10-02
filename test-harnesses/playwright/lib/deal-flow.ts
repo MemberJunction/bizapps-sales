@@ -18,7 +18,9 @@ import {
     RevealInForm,
     PipelineByName,
     SaveDeal,
+    FirstOpenStageOf,
     SetPipelineByID,
+    SetStageByID,
     SetStatusByID,
     SetText,
 } from './deal-form';
@@ -43,7 +45,19 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
     // Pipeline is a dedicated `<select>` since golive#291, so `PickLookup` -- which waits on
     // `.mj-fk-search` -- cannot reach it. Resolved by NAME through the database so a caller that asks
     // for a specific pipeline still gets that one, and the id is what the option is matched on.
-    await SetPipelineByID(page, (await PipelineByName(pipeline)).ID);
+    const chosenPipeline = await PipelineByName(pipeline);
+    await SetPipelineByID(page, chosenPipeline.ID);
+    /**
+     * ── AND A STAGE, BECAUSE ONE NO LONGER APPEARS BY ITSELF ────────────────────────────────────
+     *
+     * golive#291 clears the stage when the pipeline changes -- deliberately, since two pipelines'
+     * processes do not translate. A deal composed without this saves with PipelineStageID NULL, and
+     * anything reading deals through `JOIN PipelineStage` then cannot see it at all: 80-board-drag
+     * failed both tests on its own precondition, reporting a deal it had just created as missing.
+     *
+     * AFTER the pipeline, never before: choosing a pipeline is what does the clearing.
+     */
+    await SetStageByID(page, (await FirstOpenStageOf(chosenPipeline.ID)).ID);
     await PickLookup(page, 'AccountID');
 
     /**
@@ -477,14 +491,29 @@ export async function PurgeDeal(dealID: string, orderID: string | null): Promise
     }
 }
 
-/** The demo baseline this host must be at when the suite finishes. */
+/**
+ * The demo baseline: the SEEDED deals, untouched.
+ *
+ * SCOPED TO THE SEED, not to every row on the host. Counting everything made this assertion mean
+ * "no other test is running", which was accidentally true while the suite ran one spec at a time and
+ * is false at four workers -- it failed twice in one parallel run, reporting another spec's
+ * in-flight deal as a corrupted seed. The rows this harness creates all carry a loud run prefix
+ * (`PW-LIFE-<base36>`, `BD-...`), so they are excluded here, the same prefixes cleanup.mjs sweeps.
+ *
+ * It is also STRONGER this way when run serially: a leftover prefixed deal could previously offset a
+ * missing seeded one and let a broken baseline pass the count.
+ */
+const HARNESS_PREFIXES = ['PW-', 'TS-', 'BD-', 'AT-', 'CL-', 'RT-'];
+
 export async function AssertBaseline(): Promise<void> {
+    const notHarness = HARNESS_PREFIXES.map((p) => `d.Name NOT LIKE '${p}%'`).join(' AND ');
     const b = await QueryOne<{ Deals: number; OpenAmount: number; Priced: number }>(`
         SELECT COUNT(*) AS Deals,
                SUM(CASE WHEN t.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END) AS OpenAmount,
                SUM(CASE WHEN d.AmountIsComputed = 1 THEN 1 ELSE 0 END)         AS Priced
           FROM __mj_BizAppsSales.Deal d
-          JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID`);
+          JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
+         WHERE ${notHarness}`);
     expect(Number(b?.Deals), 'the host must be back to its seven seeded deals').toBe(7);
     expect(Number(b?.OpenAmount), 'and to an open pipeline of 251,220').toBe(251220);
     expect(Number(b?.Priced), 'and five of seven priced').toBe(5);
