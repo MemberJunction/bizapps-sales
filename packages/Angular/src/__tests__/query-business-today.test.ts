@@ -8,7 +8,9 @@
  * already took "today" from `BusinessTimeZoneEngine`, so the tile and the list beside it disagreed.
  *
  * Cycle time measured from a start instant CAST to a DATE (the UTC day) to an `ActualCloseDate` that
- * is now stamped on the business day, so the two ends of the subtraction were in different zones.
+ * is now stamped on the business day, so the two ends of the subtraction were in different zones. The
+ * won-deals exception list fell back to the same UTC day of `ClosedAt` when `ActualCloseDate` was null.
+ * Both now use `[__mj_BizAppsCommon].[fnBusinessDayOf]()`.
  *
  * STATIC, because these run as MJ Queries against a live database that unit tests do not have.
  * Comments are stripped first: both files now explain the old predicate in prose, and a test that a
@@ -36,9 +38,23 @@ describe('"past expected close" is judged on the business day', () => {
 });
 
 describe('cycle time starts on the business day, like the close it is measured to', () => {
-    it('converts the start instant AT TIME ZONE the business SqlZone before taking its day', () => {
+    it('takes the start instant\'s business day with fnBusinessDayOf() before subtracting', () => {
         const sql = sqlOf('deal-cycle-time.sql');
-        expect(sql).toMatch(BUSINESS_TODAY);
-        expect(sql).toMatch(/AT TIME ZONE bt\.SqlZone AS DATE\) AS StartedAt/);
+        expect(sql).toMatch(
+            /SELECT \[__mj_BizAppsCommon\]\.\[fnBusinessDayOf\]\(\s*CASE WHEN ev\.FirstEventAt[\s\S]*?END\) AS StartedAt/,
+        );
+        // AT TIME ZONE is what MJ's SQL parser cannot read; see query-parses-with-mj-parser.test.ts.
+        expect(sql).not.toMatch(/AT TIME ZONE/i);
+        expect(sql).not.toMatch(/CAST\([\s\S]*?__mj_CreatedAt[\s\S]*?AS DATE\)/);
+    });
+});
+
+describe('a won deal with only ClosedAt falls back to its business day', () => {
+    it('won-deals-order-not-confirmed.sql takes fnBusinessDayOf(ClosedAt), not CAST(ClosedAt AS DATE)', () => {
+        const sql = sqlOf('won-deals-order-not-confirmed.sql');
+        expect(sql).toMatch(
+            /COALESCE\(d\.ActualCloseDate, \[__mj_BizAppsCommon\]\.\[fnBusinessDayOf\]\(d\.ClosedAt\)\) AS CloseDate/,
+        );
+        expect(sql).not.toMatch(/CAST\(d\.ClosedAt AS DATE\)/i);
     });
 });
