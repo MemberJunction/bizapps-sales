@@ -6,7 +6,7 @@
       "UserQuestion": "Which won deals have an order that was never confirmed, and so will never be billed?",
       "Description": "Finance exception review (golive #279, type 3): every won deal whose order is still not Confirmed, including a voided order and a deal with no order. Closing a deal Won does not confirm its order, and nothing else says when that step never happens. Run at month end until the nightly exception check replaces it.",
       "SQL": "@file:SQL/won-deals-order-not-confirmed.sql",
-      "TechnicalDescription": "Grain: Deal. Won is DealStatusType.IsWon. The order is reached through Deal.OrderID and read from __mj_BizAppsOrders.vwOrderHeaders; a deal qualifies when the order is missing or its Status is not Confirmed. Date dimension: ActualCloseDate, falling back to the date part of ClosedAt. DaysSinceClose counts to __mj_BizAppsCommon.fnBusinessToday(). Optional parameters: CompanyID; MinDaysSinceClose (grace period, omitted = no grace); PeriodStart/PeriodEnd bound the close date inclusively.",
+      "TechnicalDescription": "Grain: Deal. Won is DealStatusType.IsWon. The order is reached through Deal.OrderID and read from __mj_BizAppsOrders.vwOrderHeaders; a deal qualifies when the order is missing or its Status is not Confirmed. Date dimension: ActualCloseDate, falling back to ClosedAt's business day from __mj_BizAppsCommon.fnBusinessDayOf() (not its UTC day, bc-aidp-next-golive#168). DaysSinceClose counts to __mj_BizAppsCommon.fnBusinessToday(). Optional parameters: CompanyID; MinDaysSinceClose (grace period, omitted = no grace); PeriodStart/PeriodEnd bound the close date inclusively.",
       "Status": "Approved",
       "QualityRank": 8,
       "ExecutionCostRank": 2,

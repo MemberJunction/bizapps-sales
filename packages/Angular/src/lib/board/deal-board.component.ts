@@ -50,8 +50,25 @@ import {
     inject,
 } from '@angular/core';
 
+import { FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
+
 import { DealWorkspaceService, type DealRosterRow } from '../workspace/deal-workspace.service';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
+
+/**
+ * A `DATE` column's day, as a value the `date` pipe can format with `'UTC'` (bc-aidp-next-golive#168).
+ *
+ * `ExpectedCloseDate` is a calendar day handed back as UTC midnight, so formatting it in the viewer's
+ * zone shows the PREVIOUS day to anyone west of Greenwich — 30 September read as "Sep 29" in Chicago.
+ * The card now passes `'UTC'`, and this normalises the value first because the roster can deliver a
+ * `Date` OR a string: Angular parses a bare `YYYY-MM-DD` string as LOCAL midnight, which `'UTC'` would
+ * then move back a day for anyone EAST of Greenwich. Through `ToCalendarDay` both shapes become the
+ * same UTC midnight, so one pipe argument is right everywhere.
+ */
+export function DisplayDay(value: string | Date | null | undefined): Date | null {
+    const day = ToCalendarDay(value);
+    return day ? FromCalendarDay(day) : null;
+}
 
 /**
  * The one currency a set of cards shares, or NULL when they do not share one.
@@ -382,6 +399,8 @@ export class DealBoardComponent {
         return this.Pipelines.find((p) => p.ID === pipelineID)?.Name ?? '—';
     }
 
+    /** Exposed for the card's close date. See {@link DisplayDay}. */
+    public readonly DisplayDay = DisplayDay;
     /** Track by ID so a re-render does not tear down every card. */
     public TrackCard = (_: number, deal: DealRosterRow): string => deal.ID;
     /** Exposed for the template's per-card fallback. See DEFAULT_DISPLAY_CURRENCY. */

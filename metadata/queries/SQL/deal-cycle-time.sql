@@ -28,6 +28,19 @@
 -- sales-cycle measure; time-to-lose is a qualification measure, and a team that loses fast is
 -- healthier than one that loses slowly. Averaging them together hides both.
 --
+-- THE START IS A BUSINESS DAY, LIKE THE CLOSE. `ActualCloseDate` is stamped on the business day the
+-- deal closed (bc-aidp-next-golive#168), so the start instant is converted to a day in the SAME zone —
+-- `[__mj_BizAppsCommon].[fnBusinessDayOf]()`, the business day of a DATETIMEOFFSET in the zone
+-- fnBusinessToday() uses — before the two are subtracted. A bare CAST took the UTC day, so a deal
+-- created after 6 PM Central (7 PM in daylight time) started "tomorrow" and its cycle read a day short,
+-- or was dropped as a close stamped before its own start. Both columns it reads (`__mj_CreatedAt`,
+-- `DealStageEvent.ChangedAt`) are DATETIMEOFFSET.
+--
+-- A FUNCTION, NOT AN INLINE `AT TIME ZONE`. MJ's SQL parser (node-sql-parser, run by
+-- MJQueryEntityServer on every save of this query) cannot parse `AT TIME ZONE`: the full parse failed
+-- and the regex fallback extracted junk table names and zero select columns. Requires bizapps-common
+-- with fnBusinessDayOf (mj-app.json's dependency floor).
+--
 -- MEDIAN AS WELL AS MEAN. PERCENTILE_CONT is a window function, so it is computed in a subquery and
 -- then aggregated — one long-running enterprise deal moves a mean far more than it moves a median,
 -- and on the small deal counts a single company produces, that difference is most of the signal.
@@ -45,9 +58,9 @@ WITH closed AS (
             ON st.ID = d.DealStatusTypeID
            AND st.IsClosed = 1
     CROSS APPLY (
-        SELECT CAST(
+        SELECT [__mj_BizAppsCommon].[fnBusinessDayOf](
             CASE WHEN ev.FirstEventAt IS NOT NULL AND ev.FirstEventAt < d.__mj_CreatedAt
-                 THEN ev.FirstEventAt ELSE d.__mj_CreatedAt END AS DATE) AS StartedAt
+                 THEN ev.FirstEventAt ELSE d.__mj_CreatedAt END) AS StartedAt
         FROM (
             SELECT MIN(e.ChangedAt) AS FirstEventAt
             FROM [__mj_BizAppsSales].DealStageEvent e

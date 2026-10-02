@@ -124,7 +124,8 @@ test.describe('dashboard — every tile against the database', () => {
                 SUM(CASE WHEN t.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END)              AS OpenAmount,
                 SUM(CASE WHEN t.IsOpen = 1 THEN 1 ELSE 0 END)                                AS OpenCount,
                 COUNT(*)                                                                     AS TotalCount,
-                SUM(CASE WHEN t.IsOpen = 1 AND d.ExpectedCloseDate < CAST(SYSUTCDATETIME() AS date)
+                -- The business day, as dashboard-summary.sql reads it (golive#168), not the UTC day.
+                SUM(CASE WHEN t.IsOpen = 1 AND d.ExpectedCloseDate < bt.Today
                          THEN 1 ELSE 0 END)                                                  AS PastDue,
                 SUM(CASE WHEN t.IsWon = 1 THEN 1 ELSE 0 END)                                 AS WonCount,
                 SUM(CASE WHEN t.IsOpen = 1 AND d.AmountIsComputed = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END)
@@ -132,7 +133,8 @@ test.describe('dashboard — every tile against the database', () => {
                 SUM(CASE WHEN t.IsOpen = 1 AND d.AmountIsComputed = 0 THEN ISNULL(d.Amount, 0) ELSE 0 END)
                                                                                              AS StatedOpen
               FROM __mj_BizAppsSales.Deal d
-              JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID`);
+              JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
+              CROSS JOIN __mj_BizAppsCommon.fnBusinessToday() AS bt`);
         expect(expected, 'the database must answer the baseline query').toBeTruthy();
 
         // A guard on the guard: if the host has no deals, every comparison below is 0 === 0 and the
