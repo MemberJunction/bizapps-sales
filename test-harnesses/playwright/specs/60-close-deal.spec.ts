@@ -37,7 +37,7 @@ import type { Locator, Page } from '@playwright/test';
 import { captureConsoleErrors, expectOnlyKnownErrors, shot } from '../lib/explorer';
 import { CloseDb, DealByName, QueryAll, QueryOne, StageEventsFor } from '../lib/db';
 import { AddLines, CloseWon, ComposeDeal, PurgeDeal, ReopenDeal } from '../lib/deal-flow';
-import { ByTestId, DealForm, EditDeal, FieldIsEditable, OpenSection } from '../lib/deal-form';
+import { ByTestId, DealForm, EditDeal, FieldIsEditable, OpenSection, RevealInForm } from '../lib/deal-form';
 
 const RUN_TAG = `CL-${Date.now().toString(36).toUpperCase()}`;
 
@@ -204,6 +204,9 @@ test.describe('closing a deal through the Explorer', () => {
         const name = await createDealWithLine(page, 'lost');
 
         await OpenSection(page, 'close');
+        // OpenSection resolves the panel; it does not move the chrome rail, and ByTestId filters
+        // on :visible -- so the control is present, hidden, and the click waits out its timeout.
+        await RevealInForm(page, ByTestId(page, 'close-open'));
         await ByTestId(page, 'close-open').click();
         const panel = ByTestId(page, 'close-panel');
         await expect(panel, 'the close panel must open').toBeVisible({ timeout: 20_000 });
