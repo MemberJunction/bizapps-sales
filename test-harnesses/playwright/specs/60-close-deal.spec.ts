@@ -214,7 +214,19 @@ test.describe('closing a deal through the Explorer', () => {
         // Choose the LOST target by the status row's ID, matched case-insensitively.
         const lostID = await lostStatusID();
         const radios = panel.locator('[data-testid="close-target"]');
-        const values = await radios.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+        /**
+         * READ `data-status-id`, NOT `.value`.
+         *
+         * These radios carry `[value]="s.ID"`, but the binding feeds Angular's radio value accessor,
+         * which declares its own `value` input -- so the id never reaches the DOM property and
+         * `input.value` returns the browser default for a valueless radio: the string "on". This
+         * assertion used to fail with "it offers on, on, on", blaming the app for offering nothing.
+         *
+         * The form adds `[attr.data-status-id]="s.ID"` for exactly this purpose, and says so in a
+         * comment: an attribute binding DOES reach the DOM, and it names which status a row is
+         * without keying on the label, which is vocabulary and may be re-worded.
+         */
+        const values = await radios.evaluateAll((els) => els.map((e) => e.getAttribute('data-status-id') ?? ''));
         const index = values.findIndex((v) => v.toLowerCase() === lostID.toLowerCase());
         expect(index, `the close panel must offer the lost status ${lostID}; it offers ${values.join(', ')}`)
             .toBeGreaterThanOrEqual(0);
