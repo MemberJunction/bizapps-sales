@@ -459,6 +459,24 @@ export class DealEntityServer extends DealEntity {
          * This one reads, so it is not free -- but one lookup is still cheaper than a transaction that
          * is going to be rolled back, and cheaper than the wrong forecast numbers it prevents.
          */
+        /**
+         * FAIL CLOSED, AND SAY WHICH FAILURE IT WAS.
+         *
+         * The check reads, so it can fail for reasons that have nothing to do with the deal — a
+         * dropped connection, a provider error. This REFUSES the save when that happens, rather than
+         * letting it through on the grounds that nothing was proven wrong.
+         *
+         * That is the right way round here because the thing being guarded is not cosmetic: a deal
+         * saved with a stage from another pipeline has `applyStageDefaults` take that stage's
+         * Probability, ForecastCategoryTypeID and DealStatusTypeID, so the forecast numbers come from
+         * a pipeline the deal does not belong to. A save refused in error is retried; a forecast
+         * quietly rewritten from the wrong pipeline is found a quarter later, if at all.
+         *
+         * The cost is bounded by the same early return the check uses: it only runs when the save
+         * MOVES the stage or the pipeline, so an ordinary edit to a closed or legacy deal cannot be
+         * refused by a lookup that failed. And the message names the lookup rather than the deal, so
+         * a transient failure reads as a transient failure instead of as "your stage is wrong".
+         */
         let stageRefusal: string | null;
         try {
             stageRefusal = await this.stageBelongsToPipelineRefusal();
