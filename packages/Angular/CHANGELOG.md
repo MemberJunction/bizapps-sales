@@ -1,5 +1,11 @@
 # @mj-biz-apps/sales-ng
 
+## 6.9.1
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.9.1
+
 ## 6.9.0
 
 ### Patch Changes

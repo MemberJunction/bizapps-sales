@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-actions
 
+## 6.9.1
+
+### Patch Changes
+
+- Updated dependencies [ec5d62b]
+  - @mj-biz-apps/sales-core-entities-server@6.9.1
+
 ## 6.9.0
 
 ### Patch Changes
