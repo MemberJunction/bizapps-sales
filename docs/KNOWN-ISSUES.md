@@ -992,7 +992,14 @@ It prints the matrix above and cleans up after itself.
 
 ---
 
-## 🔴 KI-1 — `AllowMultipleSubtypes` is `false` on common's `Person` and `Organization`
+## 🟢 KI-1 — RESOLVED: `AllowMultipleSubtypes` is now `1` on common's `Person` and `Organization`
+
+**Resolved upstream in bizapps-common 5.33.** Its migration
+`V202608061617__v5.33.x__Deprecate_Person_LinkedUserID.sql` sets the flag to `1` on both entities, so they
+are overlapping parents. The `sales-isa` integration bundle asserts the flag at the top of every check and
+tests the overlapping contract against a real database; its IS9 attaches another app's subtype to the same
+Person when the host has one. What follows is the entry as written before the fix, kept for the history
+and for the query to check a host.
 
 **This is fine today and becomes a silent data-corruption bug the moment a second app extends either
 entity. It cannot be fixed in this repository.**

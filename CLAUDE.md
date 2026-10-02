@@ -31,17 +31,16 @@ where `docs/DECISIONS.md` records a ruling that supersedes it.
   from a clean DB. `pnpm run lint:distribution` checks only that shipped SQL uses placeholders
   `mj app install` can resolve — it is not a metadata↔seed currency gate.
 
-> ## ⚠️ KNOWN ISSUE — read before touching the IsA extensions
+> ## ✅ RESOLVED UPSTREAM — the IsA extensions sit on OVERLAPPING parents
 >
-> **`AllowMultipleSubtypes` is `false` on common's `Person` and `Organization`.** MJ's IsA defaults to
-> *disjoint* — one child type per parent. Sales is currently the **first and only** app extending either,
-> so it chains correctly **today** and `SalesAccount` / `SalesContact` are verified working.
+> **`AllowMultipleSubtypes` is `1` on common's `Person` and `Organization`**, set by bizapps-common's 5.33
+> migration (`V202608061617`). A Person can be a sales contact *and* another app's subtype at once, so a
+> loaded Person lists its subtypes (`ISAChildren`) rather than linking one, and deleting a `SalesContact`
+> leaves the Person while another subtype still holds it.
 >
-> **The moment a second app (ATS, certification) extends `Person` with the flag still false, that app
-> silently mis-chains at runtime** — no error, no failed migration, just wrong records.
->
-> The fix belongs in **`bizapps-common`**, not here (`docs/DECISIONS.md` D1). Full detail, including the
-> query to check it, is in **`docs/KNOWN-ISSUES.md` KI-1**.
+> The `sales-isa` integration bundle asserts the flag at the top of every check and tests that contract
+> against a real database. A host on an older bizapps-common still has `0` and fails the bundle with that
+> reason. The history and the query to check a host are in **`docs/KNOWN-ISSUES.md` KI-1**.
 
 ## Repository Structure
 
@@ -632,8 +631,8 @@ published. Sales is three symlink-hops deep at that point; read `.mj-links.json`
 on a decorator that is perfectly correct.
 
 ## Known upstream dependencies
-- **`AllowMultipleSubtypes = true` on common's Person and Organization** — see the ⚠️ block at the top of
-  this file and `docs/KNOWN-ISSUES.md` KI-1. Fix belongs in `bizapps-common`; **do not edit it from here**.
+- **`AllowMultipleSubtypes = true` on common's Person and Organization** — shipped in bizapps-common 5.33
+  (`V202608061617`) and asserted by `sales-isa`; see the block at the top of this file and KI-1.
 - **From orders:** `Subscription.BillingMode` (`Self | External`) and the customer×product×time
   pricing-resolver slot. Neither exists yet; contracts' C0 is the orders PR that adds them. **This is the
   critical path for S2** — nothing in the pricing bridge can land until it does.

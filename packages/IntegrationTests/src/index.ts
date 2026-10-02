@@ -29,6 +29,11 @@
  *                        deal held on the way OUT — the provenance a board drag owes (D-BD2). Its writer
  *                        shares one transaction with the stage-order writer and the deal counter; see
  *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters
+ *   sales-isa            MemberJunction's IS-A contract through SalesContact IsA Person and SalesAccount
+ *                        IsA Organization, against a real database (MJ itself proves it only with mocks).
+ *                        Needs bizapps-common only, not orders. IS7 runs OUTSIDE a rolled-back
+ *                        transaction on purpose, and IS9 skips with a warning where nothing else extends
+ *                        People — see the file header for both
  *
  * ⚠️ EVERY BUNDLE REQUIRES bizapps-orders EXCEPT `close-won-contract`, whose single check needs nothing
  * at all — it is asserting an absence. save-deal and close-deal require it too. A deal cannot be
@@ -82,6 +87,7 @@ import './checks/close-won-tasks.checks.js';
 import './checks/activities.checks.js';
 import './checks/forecast.checks.js';
 import './checks/term-start.checks.js';
+import './checks/sales-isa.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
@@ -93,4 +99,5 @@ export { BoardMoveChecks } from './checks/board-move.checks.js';
 export { CloseWonTasksChecks } from './checks/close-won-tasks.checks.js';
 export { ActivitiesChecks } from './checks/activities.checks.js';
 export { ForecastChecks } from './checks/forecast.checks.js';
+export { SalesIsaChecks } from './checks/sales-isa.checks.js';
 export * from './fixture.js';
