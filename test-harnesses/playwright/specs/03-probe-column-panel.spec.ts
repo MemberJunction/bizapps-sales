@@ -7,7 +7,7 @@
  * `action-btn show-btn` buttons labelled "Show column" plus Hide/Move-up/Move-down. What is NOT known is
  * how a "Show column" button is associated with its COLUMN NAME — that is what this dumps.
  */
-import { test } from '@playwright/test';
+import { test } from '../lib/test';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { AUTH_DIR } from '../lib/env';

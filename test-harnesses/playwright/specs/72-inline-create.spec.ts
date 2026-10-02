@@ -22,7 +22,8 @@
  * Both counted `<option>`s in the workspace's select; a type-ahead has no standing option list. The
  * no-duplicate intent is kept as a row count in the database.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Page } from '@playwright/test';
 
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';

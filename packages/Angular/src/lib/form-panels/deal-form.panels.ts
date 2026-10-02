@@ -1350,8 +1350,15 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                          letting you edit, and FieldIsEditable in the Explorer harness reads exactly
                          that. A dedicated control that omits it reports frozen while perfectly
                          editable, which turns a lock assertion into one that cannot fail. -->
+                    <!-- The required-empty modifier, for the same reason as the editing one:
+                         Deal.PipelineID is NOT NULL, and base-forms STYLES that modifier on the
+                         input, so a dedicated control that omits it shows a required field as
+                         though it were optional and the rep finds out at save time. The condition
+                         mirrors MJ's own IsRequiredEmpty getter: required, editing, and no value.
+                         No backticks in here -- this whole template is a backtick string. -->
                     <div class="mj-forms-field"
-                         [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineID')">
+                         [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineID')"
+                         [class.mj-forms-field--required-empty]="EditMode && FieldEditable('PipelineID') && !Record.PipelineID">
                         <label class="mj-forms-field-label">Pipeline</label>
                         @if (EditMode && FieldEditable('PipelineID')) {
                             <select [ngModel]="Record.PipelineID" data-testid="deal-pipeline"

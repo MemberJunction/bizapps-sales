@@ -30,12 +30,13 @@
  *   4. The record reads back, fresh, with foreign keys resolved to NAMES.
  *   5. The console stays clean throughout.
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { CloseDb, OrderLinesForDeal, QueryAll, QueryOne } from '../lib/db';
 import { AddLines, ComposeDeal, PurgeDeal, ReopenRecord } from '../lib/deal-flow';
-import { DealForm, EditDeal, Field, OpenSection, PickLookup, SaveDeal, SetText } from '../lib/deal-form';
+import { DealForm, EditDeal, Field, OpenSection, PickLookup, RevealInForm, SaveDeal, SetText } from '../lib/deal-form';
 import {
     captureConsoleErrors,
     closeRestoredRecordTabs,
@@ -47,7 +48,14 @@ import {
 
 /** Unique per run, so a re-run never collides with a leftover and cleanup can find its own rows. */
 const RUN_TAG = `PW-${Date.now().toString(36).toUpperCase()}`;
-const DEAL_NAME = `Deal form smoke ${RUN_TAG}`;
+/**
+ * THE PREFIX GOES FIRST. Everything that sweeps or counts this host's deals uses an ANCHORED
+ * `LIKE 'PW-%'`, so a tag in the middle of a name is invisible to all of it: cleanup.mjs records
+ * exactly this leak ("an anchored LIKE 'PW-%' matched none of them. That is why the host reached 37
+ * deals"), and AssertBaseline counts such a deal as SEEDED, which fails the baseline for whichever
+ * spec happens to be running beside this one.
+ */
+const DEAL_NAME = `${RUN_TAG} deal form smoke`;
 
 const TERM_MONTHS = 24;
 const EXECUTION_DATE = '2026-09-15';
@@ -112,7 +120,17 @@ async function asNumber(cell: Locator): Promise<number> {
 
 test.describe('deal form — Phase 1 definition of done', () => {
     test('compose a complete deal through the Deal form, and read it back', async ({ page }) => {
-        test.setTimeout(300_000);
+        /**
+         * RAISED TO THE PROJECT'S OWN BUDGET, because the work is real and the spec was running out
+         * of road rather than hanging. It composes a deal through the form, adds two priced lines,
+         * saves, reopens, and reads everything back -- and each reopen now walks MJ's chrome rail to
+         * reveal the section it needs, which the old one-long-stack form did not require.
+         *
+         * Evidence it is progress and not a hang: at 300s it died inside "the record reopens fresh,
+         * with FKs resolved to names", a step PAST the row count it used to fail on. 480_000 is what
+         * playwright.config.ts already allows the crud project; this no longer undercuts it.
+         */
+        test.setTimeout(480_000);
         const sink = captureConsoleErrors(page);
 
         let dealID = '';
@@ -292,6 +310,14 @@ test.describe('deal form — Phase 1 definition of done', () => {
             );
 
             await OpenSection(page, 'lines');
+        // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+        // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+        // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+        await RevealInForm(page, lineRows(page).first());
+            // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+            // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+            // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+            await RevealInForm(page, lineRows(page).first());
             await expect(lineRows(page), 'both lines must read back on the reopened record').toHaveCount(2, {
                 timeout: 30_000,
             });
