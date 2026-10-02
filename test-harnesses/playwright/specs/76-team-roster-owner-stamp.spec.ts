@@ -107,8 +107,19 @@ test.describe('golive#291 — a team row saved on its own re-derives the deal ow
          * than like nothing has rendered. Waiting on a field is the readiness signal, the same one
          * `ReopenRecord` uses for the Deal form.
          */
+        /**
+         * `:visible`, NOT `.first()`. MJ's form chrome shows one section at a time, so the FIRST
+         * `.mj-forms-field` in the DOM is often one the rail is not showing — present, rendered, and
+         * `visibility: hidden`. Waiting on it reports "the team member record must open as a form"
+         * about a form that opened perfectly well, after a 60s timeout:
+         *
+         *     98 x locator resolved to <div class="mj-forms-field mj-forms-field--editing ...">
+         *        - unexpected value "hidden"
+         *
+         * The readiness signal wanted here is "a field is on screen", which is what this asks.
+         */
         await expect(
-            page.locator('.mj-forms-field').first(),
+            page.locator('.mj-forms-field:visible').first(),
             'the team member record must open as a form',
         ).toBeVisible({ timeout: 60_000 });
 
