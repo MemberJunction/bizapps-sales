@@ -62,6 +62,8 @@ function deal(opts: { persisted: string; dirty: string[]; roster: boolean }): Ha
         _declaredTransition: null,
         _reopenInProgress: false,
         _orderStatusWarnings: [],
+        _ownerStampWarnings: [],
+        Team: { Load: async () => true, IsLoaded: false, Count: 0, Items: [] },
         _orderJustProvisioned: false,
         _lockedAtSave: false,
         _lastStageEventID: null,
