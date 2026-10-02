@@ -169,6 +169,19 @@ interface StageOrderStatusRow {
 }
 
 /**
+ * What the stage lookup selects to check the stage against the deal's pipeline.
+ *
+ * `Pipeline` is the stage view's virtual name column, taken in the same read as the id so the refusal
+ * can say which pipeline the stage actually belongs to. Naming it costs nothing here and saves the
+ * reader a lookup they would otherwise have to do by hand.
+ */
+interface StagePipelineRow {
+    Name: string | null;
+    PipelineID: string | null;
+    Pipeline: string | null;
+}
+
+/**
  * What entering a stage asks of the deal's order — resolved before the transaction, applied inside it.
  *
  * A plan exists ONLY when there is something to do: the stage actually changed, and the new stage names
@@ -439,6 +452,39 @@ export class DealEntityServer extends DealEntity {
         const ownerRefusal = this.ownerStampEditRefusal();
         if (ownerRefusal) {
             return this.refuseSave(ownerRefusal);
+        }
+
+        /**
+         * Before the stamps, for the reason the owner refusal is: a refused save should cost nothing.
+         * This one reads, so it is not free -- but one lookup is still cheaper than a transaction that
+         * is going to be rolled back, and cheaper than the wrong forecast numbers it prevents.
+         */
+        /**
+         * FAIL CLOSED, AND SAY WHICH FAILURE IT WAS.
+         *
+         * The check reads, so it can fail for reasons that have nothing to do with the deal — a
+         * dropped connection, a provider error. This REFUSES the save when that happens, rather than
+         * letting it through on the grounds that nothing was proven wrong.
+         *
+         * That is the right way round here because the thing being guarded is not cosmetic: a deal
+         * saved with a stage from another pipeline has `applyStageDefaults` take that stage's
+         * Probability, ForecastCategoryTypeID and DealStatusTypeID, so the forecast numbers come from
+         * a pipeline the deal does not belong to. A save refused in error is retried; a forecast
+         * quietly rewritten from the wrong pipeline is found a quarter later, if at all.
+         *
+         * The cost is bounded by the same early return the check uses: it only runs when the save
+         * MOVES the stage or the pipeline, so an ordinary edit to a closed or legacy deal cannot be
+         * refused by a lookup that failed. And the message names the lookup rather than the deal, so
+         * a transient failure reads as a transient failure instead of as "your stage is wrong".
+         */
+        let stageRefusal: string | null;
+        try {
+            stageRefusal = await this.stageBelongsToPipelineRefusal();
+        } catch (err) {
+            return this.refuseSave(`could not check the stage against the pipeline: ${err}`);
+        }
+        if (stageRefusal) {
+            return this.refuseSave(stageRefusal);
         }
 
         try {
@@ -2416,6 +2462,88 @@ export class DealEntityServer extends DealEntity {
             );
         }
         this.CompanyID = pipeline.CompanyID;
+    }
+
+    /**
+     * Refuses a deal whose stage belongs to a different pipeline (bc-aidp-next-golive#291).
+     *
+     * ── WHY REFUSE, WHEN THE COMPANY STAMP ABOVE OVERWRITES ─────────────────────────────────────
+     *
+     * `stampCompanyFromPipeline` can correct a wrong company because there is exactly one right
+     * answer and it is derivable: the pipeline owns a company. A wrong STAGE has no such answer.
+     * Moving the deal to the pipeline's first stage would be inventing a position in a sales process
+     * nobody chose, and keeping the stage while changing the pipeline would be the same invention
+     * from the other end. So this one asks the caller instead.
+     *
+     * ── IT DID NOT SIT INERT ────────────────────────────────────────────────────────────────────
+     *
+     * A B2B deal saved with a D2C stage was accepted, and `applyStageDefaults` then took that stage's
+     * `Probability`, `ForecastCategoryTypeID` and `DealStatusTypeID`. The mismatch rewrote the deal's
+     * forecast numbers from a pipeline it does not belong to, which is why this is a refusal on the
+     * write path rather than a lint on the form: the form is one of the callers, and imports and
+     * Actions reach the same code without passing through it.
+     *
+     * A CHECK constraint cannot express this — it cannot reach across the foreign key to compare the
+     * stage's pipeline with the deal's — which is the same reason the company stamp lives here.
+     *
+     * ── KEYED ON EITHER HALF MOVING ─────────────────────────────────────────────────────────────
+     *
+     * An existing deal whose stage and pipeline already disagree is left alone unless this save
+     * touches one of them, matching how every other rule in this class is keyed. Converted deals sit
+     * in legacy pipelines (#257) and some of them may already be inconsistent; refusing a rename or a
+     * note on one of those would be a rule nobody asked for, arriving nowhere near the edit that
+     * triggered it. A save that MOVES either half is a caller stating the pair, and that is checked.
+     */
+    private async stageBelongsToPipelineRefusal(): Promise<string | null> {
+        const stageID = this.PipelineStageID;
+        const pipelineID = this.PipelineID;
+        if (!stageID || !pipelineID) {
+            // No pipeline is `Validate()`'s complaint, and no stage is a legitimate state — a deal can
+            // be created before anyone positions it. Neither is this rule's business.
+            return null;
+        }
+
+        const stageDirty = this.GetFieldByName('PipelineStageID')?.Dirty === true;
+        const pipelineDirty = this.GetFieldByName('PipelineID')?.Dirty === true;
+        if (this.IsSaved && !stageDirty && !pipelineDirty) {
+            return null;
+        }
+
+        const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await viewProvider.RunView<StagePipelineRow>(
+            {
+                EntityName: STAGE_ENTITY,
+                ExtraFilter: `ID = '${stageID}'`,
+                ResultType: 'simple',
+                Fields: ['Name', 'PipelineID', 'Pipeline'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            throw new Error(`DealEntityServer: could not read the stage's pipeline: ${result.ErrorMessage}`);
+        }
+
+        const stage = (result.Results ?? [])[0];
+        if (!stage) {
+            return `the stage on this deal could not be read, so it cannot be checked against the pipeline.`;
+        }
+
+        /**
+         * LOWERCASED BEFORE COMPARING, like every other id comparison in this class -- SQL Server hands
+         * back uppercase GUIDs and client code generates lowercase. The stage-event writer carried this
+         * bug once and recorded self-transitions because of it; the comment above `stageMoved` tells
+         * that story.
+         */
+        if (String(stage.PipelineID ?? '').toLowerCase() === String(pipelineID).toLowerCase()) {
+            return null;
+        }
+
+        const stageName = stage.Name ?? stageID;
+        const owner = stage.Pipeline ?? 'another pipeline';
+        return (
+            `the stage "${stageName}" belongs to ${owner}, not to this deal's pipeline. `
+            + `Pick a stage from the deal's own pipeline, or change the pipeline first.`
+        );
     }
 
     /* ── Owner stamp (§5.1) ─────────────────────────────────────────────────── */

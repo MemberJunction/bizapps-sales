@@ -15,7 +15,10 @@ import {
     OpenNewDeal,
     OpenSection,
     PickLookup,
+    RevealInForm,
+    PipelineByName,
     SaveDeal,
+    SetPipelineByID,
     SetStatusByID,
     SetText,
 } from './deal-form';
@@ -37,7 +40,10 @@ export interface ComposedDeal {
 export async function ComposeDeal(page: Page, name: string, pipeline?: string): Promise<ComposedDeal> {
     await OpenNewDeal(page);
     await SetText(page, 'Name', name);
-    await PickLookup(page, 'PipelineID', pipeline);
+    // Pipeline is a dedicated `<select>` since golive#291, so `PickLookup` -- which waits on
+    // `.mj-fk-search` -- cannot reach it. Resolved by NAME through the database so a caller that asks
+    // for a specific pipeline still gets that one, and the id is what the option is matched on.
+    await SetPipelineByID(page, (await PipelineByName(pipeline)).ID);
     await PickLookup(page, 'AccountID');
 
     /**
@@ -147,8 +153,31 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
 export async function AddLines(page: Page, orderID: string, count: number): Promise<number> {
     await OpenSection(page, 'lines');
 
+    /**
+     * ── ONLY PRODUCTS THE ORDER CAN PRICE ───────────────────────────────────────────────────────
+     *
+     * A product with no price rule cannot be saved onto a line: the server refuses with "cannot be
+     * priced: no price rule was found for this product, and no UnitPrice was supplied", and the
+     * editor stays open to show it. The failure then reads "the line editor must close once the line
+     * saves", which says nothing about pricing and looks like a stuck editor.
+     *
+     * The picker offers every active product, most of which have no rule -- 6 of 28 here -- and the
+     * first alphabetically is one of them. Read the priceable set from the database rather than
+     * trusting the order of a dropdown.
+     */
+    const priceable = (
+        await QueryAll<{ Name: string }>(
+            `SELECT DISTINCT p.Name
+               FROM __mj_BizAppsOrders.Product p
+               JOIN __mj_BizAppsOrders.ProductPrice pp ON pp.ProductID = p.ID`,
+        )
+    ).map((r) => String(r.Name));
+    expect(priceable.length, 'the host needs at least one product carrying a price rule').toBeGreaterThan(0);
+
     for (let i = 0; i < count; i += 1) {
         const add = ByTestId(page, 'lines-add');
+        // Lines live in their own form section; the rail may be showing a different one.
+        await RevealInForm(page, add);
         await expect(add, 'a saved, open deal must offer Add a product').toBeVisible({ timeout: 30_000 });
         await add.click();
 
@@ -166,7 +195,16 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
                     'line with no product would make this spec pass while testing nothing',
             );
         }
-        await product.selectOption({ label: labels[Math.min(i, labels.length - 1)] });
+        // An option reads "Name (SKU) — Company", so match on the name the catalogue gave us.
+        const usable = labels.filter((l) => priceable.some((name) => l.startsWith(name)));
+        if (usable.length === 0) {
+            throw new Error(
+                `the picker offered ${labels.length} product(s) and none of them carries a price rule, so `
+                    + 'every line would be refused for pricing rather than for anything this spec is about. '
+                    + `Priceable products here: ${priceable.join(', ') || '(none)'}`,
+            );
+        }
+        await product.selectOption({ label: usable[Math.min(i, usable.length - 1)] });
 
         /**
          * Quantity is the rep's to state and is not seeded, so a line without it cannot save — Save
@@ -204,6 +242,8 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
 async function openClosePanel(page: Page): Promise<void> {
     await OpenSection(page, 'close');
     const open = ByTestId(page, 'close-open');
+    // The close panel is its own form section; the rail may be showing a different one.
+    await RevealInForm(page, open);
     await expect(open, 'an open, saved deal must offer Close this deal').toBeVisible({ timeout: 30_000 });
     await open.click();
     await expect(ByTestId(page, 'close-panel'), 'the close panel must open').toBeVisible({ timeout: 20_000 });
@@ -221,8 +261,15 @@ async function closingStatus(flag: 'IsWon' | 'IsLost'): Promise<string> {
 
 /** Checks the close-target radio for a status ID, matched case-insensitively. */
 async function chooseTarget(page: Page, statusID: string): Promise<void> {
+    /**
+     * Read from the ATTRIBUTE, not the property. `[value]` on a radio with `ngModel` binds to
+     * Angular's value accessor rather than to the DOM, so `input.value` reads "on" for every option
+     * and the id is nowhere in the property. `data-status-id` carries it.
+     */
     const radios = ByTestId(page, 'close-panel').locator('[data-testid="close-target"]');
-    const values = await radios.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+    const values = await radios.evaluateAll((els) =>
+        els.map((e) => e.getAttribute('data-status-id') ?? (e as HTMLInputElement).value),
+    );
     const index = values.findIndex((v) => v.toLowerCase() === statusID.toLowerCase());
     if (index < 0) {
         throw new Error(`the close panel offers no target for status ${statusID}. It offers: ${values.join(', ') || '(none)'}`);
