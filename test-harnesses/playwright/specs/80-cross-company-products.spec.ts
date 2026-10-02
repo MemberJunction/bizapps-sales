@@ -42,7 +42,7 @@ import { expect, test } from '../lib/test';
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AssertBaseline, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
-import { ByTestId, OpenSection } from '../lib/deal-form';
+import { ByTestId, OpenSection, RevealInForm } from '../lib/deal-form';
 
 const RUN = `PW-X29-${Date.now().toString(36)}`;
 let dealID = '';
@@ -88,17 +88,30 @@ test.describe('#29 — products from another company are sellable on a deal', ()
               -- onward. The spec would then report a seed problem against a picker that works.
             AND (AvailableFrom IS NULL OR AvailableFrom <= CAST(SYSUTCDATETIME() AS DATE))
               AND (AvailableTo   IS NULL OR AvailableTo   >= CAST(SYSUTCDATETIME() AS DATE))
+              -- PRICEABLE, or the order refuses the line and this spec fails on seed data rather
+              -- than on #29. Measured on this host: 25 active products, only 6 with a price rule --
+              -- picking by name alone landed on one of the 19 that have none, and the editor said
+              -- so plainly ("cannot be priced: no price rule was found for this product").
+              AND EXISTS (
+                    SELECT 1 FROM __mj_BizAppsOrders.ProductPrice pp
+                     WHERE pp.ProductID = __mj_BizAppsOrders.Product.ID
+                  )
             ORDER BY Name
         `);
         expect(
             foreign.length,
-            `the seed must contain an ACTIVE product owned by a company other than ${ownCompany}, ` +
-                'or this spec proves nothing about #29',
+            `the seed must contain an ACTIVE, PRICEABLE product owned by a company other than ` +
+                `${ownCompany}, or this spec proves nothing about #29. Both halves matter: a foreign ` +
+                'product with no price rule cannot be saved onto the order at all.',
         ).toBeGreaterThan(0);
         const target = foreign[0];
 
         await OpenSection(page, 'lines');
         const add = ByTestId(page, 'lines-add');
+        // Lines live in their own form section and the rail may be showing a different one.
+        // OpenSection resolves the panel but does not move the rail; this does. Same call deal-flow's
+        // AddLines makes before the identical assertion, and a no-op when the button is already up.
+        await RevealInForm(page, add);
         await expect(add, 'a saved, open deal must offer Add a product').toBeVisible({ timeout: 30_000 });
         await add.click();
 

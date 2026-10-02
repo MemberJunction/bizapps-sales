@@ -478,6 +478,29 @@ export async function FirstPipeline(): Promise<{ ID: string; Name: string }> {
     return { ID: String(row!.ID), Name: String(row!.Name) };
 }
 
+/**
+ * The first stage of `pipelineID` that does NOT close the deal.
+ *
+ * Needed because golive#291 clears a stage when the pipeline changes, so a composed deal has none
+ * unless one is chosen on purpose. Non-closing because a deal parked on a closing stage is locked,
+ * and every caller here wants a deal it can still move.
+ */
+export async function FirstOpenStageOf(pipelineID: string): Promise<{ ID: string; Name: string }> {
+    const row = await QueryOne<{ ID: string; Name: string }>(`
+        SELECT TOP 1 CAST(ps.ID AS nvarchar(50)) AS ID, ps.Name
+          FROM __mj_BizAppsSales.PipelineStage ps
+          LEFT JOIN __mj_BizAppsSales.DealStatusType st ON st.ID = ps.DealStatusTypeID
+         WHERE ps.PipelineID = '${pipelineID}'
+           AND ISNULL(st.LocksDeal, 0) = 0
+         ORDER BY ps.DisplayOrder, ps.Name`);
+    expect(
+        row?.ID,
+        `pipeline ${pipelineID} has no stage that leaves the deal open — a composed deal would be ` +
+            'unmovable, and every drag or stage spec would fail on its own precondition',
+    ).toBeTruthy();
+    return { ID: String(row!.ID), Name: String(row!.Name) };
+}
+
 /** Whether the form is in edit mode — MJ marks every editable field while it is. */
 export async function InEditMode(page: Page): Promise<boolean> {
     return (await DealForm(page).locator('.mj-forms-field--editing').count()) > 0;

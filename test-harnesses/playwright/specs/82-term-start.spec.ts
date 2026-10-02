@@ -35,7 +35,7 @@ import type { Locator, Page } from '@playwright/test';
 
 import { QueryAll, QueryOne } from '../lib/db';
 import { AssertBaseline, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
-import { ByTestId, OpenSection } from '../lib/deal-form';
+import { ByTestId, OpenSection, RevealInForm } from '../lib/deal-form';
 
 const RUN = `PW-TERMSTART-${Date.now().toString(36)}`;
 let dealID = '';
@@ -125,6 +125,10 @@ test.describe('a subscription line states its term start', () => {
 
         await OpenSection(page, 'lines');
         const add = ByTestId(page, 'lines-add');
+        // Lines live in their own form section and the rail may be showing a different one.
+        // OpenSection resolves the panel but does not move the rail; this does. Same call deal-flow's
+        // AddLines makes before the identical assertion, and a no-op when the button is already up.
+        await RevealInForm(page, add);
         await expect(add, 'a saved, open deal must offer Add a product').toBeVisible({ timeout: 30_000 });
         await add.click();
         await expect(lineEditor(page), 'Add a product must open the line editor').toBeVisible({ timeout: 20_000 });
