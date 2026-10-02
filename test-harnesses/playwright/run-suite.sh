@@ -16,9 +16,30 @@
 # So the speedup is taken where it is safe and declined where it is not. Roughly 10 + 3 minutes
 # against 34, with no invented failures.
 #
-# The split is a LIST, not a rule, and it is only as good as its last measurement. Re-run the whole
-# suite at PW_WORKERS=4 occasionally and compare against a one-worker run: a spec that fails only in
-# the parallel phase belongs in SERIAL_SPECS, and one that has been fixed to own its data can leave.
+# ── READ THIS BEFORE TRUSTING THE SPLIT ────────────────────────────────────────────────────────────
+#
+# A SECOND MEASUREMENT DISAGREED WITH THE FIRST, and the first is what this list was built from:
+#
+#     run 1   phase A 16 failed / 8 passed    phase B 3 passed
+#     run 2   phase A 14 failed / 10 passed   phase B 1 FAILED  (20-demo-tour)
+#
+# and two specs that pass alone -- 80-cross-company-products and 82-term-start -- failed in phase A
+# on `the host must be back to its seven seeded deals`.
+#
+# That assertion is scoped to exclude harness-prefixed rows, and the baseline is exactly right at
+# rest (7 / 251220 / 5, verified). The failures are TRANSIENT: concurrent specs mutate SEEDED deals,
+# and AssertBaseline's inner join on DealStatusType drops any deal whose status is momentarily
+# absent, taking the count below seven. Excluding harness rows fixed rows being COUNTED; it cannot
+# fix seeded rows being CHANGED underneath another spec.
+#
+# So the split is NOT validated, and the earlier claim of "a 2.7x speedup with no invented failures"
+# was drawn from a single run. One worker remains the default in playwright.config.ts, and
+# PW_WORKERS stays an EXPERIMENT rather than a supported mode until either the specs stop sharing
+# seeded deals or the serial list grows to cover every spec that touches them.
+#
+# The list is a MEASUREMENT, not a rule, and one measurement is not enough: re-run the whole suite
+# at PW_WORKERS=4 SEVERAL times and compare against one worker. A spec that fails only in the
+# parallel phase belongs in SERIAL_SPECS; one that has been fixed to own its data can leave.
 #
 #   usage:  bash run-suite.sh [workers]        (default 4)
 #
