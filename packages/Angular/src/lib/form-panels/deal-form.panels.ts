@@ -3086,6 +3086,60 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealTeamMember;
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('internal-team', event.totalRowCount);
+        void this.refreshOwnerIfTheRosterMovedIt();
+    }
+
+    /**
+     * Bring the page's owner up to date after the grid changed the roster.
+     *
+     * Saving an Owner / AE row re-derives `Deal.OwnerEmployeeID` on the SERVER
+     * (`DealTeamMemberEntityServer`). The open page knew nothing about it, so the hero kept saying
+     * "No owner assigned." while the database disagreed — and before the save path was changed to
+     * override rather than refuse, the next edit to any field sent that stale value back and lost the
+     * user's work to a refusal. The override fixed the damage; this fixes the staleness.
+     *
+     * ── THREE GUARDS, AND EACH ONE EARNS ITS PLACE ──────────────────────────────────────────────
+     *
+     * NEVER OVER A DIRTY RECORD. `Load()` discards unsaved edits. A user who typed a Next Step and
+     * then touched the team grid must not lose it to a refresh they did not ask for — so a dirty
+     * record is left exactly alone, and the override on the server already makes its save safe.
+     *
+     * ONLY WHEN THE STORED VALUE ACTUALLY DIFFERS. This also makes it TERMINATE: `AfterDataLoad`
+     * fires on every grid load including the first, and a `Load()` that re-renders the panel can load
+     * the grid again. Reloading only on a real difference means the second pass matches and stops.
+     * One narrow field read is the price, and it is paid only while the section is open.
+     *
+     * READ, NOT ASSUMED. The owner is derived from the roster by rules this panel does not own
+     * (the Owner / AE role, oldest-row-wins, the single-holder refusal). Re-deriving it here would be
+     * a second implementation that agrees with the first until it does not; asking the database for
+     * the answer it already computed cannot drift.
+     */
+    private async refreshOwnerIfTheRosterMovedIt(): Promise<void> {
+        const record = this.Record;
+        if (!record?.IsSaved || record.Dirty) {
+            return;
+        }
+        const id = record.ID;
+        if (!id) {
+            return;
+        }
+
+        const read = await new RunView().RunView<{ OwnerEmployeeID: string | null }>({
+            EntityName: MJS_ENTITIES.Deal,
+            ExtraFilter: `ID = '${id}'`,
+            ResultType: 'simple',
+            Fields: ['OwnerEmployeeID'],
+        });
+        if (!read.Success) {
+            return;   // a failed read is not evidence the owner moved; leave the page as it is
+        }
+
+        const stored = String((read.Results ?? [])[0]?.OwnerEmployeeID ?? '').toLowerCase();
+        const shown = String(record.OwnerEmployeeID ?? '').toLowerCase();
+        if (stored === shown) {
+            return;
+        }
+        await record.Load(id);
     }
 }
 
