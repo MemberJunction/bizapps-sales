@@ -60,6 +60,29 @@ async function expectEditable(page: Page, editable: boolean, why: string): Promi
  * the tab is the point — navigating to the record route would reload the page and rebuild every form,
  * which is not a switch.
  */
+/**
+ * KNOWN FAILING, and the reason is recorded here rather than guessed at again.
+ *
+ * This spec switches between two open deals, so it needs TWO record tabs alive at once. It opens
+ * both with ReopenRecord, which does a full page.goto -- and the comment above already says why
+ * that is wrong: a reload rebuilds every form, which is not a switch. It passed historically
+ * because the PERSISTED workspace restored the first tab across the reload.
+ *
+ * The suite now runs an ephemeral workspace (lib/test.ts), so nothing restores it. Measured, two
+ * deals opened by url in one context:
+ *
+ *     ephemeral ON    1 deal form, 1 .lm_tab   -- only the current deal
+ *     ephemeral OFF   1 deal form, 57 .lm_tab  -- the host workspace's tabs, not these two
+ *
+ * So the premise cannot hold under the flag, and without the flag it would be matching tabs against
+ * whatever the host workspace happens to contain.
+ *
+ * WHAT WOULD FIX IT: open both deals through the roster (a double-click goes through
+ * OpenEntityRecord and adds a tab beside the open one) and return to the roster between them
+ * WITHOUT a reload. An attempt at that helper is not in the tree: it could not locate the roster row
+ * reliably even on a fresh roster that demonstrably lists all seven deals, and an unproven helper is
+ * worse than a documented gap.
+ */
 async function selectRecordTab(page: Page, name: string): Promise<void> {
     const tab = page.locator('mj-tab-container .lm_tab').filter({ hasText: name.slice(0, 18) }).first();
     await expect(tab, `an Explorer tab for "${name}" must be open`).toBeVisible({ timeout: 30_000 });
