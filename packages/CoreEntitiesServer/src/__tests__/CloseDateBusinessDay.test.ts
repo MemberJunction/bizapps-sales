@@ -262,6 +262,21 @@ describe('Sales.CloseDeal configures the zone, then stamps and dates its tasks f
         const h = await runWonClose();
         expect(h.taskInput?.DueAt?.toISOString()).toBe('2026-10-05T00:00:00.000Z');
     });
+
+    /**
+     * THE SAME VALUE A HAND-MADE TASK DUE THAT DAY HOLDS. bizapps-tasks' edit panel binds DueAt to an
+     * `<input type="date">` and saves the picked `YYYY-MM-DD` through `entity.Set('DueAt', ...)`, which
+     * MJ turns into `new Date('2026-10-05')` — UTC midnight — and reads back with
+     * `toISOString().split('T')[0]`. A close-won task stored any other way (end of the business day, say)
+     * would show the NEXT day in that panel and move there on an untouched save. Pinned here so it is
+     * not "fixed" in sales alone; how the tasks app displays and ages a due date is its own question.
+     */
+    it("stores DueAt exactly as the tasks app's own date picker stores that day", async () => {
+        const h = await runWonClose();
+        const pickedInTasksApp = new Date('2026-10-05');
+        expect(h.taskInput?.DueAt?.getTime()).toBe(pickedInTasksApp.getTime());
+        expect(h.taskInput?.DueAt?.toISOString().split('T')[0]).toBe('2026-10-05');
+    });
 });
 
 /**
