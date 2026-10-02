@@ -634,10 +634,37 @@ export async function setField(page: Page, label: string, value: string): Promis
 
 /** Read a field's current value. */
 export async function readField(page: Page, label: string): Promise<string> {
-  // MJ's chrome rail shows one section at a time; a field on another one is present and NOT
-  // visible, and formField filters on visible. No-op when it is already on screen.
-  await RevealInForm(page, formField(page, label));
-  const input = formField(page, label).locator('input, textarea').first();
+  /**
+   * READING DOES NOT NEED THE FIELD ON SCREEN, and insisting on it loses answers that are plainly
+   * there. A saved deal's Name lives in the generic field dump, on the `details` panel, which the
+   * Overview panel replaces via replacesSectionKey -- so NO rail item shows it. Measured: exactly
+   * one field labelled Name, inside the deal form, carrying "Beacon Charter Schools — Campus
+   * Seats", with visible:false. The old version revealed what it could, matched nothing through
+   * formField's visible filter, and returned '' -- which reads as "the value did not persist".
+   *
+   * Setting still requires visibility, because typing into a hidden control is not a thing a user
+   * can do. Reading is not an interaction, so it asks the DOM directly.
+   */
+  await RevealInForm(page, formField(page, label)).catch(() => undefined);
+  /**
+   * SCOPED TO THE RECORD ON SCREEN FIRST, then anywhere.
+   *
+   * Dropping formField's visible filter is what lets an off-section value be read at all, but
+   * page-wide `.first()` is the trap this file documents twice: MJ keeps every open tab's form in
+   * the DOM and hides the inactive ones, so an unscoped first match is "a lottery weighted towards
+   * the oldest tab" -- and a value from the WRONG record is worse than an empty string, because it
+   * can make an assertion pass.
+   *
+   * Measured with a Pipeline and a Deal open together: two record containers, but only one field
+   * labelled Name, belonging to the visible Deal. So the single caller is safe today by
+   * circumstance. Two forms of the SAME entity would give two matches and a coin flip, which is
+   * what this prefers away from.
+   */
+  const selector = `.mj-forms-field:has(> label.mj-forms-field-label:text-is("${label}"))`;
+  const inVisibleForm = page.locator('mj-record-form-container:visible').last().locator(selector).first();
+  const anywhere = (await inVisibleForm.count()) > 0 ? inVisibleForm : page.locator(selector).first();
+  if ((await anywhere.count()) === 0) return '';
+  const input = anywhere.locator('input, textarea').first();
   if (await input.count()) return (await input.inputValue().catch(() => '')) || '';
   return (await formField(page, label).locator('.mj-forms-field-control').first().innerText().catch(() => '')).trim();
 }
