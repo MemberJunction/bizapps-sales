@@ -42,6 +42,7 @@ import { RegisterClass } from '@memberjunction/global';
  * exists to catch -- and it would also be wrong twice over. See the refusal below.
  */
 import { IsBooked } from '@mj-biz-apps/orders-entities';
+import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import {
     SalesCloseDealOperation as SalesCloseDealOperationBase,
     SalesReopenDealOperation as SalesReopenDealOperationBase,
@@ -439,6 +440,14 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     WasPreview: true,
                 };
             }
+
+            /**
+             * The business zone is loaded BEFORE the transaction, because `stampClose` asks what day it
+             * is and is synchronous. One cached instance-configuration row; a second call is a no-op,
+             * and a missing or unreadable row falls back to UTC with one warning rather than throwing.
+             * Read outside the transaction so a configuration lookup never holds it open.
+             */
+            await BusinessTimeZoneEngine.Instance.Config(false, user, provider);
 
             // ── 4. Execute: one transaction, all-or-none ──────────────────────────
             await db.BeginTransaction();
@@ -918,7 +927,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
          */
         deal.DeclareTransition('Close', this.routingNote(routing, input.Notes, lossReasonName));
 
-        // Everything stored is UTC — getUTC*, never local-time getters, for anything persisted.
+        // `ClosedAt` is an instant and is stored as one. `ActualCloseDate` below is a calendar day.
         const now = new Date();
         deal.DealStatusTypeID = target.ID;
         // Derived when the caller named no stage -- see closingStageForOutcome. This is what gives a
@@ -935,11 +944,20 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         }
         deal.ClosedAt = now;
         deal.ClosedByUserID = user.ID;
-        // ActualCloseDate is a DATE, not a datetime: truncate at UTC midnight so a deal closed at
-        // 23:00 UTC does not land in tomorrow's period for a reader in another timezone.
-        deal.ActualCloseDate = new Date(
-            Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-        );
+        /**
+         * ActualCloseDate is a DATE: the BUSINESS day the deal closed on, for the deal's company
+         * (bc-aidp-next-golive#168).
+         *
+         * It used to be the UTC day of `now`, which is a different day for every close after 19:00
+         * Central. A deal won on the evening of 30 September was stamped 1 October, so the win counted
+         * in October's bookings and win rate rather than September's. `ClosedAt` above is the instant
+         * and stays one; this is the calendar day, so "what day is it" is the business zone's question.
+         *
+         * `FromCalendarDay` hands the day back as UTC midnight, which is the shape a `DATE` column
+         * round-trips as and the shape every reader of it (UTC parts) expects. The engine was loaded
+         * before the transaction opened; unconfigured, it fails open to UTC — the old behaviour.
+         */
+        deal.ActualCloseDate = FromCalendarDay(BusinessTimeZoneEngine.Instance.Today(deal.CompanyID));
     }
 
     /**
@@ -1074,8 +1092,13 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              * reasoning in full; the point here is that a reader of this method should not conclude
              * these land on the agreement.
              */
-            ExecutionDate: deal.ExecutionDate ? String(deal.ExecutionDate) : null,
-            StartDate: deal.StartDate ? String(deal.StartDate) : null,
+            /**
+             * `YYYY-MM-DD`, read from the `DATE` column's UTC parts. `String(date)` produced the
+             * server's local rendering of UTC midnight ("Tue Sep 29 2026 19:00:00 GMT-0500 ..."), which
+             * names the PREVIOUS day west of Greenwich and is not a calendar day a reader can parse.
+             */
+            ExecutionDate: ToCalendarDay(deal.ExecutionDate),
+            StartDate: ToCalendarDay(deal.StartDate),
             // The buying party, so contracts can stamp the customer without looking back at the deal.
             AccountID: deal.AccountID,
             PrimaryContactID: deal.PrimaryContactID,
