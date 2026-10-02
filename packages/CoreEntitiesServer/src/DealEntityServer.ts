@@ -116,6 +116,16 @@ type StatusTransitionPlan =
     | PriorMissingStatusTransition;
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
+const SALES_ACCOUNT_ENTITY = 'MJ_BizApps_Sales: Sales Accounts';
+const SALES_CONTACT_ENTITY = 'MJ_BizApps_Sales: Sales Contacts';
+const GUID_SHAPE = /^[0-9a-fA-F-]{36}$/;
+
+/** A party this save writes onto the deal, checked for existence before anything is written. */
+interface PartyCheck {
+    EntityName: string;
+    ID: string;
+    Label: 'customer' | 'primary contact';
+}
 
 /**
  * Accounting's two currency entities — READ, never written, and never assumed present.
@@ -485,6 +495,18 @@ export class DealEntityServer extends DealEntity {
         }
         if (stageRefusal) {
             return this.refuseSave(stageRefusal);
+        }
+
+        /**
+         * A CUSTOMER OR CONTACT THAT NO LONGER EXISTS IS REFUSED BY NAME, BEFORE THE ORDER IS BUILT.
+         *
+         * The embedded order is saved first in the graph and takes its bill-to from this deal, so a
+         * missing customer otherwise fails on the ORDER's foreign key, with a SQL error naming
+         * `FK_OrderHeader_BillToOrganization` rather than the stale selection that caused it.
+         */
+        const partyRefusal = await this.missingPartyRefusal();
+        if (partyRefusal) {
+            return this.refuseSave(partyRefusal);
         }
 
         try {
@@ -2417,6 +2439,76 @@ export class DealEntityServer extends DealEntity {
         }
         const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean } | undefined;
         return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row, Absent: !row };
+    }
+
+    /* ── Parties ────────────────────────────────────────────────────────────── */
+
+    /**
+     * Refuses a customer or primary contact that this save writes and the database no longer holds.
+     *
+     * Only a value the caller SUPPLIES is checked. One already on disk is guaranteed by
+     * `FK_Deal_SalesAccount` and `FK_Deal_PrimaryContact`, so reading it again proves nothing. A
+     * supplied value can name a row that does not exist in two measured ways: it was picked from a list
+     * read before a data reload re-keyed the customers, or the inline-create slide-in reported an id
+     * other than the one it wrote (`DECISIONS-NEEDED.md` DN-19, the "INTERMITTENT" entry).
+     *
+     * A malformed id is refused without a read, so it never reaches the filter.
+     *
+     * A read that FAILS does not refuse. The constraints still hold, so the save loses only this
+     * clearer message; refusing on a transient read would block every deal edit instead.
+     */
+    private async missingPartyRefusal(): Promise<string | null> {
+        const checks = this.suppliedParties();
+        if (!checks.length) {
+            return null;
+        }
+
+        const malformed = checks.filter((c) => !GUID_SHAPE.test(c.ID));
+        if (malformed.length) {
+            return this.missingPartyMessage(malformed);
+        }
+
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const results = await provider.RunViews(
+            checks.map((c) => ({
+                EntityName: c.EntityName,
+                ExtraFilter: `ID = '${c.ID}'`,
+                ResultType: 'simple' as const,
+                Fields: ['ID'],
+            })),
+            this.ContextCurrentUser,
+        );
+
+        const missing = checks.filter((c, i) => {
+            const result = results[i];
+            if (!result?.Success) {
+                LogError(`DealEntityServer.missingPartyRefusal: could not read ${c.Label} ${c.ID}: ${result?.ErrorMessage}`);
+                return false;
+            }
+            return (result.Results ?? []).length === 0;
+        });
+        if (!missing.length) {
+            return null;
+        }
+
+        return this.missingPartyMessage(missing);
+    }
+
+    private missingPartyMessage(missing: PartyCheck[]): string {
+        const named = missing.map((c) => `${c.Label} (${c.ID})`).join(' and ');
+        const verb = missing.length > 1 ? 'do' : 'does';
+        return `The selected ${named} ${verb} not exist, so nothing was saved. Select it again from the list, then save.`;
+    }
+
+    private suppliedParties(): PartyCheck[] {
+        const checks: PartyCheck[] = [];
+        if (this.AccountID && this.callerSuppliedValue('AccountID', this.AccountID)) {
+            checks.push({ EntityName: SALES_ACCOUNT_ENTITY, ID: this.AccountID, Label: 'customer' });
+        }
+        if (this.PrimaryContactID && this.callerSuppliedValue('PrimaryContactID', this.PrimaryContactID)) {
+            checks.push({ EntityName: SALES_CONTACT_ENTITY, ID: this.PrimaryContactID, Label: 'primary contact' });
+        }
+        return checks;
     }
 
     /* ── Selling company ────────────────────────────────────────────────────── */
