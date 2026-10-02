@@ -21,6 +21,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { DisplayDay } from '../lib/board/deal-board.component';
 
+/**
+ * Put the process zone back. Assigning `undefined` to `process.env.TZ` stores the STRING "undefined",
+ * which is not "no zone set"; when there was no zone, delete the variable instead.
+ */
+function restoreTZ(original: string | undefined): void {
+    if (original === undefined) delete process.env.TZ;
+    else process.env.TZ = original;
+}
+
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
 const BOARD = read('../lib/board/deal-board.component.html');
@@ -62,7 +71,7 @@ describe('what those arguments do, west of Greenwich', () => {
         process.env.TZ = 'America/Chicago';
     });
     afterAll(() => {
-        process.env.TZ = original;
+        restoreTZ(original);
     });
 
     /** 30 September as a DATE column delivers it. */
@@ -91,7 +100,7 @@ describe('what those arguments do, west of Greenwich', () => {
 describe('DisplayDay gives the board one shape to format', () => {
     const original = process.env.TZ;
     afterAll(() => {
-        process.env.TZ = original;
+        restoreTZ(original);
     });
 
     const shapes: Array<[string, string | Date]> = [
@@ -131,7 +140,7 @@ describe('DisplayDay gives the board one shape to format', () => {
 describe('the board card renders a bare day correctly east of Greenwich', () => {
     const original = process.env.TZ;
     afterAll(() => {
-        process.env.TZ = original;
+        restoreTZ(original);
     });
 
     /** `COND ? (VALUE | date:'FMT':'ZONE') : 'FALLBACK'` inside the card's close-date span. */

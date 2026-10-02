@@ -21,6 +21,15 @@ import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 import { CloseDealOperation } from '../CloseDealOperation.js';
 import { CloseWonTaskService, type CloseWonTaskInput } from '../CloseWonTaskService.js';
 
+/**
+ * Put the process zone back. Assigning `undefined` to `process.env.TZ` stores the STRING "undefined",
+ * which is not "no zone set"; when there was no zone, delete the variable instead.
+ */
+function restoreTZ(original: string | undefined): void {
+    if (original === undefined) delete process.env.TZ;
+    else process.env.TZ = original;
+}
+
 const BUSINESS_ZONE = 'America/Chicago';
 const COMPANY = 'cccccccc-0000-4000-8000-000000000001';
 
@@ -294,7 +303,7 @@ describe('buildContractInput hands contracts calendar days', () => {
         process.env.TZ = BUSINESS_ZONE;
     });
     afterEach(() => {
-        process.env.TZ = original;
+        restoreTZ(original);
     });
 
     type Build = {
