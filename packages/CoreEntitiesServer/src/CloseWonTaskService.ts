@@ -245,7 +245,7 @@ export function ResolveTaskTypeColumn(provider: IMetadataProvider): 'Code' | 'Na
 export const DEFAULT_DUE_IN_DAYS = 5;
 
 /**
- * The due date for work created by a close, in UTC.
+ * The due date for work created by a close: the close's business day plus `dueInDays`, as a DATE.
  *
  * ── THE ARITHMETIC IS DELIBERATELY DONE THIS WAY, AND THERE IS A CAUTIONARY TALE ────────────────
  *
@@ -259,13 +259,22 @@ export const DEFAULT_DUE_IN_DAYS = 5;
  * same shape as the bug being fixed here — a due-date feature made inert by a null — and it is the reason
  * this returns a date at all rather than leaving the column empty and the feature untested.
  *
- * Truncated to UTC midnight, like `Deal.ActualCloseDate`: a due DATE is a day, and stamping 23:47 makes
- * "due today" depend on the reader's timezone.
+ * ── COUNTED FROM THE BUSINESS DAY OF THE CLOSE, NOT ITS UTC DAY (bc-aidp-next-golive#168) ─────────
+ *
+ * `closeDay` is `Deal.ActualCloseDate`: the business day the deal closed on, in the shape a `DATE`
+ * column delivers it (UTC midnight of that day), so its UTC parts ARE the business day. The result is
+ * the same shape, UTC midnight of that day plus N — a due DATE is a day, and stamping 23:47 makes "due
+ * today" depend on the reader's timezone.
+ *
+ * Do NOT pass `ClosedAt`. It is an instant, and its UTC day is the NEXT day for a close in the evening
+ * Central (from 6 PM, 7 PM in daylight time): a deal closed at 9:30 PM CDT on 30 September has
+ * `ActualCloseDate` 30 September, and a task counted from `ClosedAt` fell due on 6 October rather than
+ * 5 October — one day later than the close date plus `DueInDays`.
  */
-export function CloseWonTaskDueAt(closedAt: Date, dueInDays?: number | null): Date {
+export function CloseWonTaskDueAt(closeDay: Date, dueInDays?: number | null): Date {
     const days = Number.isFinite(dueInDays) ? Number(dueInDays) : DEFAULT_DUE_IN_DAYS;
     return new Date(
-        Date.UTC(closedAt.getUTCFullYear(), closedAt.getUTCMonth(), closedAt.getUTCDate() + days),
+        Date.UTC(closeDay.getUTCFullYear(), closeDay.getUTCMonth(), closeDay.getUTCDate() + days),
     );
 }
 

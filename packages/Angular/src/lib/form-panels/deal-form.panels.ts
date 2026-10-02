@@ -16,7 +16,13 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
-import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
+import {
+    BusinessTimeZoneEngine,
+    CalendarDayIn,
+    FromCalendarDay,
+    IsCalendarDay,
+    ToCalendarDay,
+} from '@mj-biz-apps/common-entities';
 import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent } from '@memberjunction/ng-base-forms';
 import {
     EntityViewerModule,
@@ -348,8 +354,10 @@ function daysFrom(d: Date | string | null | undefined): number | null {
  * SEPARATE FROM {@link daysFrom}, which measures against TODAY. A sales cycle and a close variance are
  * both statements about two dates in the record, and expressing either through a today-relative helper
  * would make the number change every day after the deal closed — a figure about the past that keeps
- * moving. Everything stored is UTC (CLAUDE.md), so both sides are floored to a UTC day before
- * subtracting; using local getters here shifts the answer by a day either side of midnight.
+ * moving. Both sides are read by their UTC parts, which is how a `DATE` column and a `YYYY-MM-DD` day
+ * both carry their day; using local getters here shifts the answer by a day either side of midnight.
+ * An INSTANT must not be passed straight in — its UTC day is not its business day. Convert it with
+ * {@link businessDayOf} first (golive#168).
  */
 function daysBetween(
     from: Date | string | null | undefined,
@@ -367,6 +375,25 @@ function daysBetween(
     const b = utcDay(to);
     if (a === null || b === null) return null;
     return Math.round((b - a) / 86_400_000);
+}
+
+/**
+ * The BUSINESS day an instant fell on, for `companyID` (bc-aidp-next-golive#168).
+ *
+ * `__mj_CreatedAt` and `ClosedAt` are instants. `ActualCloseDate` is a calendar day stamped in the
+ * business zone, so subtracting the UTC day of an instant from it mixes two zones: a deal created at
+ * 8 PM Central on the 30th has a UTC day of the 1st, and a cycle ending on the 30th read as "—" or a day
+ * short. Taking the instant's day in the same zone keeps both ends of {@link daysBetween} comparable.
+ *
+ * A bare `YYYY-MM-DD` is already a day and is returned as it is. Synchronous, so it relies on the panel
+ * having configured the engine (see {@link daysFrom}); unconfigured, the zone is UTC.
+ */
+function businessDayOf(value: Date | string | null | undefined, companyID: string | null | undefined): string | null {
+    if (!value) return null;
+    if (IsCalendarDay(value)) return value;
+    const instant = value instanceof Date ? value : new Date(value);
+    if (!Number.isFinite(instant.getTime())) return null;
+    return CalendarDayIn(instant, BusinessTimeZoneEngine.Instance.Resolve(companyID ?? undefined));
 }
 
 /** "1 day" / "N days" — so a one-day cycle does not read "1 days". */
@@ -1143,7 +1170,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      * expectation would be a claim nobody made.
      */
     public get CloseVariance(): string {
-        const n = daysBetween(this.Record?.ExpectedCloseDate, this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
+        const n = daysBetween(this.Record?.ExpectedCloseDate, this.closeDay);
         if (n === null) return '';
         if (n === 0) return 'on time';
         return n < 0 ? `${dayCount(Math.abs(n))} early` : `${dayCount(n)} late`;
@@ -1162,13 +1189,23 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     }
 
     /**
+     * The business day the deal closed on: `ActualCloseDate`, or — on a legacy row carrying only the
+     * instant — `ClosedAt`'s day in the business zone, so the fallback is the same kind of day.
+     */
+    private get closeDay(): Date | string | null {
+        return this.Record?.ActualCloseDate ?? businessDayOf(this.Record?.ClosedAt, this.Record?.CompanyID);
+    }
+
+    /**
      * Creation to close, in days — the question worth asking about a finished deal, and one nothing
      * reported anywhere. Measured from `__mj_CreatedAt`, which is the only creation stamp there is.
      */
     public get SalesCycleLabel(): string {
+        // Both ends are business days: the creation instant's day in the business zone, and
+        // ActualCloseDate, which is stamped in it (golive#168). See businessDayOf.
         const n = daysBetween(
-            this.Record?.Get?.('__mj_CreatedAt') as Date | string | null | undefined,
-            this.Record?.ActualCloseDate ?? this.Record?.ClosedAt,
+            businessDayOf(this.Record?.Get?.('__mj_CreatedAt') as Date | string | null | undefined, this.Record?.CompanyID),
+            this.closeDay,
         );
         // A close back-dated before the deal was created is data, not an error to hide -- but it is not
         // a sales cycle either, and "-4 days" reads as a bug. Say nothing rather than something wrong.

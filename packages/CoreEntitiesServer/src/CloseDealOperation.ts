@@ -564,9 +564,10 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                          *
                          * Nothing to build there — only to populate. Dated from the close itself rather
                          * than from `new Date()` so the task's clock and the deal's provenance agree, and
-                         * so a close replayed inside a transaction is deterministic.
+                         * so a close replayed inside a transaction is deterministic. Counted from the
+                         * close's BUSINESS day — see closeWonTaskDueAt (golive#168).
                          */
-                        DueAt: CloseWonTaskDueAt(deal.ClosedAt ?? new Date(), cfg.DueInDays),
+                        DueAt: this.closeWonTaskDueAt(deal, cfg.DueInDays),
                         // No task-type IDs: the service resolves both by Code from rows this repo
                         // seeds. What the policy still carries is the part that varies — the assignee.
                         Assignee: cfg.AssigneeRecordID
@@ -888,6 +889,26 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
     }
 
     /* ── The close stamp (§7.2 step 6) ──────────────────────────────────────── */
+
+    /**
+     * When a close-won task falls due: `DueInDays` after the BUSINESS day the deal closed on
+     * (bc-aidp-next-golive#168).
+     *
+     * Read from `ActualCloseDate`, which `stampClose` has already set to that day, so the task and the
+     * deal name the same close day. It used to be counted from `ClosedAt`'s UTC day, which is the next
+     * day for any close in the Central evening — the task fell due one day after the close date plus
+     * `DueInDays`. `ToCalendarDay` takes the column's UTC parts whether the saved entity holds a `Date`
+     * or a string. The fallback is only for a deal the stamp somehow left without a close day, and asks
+     * the same question the stamp does.
+     */
+    private closeWonTaskDueAt(
+        deal: { ActualCloseDate: Date | string | null; CompanyID: string },
+        dueInDays: number | null | undefined,
+    ): Date {
+        const closeDay =
+            ToCalendarDay(deal.ActualCloseDate) ?? BusinessTimeZoneEngine.Instance.Today(deal.CompanyID);
+        return CloseWonTaskDueAt(FromCalendarDay(closeDay), dueInDays);
+    }
 
     /**
      * Append the provenance row and stamp the deal.
