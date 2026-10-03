@@ -30,6 +30,7 @@ where `docs/DECISIONS.md` records a ruling that supersedes it.
   `*__Metadata_Sync.sql`). The build engineer generates ONE consolidated Metadata_Sync per release
   from a clean DB. `pnpm run lint:distribution` checks only that shipped SQL uses placeholders
   `mj app install` can resolve — it is not a metadata↔seed currency gate.
+  Full release-time process: [Release Metadata Migrations Guide](https://github.com/MemberJunction/MJ/blob/next/guides/RELEASE_METADATA_MIGRATIONS_GUIDE.md).
 
 > ## ⚠️ KNOWN ISSUE — read before touching the IsA extensions
 >
