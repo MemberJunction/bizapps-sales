@@ -242,6 +242,39 @@ export class DealWorkspaceService {
         }
     }
 
+    /**
+     * Whether a record with this id is in the database: `true`, `false`, or `null` when no read
+     * succeeded.
+     *
+     * Retried because a record just created can be missing from the first read after its save. The
+     * last attempt is trusted: `false` means the id was never written, not that the read was early.
+     * A malformed id is `false` without a read, so it never reaches the filter.
+     */
+    public async RecordExists(entityName: string, id: string, attempts = 3, delayMs = 400): Promise<boolean | null> {
+        if (!/^[0-9a-fA-F-]{36}$/.test(id)) {
+            return false;
+        }
+        let answered = false;
+        for (let attempt = 1; attempt <= attempts; attempt++) {
+            const r = await new RunView().RunView<{ ID: string }>({
+                EntityName: entityName,
+                ExtraFilter: `ID = '${id}'`,
+                ResultType: 'simple',
+                Fields: ['ID'],
+            });
+            if (r?.Success) {
+                if ((r.Results ?? []).length > 0) {
+                    return true;
+                }
+                answered = true;
+            }
+            if (attempt < attempts) {
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+            }
+        }
+        return answered ? false : null;
+    }
+
     public async LoadLookups(): Promise<DealWorkspaceLookups> {
         const rv = new RunView();
         const params: RunViewParams[] = [
