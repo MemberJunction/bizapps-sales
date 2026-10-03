@@ -17,8 +17,8 @@ export class mjBizAppsSalesSalesContactFormComponent extends BaseFormComponent {
         await super.ngOnInit();
         this.initSections([
             { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
-            { sectionKey: 'mJBizAppsSalesDealsBillingContactID', sectionName: 'Deals (Billing Contact ID)', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesDealsPrimaryContactID', sectionName: 'Deals (Primary Contact ID)', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesDealsBillingContactID', sectionName: 'Deals (Billing Contact)', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesDealsPrimaryContactID', sectionName: 'Deals (Primary Contact)', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealContactRoles', sectionName: 'Deal Contact Roles', isExpanded: false }
         ]);
     }

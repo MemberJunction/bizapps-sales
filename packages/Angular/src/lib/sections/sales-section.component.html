@@ -70,6 +70,12 @@
             </div>
           </div>
 
+          @if (RosterError) {
+            <!-- Kept on the dashboard, not in Message: navigating clears Message, and without the reason
+                 the unavailable tiles below would read as a fault with no cause. -->
+            <p class="msg" role="alert">{{ RosterError }}</p>
+          }
+
           @if (Loading) {
             <mj-loading></mj-loading>
           } @else {
