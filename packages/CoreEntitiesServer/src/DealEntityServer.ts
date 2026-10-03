@@ -328,6 +328,7 @@ export class DealEntityServer extends DealEntity {
         // Per-save, so a caller reading them after `Save()` sees this save's warnings and not the last
         // one's. Cleared before the close lock can return early — an abandoned save has no warnings.
         this._orderStatusWarnings.length = 0;
+        this._ownerStampWarnings.length = 0;
         this._orderJustProvisioned = false;
         this._lockedAtSave = false;
         this._lastStageEventID = null;
@@ -449,10 +450,7 @@ export class DealEntityServer extends DealEntity {
          * field, and a rule that only the UI enforces is not a rule. Runs before the stamps below so a
          * refused save costs nothing.
          */
-        const ownerRefusal = this.ownerStampEditRefusal();
-        if (ownerRefusal) {
-            return this.refuseSave(ownerRefusal);
-        }
+        await this.overrideSuppliedOwnerStamp();
 
         /**
          * Before the stamps, for the reason the owner refusal is: a refused save should cost nothing.
@@ -1298,6 +1296,19 @@ export class DealEntityServer extends DealEntity {
 
     public get OrderStatusWarnings(): readonly string[] {
         return this._orderStatusWarnings;
+    }
+
+    /**
+     * Raised when a caller supplied `OwnerEmployeeID` and the roster overrode it.
+     *
+     * SEPARATE FROM THE ORDER-STATUS WARNINGS because they are about different things and the close
+     * operation renders them against different fields. Same shape and same lifetime: cleared per
+     * save, read after it.
+     */
+    private readonly _ownerStampWarnings: string[] = [];
+
+    public get OwnerStampWarnings(): readonly string[] {
+        return this._ownerStampWarnings;
     }
 
     /**
@@ -2592,16 +2603,55 @@ export class DealEntityServer extends DealEntity {
      * IS part of that save, and the server re-derives the same value from it a moment later. The two
      * conditions mirror `stampOwnerFromTeam`'s guard exactly, which is what keeps them from disagreeing.
      */
-    private ownerStampEditRefusal(): string | null {
+    /**
+     * A caller-supplied `OwnerEmployeeID` loses to the roster, and the override is REPORTED.
+     *
+     * ── THIS USED TO REFUSE THE WHOLE SAVE, AND THAT COST MORE THAN IT PROTECTED ────────────────
+     *
+     * `SD26` asserted the refusal and its comment said why a correction was rejected: *"A save that
+     * quietly fixed the value would produce the same surprise — the owner is not who the caller said
+     * — with nothing to notice."* That objection is right, and it is an argument for NOTICING, not
+     * for refusing. Hence the warning below.
+     *
+     * What refusing cost, found in review of sales#147: a deal page open since before someone used
+     * the Internal team grid sends back the owner it LOADED. The server sees a value that differs
+     * from the row it just read, reads that as a hand-set owner, and refuses — so an unrelated edit
+     * to Next Step is lost, and the message tells the user to do the thing they just did. There is no
+     * signal in the payload separating a stale value from a deliberate one, so no narrower rule works.
+     *
+     * ── IT IS ALSO WHAT THE SIBLING FIELD ALREADY DOES ──────────────────────────────────────────
+     *
+     * `CompanyID` and `OwnerEmployeeID` are both `serverMaintained` in the form's field list, both
+     * derived, and both have exactly one right answer obtainable elsewhere. `stampCompanyFromPipeline`
+     * OVERWRITES a supplied company for that reason. Nothing principled made the owner refuse instead;
+     * the two now behave the same way.
+     *
+     * Loading the roster is what makes the override happen: `stampOwnerFromTeam()` runs below and is
+     * guarded by `RosterDrivesThisSave`, which asks `Team.IsLoaded`. A load failure leaves the roster
+     * absent, the derivation declines, and the supplied value stands — so the failure is recorded as a
+     * warning too rather than passing silently.
+     */
+    private async overrideSuppliedOwnerStamp(): Promise<void> {
         if (this.RosterDrivesThisSave) {
-            return null;   // the roster is part of this save; the stamp is derived from it below
+            return;   // the roster is already part of this save; the stamp is derived from it below
         }
         if (!this.callerSuppliedValue('OwnerEmployeeID', this.OwnerEmployeeID)) {
-            return null;   // nobody supplied it. The common case.
+            return;   // nobody supplied it. The common case.
         }
-        return (
-            'The owner is set from the deal team. Change the Owner role on the Internal team panel ' +
-            'instead.'
+
+        try {
+            await this.Team.Load();
+        } catch (err) {
+            this._ownerStampWarnings.push(
+                'The owner is set from the deal team, and the team could not be read to check it, so the '
+                + `value supplied was left as it was. ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return;
+        }
+
+        this._ownerStampWarnings.push(
+            'The owner is set from the deal team, so the value supplied with this save was replaced by '
+            + 'the deal\'s Owner / AE. Change the Owner role on the Internal team panel to change it.',
         );
     }
 
