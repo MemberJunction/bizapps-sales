@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-entities
 
+## 6.10.0
+
+### Minor Changes
+
+- c5b7825: Sales Contacts inherits `SeniorityLevelID` from Common's People (bizapps-common v5.45.x, #148). A new migration adds the column to the Sales Contacts base view, refreshes the `vwSalesContacts` wrapper so its `g.*` column list stays aligned, and ships the inherited EntityField. Without the refresh, the wrapper returned `SeniorityLevelID` values under `OwnerEmployee` once CodeGen rebuilt the inner view. The migration also carries CodeGen's output for Deals and Deal Contact Roles, which no earlier migration shipped. The bizapps-common floor in `mj-app.json` rises to 5.45.0, since the view reads `Person.SeniorityLevelID`.
+- c91feda: The 6.10 Metadata_Sync ships the won-deal finance exception check to hosts: the `Detect Won Deals With Unconfirmed Orders` Action, its nightly scheduled job (shipped Disabled) and the `Sales: Deal Owners Without a Linked Login` query, all added in 6.9.1 as metadata that no migration carried. The seed is idempotent and safe on a host that already ran `mj sync push`, and the three rows are teardown roots so `mj app remove` retires them. The ML models, training pipeline, scoring binding and scoring record process under metadata/ are still not included.
+
 ## 6.9.3
 
 ## 6.9.2
