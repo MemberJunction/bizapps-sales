@@ -218,32 +218,50 @@ UPDATE [${mjSchema}].[Entity] SET [__mj_UpdatedAt]=GETUTCDATE() WHERE ID='530174
 /* SQL text to set default column width where needed */
 EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='', @IncludedSchemaNames='${flyway:defaultSchema}';
 
+/* PredictedWinRiskBand's field is resolved by entity and name, not by the ID V202609202353 pins:
+   that migration inserts the field with its ID only when no field of that name exists, so a host
+   whose field was created first by CodeGen or a metadata push holds it under another ID, and an
+   insert keyed to the pinned ID fails on FK_EntityFieldValue_EntityField. */
+DECLARE @RiskBandFieldID UNIQUEIDENTIFIER = (
+    SELECT TOP 1 f.[ID] FROM [${mjSchema}].[EntityField] f
+    JOIN [${mjSchema}].[Entity] e ON e.[ID] = f.[EntityID]
+    WHERE e.[SchemaName] = '${flyway:defaultSchema}' AND e.[BaseTable] = 'Deal' AND f.[Name] = 'PredictedWinRiskBand'
+    ORDER BY CASE WHEN f.[ID] = '7C778BDC-EC7E-4275-B8BE-49792D542D0B' THEN 0 ELSE 1 END);
+
 /* SQL text to insert entity field value with ID bdf041e3-97e2-4f6a-b569-5bf9dafaf7af */
+IF @RiskBandFieldID IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityFieldValue]
+               WHERE [ID] = 'bdf041e3-97e2-4f6a-b569-5bf9dafaf7af' OR ([EntityFieldID] = @RiskBandFieldID AND [Value] = 'Critical'))
 INSERT INTO [${mjSchema}].[EntityFieldValue]
                                        ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
                                     VALUES
-                                       ('bdf041e3-97e2-4f6a-b569-5bf9dafaf7af', '7C778BDC-EC7E-4275-B8BE-49792D542D0B', 1, 'Critical', 'Critical', GETUTCDATE(), GETUTCDATE());
+                                       ('bdf041e3-97e2-4f6a-b569-5bf9dafaf7af', @RiskBandFieldID, 1, 'Critical', 'Critical', GETUTCDATE(), GETUTCDATE());
 
 /* SQL text to insert entity field value with ID 344436f1-0b9e-4dbd-8cda-e433b15c6fa3 */
+IF @RiskBandFieldID IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityFieldValue]
+               WHERE [ID] = '344436f1-0b9e-4dbd-8cda-e433b15c6fa3' OR ([EntityFieldID] = @RiskBandFieldID AND [Value] = 'High'))
 INSERT INTO [${mjSchema}].[EntityFieldValue]
                                        ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
                                     VALUES
-                                       ('344436f1-0b9e-4dbd-8cda-e433b15c6fa3', '7C778BDC-EC7E-4275-B8BE-49792D542D0B', 2, 'High', 'High', GETUTCDATE(), GETUTCDATE());
+                                       ('344436f1-0b9e-4dbd-8cda-e433b15c6fa3', @RiskBandFieldID, 2, 'High', 'High', GETUTCDATE(), GETUTCDATE());
 
 /* SQL text to insert entity field value with ID b39aa5a0-5bf0-435d-b222-ad21e1e52b37 */
+IF @RiskBandFieldID IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityFieldValue]
+               WHERE [ID] = 'b39aa5a0-5bf0-435d-b222-ad21e1e52b37' OR ([EntityFieldID] = @RiskBandFieldID AND [Value] = 'Low'))
 INSERT INTO [${mjSchema}].[EntityFieldValue]
                                        ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
                                     VALUES
-                                       ('b39aa5a0-5bf0-435d-b222-ad21e1e52b37', '7C778BDC-EC7E-4275-B8BE-49792D542D0B', 3, 'Low', 'Low', GETUTCDATE(), GETUTCDATE());
+                                       ('b39aa5a0-5bf0-435d-b222-ad21e1e52b37', @RiskBandFieldID, 3, 'Low', 'Low', GETUTCDATE(), GETUTCDATE());
 
 /* SQL text to insert entity field value with ID 85305867-7ba6-48dc-8969-f6a93bb0b974 */
+IF @RiskBandFieldID IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityFieldValue]
+               WHERE [ID] = '85305867-7ba6-48dc-8969-f6a93bb0b974' OR ([EntityFieldID] = @RiskBandFieldID AND [Value] = 'Medium'))
 INSERT INTO [${mjSchema}].[EntityFieldValue]
                                        ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
                                     VALUES
-                                       ('85305867-7ba6-48dc-8969-f6a93bb0b974', '7C778BDC-EC7E-4275-B8BE-49792D542D0B', 4, 'Medium', 'Medium', GETUTCDATE(), GETUTCDATE());
+                                       ('85305867-7ba6-48dc-8969-f6a93bb0b974', @RiskBandFieldID, 4, 'Medium', 'Medium', GETUTCDATE(), GETUTCDATE());
 
 /* SQL text to update ValueListType for entity field ID 7C778BDC-EC7E-4275-B8BE-49792D542D0B */
-UPDATE [${mjSchema}].[EntityField] SET ValueListType='List' WHERE ID='7C778BDC-EC7E-4275-B8BE-49792D542D0B';
+UPDATE [${mjSchema}].[EntityField] SET ValueListType='List' WHERE ID=@RiskBandFieldID;
 
 
 /* Create Entity Relationship: MJ_BizApps_Accounting: Currencies -> MJ_BizApps_Sales: Deals (One To Many via CurrencyID) */
