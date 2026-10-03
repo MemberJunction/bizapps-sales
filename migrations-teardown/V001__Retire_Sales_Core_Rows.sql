@@ -9,7 +9,7 @@
 -- schema. Without this file they survive a remove, and the next install re-INSERTs the same fixed
 -- UUIDs and fails on a primary-key collision. That is the whole reason the file exists.
 --
--- WHAT IS LISTED BELOW IS ONLY THE ROOTS -- 28 rows, the ones the seed creates that nothing else
+-- WHAT IS LISTED BELOW IS ONLY THE ROOTS -- 33 rows, the ones the seed creates that nothing else
 -- creates. Their children are NOT listed, because listing them is what breaks: a static delete
 -- list only orders rows the SEED made, while a real installation also holds runtime children
 -- (action execution logs, scheduled-job runs, query permissions, tasks) that a pristine canary
@@ -47,7 +47,7 @@
 --     them, along with their `TaskTypeStatus` rows. Those are the follow-ups Sales' close flow
 --     creates; a task whose type no longer exists cannot be opened, so this is correct, but it is
 --     work-tracking data rather than configuration.
---   • Retiring the three Actions dooms their `ActionExecutionLog` rows (NOT NULL), which is the
+--   • Retiring the four Actions dooms their `ActionExecutionLog` rows (NOT NULL), which is the
 --     history of when they ran.
 -- The plan is printed before it executes, which is the only reason either is discoverable at the
 -- moment it happens rather than afterwards.
@@ -72,11 +72,12 @@ INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'Action',                  '5A1E5000-0000-4000-8000-000000000101', 0),  -- Sync Activities (retired; kept so a host that stopped before the retire migration still uninstalls)
     ('${mjSchema}', 'Action',                  '5A1E5000-0000-4000-8000-000000000111', 0),  -- Capture Forecast Snapshot
     ('${mjSchema}', 'Action',                  '5A1E5000-0000-4000-8000-000000000121', 0),  -- Log Activity
+    ('${mjSchema}', 'Action',                  'A5EDE4FB-14FF-4BC3-9EAC-CE8B5B89F8B9', 0),  -- Detect Won Deals With Unconfirmed Orders
     ('${mjSchema}', 'ActionCategory',          '5A1E5000-0000-4000-8000-000000000001', 0),  -- Sales
     -- The Sales application. ApplicationEntity / ApplicationRole / UserApplication are NOT NULL
     -- children and follow automatically.
     ('${mjSchema}', 'Application',             'D4F8A162-A001-4E71-B0A8-3F17C5E2D803', 0),  -- Sales
-    -- The 15 reporting queries. QueryEntity / QueryField / QueryParameter / QuerySQL /
+    -- The 17 reporting queries. QueryEntity / QueryField / QueryParameter / QuerySQL /
     -- QueryPermission / QueryDependency all carry NOT NULL QueryID and follow automatically --
     -- 327 child rows on a fresh install, none of which is listed here for that reason.
     ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-000000000001', 0),  -- Sales: Pipeline Summary
@@ -95,6 +96,7 @@ INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-00000000000E', 0),  -- Sales: Dashboard Summary
     ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-00000000000F', 0),  -- Sales: Forecast by Owner
     ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-000000000010', 0),  -- Sales: Won Deals With Unconfirmed Orders
+    ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-000000000011', 0),  -- Sales: Deal Owners Without a Linked Login
     ('${mjSchema}', 'QueryCategory',           '5A1E5000-0000-4000-A000-000000000001', 0),  -- Sales
     -- Remote operations. `RemoteOperation.CategoryID` is nullable, so the category is listed
     -- explicitly rather than left to a cascade that would only release the reference.
@@ -105,6 +107,7 @@ INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'ScheduledJob',            '5A1E5000-0000-4000-8000-000000000201', 0),  -- Sales -- Activity Sync (hourly) (retired; same reason as the Action row)
     ('__mj_BizAppsCommon', 'ActivitySyncExtension', 'A7C4E2B1-5D83-4F0A-9C1E-6B8D2F4A90C3', 0),  -- Sales.DealLinker
     ('${mjSchema}', 'ScheduledJob',            '5A1E5000-0000-4000-8000-000000000202', 0),  -- Sales -- Forecast Snapshot (daily)
+    ('${mjSchema}', 'ScheduledJob',            'FEB6F8D5-17B0-4AE6-BD8A-F0495F7CE36F', 0),  -- Sales -- Won Deals With Unconfirmed Orders (nightly)
     -- bizapps-tasks task types. NOT in our schema and not in core -- the seed reaches into a
     -- SIBLING app's schema, which is why that schema appears in the walk below. See the
     -- consequence noted in the header: `Task.TypeID` is NOT NULL.
