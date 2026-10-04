@@ -1,5 +1,59 @@
 # @mj-biz-apps/sales-ng
 
+## 6.11.0
+
+### Patch Changes
+
+- Updated dependencies [364871c]
+  - @mj-biz-apps/sales-entities@6.11.0
+
+## 6.10.0
+
+### Patch Changes
+
+- 117f74e: A customer or contact created from the deal workspace is now bound only under an id the lookup or a server read shows to exist. Previously, when the lookup reload missed the new row, the workspace bound the id the slide-in reported, which has been measured to be an id that was never written; the deal's first save then failed inside its order on `FK_OrderHeader_BillToOrganization`.
+
+  The server now refuses a deal save that names a customer or primary contact the database does not hold, with a message naming it, instead of a raw SQL error from the embedded order. The workspace re-reads its customer and contact lists after a failed save so the rep can pick again without reloading the page.
+
+- 6f616b3: The dashboard now reports an error when `Sales: Deal Roster` returns without a column it reads, instead of treating the missing column as `false`. A database holding an older query definition used to show Weighted open as $0 and an empty stage mix with no error (#137). The headline tiles stay unavailable while the roster is refused, including after a reporting period change.
+- Updated dependencies [c5b7825]
+- Updated dependencies [c91feda]
+  - @mj-biz-apps/sales-entities@6.10.0
+
+## 6.9.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.9.3
+
+## 6.9.2
+
+### Patch Changes
+
+- bead3d7: The Deal form's Pipeline Stage control offered every stage in the system, and nothing on the server
+  checked that the stage belonged to the deal's pipeline (golive #291).
+
+  `<mj-form-field>` renders a foreign key as an unfiltered dropdown off the related entity, so Stage
+  listed D2C's three stages and sixteen legacy pipelines' alongside B2B's six. A B2B deal could be
+  positioned in another pipeline's process — and the mismatch did not sit inert, because
+  `applyStageDefaults` then took that stage's probability, forecast category and status.
+
+  Pipeline and Stage are now dedicated controls: Stage lists only the chosen pipeline's stages and
+  clears when the pipeline changes, the way the deal workspace has always behaved and the way this same
+  panel already handled Status for golive #205. The form does not write `CompanyID` — the server forces
+  it from the pipeline on every save — and picking a stage does not write its defaults, which would
+  destroy a rep-typed probability before the server saw it.
+
+  `DealEntityServer.Save()` now refuses a stage that belongs to a different pipeline, so imports and
+  Actions are covered too. It refuses rather than corrects, unlike the company stamp beside it: a wrong
+  company has one derivable right answer, a wrong stage has none. Keyed on either half moving, so an
+  existing deal whose pair already disagrees — converted deals sit in legacy pipelines (#257) — is not
+  blocked from unrelated edits.
+
+  No schema change.
+
+  - @mj-biz-apps/sales-entities@6.9.2
+
 ## 6.9.1
 
 ### Patch Changes

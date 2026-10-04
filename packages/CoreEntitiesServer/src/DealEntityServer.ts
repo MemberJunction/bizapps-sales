@@ -116,6 +116,16 @@ type StatusTransitionPlan =
     | PriorMissingStatusTransition;
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
+const SALES_ACCOUNT_ENTITY = 'MJ_BizApps_Sales: Sales Accounts';
+const SALES_CONTACT_ENTITY = 'MJ_BizApps_Sales: Sales Contacts';
+const GUID_SHAPE = /^[0-9a-fA-F-]{36}$/;
+
+/** A party this save writes onto the deal, checked for existence before anything is written. */
+interface PartyCheck {
+    EntityName: string;
+    ID: string;
+    Label: 'customer' | 'primary contact';
+}
 
 /**
  * Accounting's two currency entities — READ, never written, and never assumed present.
@@ -166,6 +176,19 @@ interface OrderTotalRow {
 /** The one column the stage lookup selects for the order rule. */
 interface StageOrderStatusRow {
     OrderStatusOnEntry: string | null;
+}
+
+/**
+ * What the stage lookup selects to check the stage against the deal's pipeline.
+ *
+ * `Pipeline` is the stage view's virtual name column, taken in the same read as the id so the refusal
+ * can say which pipeline the stage actually belongs to. Naming it costs nothing here and saves the
+ * reader a lookup they would otherwise have to do by hand.
+ */
+interface StagePipelineRow {
+    Name: string | null;
+    PipelineID: string | null;
+    Pipeline: string | null;
 }
 
 /**
@@ -315,6 +338,7 @@ export class DealEntityServer extends DealEntity {
         // Per-save, so a caller reading them after `Save()` sees this save's warnings and not the last
         // one's. Cleared before the close lock can return early — an abandoned save has no warnings.
         this._orderStatusWarnings.length = 0;
+        this._ownerStampWarnings.length = 0;
         this._orderJustProvisioned = false;
         this._lockedAtSave = false;
         this._lastStageEventID = null;
@@ -436,9 +460,51 @@ export class DealEntityServer extends DealEntity {
          * field, and a rule that only the UI enforces is not a rule. Runs before the stamps below so a
          * refused save costs nothing.
          */
-        const ownerRefusal = this.ownerStampEditRefusal();
-        if (ownerRefusal) {
-            return this.refuseSave(ownerRefusal);
+        await this.overrideSuppliedOwnerStamp();
+
+        /**
+         * Before the stamps, for the reason the owner refusal is: a refused save should cost nothing.
+         * This one reads, so it is not free -- but one lookup is still cheaper than a transaction that
+         * is going to be rolled back, and cheaper than the wrong forecast numbers it prevents.
+         */
+        /**
+         * FAIL CLOSED, AND SAY WHICH FAILURE IT WAS.
+         *
+         * The check reads, so it can fail for reasons that have nothing to do with the deal — a
+         * dropped connection, a provider error. This REFUSES the save when that happens, rather than
+         * letting it through on the grounds that nothing was proven wrong.
+         *
+         * That is the right way round here because the thing being guarded is not cosmetic: a deal
+         * saved with a stage from another pipeline has `applyStageDefaults` take that stage's
+         * Probability, ForecastCategoryTypeID and DealStatusTypeID, so the forecast numbers come from
+         * a pipeline the deal does not belong to. A save refused in error is retried; a forecast
+         * quietly rewritten from the wrong pipeline is found a quarter later, if at all.
+         *
+         * The cost is bounded by the same early return the check uses: it only runs when the save
+         * MOVES the stage or the pipeline, so an ordinary edit to a closed or legacy deal cannot be
+         * refused by a lookup that failed. And the message names the lookup rather than the deal, so
+         * a transient failure reads as a transient failure instead of as "your stage is wrong".
+         */
+        let stageRefusal: string | null;
+        try {
+            stageRefusal = await this.stageBelongsToPipelineRefusal();
+        } catch (err) {
+            return this.refuseSave(`could not check the stage against the pipeline: ${err}`);
+        }
+        if (stageRefusal) {
+            return this.refuseSave(stageRefusal);
+        }
+
+        /**
+         * A CUSTOMER OR CONTACT THAT NO LONGER EXISTS IS REFUSED BY NAME, BEFORE THE ORDER IS BUILT.
+         *
+         * The embedded order is saved first in the graph and takes its bill-to from this deal, so a
+         * missing customer otherwise fails on the ORDER's foreign key, with a SQL error naming
+         * `FK_OrderHeader_BillToOrganization` rather than the stale selection that caused it.
+         */
+        const partyRefusal = await this.missingPartyRefusal();
+        if (partyRefusal) {
+            return this.refuseSave(partyRefusal);
         }
 
         try {
@@ -1252,6 +1318,19 @@ export class DealEntityServer extends DealEntity {
 
     public get OrderStatusWarnings(): readonly string[] {
         return this._orderStatusWarnings;
+    }
+
+    /**
+     * Raised when a caller supplied `OwnerEmployeeID` and the roster overrode it.
+     *
+     * SEPARATE FROM THE ORDER-STATUS WARNINGS because they are about different things and the close
+     * operation renders them against different fields. Same shape and same lifetime: cleared per
+     * save, read after it.
+     */
+    private readonly _ownerStampWarnings: string[] = [];
+
+    public get OwnerStampWarnings(): readonly string[] {
+        return this._ownerStampWarnings;
     }
 
     /**
@@ -2373,6 +2452,76 @@ export class DealEntityServer extends DealEntity {
         return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row, Absent: !row };
     }
 
+    /* ── Parties ────────────────────────────────────────────────────────────── */
+
+    /**
+     * Refuses a customer or primary contact that this save writes and the database no longer holds.
+     *
+     * Only a value the caller SUPPLIES is checked. One already on disk is guaranteed by
+     * `FK_Deal_SalesAccount` and `FK_Deal_PrimaryContact`, so reading it again proves nothing. A
+     * supplied value can name a row that does not exist in two measured ways: it was picked from a list
+     * read before a data reload re-keyed the customers, or the inline-create slide-in reported an id
+     * other than the one it wrote (`DECISIONS-NEEDED.md` DN-19, the "INTERMITTENT" entry).
+     *
+     * A malformed id is refused without a read, so it never reaches the filter.
+     *
+     * A read that FAILS does not refuse. The constraints still hold, so the save loses only this
+     * clearer message; refusing on a transient read would block every deal edit instead.
+     */
+    private async missingPartyRefusal(): Promise<string | null> {
+        const checks = this.suppliedParties();
+        if (!checks.length) {
+            return null;
+        }
+
+        const malformed = checks.filter((c) => !GUID_SHAPE.test(c.ID));
+        if (malformed.length) {
+            return this.missingPartyMessage(malformed);
+        }
+
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const results = await provider.RunViews(
+            checks.map((c) => ({
+                EntityName: c.EntityName,
+                ExtraFilter: `ID = '${c.ID}'`,
+                ResultType: 'simple' as const,
+                Fields: ['ID'],
+            })),
+            this.ContextCurrentUser,
+        );
+
+        const missing = checks.filter((c, i) => {
+            const result = results[i];
+            if (!result?.Success) {
+                LogError(`DealEntityServer.missingPartyRefusal: could not read ${c.Label} ${c.ID}: ${result?.ErrorMessage}`);
+                return false;
+            }
+            return (result.Results ?? []).length === 0;
+        });
+        if (!missing.length) {
+            return null;
+        }
+
+        return this.missingPartyMessage(missing);
+    }
+
+    private missingPartyMessage(missing: PartyCheck[]): string {
+        const named = missing.map((c) => `${c.Label} (${c.ID})`).join(' and ');
+        const verb = missing.length > 1 ? 'do' : 'does';
+        return `The selected ${named} ${verb} not exist, so nothing was saved. Select it again from the list, then save.`;
+    }
+
+    private suppliedParties(): PartyCheck[] {
+        const checks: PartyCheck[] = [];
+        if (this.AccountID && this.callerSuppliedValue('AccountID', this.AccountID)) {
+            checks.push({ EntityName: SALES_ACCOUNT_ENTITY, ID: this.AccountID, Label: 'customer' });
+        }
+        if (this.PrimaryContactID && this.callerSuppliedValue('PrimaryContactID', this.PrimaryContactID)) {
+            checks.push({ EntityName: SALES_CONTACT_ENTITY, ID: this.PrimaryContactID, Label: 'primary contact' });
+        }
+        return checks;
+    }
+
     /* ── Selling company ────────────────────────────────────────────────────── */
 
     /**
@@ -2416,6 +2565,88 @@ export class DealEntityServer extends DealEntity {
             );
         }
         this.CompanyID = pipeline.CompanyID;
+    }
+
+    /**
+     * Refuses a deal whose stage belongs to a different pipeline (bc-aidp-next-golive#291).
+     *
+     * ── WHY REFUSE, WHEN THE COMPANY STAMP ABOVE OVERWRITES ─────────────────────────────────────
+     *
+     * `stampCompanyFromPipeline` can correct a wrong company because there is exactly one right
+     * answer and it is derivable: the pipeline owns a company. A wrong STAGE has no such answer.
+     * Moving the deal to the pipeline's first stage would be inventing a position in a sales process
+     * nobody chose, and keeping the stage while changing the pipeline would be the same invention
+     * from the other end. So this one asks the caller instead.
+     *
+     * ── IT DID NOT SIT INERT ────────────────────────────────────────────────────────────────────
+     *
+     * A B2B deal saved with a D2C stage was accepted, and `applyStageDefaults` then took that stage's
+     * `Probability`, `ForecastCategoryTypeID` and `DealStatusTypeID`. The mismatch rewrote the deal's
+     * forecast numbers from a pipeline it does not belong to, which is why this is a refusal on the
+     * write path rather than a lint on the form: the form is one of the callers, and imports and
+     * Actions reach the same code without passing through it.
+     *
+     * A CHECK constraint cannot express this — it cannot reach across the foreign key to compare the
+     * stage's pipeline with the deal's — which is the same reason the company stamp lives here.
+     *
+     * ── KEYED ON EITHER HALF MOVING ─────────────────────────────────────────────────────────────
+     *
+     * An existing deal whose stage and pipeline already disagree is left alone unless this save
+     * touches one of them, matching how every other rule in this class is keyed. Converted deals sit
+     * in legacy pipelines (#257) and some of them may already be inconsistent; refusing a rename or a
+     * note on one of those would be a rule nobody asked for, arriving nowhere near the edit that
+     * triggered it. A save that MOVES either half is a caller stating the pair, and that is checked.
+     */
+    private async stageBelongsToPipelineRefusal(): Promise<string | null> {
+        const stageID = this.PipelineStageID;
+        const pipelineID = this.PipelineID;
+        if (!stageID || !pipelineID) {
+            // No pipeline is `Validate()`'s complaint, and no stage is a legitimate state — a deal can
+            // be created before anyone positions it. Neither is this rule's business.
+            return null;
+        }
+
+        const stageDirty = this.GetFieldByName('PipelineStageID')?.Dirty === true;
+        const pipelineDirty = this.GetFieldByName('PipelineID')?.Dirty === true;
+        if (this.IsSaved && !stageDirty && !pipelineDirty) {
+            return null;
+        }
+
+        const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await viewProvider.RunView<StagePipelineRow>(
+            {
+                EntityName: STAGE_ENTITY,
+                ExtraFilter: `ID = '${stageID}'`,
+                ResultType: 'simple',
+                Fields: ['Name', 'PipelineID', 'Pipeline'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            throw new Error(`DealEntityServer: could not read the stage's pipeline: ${result.ErrorMessage}`);
+        }
+
+        const stage = (result.Results ?? [])[0];
+        if (!stage) {
+            return `the stage on this deal could not be read, so it cannot be checked against the pipeline.`;
+        }
+
+        /**
+         * LOWERCASED BEFORE COMPARING, like every other id comparison in this class -- SQL Server hands
+         * back uppercase GUIDs and client code generates lowercase. The stage-event writer carried this
+         * bug once and recorded self-transitions because of it; the comment above `stageMoved` tells
+         * that story.
+         */
+        if (String(stage.PipelineID ?? '').toLowerCase() === String(pipelineID).toLowerCase()) {
+            return null;
+        }
+
+        const stageName = stage.Name ?? stageID;
+        const owner = stage.Pipeline ?? 'another pipeline';
+        return (
+            `the stage "${stageName}" belongs to ${owner}, not to this deal's pipeline. `
+            + `Pick a stage from the deal's own pipeline, or change the pipeline first.`
+        );
     }
 
     /* ── Owner stamp (§5.1) ─────────────────────────────────────────────────── */
@@ -2464,16 +2695,55 @@ export class DealEntityServer extends DealEntity {
      * IS part of that save, and the server re-derives the same value from it a moment later. The two
      * conditions mirror `stampOwnerFromTeam`'s guard exactly, which is what keeps them from disagreeing.
      */
-    private ownerStampEditRefusal(): string | null {
+    /**
+     * A caller-supplied `OwnerEmployeeID` loses to the roster, and the override is REPORTED.
+     *
+     * ── THIS USED TO REFUSE THE WHOLE SAVE, AND THAT COST MORE THAN IT PROTECTED ────────────────
+     *
+     * `SD26` asserted the refusal and its comment said why a correction was rejected: *"A save that
+     * quietly fixed the value would produce the same surprise — the owner is not who the caller said
+     * — with nothing to notice."* That objection is right, and it is an argument for NOTICING, not
+     * for refusing. Hence the warning below.
+     *
+     * What refusing cost, found in review of sales#147: a deal page open since before someone used
+     * the Internal team grid sends back the owner it LOADED. The server sees a value that differs
+     * from the row it just read, reads that as a hand-set owner, and refuses — so an unrelated edit
+     * to Next Step is lost, and the message tells the user to do the thing they just did. There is no
+     * signal in the payload separating a stale value from a deliberate one, so no narrower rule works.
+     *
+     * ── IT IS ALSO WHAT THE SIBLING FIELD ALREADY DOES ──────────────────────────────────────────
+     *
+     * `CompanyID` and `OwnerEmployeeID` are both `serverMaintained` in the form's field list, both
+     * derived, and both have exactly one right answer obtainable elsewhere. `stampCompanyFromPipeline`
+     * OVERWRITES a supplied company for that reason. Nothing principled made the owner refuse instead;
+     * the two now behave the same way.
+     *
+     * Loading the roster is what makes the override happen: `stampOwnerFromTeam()` runs below and is
+     * guarded by `RosterDrivesThisSave`, which asks `Team.IsLoaded`. A load failure leaves the roster
+     * absent, the derivation declines, and the supplied value stands — so the failure is recorded as a
+     * warning too rather than passing silently.
+     */
+    private async overrideSuppliedOwnerStamp(): Promise<void> {
         if (this.RosterDrivesThisSave) {
-            return null;   // the roster is part of this save; the stamp is derived from it below
+            return;   // the roster is already part of this save; the stamp is derived from it below
         }
         if (!this.callerSuppliedValue('OwnerEmployeeID', this.OwnerEmployeeID)) {
-            return null;   // nobody supplied it. The common case.
+            return;   // nobody supplied it. The common case.
         }
-        return (
-            'The owner is set from the deal team. Change the Owner role on the Internal team panel ' +
-            'instead.'
+
+        try {
+            await this.Team.Load();
+        } catch (err) {
+            this._ownerStampWarnings.push(
+                'The owner is set from the deal team, and the team could not be read to check it, so the '
+                + `value supplied was left as it was. ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return;
+        }
+
+        this._ownerStampWarnings.push(
+            'The owner is set from the deal team, so the value supplied with this save was replaced by '
+            + 'the deal\'s Owner / AE. Change the Owner role on the Internal team panel to change it.',
         );
     }
 

@@ -45,6 +45,7 @@
  * scan this file, which is how the list stayed wrong through the work that settled it.
  */
 export * from './DealEntityServer.js';
+export * from './DealTeamMemberEntityServer.js';
 export * from './CloseDealOperation.js';
 
 /**
@@ -122,6 +123,7 @@ export * from './finance-exceptions/WonDealOrderDetector.js';
 
 import { LoadActivitySyncEngine } from '@mj-biz-apps/common-activity-sync';
 import { DealEntityServer } from './DealEntityServer.js';
+import { DealTeamMemberEntityServer } from './DealTeamMemberEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 
@@ -137,7 +139,7 @@ import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 export function LoadSalesCoreEntitiesServer(): void {
     LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
+    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }

@@ -26,7 +26,16 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
-import { Field, FirstOpenStatus, OpenNewDeal, PickLookup, SaveDeal, SetStatusByID, SetText } from '../lib/deal-form';
+import {
+    Field,
+    FirstOpenStatus,
+    FirstPipeline,
+    OpenNewDeal,
+    SaveDeal,
+    SetPipelineByID,
+    SetStatusByID,
+    SetText,
+} from '../lib/deal-form';
 import { PurgeByPrefix } from '../lib/deal-flow';
 
 /** Unique per run, and prefixed so a leak is identifiable and removable by one predicate. */
@@ -36,7 +45,7 @@ const DEAL_NAME = `${RUN} deal`;
 /**
  * Types a name into an FK type-ahead and launches its inline create, then saves the dialog it opens.
  *
- * LOCAL HELPER. `.mj-fk-create-footer`, `mj-form-dialog` and the dialog's Save button are MJ markup
+ * LOCAL HELPER. The create footer, the dialog and its Save button are all MJ markup
  * (`@memberjunction/ng-base-forms`), not this app's. The footer is looked for page-wide because MJ
  * portals the type-ahead's dropdown out of the field.
  */
@@ -51,7 +60,20 @@ async function createFromLookup(page: Page, fieldName: string, name: string): Pr
     await expect(create, `the ${fieldName} lookup must offer to create "${name}"`).toBeVisible({ timeout: 20_000 });
     await create.click();
 
-    const dialog = page.locator('mj-form-dialog').last();
+    /**
+     * BY ROLE, not by element name.
+     *
+     * MJ's create footer does not open a dialog itself -- it emits a `create-related` Navigate event,
+     * and the presenter that answers it renders the nested form. The element it renders is
+     * `mj-dialog`, which the spec used to name as `mj-form-dialog`; but naming either is a trap,
+     * because the host is `display: inline` with a 0x0 box, so `mj-dialog:visible` matches nothing
+     * even while the dialog is plainly on screen.
+     *
+     * Measured after the click: `mj-dialog` 0x0 inline, and `[role="dialog"]` 760x648 carrying
+     * `.mj-dialog-container`, the heading "New Sales Accounts" and Save/Cancel. The role is what the
+     * user sees and what survives MJ renaming its components again.
+     */
+    const dialog = page.getByRole('dialog').last();
     await expect(dialog, 'inline create must open the related form in a dialog').toBeVisible({ timeout: 30_000 });
 
     // The typed text prefills the new record's name field; filled here only if it did not.
@@ -139,7 +161,9 @@ test.describe('inline create — the record comes back to the field it was launc
          * case-insensitively for that same reason.
          */
         await SetText(page, 'Name', DEAL_NAME);
-        await PickLookup(page, 'PipelineID');
+        // A named pipeline rather than whichever option rendered first: golive#291 made this a
+        // dedicated select, and `FirstPipeline` reads the same IsActive/Name ordering it loads.
+        await SetPipelineByID(page, (await FirstPipeline()).ID);
         await SetStatusByID(page, (await FirstOpenStatus()).ID);
         await SaveDeal(page);
 

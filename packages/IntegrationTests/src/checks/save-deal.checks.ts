@@ -1347,7 +1347,7 @@ export const SaveDealChecks: NamedCheck[] = [
     },
     {
         Id: 'save-deal.SD26',
-        Name: 'SD26: a hand-set OwnerEmployeeID is REFUSED, not silently overwritten',
+        Name: 'SD26: a hand-set OwnerEmployeeID is OVERRIDDEN by the roster, and the override is reported',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -1363,9 +1363,26 @@ export const SaveDealChecks: NamedCheck[] = [
                  * no join, so a rollup could then disagree with the roster it was meant to shortcut.
                  * Proven against the database by `scripts/audit-story-evidence.mjs` (E3).
                  *
-                 * ASSERTED AS A REFUSAL, NOT A CORRECTION. A save that quietly fixed the value would
-                 * produce the same surprise — the owner is not who the caller said — with nothing to
-                 * notice. `SD3` covers the legitimate path, `SetOwner()`, which is untouched by this:
+                 * ── THIS ASSERTED A REFUSAL UNTIL sales#147's REVIEW, AND NOW ASSERTS AN OVERRIDE ──
+                 *
+                 * The old wording here was: *"ASSERTED AS A REFUSAL, NOT A CORRECTION. A save that
+                 * quietly fixed the value would produce the same surprise — the owner is not who the
+                 * caller said — with nothing to notice."*
+                 *
+                 * That objection was right and is now answered directly: the correction is REPORTED,
+                 * through `OwnerStampWarnings`. There is something to notice. What the refusal cost
+                 * was found in review: a deal page open since before someone used the Internal team
+                 * grid sends back the owner it LOADED, which differs from the row the server just
+                 * read, is indistinguishable from a deliberate hand-set, and refused the save — losing
+                 * an unrelated edit and telling the user to do the thing they had just done.
+                 *
+                 * `CompanyID` settles which way round this belongs. It is `serverMaintained` in the
+                 * same field list, equally derived, and `stampCompanyFromPipeline` OVERWRITES a
+                 * supplied company rather than refusing. The two now behave alike.
+                 *
+                 * What has NOT changed is the guarantee S-US1 asks for: the column still cannot be
+                 * edited directly, and the owner column and the owner-role team row still cannot name
+                 * different people. `SD3` covers the legitimate path, `SetOwner()`, which is untouched:
                  * it loads the roster first, so the roster IS part of that save.
                  */
                 const f = await ResolveSalesFixture(ctx);
@@ -1393,7 +1410,7 @@ export const SaveDealChecks: NamedCheck[] = [
                 const edited = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
                 Assert(await edited.Load(created.ID), 'the deal reloads');
                 edited.OwnerEmployeeID = otherID;
-                AssertEqual(await edited.Save(), false, 'setting the stamp directly must be REFUSED');
+                await saveOk(edited, 'a header-only save carrying a hand-set stamp must still SUCCEED');
 
                 const after = await TxOne<{ OwnerEmployeeID: string | null }>(
                     ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
@@ -1401,7 +1418,23 @@ export const SaveDealChecks: NamedCheck[] = [
                 AssertEqual(
                     String(after.OwnerEmployeeID ?? '').toLowerCase(),
                     String(before.OwnerEmployeeID ?? '').toLowerCase(),
-                    'and the stored stamp is exactly what it was — a refused save writes nothing',
+                    'and the stored stamp is what the ROSTER says, not what the caller named',
+                );
+                Assert(
+                    String(after.OwnerEmployeeID ?? '').toLowerCase() !== String(otherID).toLowerCase(),
+                    'the hand-set value did NOT win — otherwise this check proves nothing',
+                );
+
+                /**
+                 * AND IT WAS NOT SILENT, which is the whole reason an override is acceptable where a
+                 * quiet correction was not.
+                 */
+                const warned = (edited as unknown as { OwnerStampWarnings?: readonly string[] })
+                    .OwnerStampWarnings ?? [];
+                Assert(warned.length > 0, 'the override must be reported, not swallowed');
+                Assert(
+                    warned.some((w) => w.includes('Internal team panel')),
+                    'and the warning must say where the owner IS changed',
                 );
 
                 /**

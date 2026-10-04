@@ -173,9 +173,9 @@ describe('#189 / #190 — the Pipeline panel does not repeat the hero', () => {
      */
     it('still lists the pipeline fields it exists for', () => {
         const names = fieldNames();
+        // Pipeline and Pipeline Stage left this list in golive#291 — they are dedicated controls now,
+        // asserted below. Everything else the report never complained about stays pinned here.
         for (const kept of [
-            'PipelineID',
-            'PipelineStageID',
             'DealTypeID',
             'ForecastCategoryTypeID',
             'Probability',
@@ -280,8 +280,10 @@ describe('creating a deal, on the section it opens on', () => {
     const names = (p: { Fields: DealFieldSpec[] }) => p.Fields.map((f) => f.name);
 
     it('offers the pipeline choices a rep makes, and the customer, together', () => {
+        // Pipeline and Pipeline Stage are dedicated controls since golive#291 and render outside this
+        // list; `the pipeline and stage controls` below is what keeps them from simply disappearing.
         expect(names(pipeline(false))).toEqual([
-            'PipelineID', 'PipelineStageID', 'DealTypeID', 'AccountID', 'PrimaryContactID', 'BillingContactID',
+            'DealTypeID', 'AccountID', 'PrimaryContactID', 'BillingContactID',
         ]);
     });
 
@@ -315,7 +317,7 @@ describe('creating a deal, on the section it opens on', () => {
 
     it('puts everything back once the deal is saved', () => {
         expect(names(pipeline(true))).toEqual([
-            'PipelineID', 'PipelineStageID', 'DealTypeID', 'ForecastCategoryTypeID', 'Probability',
+            'DealTypeID', 'ForecastCategoryTypeID', 'Probability',
         ]);
         expect(names(party(true))).toEqual([
             'AccountID', 'CompanyID', 'OwnerEmployeeID', 'PrimaryContactID', 'BillingContactID',
@@ -410,8 +412,28 @@ describe('the stage a new deal starts in', () => {
         return p.Fields.map((f) => f.name);
     };
 
+    /**
+     * RE-POINTED BY golive#291, NOT RELAXED. The stage control no longer lives in `Fields` — it is a
+     * dedicated select, because the generic one listed every pipeline's stages. What this file has
+     * always protected is that a stage can be CHOSEN while creating, and that is asserted against the
+     * control that now carries it. The original reasoning below still holds word for word.
+     */
     it('is offered while creating, because nothing defaults it', () => {
-        expect(pipelineFields(false)).toContain('PipelineStageID');
+        // Constructed, not `Object.create`d: the dedicated control reads signals, and a prototype-only
+        // instance has none, so it would throw here rather than assert anything.
+        const panel = new MJSDealPipelinePanel();
+        Object.defineProperty(panel, 'Record', {
+            value: { IsSaved: false, PipelineID: 'p-b2b', PipelineStageID: null },
+            configurable: true,
+            writable: true,
+        });
+        (panel as unknown as { stages: { set(v: unknown[]): void } }).stages.set([
+            { ID: 's-disc', Name: 'Discovery', PipelineID: 'p-b2b' },
+        ]);
+
+        // A stage can be picked on a deal nobody has saved, which is what this describe protects.
+        expect(panel.StageIsEditable).toBe(true);
+        expect(panel.StagesForCurrentPipeline.map((st) => st.Name)).toEqual(['Discovery']);
     });
 
     /**
