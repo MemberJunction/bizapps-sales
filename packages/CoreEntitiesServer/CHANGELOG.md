@@ -1,5 +1,51 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.11.0
+
+### Patch Changes
+
+- Updated dependencies [364871c]
+  - @mj-biz-apps/sales-entities@6.11.0
+
+## 6.10.0
+
+### Patch Changes
+
+- 117f74e: A customer or contact created from the deal workspace is now bound only under an id the lookup or a server read shows to exist. Previously, when the lookup reload missed the new row, the workspace bound the id the slide-in reported, which has been measured to be an id that was never written; the deal's first save then failed inside its order on `FK_OrderHeader_BillToOrganization`.
+
+  The server now refuses a deal save that names a customer or primary contact the database does not hold, with a message naming it, instead of a raw SQL error from the embedded order. The workspace re-reads its customer and contact lists after a failed save so the rep can pick again without reloading the page.
+
+- Updated dependencies [c5b7825]
+- Updated dependencies [c91feda]
+  - @mj-biz-apps/sales-entities@6.10.0
+
+## 6.9.3
+
+### Patch Changes
+
+- f8dc2f1: Adding, changing or removing the Owner / AE row in the Deal form's Internal team grid now updates
+  the deal's owner (golive #291).
+
+  `stampOwnerFromTeam()` is guarded by `RosterDrivesThisSave`, which asks whether the team is part of
+  the save. The grid saves the `DealTeamMember` row and nothing else, so it was not — the grid showed
+  an owner while the Overview still said "No owner assigned." The server's own refusal for a hand-set
+  owner says _"Change the Owner role on the Internal team panel instead"_, and that panel was the one
+  path that did not update it.
+
+  A new `DealTeamMemberEntityServer` re-derives the stamp after a team row is saved or deleted. It does
+  not compute an owner: it loads the deal with its team and saves, which makes `RosterDrivesThisSave`
+  true and lets the existing derivation run, so there is one implementation rather than two that agree
+  until they do not. A row that moves between deals refreshes both. A re-stamp that fails is logged
+  rather than thrown, because the roster edit is already committed and the roster is the authority.
+
+  Closed deals need no special case: `checkCloseLock` freezes `OwnerEmployeeID` but keys on the field
+  being dirty, and the stamp is applied after it runs — which is what golive #206 item 2 requires, since
+  reassigning a rep on a closed deal is record-keeping.
+
+  No schema change.
+
+  - @mj-biz-apps/sales-entities@6.9.3
+
 ## 6.9.2
 
 ### Patch Changes

@@ -107,6 +107,8 @@ describe('the save itself, which is where the refusal lives', () => {
         };
         for (const [k, v] of Object.entries({
             _orderStatusWarnings: [],
+        _ownerStampWarnings: [],
+        Team: { Load: async () => true, IsLoaded: false, Count: 0, Items: [] },
             _orderJustProvisioned: false,
             _lockedAtSave: false,
             _lastStageEventID: null,

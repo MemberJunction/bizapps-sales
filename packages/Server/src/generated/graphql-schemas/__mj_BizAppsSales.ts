@@ -478,7 +478,6 @@ export class mjBizAppsSalesDealContactRole_ {
     SalesContact?: string;
         
     @Field({nullable: true}) 
-
     @MaxLength(200)
     BuyingRoleType?: string;
         
@@ -2184,7 +2183,6 @@ export class mjBizAppsSalesDeal_ {
     AmountComputedAt?: Date;
         
     @Field({nullable: true, description: `Fingerprint of the embedded order's line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say the products changed after the amount was calculated, instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.`}) 
-
     @MaxLength(128)
     AmountSourceHash?: string;
         
@@ -2302,7 +2300,6 @@ export class mjBizAppsSalesDeal_ {
     @Field({nullable: true, description: `Timestamp when the deal was last scored by the predictive deal win propensity model.`}) 
     PredictedWinScoredAt?: Date;
         
-
     @Field({nullable: true}) 
     @MaxLength(200)
     Pipeline?: string;
@@ -2332,7 +2329,6 @@ export class mjBizAppsSalesDeal_ {
     BillingContact?: string;
         
     @Field({nullable: true}) 
-
     @MaxLength(50)
     Company?: string;
         
@@ -2360,28 +2356,28 @@ export class mjBizAppsSalesDeal_ {
     @MaxLength(40)
     Order?: string;
         
-    @Field(() => Int, {nullable: true, description: `Target column: 1 for Won, 0 for Lost, NULL for Open`}) 
+    @Field(() => Int, {nullable: true}) 
     WinOutcome?: number;
         
-    @Field(() => Int, {nullable: true, description: `Number of days between deal creation and expected close date`}) 
+    @Field(() => Int, {nullable: true}) 
     DaysToExpectedClose?: number;
         
-    @Field(() => Int, {nullable: true, description: `1 if payment schedule milestones exist, 0 otherwise`}) 
+    @Field(() => Int, {nullable: true}) 
     HasPaymentSchedule?: number;
         
-    @Field(() => Int, {nullable: true, description: `Number of team members on deal`}) 
+    @Field(() => Int, {nullable: true}) 
     TeamMemberCount?: number;
         
-    @Field(() => Int, {nullable: true, description: `1 if partner account involved, 0 otherwise`}) 
+    @Field(() => Int, {nullable: true}) 
     HasPartnerInvolved?: number;
         
-    @Field(() => Int, {nullable: true, description: `1 if enterprise amount threshold reached, 0 otherwise`}) 
+    @Field(() => Int, {nullable: true}) 
     IsEnterpriseTier?: number;
         
-    @Field(() => Int, {nullable: true, description: `1 if deal auto renews, 0 otherwise`}) 
+    @Field(() => Int, {nullable: true}) 
     AutoRenewFlag?: number;
         
-    @Field(() => Int, {nullable: true, description: `1 if custom agreement terms apply, 0 otherwise`}) 
+    @Field(() => Int, {nullable: true}) 
     StandardAgreementModifiedFlag?: number;
         
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
@@ -2538,7 +2534,6 @@ export class CreatemjBizAppsSalesDealInput {
     @Field({ nullable: true })
     PredictedWinScoredAt: Date | null;
 
-
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -2692,7 +2687,6 @@ export class UpdatemjBizAppsSalesDealInput {
 
     @Field({ nullable: true })
     PredictedWinScoredAt?: Date | null;
-
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -4193,14 +4187,14 @@ export class mjBizAppsSalesPipeline_ {
     @Field(() => Boolean, {nullable: true}) 
     IsActive?: boolean;
         
-    @Field(() => Boolean, {description: `Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless.`}) 
-    IncludeInForecast: boolean;
-        
     @Field() 
     _mj__CreatedAt: Date;
         
     @Field() 
     _mj__UpdatedAt: Date;
+        
+    @Field(() => Boolean, {nullable: true, description: `Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless.`}) 
+    IncludeInForecast?: boolean;
         
     @Field({nullable: true}) 
     @MaxLength(50)
@@ -4902,6 +4896,10 @@ export class mjBizAppsSalesSalesContact_ {
     Status?: string;
         
     @Field({nullable: true}) 
+    @MaxLength(36)
+    SeniorityLevelID?: string;
+        
+    @Field({nullable: true}) 
     @MaxLength(81)
     OwnerEmployee?: string;
         
@@ -4921,7 +4919,6 @@ export class mjBizAppsSalesSalesContact_ {
     @MaxLength(704)
     DisplayNameAndEmail?: string;
         
-
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
         
@@ -5004,6 +5001,9 @@ export class CreatemjBizAppsSalesSalesContactInput {
     @Field({ nullable: true })
     Status?: string;
 
+    @Field({ nullable: true })
+    SeniorityLevelID: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -5085,6 +5085,9 @@ export class UpdatemjBizAppsSalesSalesContactInput {
 
     @Field({ nullable: true })
     Status?: string;
+
+    @Field({ nullable: true })
+    SeniorityLevelID?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
