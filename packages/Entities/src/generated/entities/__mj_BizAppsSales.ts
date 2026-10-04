@@ -173,7 +173,6 @@ export const mjBizAppsSalesDealContactRoleSchema = z.object({
         * * Field Name: SalesContact
         * * Display Name: Sales Contact
         * * SQL Data Type: nvarchar(704)`),
-
     BuyingRoleType: z.string().nullable().describe(`
         * * Field Name: BuyingRoleType
         * * Display Name: Buying Role Type
@@ -695,12 +694,12 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Accounts (vwSalesAccounts.ID)`),
     PrimaryContactID: z.string().nullable().describe(`
         * * Field Name: PrimaryContactID
-        * * Display Name: Primary Contact ID
+        * * Display Name: Primary Contact
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)`),
     BillingContactID: z.string().nullable().describe(`
         * * Field Name: BillingContactID
-        * * Display Name: Billing Contact ID
+        * * Display Name: Billing Contact
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
         * * Description: The contact who receives the invoice, which is routinely NOT the person negotiating. NULL means the billing contact IS the primary contact — a real default, not "unknown" — so an AD never types the same name twice and changing the primary contact leaves no stale billing copy.`),
@@ -736,18 +735,18 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Amount Source Hash
         * * SQL Data Type: nvarchar(128)
         * * Description: Fingerprint of the embedded order's line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say the products changed after the amount was calculated, instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.`),
-
     CurrencyID: z.string().nullable().describe(`
         * * Field Name: CurrencyID
-        * * Display Name: Currency ID
-        * * SQL Data Type: uniqueidentifier`),
+        * * Display Name: Currency
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Accounting: Currencies (vwCurrencies.ID)`),
     MRR: z.number().nullable().describe(`
         * * Field Name: MRR
-        * * Display Name: Mrr
+        * * Display Name: MRR
         * * SQL Data Type: decimal(19, 4)`),
     ARR: z.number().nullable().describe(`
         * * Field Name: ARR
-        * * Display Name: Arr
+        * * Display Name: ARR
         * * SQL Data Type: decimal(19, 4)`),
     TermMonths: z.number().nullable().describe(`
         * * Field Name: TermMonths
@@ -801,21 +800,19 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Lead Source Types (vwLeadSourceTypes.ID)`),
     CampaignID: z.string().nullable().describe(`
         * * Field Name: CampaignID
-        * * Display Name: Campaign ID
+        * * Display Name: Campaign
         * * SQL Data Type: uniqueidentifier`),
     ContractID: z.string().nullable().describe(`
         * * Field Name: ContractID
-        * * Display Name: Contract ID
+        * * Display Name: Contract
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Contracts: Contracts (vwContracts.ID)
-
         * * Description: SOFT reference (no FK) to a bizapps-contracts Contract. The link points DOWN the dependency graph; there is deliberately no Contract.DealID, because it is ONE contract to MANY deals — the original sale, every renewal, every expansion.`),
     RenewsContractID: z.string().nullable().describe(`
         * * Field Name: RenewsContractID
-        * * Display Name: Renews Contract ID
+        * * Display Name: Renews Contract
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Contracts: Contracts (vwContracts.ID)
-
         * * Description: SOFT reference (no FK) to the contract this deal RENEWS. What makes the renewal chain navigable from the sales side without contracts knowing anything about it. Required when DealType.RequiresRenewalSource is set.`),
     AutoRenew: z.boolean().describe(`
         * * Field Name: AutoRenew
@@ -907,7 +904,6 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Predicted Win Scored At
         * * SQL Data Type: datetimeoffset
         * * Description: Timestamp when the deal was last scored by the predictive deal win propensity model.`),
-
     Pipeline: z.string().describe(`
         * * Field Name: Pipeline
         * * Display Name: Pipeline
@@ -923,7 +919,6 @@ export const mjBizAppsSalesDealSchema = z.object({
     DealStatusType: z.string().nullable().describe(`
         * * Field Name: DealStatusType
         * * Display Name: Status
-
         * * SQL Data Type: nvarchar(200)`),
     Account: z.string().nullable().describe(`
         * * Field Name: Account
@@ -937,7 +932,6 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: BillingContact
         * * Display Name: Billing Contact
         * * SQL Data Type: nvarchar(704)`),
-
     Company: z.string().describe(`
         * * Field Name: Company
         * * Display Name: Company
@@ -949,7 +943,6 @@ export const mjBizAppsSalesDealSchema = z.object({
     ForecastCategoryType: z.string().nullable().describe(`
         * * Field Name: ForecastCategoryType
         * * Display Name: Forecast Category
-
         * * SQL Data Type: nvarchar(200)`),
     LossReason: z.string().nullable().describe(`
         * * Field Name: LossReason
@@ -970,43 +963,35 @@ export const mjBizAppsSalesDealSchema = z.object({
     WinOutcome: z.number().nullable().describe(`
         * * Field Name: WinOutcome
         * * Display Name: Win Outcome
-        * * SQL Data Type: int
-        * * Description: Target column: 1 for Won, 0 for Lost, NULL for Open`),
+        * * SQL Data Type: int`),
     DaysToExpectedClose: z.number().nullable().describe(`
         * * Field Name: DaysToExpectedClose
         * * Display Name: Days To Expected Close
-        * * SQL Data Type: int
-        * * Description: Number of days between deal creation and expected close date`),
+        * * SQL Data Type: int`),
     HasPaymentSchedule: z.number().describe(`
         * * Field Name: HasPaymentSchedule
         * * Display Name: Has Payment Schedule
-        * * SQL Data Type: int
-        * * Description: 1 if payment schedule milestones exist, 0 otherwise`),
+        * * SQL Data Type: int`),
     TeamMemberCount: z.number().describe(`
         * * Field Name: TeamMemberCount
         * * Display Name: Team Member Count
-        * * SQL Data Type: int
-        * * Description: Number of team members on deal`),
+        * * SQL Data Type: int`),
     HasPartnerInvolved: z.number().describe(`
         * * Field Name: HasPartnerInvolved
         * * Display Name: Has Partner Involved
-        * * SQL Data Type: int
-        * * Description: 1 if partner account involved, 0 otherwise`),
+        * * SQL Data Type: int`),
     IsEnterpriseTier: z.number().describe(`
         * * Field Name: IsEnterpriseTier
         * * Display Name: Is Enterprise Tier
-        * * SQL Data Type: int
-        * * Description: 1 if enterprise amount threshold reached, 0 otherwise`),
+        * * SQL Data Type: int`),
     AutoRenewFlag: z.number().describe(`
         * * Field Name: AutoRenewFlag
         * * Display Name: Auto Renew Flag
-        * * SQL Data Type: int
-        * * Description: 1 if deal auto renews, 0 otherwise`),
+        * * SQL Data Type: int`),
     StandardAgreementModifiedFlag: z.number().describe(`
         * * Field Name: StandardAgreementModifiedFlag
         * * Display Name: Standard Agreement Modified Flag
-        * * SQL Data Type: int
-        * * Description: 1 if custom agreement terms apply, 0 otherwise`),
+        * * SQL Data Type: int`),
 });
 
 export type mjBizAppsSalesDealEntityType = z.infer<typeof mjBizAppsSalesDealSchema>;
@@ -1635,7 +1620,6 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Display Name: Parent ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Common: Organizations (vwOrganizations.null)`),
-
     Website: z.string().nullable().describe(`
         * * Field Name: Website
         * * Display Name: Website
@@ -1803,11 +1787,14 @@ export const mjBizAppsSalesSalesContactSchema = z.object({
         * * Display Name: Linked User ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ: Users (vwUsers.null)`),
-
     Status: z.string().describe(`
         * * Field Name: Status
         * * Display Name: Status
         * * SQL Data Type: nvarchar(50)`),
+    SeniorityLevelID: z.string().nullable().describe(`
+        * * Field Name: SeniorityLevelID
+        * * Display Name: Seniority Level ID
+        * * SQL Data Type: uniqueidentifier`),
     OwnerEmployee: z.string().nullable().describe(`
         * * Field Name: OwnerEmployee
         * * Display Name: Owner Employee
@@ -1829,7 +1816,6 @@ export const mjBizAppsSalesSalesContactSchema = z.object({
         * * Display Name: Name and Email
         * * SQL Data Type: nvarchar(704)
         * * Description: The contact's display name, followed by their primary email in brackets when they have one. Derived in vwSalesContacts; this is what lookups to a Sales Contact show instead of a GUID.`),
-
 });
 
 export type mjBizAppsSalesSalesContactEntityType = z.infer<typeof mjBizAppsSalesSalesContactSchema>;
@@ -2310,7 +2296,6 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
     }
 
     /**
-
     * * Field Name: BuyingRoleType
     * * Display Name: Buying Role Type
     * * SQL Data Type: nvarchar(200)
@@ -3747,7 +3732,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: PrimaryContactID
-    * * Display Name: Primary Contact ID
+    * * Display Name: Primary Contact
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
     */
@@ -3760,7 +3745,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: BillingContactID
-    * * Display Name: Billing Contact ID
+    * * Display Name: Billing Contact
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
     * * Description: The contact who receives the invoice, which is routinely NOT the person negotiating. NULL means the billing contact IS the primary contact — a real default, not "unknown" — so an AD never types the same name twice and changing the primary contact leaves no stale billing copy.
@@ -3844,7 +3829,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Display Name: Amount Source Hash
     * * SQL Data Type: nvarchar(128)
     * * Description: Fingerprint of the embedded order's line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say the products changed after the amount was calculated, instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.
-
     */
     get AmountSourceHash(): string | null {
         return this.Get('AmountSourceHash');
@@ -3855,8 +3839,9 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: CurrencyID
-    * * Display Name: Currency ID
+    * * Display Name: Currency
     * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Accounting: Currencies (vwCurrencies.ID)
     */
     get CurrencyID(): string | null {
         return this.Get('CurrencyID');
@@ -3867,7 +3852,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: MRR
-    * * Display Name: Mrr
+    * * Display Name: MRR
     * * SQL Data Type: decimal(19, 4)
     */
     get MRR(): number | null {
@@ -3879,7 +3864,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: ARR
-    * * Display Name: Arr
+    * * Display Name: ARR
     * * SQL Data Type: decimal(19, 4)
     */
     get ARR(): number | null {
@@ -4029,7 +4014,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: CampaignID
-    * * Display Name: Campaign ID
+    * * Display Name: Campaign
     * * SQL Data Type: uniqueidentifier
     */
     get CampaignID(): string | null {
@@ -4041,10 +4026,9 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: ContractID
-    * * Display Name: Contract ID
+    * * Display Name: Contract
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Contracts: Contracts (vwContracts.ID)
-
     * * Description: SOFT reference (no FK) to a bizapps-contracts Contract. The link points DOWN the dependency graph; there is deliberately no Contract.DealID, because it is ONE contract to MANY deals — the original sale, every renewal, every expansion.
     */
     get ContractID(): string | null {
@@ -4056,10 +4040,9 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: RenewsContractID
-    * * Display Name: Renews Contract ID
+    * * Display Name: Renews Contract
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Contracts: Contracts (vwContracts.ID)
-
     * * Description: SOFT reference (no FK) to the contract this deal RENEWS. What makes the renewal chain navigable from the sales side without contracts knowing anything about it. Required when DealType.RequiresRenewalSource is set.
     */
     get RenewsContractID(): string | null {
@@ -4290,7 +4273,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
-
     * * Field Name: Pipeline
     * * Display Name: Pipeline
     * * SQL Data Type: nvarchar(200)
@@ -4320,7 +4302,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     /**
     * * Field Name: DealStatusType
     * * Display Name: Status
-
     * * SQL Data Type: nvarchar(200)
     */
     get DealStatusType(): string | null {
@@ -4355,7 +4336,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
-
     * * Field Name: Company
     * * Display Name: Company
     * * SQL Data Type: nvarchar(50)
@@ -4376,7 +4356,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     /**
     * * Field Name: ForecastCategoryType
     * * Display Name: Forecast Category
-
     * * SQL Data Type: nvarchar(200)
     */
     get ForecastCategoryType(): string | null {
@@ -4423,7 +4402,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: WinOutcome
     * * Display Name: Win Outcome
     * * SQL Data Type: int
-    * * Description: Target column: 1 for Won, 0 for Lost, NULL for Open
     */
     get WinOutcome(): number | null {
         return this.Get('WinOutcome');
@@ -4433,7 +4411,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: DaysToExpectedClose
     * * Display Name: Days To Expected Close
     * * SQL Data Type: int
-    * * Description: Number of days between deal creation and expected close date
     */
     get DaysToExpectedClose(): number | null {
         return this.Get('DaysToExpectedClose');
@@ -4443,7 +4420,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: HasPaymentSchedule
     * * Display Name: Has Payment Schedule
     * * SQL Data Type: int
-    * * Description: 1 if payment schedule milestones exist, 0 otherwise
     */
     get HasPaymentSchedule(): number {
         return this.Get('HasPaymentSchedule');
@@ -4453,7 +4429,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: TeamMemberCount
     * * Display Name: Team Member Count
     * * SQL Data Type: int
-    * * Description: Number of team members on deal
     */
     get TeamMemberCount(): number {
         return this.Get('TeamMemberCount');
@@ -4463,7 +4438,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: HasPartnerInvolved
     * * Display Name: Has Partner Involved
     * * SQL Data Type: int
-    * * Description: 1 if partner account involved, 0 otherwise
     */
     get HasPartnerInvolved(): number {
         return this.Get('HasPartnerInvolved');
@@ -4473,7 +4447,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: IsEnterpriseTier
     * * Display Name: Is Enterprise Tier
     * * SQL Data Type: int
-    * * Description: 1 if enterprise amount threshold reached, 0 otherwise
     */
     get IsEnterpriseTier(): number {
         return this.Get('IsEnterpriseTier');
@@ -4483,7 +4456,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: AutoRenewFlag
     * * Display Name: Auto Renew Flag
     * * SQL Data Type: int
-    * * Description: 1 if deal auto renews, 0 otherwise
     */
     get AutoRenewFlag(): number {
         return this.Get('AutoRenewFlag');
@@ -4493,7 +4465,6 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: StandardAgreementModifiedFlag
     * * Display Name: Standard Agreement Modified Flag
     * * SQL Data Type: int
-    * * Description: 1 if custom agreement terms apply, 0 otherwise
     */
     get StandardAgreementModifiedFlag(): number {
         return this.Get('StandardAgreementModifiedFlag');
@@ -6176,7 +6147,6 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     * * Display Name: Organization Type ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Common: Organization Types (vwOrganizationTypes.null)
-
     * * IS-A Source: Inherited from MJ_BizApps_Common: Organizations
     */
     get OrganizationTypeID(): string | null {
@@ -6191,7 +6161,6 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     * * Display Name: Parent ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Common: Organizations (vwOrganizations.null)
-
     * * IS-A Source: Inherited from MJ_BizApps_Common: Organizations
     */
     get ParentID(): string | null {
@@ -6683,7 +6652,6 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
     * * Display Name: Linked User ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ: Users (vwUsers.null)
-
     * * IS-A Source: Inherited from MJ_BizApps_Common: People
     */
     get LinkedUserID(): string | null {
@@ -6704,6 +6672,19 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
     }
     set Status(value: string) {
         this.Set('Status', value);
+    }
+
+    /**
+    * * Field Name: SeniorityLevelID
+    * * Display Name: Seniority Level ID
+    * * SQL Data Type: uniqueidentifier
+    * * IS-A Source: Inherited from MJ_BizApps_Common: People
+    */
+    get SeniorityLevelID(): string | null {
+        return this.Get('SeniorityLevelID');
+    }
+    set SeniorityLevelID(value: string | null) {
+        this.Set('SeniorityLevelID', value);
     }
 
     /**
@@ -6751,5 +6732,4 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
     get DisplayNameAndEmail(): string {
         return this.Get('DisplayNameAndEmail');
     }
-
 }

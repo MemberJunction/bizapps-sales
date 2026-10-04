@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/sales-ng",
   "type": "module",
-  "version": "6.9.2",
+  "version": "6.11.0",
   "description": "BizApps Sales Angular bootstrap - generated form components and module for the deal-pipeline Open App",
   "main": "dist/public-api.js",
   "types": "dist/public-api.d.ts",
@@ -22,7 +22,7 @@
     "@mj-biz-apps/common-ng": "^5.44.0",
     "@mj-biz-apps/orders-entities": "^5.18.0",
     "@mj-biz-apps/orders-ng": "^5.18.0",
-    "@mj-biz-apps/sales-entities": "6.9.2"
+    "@mj-biz-apps/sales-entities": "6.11.0"
   },
   "peerDependencies": {
     "@angular/animations": ">=21.0.0 <22.0.0",
