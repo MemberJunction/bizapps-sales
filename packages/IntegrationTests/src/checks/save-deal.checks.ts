@@ -2258,11 +2258,16 @@ export const SaveDealChecks: NamedCheck[] = [
                  * after guards that return early, so a caller that declared a transition and was then
                  * REFUSED kept the declaration and the next save inherited it.
                  *
-                 * Induced through the loss-reason refusal: a status write that closes the deal as LOST
-                 * with no `LossReasonID` is refused before anything is written, every time. This used to
-                 * go through the owner-stamp refusal, which no longer exists — a supplied owner is now
-                 * overridden by the roster with a warning — and its "unrelated" second save cleared the
-                 * owner, which that same guard refused, so the check failed on its own setup.
+                 * Induced through the stage-belongs-to-pipeline refusal: a stage from another pipeline
+                 * is refused before anything is written, whether or not a transition is declared.
+                 *
+                 * TWO EARLIER CHOICES FAILED ON THEIR OWN SETUP. The owner-stamp refusal no longer
+                 * exists — a supplied owner is now overridden by the roster with a warning. The
+                 * loss-reason refusal (closing as LOST with no `LossReasonID`) cannot be reached from
+                 * here at all: it fires only for a close that `planStatusTransition()` plans, and that
+                 * returns null whenever a transition is DECLARED, because a declared save is the close
+                 * operation writing its own, already-validated result. The declaration this check
+                 * needs switched off the refusal it relied on.
                  *
                  * The second save edits only `NextStep`. It owes a stage event only if a declaration is
                  * still standing, so a leaked declaration is exactly what puts the note on a row.
@@ -2271,21 +2276,33 @@ export const SaveDealChecks: NamedCheck[] = [
                 const created = await newDeal(ctx, f, (d) => { d.Name = 'SD40 declaration outlives refusal'; });
                 await saveOk(created, 'create');
 
+                const foreign = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: E_STAGE,
+                        ExtraFilter: `PipelineID <> '${f.PipelineID}'`,
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                    },
+                    ctx.User,
+                );
+                Assert(foreign.Success, `reading stages failed — ${foreign.ErrorMessage}`);
+                const foreignStageID = (foreign.Results ?? [])[0]?.ID;
+                Assert(!!foreignStageID, 'the host needs a second pipeline with a stage for this check to mean anything');
+
                 const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
                 Assert(await deal.Load(created.ID), 'the deal reloads');
-                const openStatusID = deal.DealStatusTypeID;
+                const ownStageID = deal.PipelineStageID;
 
                 (deal as unknown as { DeclareTransition(kind: string, note: string): void })
                     .DeclareTransition('Close', 'SD40 note that must not survive');
 
-                // Refused: closed as lost, no loss reason.
-                deal.DealStatusTypeID = f.LostStatusID;
-                deal.LossReasonID = null;
+                // Refused: a stage from another pipeline.
+                deal.PipelineStageID = foreignStageID;
                 const refused = await deal.Save();
-                Assert(refused === false, 'setup: closing as lost with no loss reason must be refused');
+                Assert(refused === false, 'setup: a stage from another pipeline must be refused');
 
                 // Now an ordinary edit on the SAME object. It must not inherit the declaration.
-                deal.DealStatusTypeID = openStatusID;
+                deal.PipelineStageID = ownStageID;
                 deal.NextStep = 'an unrelated edit after the refusal';
                 await saveOk(deal, 'the next, unrelated save');
 
