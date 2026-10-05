@@ -76,18 +76,22 @@ async function rows(ctx: Ctx, entity: string, filter: string): Promise<Record<st
  * asking for the wrong one fails at the SQL layer with `Invalid column name`, which surfaces as the
  * unhelpful `Error executing SQL` through `RunView`.
  *
- * And `ParentStatusRequirement` is why this cannot be "the first active type". 'Change Order' carries
- * `Required`, meaning contracts refuses one without a `ParentContractID` — correctly. A close-won deal
- * creates a fresh agreement with no parent, so the type this check needs is one that can stand alone.
- * Reading the FLAG rather than excluding the name 'Change Order' is the same discipline this app applies
- * to its own vocabulary: contracts put that column there precisely so nobody compares the name, and its
- * own seed comment says the subclass used to do exactly that and broke on a rename.
+ * And `MustBeChild` is why this cannot be "the first active type". 'Change Order' carries it, meaning
+ * contracts refuses one without a `ParentContractID` — correctly. A close-won deal creates a fresh
+ * agreement with no parent, so the type this check needs is one that can stand alone. Reading the FLAG
+ * rather than excluding the name 'Change Order' is the same discipline this app applies to its own
+ * vocabulary: contracts put that column there precisely so nobody compares the name, and its own seed
+ * comment says the subclass used to do exactly that and broke on a rename.
+ *
+ * This filter used to read `ParentStatusRequirement`, the three-state string contracts replaced with
+ * `MustBeRoot` / `MustBeChild` in its baseline. On any contracts install the column does not exist, so
+ * CT1 and CT5 failed with `Error executing SQL` — the same symptom as the `IsActive` mistake above.
  */
 async function anyContractTypeName(ctx: Ctx): Promise<string> {
     const found = await rows(
         ctx,
         E_CONTRACT_TYPE,
-        `Status = 'Active' AND (ParentStatusRequirement IS NULL OR ParentStatusRequirement <> 'Required')`,
+        `Status = 'Active' AND MustBeChild = 0`,
     );
     Assert(found.length > 0, 'contracts has no standalone active contract type, so the seam has nothing to resolve');
     const name = String(found[0].Name ?? '');

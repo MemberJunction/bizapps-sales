@@ -488,7 +488,7 @@ export const SaveDealChecks: NamedCheck[] = [
     },
     {
         Id: 'save-deal.SD6',
-        Name: 'SD6: KI-20 TRIPWIRE — removing an order line is silently DROPPED (see the comment)',
+        Name: 'SD6: removing an order line through the deal deletes it, and the survivor is re-sequenced',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -501,67 +501,39 @@ export const SaveDealChecks: NamedCheck[] = [
                 AssertEqual(before.length, 2, 'two lines to start with');
 
                 /**
-                 * ⚠️ THIS CHECK ASSERTS A DEFECT, DELIBERATELY. Read this before "fixing" it.
+                 * THE REQUIREMENT: `Remove()` records the row in the collection's removal list, the save
+                 * issued on the DEAL reaches the embedded order, and the delete, the re-sequencing of what
+                 * remains and the header update land together. The deal form's line editor depends on it.
                  *
-                 * It used to assert the requirement: `Remove()` records the row in the collection's removal
-                 * list, that list is contributed to the save plan, and the delete, the re-sequencing of
-                 * what remains and the header update land as one atomic unit. That is what the workspace's
-                 * delete-line affordance depends on, and it is what SD13's complement is about.
+                 * This check asserted the DEFECT for a while (KI-20): orders' save took over the line
+                 * writes and never drained the pending removals, so the row survived. It was written to
+                 * fail the day orders fixed that, as the signal to restore these assertions. Orders fixed
+                 * it (bc-aidp-next-golive#187), and SD6 then failed on every host with its own
+                 * "If this now reads 1" message until it was inverted here.
                  *
-                 * **It does not happen.** The save returns TRUE and the row survives — measured, with the
-                 * full matrix, in `test-harnesses/prove-line-removal.mjs` and written up as KI-20. The
-                 * cause is in orders, not here and not in MJ: `OrderEntityServer.Save()` passes
-                 * `SkipRelatedCollections: true` (correctly — lines must not insert before they are priced)
-                 * and its hand-rolled `savePendingLines()` iterates `this.Lines.Items`, so it handles
-                 * inserts and updates and never asks the collection for its pending removals. The control
-                 * in that harness — removing one of the DEAL's own instalments — deletes fine, which is how
-                 * we know MJ's machinery works and only `OrderHeader.Lines` drops it.
-                 *
-                 * SO WHY KEEP THE CHECK AT ALL, POINTING THE WRONG WAY? The CD7 pattern. Deleting it would
-                 * lose the requirement with no trace; leaving it red would make a permanently failing suite
-                 * that people learn to skim past. Written this way, **the day orders fixes it this check
-                 * FAILS, and that failure is the signal to invert it back** to the assertions preserved
-                 * verbatim below.
-                 *
-                 * What it still proves in the meantime is not nothing: the SALES side does its part. The
-                 * collection accepts the removal, reports the right count, and the save succeeds — so when
-                 * the fix lands there is no second bug waiting behind this one.
-                 *
-                 * ── THE ASSERTIONS TO RESTORE, when KI-20 is fixed ──
-                 *   AssertEqual(after.length, 1, 'the removed line was deleted');
-                 *   const survivor = after.find((r) => String(r.ID) === String(before[0].ID));
-                 *   Assert(!!survivor, 'the surviving line is the one that was KEPT, not merely one of the two');
-                 *   AssertEqual(Number(survivor.LineNumber), 1, 'what remains was re-sequenced');
-                 *
-                 * NOTE THE `find`, AND DO NOT SIMPLIFY IT BACK. The earlier draft of this list read
-                 * `after[0].ProductID` compared against `before[0].ProductID` — indexing a collection and
-                 * then asserting WHICH row it is. That is the defect twice found and fixed elsewhere
-                 * (close-won-tasks WT1, activities AC13): it passes until the row order shifts, then fails
-                 * somewhere unrelated to its subject. Restoring the list verbatim would have reintroduced
-                 * it the day KI-20 is fixed. Identify the row, then assert about it.
+                 * NOTE THE `find`, AND DO NOT SIMPLIFY IT. Indexing `after[0]` and asserting WHICH row it is
+                 * passes until the row order shifts, then fails somewhere unrelated to its subject — the
+                 * defect found and fixed in close-won-tasks WT1 and activities AC13. Identify the row, then
+                 * assert about it.
                  */
                 const deal = await reopen(ctx, created.ID);
                 const lines = deal.OrderID_Object!.Lines;
-                const doomed = lines.Items[1];
-                Assert(!!doomed, 'the line to remove was found after re-reading');
-                lines.Remove(doomed);
+                // Remove line 1 and keep line 2, so the survivor has to MOVE to be numbered 1. Keeping
+                // line 1 would make the re-sequencing assertion pass whether or not anything renumbered.
+                const doomed = lines.Items.find((l) => Number(l.LineNumber) === 1);
+                const kept = lines.Items.find((l) => Number(l.LineNumber) === 2);
+                Assert(!!doomed && !!kept, 'setup: lines 1 and 2 were found after re-reading');
+                const keptID = String(kept!.ID);
+                lines.Remove(doomed!);
                 AssertEqual(lines.Count, 1, 'the collection accepts the removal and reports one line left');
 
                 await saveOk(deal, 'the save after removal');
 
                 const after = await orderLines(ctx, orderID, ['ID', 'ProductID', 'LineNumber']);
-                AssertEqual(
-                    after.length,
-                    2,
-                    'KI-20: the removal was DROPPED and both rows are still there. If this now reads 1, ' +
-                        'orders has fixed savePendingLines() — restore the three assertions listed in the ' +
-                        'comment above, delete this one, and close KI-20.',
-                );
-                AssertEqual(
-                    idsOf(after),
-                    idsOf(before),
-                    'and they are the SAME two rows — nothing was deleted and nothing was replaced',
-                );
+                AssertEqual(after.length, 1, 'the removed line was deleted');
+                const survivor = after.find((r) => String(r.ID) === keptID);
+                Assert(!!survivor, 'the surviving line is the one that was KEPT, not merely one of the two');
+                AssertEqual(Number(survivor!.LineNumber), 1, 'what remains was re-sequenced from 2 to 1');
             }),
     },
     {
@@ -2260,19 +2232,20 @@ export const SaveDealChecks: NamedCheck[] = [
                 /**
                  * ── A DECLARATION GOVERNS ONE SAVE ──────────────────────────────────────
                  *
-                 * `Save()` clears `_declaredTransition` near its end, and the comment there says why:
-                 * left standing it "would suppress the stage defaults on the next unrelated edit to the
-                 * same in-memory record and put its note on that edit's event".
+                 * `Save()` clears `_declaredTransition` in a `finally`, because left standing it "would
+                 * suppress the stage defaults on the next unrelated edit to the same in-memory record and
+                 * put its note on that edit's event". The clear used to sit near the end of the body,
+                 * after guards that return early, so a caller that declared a transition and was then
+                 * REFUSED kept the declaration and the next save inherited it.
                  *
-                 * But three guards return BEFORE that line — the close-lock refusal, the owner-stamp
-                 * refusal, and a failure resolving the server-maintained stamps. A caller that declares a
-                 * transition and is then refused keeps the declaration, and the NEXT save of that same
-                 * object inherits it: stage defaults suppressed, and the previous note stamped onto an
-                 * unrelated event.
+                 * Induced through the loss-reason refusal: a status write that closes the deal as LOST
+                 * with no `LossReasonID` is refused before anything is written, every time. This used to
+                 * go through the owner-stamp refusal, which no longer exists — a supplied owner is now
+                 * overridden by the roster with a warning — and its "unrelated" second save cleared the
+                 * owner, which that same guard refused, so the check failed on its own setup.
                  *
-                 * Induced through the owner-stamp refusal because it is the one a check can trigger
-                 * deterministically: setting `OwnerEmployeeID` directly, with no roster loaded, is
-                 * refused by design.
+                 * The second save edits only `NextStep`. It owes a stage event only if a declaration is
+                 * still standing, so a leaked declaration is exactly what puts the note on a row.
                  */
                 const f = await ResolveSalesFixture(ctx);
                 const created = await newDeal(ctx, f, (d) => { d.Name = 'SD40 declaration outlives refusal'; });
@@ -2280,17 +2253,19 @@ export const SaveDealChecks: NamedCheck[] = [
 
                 const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
                 Assert(await deal.Load(created.ID), 'the deal reloads');
+                const openStatusID = deal.DealStatusTypeID;
 
                 (deal as unknown as { DeclareTransition(kind: string, note: string): void })
                     .DeclareTransition('Close', 'SD40 note that must not survive');
 
-                // Refused by the owner stamp: supplied directly, no roster in this save.
-                deal.OwnerEmployeeID = f.EmployeeID;
+                // Refused: closed as lost, no loss reason.
+                deal.DealStatusTypeID = f.LostStatusID;
+                deal.LossReasonID = null;
                 const refused = await deal.Save();
-                Assert(refused === false, 'setup: the owner-stamp guard must refuse this save');
+                Assert(refused === false, 'setup: closing as lost with no loss reason must be refused');
 
                 // Now an ordinary edit on the SAME object. It must not inherit the declaration.
-                deal.OwnerEmployeeID = null;
+                deal.DealStatusTypeID = openStatusID;
                 deal.NextStep = 'an unrelated edit after the refusal';
                 await saveOk(deal, 'the next, unrelated save');
 
