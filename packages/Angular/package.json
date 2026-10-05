@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/sales-ng",
   "type": "module",
-  "version": "6.11.0",
+  "version": "6.12.1",
   "description": "BizApps Sales Angular bootstrap - generated form components and module for the deal-pipeline Open App",
   "main": "dist/public-api.js",
   "types": "dist/public-api.d.ts",
@@ -22,7 +22,7 @@
     "@mj-biz-apps/common-ng": "^5.44.0",
     "@mj-biz-apps/orders-entities": "^5.18.0",
     "@mj-biz-apps/orders-ng": "^5.18.0",
-    "@mj-biz-apps/sales-entities": "6.11.0"
+    "@mj-biz-apps/sales-entities": "6.12.1"
   },
   "peerDependencies": {
     "@angular/animations": ">=21.0.0 <22.0.0",
@@ -30,17 +30,17 @@
     "@angular/common": ">=21.0.0 <22.0.0",
     "@angular/core": ">=21.0.0 <22.0.0",
     "@angular/forms": ">=21.0.0 <22.0.0",
-    "@memberjunction/actions-base": "^6.1.0-edge.5",
-    "@memberjunction/core": "^6.1.0-edge.5",
-    "@memberjunction/core-entities": "^6.1.0-edge.5",
-    "@memberjunction/global": "^6.1.0-edge.5",
-    "@memberjunction/graphql-dataprovider": "^6.1.0-edge.5",
-    "@memberjunction/ng-base-forms": "^6.1.0-edge.5",
-    "@memberjunction/ng-entity-viewer": "^6.1.0-edge.5",
-    "@memberjunction/ng-link-directives": "^6.1.0-edge.5",
-    "@memberjunction/ng-shared": "^6.1.0-edge.5",
-    "@memberjunction/ng-shared-generic": "^6.1.0-edge.5",
-    "@memberjunction/ng-ui-components": "^6.1.0-edge.5"
+    "@memberjunction/actions-base": "^6.1.4",
+    "@memberjunction/core": "^6.1.4",
+    "@memberjunction/core-entities": "^6.1.4",
+    "@memberjunction/global": "^6.1.4",
+    "@memberjunction/graphql-dataprovider": "^6.1.4",
+    "@memberjunction/ng-base-forms": "^6.1.4",
+    "@memberjunction/ng-entity-viewer": "^6.1.4",
+    "@memberjunction/ng-link-directives": "^6.1.4",
+    "@memberjunction/ng-shared": "^6.1.4",
+    "@memberjunction/ng-shared-generic": "^6.1.4",
+    "@memberjunction/ng-ui-components": "^6.1.4"
   },
   "devDependencies": {
     "@angular/compiler": "21.1.3",

@@ -1,5 +1,20 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.12.1
+
+### Patch Changes
+
+- 016a740: Raise the MemberJunction floor to the 6.1 LTS release (`^6.1.4`, `mjVersionRange >=6.1.4 <7.0.0`) and move bizapps-common to `^5.50.1`. The accounting packages sales depends on require MJ core 6.1.0-edge.7 or later; with the old `^6.1.0-edge.5` override the lockfile installed an edge.5 core under them and the first accounting read during a deal save failed. Common 5.50.1 carries the Tags metadata that pushes to an MJ v6 host.
+- Updated dependencies [016a740]
+  - @mj-biz-apps/sales-entities@6.12.1
+
+## 6.12.0
+
+### Patch Changes
+
+- 58259d2: A deal created already in a locking status (Won or Lost) no longer gets an empty Draft order. The close lock reads the persisted status, which a create does not have, so a deal born closed used to pass as unlocked and receive an embedded order it would never use, consuming an order number. The save now checks the incoming status on a create. An order the caller built before the first save (lines added in the same save) is still provisioned. A deal created open, or with no status, gets its order as before.
+  - @mj-biz-apps/sales-entities@6.12.0
+
 ## 6.11.0
 
 ### Patch Changes

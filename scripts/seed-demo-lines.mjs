@@ -52,12 +52,16 @@ await import('@mj-biz-apps/sales-server').then((m) => m.LoadBizAppsSalesServer?.
  * `OrderNumber`, the insert dies on a NOT NULL violation inside the save graph, and what surfaces names
  * an entity rather than a missing import. So it is checked rather than discovered.
  */
+// Through `importSibling`, the way the integration runner reaches orders: sales does not declare
+// orders-server, so a plain import only resolves inside a joined pnpm workspace. A host built with the
+// sibling repos checked out next to this one (docs/WORKSPACE-SETUP.md) has it built one directory up.
+const { importSibling } = await import('../test-harnesses/sibling-resolve.mjs');
 try {
-    const orders = await import('@mj-biz-apps/orders-server');
+    const orders = await importSibling('@mj-biz-apps/orders-server');
     orders.LoadBizAppsOrdersServer();
 } catch (err) {
     console.error(
-        '\n  bizapps-orders is not resolvable from this repo, so order lines cannot be seeded.\n' +
+        '\n  bizapps-orders is not resolvable from this repo or built beside it, so order lines cannot be seeded.\n' +
         '  The deals themselves are already seeded by scripts/seed-demo-data.sh; this step adds the\n' +
         '  lines that make Deal.Amount a computed figure rather than a stated one.\n' +
         `  (${err instanceof Error ? err.message : String(err)})\n`,
