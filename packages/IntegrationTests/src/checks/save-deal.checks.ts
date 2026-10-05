@@ -1673,29 +1673,45 @@ export const SaveDealChecks: NamedCheck[] = [
     },
     {
         Id: 'save-deal.SD31',
-        Name: 'SD31: a hand-set OwnerEmployeeID is refused ON CREATE too, not just on edit',
+        Name: 'SD31: a hand-set OwnerEmployeeID is OVERRIDDEN on CREATE too, and the override is reported',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 /**
                  * ── SD26'S RULE, ON THE PATH SD26 COULD NOT REACH ───────────────────────────────────
                  *
-                 * SD26 proves a hand-set owner stamp is refused on an EDIT. The refusal asked
+                 * SD26 proves a hand-set owner stamp loses to the roster on an EDIT. The guard used to ask
                  * `GetFieldByName('OwnerEmployeeID').Dirty`, which is the right question on an update and
                  * useless on a create: a first assignment does not mark a field dirty, so an importer
-                 * doing `NewRecord()` -> `OwnerEmployeeID = X` -> `Save()` walked straight past the guard
-                 * and created the exact state SD26 exists to forbid — an owner column and an owner-role
-                 * roster naming different people, on the highest-volume path there is.
+                 * doing `NewRecord()` -> `OwnerEmployeeID = X` -> `Save()` walked straight past it and
+                 * created the exact state SD26 exists to forbid — an owner column and an owner-role
+                 * roster naming different people, on the highest-volume path there is. The guard now asks
+                 * `callerSuppliedValue`, which knows that on a create the question is "is there a value
+                 * here" rather than "did this save change it".
                  *
-                 * Both places now ask `callerSuppliedValue`, which knows that on a create the question is
-                 * "is there a value here" rather than "did this save change it".
+                 * ── THIS ASSERTED A REFUSAL, AND NOW ASSERTS AN OVERRIDE, AS SD26 DOES ──────────────
+                 *
+                 * `overrideSuppliedOwnerStamp` replaced the refusal: a supplied owner loses to the roster,
+                 * and the override is reported through `OwnerStampWarnings`. SD26 was moved to assert
+                 * that; this check still asserted the refusal and failed on every host.
+                 *
+                 * The owner the roster gives a NEW deal is the default `seedOwnerOnCreate` stages, so the
+                 * comparison is with an ordinary create from the same fixture rather than with a named
+                 * employee: what the caller supplied must make no difference to who owns the deal.
                  */
                 const f = await ResolveSalesFixture(ctx);
+
+                const clean = await newDeal(ctx, f, (d) => { d.Name = 'SD31 ordinary create'; });
+                await saveOk(clean, 'a create that leaves the server-owned stamp alone');
+                const expected = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${clean.ID}'`,
+                );
+                Assert(!!expected.OwnerEmployeeID, 'an ordinary create is given an owner, or this check proves nothing');
 
                 const other = await new RunView().RunView<{ ID: string }>(
                     {
                         EntityName: E_EMPLOYEE,
-                        ExtraFilter: `Active = 1 AND ID <> '${f.EmployeeID}'`,
+                        ExtraFilter: `Active = 1 AND ID <> '${expected.OwnerEmployeeID}'`,
                         ResultType: 'simple',
                         Fields: ['ID'],
                     },
@@ -1709,31 +1725,35 @@ export const SaveDealChecks: NamedCheck[] = [
                     d.Name = 'SD31 owner stamp on create';
                     d.OwnerEmployeeID = otherID;
                 });
+                await saveOk(created, 'a create carrying a hand-set owner stamp must still SUCCEED');
+
+                const stored = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                Assert(
+                    String(stored.OwnerEmployeeID ?? '').toLowerCase() !== String(otherID).toLowerCase(),
+                    'the hand-set value did NOT win',
+                );
                 AssertEqual(
-                    await created.Save(),
-                    false,
-                    'setting the owner stamp on a NEW deal must be refused, exactly as on an edit',
+                    String(stored.OwnerEmployeeID ?? '').toLowerCase(),
+                    String(expected.OwnerEmployeeID).toLowerCase(),
+                    'and the deal is owned by whoever an ordinary create would have given it',
                 );
 
-                // A refused create writes nothing at all.
-                const rows = await new RunView().RunView<{ ID: string }>(
-                    {
-                        EntityName: E_DEAL,
-                        ExtraFilter: `Name = 'SD31 owner stamp on create'`,
-                        ResultType: 'simple',
-                        Fields: ['ID'],
-                    },
-                    ctx.User,
+                // The stamp is derived from the roster, so the roster must name the same person.
+                const team = await children(ctx, E_TEAM, created.ID, ['EmployeeID']);
+                Assert(
+                    team.some((m) => String(m.EmployeeID).toLowerCase() === String(expected.OwnerEmployeeID).toLowerCase()),
+                    'the roster carries the owner the stamp names',
                 );
-                Assert(rows.Success, `reading deals failed — ${rows.ErrorMessage}`);
-                AssertEqual((rows.Results ?? []).length, 0, 'and no deal row was written');
 
-                /**
-                 * AND THE REFUSAL IS STILL NARROW — the same create WITHOUT the stamp must succeed. The
-                 * server fills it from the roster, which is the whole reason the column is not writable.
-                 */
-                const clean = await newDeal(ctx, f, (d) => { d.Name = 'SD31 ordinary create'; });
-                await saveOk(clean, 'a create that leaves the server-owned stamp alone');
+                const warned = (created as unknown as { OwnerStampWarnings?: readonly string[] })
+                    .OwnerStampWarnings ?? [];
+                Assert(warned.length > 0, 'the override must be reported, not swallowed');
+                Assert(
+                    warned.some((w) => w.includes('Internal team panel')),
+                    'and the warning must say where the owner IS changed',
+                );
             }),
     },
     {
