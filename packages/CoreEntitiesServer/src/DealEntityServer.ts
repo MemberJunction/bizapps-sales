@@ -533,7 +533,7 @@ export class DealEntityServer extends DealEntity {
          * it one the moment it is legitimately reopened and saved, which is the path that is allowed to
          * change it.
          */
-        if (!this._lockedAtSave) {
+        if (!this._lockedAtSave && !(await this.isBornClosedWithoutOrder())) {
             this.provisionEmbeddedOrder();
         }
 
@@ -1265,6 +1265,33 @@ export class DealEntityServer extends DealEntity {
         order.OrderType = 'Sale';
         order.BillToOrganizationID = this.AccountID ?? null;
         order.BillToPersonID = this.PrimaryContactID ?? null;
+    }
+
+    /**
+     * Whether this save CREATES a deal already in a locking status, with no order supplied (#152).
+     *
+     * The close lock keys on the PERSISTED status, so a create has none and passes as unlocked. A deal
+     * born Won or Lost — an integration sync bringing in deal history does exactly this — would then get
+     * an empty Draft order beside a closed deal, consuming an order number and never moving. That is
+     * the same outcome the lock already prevents for a saved closed deal, reached through the one save
+     * the lock cannot see.
+     *
+     * So the INCOMING status is asked here, and only on a create: on an update the persisted status is
+     * the lock's question, and the transition into a locking status is handled by the close flow.
+     *
+     * AN ORDER THE CALLER ALREADY BUILT IS STILL PROVISIONED. `OrderID_Object` is non-null only when
+     * something reached for the order before saving — lines added for this one save. That caller asked
+     * for an order, and skipping the stamps would fail the insert on `CompanyID`.
+     *
+     * An unreadable status reports `LocksDeal: true` and so skips the order. On a create that costs
+     * nothing: a deal that turns out to be open gets its order on its next save.
+     */
+    private async isBornClosedWithoutOrder(): Promise<boolean> {
+        if (this.IsSaved || !this.DealStatusTypeID || this.OrderID_Object) {
+            return false;
+        }
+        const flags = await this.readStatusLockFlags(this.DealStatusTypeID);
+        return flags.LocksDeal;
     }
 
     /**

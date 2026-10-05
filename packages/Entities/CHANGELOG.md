@@ -1,5 +1,7 @@
 # @mj-biz-apps/sales-entities
 
+## 6.12.0
+
 ## 6.11.0
 
 ### Minor Changes

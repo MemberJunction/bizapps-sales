@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Metadata } from '@memberjunction/core';
+import { MJOLinePricePickerComponent } from '@mj-biz-apps/orders-ng';
 import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.component';
 
 /**
@@ -11,7 +12,8 @@ import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.
  *
  * The deal line hosts orders' shared `mjo-line-price-picker`, so a rep with an override grant can put
  * the line on one of the product's named prices. What sales adds around it is small, and these pin it:
- * the picker never offers a typed amount (D-DL2), a picked price reaches `Orders.PriceOrder` pinned,
+ * the picker allows a typed amount, which it offers only to an `OverrideAny` holder (D-DL2, revised),
+ * a picked or typed price reaches `Orders.PriceOrder` pinned,
  * a pick without a reason cannot be saved, and each product in the list names its catalog price.
  */
 
@@ -86,9 +88,19 @@ const REAL_PROVIDER = Metadata.Provider;
 afterEach(() => { Metadata.Provider = REAL_PROVIDER; });
 
 describe('the price picker on a deal line', () => {
-    it('never offers a typed amount (D-DL2)', () => {
+    it('allows a typed amount, which the picker offers only to an OverrideAny holder (D-DL2, revised)', () => {
         const tag = SOURCE.slice(SOURCE.indexOf('<mjo-line-price-picker'), SOURCE.indexOf('</mjo-line-price-picker>'));
-        expect(tag).toContain('[AllowCustomAmount]="false"');
+        expect(tag).toContain('[AllowCustomAmount]="true"');
+        expect(tag).toContain('[OverrideKind]="OverrideKind"');
+    });
+
+    it('offers the custom amount to an OverrideAny holder and not to an OverrideList holder', () => {
+        const picker = Object.create(MJOLinePricePickerComponent.prototype) as MJOLinePricePickerComponent;
+        picker.AllowCustomAmount = true;
+        picker.OverrideKind = 'any';
+        expect(picker.CustomAmountOffered).toBe(true);
+        picker.OverrideKind = 'list';
+        expect(picker.CustomAmountOffered).toBe(false);
     });
 
     it('is offered on an open deal to a rep holding an override grant', () => {
@@ -128,6 +140,21 @@ describe('a picked price needs a reason', () => {
         const { e } = editor({ working: line({ overridden: true, reason: null, unitPrice: 80 }) });
         expect(e.CanSave).toBe(false);
         expect(e.BlockedReason).toBe('Enter a reason for the price override.');
+    });
+
+    it('applies to a typed amount too: pinned to Orders, and refused without a reason', async () => {
+        const typed = () => {
+            const l = line({ overridden: true, reason: null, unitPrice: 2500 });
+            (l.GetFieldByName('ProductPriceID') as { Value: unknown }).Value = null;
+            return l;
+        };
+        const blocked = editor({ overrideKind: 'any', working: typed() }).e;
+        expect(blocked.CanSave).toBe(false);
+        expect(blocked.BlockedReason).toBe('Enter a reason for the price override.');
+
+        const { e, routed } = editor({ overrideKind: 'any', working: typed() });
+        await e['refreshPrice']();
+        expect(routed[0].input.Lines[0].UnitPrice).toBe(2500);
     });
 
     it('can be saved once it has one', () => {
