@@ -329,7 +329,7 @@ INSERT INTO __mj_BizAppsCommon.ContactMethod (ID, PersonID, ContactTypeID, Value
 -- anyone watching the return value.
 --
 -- 'Order Form' is what S-US2 names as the default, and it is also the only safe class of answer: it
--- has ParentStatusRequirement = NULL, so it STANDS ALONE. A type requiring a parent -- Change Order --
+-- has MustBeChild = 0, so it STANDS ALONE. A type requiring a parent -- Change Order --
 -- is refused by ContractEntityServer.ValidateAsync(), because a change order that amends nothing has
 -- no lineage. Any future value here must satisfy that too.
 DECLARE @pipe1 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000001';
@@ -698,6 +698,7 @@ $SQLCMD -d "${DB_DATABASE}" -h -1 -W -i "$(cygpath -w "$TMP" 2>/dev/null || echo
 say "Seeding the orders catalog against the settled pipeline companies"
 $SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-orders-catalog.sql
 $SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-revenue-stack.sql
+$SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-contract-template.sql
 
 say "Pricing five deals through the entity layer"
 if node scripts/seed-demo-lines.mjs; then
