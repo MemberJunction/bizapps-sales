@@ -63,6 +63,12 @@ import { DealEntityServer } from './DealEntityServer.js';
 import { OrdersIsInstalled } from './orders-availability.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
 import { CloseWonTaskDueAt, CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
+import {
+    AnswerAsNextTerm,
+    FindUnansweredSubscriptionLines,
+    SubscriptionChoiceIssue,
+    type UnansweredSubscriptionLine,
+} from './subscription-choice.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
@@ -98,6 +104,8 @@ interface CloseValidation {
     Issues: SalesCloseIssue[];
     /** The reason's name for the close event's note, or null when this close is not a loss. */
     LossReasonName: string | null;
+    /** A renewal deal's unanswered held-product lines, answered `ExtendExisting` inside the close. */
+    RenewalNextTerm: UnansweredSubscriptionLine[];
 }
 
 /** Defaults applied when a pipeline's policy is silent on a key. */
@@ -444,6 +452,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             await db.BeginTransaction();
             transactionOpen = true;
 
+            // Before the deal's save, which is what confirms the order and applies the answer.
+            await AnswerAsNextTerm(validation.RenewalNextTerm);
+
             for (const plan of routing) {
                 await this.execute(plan, deal, policy, provider, user);
             }
@@ -677,7 +688,36 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             issues.push(issue('party', 'A won deal must be attached to a customer.', 'AccountID'));
         }
 
-        return { Issues: issues, LossReasonName: lossReasonName };
+        const choice = target.IsWon
+            ? await this.subscriptionChoice(deal, provider, user)
+            : { Issues: [], RenewalNextTerm: [] };
+        issues.push(...choice.Issues);
+
+        return { Issues: issues, LossReasonName: lossReasonName, RenewalNextTerm: choice.RenewalNextTerm };
+    }
+
+    /**
+     * Lines for a product the customer already holds that have not said whether they extend it
+     * (golive #318). Refused on an ordinary deal; on a renewal deal they are the next term by
+     * definition, so they are answered that way inside the close instead. See `subscription-choice.ts`
+     * for why this cannot be left to orders' confirm.
+     */
+    private async subscriptionChoice(
+        deal: DealEntityServer,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<{ Issues: SalesCloseIssue[]; RenewalNextTerm: UnansweredSubscriptionLine[] }> {
+        if (!OrdersIsInstalled()) {
+            return { Issues: [], RenewalNextTerm: [] };
+        }
+        const unanswered = await FindUnansweredSubscriptionLines(deal, provider as unknown as IRunViewProvider, user);
+        if (unanswered.length === 0) {
+            return { Issues: [], RenewalNextTerm: [] };
+        }
+        if (await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user)) {
+            return { Issues: [], RenewalNextTerm: unanswered };
+        }
+        return { Issues: unanswered.map(SubscriptionChoiceIssue), RenewalNextTerm: [] };
     }
 
     /* ── Policy (§7.1) ──────────────────────────────────────────────────────── */

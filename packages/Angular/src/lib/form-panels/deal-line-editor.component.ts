@@ -72,6 +72,7 @@ import { Metadata } from '@memberjunction/core';
 import { FormsModule } from '@angular/forms';
 import {
     AsDateValue,
+    HoldingSubscriberFor,
     IsLinePriceOverridden,
     LineNeedsOverrideReason,
     ListApplicablePrices,
@@ -85,7 +86,12 @@ import {
     type PriceOverrideKind,
     type mjBizAppsOrdersOrderLineEntity as OrderLineEntity,
 } from '@mj-biz-apps/orders-entities';
-import { MJOLinePricePickerComponent } from '@mj-biz-apps/orders-ng';
+import {
+    ContinuationStartFrom,
+    GetExistingHolding,
+    MJOLinePricePickerComponent,
+    type MJOExistingHolding,
+} from '@mj-biz-apps/orders-ng';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountFractionToPercent,
@@ -246,6 +252,46 @@ interface RemoteOperationRouter {
                         </label>
                     }
 
+                    <!-- The customer already holds this product (golive #318): the same question the
+                         order line asks. Unanswered, Close Won refuses the deal, except on a renewal
+                         deal, which adds the line as the next term. -->
+                    @if (Holding; as holding) {
+                        <div class="mjs-le__field" role="group" data-testid="line-subscription-choice"
+                             [attr.aria-label]="'Existing subscription ' + holding.SubscriptionNumber">
+                            <span class="mjs-le__label">Existing subscription</span>
+                            <span class="mjs-le__muted">
+                                The customer already holds {{ holding.SubscriptionNumber }} for this product
+                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd }}) }.
+                            </span>
+                            <div class="mjs-le__choices">
+                                <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-extend"
+                                        [class.is-selected]="Working.SubscriptionAction === 'ExtendExisting'"
+                                        [attr.aria-pressed]="Working.SubscriptionAction === 'ExtendExisting'"
+                                        [disabled]="IsLocked" [title]="BlockedReason"
+                                        (click)="SetSubscriptionAction('ExtendExisting')">
+                                    Add as next term
+                                    @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart }}) }
+                                </button>
+                                <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-new"
+                                        [class.is-selected]="Working.SubscriptionAction === 'CreateNew'"
+                                        [attr.aria-pressed]="Working.SubscriptionAction === 'CreateNew'"
+                                        [disabled]="IsLocked" [title]="BlockedReason"
+                                        (click)="SetSubscriptionAction('CreateNew')">
+                                    New subscription (keeps this line's dates)
+                                </button>
+                            </div>
+                            <small class="mjs-le__hint" [class.mjs-le__error]="!Working.SubscriptionAction">
+                                @if (Working.SubscriptionAction === 'CreateNew') {
+                                    Starts a separate subscription on this line's term start.
+                                } @else if (Working.SubscriptionAction === 'ExtendExisting') {
+                                    Adds a term to {{ holding.SubscriptionNumber }}, starting the day after its coverage ends.
+                                } @else {
+                                    Not chosen. Close Won asks for this, unless the deal is a renewal, which adds it as the next term.
+                                }
+                            </small>
+                        </div>
+                    }
+
                     <!-- PRICED BY ORDERS, NEVER ENTERED HERE. This is the whole point of the issue:
                          sales states intent, orders states price. -->
                     <div class="mjs-le__readonly">
@@ -378,6 +424,10 @@ interface RemoteOperationRouter {
             background: var(--mj-status-error, #b3261e); color: #fff; border-color: transparent;
         }
         .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+        .mjs-le__choices { display: flex; gap: var(--mj-space-2, 8px); flex-wrap: wrap; }
+        .mjs-le__choice.is-selected {
+            border-color: var(--mj-color-primary, #1268cf); color: var(--mj-color-primary, #1268cf);
+        }
         @media (max-width: 480px) {
             .mjs-le__row { flex-direction: column; }
         }
@@ -428,6 +478,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     /** The rules' answer for this line, from the last `Orders.PriceOrder`. Undefined until one reports it. */
     public EngineDefault: LineEngineDefault | null | undefined = undefined;
     public Working: OrderLineEntity | null = null;
+    /** The live subscription the line's customer already holds for its product, or null. */
+    public Holding: MJOExistingHolding | null = null;
     public Loading = true;
     public Saving = false;
     public Error: string | null = null;
@@ -527,6 +579,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                 // legal value rather than at the one the database refuses.
                 this.Working.Quantity = 1;
             }
+            void this.refreshHolding();
             if (this.ShowPricePicker) {
                 // The picker's Default row needs orders' answer before anything is changed, and its list
                 // needs the applicable prices; a saved line otherwise opens with Default disabled.
@@ -607,10 +660,12 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (product) {
             this.Working.CompanyID = product.CompanyID;
         }
-        // The previous product's default and named prices say nothing about this one.
+        // The previous product's default, named prices and subscription answer say nothing about this one.
         this.EngineDefault = undefined;
         this.Applicable = [];
+        this.Working.SubscriptionAction = null;
         void this.refreshApplicable();
+        void this.refreshHolding();
         this.cdr.detectChanges();
     }
 
@@ -736,6 +791,43 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (!this.Working) return;
         // An emptied control means "use the order date", which is NULL in the column -- not the epoch.
         this.Working.ServicePeriodStart = value ? new Date(`${value}T00:00:00Z`) : null;
+    }
+
+    /* ── The customer already holds this product (golive #318) ─────────────────────── */
+
+    /**
+     * The subscription this line would extend at confirm, read with orders' rule so the deal and the
+     * order screen ask about the same lines. Renewal lines and one-time products are not asked. A failed
+     * read hides the question; Close Won still asks, because it reads the same rule on the server.
+     */
+    private async refreshHolding(): Promise<void> {
+        const line = this.Working;
+        const subscriber = line ? HoldingSubscriberFor(line, this.Deal?.OrderID_Object ?? null) : null;
+        if (!line?.ProductID || line.RenewsSubscriptionID || !this.SelectedProduct?.SubscriptionTypeID || !subscriber) {
+            this.Holding = null;
+            this.cdr.detectChanges();
+            return;
+        }
+        const productID = String(line.ProductID);
+        const holding = await GetExistingHolding(productID, subscriber.OrganizationID, subscriber.PersonID);
+        // A reply for a product the rep has since moved off is dropped rather than shown.
+        if (this.Working?.ProductID === productID) this.Holding = holding;
+        this.cdr.detectChanges();
+    }
+
+    /** Where the existing coverage ends, for the prompt. */
+    public get HoldingCoverageEnd(): string | null {
+        return toDateInput(this.Holding?.LatestTermEnd ?? null);
+    }
+
+    /** The start an extension would get: the day after the existing coverage ends. */
+    public get HoldingContinuationStart(): string | null {
+        return toDateInput(ContinuationStartFrom(this.Holding));
+    }
+
+    public SetSubscriptionAction(action: 'ExtendExisting' | 'CreateNew'): void {
+        if (this.IsLocked || !this.Working) return;
+        this.Working.SubscriptionAction = action;
     }
 
     public Money(n: number | null | undefined): string {
