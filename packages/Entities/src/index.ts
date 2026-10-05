@@ -57,5 +57,8 @@ export function LoadGeneratedEntities(): void {
 }
 export * from './discount-conversion.js';
 
+// A deal line's discount as the Price concession orders' confirm gate holds on (golive#305).
+export * from './discount-concession.js';
+
 /** Activity vocabulary — shared, because the deal-activity pane needs the codes too. */
 export * from './activities/activity-vocabulary.js';
