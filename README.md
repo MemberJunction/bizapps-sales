@@ -195,6 +195,14 @@ stored as `$4,750,000` is false precision that later gets treated as fact.
 > one line of declarative config, and it needs a test that attaches two children to one Person and
 > reads both back.
 
+**Where it is tested.** The `sales-isa` integration bundle
+(`packages/IntegrationTests/src/checks/sales-isa.checks.ts`) drives both extensions through a live database:
+one key across Person and SalesContact, the Person's columns in the child's view, promotion of an existing
+Person or Organization, parent-first atomic saves, and the delete rules. Every check first asserts the
+flag above, which bizapps-common ships from 5.33.0. `sales-isa.IS9` is the two-children test this callout asks
+for; it needs a second app extending `People` on the host (bizapps-ats' Applicants does) and prints a
+`SKIPPED` warning without one.
+
 ### Pipelines — owned by a company
 
 **L-14: a pipeline belongs to a company; a company may have any number of them.**
@@ -644,6 +652,13 @@ RUN_MUTATION_TESTS=1 MJ_INTEGRATION_TEST=1 \
 > **`RUN_MUTATION_TESTS=1` is not optional.** Every check is `RequiresMutation`, and MJ's driver skips
 > them without it — so a run without the flag executes **nothing and reports success**.
 > `scripts/assert-check-count.mjs` fails if fewer checks ran than the registry declares.
+
+One bundle tests MemberJunction rather than sales: **`sales-isa`** (IS1–IS9) proves MJ's IS-A machinery
+through `SalesContact` and `SalesAccount`, which MJ itself covers only with mocked unit tests. It needs
+bizapps-common and nothing else. Two of its checks break the habits above on purpose: `sales-isa.IS7` runs
+**outside** a rolled-back transaction, because a database refusal inside a savepoint can doom the
+surrounding transaction, and it removes anything a failure leaves; `sales-isa.IS9` skips with a warning where
+no other app extends `People`, and still counts as run.
 
 CI runs **unit tests only, deliberately** — the integration suite needs SQL Server plus sibling
 checkouts of three unpublished repos. The integration suite is a **pre-merge step run locally**.
