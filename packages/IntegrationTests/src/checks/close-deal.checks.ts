@@ -1649,10 +1649,10 @@ export const CloseDealChecks: NamedCheck[] = [
                 const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
                 Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
 
-                const tasks = await TxAll<{ Name: string; DueAt: string | null; ClosedAt: string }>(
+                const tasks = await TxAll<{ Name: string; DueAt: string | null; ActualCloseDate: string }>(
                     ctx,
                     `SELECT t.Name, CONVERT(varchar(33), t.DueAt, 126) AS DueAt,
-                            CONVERT(varchar(33), d.ClosedAt, 126) AS ClosedAt
+                            CONVERT(varchar(10), d.ActualCloseDate, 23) AS ActualCloseDate
                        FROM ${TASKS_SCHEMA}.Task t
                        JOIN ${TASKS_SCHEMA}.TaskLink tl ON tl.TaskID = t.ID
                        JOIN ${SALES_SCHEMA}.Deal d ON d.ID = '${dealID}'
@@ -1668,7 +1668,6 @@ export const CloseDealChecks: NamedCheck[] = [
                         `"${t.Name}" has a NULL due date — every downstream due-date feature is inert for it`,
                     );
                     const due = new Date(String(t.DueAt));
-                    const closed = new Date(String(t.ClosedAt));
                     /**
                      * ── AN EXACT OFFSET, NOT A PLAUSIBLE RANGE. THE RANGE WAS THE BUG ───────────────
                      *
@@ -1684,16 +1683,21 @@ export const CloseDealChecks: NamedCheck[] = [
                      * from a right one; an equality can.
                      */
                     /**
-                     * BOTH SIDES TRUNCATED TO UTC MIDNIGHT BEFORE DIFFERENCING, and the first version of
-                     * this line was wrong in the way the fix's own comment warns about: `DueAt` is a
-                     * midnight DATE while `ClosedAt` is a full timestamp, so subtracting them lost the
-                     * afternoon and a five-day offset measured as four. The check had the day-arithmetic
-                     * bug it was written to catch.
+                     * BOTH SIDES AT UTC MIDNIGHT BEFORE DIFFERENCING, and the first version of this line
+                     * was wrong in the way the fix's own comment warns about: `DueAt` is a midnight DATE
+                     * while `ClosedAt` is a full timestamp, so subtracting them lost the afternoon and a
+                     * five-day offset measured as four. The check had the day-arithmetic bug it was
+                     * written to catch.
+                     *
+                     * MEASURED FROM `ActualCloseDate`, NOT FROM `ClosedAt`'s UTC DAY (golive#168). The
+                     * due date counts from the BUSINESS day of the close, which is what `ActualCloseDate`
+                     * stores. From the evening on in Central (6 PM, 7 PM in daylight time) `ClosedAt`'s UTC
+                     * day is the next day, so a check keyed on it would read a correct five-day offset as
+                     * four whenever this suite runs in the evening.
                      */
-                    const closedMidnight = Date.UTC(
-                        closed.getUTCFullYear(), closed.getUTCMonth(), closed.getUTCDate(),
-                    );
-                    const days = Math.round((due.getTime() - closedMidnight) / 86_400_000);
+                    const closeDay = Date.parse(`${t.ActualCloseDate}T00:00:00Z`);
+                    Assert(Number.isFinite(closeDay), `the deal has no ActualCloseDate (${t.ActualCloseDate})`);
+                    const days = Math.round((due.getTime() - closeDay) / 86_400_000);
                     AssertEqual(
                         days,
                         DEFAULT_DUE_IN_DAYS,

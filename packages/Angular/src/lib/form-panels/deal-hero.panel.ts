@@ -15,6 +15,7 @@ import { UserInfoEngine } from '@memberjunction/core-entities';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule, FormChromeCoordinator } from '@memberjunction/ng-base-forms';
 import { RelatedChipsComponent, type BizAppsRelatedLink } from '@mj-biz-apps/common-ng';
+import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 import {
     DealEntity,
     IsDealFieldEditableWhileLocked,
@@ -23,6 +24,7 @@ import {
 } from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
+import { DealCloseDay } from './deal-close-day';
 
 
 /**
@@ -231,7 +233,7 @@ function money(n: number | null | undefined): string {
                         <span class="mjs-deal-hero__stat-label">Next step</span>
                         <span class="mjs-deal-hero__next-val">{{ Record.NextStep }}</span>
                         @if (Record.NextStepDate) {
-                            <span class="mjs-deal-hero__next-when">{{ Record.NextStepDate | date: 'd MMM y' }}</span>
+                            <span class="mjs-deal-hero__next-when">{{ Record.NextStepDate | date: 'd MMM y' : 'UTC' }}</span>
                         }
                     </div>
                 }
@@ -438,6 +440,14 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
             try { this.Collapsed = JSON.parse(raw) === true; } catch { this.Collapsed = false; }
         }
         await this.refreshNotices();
+        /**
+         * The business zone, for a legacy `ClosedAt`-only row's close day ({@link CloseStatValue},
+         * golive#168). Idempotent and a no-op once loaded; unconfigured, the engine answers UTC, and
+         * `sales-ng` is lazily loaded, so the boot sequence is not relied on — the Overview panel does
+         * the same. Marked for check because nothing else repaints the stat when it lands.
+         */
+        await BusinessTimeZoneEngine.Instance.Config(false);
+        this.cdr?.markForCheck();
     }
 
     /**
@@ -585,11 +595,15 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     /** "Closed" once it has happened, "Close" while it is still a forecast. */
     public get CloseStatLabel(): string { return this.IsClosed ? 'Closed' : 'Close'; }
 
-    /** The date it closed on, or the date it is expected to. */
+    /**
+     * The date it closed on, or the date it is expected to.
+     *
+     * The close is the BUSINESS close day ({@link DealCloseDay}), the same one the Overview's labels,
+     * variance and sales cycle use: on a legacy row carrying only `ClosedAt`, that instant's UTC day is
+     * the next day for any close in the Central evening (golive#168).
+     */
     public get CloseStatValue(): string {
-        const when = this.IsClosed
-            ? (this.Record?.ActualCloseDate ?? this.Record?.ClosedAt)
-            : this.Record?.ExpectedCloseDate;
+        const when = this.IsClosed ? DealCloseDay(this.Record) : this.Record?.ExpectedCloseDate;
         if (!when) return '—';
         return new Date(when).toLocaleDateString(undefined, {
             day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',

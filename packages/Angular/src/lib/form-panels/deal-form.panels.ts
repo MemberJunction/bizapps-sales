@@ -38,6 +38,7 @@ import { DealActivityTimelineComponent } from '../activities/deal-activity-timel
 import { SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { MJSDealLineEditorComponent } from './deal-line-editor.component';
+import { BusinessDayOf, DealCloseDay } from './deal-close-day';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -415,8 +416,10 @@ function daysFrom(d: Date | string | null | undefined): number | null {
  * SEPARATE FROM {@link daysFrom}, which measures against TODAY. A sales cycle and a close variance are
  * both statements about two dates in the record, and expressing either through a today-relative helper
  * would make the number change every day after the deal closed — a figure about the past that keeps
- * moving. Everything stored is UTC (CLAUDE.md), so both sides are floored to a UTC day before
- * subtracting; using local getters here shifts the answer by a day either side of midnight.
+ * moving. Both sides are read by their UTC parts, which is how a `DATE` column and a `YYYY-MM-DD` day
+ * both carry their day; using local getters here shifts the answer by a day either side of midnight.
+ * An INSTANT must not be passed straight in — its UTC day is not its business day. Convert it with
+ * {@link BusinessDayOf} first (golive#168).
  */
 function daysBetween(
     from: Date | string | null | undefined,
@@ -948,7 +951,7 @@ const FIELD_STYLES = `
                         @if (Record.NextStep) {
                             <p class="mjs-ov-next">{{ Record.NextStep }}</p>
                             @if (Record.NextStepDate) {
-                                <div class="muted">Due {{ Record.NextStepDate | date: 'd MMM y' }}
+                                <div class="muted">Due {{ Record.NextStepDate | date: 'd MMM y' : 'UTC' }}
                                     @if (NextStepOverdue) { · overdue }
                                 </div>
                             }
@@ -1145,7 +1148,8 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         // (or missed) is advice on a decision nobody can take any more.
         if (this.IsClosed) {
             return {
-                label: this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt),
+                // The business close day, the same one the variance and the cycle count from (golive#168).
+                label: this.DateLabel(this.closeDay),
                 tone: this.IsLost ? 'muted' : 'success',
             };
         }
@@ -1215,7 +1219,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      * expectation would be a claim nobody made.
      */
     public get CloseVariance(): string {
-        const n = daysBetween(this.Record?.ExpectedCloseDate, this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
+        const n = daysBetween(this.Record?.ExpectedCloseDate, this.closeDay);
         if (n === null) return '';
         if (n === 0) return 'on time';
         return n < 0 ? `${dayCount(Math.abs(n))} early` : `${dayCount(n)} late`;
@@ -1228,9 +1232,18 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return 'Closed';
     }
 
-    /** The day it closed. */
+    /** The day it closed — the business day, as {@link closeDay} defines it. */
     public get ClosedDateLabel(): string {
-        return this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
+        return this.DateLabel(this.closeDay);
+    }
+
+    /**
+     * The business day the deal closed on. See {@link DealCloseDay}: every close figure on this panel and
+     * on the hero reads it, so a legacy `ClosedAt`-only row cannot show one day in its label and count
+     * from another in its variance (golive#168).
+     */
+    private get closeDay(): Date | string | null {
+        return DealCloseDay(this.Record);
     }
 
     /**
@@ -1238,9 +1251,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      * reported anywhere. Measured from `__mj_CreatedAt`, which is the only creation stamp there is.
      */
     public get SalesCycleLabel(): string {
+        // Both ends are business days: the creation instant's day in the business zone, and
+        // ActualCloseDate, which is stamped in it (golive#168). See BusinessDayOf.
         const n = daysBetween(
-            this.Record?.Get?.('__mj_CreatedAt') as Date | string | null | undefined,
-            this.Record?.ActualCloseDate ?? this.Record?.ClosedAt,
+            BusinessDayOf(this.Record?.Get?.('__mj_CreatedAt') as Date | string | null | undefined, this.Record?.CompanyID),
+            this.closeDay,
         );
         // A close back-dated before the deal was created is data, not an error to hide -- but it is not
         // a sales cycle either, and "-4 days" reads as a bug. Say nothing rather than something wrong.
