@@ -488,7 +488,7 @@ export const SaveDealChecks: NamedCheck[] = [
     },
     {
         Id: 'save-deal.SD6',
-        Name: 'SD6: KI-20 TRIPWIRE — removing an order line is silently DROPPED (see the comment)',
+        Name: 'SD6: removing an order line through the deal deletes it, and the survivor is re-sequenced',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -501,67 +501,39 @@ export const SaveDealChecks: NamedCheck[] = [
                 AssertEqual(before.length, 2, 'two lines to start with');
 
                 /**
-                 * ⚠️ THIS CHECK ASSERTS A DEFECT, DELIBERATELY. Read this before "fixing" it.
+                 * THE REQUIREMENT: `Remove()` records the row in the collection's removal list, the save
+                 * issued on the DEAL reaches the embedded order, and the delete, the re-sequencing of what
+                 * remains and the header update land together. The deal form's line editor depends on it.
                  *
-                 * It used to assert the requirement: `Remove()` records the row in the collection's removal
-                 * list, that list is contributed to the save plan, and the delete, the re-sequencing of
-                 * what remains and the header update land as one atomic unit. That is what the workspace's
-                 * delete-line affordance depends on, and it is what SD13's complement is about.
+                 * This check asserted the DEFECT for a while (KI-20): orders' save took over the line
+                 * writes and never drained the pending removals, so the row survived. It was written to
+                 * fail the day orders fixed that, as the signal to restore these assertions. Orders fixed
+                 * it (bc-aidp-next-golive#187), and SD6 then failed on every host with its own
+                 * "If this now reads 1" message until it was inverted here.
                  *
-                 * **It does not happen.** The save returns TRUE and the row survives — measured, with the
-                 * full matrix, in `test-harnesses/prove-line-removal.mjs` and written up as KI-20. The
-                 * cause is in orders, not here and not in MJ: `OrderEntityServer.Save()` passes
-                 * `SkipRelatedCollections: true` (correctly — lines must not insert before they are priced)
-                 * and its hand-rolled `savePendingLines()` iterates `this.Lines.Items`, so it handles
-                 * inserts and updates and never asks the collection for its pending removals. The control
-                 * in that harness — removing one of the DEAL's own instalments — deletes fine, which is how
-                 * we know MJ's machinery works and only `OrderHeader.Lines` drops it.
-                 *
-                 * SO WHY KEEP THE CHECK AT ALL, POINTING THE WRONG WAY? The CD7 pattern. Deleting it would
-                 * lose the requirement with no trace; leaving it red would make a permanently failing suite
-                 * that people learn to skim past. Written this way, **the day orders fixes it this check
-                 * FAILS, and that failure is the signal to invert it back** to the assertions preserved
-                 * verbatim below.
-                 *
-                 * What it still proves in the meantime is not nothing: the SALES side does its part. The
-                 * collection accepts the removal, reports the right count, and the save succeeds — so when
-                 * the fix lands there is no second bug waiting behind this one.
-                 *
-                 * ── THE ASSERTIONS TO RESTORE, when KI-20 is fixed ──
-                 *   AssertEqual(after.length, 1, 'the removed line was deleted');
-                 *   const survivor = after.find((r) => String(r.ID) === String(before[0].ID));
-                 *   Assert(!!survivor, 'the surviving line is the one that was KEPT, not merely one of the two');
-                 *   AssertEqual(Number(survivor.LineNumber), 1, 'what remains was re-sequenced');
-                 *
-                 * NOTE THE `find`, AND DO NOT SIMPLIFY IT BACK. The earlier draft of this list read
-                 * `after[0].ProductID` compared against `before[0].ProductID` — indexing a collection and
-                 * then asserting WHICH row it is. That is the defect twice found and fixed elsewhere
-                 * (close-won-tasks WT1, activities AC13): it passes until the row order shifts, then fails
-                 * somewhere unrelated to its subject. Restoring the list verbatim would have reintroduced
-                 * it the day KI-20 is fixed. Identify the row, then assert about it.
+                 * NOTE THE `find`, AND DO NOT SIMPLIFY IT. Indexing `after[0]` and asserting WHICH row it is
+                 * passes until the row order shifts, then fails somewhere unrelated to its subject — the
+                 * defect found and fixed in close-won-tasks WT1 and activities AC13. Identify the row, then
+                 * assert about it.
                  */
                 const deal = await reopen(ctx, created.ID);
                 const lines = deal.OrderID_Object!.Lines;
-                const doomed = lines.Items[1];
-                Assert(!!doomed, 'the line to remove was found after re-reading');
-                lines.Remove(doomed);
+                // Remove line 1 and keep line 2, so the survivor has to MOVE to be numbered 1. Keeping
+                // line 1 would make the re-sequencing assertion pass whether or not anything renumbered.
+                const doomed = lines.Items.find((l) => Number(l.LineNumber) === 1);
+                const kept = lines.Items.find((l) => Number(l.LineNumber) === 2);
+                Assert(!!doomed && !!kept, 'setup: lines 1 and 2 were found after re-reading');
+                const keptID = String(kept!.ID);
+                lines.Remove(doomed!);
                 AssertEqual(lines.Count, 1, 'the collection accepts the removal and reports one line left');
 
                 await saveOk(deal, 'the save after removal');
 
                 const after = await orderLines(ctx, orderID, ['ID', 'ProductID', 'LineNumber']);
-                AssertEqual(
-                    after.length,
-                    2,
-                    'KI-20: the removal was DROPPED and both rows are still there. If this now reads 1, ' +
-                        'orders has fixed savePendingLines() — restore the three assertions listed in the ' +
-                        'comment above, delete this one, and close KI-20.',
-                );
-                AssertEqual(
-                    idsOf(after),
-                    idsOf(before),
-                    'and they are the SAME two rows — nothing was deleted and nothing was replaced',
-                );
+                AssertEqual(after.length, 1, 'the removed line was deleted');
+                const survivor = after.find((r) => String(r.ID) === keptID);
+                Assert(!!survivor, 'the surviving line is the one that was KEPT, not merely one of the two');
+                AssertEqual(Number(survivor!.LineNumber), 1, 'what remains was re-sequenced from 2 to 1');
             }),
     },
     {
@@ -1701,29 +1673,45 @@ export const SaveDealChecks: NamedCheck[] = [
     },
     {
         Id: 'save-deal.SD31',
-        Name: 'SD31: a hand-set OwnerEmployeeID is refused ON CREATE too, not just on edit',
+        Name: 'SD31: a hand-set OwnerEmployeeID is OVERRIDDEN on CREATE too, and the override is reported',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 /**
                  * ── SD26'S RULE, ON THE PATH SD26 COULD NOT REACH ───────────────────────────────────
                  *
-                 * SD26 proves a hand-set owner stamp is refused on an EDIT. The refusal asked
+                 * SD26 proves a hand-set owner stamp loses to the roster on an EDIT. The guard used to ask
                  * `GetFieldByName('OwnerEmployeeID').Dirty`, which is the right question on an update and
                  * useless on a create: a first assignment does not mark a field dirty, so an importer
-                 * doing `NewRecord()` -> `OwnerEmployeeID = X` -> `Save()` walked straight past the guard
-                 * and created the exact state SD26 exists to forbid — an owner column and an owner-role
-                 * roster naming different people, on the highest-volume path there is.
+                 * doing `NewRecord()` -> `OwnerEmployeeID = X` -> `Save()` walked straight past it and
+                 * created the exact state SD26 exists to forbid — an owner column and an owner-role
+                 * roster naming different people, on the highest-volume path there is. The guard now asks
+                 * `callerSuppliedValue`, which knows that on a create the question is "is there a value
+                 * here" rather than "did this save change it".
                  *
-                 * Both places now ask `callerSuppliedValue`, which knows that on a create the question is
-                 * "is there a value here" rather than "did this save change it".
+                 * ── THIS ASSERTED A REFUSAL, AND NOW ASSERTS AN OVERRIDE, AS SD26 DOES ──────────────
+                 *
+                 * `overrideSuppliedOwnerStamp` replaced the refusal: a supplied owner loses to the roster,
+                 * and the override is reported through `OwnerStampWarnings`. SD26 was moved to assert
+                 * that; this check still asserted the refusal and failed on every host.
+                 *
+                 * The owner the roster gives a NEW deal is the default `seedOwnerOnCreate` stages, so the
+                 * comparison is with an ordinary create from the same fixture rather than with a named
+                 * employee: what the caller supplied must make no difference to who owns the deal.
                  */
                 const f = await ResolveSalesFixture(ctx);
+
+                const clean = await newDeal(ctx, f, (d) => { d.Name = 'SD31 ordinary create'; });
+                await saveOk(clean, 'a create that leaves the server-owned stamp alone');
+                const expected = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${clean.ID}'`,
+                );
+                Assert(!!expected.OwnerEmployeeID, 'an ordinary create is given an owner, or this check proves nothing');
 
                 const other = await new RunView().RunView<{ ID: string }>(
                     {
                         EntityName: E_EMPLOYEE,
-                        ExtraFilter: `Active = 1 AND ID <> '${f.EmployeeID}'`,
+                        ExtraFilter: `Active = 1 AND ID <> '${expected.OwnerEmployeeID}'`,
                         ResultType: 'simple',
                         Fields: ['ID'],
                     },
@@ -1737,31 +1725,35 @@ export const SaveDealChecks: NamedCheck[] = [
                     d.Name = 'SD31 owner stamp on create';
                     d.OwnerEmployeeID = otherID;
                 });
+                await saveOk(created, 'a create carrying a hand-set owner stamp must still SUCCEED');
+
+                const stored = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
+                );
+                Assert(
+                    String(stored.OwnerEmployeeID ?? '').toLowerCase() !== String(otherID).toLowerCase(),
+                    'the hand-set value did NOT win',
+                );
                 AssertEqual(
-                    await created.Save(),
-                    false,
-                    'setting the owner stamp on a NEW deal must be refused, exactly as on an edit',
+                    String(stored.OwnerEmployeeID ?? '').toLowerCase(),
+                    String(expected.OwnerEmployeeID).toLowerCase(),
+                    'and the deal is owned by whoever an ordinary create would have given it',
                 );
 
-                // A refused create writes nothing at all.
-                const rows = await new RunView().RunView<{ ID: string }>(
-                    {
-                        EntityName: E_DEAL,
-                        ExtraFilter: `Name = 'SD31 owner stamp on create'`,
-                        ResultType: 'simple',
-                        Fields: ['ID'],
-                    },
-                    ctx.User,
+                // The stamp is derived from the roster, so the roster must name the same person.
+                const team = await children(ctx, E_TEAM, created.ID, ['EmployeeID']);
+                Assert(
+                    team.some((m) => String(m.EmployeeID).toLowerCase() === String(expected.OwnerEmployeeID).toLowerCase()),
+                    'the roster carries the owner the stamp names',
                 );
-                Assert(rows.Success, `reading deals failed — ${rows.ErrorMessage}`);
-                AssertEqual((rows.Results ?? []).length, 0, 'and no deal row was written');
 
-                /**
-                 * AND THE REFUSAL IS STILL NARROW — the same create WITHOUT the stamp must succeed. The
-                 * server fills it from the roster, which is the whole reason the column is not writable.
-                 */
-                const clean = await newDeal(ctx, f, (d) => { d.Name = 'SD31 ordinary create'; });
-                await saveOk(clean, 'a create that leaves the server-owned stamp alone');
+                const warned = (created as unknown as { OwnerStampWarnings?: readonly string[] })
+                    .OwnerStampWarnings ?? [];
+                Assert(warned.length > 0, 'the override must be reported, not swallowed');
+                Assert(
+                    warned.some((w) => w.includes('Internal team panel')),
+                    'and the warning must say where the owner IS changed',
+                );
             }),
     },
     {
@@ -2260,37 +2252,57 @@ export const SaveDealChecks: NamedCheck[] = [
                 /**
                  * ── A DECLARATION GOVERNS ONE SAVE ──────────────────────────────────────
                  *
-                 * `Save()` clears `_declaredTransition` near its end, and the comment there says why:
-                 * left standing it "would suppress the stage defaults on the next unrelated edit to the
-                 * same in-memory record and put its note on that edit's event".
+                 * `Save()` clears `_declaredTransition` in a `finally`, because left standing it "would
+                 * suppress the stage defaults on the next unrelated edit to the same in-memory record and
+                 * put its note on that edit's event". The clear used to sit near the end of the body,
+                 * after guards that return early, so a caller that declared a transition and was then
+                 * REFUSED kept the declaration and the next save inherited it.
                  *
-                 * But three guards return BEFORE that line — the close-lock refusal, the owner-stamp
-                 * refusal, and a failure resolving the server-maintained stamps. A caller that declares a
-                 * transition and is then refused keeps the declaration, and the NEXT save of that same
-                 * object inherits it: stage defaults suppressed, and the previous note stamped onto an
-                 * unrelated event.
+                 * Induced through the stage-belongs-to-pipeline refusal: a stage from another pipeline
+                 * is refused before anything is written, whether or not a transition is declared.
                  *
-                 * Induced through the owner-stamp refusal because it is the one a check can trigger
-                 * deterministically: setting `OwnerEmployeeID` directly, with no roster loaded, is
-                 * refused by design.
+                 * TWO EARLIER CHOICES FAILED ON THEIR OWN SETUP. The owner-stamp refusal no longer
+                 * exists — a supplied owner is now overridden by the roster with a warning. The
+                 * loss-reason refusal (closing as LOST with no `LossReasonID`) cannot be reached from
+                 * here at all: it fires only for a close that `planStatusTransition()` plans, and that
+                 * returns null whenever a transition is DECLARED, because a declared save is the close
+                 * operation writing its own, already-validated result. The declaration this check
+                 * needs switched off the refusal it relied on.
+                 *
+                 * The second save edits only `NextStep`. It owes a stage event only if a declaration is
+                 * still standing, so a leaked declaration is exactly what puts the note on a row.
                  */
                 const f = await ResolveSalesFixture(ctx);
                 const created = await newDeal(ctx, f, (d) => { d.Name = 'SD40 declaration outlives refusal'; });
                 await saveOk(created, 'create');
 
+                const foreign = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: E_STAGE,
+                        ExtraFilter: `PipelineID <> '${f.PipelineID}'`,
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                    },
+                    ctx.User,
+                );
+                Assert(foreign.Success, `reading stages failed — ${foreign.ErrorMessage}`);
+                const foreignStageID = (foreign.Results ?? [])[0]?.ID;
+                Assert(!!foreignStageID, 'the host needs a second pipeline with a stage for this check to mean anything');
+
                 const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
                 Assert(await deal.Load(created.ID), 'the deal reloads');
+                const ownStageID = deal.PipelineStageID;
 
                 (deal as unknown as { DeclareTransition(kind: string, note: string): void })
                     .DeclareTransition('Close', 'SD40 note that must not survive');
 
-                // Refused by the owner stamp: supplied directly, no roster in this save.
-                deal.OwnerEmployeeID = f.EmployeeID;
+                // Refused: a stage from another pipeline.
+                deal.PipelineStageID = foreignStageID;
                 const refused = await deal.Save();
-                Assert(refused === false, 'setup: the owner-stamp guard must refuse this save');
+                Assert(refused === false, 'setup: a stage from another pipeline must be refused');
 
                 // Now an ordinary edit on the SAME object. It must not inherit the declaration.
-                deal.OwnerEmployeeID = null;
+                deal.PipelineStageID = ownStageID;
                 deal.NextStep = 'an unrelated edit after the refusal';
                 await saveOk(deal, 'the next, unrelated save');
 

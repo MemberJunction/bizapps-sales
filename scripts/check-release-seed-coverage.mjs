@@ -39,16 +39,8 @@ const IGNORED_DIRS = new Set(['sql_logging', '.backups']);
  * Records deliberately left out of the release Metadata_Sync. Each entry names the issue that ships
  * it; remove the entry in that issue's PR. Keyed by UPPERCASE ID.
  */
-const HELD_BACK = new Map(
-    [
-        'C1A02E75-4C6E-49B0-96F3-79D1A8E23001', // ML training pipeline
-        'C1A02E75-4C6E-49B0-96F3-79D1A8E23011', // ML model v1
-        'C1A02E75-4C6E-49B0-96F3-79D1A8E23012', // ML model v2
-        'C1A02E75-4C6E-49B0-96F3-79D1A8E23013', // ML model v3
-        'C1A02E75-4C6E-49B0-96F3-79D1A8E23050', // record process (scheduled scoring)
-        'C1A02E75-4C6E-49B0-96F3-79D1A8E23060', // ML model scoring binding
-    ].map((id) => [id, 'bizapps-sales#138']),
-);
+/** @type {Map<string, string>} */
+const HELD_BACK = new Map();
 
 function walkJson(dir, acc = []) {
     for (const name of readdirSync(dir).sort()) {
@@ -279,7 +271,13 @@ function changedSinceSeed() {
         else if (before.value !== record.value) changes.push({ kind: 'changed', key: record.key, path: record.path });
     }
     for (const [id, record] of then) {
-        if (!now.has(id)) changes.push({ kind: 'removed', key: record.key, path: record.path });
+        if (now.has(id)) continue;
+        // A removed record that no migration ever seeded never reached an installed database, so
+        // there is nothing for the next seed to carry (records held back from every seed, then
+        // dropped from metadata/). Records keyed by `@lookup:` cannot be checked this way and stay
+        // reported.
+        if (UUID.test(record.key) && !allSqlLower.includes(record.key.toLowerCase())) continue;
+        changes.push({ kind: 'removed', key: record.key, path: record.path });
     }
     return { changes, seed, commit };
 }
