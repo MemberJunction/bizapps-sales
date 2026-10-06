@@ -34,6 +34,17 @@ export function InForecast(deals: readonly DealRosterRow[]): DealRosterRow[] {
 }
 
 /**
+ * The summary the headline tiles may show: none while the roster is refused (bizapps-sales#137).
+ *
+ * Tiles reduced from `Sales: Dashboard Summary` above an empty roster is two figures disagreeing with
+ * no error, which is the state the refusal exists to prevent. Both places that set the summary — a
+ * refresh and a period change — go through this, so a period change cannot put numbers back.
+ */
+export function TileSummary<T>(summary: T | null, rosterError: string | null): T | null {
+    return rosterError ? null : summary;
+}
+
+/**
  * Whether a WON deal falls inside the dashboard's selected period.
  *
  * ── ONE PREDICATE, TWO CALLERS, ON PURPOSE ──────────────────────────────────────────────────────

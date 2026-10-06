@@ -1,5 +1,94 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.12.1
+
+### Patch Changes
+
+- 016a740: Raise the MemberJunction floor to the 6.1 LTS release (`^6.1.4`, `mjVersionRange >=6.1.4 <7.0.0`) and move bizapps-common to `^5.50.1`. The accounting packages sales depends on require MJ core 6.1.0-edge.7 or later; with the old `^6.1.0-edge.5` override the lockfile installed an edge.5 core under them and the first accounting read during a deal save failed. Common 5.50.1 carries the Tags metadata that pushes to an MJ v6 host.
+- Updated dependencies [016a740]
+  - @mj-biz-apps/sales-entities@6.12.1
+
+## 6.12.0
+
+### Patch Changes
+
+- 58259d2: A deal created already in a locking status (Won or Lost) no longer gets an empty Draft order. The close lock reads the persisted status, which a create does not have, so a deal born closed used to pass as unlocked and receive an embedded order it would never use, consuming an order number. The save now checks the incoming status on a create. An order the caller built before the first save (lines added in the same save) is still provisioned. A deal created open, or with no status, gets its order as before.
+  - @mj-biz-apps/sales-entities@6.12.0
+
+## 6.11.0
+
+### Patch Changes
+
+- Updated dependencies [364871c]
+  - @mj-biz-apps/sales-entities@6.11.0
+
+## 6.10.0
+
+### Patch Changes
+
+- 117f74e: A customer or contact created from the deal workspace is now bound only under an id the lookup or a server read shows to exist. Previously, when the lookup reload missed the new row, the workspace bound the id the slide-in reported, which has been measured to be an id that was never written; the deal's first save then failed inside its order on `FK_OrderHeader_BillToOrganization`.
+
+  The server now refuses a deal save that names a customer or primary contact the database does not hold, with a message naming it, instead of a raw SQL error from the embedded order. The workspace re-reads its customer and contact lists after a failed save so the rep can pick again without reloading the page.
+
+- Updated dependencies [c5b7825]
+- Updated dependencies [c91feda]
+  - @mj-biz-apps/sales-entities@6.10.0
+
+## 6.9.3
+
+### Patch Changes
+
+- f8dc2f1: Adding, changing or removing the Owner / AE row in the Deal form's Internal team grid now updates
+  the deal's owner (golive #291).
+
+  `stampOwnerFromTeam()` is guarded by `RosterDrivesThisSave`, which asks whether the team is part of
+  the save. The grid saves the `DealTeamMember` row and nothing else, so it was not — the grid showed
+  an owner while the Overview still said "No owner assigned." The server's own refusal for a hand-set
+  owner says _"Change the Owner role on the Internal team panel instead"_, and that panel was the one
+  path that did not update it.
+
+  A new `DealTeamMemberEntityServer` re-derives the stamp after a team row is saved or deleted. It does
+  not compute an owner: it loads the deal with its team and saves, which makes `RosterDrivesThisSave`
+  true and lets the existing derivation run, so there is one implementation rather than two that agree
+  until they do not. A row that moves between deals refreshes both. A re-stamp that fails is logged
+  rather than thrown, because the roster edit is already committed and the roster is the authority.
+
+  Closed deals need no special case: `checkCloseLock` freezes `OwnerEmployeeID` but keys on the field
+  being dirty, and the stamp is applied after it runs — which is what golive #206 item 2 requires, since
+  reassigning a rep on a closed deal is record-keeping.
+
+  No schema change.
+
+  - @mj-biz-apps/sales-entities@6.9.3
+
+## 6.9.2
+
+### Patch Changes
+
+- bead3d7: The Deal form's Pipeline Stage control offered every stage in the system, and nothing on the server
+  checked that the stage belonged to the deal's pipeline (golive #291).
+
+  `<mj-form-field>` renders a foreign key as an unfiltered dropdown off the related entity, so Stage
+  listed D2C's three stages and sixteen legacy pipelines' alongside B2B's six. A B2B deal could be
+  positioned in another pipeline's process — and the mismatch did not sit inert, because
+  `applyStageDefaults` then took that stage's probability, forecast category and status.
+
+  Pipeline and Stage are now dedicated controls: Stage lists only the chosen pipeline's stages and
+  clears when the pipeline changes, the way the deal workspace has always behaved and the way this same
+  panel already handled Status for golive #205. The form does not write `CompanyID` — the server forces
+  it from the pipeline on every save — and picking a stage does not write its defaults, which would
+  destroy a rep-typed probability before the server saw it.
+
+  `DealEntityServer.Save()` now refuses a stage that belongs to a different pipeline, so imports and
+  Actions are covered too. It refuses rather than corrects, unlike the company stamp beside it: a wrong
+  company has one derivable right answer, a wrong stage has none. Keyed on either half moving, so an
+  existing deal whose pair already disagrees — converted deals sit in legacy pipelines (#257) — is not
+  blocked from unrelated edits.
+
+  No schema change.
+
+  - @mj-biz-apps/sales-entities@6.9.2
+
 ## 6.9.1
 
 ### Patch Changes

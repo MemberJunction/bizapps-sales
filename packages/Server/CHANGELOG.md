@@ -1,5 +1,62 @@
 # @mj-biz-apps/sales-server
 
+## 6.12.1
+
+### Patch Changes
+
+- 016a740: Raise the MemberJunction floor to the 6.1 LTS release (`^6.1.4`, `mjVersionRange >=6.1.4 <7.0.0`) and move bizapps-common to `^5.50.1`. The accounting packages sales depends on require MJ core 6.1.0-edge.7 or later; with the old `^6.1.0-edge.5` override the lockfile installed an edge.5 core under them and the first accounting read during a deal save failed. Common 5.50.1 carries the Tags metadata that pushes to an MJ v6 host.
+- Updated dependencies [016a740]
+  - @mj-biz-apps/sales-entities@6.12.1
+  - @mj-biz-apps/sales-core-entities-server@6.12.1
+  - @mj-biz-apps/sales-actions@6.12.1
+
+## 6.12.0
+
+### Patch Changes
+
+- Updated dependencies [58259d2]
+  - @mj-biz-apps/sales-core-entities-server@6.12.0
+  - @mj-biz-apps/sales-actions@6.12.0
+  - @mj-biz-apps/sales-entities@6.12.0
+
+## 6.11.0
+
+### Patch Changes
+
+- Updated dependencies [364871c]
+  - @mj-biz-apps/sales-entities@6.11.0
+  - @mj-biz-apps/sales-core-entities-server@6.11.0
+  - @mj-biz-apps/sales-actions@6.11.0
+
+## 6.10.0
+
+### Patch Changes
+
+- Updated dependencies [117f74e]
+- Updated dependencies [c5b7825]
+- Updated dependencies [c91feda]
+  - @mj-biz-apps/sales-core-entities-server@6.10.0
+  - @mj-biz-apps/sales-entities@6.10.0
+  - @mj-biz-apps/sales-actions@6.10.0
+
+## 6.9.3
+
+### Patch Changes
+
+- Updated dependencies [f8dc2f1]
+  - @mj-biz-apps/sales-core-entities-server@6.9.3
+  - @mj-biz-apps/sales-actions@6.9.3
+  - @mj-biz-apps/sales-entities@6.9.3
+
+## 6.9.2
+
+### Patch Changes
+
+- Updated dependencies [bead3d7]
+  - @mj-biz-apps/sales-core-entities-server@6.9.2
+  - @mj-biz-apps/sales-actions@6.9.2
+  - @mj-biz-apps/sales-entities@6.9.2
+
 ## 6.9.1
 
 ### Patch Changes

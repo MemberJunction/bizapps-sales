@@ -58,10 +58,11 @@
  *
  * A product can carry several named prices — a default plus overrides. The rep may pick one of them
  * with orders' shared `mjo-line-price-picker`, the same control the order line uses, gated by the same
- * `MJ.BizApps.Orders.Price.OverrideList` / `OverrideAny` grants. `AllowCustomAmount` is off: choosing
- * one of orders' rules is not entering a price, and a typed amount would be (D-DL2). A pick away from
- * the default asks for a reason, and the ORDER's save refuses a flagged line without one. The picker's
- * list, its default and the figures beside it all come from orders; this file only passes them through.
+ * `MJ.BizApps.Orders.Price.OverrideList` / `OverrideAny` grants. `AllowCustomAmount` is on, so a rep
+ * holding `OverrideAny` may also type a custom amount (D-DL2, revised); the picker itself withholds that
+ * row from `OverrideList` holders. Any pick away from the default asks for a reason, and the ORDER's
+ * save refuses a flagged line without one. The picker's list, its default and the figures beside it
+ * all come from orders; this file only passes them through.
  *
  * @module @mj-biz-apps/sales-ng
  */
@@ -218,12 +219,13 @@ interface RemoteOperationRouter {
                     @if (ShowPricePicker) {
                         <div class="mjs-le__field">
                             <span class="mjs-le__label">Price</span>
-                            <!-- Orders' named prices only. AllowCustomAmount is off because a typed amount
-                                 is a price field in the rep's hands (D-DL2); a named rule is not. -->
+                            <!-- Orders' named prices, plus a typed custom amount for an OverrideAny
+                                 holder (D-DL2, revised). The picker withholds the custom row from
+                                 OverrideList holders and asks for a reason on any pick off the default. -->
                             <mjo-line-price-picker
                                 [Line]="Working"
                                 [OverrideKind]="OverrideKind"
-                                [AllowCustomAmount]="false"
+                                [AllowCustomAmount]="true"
                                 [Applicable]="Applicable"
                                 [EngineDefault]="EngineDefault"
                                 [DefaultUnit]="DefaultUnit"

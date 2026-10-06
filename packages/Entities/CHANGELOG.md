@@ -1,5 +1,30 @@
 # @mj-biz-apps/sales-entities
 
+## 6.12.1
+
+### Patch Changes
+
+- 016a740: Raise the MemberJunction floor to the 6.1 LTS release (`^6.1.4`, `mjVersionRange >=6.1.4 <7.0.0`) and move bizapps-common to `^5.50.1`. The accounting packages sales depends on require MJ core 6.1.0-edge.7 or later; with the old `^6.1.0-edge.5` override the lockfile installed an edge.5 core under them and the first accounting read during a deal save failed. Common 5.50.1 carries the Tags metadata that pushes to an MJ v6 host.
+
+## 6.12.0
+
+## 6.11.0
+
+### Minor Changes
+
+- 364871c: The 6.10 upgrade no longer fails on hosts whose Deals `PredictedWinRiskBand` field was created outside V202609202353. Migration V202609291800 inserted that field's four values against the field ID V202609202353 pins, but V202609202353 only inserts the field with that ID when no field of that name exists yet. A host that already had the field under another ID failed on `FK_EntityFieldValue_EntityField`, which `mj app upgrade` reports as "Transaction has been aborted". The migration now resolves the field by entity and name, and skips a value the field already has.
+
+## 6.10.0
+
+### Minor Changes
+
+- c5b7825: Sales Contacts inherits `SeniorityLevelID` from Common's People (bizapps-common v5.45.x, #148). A new migration adds the column to the Sales Contacts base view, refreshes the `vwSalesContacts` wrapper so its `g.*` column list stays aligned, and ships the inherited EntityField. Without the refresh, the wrapper returned `SeniorityLevelID` values under `OwnerEmployee` once CodeGen rebuilt the inner view. The migration also carries CodeGen's output for Deals and Deal Contact Roles, which no earlier migration shipped. The bizapps-common floor in `mj-app.json` rises to 5.45.0, since the view reads `Person.SeniorityLevelID`.
+- c91feda: The 6.10 Metadata_Sync ships the won-deal finance exception check to hosts: the `Detect Won Deals With Unconfirmed Orders` Action, its nightly scheduled job (shipped Disabled) and the `Sales: Deal Owners Without a Linked Login` query, all added in 6.9.1 as metadata that no migration carried. The seed is idempotent and safe on a host that already ran `mj sync push`, and the three rows are teardown roots so `mj app remove` retires them. The ML models, training pipeline, scoring binding and scoring record process under metadata/ are still not included.
+
+## 6.9.3
+
+## 6.9.2
+
 ## 6.9.1
 
 ## 6.9.0

@@ -585,13 +585,28 @@ pricing walk is theirs, and the derivation already handles both channels.
 Do **not** bind `DiscountAmount` and call it the discount. Derive it (`list − net`) or ask orders for the
 figure. The column is not the number you want, and it will be zero exactly when a discount exists.
 
-### Choosing one of orders' named prices is not entering one (golive#270)
+### Choosing a price on a deal line (golive#270, revised)
 
 The deal line editor hosts orders' shared `mjo-line-price-picker`, so a rep with an override grant can
-put a line on one of the product's named prices. That stays inside this decision: the rep picks among
-rules orders already holds, and orders resolves the figure. The picker's typed **Custom amount** is
-switched off (`AllowCustomAmount = false`), because a typed amount is the price field this decision
-keeps out of the rep's hands. Allowing it is a change to D-DL2, not to the editor.
+put a line on one of the product's named prices. Picking among rules orders already holds is not
+entering a price; orders resolves the figure.
+
+**Revision: a rep holding `MJ.BizApps.Orders.Price.OverrideAny` may type a custom amount on a deal
+line** (`AllowCustomAmount = true`). This narrows the "no enterable price field" rule above to reps
+without that grant. The reason: a product priced deal by deal carries a $0 catalog price, and a percent
+discount cannot raise $0, so without a typed amount such a line could only book at $0.
+
+What keeps it controlled is what controls the same amount on the order line:
+
+- **The grant.** The picker offers the custom row only to `OverrideAny` holders; `OverrideList`
+  holders still pick named prices only, and holders of neither see no picker. Orders ships the grant on
+  its Account Director role.
+- **The reason.** Any pick off the default, a typed amount included, requires an override reason, and
+  the order's save refuses a flagged line without one.
+- **One row.** A deal line is an order line on the deal's own order, so the typed price and its reason
+  are stored where the order shows them after Closed Won. Nothing is copied.
+
+The discount stays percent-only: the `DiscountAmount` reasoning above is unchanged.
 
 ---
 
