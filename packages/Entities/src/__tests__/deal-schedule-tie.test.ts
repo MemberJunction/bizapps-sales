@@ -72,18 +72,23 @@ describe('a schedule that does not tie', () => {
 });
 
 /**
- * A ROW MISSING A DATE OR AN AMOUNT CANNOT BECOME AN ORDER ROW.
+ * A ROW THE ORDER SIDE WOULD REFUSE CANNOT BE ALLOWED THROUGH THE CLOSE.
  *
- * `OrderHeaderPaymentSchedule.DueDate` and `.Amount` are both NOT NULL while the deal's are nullable,
- * so the copy at Close Won would have to drop the row or invent a value. Refusing while the rep is
- * still looking at the panel is better than either.
+ * Three ways a deal row fails that test, and each is a column constraint on the order:
+ * `OrderHeaderPaymentSchedule.DueDate` and `.Amount` are NOT NULL while the deal's are nullable, and
+ * `CK_OrderHeaderPaymentSchedule_Amount` requires `Amount > 0`. The copy at Close Won would have to
+ * drop such a row or invent a value; refusing while the rep is still looking at the panel beats both.
+ *
+ * The ZERO case is the one that hides: a 0.00 instalment looks complete and sums harmlessly, so a
+ * schedule containing one can TIE and still be impossible to copy. It was found by reading the check
+ * constraint, not by hitting it.
  */
-describe('a schedule with incomplete rows', () => {
+describe('a schedule with rows the order could not take', () => {
     it('refuses a row with no amount, even when the rest tie', () => {
         const tie = ReadDealScheduleTie([row(24000), row(null)], 24000);
         expect(tie.Ties).toBe(false);
         expect(tie.Incomplete).toBe(1);
-        expect(ExplainDealScheduleTie(tie)).toContain('missing a date or an amount');
+        expect(ExplainDealScheduleTie(tie)).toContain('cannot be billed');
     });
 
     it('refuses a row with no date', () => {
@@ -96,8 +101,19 @@ describe('a schedule with incomplete rows', () => {
         // Both wrong: a blank row AND a shortfall. The blank row is the one to fix first, because an
         // amount typed into it changes the shortfall.
         const message = ExplainDealScheduleTie(ReadDealScheduleTie([row(100), row(null)], 24000)) ?? '';
-        expect(message).toContain('missing a date or an amount');
+        expect(message).toContain('cannot be billed');
         expect(message).not.toContain('unscheduled');
+    });
+
+    it('refuses a zero-amount row, even though it ties', () => {
+        const tie = ReadDealScheduleTie([row(24000), row(0)], 24000);
+        expect(tie.Remainder, 'the arithmetic is fine — that is the trap').toBe(0);
+        expect(tie.Ties, 'but the order would refuse the row').toBe(false);
+        expect(ExplainDealScheduleTie(tie)).toContain('greater than zero');
+    });
+
+    it('refuses a negative amount', () => {
+        expect(ReadDealScheduleTie([row(24100), row(-100)], 24000).Ties).toBe(false);
     });
 
     it('counts every incomplete row, not just the first', () => {

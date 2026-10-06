@@ -22,6 +22,7 @@
  * @module @mj-biz-apps/sales-core-entities-server
  */
 import {
+    BaseEntity,
     BaseRemotableOperation,
     DatabaseProviderBase,
     IMetadataProvider,
@@ -68,6 +69,8 @@ import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js'
 import { CloseWonTaskDueAt, CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
+const ORDER_HEADER_ENTITY = 'MJ_BizApps_Orders: Order Headers';
+const ORDER_SCHEDULE_ENTITY = 'MJ_BizApps_Orders: Order Header Payment Schedules';
 const DEAL_PAYMENT_SCHEDULE_ENTITY = 'MJ_BizApps_Sales: Deal Payment Schedules';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const DEAL_TYPE_ENTITY = 'MJ_BizApps_Sales: Deal Types';
@@ -578,6 +581,10 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 for (const message of taskResult.Issues) {
                     taskIssues.push({ Section: 'deal', Field: null, Severity: 'warning', Message: message });
                 }
+
+                for (const message of await this.copyScheduleToOrder(deal, provider, user)) {
+                    taskIssues.push({ Section: 'deal', Field: null, Severity: 'warning', Message: message });
+                }
             }
 
             await db.CommitTransaction();
@@ -632,6 +639,116 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
      * The loss-reason rule is the app's ONLY mandatory field and the friction is deliberate: loss
      * reasons are the highest-value and most consistently-skipped data in any CRM (§7.2).
      */
+    /**
+     * COPIES THE DEAL'S PAYMENT SCHEDULE ONTO ITS ORDER (bc-aidp-next-golive#290).
+     *
+     * The rows the rep entered on the deal never reached the order, so the order booked and invoiced
+     * its full value in one amount while the deal showed four instalments. Nothing read the deal's
+     * schedule after the close; this is what makes it mean something.
+     *
+     * ONE TO ONE, AND UNDER THE ORDER'S COMPANY. Each deal row becomes one order row with the same
+     * date and amount. A row covering several products stays one row, and nothing is split by product
+     * company — golive#311 moved schedule rows onto the order, where they tie to the order total
+     * rather than per product company.
+     *
+     * IDEMPOTENT, WHICH IS NOT OPTIONAL. A won deal can be reopened and closed again (S-US8), and
+     * this runs on every Won close. An order that already carries a schedule is left alone rather
+     * than doubled — the second close of golive#324's deal is exactly that path.
+     *
+     * NON-FATAL, like the close-won tasks beside it. The deal is already closed and the order already
+     * exists by the time this runs; failing the close because a derived schedule could not be written
+     * would roll back a correct close over a copy the next close can redo. The tie check in
+     * `validate()` is where a bad schedule stops the close — by here it has already passed.
+     */
+    private async copyScheduleToOrder(
+        deal: DealEntityServer,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<string[]> {
+        const warnings: string[] = [];
+        const orderID = String(deal.OrderID ?? '');
+        // A header-only deal mints no order. Nothing to copy to, and nothing wrong.
+        if (!orderID) {
+            return warnings;
+        }
+        const view = provider as unknown as IRunViewProvider;
+
+        const rows = await view.RunView(
+            {
+                EntityName: DEAL_PAYMENT_SCHEDULE_ENTITY,
+                ExtraFilter: `DealID = '${deal.ID}'`,
+                // The rep's own order. DisplayOrder is NOT NULL; the date breaks ties within it.
+                OrderBy: 'DisplayOrder ASC, PaymentDate ASC',
+                ResultType: 'simple',
+                Fields: ['PaymentDate', 'Amount', 'Description'],
+            },
+            user,
+        );
+        if (!rows.Success) {
+            warnings.push('The deal closed, but its payment schedule could not be read, so the order has none.');
+            return warnings;
+        }
+        const schedule = (rows.Results ?? []) as Array<{ PaymentDate: unknown; Amount: unknown; Description?: unknown }>;
+        // No schedule is the implicit single instalment, which is how every deal behaved before this.
+        if (!schedule.length) {
+            return warnings;
+        }
+
+        const existing = await view.RunView(
+            { EntityName: ORDER_SCHEDULE_ENTITY, ExtraFilter: `OrderHeaderID = '${orderID}'`, ResultType: 'simple', Fields: ['ID'] },
+            user,
+        );
+        if (!existing.Success) {
+            warnings.push('The deal closed, but whether its order already has a payment schedule could not be read, so none was written.');
+            return warnings;
+        }
+        if ((existing.Results ?? []).length > 0) {
+            return warnings;
+        }
+
+        /**
+         * The ORDER'S company, not the deal's and not the product's. Read rather than assumed: the
+         * column is NOT NULL, and a wrong company here would put instalments on books that never
+         * sold anything.
+         */
+        const order = await view.RunView(
+            { EntityName: ORDER_HEADER_ENTITY, ExtraFilter: `ID = '${orderID}'`, ResultType: 'simple', Fields: ['CompanyID'] },
+            user,
+        );
+        const companyID = String(((order.Results ?? [])[0] as { CompanyID?: unknown } | undefined)?.CompanyID ?? '');
+        if (!order.Success || !companyID) {
+            warnings.push('The deal closed, but its order\'s company could not be read, so the payment schedule was not copied.');
+            return warnings;
+        }
+
+        let instalment = 0;
+        for (const row of schedule) {
+            instalment += 1;
+            const target = await provider.GetEntityObject<BaseEntity>(ORDER_SCHEDULE_ENTITY, user);
+            target.NewRecord();
+            target.Set('OrderHeaderID', orderID);
+            target.Set('CompanyID', companyID);
+            target.Set('InstallmentNumber', instalment);
+            target.Set('DueDate', row.PaymentDate);
+            target.Set('Amount', row.Amount);
+            // The only status an unbilled instalment may carry; orders' own tie check counts it live.
+            target.Set('Status', 'Scheduled');
+            target.Set('AmountPaid', 0);
+            if (row.Description) {
+                target.Set('Description', row.Description);
+            }
+            if (!(await target.Save())) {
+                const why = target.LatestResult?.Message ?? 'unknown error';
+                warnings.push(
+                    `The deal closed, but instalment ${instalment} of its payment schedule could not be written ` +
+                        `to the order: ${why}. The order's schedule is incomplete.`,
+                );
+                return warnings;
+            }
+        }
+        return warnings;
+    }
+
     private async validate(
         deal: DealEntityServer,
         input: SalesCloseDealInput,

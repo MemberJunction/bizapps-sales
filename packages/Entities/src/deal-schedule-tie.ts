@@ -50,12 +50,16 @@ export interface DealScheduleTie {
     /** True when the schedule may stand: no rows at all, or rows that tie and are complete. */
     Ties: boolean;
     /**
-     * Rows missing a date or an amount.
+     * Rows that could never become an order row: no date, no amount, or an amount of zero or less.
      *
-     * NOT a nicety. `OrderHeaderPaymentSchedule.DueDate` and `.Amount` are both NOT NULL, while the
-     * deal's are nullable — so a row with either one blank cannot become an order row at all. Left
-     * unchecked, the copy at Close Won would have to either drop the row or invent a value, and both
-     * of those are worse than refusing while the rep is still looking at the panel.
+     * NOT a nicety — each of the three is a column the order side will not accept.
+     * `OrderHeaderPaymentSchedule.DueDate` and `.Amount` are both NOT NULL while the deal's are
+     * nullable, and `CK_OrderHeaderPaymentSchedule_Amount` requires `Amount > 0`. So the copy at
+     * Close Won would have to drop such a row or invent a value, and both are worse than refusing
+     * while the rep is still looking at the panel.
+     *
+     * The zero case is the one worth naming: a 0.00 instalment looks like a complete row and sums
+     * harmlessly, so a schedule containing one can TIE and still be impossible to copy.
      */
     Incomplete: number;
 }
@@ -73,7 +77,9 @@ function cents(n: number): number {
  * from entering one before the order comes back.
  */
 export function ReadDealScheduleTie(rows: readonly DealScheduleRow[], dealAmount: number | null | undefined): DealScheduleTie {
-    const incomplete = rows.filter((r) => r.Amount === null || r.Amount === undefined || !r.PaymentDate).length;
+    const incomplete = rows.filter(
+        (r) => r.Amount === null || r.Amount === undefined || Number(r.Amount) <= 0 || !r.PaymentDate,
+    ).length;
     // money-grep-allow: rollup of typed schedule amounts for the tie check, not a derivation — see the module comment.
     const scheduledCents = rows.reduce((sum, r) => sum + cents(Number(r.Amount ?? 0)), 0);
     const scheduled = scheduledCents / 100;
@@ -104,10 +110,10 @@ export function ReadDealScheduleTie(rows: readonly DealScheduleRow[], dealAmount
 export function ExplainDealScheduleTie(tie: DealScheduleTie): string | null {
     if (tie.Ties) return null;
     if (tie.Incomplete > 0) {
-        const rows = tie.Incomplete === 1 ? 'row is' : 'rows are';
+        const rows = tie.Incomplete === 1 ? 'row' : 'rows';
         return (
-            `${tie.Incomplete} payment schedule ${rows} missing a date or an amount. ` +
-            'Every instalment needs both before the deal can close, because the order copies them as they stand.'
+            `${tie.Incomplete} payment schedule ${rows} cannot be billed: an instalment needs a date and an ` +
+            'amount greater than zero. The order copies these rows as they stand, and will not take one without.'
         );
     }
     const direction =

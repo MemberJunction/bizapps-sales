@@ -87,7 +87,7 @@ describe('closing a deal Won reads its payment schedule', () => {
 
     it('refuses a row that could never become an order row', async () => {
         const { issues } = await validateWonClose({ rows: [{ Amount: 24000, PaymentDate: null }] });
-        expect(scheduleMessages(issues)[0]).toContain('missing a date or an amount');
+        expect(scheduleMessages(issues)[0]).toContain('cannot be billed');
     });
 });
 
