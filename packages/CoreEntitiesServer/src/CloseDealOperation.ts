@@ -57,6 +57,9 @@ import {
     type SalesCloseWonPolicy,
     type SalesReopenDealInput,
     type SalesReopenDealOutput,
+    ReadDealScheduleTie,
+    ExplainDealScheduleTie,
+    type DealScheduleRow,
 } from '@mj-biz-apps/sales-entities';
 
 import { DealEntityServer } from './DealEntityServer.js';
@@ -65,6 +68,7 @@ import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js'
 import { CloseWonTaskDueAt, CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
+const DEAL_PAYMENT_SCHEDULE_ENTITY = 'MJ_BizApps_Sales: Deal Payment Schedules';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const DEAL_TYPE_ENTITY = 'MJ_BizApps_Sales: Deal Types';
 const LOSS_REASON_ENTITY = 'MJ_BizApps_Sales: Loss Reasons';
@@ -675,6 +679,41 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
 
         if (target.IsWon && !deal.AccountID) {
             issues.push(issue('party', 'A won deal must be attached to a customer.', 'AccountID'));
+        }
+
+        /**
+         * THE PAYMENT SCHEDULE MUST TIE BEFORE THE DEAL CAN WIN (bc-aidp-next-golive#290).
+         *
+         * The Deal form accepted instalment rows and compared them with nothing, so a schedule a penny
+         * short of the deal saved silently — and the rows never reached the order, which then booked
+         * and invoiced its full value in one amount. Refusing here is the half that cannot be skipped:
+         * the panel's running total only helps a rep who is looking at the panel.
+         *
+         * WON ONLY. A lost deal mints no order, so its schedule governs nothing and refusing on it
+         * would block a close that has no money consequence at all.
+         *
+         * A FAILED READ DOES NOT REFUSE. The schedule is advisory until the order exists; treating an
+         * unreadable one as broken would make a transient view failure block every close, which is a
+         * worse failure than the one this guards.
+         */
+        if (target.IsWon) {
+            const view = provider as unknown as IRunViewProvider;
+            const rows = await view.RunView(
+                {
+                    EntityName: DEAL_PAYMENT_SCHEDULE_ENTITY,
+                    ExtraFilter: `DealID = '${deal.ID}'`,
+                    ResultType: 'simple',
+                    Fields: ['Amount', 'PaymentDate'],
+                },
+                user,
+            );
+            if (rows.Success) {
+                const tie = ReadDealScheduleTie((rows.Results ?? []) as DealScheduleRow[], deal.Amount ?? null);
+                const why = ExplainDealScheduleTie(tie);
+                if (why) {
+                    issues.push(issue('deal', why, 'Amount'));
+                }
+            }
         }
 
         return { Issues: issues, LossReasonName: lossReasonName };

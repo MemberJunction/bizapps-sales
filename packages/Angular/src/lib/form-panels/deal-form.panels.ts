@@ -15,6 +15,7 @@ import { ChangeDetectorRef, Component, ViewChild, ViewEncapsulation, inject, sig
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions } from '@memberjunction/core';
+import { ReadDealScheduleTie, ExplainDealScheduleTie, type DealScheduleTie } from '@mj-biz-apps/sales-entities';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent } from '@memberjunction/ng-base-forms';
@@ -3377,16 +3378,81 @@ export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+                <!-- The running total the panel never had. Shown whenever there are rows, not only when
+                     they are wrong: a rep adding instalments needs to watch the remainder fall to zero,
+                     and a figure that appears only on failure cannot be watched. -->
+                @if (Tie && Tie.RowCount > 0) {
+                    <p class="mjs-deal-schedule-tie" [class.mjs-deal-schedule-tie--off]="!Tie.Ties">
+                        <span>{{ Tie.Scheduled | currency }} scheduled</span>
+                        @if (Tie.DealAmount !== null) {
+                            <span>of {{ Tie.DealAmount | currency }}</span>
+                        }
+                        @if (TieWarning) { <span class="mjs-deal-schedule-tie__why">{{ TieWarning }}</span> }
+                    </p>
+                }
             } @else {
                 <p class="mjs-deal-empty">Save the deal first. Payments are scheduled against it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
-    styles: [EMPTY_STATE_STYLES],
+    styles: [EMPTY_STATE_STYLES, `
+        .mjs-deal-schedule-tie {
+            display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+            margin: var(--mj-space-3) 0 0; padding: var(--mj-space-2) var(--mj-space-3);
+            border-radius: var(--mj-radius-sm); background: var(--mj-bg-surface-sunken);
+            font-size: var(--mj-text-sm); color: var(--mj-text-secondary);
+        }
+        .mjs-deal-schedule-tie--off {
+            background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text);
+            border-left: 3px solid var(--mj-status-warning);
+        }
+        .mjs-deal-schedule-tie__why { flex-basis: 100%; }
+    `],
 })
 export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealPaymentSchedule;
+
+    /**
+     * The running total and remainder, or null before the first read.
+     *
+     * bc-aidp-next-golive#290: the panel accepted instalment rows and compared them with nothing. A
+     * schedule a penny short of the deal saved with no total, no remainder and no warning, and the
+     * rep found out at Close Won — or did not, because nothing refused it either.
+     */
+    public Tie: DealScheduleTie | null = null;
+
+    /** The sentence shown when the schedule cannot stand. Null when it ties. */
+    public get TieWarning(): string | null {
+        return this.Tie ? ExplainDealScheduleTie(this.Tie) : null;
+    }
+
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('payment-schedule', event.totalRowCount);
+        void this.refreshTie();
+    }
+
+    /**
+     * READ AGAIN RATHER THAN SUM THE GRID. `AfterDataLoadEventArgs` carries counts and timings, not
+     * rows — and the grid pages, so even if it carried them they would be the page's rows and the
+     * total would silently describe the first page of a long schedule.
+     */
+    private async refreshTie(): Promise<void> {
+        const dealID = this.Record?.ID;
+        if (!dealID) {
+            this.Tie = null;
+            return;
+        }
+        const read = await new RunView().RunView<{ Amount: number | null; PaymentDate: string | null }>({
+            EntityName: MJS_ENTITIES.DealPaymentSchedule,
+            ExtraFilter: `DealID='${String(dealID).replace(/'/g, "''")}'`,
+            ResultType: 'simple',
+            Fields: ['Amount', 'PaymentDate'],
+        });
+        // A failed read leaves the panel saying nothing rather than asserting a tie it cannot see.
+        if (!read.Success) {
+            this.Tie = null;
+            return;
+        }
+        this.Tie = ReadDealScheduleTie(read.Results ?? [], this.Record?.Amount ?? null);
     }
 }
