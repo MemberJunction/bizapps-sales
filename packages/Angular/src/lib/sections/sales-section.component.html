@@ -39,6 +39,14 @@
           <p class="msg" role="status">{{ Message }}</p>
         }
 
+        <!-- Outside the page blocks: dashboard, list and board all read what Refresh() loads. -->
+        @if (LoadError) {
+          <div class="msg msg--error" role="alert" data-testid="sales-load-error">
+            <span>{{ LoadError }}</span>
+            <button type="button" mjButton variant="outline" size="sm" (click)="Refresh()">Try again</button>
+          </div>
+        }
+
         <!-- ═════════════════════════ DASHBOARD ═════════════════════════ -->
         <div class="wrap wrap--dashboard" [hidden]="Page !== 'dashboard'">
           <!--

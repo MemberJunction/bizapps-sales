@@ -115,6 +115,8 @@ import {
  */
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
+/** What a failed refresh says. The cause goes to the log; a gateway error body is no use on screen. */
+export const REFRESH_FAILED = 'The deals could not be loaded: the server returned an error or did not answer in time.';
 
 /** One KPI tile. `Tone` drives colour only — no behaviour hangs off it. */
 interface SalesKpi {
@@ -209,6 +211,13 @@ export class MJSSalesSectionComponent implements OnInit {
     public PeriodLoading = false;
     /** Identifies the newest period request, so a slower superseded one cannot apply late. */
     private periodToken = 0;
+    /**
+     * Why the last `Refresh()` failed, or null. Set when a read THROWS rather than returning
+     * `Success: false`, which is what a gateway timeout, a 5xx or a dropped connection does.
+     */
+    public LoadError: string | null = null;
+    /** Identifies the newest refresh, so an older one cannot clear `Loading` while a newer one runs. */
+    private refreshToken = 0;
     public WinRateByCount: number | null = null;
     public WinRateByValue: number | null = null;
     public WinClosedCount = 0;
@@ -273,10 +282,37 @@ export class MJSSalesSectionComponent implements OnInit {
 
     // ── Data ───────────────────────────────────────────────────────────────────
 
+    /**
+     * Reloads everything the section shows.
+     *
+     * `Loading` is cleared in `finally`, never at the end of the happy path. MJ's GraphQL provider
+     * throws on a transport failure (a 504 from the gateway, a 5xx, a dropped connection) instead of
+     * returning `Success: false`, so any read below can reject. When `Loading` was cleared only on
+     * success, one rejected read left every page behind `<mj-loading>` with nothing to say why.
+     */
     public async Refresh(): Promise<void> {
+        const token = ++this.refreshToken;
         this.Loading = true;
+        this.LoadError = null;
         this.cdr.detectChanges();
+        try {
+            await this.loadSection();
+        } catch (e) {
+            if (token === this.refreshToken) {
+                // Same reasoning as SetPeriod: clear the figures rather than show stale ones as current.
+                this.summary = null;
+                this.LoadError = REFRESH_FAILED;
+                LogError(`Sales: refresh failed - ${e instanceof Error ? e.message : String(e)}`);
+            }
+        } finally {
+            if (token === this.refreshToken) {
+                this.Loading = false;
+                this.cdr.detectChanges();
+            }
+        }
+    }
 
+    private async loadSection(): Promise<void> {
         /**
          * THE BUSINESS ZONE IS LOADED BEFORE ANYTHING ASKS WHAT DAY IT IS (bc-aidp-next-golive#168).
          *
@@ -321,12 +357,10 @@ export class MJSSalesSectionComponent implements OnInit {
         this.DealEntityInfo = new Metadata().Entities.find((e) => e.Name === E_DEAL) ?? null;
         await this.refreshInspectView();
         await this.refreshAllDealsView();
-        this.Loading = false;
         if (roster && !roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
             this.Message = '';
         }
-        this.cdr.detectChanges();
     }
 
     /**
