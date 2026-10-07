@@ -29,7 +29,7 @@ type Deal = { ID: string; DealNumber: string | null; DealStatusTypeID: string | 
  * @param deal the row `Deal WHERE OrderID = ...` returns, or null for an order no deal points at.
  * @param statuses IsWon by status id.
  */
-function withData(deal: Deal | null, statuses: Record<string, boolean>, fail?: 'deal' | 'status') {
+function withData(deal: Deal | Deal[] | null, statuses: Record<string, boolean>, fail?: 'deal' | 'status') {
     const asked: string[] = [];
     RunView.prototype.RunView = (async ({ EntityName, ExtraFilter }: { EntityName: string; ExtraFilter: string }) => {
         asked.push(EntityName);
@@ -39,7 +39,7 @@ function withData(deal: Deal | null, statuses: Record<string, boolean>, fail?: '
             return { Success: true, Results: id in statuses ? [{ IsWon: statuses[id] }] : [] };
         }
         if (fail === 'deal') return { Success: false, ErrorMessage: 'deal view is down', Results: [] };
-        return { Success: true, Results: deal ? [deal] : [] };
+        return { Success: true, Results: deal ? (Array.isArray(deal) ? deal : [deal]) : [] };
     }) as unknown as typeof RunView.prototype.RunView;
     return { asked };
 }
@@ -102,6 +102,49 @@ describe('the decision is the IsWon flag', () => {
         const { asked } = withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: WON }, { [WON]: true });
         await veto().MayConfirm(ctx);
         expect(asked.some((e) => e.includes('Deal Status Types'))).toBe(true);
+    });
+});
+
+/**
+ * TWO DEALS POINTING AT ONE ORDER.
+ *
+ * `Deal.OrderID` carries no unique index, so the database permits it even though no order on the
+ * reporting host has two. Reading only the first row made the verdict depend on which row came back
+ * first, which a view with no ORDER BY does not promise twice running. Every owner is checked, and
+ * one still open refuses — a booked order settles the ledger for every deal that minted it.
+ */
+describe('an order two deals point at', () => {
+    const A = { ID: DEAL, DealNumber: 'DEAL-A', DealStatusTypeID: WON };
+    const B = { ID: 'dddddddd-0000-4000-8000-000000000002', DealNumber: 'DEAL-B', DealStatusTypeID: OPEN };
+
+    it('is allowed only when BOTH are won', async () => {
+        withData([A, { ...B, DealStatusTypeID: WON }], { [WON]: true });
+        expect(await veto().MayConfirm(ctx)).toBeNull();
+    });
+
+    it('is refused when either one is open, whichever is read first', async () => {
+        withData([A, B], { [WON]: true, [OPEN]: false });
+        const first = await veto().MayConfirm(ctx);
+        withData([B, A], { [WON]: true, [OPEN]: false });
+        const second = await veto().MayConfirm(ctx);
+        expect(first, 'the open one decides, not the row order').not.toBeNull();
+        expect(second).toEqual(first);
+    });
+
+    it('names only the deal that is actually open', async () => {
+        withData([A, B], { [WON]: true, [OPEN]: false });
+        const refusal = (await veto().MayConfirm(ctx)) ?? '';
+        expect(refusal).toContain('DEAL-B');
+        expect(refusal, "the deal that IS won is not what blocks the confirm").not.toContain('DEAL-A');
+    });
+
+    it('names both when both are open, and reads as plural', async () => {
+        withData([{ ...A, DealStatusTypeID: OPEN }, B], { [OPEN]: false });
+        const refusal = (await veto().MayConfirm(ctx)) ?? '';
+        expect(refusal).toContain('DEAL-A');
+        expect(refusal).toContain('DEAL-B');
+        expect(refusal).toContain('Deals ');
+        expect(refusal).toContain(' are not Won');
     });
 });
 

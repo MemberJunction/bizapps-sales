@@ -49,36 +49,61 @@ import {
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
-/** The deal an order came from, as this check reads it. Null when no deal points at the order. */
-type OwningDeal = { DealID: string; DealNumber: string | null; DealStatusTypeID: string | null } | null;
+/** A deal an order came from, as this check reads it. */
+type OwningDeal = { DealID: string; DealNumber: string | null; DealStatusTypeID: string | null };
 
 export class DealNotWonConfirmVeto implements OrderConfirmVeto {
     public async MayConfirm(context: OrderConfirmContext): Promise<string | null> {
-        const owner = await this.owningDeal(context.OrderHeaderID, context.ContextUser);
-        if (!owner) {
+        const owners = await this.owningDeals(context.OrderHeaderID, context.ContextUser);
+        if (owners.length === 0) {
             return null;
         }
         /**
-         * A deal with no status cannot be Won, so this refuses. The deal is in a state nobody can
-         * read, and booking against it would be a decision made by absence.
+         * EVERY owning deal has to be Won, not just the first one read.
+         *
+         * `Deal.OrderID` carries no unique index, so two deals pointing at one order is a shape the
+         * database permits — none do on the reporting host today, but "none today" is not a rule.
+         * Reading one row and deciding from it made the verdict depend on which row came back
+         * first, and a view with no ORDER BY does not promise that twice running. Same data,
+         * different answer, is the worst kind of bug to be handed.
+         *
+         * Refusing while ANY of them is open is also the honest reading of the rule: a booked order
+         * settles the ledger for every deal that minted it, and one of those still being open is
+         * exactly the harm (golive#323). A deal with no status at all cannot be Won either — that
+         * is a state nobody can read, and booking against it would be a decision made by absence.
          */
-        if (owner.DealStatusTypeID && (await this.statusIsWon(owner.DealStatusTypeID, context.ContextUser))) {
+        const open: string[] = [];
+        for (const owner of owners) {
+            const won =
+                !!owner.DealStatusTypeID &&
+                (await this.statusIsWon(owner.DealStatusTypeID, context.ContextUser));
+            if (!won) {
+                open.push(owner.DealNumber?.trim() || owner.DealID);
+            }
+        }
+        if (open.length === 0) {
             return null;
         }
-        const named = owner.DealNumber?.trim() || owner.DealID;
+        const named = open.length === 1 ? `Deal ${open[0]} is` : `Deals ${open.join(', ')} are`;
         return (
-            `Deal ${named} is not Won, so this order cannot be confirmed yet. Close the deal as Won ` +
+            `${named} not Won, so this order cannot be confirmed yet. Close the deal as Won ` +
             'first — confirming now would book an order against a deal that is still open.'
         );
     }
 
-    /** The deal pointing at this order, if any. `Deal.OrderID` is the only link between the two. */
-    private async owningDeal(orderID: string, user: UserInfo | null): Promise<OwningDeal> {
+    /**
+     * Every deal pointing at this order. `Deal.OrderID` is the only link between the two.
+     *
+     * Ordered by `ID` so a host that somehow holds two reads them the same way twice, and so a
+     * refusal names them in a stable order rather than whatever the view happened to return.
+     */
+    private async owningDeals(orderID: string, user: UserInfo | null): Promise<OwningDeal[]> {
         const result = await new RunView().RunView<{ ID: string; DealNumber: string | null; DealStatusTypeID: string | null }>(
             {
                 EntityName: DEAL_ENTITY,
                 ExtraFilter: `OrderID = '${SafeID(orderID)}'`,
                 Fields: ['ID', 'DealNumber', 'DealStatusTypeID'],
+                OrderBy: 'ID',
                 ResultType: 'simple',
             },
             user ?? undefined,
@@ -86,10 +111,11 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
         if (!result.Success) {
             throw new Error(`the deal behind this order could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
         }
-        const row = (result.Results ?? [])[0];
-        return row
-            ? { DealID: row.ID, DealNumber: row.DealNumber ?? null, DealStatusTypeID: row.DealStatusTypeID ?? null }
-            : null;
+        return (result.Results ?? []).map((row) => ({
+            DealID: row.ID,
+            DealNumber: row.DealNumber ?? null,
+            DealStatusTypeID: row.DealStatusTypeID ?? null,
+        }));
     }
 
     /**
