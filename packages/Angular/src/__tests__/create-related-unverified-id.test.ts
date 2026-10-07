@@ -24,12 +24,17 @@ function workspace(opts: {
     reloads: Lookup[][];
     exists: boolean | null;
     name?: string;
+    /** The child's own key; defaults to REPORTED, the state once MJ sends the key on create. */
+    primaryKey?: string;
 }) {
     const deal = { AccountID: null as string | null, PrimaryContactID: null as string | null };
     const failures: string[] = [];
     const existsCalls: string[] = [];
     const reloads = [...opts.reloads];
-    const created = { Get: (f: string) => ({ ID: REPORTED, Name: opts.name ?? 'Example Co' })[f] ?? null };
+    const created = {
+        Get: (f: string) => ({ ID: REPORTED, Name: opts.name ?? 'Example Co' })[f] ?? null,
+        PrimaryKey: { GetValueByFieldName: (f: string) => (f === 'ID' ? (opts.primaryKey ?? REPORTED) : null) },
+    };
 
     const c = Object.create(DealWorkspaceComponent.prototype) as {
         CreateRelated(entityName: string, target: 'AccountID'): Promise<void>;
@@ -108,5 +113,15 @@ describe('binding a customer created from the deal workspace', () => {
 
         expect(w.deal.AccountID).toBeNull();
         expect(w.failures[0]).toContain('could not be confirmed');
+    });
+
+    it('binds the key the child carries, not the parent key Get(ID) reads (issue #188)', async () => {
+        // MJ 6.1.x: Get('ID') reads the parent's never-written key; PrimaryKey holds the written one.
+        const w = workspace({ reloads: [[{ ID: WRITTEN, Name: 'Example Co' }]], exists: false, primaryKey: WRITTEN });
+        await w.c.CreateRelated(ACCOUNT, 'AccountID');
+
+        expect(w.deal.AccountID).toBe(WRITTEN);
+        expect(w.existsCalls).toHaveLength(0);
+        expect(w.failures).toHaveLength(0);
     });
 });

@@ -638,7 +638,19 @@ export class DealWorkspaceComponent implements OnInit {
             return;   // cancelled — writing the field here would invent a selection
         }
 
-        const id = String(created.Get('ID') ?? '');
+        /**
+         * ── THE ID COMES FROM `PrimaryKey`, NOT `Get('ID')` (issue #188, DN-19) ─────────────────────
+         *
+         * `SalesAccount` and `SalesContact` are IsA children, and `Get('ID')` reads the shared key from
+         * the PARENT object. On MJ 6.1.x a create over GraphQL never sends that key: the server mints
+         * its own and writes both rows under it, the parent object keeps the key the browser minted,
+         * and the server's value is dropped on the way back because a ReadOnly field takes one write.
+         * So `Get('ID')` names a row that was never written, on every create.
+         *
+         * `PrimaryKey` reads the child's OWN key field, which the save response re-hydrates with the
+         * key the server wrote. Once MJ sends the key (6.2, and the 6.1 backport), both reads agree.
+         */
+        const id = String(created.PrimaryKey.GetValueByFieldName('ID') ?? '');
         if (!id) {
             this.Fail('The record was saved but returned no ID, so it could not be selected.');
             return;
