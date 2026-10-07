@@ -55,10 +55,10 @@ pnpm run change
    PR open (head `changeset-release/main`, base `main`). It runs `pnpm run version:prepare` —
    `changeset version`, `ci/sync-mj-app-version.mjs` (syncs `mj-app.json`'s `version` and
    `mjVersionRange` from `packages/Entities/package.json`) and a lockfile refresh.
-4. That PR is the release. PRs into `main` run `release-readiness.yml` (the six `rr:` checks:
-   nothing pending, bump level, metadata shipped, release base current, migration immutability,
-   packages on npm) and `build.yml`. Run `pnpm run check:release-seed` against it before merging
-   (see below — CI does not).
+4. That PR is the release. PRs into `main` run `release-readiness.yml` (the `rr:` checks: nothing pending, bump level,
+   metadata shipped, pg counterparts, release base current, migration immutability, packages on
+   npm), `build.yml`, and this repo's `repo: release seed` check (`repo-checks.yml`), which runs
+   `check:release-seed` on the release PR.
 5. Merging it pushes `main`, which starts `.github/workflows/publish.yml`: it validates the
    lockfile, migration filenames, npm package existence, `repository.url` and package `files`,
    builds, publishes to npm via OIDC (no token), tags `vX.Y.Z` only if something shipped, then opens
@@ -148,7 +148,7 @@ DB_DATABASE=$DB pnpm exec mj sync push --dir metadata --ci
 #    Sibling schemas (`__mj_BizAppsTasks`, `__mj_BizAppsOrders`) stay literal — `mj app install`
 #    supplies only `${mjSchema}` and `${flyway:defaultSchema}`, and neither of those is theirs.
 
-# 4. Placeholders, then the release seed gate (run by hand — CI does not run it).
+# 4. Placeholders, then the release seed gate (CI also runs it on the release PR: `repo: release seed`).
 pnpm run lint:distribution
 pnpm run check:release-seed
 ```
