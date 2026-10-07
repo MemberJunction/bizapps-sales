@@ -28,7 +28,7 @@
     "build:stream": "turbo --log-order=stream build",
     "build:generated": "turbo --log-order=stream build --filter=\"@mj-biz-apps/sales-entities\" --filter=\"@mj-biz-apps/sales-actions\"",
     "build:packages": "turbo --log-order=stream build --filter=\"@mj-biz-apps/sales-*\"",
-    "test": "turbo --log-order=stream test --filter=\"@mj-biz-apps/sales-*\"",
+    "test": "vitest run",
     "mj": "node node_modules/@memberjunction/cli/bin/run.js",
     "version": "changeset version",
     "version:prepare": "changeset version && node ci/sync-mj-app-version.mjs && pnpm install --lockfile-only",
