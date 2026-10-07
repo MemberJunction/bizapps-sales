@@ -1,6 +1,6 @@
 ---
-"@mj-biz-apps/sales-core-entities-server": patch
-"@mj-biz-apps/sales-server": patch
+"@mj-biz-apps/sales-core-entities-server": minor
+"@mj-biz-apps/sales-server": minor
 ---
 
 An order whose deal is not Won can no longer be confirmed.
