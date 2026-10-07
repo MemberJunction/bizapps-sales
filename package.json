@@ -49,6 +49,7 @@
     "test:validation-gate": "node scripts/assert-workspace-validation.mjs",
     "test:spec-gate": "node scripts/assert-specs-typecheck.mjs",
     "test:selector-gate": "node scripts/assert-harness-selectors.mjs",
+    "test:mutate-harness": "node --test test-harnesses/mutate-checks.spec.mjs",
     "test:drift-gate": "node scripts/run-python.mjs scripts/assert-no-comment-drift.py",
     "change": "changeset",
     "commitpush": "node ci/commit_push.mjs",

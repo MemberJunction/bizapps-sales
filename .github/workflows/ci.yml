@@ -138,6 +138,13 @@ jobs:
       - name: Harness selector gate (the harness only targets markup the app renders)
         run: npm run test:selector-gate
 
+      # THE MUTATION DRIVER EDITS SOURCE IN PLACE, so an interrupted run that does not clean up leaves a
+      # mutant that looks like an ordinary code change. This proves a signal restores the source, kills
+      # the build/suite's whole process tree and rebuilds, and that a run killed past any handler is
+      # recovered by the next start. Fixture build and suite, so no database.
+      - name: Mutation driver cleanup (an interrupted run leaves no mutant behind)
+        run: npm run test:mutate-harness
+
       # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
       # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a
       # permanent red X asserting nothing. Guarded rather than omitted, so the first real test file

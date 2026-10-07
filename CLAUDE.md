@@ -486,7 +486,7 @@ PW_HEADLESS=1 pnpm run test:explorer   # unattended
   and view-vs-edit-mode traps that cost real time to find.
 
 ### CI (`.github/workflows/ci.yml`)
-**EIGHT gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
+**TEN gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
 listed the first and third; five more have been added since and went unrecorded. That understatement is
 not harmless — a reviewer who believes CI only greps and builds will reason that a template change, a
 copy change or a query comment cannot be caught by it, and will hand-check things CI already covers
@@ -502,6 +502,8 @@ while trusting things it does not:
 6. **`python3 scripts/assert-no-comment-drift.py`** — a documented column that is not returned.
 7. **`npm run test:spec-gate`** — Playwright specs typecheck (it does NOT run them).
 8. **Unit tests**, guarded on any existing.
+9. **`npm run test:selector-gate`** — every selector the Explorer harness names is in mounted markup.
+10. **`npm run test:mutate-harness`** — an interrupted mutation run leaves no mutant in the tree or `dist/`.
 
 Plus a non-blocking changeset presence check.
 

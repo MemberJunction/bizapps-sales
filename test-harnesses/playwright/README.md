@@ -206,13 +206,21 @@ Things the harness surfaced that are worth knowing, and are not bugs in this app
 ## A killed mutation run leaves the mutant behind — `git status` before trusting a clean tree
 
 `test-harnesses/mutate-checks.mjs` copies a source file aside, edits it, builds, runs the suite, and
-restores from the copy in a `finally`. Kill the process between the edit and the restore — a Ctrl-C, a
-session ending — and **the mutation stays in the working tree and in `dist/`**.
+restores from the copy in a `finally`. Kill the process between the edit and the restore and **the
+mutation stays in the working tree and in `dist/`**.
 
 It has happened three times. Each looked like a puzzling test failure rather than a stranded edit,
 because `git diff` on a file nobody remembers touching is not where anyone looks first.
 
-So, after any interrupted run:
+**The driver now cleans up after itself** (`test-harnesses/mutation-run.mjs`). Ctrl-C, SIGTERM or
+Ctrl-Break kills the build/suite's process tree, restores the source and rebuilds; a second Ctrl-C skips
+the rebuild. A kill no handler sees (SIGKILL, a closed window) is repaired by the **next** run, which
+restores and rebuilds before measuring anything.
+
+**`.mutate-checks.run.json` at the repo root means a run may have a mutant applied.** It names the PID
+that owns it. If that PID is alive, the run is live: leave the tree alone (the driver itself refuses to
+start). If it is dead, start the driver again and it recovers. The steps below are only for when
+recovery reports that the backup is gone:
 
 ```bash
 git status --porcelain          # a modified source file you did not edit IS the mutant
