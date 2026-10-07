@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-entities
 
+## 6.12.2
+
+### Patch Changes
+
+- 01fa1e0: Requires MemberJunction 6.1.5, the 6.1 LTS release AIDP Next runs. Every `@memberjunction/*` range is `^6.1.5` and `mj-app.json` declares `>=6.1.5 <7.0.0`. 6.1.5 carries the CodeGen fix for MemberJunction/MJ#4603. Generated code regenerated on 6.1.5 from a database built from migrations is unchanged.
+- a316f32: Requires bizapps-orders 5.26.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.26.0`, `mj-app.json` `>=5.26.0`). That release adds `OrderLine.SubscriptionAction`, which lets a line say whether it extends a subscription the customer already holds or starts a new one. The lockfile drops duplicate MemberJunction 6.1.2 copies in favour of 6.1.4 and resolves bizapps-accounting 0.20.0, which orders 5.26.0 requires.
+
 ## 6.12.1
 
 ### Patch Changes

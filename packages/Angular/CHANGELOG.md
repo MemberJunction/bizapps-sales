@@ -1,5 +1,28 @@
 # @mj-biz-apps/sales-ng
 
+## 6.12.2
+
+### Patch Changes
+
+- afc92f5: The Deal form re-resolves its close lock after every save and refresh, not only when the form opens.
+
+  `resolveCloseLock()` ran once, in `ngOnInit`, and reads the PERSISTED status, so a deal closed in the form kept `IsLocked = false` for the rest of the session. The hero's Locked chip was right the whole time because it reads the record; the form component did not.
+
+  That is what the form reasons from: `FieldEditable()` returns `!locked || IsDealFieldEditableWhileLocked(...)`, so a stale false made every field report editable — the dedicated Pipeline control rendered an editable picker on a locked deal, which the server then refused on save. `EditableFieldNames()` returned null instead of the locked carve-outs, and `ValidateAsync` reads the same signal.
+
+- 45615d6: The Deal form's header card no longer shrinks on a short window. Tall panels below it squeezed it to its title row, hiding the Name editor in edit mode and the summary after a save.
+- 01fa1e0: Requires MemberJunction 6.1.5, the 6.1 LTS release AIDP Next runs. Every `@memberjunction/*` range is `^6.1.5` and `mj-app.json` declares `>=6.1.5 <7.0.0`. 6.1.5 carries the CodeGen fix for MemberJunction/MJ#4603. Generated code regenerated on 6.1.5 from a database built from migrations is unchanged.
+- a316f32: Requires bizapps-orders 5.26.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.26.0`, `mj-app.json` `>=5.26.0`). That release adds `OrderLine.SubscriptionAction`, which lets a line say whether it extends a subscription the customer already holds or starts a new one. The lockfile drops duplicate MemberJunction 6.1.2 copies in favour of 6.1.4 and resolves bizapps-accounting 0.20.0, which orders 5.26.0 requires.
+- d410060: The Deal form orders its pipeline list by `DisplayRank`, the way the deal workspace already does.
+
+  The form listed pipelines alphabetically while `deal-workspace.service.ts` lists them by `DisplayRank ASC, Name ASC`, so a rep who uses both sees the same pipelines in two orders on any host where rank and alphabet do not coincide — and `DisplayRank` exists so a seed can say which pipeline a team reaches for first.
+
+  Every other vocabulary list in that file and in the workspace service already sorted this way; the pipeline list was the only one that did not. Stages are unchanged: a stage sequence is a process, not an alphabet.
+
+- Updated dependencies [01fa1e0]
+- Updated dependencies [a316f32]
+  - @mj-biz-apps/sales-entities@6.12.2
+
 ## 6.12.1
 
 ### Patch Changes
