@@ -26,7 +26,7 @@
  * READ-ONLY apart from New deal, which opens an UNSAVED form and is never saved, so it leaves nothing
  * behind and is safe to re-run. Creating and saving is covered by `70-lifecycle.spec.ts`.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../lib/test';
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, expectOnlyKnownErrors, KNOWN_POST_DELETE_ERRORS, shot } from '../lib/explorer';
 import { DEAL_FORM_ROOT, DealForm, OpenNewDeal } from '../lib/deal-form';
