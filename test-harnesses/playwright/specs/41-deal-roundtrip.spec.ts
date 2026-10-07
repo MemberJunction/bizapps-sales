@@ -27,15 +27,22 @@
  *
  * Every one of those looks like a working screen. The only way to catch them is to leave and come back.
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { CloseDb, OrderLinesForDeal, QueryAll } from '../lib/db';
 import { AddLines, ComposeDeal, PurgeDeal, ReopenRecord } from '../lib/deal-flow';
-import { DealForm, EditDeal, Field, OpenSection, SaveDeal, SetText } from '../lib/deal-form';
+import { DealForm, EditDeal, Field, OpenSection, RevealInForm, SaveDeal, SetText } from '../lib/deal-form';
 import { captureConsoleErrors, expectOnlyKnownErrors, KNOWN_POST_DELETE_ERRORS, shot } from '../lib/explorer';
 
 const RUN_TAG = `RT-${Date.now().toString(36).toUpperCase()}`;
-const DEAL_NAME = `Round trip ${RUN_TAG}`;
+/**
+ * THE PREFIX GOES FIRST, for the same reason cleanup.mjs records against its own history: every
+ * sweep and every count uses an ANCHORED LIKE, so a tag in the middle of the name is invisible to
+ * them. AssertBaseline then counts this deal as SEEDED and fails the baseline for whichever spec is
+ * running beside this one.
+ */
+const DEAL_NAME = `${RUN_TAG} round trip`;
 
 /**
  * Cleanup by name, handed to `PurgeDeal`, which removes children first. `PurgeByPrefix` refuses any
@@ -177,6 +184,14 @@ test.describe('deal form — the round trip', () => {
         await test.step('reopening brings back both lines, each with its product and quantity', async () => {
             await ReopenRecord(page, DEAL_NAME);
             await OpenSection(page, 'lines');
+        // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+        // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+        // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+        await RevealInForm(page, lineRows(page).first());
+            // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+            // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+            // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+            await RevealInForm(page, lineRows(page).first());
             await expect(lineRows(page), 'both lines must come back — an empty grid means the lines never loaded')
                 .toHaveCount(2, { timeout: 30_000 });
 
@@ -208,6 +223,14 @@ test.describe('deal form — the round trip', () => {
         await test.step('removing a saved line through the line editor takes it off the order', async () => {
             await ReopenRecord(page, DEAL_NAME);
             await OpenSection(page, 'lines');
+        // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+        // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+        // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+        await RevealInForm(page, lineRows(page).first());
+            // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+            // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+            // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+            await RevealInForm(page, lineRows(page).first());
             await expect(lineRows(page), 'the two saved lines are the starting point').toHaveCount(2, {
                 timeout: 30_000,
             });
@@ -239,6 +262,14 @@ test.describe('deal form — the round trip', () => {
 
             await ReopenRecord(page, DEAL_NAME);
             await OpenSection(page, 'lines');
+        // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+        // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+        // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+        await RevealInForm(page, lineRows(page).first());
+            // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+            // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+            // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+            await RevealInForm(page, lineRows(page).first());
             await expect(lineRows(page), 'exactly one line must come back — two means the removal only hid the row')
                 .toHaveCount(1, { timeout: 30_000 });
             expect(await linesOnScreen(page), 'and it must be the kept line, with its quantity').toEqual(kept);

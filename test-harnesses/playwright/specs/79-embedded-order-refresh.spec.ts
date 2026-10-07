@@ -41,7 +41,7 @@
  *
  * @module test-harnesses/playwright
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../lib/test';
 
 import { QueryAll, QueryOne } from '../lib/db';
 import { AddLines, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
@@ -66,6 +66,27 @@ test.describe('the embedded order after create — one order, and the line lands
 
         const ordersBefore = await QueryOne<{ N: number }>(
             'SELECT COUNT(*) AS N FROM __mj_BizAppsOrders.OrderHeader',
+        );
+
+        /**
+         * THE ORPHANS THAT WERE ALREADY HERE, so the sweep below can tell them from ours.
+         *
+         * This host carries a standing backlog of unreferenced Draft orders -- 31 of 38 when this was
+         * written. They accumulate because an order outlives its deal whenever the deal is removed by
+         * any path other than `PurgeDeal`: 10-deal-crud deletes its deal through the UI deliberately
+         * ("that is an assertion, not housekeeping"), and a UI delete does not cascade to the embedded
+         * order 6.9.0 provisions on first save.
+         *
+         * The sweep used to be scoped by WALL CLOCK -- any unreferenced order from the last 15 minutes
+         * -- so it reported whatever an earlier spec had abandoned as this spec's leak, under a message
+         * reading "no order created by this spec". It measured the host, not the behaviour under test.
+         */
+        const knownOrphans = new Set(
+            (await QueryAll<{ ID: string }>(`
+                SELECT oh.ID
+                  FROM __mj_BizAppsOrders.OrderHeader oh
+                 WHERE NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d WHERE d.OrderID = oh.ID)`))
+                .map((o) => String(o.ID)),
         );
 
         /**
@@ -98,11 +119,12 @@ test.describe('the embedded order after create — one order, and the line lands
                 'and the extra is an orphan no teardown can find',
         ).toBe(1);
 
-        const orphans = await QueryAll<{ ID: string; OrderNumber: string }>(`
+        // Newly unreferenced since this test started -- not "recent", which is a property of the host.
+        const orphans = (await QueryAll<{ ID: string; OrderNumber: string }>(`
             SELECT oh.ID, oh.OrderNumber
               FROM __mj_BizAppsOrders.OrderHeader oh
-             WHERE NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d WHERE d.OrderID = oh.ID)
-               AND oh.__mj_CreatedAt > DATEADD(minute, -15, GETUTCDATE())`);
+             WHERE NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Deal d WHERE d.OrderID = oh.ID)`))
+            .filter((o) => !knownOrphans.has(String(o.ID)));
         expect(
             orphans.map((o) => o.OrderNumber),
             'no order created by this spec may be left unreferenced',

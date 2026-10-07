@@ -55,7 +55,7 @@
  * append-only provenance, so a test run that leaves them behind has written history that never
  * happened.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../lib/test';
 
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, drain, shot } from '../lib/explorer';
