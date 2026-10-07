@@ -69,7 +69,9 @@ set -a; . ./.env; set +a
 # The same defect was fixed in rebuild-db.sh and append-codegen.sh; those four are all of them.
 [ -n "${_PRESET_DB_DATABASE:-}" ] && DB_DATABASE="$_PRESET_DB_DATABASE"
 
-SQLCMD="sqlcmd -S ${DB_HOST},${DB_PORT:-1433} -U ${DB_USERNAME} -P ${DB_PASSWORD} -C -N o -b"
+# -I turns QUOTED_IDENTIFIER on. sqlcmd leaves it off, and SQL Server refuses any insert into a table
+# with a filtered index while it is off (Msg 1934), which the current schema has.
+SQLCMD="sqlcmd -S ${DB_HOST},${DB_PORT:-1433} -U ${DB_USERNAME} -P ${DB_PASSWORD} -C -N o -b -I"
 say() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
 TMP="$(mktemp -t sales-demo-XXXXXX.sql)"
@@ -327,7 +329,7 @@ INSERT INTO __mj_BizAppsCommon.ContactMethod (ID, PersonID, ContactTypeID, Value
 -- anyone watching the return value.
 --
 -- 'Order Form' is what S-US2 names as the default, and it is also the only safe class of answer: it
--- has ParentStatusRequirement = NULL, so it STANDS ALONE. A type requiring a parent -- Change Order --
+-- has MustBeChild = 0, so it STANDS ALONE. A type requiring a parent -- Change Order --
 -- is refused by ContractEntityServer.ValidateAsync(), because a change order that amends nothing has
 -- no lineage. Any future value here must satisfy that too.
 DECLARE @pipe1 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000001';
@@ -696,6 +698,7 @@ $SQLCMD -d "${DB_DATABASE}" -h -1 -W -i "$(cygpath -w "$TMP" 2>/dev/null || echo
 say "Seeding the orders catalog against the settled pipeline companies"
 $SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-orders-catalog.sql
 $SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-revenue-stack.sql
+$SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-contract-template.sql
 
 say "Pricing five deals through the entity layer"
 if node scripts/seed-demo-lines.mjs; then
@@ -730,11 +733,12 @@ UNION ALL SELECT '  closed w/ team   ' + CAST(COUNT(DISTINCT d.ID) AS varchar)
   JOIN __mj_BizAppsSales.DealTeamMember tm ON tm.DealID = d.ID
  WHERE t.IsClosed = 1 AND d.ActualCloseDate IS NOT NULL
 -- PAST DUE is the DASHBOARD question -- its 'Past expected close' KPI -- and the rotting indicator's.
--- NO DOUBLE QUOTE MAY APPEAR ANYWHERE IN THIS BLOCK. It sits inside sqlcmd -Q argument, which the
--- shell quotes with double quotes, so a single stray one closes that string and bash begins executing
--- the SQL as commands -- reported as: Sales:: command not found. A confusing way to learn it. It is NOT
--- what `Sales: Slipped Deals` reports -- that one reads __mj.RecordChange for deals whose expected close
--- date was MOVED, which no SQL seed can produce because RecordChange is a side effect of a save. The
+-- NO DOUBLE QUOTE AND NO BACKTICK MAY APPEAR ANYWHERE IN THIS BLOCK. It sits inside the sqlcmd -Q
+-- argument, which the shell quotes with double quotes: a stray double quote closes that string, and a
+-- backtick pair is command substitution, so bash runs what is between them -- reported as
+-- Sales:: command not found. Comments are not exempt. It is NOT
+-- what the Sales: Slipped Deals query reports -- that one reads __mj.RecordChange for deals whose expected
+-- close date was MOVED, which no SQL seed can produce because RecordChange is a side effect of a save. The
 -- entity-layer step at the bottom of this script creates that history; these two counters are different
 -- questions and were briefly conflated here.
 UNION ALL SELECT '  past due open    ' + CAST(COUNT(*) AS varchar)

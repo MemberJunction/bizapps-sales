@@ -90,12 +90,25 @@ export interface PipelineStageOption {
     PipelineID: string;
 }
 
-/** Every active pipeline, for the picker that also decides which stages are offered. */
+/**
+ * Every active pipeline, for the picker that also decides which stages are offered.
+ *
+ * ORDERED THE WAY THE WORKSPACE ORDERS THEM, which is `DisplayRank` first.
+ *
+ * This listed them alphabetically, so the same two lists could disagree on a host where rank and
+ * alphabet do not coincide — the form offering D2C above B2B while the workspace offered the reverse,
+ * for a rep who uses both. `DisplayRank` exists to let the seed say which pipeline a team reaches for
+ * first, and an alphabetical list silently discards that.
+ *
+ * Every other vocabulary list in this file and in `deal-workspace.service.ts` already reads
+ * `DisplayRank ASC, Name ASC` — loss reasons, deal types, status types, forecast categories. This was
+ * the one that did not.
+ */
 async function LoadPipelines(): Promise<PipelineOption[]> {
     const result = await new RunView().RunView<{ ID: string; Name: string }>({
         EntityName: MJS_ENTITIES.Pipeline,
         ExtraFilter: 'IsActive = 1',
-        OrderBy: 'Name ASC',
+        OrderBy: 'DisplayRank ASC, Name ASC',
         ResultType: 'simple',
         Fields: ['ID', 'Name'],
     });
@@ -1350,8 +1363,15 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                          letting you edit, and FieldIsEditable in the Explorer harness reads exactly
                          that. A dedicated control that omits it reports frozen while perfectly
                          editable, which turns a lock assertion into one that cannot fail. -->
+                    <!-- The required-empty modifier, for the same reason as the editing one:
+                         Deal.PipelineID is NOT NULL, and base-forms STYLES that modifier on the
+                         input, so a dedicated control that omits it shows a required field as
+                         though it were optional and the rep finds out at save time. The condition
+                         mirrors MJ's own IsRequiredEmpty getter: required, editing, and no value.
+                         No backticks in here -- this whole template is a backtick string. -->
                     <div class="mj-forms-field"
-                         [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineID')">
+                         [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineID')"
+                         [class.mj-forms-field--required-empty]="EditMode && FieldEditable('PipelineID') && !Record.PipelineID">
                         <label class="mj-forms-field-label">Pipeline</label>
                         @if (EditMode && FieldEditable('PipelineID')) {
                             <select [ngModel]="Record.PipelineID" data-testid="deal-pipeline"
@@ -3086,6 +3106,60 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealTeamMember;
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('internal-team', event.totalRowCount);
+        void this.refreshOwnerIfTheRosterMovedIt();
+    }
+
+    /**
+     * Bring the page's owner up to date after the grid changed the roster.
+     *
+     * Saving an Owner / AE row re-derives `Deal.OwnerEmployeeID` on the SERVER
+     * (`DealTeamMemberEntityServer`). The open page knew nothing about it, so the hero kept saying
+     * "No owner assigned." while the database disagreed — and before the save path was changed to
+     * override rather than refuse, the next edit to any field sent that stale value back and lost the
+     * user's work to a refusal. The override fixed the damage; this fixes the staleness.
+     *
+     * ── THREE GUARDS, AND EACH ONE EARNS ITS PLACE ──────────────────────────────────────────────
+     *
+     * NEVER OVER A DIRTY RECORD. `Load()` discards unsaved edits. A user who typed a Next Step and
+     * then touched the team grid must not lose it to a refresh they did not ask for — so a dirty
+     * record is left exactly alone, and the override on the server already makes its save safe.
+     *
+     * ONLY WHEN THE STORED VALUE ACTUALLY DIFFERS. This also makes it TERMINATE: `AfterDataLoad`
+     * fires on every grid load including the first, and a `Load()` that re-renders the panel can load
+     * the grid again. Reloading only on a real difference means the second pass matches and stops.
+     * One narrow field read is the price, and it is paid only while the section is open.
+     *
+     * READ, NOT ASSUMED. The owner is derived from the roster by rules this panel does not own
+     * (the Owner / AE role, oldest-row-wins, the single-holder refusal). Re-deriving it here would be
+     * a second implementation that agrees with the first until it does not; asking the database for
+     * the answer it already computed cannot drift.
+     */
+    private async refreshOwnerIfTheRosterMovedIt(): Promise<void> {
+        const record = this.Record;
+        if (!record?.IsSaved || record.Dirty) {
+            return;
+        }
+        const id = record.ID;
+        if (!id) {
+            return;
+        }
+
+        const read = await new RunView().RunView<{ OwnerEmployeeID: string | null }>({
+            EntityName: MJS_ENTITIES.Deal,
+            ExtraFilter: `ID = '${id}'`,
+            ResultType: 'simple',
+            Fields: ['OwnerEmployeeID'],
+        });
+        if (!read.Success) {
+            return;   // a failed read is not evidence the owner moved; leave the page as it is
+        }
+
+        const stored = String((read.Results ?? [])[0]?.OwnerEmployeeID ?? '').toLowerCase();
+        const shown = String(record.OwnerEmployeeID ?? '').toLowerCase();
+        if (stored === shown) {
+            return;
+        }
+        await record.Load(id);
     }
 }
 

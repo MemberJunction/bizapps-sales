@@ -222,6 +222,14 @@
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="SeniorityLevelID"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
 
     </mj-collapsible-panel>
 
@@ -231,10 +239,10 @@
          RELATED ENTITY PANELS
          ======================================== -->
 
-    <!-- Deals (Billing Contact ID) Section -->
+    <!-- Deals (Billing Contact) Section -->
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesDealsBillingContactID"
-        SectionName="Deals (Billing Contact ID)"
+        SectionName="Deals (Billing Contact)"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
@@ -256,10 +264,10 @@
         }
     </mj-collapsible-panel>
 
-    <!-- Deals (Primary Contact ID) Section -->
+    <!-- Deals (Primary Contact) Section -->
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesDealsPrimaryContactID"
-        SectionName="Deals (Primary Contact ID)"
+        SectionName="Deals (Primary Contact)"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"

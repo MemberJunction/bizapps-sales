@@ -638,7 +638,19 @@ export class DealWorkspaceComponent implements OnInit {
             return;   // cancelled — writing the field here would invent a selection
         }
 
-        const id = String(created.Get('ID') ?? '');
+        /**
+         * ── THE ID COMES FROM `PrimaryKey`, NOT `Get('ID')` (issue #188, DN-19) ─────────────────────
+         *
+         * `SalesAccount` and `SalesContact` are IsA children, and `Get('ID')` reads the shared key from
+         * the PARENT object. On MJ 6.1.x a create over GraphQL never sends that key: the server mints
+         * its own and writes both rows under it, the parent object keeps the key the browser minted,
+         * and the server's value is dropped on the way back because a ReadOnly field takes one write.
+         * So `Get('ID')` names a row that was never written, on every create.
+         *
+         * `PrimaryKey` reads the child's OWN key field, which the save response re-hydrates with the
+         * key the server wrote. Once MJ sends the key (6.2, and the 6.1 backport), both reads agree.
+         */
+        const id = String(created.PrimaryKey.GetValueByFieldName('ID') ?? '');
         if (!id) {
             this.Fail('The record was saved but returned no ID, so it could not be selected.');
             return;
@@ -668,120 +680,9 @@ export class DealWorkspaceComponent implements OnInit {
          * wrong company, a filter added later) now reports instead of leaving a blank box the rep has to
          * interpret.
          */
-        const options: DealLookup[] =
-            target === 'AccountID' ? this.Lookups.Accounts : this.Lookups.Contacts;
-        let match = options.find((o) => o.ID.toLowerCase() === id.toLowerCase());
-
-        /**
-         * ── THE RELOAD IS NOT GUARANTEED TO CONTAIN THE ROW THAT WAS JUST WRITTEN ───────────────────
-         *
-         * Measured, not theorised. On the second run of this flow the record was committed —
-         * `Organization` and `SalesAccount` both present, `IsActive = 1`, visible in
-         * `vwSalesAccounts` — `AfterSaved()` returned the entity, and the list that came back from
-         * `LoadLookups()` DID NOT INCLUDE IT. The option appeared in the picker moments later, so the
-         * data was fine and the read was early: a read-after-write lag between the save and what the
-         * account query returns.
-         *
-         * That makes "reload, then find" racy BY CONSTRUCTION, and the failure is the ugly kind — the
-         * record exists, the rep did nothing wrong, and the field they were looking at stays empty with
-         * a message telling them to go and find it themselves.
-         *
-         * So the reload is now an OPTIMISATION rather than the mechanism. When it contains the row, its
-         * label is used, because that label is the canonical one the view composes. When it does not,
-         * the option is synthesised from the record in hand and inserted, and the picker is correct
-         * immediately. The next ordinary reload replaces the synthetic row with the canonical one, and
-         * because both carry the same ID nothing the rep did is disturbed when it does.
-         *
-         * COMPOSING THE LABEL IS THE PART I ARGUED AGAINST EARLIER, and the objection still stands as
-         * far as it goes: `SalesAccount` IS an Organization and `SalesContact` IS a Person, so the
-         * canonical display name comes from the parent through the view, and contacts' is assembled by
-         * the service. Which is why this is a FALLBACK and not the path — and why it reads the same
-         * fields the service reads rather than inventing a format.
-         */
-        /**
-         * ── THE ID THE SAVED ENTITY REPORTS IS NOT ALWAYS THE ID OF THE ROW THAT WAS WRITTEN ────────
-         *
-         * Measured in the browser, twice, on `SalesAccount`: the row landed as `7F220478-…` while the
-         * entity handed back by `AfterSaved()` reported `c7afc84f-…` — an id present in NEITHER
-         * `__mj_BizAppsCommon.Organization` NOR `__mj_BizAppsSales.SalesAccount`. Binding it gave the deal
-         * a **dangling `AccountID`**, and because the picker had already been given a synthetic option
-         * carrying that id and the right NAME, the screen looked perfect. The rep sees their new customer
-         * selected; the FK points at nothing.
-         *
-         * That is the worst failure shape this surface can have, and it is why the id is no longer trusted
-         * on its own. The cause is upstream — `SalesAccount` extends common's `Organization` (IsA, shared
-         * PK), and the create path evidently persists a key the client instance is never rebased onto; see
-         * `DECISIONS-NEEDED.md` DN-19. Sales cannot fix that, but it can refuse to act on it.
-         *
-         * SO THE CANONICAL ROW IS PREFERRED, BY LABEL, WHEN THE ID DOES NOT RESOLVE. The reload had the
-         * real row in it all along — same name, correct id — and the old code walked straight past it
-         * because it only ever looked the id up. Matching on the label finds it, and the count check is
-         * what keeps that honest: with two accounts of the same name there is no way to tell which one was
-         * just created, so the rep is asked rather than guessed at.
-         */
+        const match = await this.resolveCreatedOption(created, id, entityName, target);
         if (!match) {
-            const label = this.labelForCreated(created, target);
-            if (!label) {
-                this.Fail(
-                    'The record was created but could not be named, so it was not selected. Reopen the ' +
-                        'picker to choose it.',
-                );
-                return;
-            }
-
-            const byLabel = options.filter((o) => o.Name.trim() === label.trim());
-            if (byLabel.length === 1) {
-                // The canonical row, with the id the database actually holds.
-                match = byLabel[0];
-            } else if (byLabel.length > 1) {
-                this.Fail(
-                    `More than one ${target === 'AccountID' ? 'customer' : 'contact'} is named ` +
-                        `"${label}", so the new one could not be identified. Choose it in the picker.`,
-                );
-                return;
-            }
-        }
-
-        /**
-         * ONLY NOW may a synthetic option be minted — and only for the read-after-write case, where the
-         * row genuinely is not back yet. That case is real and measured (the record committed, the reload
-         * did not contain it, the option appeared moments later), so it keeps its fallback.
-         *
-         * The distinction that matters: above, the row WAS in the lookup under a different id, and
-         * synthesising there is what produced the dangling FK. Here nothing about the record is in the
-         * lookup at all, so the id in hand is the only one there is.
-         */
-        if (!match) {
-            const label = this.labelForCreated(created, target);
-            if (!label) {
-                this.Fail(
-                    'The record was created but could not be named, so it was not selected. Reopen the ' +
-                        'picker to choose it.',
-                );
-                return;
-            }
-            match = { ID: id, Name: label };
-
-            /**
-             * A NEW, DE-DUPLICATED ARRAY rather than `options.unshift(match)`.
-             *
-             * Unshifting left the picker offering the same account TWICE — observed in the browser: the
-             * synthetic row was inserted, a later reload brought the canonical row into the same array,
-             * and both were rendered. Harmless-looking, and exactly the kind of thing a rep reports as
-             * "the list is wrong" three weeks later.
-             *
-             * Filtering by ID first makes the insertion idempotent however many times it runs and
-             * whatever else has already put the row there, which is a stronger property than getting the
-             * ordering right once.
-             */
-            const merged: DealLookup[] = [
-                match,
-                ...options.filter((o) => o.ID.toLowerCase() !== id.toLowerCase()),
-            ];
-            this.Lookups =
-                target === 'AccountID'
-                    ? { ...this.Lookups, Accounts: merged }
-                    : { ...this.Lookups, Contacts: merged };
+            return;   // resolveCreatedOption has already reported why
         }
 
         /**
@@ -1086,6 +987,97 @@ export class DealWorkspaceComponent implements OnInit {
         // no unsaved work in the collection to discard — which is the only thing the guard protects.
         await deal.OrderID_Object?.Lines.Load(true);
         this.Touch();
+    }
+
+    /**
+     * The picker option to bind for a record the slide-in just created, or null once the reason is
+     * reported. Three cases, checked in order:
+     *
+     * 1. **The reloaded lookup carries the id.** Bind that option; its value has the view's GUID case.
+     * 2. **A server read finds the id, but the reload did not.** The read-after-write lag measured on
+     *    this flow: the record committed and the lookup came back without it. Bind a synthetic option
+     *    carrying that id; the next reload replaces it with the canonical row.
+     * 3. **The id was never written.** `DECISIONS-NEEDED.md` DN-19 (the "INTERMITTENT" entry) measured
+     *    the slide-in reporting an id present in neither `Organization` nor `SalesAccount` while the
+     *    row landed under another. Re-read the lookup and bind the one row carrying the record's label.
+     *
+     * NO PATH BINDS AN ID THAT NEITHER THE LOOKUP NOR A SERVER READ HAS SHOWN TO EXIST. The synthetic
+     * option used to be minted from the reported id alone whenever the reload missed it, and when that id
+     * was the unwritten one the deal reached its order insert holding a customer that failed
+     * `FK_OrderHeader_BillToOrganization`.
+     */
+    private async resolveCreatedOption(
+        created: BaseEntity,
+        id: string,
+        entityName: string,
+        target: DealRelatedTarget,
+    ): Promise<DealLookup | null> {
+        const inLookup = this.optionsFor(target).find((o) => o.ID.toLowerCase() === id.toLowerCase());
+        if (inLookup) {
+            return inLookup;
+        }
+
+        const label = this.labelForCreated(created, target);
+        if (!label) {
+            this.Fail(
+                'The record was created but could not be named, so it was not selected. Reopen the ' +
+                    'picker to choose it.',
+            );
+            return null;
+        }
+
+        const exists = await this.service.RecordExists(entityName, id);
+        if (exists === null) {
+            this.Fail('The record was created but could not be confirmed, so it was not selected. Choose it in the picker.');
+            return null;
+        }
+        if (exists) {
+            return this.insertSyntheticOption({ ID: id, Name: label }, target);
+        }
+
+        this.Lookups = await this.service.LoadLookups();
+        return this.uniqueOptionByLabel(label, target);
+    }
+
+    /**
+     * The one lookup row carrying this label. With two of the same name there is no way to tell which
+     * was just created, so the rep is asked rather than guessed at.
+     */
+    private uniqueOptionByLabel(label: string, target: DealRelatedTarget): DealLookup | null {
+        const noun = target === 'AccountID' ? 'customer' : 'contact';
+        const byLabel = this.optionsFor(target).filter((o) => o.Name.trim() === label.trim());
+        if (byLabel.length === 1) {
+            return byLabel[0];
+        }
+        this.Fail(
+            byLabel.length > 1
+                ? `More than one ${noun} is named "${label}", so the new one could not be identified. Choose it in the picker.`
+                : `The new ${noun} "${label}" was saved but could not be found, so it was not selected. Choose it in the picker.`,
+        );
+        return null;
+    }
+
+    /**
+     * Puts an option in front of the lookup for a record the reload has not caught up with.
+     *
+     * A NEW, DE-DUPLICATED ARRAY rather than `unshift`: unshifting left the picker offering the same
+     * account twice once a later reload brought the canonical row into the same array. Filtering by ID
+     * first makes the insertion idempotent however many times it runs.
+     */
+    private insertSyntheticOption(option: DealLookup, target: DealRelatedTarget): DealLookup {
+        const merged: DealLookup[] = [
+            option,
+            ...this.optionsFor(target).filter((o) => o.ID.toLowerCase() !== option.ID.toLowerCase()),
+        ];
+        this.Lookups =
+            target === 'AccountID'
+                ? { ...this.Lookups, Accounts: merged }
+                : { ...this.Lookups, Contacts: merged };
+        return option;
+    }
+
+    private optionsFor(target: DealRelatedTarget): DealLookup[] {
+        return target === 'AccountID' ? this.Lookups.Accounts : this.Lookups.Contacts;
     }
 
     /**
@@ -1756,6 +1748,13 @@ export class DealWorkspaceComponent implements OnInit {
                     ?? outcome.Validation.Issues[0]?.Message
                     ?? 'The deal could not be saved.',
                 );
+                /**
+                 * The pickers are read once, when the workspace opens, so a session that outlives a
+                 * data reload offers customers and contacts that no longer exist. The server refuses
+                 * those by name; re-reading here is what lets the rep pick again without reloading
+                 * the page. After a failure only, because a full read on every save is not needed.
+                 */
+                this.Lookups = await this.service.LoadLookups();
                 return false;
             }
 

@@ -1,5 +1,100 @@
 # @mj-biz-apps/sales-ng
 
+## 6.12.2
+
+### Patch Changes
+
+- afc92f5: The Deal form re-resolves its close lock after every save and refresh, not only when the form opens.
+
+  `resolveCloseLock()` ran once, in `ngOnInit`, and reads the PERSISTED status, so a deal closed in the form kept `IsLocked = false` for the rest of the session. The hero's Locked chip was right the whole time because it reads the record; the form component did not.
+
+  That is what the form reasons from: `FieldEditable()` returns `!locked || IsDealFieldEditableWhileLocked(...)`, so a stale false made every field report editable — the dedicated Pipeline control rendered an editable picker on a locked deal, which the server then refused on save. `EditableFieldNames()` returned null instead of the locked carve-outs, and `ValidateAsync` reads the same signal.
+
+- 45615d6: The Deal form's header card no longer shrinks on a short window. Tall panels below it squeezed it to its title row, hiding the Name editor in edit mode and the summary after a save.
+- 01fa1e0: Requires MemberJunction 6.1.5, the 6.1 LTS release AIDP Next runs. Every `@memberjunction/*` range is `^6.1.5` and `mj-app.json` declares `>=6.1.5 <7.0.0`. 6.1.5 carries the CodeGen fix for MemberJunction/MJ#4603. Generated code regenerated on 6.1.5 from a database built from migrations is unchanged.
+- a316f32: Requires bizapps-orders 5.26.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.26.0`, `mj-app.json` `>=5.26.0`). That release adds `OrderLine.SubscriptionAction`, which lets a line say whether it extends a subscription the customer already holds or starts a new one. The lockfile drops duplicate MemberJunction 6.1.2 copies in favour of 6.1.4 and resolves bizapps-accounting 0.20.0, which orders 5.26.0 requires.
+- d410060: The Deal form orders its pipeline list by `DisplayRank`, the way the deal workspace already does.
+
+  The form listed pipelines alphabetically while `deal-workspace.service.ts` lists them by `DisplayRank ASC, Name ASC`, so a rep who uses both sees the same pipelines in two orders on any host where rank and alphabet do not coincide — and `DisplayRank` exists so a seed can say which pipeline a team reaches for first.
+
+  Every other vocabulary list in that file and in the workspace service already sorted this way; the pipeline list was the only one that did not. Stages are unchanged: a stage sequence is a process, not an alphabet.
+
+- Updated dependencies [01fa1e0]
+- Updated dependencies [a316f32]
+  - @mj-biz-apps/sales-entities@6.12.2
+
+## 6.12.1
+
+### Patch Changes
+
+- 016a740: Raise the MemberJunction floor to the 6.1 LTS release (`^6.1.4`, `mjVersionRange >=6.1.4 <7.0.0`) and move bizapps-common to `^5.50.1`. The accounting packages sales depends on require MJ core 6.1.0-edge.7 or later; with the old `^6.1.0-edge.5` override the lockfile installed an edge.5 core under them and the first accounting read during a deal save failed. Common 5.50.1 carries the Tags metadata that pushes to an MJ v6 host.
+- Updated dependencies [016a740]
+  - @mj-biz-apps/sales-entities@6.12.1
+
+## 6.12.0
+
+### Minor Changes
+
+- 5def2fd: Deal line editor: a rep holding `MJ.BizApps.Orders.Price.OverrideAny` may type a custom amount on a deal line through orders' shared price picker, with the same required override reason as the order line. D-DL2 revised to match.
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.12.0
+
+## 6.11.0
+
+### Patch Changes
+
+- Updated dependencies [364871c]
+  - @mj-biz-apps/sales-entities@6.11.0
+
+## 6.10.0
+
+### Patch Changes
+
+- 117f74e: A customer or contact created from the deal workspace is now bound only under an id the lookup or a server read shows to exist. Previously, when the lookup reload missed the new row, the workspace bound the id the slide-in reported, which has been measured to be an id that was never written; the deal's first save then failed inside its order on `FK_OrderHeader_BillToOrganization`.
+
+  The server now refuses a deal save that names a customer or primary contact the database does not hold, with a message naming it, instead of a raw SQL error from the embedded order. The workspace re-reads its customer and contact lists after a failed save so the rep can pick again without reloading the page.
+
+- 6f616b3: The dashboard now reports an error when `Sales: Deal Roster` returns without a column it reads, instead of treating the missing column as `false`. A database holding an older query definition used to show Weighted open as $0 and an empty stage mix with no error (#137). The headline tiles stay unavailable while the roster is refused, including after a reporting period change.
+- Updated dependencies [c5b7825]
+- Updated dependencies [c91feda]
+  - @mj-biz-apps/sales-entities@6.10.0
+
+## 6.9.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.9.3
+
+## 6.9.2
+
+### Patch Changes
+
+- bead3d7: The Deal form's Pipeline Stage control offered every stage in the system, and nothing on the server
+  checked that the stage belonged to the deal's pipeline (golive #291).
+
+  `<mj-form-field>` renders a foreign key as an unfiltered dropdown off the related entity, so Stage
+  listed D2C's three stages and sixteen legacy pipelines' alongside B2B's six. A B2B deal could be
+  positioned in another pipeline's process — and the mismatch did not sit inert, because
+  `applyStageDefaults` then took that stage's probability, forecast category and status.
+
+  Pipeline and Stage are now dedicated controls: Stage lists only the chosen pipeline's stages and
+  clears when the pipeline changes, the way the deal workspace has always behaved and the way this same
+  panel already handled Status for golive #205. The form does not write `CompanyID` — the server forces
+  it from the pipeline on every save — and picking a stage does not write its defaults, which would
+  destroy a rep-typed probability before the server saw it.
+
+  `DealEntityServer.Save()` now refuses a stage that belongs to a different pipeline, so imports and
+  Actions are covered too. It refuses rather than corrects, unlike the company stamp beside it: a wrong
+  company has one derivable right answer, a wrong stage has none. Keyed on either half moving, so an
+  existing deal whose pair already disagrees — converted deals sit in legacy pipelines (#257) — is not
+  blocked from unrelated edits.
+
+  No schema change.
+
+  - @mj-biz-apps/sales-entities@6.9.2
+
 ## 6.9.1
 
 ### Patch Changes

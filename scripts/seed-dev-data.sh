@@ -71,7 +71,9 @@ ROLE_DEVELOPER='DEAFCCEC-6A37-EF11-86D4-000D3A4E707E'
 ROLE_UI='E0AFCCEC-6A37-EF11-86D4-000D3A4E707E'
 ROLE_INTEGRATION='DFAFCCEC-6A37-EF11-86D4-000D3A4E707E'
 
-SQLCMD="sqlcmd -S ${DB_HOST},${DB_PORT:-1433} -U ${DB_USERNAME} -P ${DB_PASSWORD} -C -N o -b"
+# -I turns QUOTED_IDENTIFIER on. sqlcmd leaves it off, and SQL Server refuses any insert into a table
+# with a filtered index while it is off (Msg 1934), which the current schema has.
+SQLCMD="sqlcmd -S ${DB_HOST},${DB_PORT:-1433} -U ${DB_USERNAME} -P ${DB_PASSWORD} -C -N o -b -I"
 
 say() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 

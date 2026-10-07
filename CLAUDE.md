@@ -29,7 +29,8 @@ where `docs/DECISIONS.md` records a ruling that supersedes it.
   only (fields, `@lookup`/`@file`/`@parent`, a `uuidgen` primaryKey, no `sync` block, no
   `*__Metadata_Sync.sql`). The build engineer generates ONE consolidated Metadata_Sync per release
   from a clean DB. `pnpm run lint:distribution` checks only that shipped SQL uses placeholders
-  `mj app install` can resolve — it is not a metadata↔seed currency gate.
+  `mj app install` can resolve — it is not a metadata↔seed currency gate. `check:release-seed` is;
+  `publish.yml` runs it, so a release fails while `metadata/` is ahead of its Metadata_Sync.
   The model: [Release Metadata Migrations Guide](https://github.com/MemberJunction/MJ/blob/next/guides/RELEASE_METADATA_MIGRATIONS_GUIDE.md). This repo's recipe: [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 
 > ## ⚠️ KNOWN ISSUE — read before touching the IsA extensions
@@ -533,6 +534,26 @@ absorb by reading the CHANGELOG.
 the level you pick drives the CHANGELOG's accuracy rather than which packages move.
 
 ---
+
+## MemberJunction versions — the LTS line AIDP Next runs
+
+AIDP Next runs MemberJunction's 6.1 LTS line, pinned exactly in `aidp-next/package.json`. This repo builds, tests and runs CodeGen against that same version, so what passes here is what runs there (bc-aidp-next-golive#298).
+
+- **Declared ranges.** Every `@memberjunction/*` range in `dependencies`, `devDependencies` and `peerDependencies` is `^6.1.N`, where 6.1.N is the LTS release AIDP Next runs: a floor, not a cap. Never an edge or prerelease range (`6.1.0-edge.x` sorts *before* 6.1.0 and has none of the LTS fixes). Packages MJ versions separately (`@memberjunction/connector-*`, `@memberjunction/skyway-*`) keep their own ranges.
+- **`pnpm.overrides`.** `@memberjunction/core` and `@memberjunction/global` carry the same floor (for example `"^6.1.5"`), so every request in the graph resolves to one copy. Two copies of `core` split the ClassFactory: registrations land in one factory while the resolver reads the other, and nothing errors. Overrides are workspace-local and never published. Do not exact-pin sibling `@mj-biz-apps/*` packages here; how the apps declare each other is bc-aidp-next-golive#265.
+- **One copy of each.** After any install, `pnpm why @memberjunction/core` must show a single version. A sibling app package that exact-pins an old MJ build brings a second copy in (for example `@mj-biz-apps/common-ng@5.37.0` pinned edge.3 packages); fix it by raising that package's floor, not with more overrides.
+- **Bumping to a new 6.1.N**, when AIDP Next moves: raise every `^6.1.N` floor and both overrides; `pnpm install`; confirm one copy; set `mjVersionRange` in `mj-app.json` to `>=6.1.N <7.0.0` by hand (this repo has no sync script); rebuild the database from migrations on MJ core `v6.1.N` and regenerate (below); run the full test suite; add a `patch` changeset; commit the lockfile. If CI then fails on the lockfile although a clean local install works, GitHub is testing the merge with `next`: merge `next` in, run `pnpm install --no-frozen-lockfile`, and commit the lockfile.
+- **Never patch MemberJunction.** No `pnpm patch`, `patchedDependencies`, patch-package or `sed` against `@memberjunction/*` `dist/`. That is AIDP Next's hard rule (`.github/workflows/MJ_PATCH_REGISTER.md` in aidp-next). Fix MJ on its `next` branch and bring the fix to the line with the `backport lts/6.1` label, or with a hand-port PR against `lts/6.1` when the fix can't be isolated; then wait for the patch release.
+
+### CodeGen output must be reproducible from this repo
+
+Generated files are committed, and AIDP Next ships them as they are: it excludes every `__mj_BizApps*` schema from its own CodeGen and installs the published packages. So the committed output has to be what this repo's toolchain produces from its migrations.
+
+- Run CodeGen only with this repo's pinned MJ version, against a database built from migrations (MJ core `v6.1.N`, then the apps this one depends on, then this repo), after `mj sync push` of `metadata/`.
+- Set an AI key in your gitignored `.env`: `AI_VENDOR_API_KEY__GeminiLLM` (every CodeGen prompt ranks Gemini first), or `AI_VENDOR_API_KEY__OpenRouterLLM`. Without one, CodeGen silently drops AI-written output: check-constraint `Validate*()` methods, display names, descriptions and form layouts.
+- Never hand-edit generated files, and never paste in generated output from another toolchain or another database. That is how OrderLine lost `OrderHeader`'s `@Field` (bc-aidp-next-golive#295).
+- Review what AI wrote. Validators, names and descriptions are not deterministic between runs.
+- If CodeGen has to create metadata in the database that the generated code depends on (fields, value lists, relationships, validator code), ship it in a migration in the same PR. Otherwise every host installed from migrations drifts from the code.
 
 ## NPM Workspace Management
 - Define dependencies in the individual package's `package.json`, then run **`npm install` at the

@@ -837,6 +837,8 @@ grep -A3 'dynamicPackages' mj.config.cjs      # orders-server must be listed
 > firing"). Nobody acted on it for some weeks, which is the part worth learning from — a red tripwire
 > nobody reads is the same as no tripwire.
 >
+> SD6 now asserts the fix: the removed line is deleted and the kept line is re-sequenced from 2 to 1.
+>
 > **What this changed in sales.** Removal is now offered on the deal form's restricted line editor,
 > going through `Lines.Remove()` + `order.Save()` — the path orders drains. The blanket refusal written
 > for this entry, `ShouldRefuseLineRemoval` in `deal-workspace.validation.ts`, is therefore OBSOLETE. It

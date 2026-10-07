@@ -250,6 +250,12 @@ function money(n: number | null | undefined): string {
             box-shadow: var(--mj-shadow-md, 0 4px 16px rgba(0, 0, 0, .08));
             position: relative; overflow: hidden;
             container-type: inline-size; container-name: mjs-deal-hero;
+            /* NEVER SHRINKS. MJ's slot host and this panel's host are display:contents, so this div
+               is the flex item in the form's fixed-height column, and MJ's flex-shrink: 0 on that
+               column's direct children does not reach it. With overflow hidden its minimum height is
+               0, so on a short window with tall panels below it was squeezed to the title row and
+               clipped the Name editor and the summary (bc-aidp-next-golive#287). */
+            flex-shrink: 0;
         }
         .mjs-deal-hero::before {
             content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3.5px;

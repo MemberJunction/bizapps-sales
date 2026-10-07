@@ -82,18 +82,73 @@ export async function WaitForFormSettled(page: Page, stableFor = 2, gapMs = 400)
 }
 
 export async function OpenNewDeal(page: Page): Promise<void> {
-    await page.goto(`${EXPLORER_BASE_URL}${SALES_DEALS_ROUTE}`, { waitUntil: 'domcontentloaded' });
-    const primary = page.locator('[data-testid="sales-primary"]:visible').first();
-    await expect(primary, 'the Sales header must offer New deal').toBeVisible({ timeout: 90_000 });
-    await primary.click();
-    await expect(DealForm(page), 'a new deal must open as a Deal record form').toBeVisible({ timeout: 60_000 });
     /**
-     * PRESENT IS NOT READY. The form root mounts before its panels render their fields, and every
-     * caller's next line addresses a field -- so returning here on the root alone loses a race
-     * intermittently, and it surfaces as "must render field Name" with a count of 0, which reads
-     * like the field does not exist rather than like a form still building itself.
+     * RETRIED, AND IT SAYS EXACTLY WHAT IT IS RETRYING AROUND.
+     *
+     * MJ's tab container can hide a record form it has already rendered. The main Golden Layout
+     * stays laid out underneath a shown records region, so the region swap resizes it, GL emits
+     * ActiveTab for its stack, and the main layout's ActiveTab subscriber -- ungated, unlike the
+     * records one -- stamps the workspace's active tab back to the MAIN tab. ShowRecordsRegion
+     * flips false, `.region-hidden *` applies, and a complete deal form sits there at 1280x586 with
+     * `visibility: hidden`. The records side cannot undo it: its own handler only forwards an
+     * activation while the region is ALREADY showing.
+     *
+     * Measured on a healthy stack: 4 opens in 10, and permanent -- still hidden 60 seconds later.
+     * So this reloads rather than waiting longer, because waiting longer provably does not help.
+     *
+     * Fixed in MJ by gating that subscriber symmetrically. This stays because the suite has to run
+     * against whatever MJ is installed, and a silent retry would hide a regression: every retry
+     * prints its reason, and the final message says how many attempts were made. It also tells the
+     * two cases apart -- a form that never mounted is NOT this bug and must not be reported as it.
      */
-    await WaitForFormSettled(page);
+    const ATTEMPTS = 3;
+    let lastReason = '';
+
+    for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
+        await page.goto(`${EXPLORER_BASE_URL}${SALES_DEALS_ROUTE}`, { waitUntil: 'domcontentloaded' });
+        const primary = page.locator('[data-testid="sales-primary"]:visible').first();
+        await expect(primary, 'the Sales header must offer New deal').toBeVisible({ timeout: 90_000 });
+        await primary.click();
+
+        const form = DealForm(page);
+        const visible = await form
+            .waitFor({ state: 'visible', timeout: attempt === ATTEMPTS ? 60_000 : 30_000 })
+            .then(() => true)
+            .catch(() => false);
+
+        if (visible) {
+            if (attempt > 1) {
+                // eslint-disable-next-line no-console
+                console.log(`  OpenNewDeal succeeded on attempt ${attempt}/${ATTEMPTS}`);
+            }
+            /**
+             * PRESENT IS NOT READY. The form root mounts before its panels render their fields, and
+             * every caller's next line addresses a field -- so returning here on the root alone
+             * loses a race intermittently, and it surfaces as "must render field Name" with a count
+             * of 0, which reads like the field does not exist rather than like a form still
+             * building itself.
+             */
+            await WaitForFormSettled(page);
+            return;
+        }
+
+        // Which failure is this? The answer changes who should be looking at it.
+        const mounted = (await form.count()) > 0;
+        const regionHidden = mounted
+            && (await page.locator('.region-hidden mjs-deal-form').count()) > 0;
+        lastReason = regionHidden
+            ? 'the form rendered and MJ hid it (records region de-activated)'
+            : mounted
+                ? 'the form mounted but never became visible, and NOT via region-hidden'
+                : 'the form never mounted at all';
+
+        // eslint-disable-next-line no-console
+        console.log(`  OpenNewDeal attempt ${attempt}/${ATTEMPTS}: ${lastReason} - retrying`);
+    }
+
+    throw new Error(
+        `a new deal must open as a Deal record form - ${lastReason}, after ${ATTEMPTS} attempts.`,
+    );
 }
 
 /**
@@ -420,6 +475,35 @@ export async function FirstPipeline(): Promise<{ ID: string; Name: string }> {
           WHERE IsActive = 1 ORDER BY Name`,
     );
     expect(row?.ID, 'the host needs an active pipeline for a deal to be created in').toBeTruthy();
+    return { ID: String(row!.ID), Name: String(row!.Name) };
+}
+
+/**
+ * The first stage of `pipelineID` that does NOT close the deal.
+ *
+ * Needed because golive#291 clears a stage when the pipeline changes, so a composed deal has none
+ * unless one is chosen on purpose. Non-closing because a deal parked on a closing stage is locked,
+ * and every caller here wants a deal it can still move.
+ */
+export async function FirstOpenStageOf(pipelineID: string): Promise<{ ID: string; Name: string }> {
+    const row = await QueryOne<{ ID: string; Name: string }>(`
+        SELECT TOP 1 CAST(ps.ID AS nvarchar(50)) AS ID, ps.Name
+          FROM __mj_BizAppsSales.PipelineStage ps
+          LEFT JOIN __mj_BizAppsSales.DealStatusType st ON st.ID = ps.DealStatusTypeID
+         WHERE ps.PipelineID = '${pipelineID}'
+           AND ISNULL(st.LocksDeal, 0) = 0
+           -- ACTIVE ONLY, to match what the control actually offers. The app loads stages with
+           -- ExtraFilter 'IsActive = 1' and OrderBy 'DisplayOrder ASC'; resolving an inactive stage
+           -- here would hand SetStageByID an id with no option to select, and the failure would read
+           -- as a broken dropdown. No inactive stages exist on this host today, which is precisely
+           -- why the omission went unnoticed -- it agreed with the UI by circumstance.
+           AND ISNULL(ps.IsActive, 1) = 1
+         ORDER BY ps.DisplayOrder, ps.Name`);
+    expect(
+        row?.ID,
+        `pipeline ${pipelineID} has no stage that leaves the deal open — a composed deal would be ` +
+            'unmovable, and every drag or stage spec would fail on its own precondition',
+    ).toBeTruthy();
     return { ID: String(row!.ID), Name: String(row!.Name) };
 }
 

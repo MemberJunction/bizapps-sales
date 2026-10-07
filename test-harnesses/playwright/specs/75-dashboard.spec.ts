@@ -42,7 +42,8 @@
  * both can be wrong in the same way. Asking "you say you counted wins between these two dates; did
  * you?" is a question the app cannot pass by being consistently wrong.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Page } from '@playwright/test';
 
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryOne } from '../lib/db';
