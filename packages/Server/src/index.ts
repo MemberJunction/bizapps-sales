@@ -80,12 +80,12 @@ export function LoadBizAppsSalesServer(): void {
      */
     LoadDealLockOrderLineVeto();
 
-/**
- * And the other direction (bc-aidp-next-golive#323): an order whose deal is NOT Won may not be
- * confirmed. A deal closed Won, reopened, and its order confirmed anyway booked against a deal
- * sitting Open. Same seam shape, same package reasoning as the note above.
- */
-LoadDealNotWonConfirmVeto();
+    /**
+     * And the other direction (bc-aidp-next-golive#323): an order whose deal is NOT Won may not be
+     * confirmed. A deal closed Won, reopened, and its order confirmed anyway booked against a deal
+     * sitting Open. Same seam shape, same package reasoning as the note above.
+     */
+    LoadDealNotWonConfirmVeto();
 
     LoadCaptureForecastSnapshotAction();
     LoadLogActivityAction();
