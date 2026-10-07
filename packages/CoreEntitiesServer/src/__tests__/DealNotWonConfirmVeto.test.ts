@@ -35,8 +35,12 @@ function withData(deal: Deal | Deal[] | null, statuses: Record<string, boolean>,
         asked.push(EntityName);
         if (EntityName.includes('Deal Status Types')) {
             if (fail === 'status') return { Success: false, ErrorMessage: 'status view is down', Results: [] };
-            const id = /ID = '([^']+)'/.exec(ExtraFilter)?.[1] ?? '';
-            return { Success: true, Results: id in statuses ? [{ IsWon: statuses[id] }] : [] };
+            // Handles both `ID = 'x'` and the batched `ID IN ('x', 'y')`.
+            const ids = [...String(ExtraFilter).matchAll(/'([^']+)'/g)].map((m) => m[1]);
+            return {
+                Success: true,
+                Results: ids.filter((id) => id in statuses).map((id) => ({ ID: id, IsWon: statuses[id] })),
+            };
         }
         if (fail === 'deal') return { Success: false, ErrorMessage: 'deal view is down', Results: [] };
         return { Success: true, Results: deal ? (Array.isArray(deal) ? deal : [deal]) : [] };
@@ -136,6 +140,18 @@ describe('an order two deals point at', () => {
         const refusal = (await veto().MayConfirm(ctx)) ?? '';
         expect(refusal).toContain('DEAL-B');
         expect(refusal, "the deal that IS won is not what blocks the confirm").not.toContain('DEAL-A');
+    });
+
+    /**
+     * ONE status read, not one per deal. MJ's UI guide says to batch rather than loop, and this sits
+     * in the critical section of every confirm — a query per owner would put round trips on the save
+     * path for nothing, since a single `IN` answers them together.
+     */
+    it('reads every status in ONE view, not one per deal', async () => {
+        const { asked } = withData([A, B], { [WON]: true, [OPEN]: false });
+        await veto().MayConfirm(ctx);
+        const statusReads = asked.filter((e) => e.includes('Deal Status Types')).length;
+        expect(statusReads, 'two owning deals must still cost one status read').toBe(1);
     });
 
     it('names both when both are open, and reads as plural', async () => {

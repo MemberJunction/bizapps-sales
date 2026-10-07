@@ -72,15 +72,13 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
          * exactly the harm (golive#323). A deal with no status at all cannot be Won either — that
          * is a state nobody can read, and booking against it would be a decision made by absence.
          */
-        const open: string[] = [];
-        for (const owner of owners) {
-            const won =
-                !!owner.DealStatusTypeID &&
-                (await this.statusIsWon(owner.DealStatusTypeID, context.ContextUser));
-            if (!won) {
-                open.push(owner.DealNumber?.trim() || owner.DealID);
-            }
-        }
+        const won = await this.wonStatusIDs(
+            [...new Set(owners.map((o) => o.DealStatusTypeID).filter((id): id is string => !!id))],
+            context.ContextUser,
+        );
+        const open = owners
+            .filter((o) => !o.DealStatusTypeID || !won.has(o.DealStatusTypeID))
+            .map((o) => o.DealNumber?.trim() || o.DealID);
         if (open.length === 0) {
             return null;
         }
@@ -119,19 +117,31 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
     }
 
     /**
-     * Whether that status is a winning one.
+     * Which of these statuses are winning ones, read in ONE view rather than one per deal.
+     *
+     * MJ's UI guide says to batch reads rather than issue them in a loop, and this sits in the
+     * critical section of every confirm: a query per owning deal would put the round trips on the
+     * save path for no gain, since one `IN` answers them together. Two reads now, whatever the
+     * number of owners.
      *
      * A read that fails THROWS rather than defaulting either way. Defaulting to "won" would confirm
      * on an unreadable deal; defaulting to "not won" would refuse every confirm on this host the
      * moment the view broke. The caller turns the throw into a refusal that names the fault, which
      * is both safe and diagnosable.
+     *
+     * A status id with no row back is simply absent from the set, which reads as not-won — as
+     * unanswerable as a missing id, and not a win.
      */
-    private async statusIsWon(statusID: string, user: UserInfo | null): Promise<boolean> {
-        const result = await new RunView().RunView<{ IsWon: boolean }>(
+    private async wonStatusIDs(statusIDs: string[], user: UserInfo | null): Promise<Set<string>> {
+        if (statusIDs.length === 0) {
+            return new Set();
+        }
+        const list = statusIDs.map((id) => `'${SafeID(id)}'`).join(', ');
+        const result = await new RunView().RunView<{ ID: string; IsWon: boolean }>(
             {
                 EntityName: DEAL_STATUS_ENTITY,
-                ExtraFilter: `ID = '${SafeID(statusID)}'`,
-                Fields: ['IsWon'],
+                ExtraFilter: `ID IN (${list})`,
+                Fields: ['ID', 'IsWon'],
                 ResultType: 'simple',
             },
             user ?? undefined,
@@ -139,9 +149,7 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
         if (!result.Success) {
             throw new Error(`the deal's status could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
         }
-        const row = (result.Results ?? [])[0];
-        // An absent status row is as unanswerable as a failed read, and is not a win.
-        return row?.IsWon === true;
+        return new Set((result.Results ?? []).filter((row) => row.IsWon === true).map((row) => row.ID));
     }
 }
 
