@@ -138,18 +138,7 @@ jobs:
       - name: Harness selector gate (the harness only targets markup the app renders)
         run: npm run test:selector-gate
 
-      # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
-      # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a
-      # permanent red X asserting nothing. Guarded rather than omitted, so the first real test file
-      # switches this on with no workflow edit.
-      - name: Unit tests (if any exist)
-        run: |
-          if find packages -path '*/src/*' \( -name '*.test.ts' -o -name '*.spec.ts' \) -print -quit | grep -q .; then
-            echo "Test files found — running vitest."
-            npx vitest run
-          else
-            echo "::notice title=No unit tests yet::No *.test.ts / *.spec.ts under packages/*/src. This step self-enables when the first one lands."
-          fi
+      # Unit tests run in the shared build.yml (`pnpm run test`, the root vitest suite).
 
       # Advisory, matching the sibling repo's judgement. migrations/_README.md requires a changeset on
       # any PR touching a migration, and that rule sat unenforced through several schema changes there.
