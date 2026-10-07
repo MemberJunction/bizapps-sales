@@ -52,7 +52,7 @@
  * `Quoted`, orders permits the move, so there is no refusal to warn about and the warning assertion is
  * gated off. A mutant aimed at a branch the spec no longer reaches proves nothing about the spec.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../lib/test';
 
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { CanTransition } from '@mj-biz-apps/orders-entities';

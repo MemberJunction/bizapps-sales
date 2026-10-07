@@ -30,7 +30,8 @@
  * and step 4 fails with the old stage still selected. Both were used to prove this spec is not
  * vacuous.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Page } from '@playwright/test';
 
 import { QueryAll, QueryOne } from '../lib/db';
 import {
