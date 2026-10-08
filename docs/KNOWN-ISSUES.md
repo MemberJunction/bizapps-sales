@@ -1691,6 +1691,10 @@ silent cost, and the numbers above are the input to that decision.
 
 ## 🟠 KI-13 — bizapps-contracts cannot be installed on a fresh database
 
+> **No longer reproduces with contracts 0.7.x.** Contracts 0.7.1 and 0.7.2 applied cleanly after MJ
+> core 6.1.5, common, tasks, accounting and orders on fresh databases (2026-10-06 and 2026-10-08, #161),
+> and the contract checks passed there. The entry below describes the earlier baseline.
+
 **Found while proving the close-won contract seam end to end. Not caused by the pnpm/v6 conversion — it
 fails identically on npm/v5.** Recorded here because Sales' contract path cannot be demonstrated on any
 new environment until it is fixed upstream, and because the failure disguises itself twice.
