@@ -13,8 +13,10 @@ file honestly, mark what you know.
 ## 0. Decide whether to file at all
 
 - A **nit** (cosmetic, no user impact, no data risk) does **not** get filed during the pilot.
-  Note it in the workspace's local log (`BUGS.md`, `MJDEV-ISSUES.md`, or the repo's
-  `plans/ISSUES.md` if one exists) and stop.
+  Note it in the **local log** and stop. The local log is, in order: the repo's `BUGS.md` at
+  its root (create it if absent: a heading and one dated bullet per entry), or an MJDev
+  workspace's `MJDEV-ISSUES.md` / `MJ-UPSTREAM.md` when you are working inside one. It is a
+  scratch file, not a tracker; never file its contents in bulk.
 - If you are an agent acting without a human asking you to file: file only when you have a
   **minimal repro**, or you have seen the **same fingerprint twice** this session. A single
   inferred-from-code suspicion stays in the local log. At most **five** filings per session; the
@@ -125,18 +127,31 @@ grep -qx origin:human  /tmp/labels.txt && LABELS="$LABELS,origin:human"   # orig
 gh issue create --repo <owner/repo> --title "<symptom>" --body-file /tmp/issue.md --label "$LABELS"
 ```
 
-Print the URL. If the workspace has a receipt log (`MJDEV-ISSUES.md` for mjdev, `MJ-UPSTREAM.md`
-for MJ bugs, the instance's `BUGS.md` otherwise), append a one-line receipt: link, title, status.
+Print the URL and append a one-line receipt to the local log (see step 0): link, title, status.
 
-If `gh` fails (auth, network), write the full body into that local log, mark it
+If `gh` fails (auth, network), write the full body into the local log, mark it
 `PROMOTE-PENDING`, and tell the user it could not be filed. Never drop the report.
 
 ## 5. Or: post an occurrence comment on the existing issue
 
-When the search found an open duplicate, add a comment using `templates/occurrence-comment.md`
-(fixed heading, your environment, what differs). Carry your environment: the version boundary
-where a bug appears is usually the most useful fact in the whole thread. Then print the URL and
-stop. Do not file a second issue.
+When the search found an open duplicate, add a comment with exactly this shape (the fixed
+heading and the HTML marker are what a bot counts later; keep both):
+
+```md
+### Occurrence <!-- occurrence v=1 -->
+**Environment:** MJ <version> · <app> <version> @ <branch> <sha> · <linked apps + versions> · <OS> · Node <ver>
+**Origin:** human | agent
+**What I saw:** <one line — the error or the wrong behaviour, verbatim where possible>
+**Differs from the original:** <entry point, version, data shape — or "nothing, same path">
+**Blocking?** <Blocked — … | Not blocked — …>
+```
+
+```sh
+gh issue comment <N> --repo <owner/repo> --body-file /tmp/occurrence.md
+```
+
+Carry your environment: the version boundary where a bug appears is usually the most useful fact
+in the whole thread. Then print the URL and stop. Do not file a second issue.
 
 ## Rules
 
