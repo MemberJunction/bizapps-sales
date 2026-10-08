@@ -31,6 +31,7 @@ import sql from 'mssql';
 
 // Symlinked sibling directories count; the shared helper says why.
 import { listDirs } from './sibling-resolve.mjs';
+import { formatAppPresence, judgeAppPresence, presentApps } from '../scripts/app-presence.mjs';
 
 dotenv.config();
 
@@ -554,7 +555,6 @@ const registry = IntegrationCheckRegistry.Instance;
  * with no contracts tables. `scripts/app-presence.mjs` adds the second test (the app's entities are
  * registered) and is shared with the coverage gate, which reads the line printed here.
  */
-const { judgeAppPresence, formatAppPresence, presentApps } = await import('../scripts/app-presence.mjs');
 const appPresence = judgeAppPresence(MANIFEST, optionalLoads, provider.Entities);
 console.log(formatAppPresence(appPresence));
 const linkedApps = presentApps(appPresence);
