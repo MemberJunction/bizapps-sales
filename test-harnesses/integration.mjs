@@ -265,7 +265,7 @@ const provider = await setupSQLServerClient(
 
 // The acting user, from MJ's own cache rather than a hand-rolled query — it arrives with roles and
 // permissions already resolved, which is what the checks' RunView calls need.
-await UserCache.Instance.Refresh(pool);
+await UserCache.Instance.Refresh(provider);
 const user =
     UserCache.Users.find((u) => u?.Type?.trim().toLowerCase() === 'owner') ?? UserCache.Users[0];
 if (!user) {

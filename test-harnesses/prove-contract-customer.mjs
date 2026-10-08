@@ -48,7 +48,7 @@ ck(true, 'CK_Contract_CustomerXor exists — the constraint under test');
 const { setupSQLServerClient, SQLServerProviderConfigData } = await import('@memberjunction/sqlserver-dataprovider');
 const { UserCache } = await import('@memberjunction/generic-database-provider');
 const provider = await setupSQLServerClient(new SQLServerProviderConfigData(pool, process.env.MJ_CORE_SCHEMA || '__mj'));
-await UserCache.Instance.Refresh(pool);
+await UserCache.Instance.Refresh(provider);
 const user = UserCache.Users.find(u => u?.Type?.trim().toLowerCase() === 'owner') ?? UserCache.Users[0];
 if (!user) die('no context user in UserCache — run scripts/seed-dev-data.sh');
 
