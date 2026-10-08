@@ -29,6 +29,9 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import sql from 'mssql';
 
+// Symlinked sibling directories count; the shared helper says why.
+import { listDirs } from './sibling-resolve.mjs';
+
 dotenv.config();
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -395,8 +398,6 @@ function declaredDownstream() {
 async function resolveSiblingPackage(name) {
     const { existsSync, readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
-    // Symlinked sibling directories count; the shared helper says why.
-    const { listDirs } = await import('./sibling-resolve.mjs');
     const parent = join(process.cwd(), '..');
     let repos = [];
     try {
