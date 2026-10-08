@@ -31,6 +31,7 @@ where `docs/DECISIONS.md` records a ruling that supersedes it.
   from a clean DB. `pnpm run lint:distribution` checks only that shipped SQL uses placeholders
   `mj app install` can resolve — it is not a metadata↔seed currency gate. `check:release-seed` is;
   `publish.yml` runs it, so a release fails while `metadata/` is ahead of its Metadata_Sync.
+  The model: [Release Metadata Migrations Guide](https://github.com/MemberJunction/MJ/blob/next/guides/RELEASE_METADATA_MIGRATIONS_GUIDE.md). This repo's recipe: [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 
 > ## ⚠️ KNOWN ISSUE — read before touching the IsA extensions
 >
