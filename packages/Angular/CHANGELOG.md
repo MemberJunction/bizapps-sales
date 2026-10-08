@@ -1,5 +1,18 @@
 # @mj-biz-apps/sales-ng
 
+## 6.12.3
+
+### Patch Changes
+
+- ec032c0: The Deal form's dedicated Pipeline control carries the `--required-empty` modifier.
+
+  `Deal.PipelineID` is NOT NULL, and base-forms styles that modifier on the input — so a dedicated control that omits it shows a required field as though it were optional, and the rep finds out at save time. The condition mirrors MJ's own `IsRequiredEmpty` getter: required, editing, and no value.
+
+  The rest of this change is test harness only.
+
+- 4adb366: **A customer or contact created from the deal workspace is linked under the ID that was actually written.** On MJ 6.1.x, creating an IsA child (`SalesAccount`, `SalesContact`) over GraphQL writes it under a server-minted key while `Get('ID')` keeps reporting the browser's unwritten key, so the deal could be bound to a customer that does not exist and refused on save. The workspace now reads the new record's key from `PrimaryKey`, which carries the written value. Fixes #188.
+  - @mj-biz-apps/sales-entities@6.12.3
+
 ## 6.12.2
 
 ### Patch Changes
