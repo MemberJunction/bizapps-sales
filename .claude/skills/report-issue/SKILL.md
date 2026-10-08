@@ -46,10 +46,11 @@ node -e "console.log(require('./node_modules/@memberjunction/core/package.json')
   || cat packages/MJCore/package.json | grep '"version"'               # ACTUAL MJ version
 cat package.json | grep -E '"(name|version)"' | head -2                # this app's name + version
 ls node_modules/@memberjunction/ 2>/dev/null | head -0; for d in ../*/package.json; do :; done   # (adapt) linked apps + versions
-node -v; sw_vers -productVersion 2>/dev/null || uname -sr               # Node, OS
+node -v; (pnpm -v 2>/dev/null || npm -v)                               # Node + package manager
 ```
 
 Report the actual MJ version AND the branch; they diverge. Name linked open apps with versions.
+Do NOT include the machine: no OS, no hardware, no hostname. Software versions only.
 
 ## 3. Search for duplicates, then judge
 
@@ -76,9 +77,12 @@ Write the body with **exactly these headings** (the web form produces the same o
 intake workflow parses them):
 
 ```md
+### Summary
+<for a person: three sentences at most, as concise as possible while still useful to a human —
+what breaks, where in the code, what a fix would change. People read this and the title, little else.>
+
 ### What happened
-Expected: …
-Actual: …
+<a plain explanation: what you did, what the system did instead, expected and actual stated inside it>
 
 ### Steps to reproduce
 1. …
@@ -89,7 +93,7 @@ Reproduced with a minimal repro (attached above) | Observed directly, no minimal
 ### Environment
 MJ <ver> · <app> <ver> @ <branch> <sha>
 <linked apps + versions>
-<OS> · Node <ver> · <pm> <ver>
+Node <ver> · <pm> <ver>
 
 ### Severity proposed
 blocker | breaking | vulnerability | degraded | minor
@@ -111,7 +115,7 @@ Proposed: …
 Tested: no
 ```
 
-Title: the symptom, not the theory. Severity meanings: blocker = someone cannot work; breaking =
+Title: the symptom, not the theory. Summary: never more than three sentences; the rest of the body may be as long as the evidence needs, but a person decides from the title and Summary alone. Severity meanings: blocker = someone cannot work; breaking =
 feature does not work, no workaround; vulnerability = security; degraded = works with a
 workaround; minor = cosmetic. Target line is `next` unless a blocker/breaking/vulnerability is
 live on a release line.
@@ -139,7 +143,7 @@ heading and the HTML marker are what a bot counts later; keep both):
 
 ```md
 ### Occurrence <!-- occurrence v=1 -->
-**Environment:** MJ <version> · <app> <version> @ <branch> <sha> · <linked apps + versions> · <OS> · Node <ver>
+**Environment:** MJ <version> · <app> <version> @ <branch> <sha> · <linked apps + versions> · Node <ver>
 **Origin:** human | agent
 **What I saw:** <one line — the error or the wrong behaviour, verbatim where possible>
 **Differs from the original:** <entry point, version, data shape — or "nothing, same path">

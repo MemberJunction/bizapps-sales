@@ -13,13 +13,21 @@ body:
         Landing as `needs-triage` is not a judgment about your report. Fill in what you know, mark your confidence honestly, and watch for a follow-up question.
 
   - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: For a person. Three sentences at most, as concise as possible while still useful to a human — what breaks, where in the code, and what a fix would change. People read this and the title, little else.
+      placeholder: Confirming a saved draft that carries a promotion code books the discount twice in the adjustment trail. The pricing walk in OrderEntityServer re-adds promotion rows on every save instead of replacing the draft's set. A fix replaces only the rows a promotion re-decides, leaving manual discounts alone.
+    validations:
+      required: true
+
+  - type: textarea
     id: what-happened
     attributes:
       label: What happened
-      description: Expected versus actual. State both.
+      description: A plain explanation of what you did and what the system did instead, with the expected and actual behaviour stated inside it.
       placeholder: |
-        Expected: confirming a draft with a promotion code records one adjustment.
-        Actual: the adjustment trail records it twice (SUM = 200 for a 100 discount).
+        Saved a draft order with a 10% promotion code, then set Status = Confirmed and saved again. I expected one adjustment of 100 on the order; the trail shows two, so SUM(OrderAdjustment.Amount) is 200 while the line's DiscountAmount is still 100.
     validations:
       required: true
 
@@ -52,12 +60,12 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: MJ version, this app's version, branch and commit, OS, Node, linked apps and their versions. Report the ACTUAL MJ version (packages/MJCore or node_modules/@memberjunction/core) as well as the branch; they diverge.
+      description: Software versions only — MJ version, this app's version, branch and commit, Node and package manager, linked apps and their versions. No machine details (OS, hardware). Report the ACTUAL MJ version (packages/MJCore or node_modules/@memberjunction/core) as well as the branch; they diverge.
       render: shell
       placeholder: |
         MJ 6.1.5 · bizapps-orders 0.21.0 @ next 429cb18c
         common 5.49.0 · tasks 1.4.1 · accounting 0.17.0
-        macOS 15.6 · Node 24.4 · pnpm 10.33
+        Node 24.4 · pnpm 10.33
     validations:
       required: true
 
