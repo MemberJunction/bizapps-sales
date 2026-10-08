@@ -17,7 +17,7 @@ import { FormsModule } from '@angular/forms';
 import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
-import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent } from '@memberjunction/ng-base-forms';
+import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent, type FormContext } from '@memberjunction/ng-base-forms';
 import {
     EntityViewerModule,
     type AfterDataLoadEventArgs,
@@ -493,6 +493,25 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
      * Only ever true while READING. The moment the field is editable the shared control takes it back,
      * so there is exactly one editable implementation of every field on this form.
      */
+    /**
+     * The `FormContext` a field renders with: the form's own, or a copy with record links off for a
+     * `noLink` field.
+     *
+     * The copy is cached against the context it was made from. The template reads this on every
+     * change-detection pass, and a fresh object each pass would hand `mj-form-field` a new input
+     * every time.
+     */
+    public FieldFormContext(f: DealFieldSpec): FormContext | undefined {
+        if (!f.noLink || !this.FormContext) return this.FormContext;
+        if (this.noLinkContextSource !== this.FormContext) {
+            this.noLinkContextSource = this.FormContext;
+            this.noLinkContext = { ...this.FormContext, enableRecordLinks: false };
+        }
+        return this.noLinkContext;
+    }
+    private noLinkContextSource?: FormContext;
+    private noLinkContext?: FormContext;
+
     public DrawsOwnMoney(f: DealFieldSpec): boolean {
         return f.currency === true && !(this.EditMode && this.FieldEditable(f.name));
     }
@@ -684,6 +703,15 @@ interface DealFieldSpec {
      * Never hand-set them."
      */
     serverMaintained?: boolean;
+    /**
+     * RENDERED AS PLAIN TEXT, NEVER AS A LINK — even though the field is a foreign key.
+     *
+     * `link` cannot express this. `mj-form-field` draws any foreign key with a mapped name field as a
+     * link in read mode, and the only thing that turns that off is `FormContext.enableRecordLinks`;
+     * `LinkType` is not consulted on that branch. So a spec that merely omits `link` still links.
+     * This flag hands the field a context with record links off (see `FieldFormContext`).
+     */
+    noLink?: boolean;
     /**
      * A MONEY COLUMN: shown formatted as currency when reading, edited as a plain number.
      *
@@ -2491,7 +2519,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FieldFormContext(f)" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -2508,6 +2536,13 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
      * price inside the deal; the order becomes reachable once the deal is won, and the hero's chip
      * row is where that now happens because only it knows the outcome. The row stays as a READ of
      * the order's name — the provenance is worth showing — it is just not a way in.
+     *
+     * Omitting `link` was not enough, and the first version of this relied on it: `mj-form-field`
+     * links any foreign key with a mapped name field regardless of `LinkType`, so the order stayed
+     * one click away on every open deal (bc-aidp-next-golive#331). `noLink` is what removes it.
+     * `serverMaintained` keeps it out of edit mode too: `DealEntityServer` provisions the order and
+     * owns the id, so an FK search that lets a rep re-point the deal at another order is the same
+     * way in by a different door.
      *
      * Deliberately not gated on `IsWon` here instead: a link that appears and disappears from a
      * field list is harder to reason about than one place that owns the rule, and the hero already
@@ -2526,7 +2561,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
         { name: 'NextStepDate', type: 'datepicker' },
         { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
         { name: 'CampaignID', type: 'textbox' },
-        { name: 'OrderID', type: 'textbox' },
+        { name: 'OrderID', type: 'textbox', noLink: true, serverMaintained: true },
         { name: 'ContractID', type: 'textbox', link: 'Record' },
         { name: 'RenewsContractID', type: 'textbox', link: 'Record' },
         { name: 'ContractVariances', type: 'textarea', span: true },
