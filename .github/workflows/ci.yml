@@ -74,6 +74,18 @@ jobs:
           node-version: '24'
           cache: pnpm
 
+      # ===================================================================================
+      # GATE 0 — the dependency model. A host installs ONE copy of MemberJunction and one copy of each
+      # Open App; a published package that lists @memberjunction/* or another app's @mj-biz-apps/*
+      # package in `dependencies` (or pins its peer with ~ or an exact version) brings its own copy and
+      # splits the class-factory registry, with no error. Needs only Node, so it runs before install.
+      # The self-test proves the check can fail before its pass is trusted.
+      # ===================================================================================
+      - name: Dependency model gate (host-provided packages are caret peers only)
+        run: |
+          node .github/scripts/check-dependency-model.mjs --self-test
+          node .github/scripts/check-dependency-model.mjs
+
       # postinstall runs scripts/link-local-apps.mjs, which is a clean no-op while .mj-links.json has an
       # empty `links` map. That changes at S2, when the unpublished siblings get linked — at which point
       # this step will need a decision, because CI cannot check out private sibling repos.
