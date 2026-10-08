@@ -393,12 +393,14 @@ function declaredDownstream() {
 }
 
 async function resolveSiblingPackage(name) {
-    const { readdirSync, existsSync, readFileSync } = await import('node:fs');
+    const { existsSync, readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
+    // Symlinked sibling directories count; the shared helper says why.
+    const { listDirs } = await import('./sibling-resolve.mjs');
     const parent = join(process.cwd(), '..');
     let repos = [];
     try {
-        repos = readdirSync(parent, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+        repos = listDirs(parent);
     } catch {
         return null;
     }
@@ -407,7 +409,7 @@ async function resolveSiblingPackage(name) {
         if (!existsSync(pkgDir)) continue;
         let subs = [];
         try {
-            subs = readdirSync(pkgDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+            subs = listDirs(pkgDir);
         } catch {
             continue;
         }

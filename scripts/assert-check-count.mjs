@@ -94,11 +94,13 @@ function runSuite() {
             maxBuffer: 64 * 1024 * 1024,
             // RUN_MUTATION_TESTS is mandatory: without it the runner skips every check and reports a
             // green nothing. MJ_INTEGRATION_LOG is redirected so this run does not clobber the log a
-            // human may be reading -- the verdict comes from stdout, never from disk.
+            // human may be reading -- the verdict comes from stdout, never from disk. A caller's own
+            // MJ_INTEGRATION_LOG wins, so a host running several checkouts can keep each gate's log apart.
             env: {
                 ...process.env,
                 RUN_MUTATION_TESTS: '1',
-                MJ_INTEGRATION_LOG: join(root, 'test-harnesses', '.integration-log.gate.txt'),
+                MJ_INTEGRATION_LOG:
+                    process.env.MJ_INTEGRATION_LOG ?? join(root, 'test-harnesses', '.integration-log.gate.txt'),
             },
         });
     } catch (err) {
