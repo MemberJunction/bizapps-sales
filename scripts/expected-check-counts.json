@@ -8,8 +8,14 @@
     "stops the gate and the suite from drifting into agreeing on a wrong figure.",
     "",
     "`requires` names the sibling app a bundle needs. null means it always runs. A bundle whose app is",
-    "not linked is NOT expected to run, which is why a straight port of orders' gate would fail on a",
+    "not PRESENT is NOT expected to run, which is why a straight port of orders' gate would fail on a",
     "sales-only host: it would demand bundles that cannot exist there.",
+    "",
+    "PRESENT means the app's `probes` package loaded AND the host's metadata registers an entity in its",
+    "`schemas` entry. A package that loads proves only that the code is linked; in a joined workspace it",
+    "always is, migrated or not (#89). scripts/app-presence.mjs holds the rule for the runner and the gate.",
+    "A single check that needs an app its bundle does not require names it in `RequiresApp`, and is left",
+    "out the same way when that app is not present.",
     "",
     "NOTHING IS null ANY MORE, and that is a real change rather than tidying. Saving a deal provisions",
     "its embedded order inside DealEntityServer.Save(), so a host without bizapps-orders cannot save a",
@@ -57,6 +63,12 @@
     "activities": { "count": 21, "requires": "common", "ids": "AC1-AC14, AC16, AC18-AC23" },
     "forecast": { "count": 14, "requires": null, "ids": "FS1-FS14" },
     "term-start": { "count": 6, "requires": "orders", "ids": "TS1-TS6 — the term start a deal states for a subscription line (#32). TS1-TS4 are pure rule checks; TS5 reads the catalogue; TS6 round-trips OrderLine.ServicePeriodStart through a deal save." }
+  },
+  "schemas": {
+    "orders": "__mj_BizAppsOrders",
+    "contracts": "__mj_BizAppsContracts",
+    "tasks": "__mj_BizAppsTasks",
+    "common": "__mj_BizAppsCommon"
   },
   "probes": {
     "orders": "@mj-biz-apps/orders-entities",
