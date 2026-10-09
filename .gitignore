@@ -42,3 +42,6 @@ test-harnesses/.integration-log*.txt
 # `mj sync push` writes these before it updates a record in place (every directory under
 # metadata/ declares backupBeforeUpdate). Generator output, not source.
 metadata/**/.backups/
+
+# The mutation driver's run marker: present while a run may have a mutant applied (test-harnesses/mutation-run.mjs).
+.mutate-checks.run.json

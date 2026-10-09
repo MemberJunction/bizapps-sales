@@ -22,6 +22,10 @@
  * thing it is testing. It now runs safely against a dirty tree, which is also when you most want it —
  * the moment a check is written is the moment to ask whether it can fail.
  *
+ * An interrupted run cleans up too: a signal restores the source and rebuilds, and a run killed past
+ * any handler is recovered by the next start. See `mutation-run.mjs`, which also refuses to start
+ * while another run is live in this tree.
+ *
  * USAGE
  *   node test-harnesses/mutate-checks.mjs                 # every mutation
  *   node test-harnesses/mutate-checks.mjs M-OS1 M-CD4     # only these
@@ -52,11 +56,10 @@
  * Each mutation runs the WHOLE suite, not one bundle, so a mutation that breaks something unintended
  * shows up instead of hiding. Budget roughly 70 seconds each.
  */
-import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, readFileSync, writeFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { copyFileSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { restore, startMutationRun } from './mutation-run.mjs';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
@@ -981,6 +984,8 @@ const TALLY_RE = /(\d+) passed,\s+(\d+) failed,\s+(\d+) skipped/;
  * lock for an hour is a worse neighbour than one that queues.
  */
 async function withSuiteLock(label, fn) {
+    // A seamed suite never touches the database, so there is nothing to serialise.
+    if (run.commands.testSeamed) return await fn(false);
     let sql;
     let pool = null;
     try {
@@ -1034,7 +1039,8 @@ async function withSuiteLock(label, fn) {
     }
 }
 
-const safety = mkdtempSync(join(tmpdir(), 'mj-mutate-'));
+const run = await startMutationRun(REPO);
+const safety = run.safety;
 const results = [];
 
 /**
@@ -1075,15 +1081,6 @@ function distFingerprint(srcRel) {
     return createHash('sha256').update(readFileSync(p)).digest('hex');
 }
 
-/** Restores from the byte-for-byte copy and PROVES it. Never `git checkout`. */
-function restore(abs, backup) {
-    copyFileSync(backup, abs);
-    if (readFileSync(abs, 'utf8') !== readFileSync(backup, 'utf8')) {
-        console.error(`\n✖ RESTORE FAILED for ${abs}\n  The original is still at ${backup} — copy it back by hand before doing anything else.\n`);
-        process.exit(3);
-    }
-}
-
 for (const m of MUTATIONS) {
     if (wanted.size && !wanted.has(m.id)) continue;
 
@@ -1102,6 +1099,7 @@ for (const m of MUTATIONS) {
     // SAFETY FIRST — the copy is taken before a single byte changes.
     const backup = join(safety, `${m.id}-${basename(m.file)}`);
     copyFileSync(abs, backup);
+    run.mutating({ id: m.id, abs, backup });
 
     // Taken BEFORE the edit, so the comparison after the build is against the untouched artefact.
     const distBefore = distFingerprint(m.file);
@@ -1111,10 +1109,10 @@ for (const m of MUTATIONS) {
 
     const started = Date.now();
     try {
-        try {
-            execSync('npm run build:packages', { cwd: REPO, stdio: 'pipe' });
-        } catch (err) {
-            const text = String(err.stdout ?? '') + String(err.stderr ?? '');
+        run.building();
+        const build = await run.exec(run.commands.build);
+        if (build.code !== 0) {
+            const text = build.stdout + build.stderr;
             const lines = text.split('\n').filter((l) => /error/i.test(l)).slice(0, 2);
             console.log(`${m.id.padEnd(7)} BUILD FAILED — ${lines.map((l) => l.trim().slice(0, 100)).join(' | ')}`);
             results.push({ ...m, skipped: 'build' });
@@ -1155,16 +1153,10 @@ for (const m of MUTATIONS) {
          * number that is wrong.
          */
         const CONTENTION_RE = /was deadlocked on lock resources|deadlock victim/i;
-        const runSuiteOnce = (extraEnv = {}) => {
-            try {
-                return execSync('node test-harnesses/integration.mjs', {
-                    cwd: REPO, stdio: 'pipe', encoding: 'utf8',
-                    env: { ...process.env, RUN_MUTATION_TESTS: '1', ...extraEnv },
-                });
-            } catch (err) {
-                // a failing suite exits non-zero, which is the POINT
-                return String(err.stdout ?? '') + String(err.stderr ?? '');
-            }
+        // A failing suite exits non-zero, which is the POINT, so the exit code is not read.
+        const runSuiteOnce = async (extraEnv = {}) => {
+            const suite = await run.exec(run.commands.test, { RUN_MUTATION_TESTS: '1', ...extraEnv });
+            return suite.stdout + suite.stderr;
         };
 
         /**
@@ -1198,7 +1190,7 @@ for (const m of MUTATIONS) {
         await withSuiteLock(m.id, async (held) => {
             const childEnv = held ? { MJ_INTEGRATION_LOCK_HELD_BY_PARENT: '1' } : {};
             for (let attempt = 1; attempt <= 3; attempt++) {
-                out = runSuiteOnce(childEnv);
+                out = await runSuiteOnce(childEnv);
                 if (!CONTENTION_RE.test(out)) break;
                 contended++;
                 if (attempt < 3) {
@@ -1232,6 +1224,7 @@ for (const m of MUTATIONS) {
         );
     } finally {
         restore(abs, backup);
+        run.restored();
         /**
          * ── AND REBUILD, OR THE MUTANT OUTLIVES THE RUN ─────────────────────────────────────────────
          *
@@ -1248,14 +1241,15 @@ for (const m of MUTATIONS) {
          * A tool whose job is to break things on purpose must not be able to leave them broken. Same
          * principle as the copy-aside restore above; this is the half that was missing.
          */
-        try {
-            execSync('npm run build:packages', { cwd: REPO, stdio: 'pipe' });
-        } catch (err) {
+        const rebuild = await run.exec(run.commands.build);
+        if (rebuild.code === 0) {
+            run.rebuilt();
+        } else {
             console.error(
                 `
   ⚠️  REBUILD AFTER RESTORE FAILED for ${m.id}. dist/ may still hold the mutant — ` +
                 `run \`npm run build\` before trusting anything that reads it.
-${String(err.stdout ?? err)}`,
+${rebuild.stdout}${rebuild.stderr}`,
             );
         }
     }
@@ -1299,5 +1293,5 @@ if (missed.length) {
 const skipped = results.filter((r) => r.skipped);
 if (skipped.length) console.log(`\n  skipped: ${skipped.map((r) => `${r.id} (${r.skipped})`).join(', ')}`);
 
-if (existsSync(safety)) rmSync(safety, { recursive: true, force: true });
+run.finish();
 process.exit(missed.length || skipped.length ? 1 : 0);
