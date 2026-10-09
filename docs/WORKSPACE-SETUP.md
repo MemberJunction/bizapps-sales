@@ -829,6 +829,17 @@ the smoke script resolve siblings by scanning neighbouring repos for a matching 
 new tooling, do the same, and **never swallow the failure** — a sibling that is present but fails to load
 must not read as "not installed".
 
+**Sibling checkouts share this checkout's MJ core; no relinking.** When the repos are checked out side by
+side, each with its own `pnpm install` rather than joined into one workspace, every checkout has its own
+`node_modules`. Without help the process then loads one `@memberjunction/core` per checkout, even when all
+lock the same version (four on 2026-10-09: sales, accounting 0.21.2, orders 5.29.0, contracts 0.7.2, all
+on 6.1.5), and checks fail with errors such as `IsFieldReadableByUser is not a function` or
+`BindProvider is not a function`. `test-harnesses/one-mj-core.mjs` prevents it: the integration runner,
+`seed-demo-lines.mjs` and every harness that uses `importSibling` resolve a sibling's `@memberjunction/*`
+imports from this checkout, and its `@mj-biz-apps/*` imports from this checkout (or the sibling that builds
+the package) when the version matches. The runner prints `MJ core instances -> 1` and stops before any
+check if it counts more than one. It needs Node 22.15 or 23.5+ (`module.registerHooks`).
+
 **A regenerated class manifest can want a package the host has not linked.** MJAPI's and MJExplorer's
 `prestart` run `mj codegen manifest`, which walks whatever is linked in the workspace *at that moment* and
 emits imports for it. Link a new app into `/c/v6` and the next `npm start` in MJ begins importing it — and
