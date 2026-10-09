@@ -110,6 +110,38 @@
     font-size: 0.85rem;
 }
 
+/* A load that stopped part-way: the reason and a Retry, in place of the page's content. */
+.load-failed {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.75rem 0;
+    padding: 0.85rem 1rem;
+    border-radius: 6px;
+    border-left: 3px solid var(--mj-status-error);
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-primary);
+    font-size: 0.88rem;
+}
+
+.load-failed > .fa-triangle-exclamation {
+    color: var(--mj-status-error);
+}
+
+.load-failed__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.load-failed__reason {
+    color: var(--mj-text-secondary);
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+}
+
 /* ── KPI strip ─────────────────────────────────────────────────────────────── */
 
 .kpis {
