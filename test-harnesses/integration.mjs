@@ -29,6 +29,10 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import sql from 'mssql';
 
+// Symlinked sibling directories count; the shared helper says why.
+import { listDirs } from './sibling-resolve.mjs';
+import { formatAppPresence, judgeAppPresence, presentApps } from '../scripts/app-presence.mjs';
+
 dotenv.config();
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -265,7 +269,7 @@ const provider = await setupSQLServerClient(
 
 // The acting user, from MJ's own cache rather than a hand-rolled query — it arrives with roles and
 // permissions already resolved, which is what the checks' RunView calls need.
-await UserCache.Instance.Refresh(pool);
+await UserCache.Instance.Refresh(provider);
 const user =
     UserCache.Users.find((u) => u?.Type?.trim().toLowerCase() === 'owner') ?? UserCache.Users[0];
 if (!user) {
@@ -393,12 +397,12 @@ function declaredDownstream() {
 }
 
 async function resolveSiblingPackage(name) {
-    const { readdirSync, existsSync, readFileSync } = await import('node:fs');
+    const { existsSync, readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const parent = join(process.cwd(), '..');
     let repos = [];
     try {
-        repos = readdirSync(parent, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+        repos = listDirs(parent);
     } catch {
         return null;
     }
@@ -407,7 +411,7 @@ async function resolveSiblingPackage(name) {
         if (!existsSync(pkgDir)) continue;
         let subs = [];
         try {
-            subs = readdirSync(pkgDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+            subs = listDirs(pkgDir);
         } catch {
             continue;
         }
@@ -545,11 +549,15 @@ const registry = IntegrationCheckRegistry.Instance;
  * `registry.GetBundleNames()`. A bundle that fails to register must surface as "no checks matched",
  * not quietly shorten a still-green run.
  */
-const linkedApps = new Set(
-    Object.entries(MANIFEST.probes)
-        .filter(([, pkg]) => optionalLoads.includes(`${pkg}: loaded`))
-        .map(([app]) => app),
-);
+/**
+ * PRESENT, NOT MERELY LINKED (#89). In a joined workspace every sibling's package loads whether or not its
+ * schema was migrated into this database, so a package probe alone sent contracts' checks against a host
+ * with no contracts tables. `scripts/app-presence.mjs` adds the second test (the app's entities are
+ * registered) and is shared with the coverage gate, which reads the line printed here.
+ */
+const appPresence = judgeAppPresence(MANIFEST, optionalLoads, provider.Entities);
+console.log(formatAppPresence(appPresence));
+const linkedApps = presentApps(appPresence);
 /**
  * -- THE RUN'S OWN DURATION, REPORTED, BECAUSE IT IS THE DISCRIMINATOR ------------------------------
  *
@@ -580,6 +588,14 @@ const RUN_STARTED_AT = Date.now();
 const ALL_BUNDLES = Object.entries(MANIFEST.bundles)
     .filter(([, spec]) => spec.requires === null || linkedApps.has(spec.requires))
     .map(([bundle]) => bundle);
+
+// Said out loud, with the reason, so a shorter run is never mistaken for a full one.
+const LEFT_OUT_BUNDLES = Object.entries(MANIFEST.bundles).filter(
+    ([bundle, spec]) => !bundle.startsWith('$') && spec.requires && !linkedApps.has(spec.requires),
+);
+for (const [bundle, spec] of LEFT_OUT_BUNDLES) {
+    console.log(`  left out: ${bundle} -- needs ${spec.requires}, ${appPresence.get(spec.requires) ?? 'unknown app'}`);
+}
 
 /**
  * `Storage` is only read by MJ's own cache bundles. A stub is honest here — ours never touch it, and
@@ -613,12 +629,26 @@ for (const request of requested) {
         continue;
     }
 
+    /**
+     * A check that needs an app its bundle does not require (WT10 and WT14 sit in close-won-tasks but
+     * need contracts) names it in `RequiresApp`. Left out like a bundle whose app is not present: listed
+     * with the reason, NOT counted as skipped, because nothing chose not to run it.
+     */
+    const leftOut = all.filter((c) => c.RequiresApp && !linkedApps.has(c.RequiresApp));
+    const eligible = all.filter((c) => !leftOut.includes(c));
+
     // THE GATE. A mutation check without the flag is SKIPPED and counted, never silently dropped.
-    const checks = all.filter((c) => (c.RequiresMutation ? RUN_MUTATIONS : true));
-    skipped += all.length - checks.length;
+    const checks = eligible.filter((c) => (c.RequiresMutation ? RUN_MUTATIONS : true));
+    skipped += eligible.length - checks.length;
     selected += checks.length;
 
-    console.log(`\n=== ${bundle} (${checks.length} of ${all.length} check${all.length === 1 ? '' : 's'}) ===`);
+    console.log(
+        `\n=== ${bundle} (${checks.length} of ${all.length} check${all.length === 1 ? '' : 's'}` +
+            `${leftOut.length ? `, ${leftOut.length} left out` : ''}) ===`,
+    );
+    for (const c of leftOut) {
+        console.log(`  left out: ${c.Id} -- needs ${c.RequiresApp}, ${appPresence.get(c.RequiresApp) ?? 'unknown app'}`);
+    }
     if (checks.length === 0) {
         continue;
     }

@@ -1138,7 +1138,13 @@ export const ActivitiesChecks: NamedCheck[] = [
                 /**
                  * AND THE CONSEQUENCE, PROVED RATHER THAN ARGUED: a meeting for an earlier date, created
                  * after that watermark, still comes through. Under the defect this second run saw nothing.
+                 *
+                 * "Next week" is measured from the first fetch, not written as a calendar date: a fixed
+                 * date passes only until the day it falls behind the run, after which the source drops it
+                 * as already-seen and the check fails whatever the code does. A week after the watermark
+                 * and years before `farFuture` is the window the defect closed.
                  */
+                const nextWeek = new Date(source.fetchedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
                 const nextSource = new FixtureActivitySyncProvider(
                     [
                         item({
@@ -1146,7 +1152,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                             TypeCode: 'Meeting',
                             Subject: 'AC19 meeting next week',
                             Direction: 'Internal',
-                            StartedAt: new Date(Date.UTC(2026, 8, 15, 9, 0, 0)),
+                            StartedAt: nextWeek,
                         }),
                     ],
                     'Calendar',
