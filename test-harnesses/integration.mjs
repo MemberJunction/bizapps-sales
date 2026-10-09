@@ -29,7 +29,15 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import sql from 'mssql';
 
+import { MJCoreInstances, ShareTestedCheckoutPackages } from './one-mj-core.mjs';
+
 dotenv.config();
+
+/**
+ * Before anything MemberJunction loads: sibling checkouts resolve MJ (and same-version BizApps
+ * packages) from THIS checkout, so the process holds one MJ core. See one-mj-core.mjs (sales#200).
+ */
+const SHARING = ShareTestedCheckoutPackages();
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -456,6 +464,32 @@ for (const [pkg, anchor] of (process.env.MJ_SKIP_DOWNSTREAM === '1' ? [] : ORDER
     optionalLoads.push(`${pkg}: loaded`);
 }
 console.log(`  downstream packages -> ${optionalLoads.join(' | ')}`);
+
+/**
+ * ── MORE THAN ONE MJ CORE IS AN ENVIRONMENT FAILURE, said before any check runs ───────────────────
+ *
+ * With two copies of `@memberjunction/core` the checks crash on errors that name a method
+ * (`IsFieldReadableByUser is not a function`, `BindProvider is not a function`) rather than the
+ * cause, or pass and fail on which copy a registration landed in. Counted from what actually resolved.
+ */
+const coreInstances = MJCoreInstances();
+console.log(`  MJ core instances -> ${coreInstances.length} (sibling sharing: ${SHARING})`);
+if (coreInstances.length > 1) {
+    console.error(
+        [
+            '',
+            `✖ ${coreInstances.length} COPIES OF @memberjunction/core ARE LOADED. Checks would fail on errors that`,
+            '  name a method rather than the cause. Loaded from:',
+            '',
+            ...coreInstances.map((f) => `    ${f}`),
+            '',
+            '  Sibling checkouts normally share this checkout\'s copy through test-harnesses/one-mj-core.mjs.',
+            '  If sharing is not "installed" above, run on a Node that has module.registerHooks.',
+            '',
+        ].join(String.fromCharCode(10)),
+    );
+    process.exit(2);
+}
 
 /**
  * ── AN UNRESOLVABLE *DECLARED* PACKAGE IS A FAILURE, NOT A LOG LINE ────────────────────
