@@ -172,6 +172,16 @@ export class MJSSalesSectionComponent implements OnInit {
      * the dashboard keeps its tiles unavailable for as long as this is set (see `TileSummary`).
      */
     public RosterError: string | null = null;
+    /**
+     * Why the last `Refresh()` could not finish, or null. While set, every page shows this with a
+     * Retry button in place of its content (bizapps-sales#195).
+     *
+     * Separate from `RosterError`, which the dashboard survives with its tiles marked unavailable: this
+     * one means the load as a whole stopped, so nothing below it is known to be current.
+     */
+    public LoadError: string | null = null;
+    /** Identifies the newest `Refresh()`, so a slower superseded one cannot clear its spinner or error. */
+    private refreshToken = 0;
     /** Which slice the inspect grid is showing. Default is closing-soonest (the DB-oracle spec). */
     public InspectFilter: InspectKey = 'closing';
     /**
@@ -273,10 +283,40 @@ export class MJSSalesSectionComponent implements OnInit {
 
     // ── Data ───────────────────────────────────────────────────────────────────
 
+    /**
+     * Loads everything the section shows. Never rejects.
+     *
+     * ── WHY THE SPINNER IS CLEARED IN `finally` (bizapps-sales#195) ──────────────────────────────
+     *
+     * The data provider THROWS on a transport failure — a gateway 504, a timeout, a dropped
+     * connection — rather than returning `Success: false`. Any one of the reads below can therefore
+     * reject, and `Loading = false` used to sit after all of them: one failed request left the page on
+     * its spinner for good, with the rejection unhandled because `ngOnInit` awaits this uncaught.
+     * Clearing it in `finally` covers every exit, including ones added later; the failure is shown as
+     * `LoadError` with a Retry instead.
+     */
     public async Refresh(): Promise<void> {
+        const token = ++this.refreshToken;
         this.Loading = true;
+        this.LoadError = null;
         this.cdr.detectChanges();
+        try {
+            await this.load();
+        } catch (e) {
+            if (token === this.refreshToken) {
+                this.LoadError = e instanceof Error ? e.message : String(e);
+                LogError(`Sales: the section failed to load - ${this.LoadError}`);
+            }
+        } finally {
+            if (token === this.refreshToken) {
+                this.Loading = false;
+                this.cdr.detectChanges();
+            }
+        }
+    }
 
+    /** The reads behind `Refresh()`. Throws on any failure the reads themselves do not absorb. */
+    private async load(): Promise<void> {
         /**
          * THE BUSINESS ZONE IS LOADED BEFORE ANYTHING ASKS WHAT DAY IT IS (bc-aidp-next-golive#168).
          *
@@ -321,12 +361,10 @@ export class MJSSalesSectionComponent implements OnInit {
         this.DealEntityInfo = new Metadata().Entities.find((e) => e.Name === E_DEAL) ?? null;
         await this.refreshInspectView();
         await this.refreshAllDealsView();
-        this.Loading = false;
         if (roster && !roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
             this.Message = '';
         }
-        this.cdr.detectChanges();
     }
 
     /**
