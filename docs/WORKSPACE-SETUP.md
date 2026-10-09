@@ -483,29 +483,29 @@ sqlcmd -S localhost,1433 -U sa -P "$PW" -C -Q "CREATE DATABASE MJ_QA;"
 Give **every** repo a `.env` pointing at it (`DB_DATABASE=MJ_QA`, plus host/port/credentials). Then migrate
 in this order — it is the dependency order, and it is not negotiable:
 
-| # | Repo | Command | Expect |
+| # | Repo | Command | Expect (measured 2026-10-08) |
 |---|---|---|---|
-| 1 | MJ | `node packages/MJCLI/bin/run.js migrate` | ~52 applied |
-| 2 | common | `… migrate --schema __mj_BizAppsCommon --dir ./migrations` | 11 |
-| 3 | tasks | `… migrate --schema __mj_BizAppsTasks --dir ./migrations` | 4 |
-| 4 | accounting | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 2 |
-| 5 | orders | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 9 |
-| 6 | **contracts** | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 1 — **see the warning below** |
-| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | **4** — see below |
+| 1 | MJ v6.1.5 | `node packages/MJCLI/bin/run.js migrate` | 89 applied |
+| 2 | common 5.50.1 | `… migrate --schema __mj_BizAppsCommon --dir ./migrations` | 37 |
+| 3 | tasks 1.4.1 | `… migrate --schema __mj_BizAppsTasks --dir ./migrations` | 7 |
+| 4 | accounting 0.20.0 | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 22 |
+| 5 | orders 5.26.0 | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 66 |
+| 6 | **contracts** 0.7.2 | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 9 |
+| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 15 |
 
-> ⚠️ **Contracts migrates LAST, and does not currently install on a fresh database.** It FKs into
-> common, tasks, orders AND accounting — the full stack — so nothing else may follow it. More
-> importantly its baseline hardcodes other apps' entity UUIDs and fails on any machine but the one its
-> CodeGen ran on. Read `docs/KNOWN-ISSUES.md` **KI-13** before attempting it: the first error names the
-> wrong table, and three of the six broken references fail *silently* as a column-count mismatch that
-> breaks every insert. Always column-diff contracts' ten entities after installing.
+The counts are for the versions named: the ones this repo's lockfile resolves, and contracts' latest
+release (sales does not declare contracts). Another version of a sibling applies a different number;
+what matters is that each step reports no failure.
 
-> ⚠️ **Sales applies FOUR migrations, not two.** The baseline pair (`B…Schema`, `V…Tables_and_Objects`)
-> was joined on 2026-08-21 by `V202608211200__…DealStageEvent_Amount_Provenance` and
-> `V202608211201__…Refresh_DealStageEvent_View`. This table said 2 until it was measured against a
-> genuinely empty database.
+> ⚠️ **Contracts migrates after the apps it references.** It FKs into common, tasks, orders AND
+> accounting, so it follows all four. Contracts 0.7.x installs on a fresh database in this order
+> (measured 2026-10-06 and 2026-10-08). **KI-13** records the earlier baseline that hardcoded other apps'
+> entity UUIDs and did not install; read it if you are installing a contracts release older than 0.7.
+
+> ⚠️ **Re-measure these counts against an empty database when you change them.** This table once
+> said sales applies 2 while it applied 4, and it now applies 15.
 >
-> That staleness has the same cause as a known issue worth reading: **an applied migration in this repo
+> Stale counts here have the same cause as a known issue worth reading: **an applied migration in this repo
 > can be silently rewritten.** `V202608042101` has been edited four times since it applied on 2026-08-13
 > at checksum 666373835, and those two Aug 21 migrations went on applying cleanly without Flyway ever
 > objecting to the changed checksum. So the file on disk and the file that built a long-lived database
@@ -646,24 +646,15 @@ is wrong.
 # steps and their order are right; treat the SEQUENCE as reasoned until someone rebuilds from empty
 # and confirms it, then delete this paragraph.
 # Three things changed from the version this file used to carry, and each was a hard failure:
-#   1. CodeGen now runs FIRST. Without it the orders push in (b) fails outright -- see KI-28.
+#   1. The EntityField drift check now runs FIRST, and CodeGen only if it finds rows. Drift made
+#      the orders push in (b) fail outright -- see KI-28.
 #   2. bizapps-common is pushed. It was missing entirely, costing the six ActivityType codes.
 #   3. The catalogue is seeded BEFORE the demo data, not after. Reversed, every deal is
 #      provisioned with no product to embed and comes up with no order.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 
-# a. CODEGEN, for orders and common. Migrate, then generate.
+# a. CHECK FOR ENTITYFIELD DRIFT. CodeGen only if this returns rows.
 #
-#    Several orders migrations add a column and leave its EntityField row to CodeGen; common's
-#    activity tables are not registered as entities at all. Skip this and step (b) dies with
-#    "Column name or number of supplied values does not match table definition" -- several hundred
-#    lines of generated SQL naming neither EntityField nor the column. KI-28 has the full detail.
-#
-#    Each app's mj.config.cjs excludes every schema but its own, so these are scoped, not global.
-cd C:\ws\bizapps-orders && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/run.js codegen
-cd C:\ws\bizapps-common && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/run.js codegen
-
-#    Verify before continuing -- this must return NOTHING:
 #      SELECT e.Name, c.name FROM __mj.Entity e
 #        JOIN sys.views v ON v.name = e.BaseView
 #        JOIN sys.schemas s ON s.schema_id = v.schema_id AND s.name = e.SchemaName
@@ -671,6 +662,18 @@ cd C:\ws\bizapps-common && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/r
 #       WHERE NOT EXISTS (SELECT 1 FROM __mj.EntityField ef
 #                          WHERE ef.EntityID = e.ID AND ef.Name = c.name);
 #
+#    On hosts migrated with the sibling versions in §4 it returns NOTHING (measured 2026-10-06 and
+#    2026-10-08): those migrations now ship the EntityField rows they used to leave to CodeGen. Older
+#    orders migrations added a column and left its EntityField row to CodeGen, and common's activity
+#    tables were not registered as entities at all. On such a host step (b) dies with
+#    "Column name or number of supplied values does not match table definition" -- several hundred
+#    lines of generated SQL naming neither EntityField nor the column. KI-28 has the full detail.
+#
+#    If it returns rows, run CodeGen for the app that owns them, then re-run the query. Each app's
+#    mj.config.cjs excludes every schema but its own, so these are scoped, not global.
+cd C:\ws\bizapps-orders && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/run.js codegen
+cd C:\ws\bizapps-common && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/run.js codegen
+
 #    ⚠ CodeGen also REWRITES that repo's generated TypeScript, against the database you point it at.
 #    Point it at an under-provisioned one and it will happily replace good generated code with worse
 #    (it dropped OrderHeader.Lines here and broke the workspace build). Discard those file changes
@@ -697,9 +700,11 @@ cd C:\ws\bizapps-common     && node ../MJ/packages/MJCLI/bin/run.js sync push --
 # c. sales dev data — companies, pipelines, accounts, contacts
 cd C:\ws\bizapps-sales && bash scripts/seed-dev-data.sh
 
-# d. orders catalogue, then the six accounting/pricing layers. BEFORE the demo data.
-sqlcmd … -i scripts/dev/seed-orders-catalog.sql
-sqlcmd … -i scripts/dev/seed-revenue-stack.sql
+# d. orders catalogue and the six accounting/pricing layers: NOTHING TO RUN BY HAND.
+#    seed-demo-data.sh in (e) runs seed-orders-catalog.sql, seed-revenue-stack.sql and
+#    seed-contract-template.sql itself, after it has moved the pipelines onto their final companies.
+#    Run by hand before that, the catalogue lands on a company that is about to stop owning any
+#    pipeline (the script's own comment explains it).
 ```
 
 > ### e. THEN the demo data — last, because it embeds what the catalogue provides

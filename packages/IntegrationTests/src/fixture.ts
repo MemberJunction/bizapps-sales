@@ -33,10 +33,22 @@
  * @module @mj-biz-apps/sales-integration-tests
  */
 import { DatabaseProviderBase, RunView, type IMetadataProvider } from '@memberjunction/core';
-import { Assert, type IntegrationCheckContext } from '@memberjunction/testing-integration';
+import { Assert, type IntegrationCheckContext, type NamedCheck } from '@memberjunction/testing-integration';
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 
 export const SALES_SCHEMA = '__mj_BizAppsSales';
+
+/** A sibling app named in `scripts/expected-check-counts.json` (`probes` and `schemas`). */
+export type SiblingApp = 'orders' | 'contracts' | 'tasks' | 'common';
+
+/**
+ * A check that may need an app its bundle does not require.
+ *
+ * `RequiresApp` is read by `test-harnesses/integration.mjs`: when that app is not present (linked AND its
+ * entities registered), the check is left out and listed with the reason instead of failing as if the
+ * product were broken. The registry stores the object as given, so the field survives registration.
+ */
+export type SalesCheck = NamedCheck & { RequiresApp?: SiblingApp };
 
 export const E_DEAL = 'MJ_BizApps_Sales: Deals';
 export const E_SCHEDULE = 'MJ_BizApps_Sales: Deal Payment Schedules';

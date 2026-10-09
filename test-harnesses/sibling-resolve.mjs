@@ -21,16 +21,36 @@
  * FOLDER NAMES ARE NEVER ASSUMED (`EngineBase` vs `engine-base` vs `Entities`) — the `name` in
  * package.json is the only thing matched, so this keeps working when a sibling reorganises.
  */
-import { readdirSync, existsSync, readFileSync } from 'node:fs';
+import { readdirSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+
+/**
+ * Entries of `dir` that are directories, FOLLOWING SYMLINKS.
+ *
+ * `Dirent.isDirectory()` is false for a symlink, so a sibling linked into the parent (one real checkout
+ * shared by several worktrees, or a per-ref sibling set swapped in by link) was skipped as if absent.
+ */
+export function listDirs(dir) {
+    return readdirSync(dir, { withFileTypes: true })
+        .filter((d) => {
+            if (d.isDirectory()) return true;
+            if (!d.isSymbolicLink()) return false;
+            try {
+                return statSync(join(dir, d.name)).isDirectory();
+            } catch {
+                return false; // a dangling link is not a sibling
+            }
+        })
+        .map((d) => d.name);
+}
 
 /** The built entry point of a sibling package, or null when it is absent or unbuilt. */
 export function resolveSiblingPackage(name, from = process.cwd()) {
     const parent = join(from, '..');
     let repos = [];
     try {
-        repos = readdirSync(parent, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+        repos = listDirs(parent);
     } catch {
         return null;
     }
@@ -39,7 +59,7 @@ export function resolveSiblingPackage(name, from = process.cwd()) {
         if (!existsSync(pkgDir)) continue;
         let subs = [];
         try {
-            subs = readdirSync(pkgDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+            subs = listDirs(pkgDir);
         } catch {
             continue;
         }
