@@ -561,7 +561,7 @@ export class CloseWonTaskService {
          * for whoever owns the queue, and it needs a flag on the task type before it can be written
          * honestly.
          */
-        const found = await this.existingTaskID(task.TypeID, primary, provider, contextUser);
+        const found = await this.existingTaskID(task.TypeID, unique, provider, contextUser);
         if (found) {
             return {
                 Kind: kind,
@@ -656,19 +656,35 @@ export class CloseWonTaskService {
      */
     private async existingTaskID(
         typeID: string,
-        target: CloseWonTaskTarget,
+        targets: readonly CloseWonTaskTarget[],
         provider: IMetadataProvider,
         contextUser: UserInfo,
     ): Promise<string | null> {
-        const entity = provider.Entities.find((e) => e.Name === target.EntityName);
-        if (!entity) {
+        /**
+         * EVERY target, not just the primary one — because the primary MOVES between closes.
+         *
+         * The contract task points at the contract when there is one and falls back to the deal when
+         * there is not. A first close that ran before the contract existed links the deal; the
+         * re-close, now holding a `ContractID`, would ask about the contract, find nothing, and raise
+         * the duplicate this guard exists to prevent. A task is linked to ALL of its targets, so
+         * asking about all of them finds it whichever way round the primary landed.
+         *
+         * Still one read: the pairs are OR-ed into a single filter rather than queried in a loop.
+         */
+        const pairs = targets
+            .map((t) => ({ id: provider.Entities.find((e) => e.Name === t.EntityName)?.ID, record: t.RecordID }))
+            .filter((p): p is { id: string; record: string } => !!p.id);
+        if (pairs.length === 0) {
             return null;
         }
 
+        const where = pairs
+            .map((p) => `(EntityID = '${SafeText(p.id)}' AND RecordID = '${SafeText(p.record)}')`)
+            .join(' OR ');
         const links = await new RunView().RunView<{ TaskID: string }>(
             {
                 EntityName: E_TASK_LINK,
-                ExtraFilter: `EntityID = '${SafeText(entity.ID)}' AND RecordID = '${SafeText(target.RecordID)}'`,
+                ExtraFilter: where,
                 Fields: ['TaskID'],
                 ResultType: 'simple',
             },

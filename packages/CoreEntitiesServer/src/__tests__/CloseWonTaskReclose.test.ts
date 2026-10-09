@@ -67,14 +67,23 @@ const input = {
  * @param links what `Task Links` returns for the order.
  * @param tasks what `Tasks` returns for those link ids, already filtered by type.
  */
-function withReads(links: { TaskID: string }[], tasks: { ID: string }[], fail?: 'links' | 'tasks') {
-    runView.mockImplementation(async ({ EntityName }: { EntityName: string }) => {
+function withReads(
+    links: { TaskID: string }[],
+    tasks: { ID: string }[],
+    fail?: 'links' | 'tasks',
+    onlyEntity?: string,
+) {
+    runView.mockImplementation(async ({ EntityName, ExtraFilter }: { EntityName: string; ExtraFilter?: string }) => {
         if (EntityName === E_TASK_TYPE) return { Success: true, Results: [{ ID: TYPE_ORDER_REVIEW }] };
         if (EntityName === E_PIPELINE) return { Success: true, Results: [{ CloseWonPolicy: null }] };
         if (EntityName === E_TASK_LINK) {
-            return fail === 'links'
-                ? { Success: false, ErrorMessage: 'links down', Results: [] }
-                : { Success: true, Results: links };
+            if (fail === 'links') return { Success: false, ErrorMessage: 'links down', Results: [] };
+            // The filter ORs one clause per target; `onlyEntity` pins which of them actually carries
+            // the link, so a test can put it on the deal and ask with the order as primary.
+            if (onlyEntity && !String(ExtraFilter ?? '').includes(onlyEntity)) {
+                return { Success: true, Results: [] };
+            }
+            return { Success: true, Results: links };
         }
         if (EntityName === E_TASK) {
             return fail === 'tasks'
@@ -113,6 +122,31 @@ describe('a re-close where the order-review task already exists', () => {
         const out = await run();
         expect(out.Issues).toEqual([]);
         expect(out.Success).toBe(true);
+    });
+});
+
+/**
+ * THE PRIMARY TARGET MOVES BETWEEN CLOSES, so the lookup asks about all of them.
+ *
+ * The contract task points at the contract when there is one and falls back to the deal when there
+ * is not, so a first close that ran before the contract existed links the DEAL. Asking only about
+ * the primary would miss that task on the re-close and raise the duplicate anyway.
+ */
+describe('a task linked to a secondary target', () => {
+    it('is still found when the primary is something else', async () => {
+        // The link exists only on the DEAL entity; the order-review primary is the ORDER.
+        withReads([{ TaskID: EXISTING_TASK }], [{ ID: EXISTING_TASK }], undefined, 'e-deal');
+        const out = await run();
+        expect(createTask).not.toHaveBeenCalled();
+        expect(out.Tasks.find((t) => t.Kind === 'OrderReview')?.AlreadyExisted).toBe(true);
+    });
+
+    it('asks about every target in one read, not one per target', async () => {
+        withReads([{ TaskID: EXISTING_TASK }], [{ ID: EXISTING_TASK }]);
+        await run();
+        const linkReads = runView.mock.calls.filter((c) => c[0]?.EntityName === E_TASK_LINK);
+        expect(linkReads.length, 'two targets must still cost one link read').toBe(1);
+        expect(linkReads[0][0].ExtraFilter, 'both targets in the filter').toContain(' OR ');
     });
 });
 
