@@ -1,5 +1,20 @@
 # @mj-biz-apps/sales-actions
 
+## 6.12.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.12.3
+
+## 6.12.2
+
+### Patch Changes
+
+- 01fa1e0: Requires MemberJunction 6.1.5, the 6.1 LTS release AIDP Next runs. Every `@memberjunction/*` range is `^6.1.5` and `mj-app.json` declares `>=6.1.5 <7.0.0`. 6.1.5 carries the CodeGen fix for MemberJunction/MJ#4603. Generated code regenerated on 6.1.5 from a database built from migrations is unchanged.
+- Updated dependencies [01fa1e0]
+- Updated dependencies [a316f32]
+  - @mj-biz-apps/sales-core-entities-server@6.12.2
+
 ## 6.12.1
 
 ### Patch Changes

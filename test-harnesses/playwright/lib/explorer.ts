@@ -18,6 +18,7 @@ import { expect, type Page, type Locator } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { ARTIFACTS_DIR, EXPLORER_BASE_URL } from './env';
+import { RevealInForm } from './deal-form';
 
 /**
  * Benign console.error substrings — known framework noise, not app bugs. KEEP THIS TIGHT: the value
@@ -194,12 +195,31 @@ export async function waitForAuthenticatedShell(page: Page, timeoutMs: number): 
   );
 }
 
-/** Save a named screenshot into artifacts/ and return its path. */
+/**
+ * Save a named screenshot into artifacts/ and return its path.
+ *
+ * NEVER FAILS THE RUN. A screenshot here is a diagnostic aid, not a precondition for anything, and
+ * Chrome genuinely refuses one sometimes -- `Protocol error (Page.captureScreenshot): Unable to
+ * capture screenshot` while a page is mid-redirect, which is exactly when auth.setup wants its
+ * `00-login-screen` shot during the MSAL hop.
+ *
+ * Measured cost of the old behaviour: one failed screenshot in auth-setup aborted the setup project,
+ * and because every spec depends on it, `31 did not run`. A whole suite lost to a picture. The
+ * authenticated shell was reachable the entire time.
+ *
+ * So the failure is reported and swallowed, and the empty string says no file was written.
+ */
 export async function shot(page: Page, name: string): Promise<string> {
   mkdirSync(ARTIFACTS_DIR, { recursive: true });
   const file = path.join(ARTIFACTS_DIR, `${name}.png`);
-  await page.screenshot({ path: file, fullPage: false });
-  return file;
+  try {
+    await page.screenshot({ path: file, fullPage: false });
+    return file;
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.log(`  (screenshot "${name}" failed, continuing: ${error instanceof Error ? error.message.slice(0, 120) : String(error)})`);
+    return '';
+  }
 }
 
 /**
@@ -572,14 +592,37 @@ export function formField(page: Page, label: string): Locator {
     .first();
 }
 
-/** True when the form marks this field required-and-empty. */
+/**
+ * True when the form marks this field required-and-empty.
+ *
+ * READ WHEREVER THE FIELD LIVES, not only on the panel currently showing. MJ's chrome rail renders
+ * one section at a time, and a new deal leads on Pipeline -- so Company is present and correctly
+ * marked while `formField`'s `visible=true` filter matches nothing, the getAttribute throws, and the
+ * catch returns '' . That reads as "not marked required", which is a different claim entirely.
+ *
+ * The dangerous direction is the negative one: a caller asserting `.toBe(false)` after a save was
+ * satisfied by a field being on another panel rather than by it having a value.
+ *
+ * What these assertions are about is the MARKUP a NOT NULL column produces, not which section the
+ * rail is showing, so panel state is not part of the question. Revealing the section instead would
+ * leave the rail parked there, and the next line usually types into a field on a different one.
+ */
 export async function isRequiredEmpty(page: Page, label: string): Promise<boolean> {
-  const cls = (await formField(page, label).getAttribute('class').catch(() => '')) ?? '';
+  const anywhere = page
+    .locator(`.mj-forms-field:has(> label.mj-forms-field-label:text-is("${label}"))`)
+    .first();
+  if ((await anywhere.count()) === 0) {
+    return false; // genuinely absent, which is not the same as present-and-unmarked
+  }
+  const cls = (await anywhere.getAttribute('class').catch(() => '')) ?? '';
   return /mj-forms-field--required-empty/.test(cls);
 }
 
 /** Type into a plain text / number / date input. */
 export async function setField(page: Page, label: string, value: string): Promise<void> {
+  // MJ's chrome rail shows one section at a time; a field on another one is present and NOT
+  // visible, and formField filters on visible. No-op when it is already on screen.
+  await RevealInForm(page, formField(page, label));
   const input = formField(page, label).locator('input.mj-forms-field-input, textarea.mj-forms-field-input').first();
   await expect(input, `field "${label}" must be editable`).toBeVisible({ timeout: 15_000 });
   await input.click();
@@ -591,7 +634,37 @@ export async function setField(page: Page, label: string, value: string): Promis
 
 /** Read a field's current value. */
 export async function readField(page: Page, label: string): Promise<string> {
-  const input = formField(page, label).locator('input, textarea').first();
+  /**
+   * READING DOES NOT NEED THE FIELD ON SCREEN, and insisting on it loses answers that are plainly
+   * there. A saved deal's Name lives in the generic field dump, on the `details` panel, which the
+   * Overview panel replaces via replacesSectionKey -- so NO rail item shows it. Measured: exactly
+   * one field labelled Name, inside the deal form, carrying "Beacon Charter Schools — Campus
+   * Seats", with visible:false. The old version revealed what it could, matched nothing through
+   * formField's visible filter, and returned '' -- which reads as "the value did not persist".
+   *
+   * Setting still requires visibility, because typing into a hidden control is not a thing a user
+   * can do. Reading is not an interaction, so it asks the DOM directly.
+   */
+  await RevealInForm(page, formField(page, label)).catch(() => undefined);
+  /**
+   * SCOPED TO THE RECORD ON SCREEN FIRST, then anywhere.
+   *
+   * Dropping formField's visible filter is what lets an off-section value be read at all, but
+   * page-wide `.first()` is the trap this file documents twice: MJ keeps every open tab's form in
+   * the DOM and hides the inactive ones, so an unscoped first match is "a lottery weighted towards
+   * the oldest tab" -- and a value from the WRONG record is worse than an empty string, because it
+   * can make an assertion pass.
+   *
+   * Measured with a Pipeline and a Deal open together: two record containers, but only one field
+   * labelled Name, belonging to the visible Deal. So the single caller is safe today by
+   * circumstance. Two forms of the SAME entity would give two matches and a coin flip, which is
+   * what this prefers away from.
+   */
+  const selector = `.mj-forms-field:has(> label.mj-forms-field-label:text-is("${label}"))`;
+  const inVisibleForm = page.locator('mj-record-form-container:visible').last().locator(selector).first();
+  const anywhere = (await inVisibleForm.count()) > 0 ? inVisibleForm : page.locator(selector).first();
+  if ((await anywhere.count()) === 0) return '';
+  const input = anywhere.locator('input, textarea').first();
   if (await input.count()) return (await input.inputValue().catch(() => '')) || '';
   return (await formField(page, label).locator('.mj-forms-field-control').first().innerText().catch(() => '')).trim();
 }
@@ -605,6 +678,9 @@ export async function readField(page: Page, label: string): Promise<string> {
  * untrustworthy rather than merely failing loudly.
  */
 export async function setLookup(page: Page, label: string, searchText: string): Promise<void> {
+  // MJ's chrome rail shows one section at a time; a field on another one is present and NOT
+  // visible, and formField filters on visible. No-op when it is already on screen.
+  await RevealInForm(page, formField(page, label));
   const input = formField(page, label).locator('.mj-fk-search input, input.mj-forms-field-input').first();
   await expect(input, `lookup "${label}" must be present`).toBeVisible({ timeout: 15_000 });
   await input.click();
@@ -761,12 +837,34 @@ export async function deleteRecordViaRecordView(page: Page, recordName: string):
   }
   await page.waitForTimeout(5500);
 
-  // The explicit record-level delete control, on the VISIBLE form — see the block above.
+  /**
+   * DELETE LIVES BEHIND "More actions" NOW, UNLESS THE USER PINNED IT.
+   *
+   * MJ's form toolbar renders Edit inline plus the user's PINNED actions, and sends everything else
+   * to an overflow menu. Delete declares `Placement: 'actions'` like Edit, but is not pinned by
+   * default, so it is not in the DOM at all until that menu opens.
+   *
+   * Measured on a saved deal: `button[title="Delete this Record"]` count 0 before opening the menu
+   * and 1 visible at 250x28 after. The gates were both open the whole time -- the toolbar component
+   * reported `UserCanDelete: true` and `ShowDeleteButton: true` -- so the old failure, "the record
+   * view must expose Delete this Record", was about a control the view exposes one click away.
+   *
+   * Opened only when Delete is not already on screen, so a pinned Delete still works and no menu is
+   * left hanging open for the next step.
+   */
   const del = page.locator('button[title="Delete this Record"]:visible').first();
+  if ((await del.count()) === 0) {
+    const more = page.locator('button[title="More actions"]:visible').first();
+    if ((await more.count()) > 0) {
+      await more.click({ timeout: 15_000 }).catch(() => undefined);
+      await page.waitForTimeout(800);
+    }
+  }
   await expect(
     del,
-    'the record view must expose "Delete this Record" — if this is not found, check the run screenshot '
-    + 'for a slide-in Details panel, which means the full record never opened',
+    'the record view must expose "Delete this Record", inline or under "More actions" — if this is '
+    + 'not found, check the run screenshot for a slide-in Details panel, which means the full record '
+    + 'never opened',
   ).toBeVisible({ timeout: 20_000 });
   await del.click({ timeout: 15_000 });
   await page.waitForTimeout(2000);

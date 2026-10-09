@@ -14,7 +14,7 @@
  *   - the entity grid is real and complete: (Default) view selector, filter box, and a toolbar with
  *     + New · Refresh · Export · Add to List · ⋮
  */
-import { test, expect } from '@playwright/test';
+import { expect, test } from '../lib/test';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { AUTH_DIR, ENTITY, EXPLORER_BASE_URL } from '../lib/env';
