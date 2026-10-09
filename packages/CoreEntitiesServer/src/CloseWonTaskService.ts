@@ -44,6 +44,7 @@ import type { mjBizAppsTasksTaskLinkEntity } from '@mj-biz-apps/tasks-entities';
 
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_TASK_LINK = 'MJ_BizApps_Tasks: Task Links';
+const E_TASK = 'MJ_BizApps_Tasks: Tasks';
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_TASK_TYPE = 'MJ_BizApps_Tasks: Task Types';
@@ -163,6 +164,14 @@ export interface CloseWonTaskCreated {
     LinkedEntityName: string;
     LinkedRecordID: string;
     AssignmentID: string | null;
+    /**
+     * True when the close FOUND this task rather than creating it.
+     *
+     * A reopened deal closed Won again runs this service a second time, and the task its first close
+     * raised is still sitting in finance's queue. Reporting the task either way keeps the result a
+     * description of what exists; the flag is how a reader tells "raised now" from "already there".
+     */
+    AlreadyExisted: boolean;
 }
 
 export interface CloseWonTaskResult {
@@ -276,6 +285,18 @@ export function ReadCloseWonTaskConfig(policy: unknown): CloseWonTasksPolicyConf
 
 interface PolicyCreateContract {
     CreateContract?: boolean;
+}
+
+/**
+ * Single-quote escaping for a value interpolated into an `ExtraFilter`.
+ *
+ * The same shape `DealLockOrderLineVeto` and `DealNotWonConfirmVeto` keep locally. Named once here
+ * rather than inlined at each call site: this file had one such regex already and this change would
+ * have added three more. (Orders solved this properly with a shared `sql-guards.ts`; sales has no
+ * equivalent yet, and giving it one is a bigger change than this fix should carry.)
+ */
+function SafeText(value: string): string {
+    return String(value).replace(/'/g, "''");
 }
 
 export class CloseWonTaskService {
@@ -458,7 +479,7 @@ export class CloseWonTaskService {
         const r = await new RunView().RunView<{ ID: string }>(
             {
                 EntityName: E_TASK_TYPE,
-                ExtraFilter: `${column} = '${String(value).replace(/'/g, "''")}'`,
+                ExtraFilter: `${column} = '${SafeText(String(value))}'`,
                 ResultType: 'simple',
                 Fields: ['ID'],
             },
@@ -506,6 +527,52 @@ export class CloseWonTaskService {
         contextUser: UserInfo,
         result: CloseWonTaskResult,
     ): Promise<CloseWonTaskCreated | null> {
+        /**
+         * DE-DUPLICATED, because the contract task's own fallback already targets the deal when there is no
+         * contract to point at. Linking the same record twice would put two identical rows in front of
+         * finance and make the task look like two pieces of work.
+         */
+        const unique = targets.filter(
+            (t, i) => targets.findIndex(
+                (o) => o.EntityName === t.EntityName
+                    && o.RecordID.toLowerCase() === t.RecordID.toLowerCase(),
+            ) === i,
+        );
+        const primary = unique[0];
+
+        /**
+         * ── A RE-CLOSE DOES NOT RAISE THE TASK TWICE (bc-aidp-next-golive#324) ──────────────────────
+         *
+         * Reopening a Won deal and closing it Won again runs this service a second time. The task the
+         * first close raised is still in finance's queue, so a second one is duplicate work — and on QA
+         * the attempt did not even fail quietly: tasks' `CreateTask` builds its own `Metadata`, so the
+         * insert went to a different connection from the close's open transaction and came back as a
+         * raw mssql error, which `raise` then printed onto the close panel, SQL and all.
+         *
+         * Finding the task first fixes both halves: no duplicate, and on the path that was erroring,
+         * nothing to error. The task is still REPORTED, flagged as pre-existing, because it does exist
+         * and a caller asking what tasks this close left behind should be told about it.
+         *
+         * ANY task of this type on this record counts, whatever its status. Suppressing only a LIVE one
+         * would mean reading `Task.Status` against a literal, which this app forbids — behaviour comes
+         * from a type-table flag, never a name — and tasks publishes no such flag to read instead
+         * (`TaskStatus` is a union in its source, not a row). So the narrower rule is deliberately not
+         * invented here: a completed review that should be redone after a re-close is a policy question
+         * for whoever owns the queue, and it needs a flag on the task type before it can be written
+         * honestly.
+         */
+        const found = await this.existingTaskID(task.TypeID, unique, provider, contextUser);
+        if (found) {
+            return {
+                Kind: kind,
+                TaskID: found,
+                LinkedEntityName: primary.EntityName,
+                LinkedRecordID: primary.RecordID,
+                AssignmentID: null,
+                AlreadyExisted: true,
+            };
+        }
+
         let taskID: string;
         try {
             // Through tasks' OWN orchestration service rather than a bare entity save: it is that app's
@@ -522,23 +589,26 @@ export class CloseWonTaskService {
             );
             taskID = created.ID;
         } catch (err) {
-            result.Issues.push(`The ${kind} task could not be created: ${String(err)}`);
+            /**
+             * THE DATABASE ERROR GOES TO THE LOG, NOT THE CLOSE PANEL (bc-aidp-next-golive#324).
+             *
+             * `result.Issues` is rendered to whoever closed the deal, and this used to interpolate the
+             * whole thrown error. Tasks' own failure text carries the entity's `CompleteMessage`, which
+             * carries the failing statement, so a rep closing a deal was shown a `DECLARE @ID_...` dump.
+             * It told them nothing they could act on and read like the close had broken.
+             *
+             * `LogError` already carries this file's diagnostics (see `link`), so the detail is kept
+             * where someone can use it and the panel gets a sentence about what to do instead.
+             */
+            LogError(`CloseWonTaskService: ${kind} task creation failed: ${err instanceof Error ? err.message : String(err)}`);
+            result.Issues.push(
+                `The ${kind} task could not be created, so it is not in the queue. The close itself is `
+                    + 'unaffected. Raise the task by hand, or close the deal again once the cause is '
+                    + 'fixed — the database error is in the server log.',
+            );
             result.Success = false;
             return null;
         }
-
-        /**
-         * DE-DUPLICATED, because the contract task's own fallback already targets the deal when there is no
-         * contract to point at. Linking the same record twice would put two identical rows in front of
-         * finance and make the task look like two pieces of work.
-         */
-        const unique = targets.filter(
-            (t, i) => targets.findIndex(
-                (o) => o.EntityName === t.EntityName
-                    && o.RecordID.toLowerCase() === t.RecordID.toLowerCase(),
-            ) === i,
-        );
-        const primary = unique[0];
 
         /**
          * The PRIMARY link decides whether the task is usable at all; a secondary that fails leaves the
@@ -567,7 +637,79 @@ export class CloseWonTaskService {
             LinkedEntityName: primary.EntityName,
             LinkedRecordID: primary.RecordID,
             AssignmentID: assignmentID,
+            AlreadyExisted: false,
         };
+    }
+
+    /**
+     * The id of a task of this type already hanging off this record, or null.
+     *
+     * TWO READS, because `TaskLink` is polymorphic and carries no task type: the links on the record
+     * come back first, then the tasks among them that are of this type. `ID IN (...)` keeps the second
+     * read to one round trip however many links the record has.
+     *
+     * A FAILED READ RETURNS NULL, which lets the close go on and create the task. That is the right way
+     * to fail here, and it is the opposite of the confirm veto's choice next door: there, not knowing
+     * meant refusing, because the cost was booking against an open deal. Here the cost of not knowing
+     * is a second row in a work queue that someone closes — far cheaper than a close that fails, or a
+     * task finance never gets because a lookup had a bad day.
+     */
+    private async existingTaskID(
+        typeID: string,
+        targets: readonly CloseWonTaskTarget[],
+        provider: IMetadataProvider,
+        contextUser: UserInfo,
+    ): Promise<string | null> {
+        /**
+         * EVERY target, not just the primary one — because the primary MOVES between closes.
+         *
+         * The contract task points at the contract when there is one and falls back to the deal when
+         * there is not. A first close that ran before the contract existed links the deal; the
+         * re-close, now holding a `ContractID`, would ask about the contract, find nothing, and raise
+         * the duplicate this guard exists to prevent. A task is linked to ALL of its targets, so
+         * asking about all of them finds it whichever way round the primary landed.
+         *
+         * Still one read: the pairs are OR-ed into a single filter rather than queried in a loop.
+         */
+        const pairs = targets
+            .map((t) => ({ id: provider.Entities.find((e) => e.Name === t.EntityName)?.ID, record: t.RecordID }))
+            .filter((p): p is { id: string; record: string } => !!p.id);
+        if (pairs.length === 0) {
+            return null;
+        }
+
+        const where = pairs
+            .map((p) => `(EntityID = '${SafeText(p.id)}' AND RecordID = '${SafeText(p.record)}')`)
+            .join(' OR ');
+        const links = await new RunView().RunView<{ TaskID: string }>(
+            {
+                EntityName: E_TASK_LINK,
+                ExtraFilter: where,
+                Fields: ['TaskID'],
+                ResultType: 'simple',
+            },
+            contextUser,
+        );
+        const taskIDs = [...new Set((links?.Results ?? []).map((r) => r.TaskID).filter(Boolean))];
+        if (!links?.Success || taskIDs.length === 0) {
+            return null;
+        }
+
+        const list = taskIDs.map((id) => `'${SafeText(id)}'`).join(', ');
+        const tasks = await new RunView().RunView<{ ID: string }>(
+            {
+                EntityName: E_TASK,
+                ExtraFilter: `ID IN (${list}) AND TypeID = '${SafeText(typeID)}'`,
+                Fields: ['ID'],
+                OrderBy: 'ID',
+                ResultType: 'simple',
+            },
+            contextUser,
+        );
+        if (!tasks?.Success) {
+            return null;
+        }
+        return (tasks.Results ?? [])[0]?.ID ?? null;
     }
 
     /**
