@@ -42,7 +42,7 @@ import type {
  *   2. **`OwnerEmployeeID` is not projected at all.** `Sales: Forecast by Category` groups by company and
  *      pipeline only. That is not a gap: null means "across all owners" on `ForecastSnapshot`, which is
  *      the honest description of a company-by-pipeline rollup. But it means THIS query cannot produce the
- *      per-owner grain, and anything expecting one needs a different query. See D-33.
+ *      per-owner grain, and anything expecting one needs a different query. See D-32.
  *
  * A list rather than a rename because both names are legitimate and a future query may use either: the
  * query's own name first, the storage column name second. Declared, never inferred from position or

@@ -602,7 +602,7 @@ export const ForecastChecks: NamedCheck[] = [
                     AssertEqual(
                         mapped.OwnerEmployeeID,
                         null,
-                        'OwnerEmployeeID is null because Forecast by Category does not group by owner — see D-33',
+                        'OwnerEmployeeID is null because Forecast by Category does not group by owner — see D-32',
                     );
                 }
             }),
