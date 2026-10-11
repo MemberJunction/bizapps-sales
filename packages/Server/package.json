@@ -18,6 +18,12 @@
   "author": "MemberJunction.com",
   "license": "BUSL-1.1",
   "devDependencies": {
+    "@memberjunction/actions": "6.1.5",
+    "@memberjunction/actions-base": "6.1.5",
+    "@memberjunction/core": "6.1.5",
+    "@memberjunction/global": "6.1.5",
+    "@memberjunction/server": "6.1.5",
+    "@memberjunction/sqlserver-dataprovider": "6.1.5",
     "@types/express": "^5.0.0",
     "@types/node": "^22.20.1",
     "typescript": "^5.9.3"

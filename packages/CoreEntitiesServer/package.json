@@ -19,23 +19,32 @@
   "author": "MemberJunction.com",
   "license": "BUSL-1.1",
   "devDependencies": {
+    "@memberjunction/core": "6.1.5",
+    "@memberjunction/core-entities": "6.1.5",
+    "@memberjunction/global": "6.1.5",
+    "@memberjunction/sqlserver-dataprovider": "6.1.5",
+    "@mj-biz-apps/common-activity-sync": "5.50.1",
+    "@mj-biz-apps/common-entities": "5.50.1",
+    "@mj-biz-apps/orders-entities": "5.26.0",
+    "@mj-biz-apps/tasks-core": "1.4.1",
+    "@mj-biz-apps/tasks-entities": "1.4.1",
     "@types/node": "^22.20.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@mj-biz-apps/common-activity-sync": "^5.44.0",
-    "@mj-biz-apps/common-entities": "^5.44.0",
-    "@mj-biz-apps/orders-entities": "^5.26.0",
-    "@mj-biz-apps/sales-entities": "6.12.3",
-    "@mj-biz-apps/tasks-core": "^1.4.1",
-    "@mj-biz-apps/tasks-entities": "^1.4.1"
+    "@mj-biz-apps/sales-entities": "6.12.3"
   },
   "peerDependencies": {
     "@memberjunction/core": "^6.1.5",
     "@memberjunction/core-entities": "^6.1.5",
     "@memberjunction/global": "^6.1.5",
-    "@memberjunction/sqlserver-dataprovider": "^6.1.5"
+    "@memberjunction/sqlserver-dataprovider": "^6.1.5",
+    "@mj-biz-apps/common-activity-sync": "^5.44.0",
+    "@mj-biz-apps/common-entities": "^5.44.0",
+    "@mj-biz-apps/orders-entities": "^5.26.0",
+    "@mj-biz-apps/tasks-core": "^1.4.1",
+    "@mj-biz-apps/tasks-entities": "^1.4.1"
   },
   "repository": {
     "type": "git",
