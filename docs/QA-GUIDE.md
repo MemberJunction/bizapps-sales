@@ -339,9 +339,9 @@ Which downstream a won deal produces is driven by the **pipeline's policy**, nev
     reserved in T-SQL and Postgres (D6).
 13. **The Playwright demo-tour specs run slowly** against a development-mode Explorer build
     (`docs/KNOWN-ISSUES.md` KI-12). Behaviour is correct; the budgets assume a production build.
-14. **An upstream risk, not a sales bug:** `AllowMultipleSubtypes` is `false` on common's `Person` and
-    `Organization`. Sales is currently the only app extending them, so it works today; a second app
-    doing so would mis-chain. The fix belongs in bizapps-common (`docs/KNOWN-ISSUES.md` KI-1).
+14. **Resolved upstream:** `AllowMultipleSubtypes` is `1` on common's `Person` and `Organization` from
+    bizapps-common 5.33, so another app can extend `Person` beside sales. The `sales-isa` bundle asserts
+    it (`docs/KNOWN-ISSUES.md` KI-1).
 
 ---
 

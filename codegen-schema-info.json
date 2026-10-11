@@ -9,7 +9,7 @@
       "SchemaName": "__mj_BizAppsSales"
     },
     {
-      "_comment": "SalesContact IS-A Person (same Table-Per-Type shape). NOTE there is deliberately no Lead entity (L-3): a lead is a common.Person sitting at a LifecycleStageType, not a second identity table for humans. ⚠️ common's Person and Organization currently carry AllowMultipleSubtypes=0. Sales is the FIRST app to extend either (accounting extends MJ: Companies; orders extends its own Product/OrderLine), so the disjoint default chains correctly TODAY. It must be flipped to 1 in bizapps-common before ATS or certification extend Person, or the second app silently mis-chains at runtime.",
+      "_comment": "SalesContact IS-A Person (same Table-Per-Type shape). NOTE there is deliberately no Lead entity (L-3): a lead is a common.Person sitting at a LifecycleStageType, not a second identity table for humans. common's Person and Organization carry AllowMultipleSubtypes=1 from bizapps-common 5.33 (V202608061617): they are OVERLAPPING parents, so a Person can hold this subtype and another app's at once. The sales-isa integration bundle asserts it (docs/KNOWN-ISSUES.md KI-1).",
       "ChildEntity": "SalesContact",
       "ParentEntity": "MJ_BizApps_Common: People",
       "SchemaName": "__mj_BizAppsSales"

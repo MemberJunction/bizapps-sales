@@ -56,7 +56,8 @@
     "close-won-tasks": { "count": 16, "requires": "tasks", "ids": "WT1-WT16" },
     "activities": { "count": 21, "requires": "common", "ids": "AC1-AC14, AC16, AC18-AC23" },
     "forecast": { "count": 14, "requires": null, "ids": "FS1-FS14" },
-    "term-start": { "count": 6, "requires": "orders", "ids": "TS1-TS6 — the term start a deal states for a subscription line (#32). TS1-TS4 are pure rule checks; TS5 reads the catalogue; TS6 round-trips OrderLine.ServicePeriodStart through a deal save." }
+    "term-start": { "count": 6, "requires": "orders", "ids": "TS1-TS6 — the term start a deal states for a subscription line (#32). TS1-TS4 are pure rule checks; TS5 reads the catalogue; TS6 round-trips OrderLine.ServicePeriodStart through a deal save." },
+    "sales-isa": { "count": 9, "requires": "common", "ids": "IS1-IS9 — MemberJunction's IS-A contract through SalesContact IsA Person and SalesAccount IsA Organization. IS7 runs outside a rolled-back transaction by design. IS9 needs a second app extending People; without one it prints a SKIPPED warning and still counts as run, so read the log, not only the tally." }
   },
   "probes": {
     "orders": "@mj-biz-apps/orders-entities",
