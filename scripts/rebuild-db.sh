@@ -2,39 +2,23 @@
 #
 # Rebuild the local development database from scratch.
 #
-# WHY THIS EXISTS: the standing pre-production practice is that schema changes EDIT THE BASELINE
-# MIGRATION IN PLACE rather than adding fix-up migrations. That is only safe if rebuilding from zero
-# is routine — otherwise the baseline drifts from what anyone actually has installed. This script is
-# that routine.
+# WHY THIS EXISTS: a local database built from migrations alone, every app in dependency order. It
+# was written for the pre-release practice of editing the baseline migration in place, which ended
+# with the first release (docs/history/migrations-baseline-in-place.md), and it still trims the
+# baseline's generated half before applying it (TRIM, below). On success the trimmed baseline is left
+# in the working tree. It is a shipped migration: never commit it trimmed or re-appended (#217).
 #
 # WHAT IT DOES
 #   1. drop + recreate the database
 #   2. MJ core schema at the pinned version
-#   3. bizapps-common   — applied with sqlcmd rather than `mj migrate`, because `mj migrate` would
-#                         rewrite common's ${flyway:defaultSchema} to THIS app's schema and put
-#                         common's tables and procedures inside __mj_BizAppsSales. The substitution
-#                         is therefore done here, pinned to common's OWN schema.
+#   3-6. bizapps-common, bizapps-tasks, bizapps-accounting and bizapps-orders, each migrated by its
+#        own CLI from its own checkout (SIBLINGS, below)
+#   7. this app's migrations, after trimming the baseline's generated half
 #
-#                         ⚠️ ${flyway:defaultSchema} MEANS __mj_BizAppsCommon, NOT __mj.
-#                         The bizapps-orders script this was derived from substitutes __mj here and
-#                         its comment asserts that common "extends core". That is wrong, and it fails
-#                         silently in a way worth knowing about: common's BASELINE hardcodes
-#                         __mj_BizAppsCommon, so the tables land correctly and the database looks
-#                         fine — but all five of common's VERSIONED migrations (the v5.28 tolerant SP
-#                         regen, the v5.29 Person.DisplayName computed column and its wireup, the
-#                         v5.29 metadata sync, the v5.30 LinkedUserID unique constraint) reference
-#                         [${flyway:defaultSchema}].[Person] / [AddressType] / [vwAddressLinks] and
-#                         die on "Invalid object name '__mj.Person'". Because the loop does not check
-#                         sqlcmd's exit status, the rebuild reports success and common is left at its
-#                         baseline with none of its patches. Verified here 2026-08-04.
-#   4. this app's migrations
-#
-# WHAT IT DELIBERATELY DOES NOT DO, unlike the bizapps-orders script it is derived from:
-#   * no bizapps-accounting step, and no accounting seed metadata. Sales books nothing and computes
-#     no money — it asks Orders.PreviewOrder. Nothing in the S1 schema references an accounting row.
-#   * no bizapps-contracts step. It does not install on a fresh database (KI-13), and sales has no
-#     FK into it -- measured 2026-08-25: sales' only cross-schema FKs are to __mj,
-#     __mj_BizAppsCommon and __mj_BizAppsOrders. If that changes, contracts goes LAST, after sales.
+# WHAT IT DELIBERATELY DOES NOT DO:
+#   * no bizapps-contracts step. Sales has no FK into it -- measured 2026-08-25: sales' only
+#     cross-schema FKs are to __mj, __mj_BizAppsCommon and __mj_BizAppsOrders. If that changes,
+#     contracts goes LAST, after sales.
 #
 #   IT USED TO SKIP ORDERS AND ACCOUNTING TOO, on the grounds that "DealLine.ProductID and
 #   Deal.ContractID are SOFT references (DG-6), so the sales baseline stands up with only common
@@ -43,9 +27,10 @@
 #   The steps the header promised would "arrive when S2 wires the pricing bridge" are now present.
 #
 # AFTER THIS, still by hand (they need judgement, not automation):
-#   npm run mj:codegen                     # regenerate entity metadata + SQL objects
-#   scripts/append-codegen.sh              # append the generated SQL below the migration's banner
-#   pnpm mj sync push --dir metadata # seed the type tables
+#   pnpm run mj:codegen                    # regenerate entity metadata + SQL objects in the database
+#   pnpm mj sync push --dir metadata       # seed the type tables
+#   git checkout -- migrations/V202608042101__v0.1.x__Tables_and_Objects.sql   # undo the trim
+# Do not run scripts/append-codegen.sh: it writes generated SQL into the baseline, a shipped migration.
 #
 # Usage: scripts/rebuild-db.sh
 set -euo pipefail
@@ -193,9 +178,9 @@ for entry in "${SIBLINGS[@]}"; do
         node node_modules/@memberjunction/cli/bin/run.js migrate --schema "$schema" --dir ./migrations )
 done
 
-# bizapps-contracts is deliberately NOT here. It does not install on a fresh database (KI-13) and
-# sales has no FK into it -- measured: sales' only cross-schema FKs are to __mj, __mj_BizAppsCommon
-# and __mj_BizAppsOrders. If that changes, contracts goes LAST, after sales.
+# bizapps-contracts is deliberately NOT here: sales has no FK into it -- measured: sales' only
+# cross-schema FKs are to __mj, __mj_BizAppsCommon and __mj_BizAppsOrders. If that changes, contracts
+# goes LAST, after sales.
 
 # TRIM THE GENERATED HALF BEFORE APPLYING. Once CodeGen output lives in the baseline, a rebuild
 # produces a database whose entity metadata is ALREADY current — so the next CodeGen run has nothing

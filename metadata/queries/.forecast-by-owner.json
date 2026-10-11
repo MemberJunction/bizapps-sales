@@ -7,7 +7,7 @@
       "and rolls the whole push back. Dropping the declarations does not fix the underlying defect --",
       "it moves the same failure from the FIRST push to the SECOND, because extraction re-inserts what",
       "it inserted last time. The real fix is upstream: parameter persistence should upsert on",
-      "(QueryID, Name). Written up in docs/upstream/MJ-metadatasync-query-parameter-push.md.",
+      "(QueryID, Name). Filed as MemberJunction/MJ#4545.",
       "",
       "The twelve older query files keep their declarations deliberately, so their hand-written",
       "parameter descriptions survive; they simply cannot be re-pushed until MJ is fixed."

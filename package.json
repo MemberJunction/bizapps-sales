@@ -22,7 +22,7 @@
     "better, making it read sources like the other four."
   ],
   "scripts": {
-    "prebuild": "node -e \"try { require.resolve('turbo') } catch (e) { console.error('\\n❌ Dependencies not installed. Run: npm install\\n'); process.exit(1); }\"",
+    "prebuild": "node -e \"try { require.resolve('turbo') } catch (e) { console.error('\\n❌ Dependencies not installed. Run: pnpm install\\n'); process.exit(1); }\"",
     "build": "npm run build:stream",
     "build:stream": "turbo --log-order=stream build",
     "build:generated": "turbo --log-order=stream build --filter=\"@mj-biz-apps/sales-entities\" --filter=\"@mj-biz-apps/sales-actions\"",
@@ -34,7 +34,7 @@
     "mj:codegen:files": "node node_modules/@memberjunction/cli/bin/run.js codegen --skipdb",
     "postinstall": "node scripts/link-local-apps.mjs",
     "link:local": "node scripts/link-local-apps.mjs",
-    "install:deps": "npm install",
+    "install:deps": "pnpm install",
     "setup": "echo 'Please run: npm run mj:migrate && npm run mj:codegen && npm run build'",
     "test:unit": "vitest run",
     "test:integration": "node test-harnesses/integration.mjs --mutations",
