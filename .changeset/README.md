@@ -32,8 +32,9 @@ Warning rather than failing is deliberate: a hard gate would put a red X on docu
 that legitimately have no version impact, and the sibling repo's experience is that such an X is
 quickly learned and then ignored. Treat the warning as a review item.
 
-The `migrations/` half of the rule is enforced at release: `publish.yml` refuses a patch release when
-anything under `migrations/` changed since the last `vX.Y.Z` tag. Nothing checks the public-API half.
+The `migrations/` half of the rule is enforced: the `migration changeset` check fails a PR into `next`
+that adds a migration with only a patch changeset, and `rr: minor bump` fails the release PR. Nothing
+checks the public-API half.
 
 `baseBranch` is **`next`**, the integration branch, not `main`. `main` is the release branch and only
 ever receives the coordinating release PR.

@@ -1,6 +1,7 @@
 {
   "name": "bizapps-sales",
   "version": "0.1.0",
+  "private": true,
   "license": "BUSL-1.1",
   "description": "BizApps Sales - deal pipeline management (accounts, contacts, pipelines, deals, deal teams, forecasting) built on MemberJunction",
   "workspaces": [
@@ -27,8 +28,10 @@
     "build:stream": "turbo --log-order=stream build",
     "build:generated": "turbo --log-order=stream build --filter=\"@mj-biz-apps/sales-entities\" --filter=\"@mj-biz-apps/sales-actions\"",
     "build:packages": "turbo --log-order=stream build --filter=\"@mj-biz-apps/sales-*\"",
+    "test": "vitest run",
     "mj": "node node_modules/@memberjunction/cli/bin/run.js",
     "version": "changeset version",
+    "version:prepare": "changeset version && node ci/sync-mj-app-version.mjs && pnpm install --lockfile-only",
     "mj:migrate": "node node_modules/@memberjunction/cli/bin/run.js migrate --schema __mj_BizAppsSales --dir ./migrations",
     "mj:codegen": "node node_modules/@memberjunction/cli/bin/run.js codegen",
     "mj:codegen:files": "node node_modules/@memberjunction/cli/bin/run.js codegen --skipdb",
@@ -51,9 +54,6 @@
     "test:selector-gate": "node scripts/assert-harness-selectors.mjs",
     "test:drift-gate": "node scripts/run-python.mjs scripts/assert-no-comment-drift.py",
     "change": "changeset",
-    "commitpush": "node ci/commit_push.mjs",
-    "mergemain": "node ci/merge_main.mjs",
-    "mergemain:update-lock": "node ci/merge_main_and_update_lock.mjs",
     "lint:distribution": "node scripts/check-distribution-seed.mjs",
     "check:release-seed": "node scripts/check-release-seed-coverage.mjs"
   },
