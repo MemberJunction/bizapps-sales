@@ -46,6 +46,7 @@ export * from './close-lock';
  * stored figures, never a computation. See the file header for why it is no longer a timestamp test.
  */
 export * from './amount-freshness';
+export * from './deal-schedule-tie';
 
 /**
  * Forces the generated entity subclasses to be loaded. Without an explicit
