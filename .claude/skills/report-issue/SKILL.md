@@ -12,8 +12,7 @@ file honestly, mark what you know.
 
 ## 0. Decide whether to file at all
 
-- A **nit** (cosmetic, no user impact, no data risk) does **not** get filed during the pilot (the
-  bug form and this skill, on trial in this repo before an intake workflow is added).
+- A **nit** (cosmetic, no user impact, no data risk) does **not** get filed during the pilot.
   Note it in the **local log** and stop. The local log is, in order: the repo's `BUGS.md` at
   its root (create it if absent: a heading and one dated bullet per entry), or an MJDev
   workspace's `MJDEV-ISSUES.md` / `MJ-UPSTREAM.md` when you are working inside one. It is a
@@ -75,12 +74,12 @@ Do NOT include the machine: no OS, no hardware, no hostname. Software versions o
 ## 4. File the issue
 
 Write the body with **exactly these headings** (the web form produces the same ones, and the
-planned intake workflow will parse them):
+intake workflow, where installed, parses them):
 
 ```md
 ### Summary
-<for a person: three sentences at most, as concise as possible while still useful to a human —
-what breaks, where in the code, what a fix would change. People read this and the title, little else.>
+<for a person: three sentences at most and under 40 words, as concise as possible while still useful
+to a human — what breaks, where in the code, what a fix would change. People read this and the title, little else.>
 
 ### What happened
 <a plain explanation: what you did, what the system did instead, expected and actual stated inside it>
@@ -116,7 +115,7 @@ Proposed: …
 Tested: no
 ```
 
-Title: the symptom, not the theory. Summary: never more than three sentences; the rest of the body may be as long as the evidence needs, but a person decides from the title and Summary alone. Severity meanings: blocker = someone cannot work; breaking =
+Title: the symptom, not the theory. Summary: never more than three sentences or 40 words; the rest of the body may be as long as the evidence needs, but a person decides from the title and Summary alone. Severity meanings: blocker = someone cannot work; breaking =
 feature does not work, no workaround; vulnerability = security; degraded = works with a
 workaround; minor = cosmetic. Target line is `next` unless a blocker/breaking/vulnerability is
 live on a release line.
@@ -124,8 +123,8 @@ live on a release line.
 Then:
 
 ```sh
-# labels: use only the ones the repo has (check first). No workflow applies sev:/target: labels
-# yet; severity and target line stay in the body for triage until the intake workflow is added.
+# labels: use only the ones the repo has (check first). Where the intake workflow is installed it
+# adds sev:/target: from the body; elsewhere severity and target stay in the body for triage.
 gh label list --repo <owner/repo> --limit 200 --json name -q '.[].name' > /tmp/labels.txt
 LABELS="bug"
 grep -qx needs-triage /tmp/labels.txt && LABELS="$LABELS,needs-triage"
