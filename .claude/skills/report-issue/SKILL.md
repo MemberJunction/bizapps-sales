@@ -17,10 +17,12 @@ file honestly, mark what you know.
   its root (create it if absent: a heading and one dated bullet per entry), or an MJDev
   workspace's `MJDEV-ISSUES.md` / `MJ-UPSTREAM.md` when you are working inside one. It is a
   scratch file, not a tracker; never file its contents in bulk.
-- If you are an agent acting without a human asking you to file: file only when you have a
-  **minimal repro**, or you have seen the **same fingerprint twice** this session. A single
-  inferred-from-code suspicion stays in the local log. At most **five** filings per session; the
-  sixth and later collapse into one digest issue titled "Digest: N further findings from <date>".
+- **There is no cap.** A UAT or long-running session that finds fifteen real problems files
+  fifteen issues; other sessions pick them up. What is limited is *unprompted* filing by an agent:
+  file on your own initiative only when you have a minimal repro or observed the failure directly.
+  An unprompted "Inferred from code, not observed" suspicion goes in the local log, not GitHub.
+  When a person asks for an audit and wants the findings collapsed, use one "Digest: N findings
+  from <date>" issue; otherwise one issue per finding.
 
 ## 1. Pick the repo where the fix lives
 
@@ -162,5 +164,5 @@ in the whole thread. Then print the URL and stop. Do not file a second issue.
 
 - Never close, relabel (beyond the creation labels), transfer, or assign.
 - Never present an untested theory as a diagnosis; say "Tested: no".
-- Never file a nit; never file more than five issues in a session without collapsing to a digest.
+- Never file a nit. Never file an unprompted inferred-from-code suspicion. Everything reproduced, observed, or asked for is filed, one issue each, no cap.
 - Report what you did and did not verify, exactly as it happened.
