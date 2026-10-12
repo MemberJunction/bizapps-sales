@@ -36,6 +36,7 @@ no mounted template declares.
 | `20-demo-tour` | The Product lines step asserts the Deal form's lines panel and the line editor's read-only price and total. |
 | `40-deal-form` (was `40-deal-workspace`) | New deal opens the Deal form with its six working panels; header fields persist (checked in the DB); two lines added through the line editor are priced by the engine; the record reopens by route with Pipeline/Account names and both lines. Payment schedule and pane-switch state removed with the workspace. |
 | `41-deal-roundtrip` | Lines (product, quantity) and header dates come back bound after reopening by route; a saved line removed through the line editor is gone from the order and stays gone. Instalment and owner round trips removed with the workspace. |
+| `42-hero-short-window` | At 1100 x 617 the Deal header card is not clipped (rendered height covers its content) after a new deal is saved and in edit mode (bc-aidp-next-golive#287). |
 | `50-sales-shell` | All deals is the entity viewer and rows open on double-click into `mjs-deal-form`; no Workspace item; New deal opens the Deal form. |
 | `60-close-deal` | Close through the Close panel; the routing summary and "Status frozen" checks are dropped (Status is the reopen route, golive#205); a lost close without a reason is a disabled confirm. |
 | `70-activity-timeline` | Timeline driven in the Deal form's Activity panel (compose-only); the new row is checked in the panel's viewer; the lock is proven by the hero's Locked chip. |

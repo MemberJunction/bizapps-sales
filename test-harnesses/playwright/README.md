@@ -115,6 +115,7 @@ below stops matching — it is the map, and it is cheaper than guessing.
 | `specs/10-deal-crud.spec.ts` | **The actual verification** — CRUD through the *generated* entity browser. |
 | `specs/40-deal-form.spec.ts` | Composes a deal across the Deal form's panels, adds priced lines, and reads it back through a **different** surface. |
 | `specs/41-deal-roundtrip.spec.ts` | **The related-record-collection round trip** — save, RE-OPEN, and prove the lines and dates came back; then remove a line and prove the removal survives another re-open. |
+| `specs/42-hero-short-window.spec.ts` | At a 1100 x 617 window (1920 x 1080 at 175%), the Deal header card shows all of its content after a save and in edit mode. |
 | `specs/50-sales-shell.spec.ts` | The section layout, the rail (no Workspace item), New deal opening the Deal form, and All-deals rows opening records. |
 | `specs/70-activity-timeline.spec.ts` | **NEVER RUN.** Logs an activity from the Deal form's Activity panel and asserts the `Activity` row, its `LoggedByUserID`, and the deal/account/contact links the `Sales.LogActivity` Action attaches. Plus: a refused log leaves no unreachable activity. |
 | `specs/80-board-drag.spec.ts` | **NEVER RUN.** Drags a card between stages and asserts the stage change, exactly one append-only event stamped with the DEPARTING probability and amount, and the order following the new stage. Plus: a drop onto a closing column is refused with a hint. |

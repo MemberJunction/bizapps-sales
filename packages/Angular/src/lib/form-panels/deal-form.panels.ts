@@ -90,12 +90,25 @@ export interface PipelineStageOption {
     PipelineID: string;
 }
 
-/** Every active pipeline, for the picker that also decides which stages are offered. */
+/**
+ * Every active pipeline, for the picker that also decides which stages are offered.
+ *
+ * ORDERED THE WAY THE WORKSPACE ORDERS THEM, which is `DisplayRank` first.
+ *
+ * This listed them alphabetically, so the same two lists could disagree on a host where rank and
+ * alphabet do not coincide — the form offering D2C above B2B while the workspace offered the reverse,
+ * for a rep who uses both. `DisplayRank` exists to let the seed say which pipeline a team reaches for
+ * first, and an alphabetical list silently discards that.
+ *
+ * Every other vocabulary list in this file and in `deal-workspace.service.ts` already reads
+ * `DisplayRank ASC, Name ASC` — loss reasons, deal types, status types, forecast categories. This was
+ * the one that did not.
+ */
 async function LoadPipelines(): Promise<PipelineOption[]> {
     const result = await new RunView().RunView<{ ID: string; Name: string }>({
         EntityName: MJS_ENTITIES.Pipeline,
         ExtraFilter: 'IsActive = 1',
-        OrderBy: 'Name ASC',
+        OrderBy: 'DisplayRank ASC, Name ASC',
         ResultType: 'simple',
         Fields: ['ID', 'Name'],
     });

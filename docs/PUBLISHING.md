@@ -103,7 +103,9 @@ It checks two things:
 3. no metadata record has been added, changed or removed since the commit that added the latest
    `*__Metadata_Sync.sql`. This is the one that covers everything else: an edited label, description
    or status, and every record keyed by `@lookup:` rather than a UUID, which checks 1 and 2 cannot
-   see. `_comments` and `sync` blocks are ignored and `@file:` values are compared by content. It
+   see. `_comments` and `sync` blocks are ignored and `@file:` values are compared by content. A
+   removed record whose UUID no migration ever carried is not reported: no installed database has
+   it, so there is nothing to seed. It
    reads git history, so it needs a full clone; a shallow one fails the check rather than passing it.
    While the newest seed is still uncommitted — you have just generated it from this tree — check 3
    is skipped and says so.

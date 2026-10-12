@@ -87,6 +87,35 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
 
     public override async ngOnInit(): Promise<void> {
         await super.ngOnInit();
+        await this.resolveDealState();
+
+        /**
+         * RE-RESOLVE AFTER EVERY SAVE AND REFRESH, not only at init.
+         *
+         * `resolveCloseLock()` used to run once, in `ngOnInit`, and it reads the PERSISTED status
+         * (`GetFieldByName('DealStatusTypeID').OldValue`). So a deal CLOSED in this form kept the
+         * `IsLocked` it had when the form opened -- false -- for the rest of the session.
+         *
+         * Measured on a deal closed through the close panel: the hero's Locked chip rendered, and
+         * `IsLocked` was still `false`. The chip reads the record; this did not.
+         *
+         * That is not cosmetic, because `IsLocked` is what the form reasons from:
+         *   - `FieldEditable()` returns `!locked || ...`, so a stale `false` makes EVERY field report
+         *     editable. The dedicated Pipeline control trusts it and renders an editable picker on a
+         *     locked deal -- the "accepts typing, refuses on save" behaviour golive#206 item 3 exists
+         *     to delete. Generic fields escaped only because base-forms re-checks the record itself.
+         *   - `EditableFieldNames()` returns null instead of the locked carve-outs.
+         *   - `ValidateAsync` reads it, and nothing else produces that signal.
+         *
+         * Subscribing to this component's OWN outputs needs no teardown: the emitters are fields of
+         * this instance, so the subscriptions cannot outlive it.
+         */
+        this.RecordSaved.subscribe(() => { void this.resolveDealState(); });
+        this.RecordRefreshed.subscribe(() => { void this.resolveDealState(); });
+    }
+
+    /** The lock and the amount warning, resolved together — they are read together. */
+    private async resolveDealState(): Promise<void> {
         await this.resolveCloseLock();
         await this.resolveAmountFreshness();
         this.cdr?.detectChanges();

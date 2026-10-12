@@ -271,7 +271,13 @@ function changedSinceSeed() {
         else if (before.value !== record.value) changes.push({ kind: 'changed', key: record.key, path: record.path });
     }
     for (const [id, record] of then) {
-        if (!now.has(id)) changes.push({ kind: 'removed', key: record.key, path: record.path });
+        if (now.has(id)) continue;
+        // A removed record that no migration ever seeded never reached an installed database, so
+        // there is nothing for the next seed to carry (records held back from every seed, then
+        // dropped from metadata/). Records keyed by `@lookup:` cannot be checked this way and stay
+        // reported.
+        if (UUID.test(record.key) && !allSqlLower.includes(record.key.toLowerCase())) continue;
+        changes.push({ kind: 'removed', key: record.key, path: record.path });
     }
     return { changes, seed, commit };
 }
