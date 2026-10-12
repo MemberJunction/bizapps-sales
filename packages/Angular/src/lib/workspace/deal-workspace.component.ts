@@ -904,8 +904,7 @@ export class DealWorkspaceComponent implements OnInit {
      *
      * The refusal below is therefore obsolete and is kept only because this component is mounted by no
      * template. See the note on `ShouldRefuseLineRemoval`; whoever settles re-mount-or-retire should
-     * delete both. (`DECISIONS-NEEDED.md` DN-6 was cited here and that file does not exist in this
-     * repo — the pointer was already dangling.)
+     * delete both. (`DECISIONS-NEEDED.md` DN-6 records the fix.)
      */
     public RemoveLine(line: OrderLineEntity): void {
         /**

@@ -6,7 +6,7 @@
       "UserQuestion": "Which deals are these — one row each, with names, amounts and provenance?",
       "Description": "One row per deal, dimensioned, as a grid source and a drill-through target for every aggregate here. Exists because the first thing anyone does with a number they distrust is ask which deals are in it, and without a roster sharing the same filters that question gets answered by ad-hoc SQL — which is how a report and its drill-through quietly stop agreeing. Names throughout, per S-US11, with IDs alongside for navigation.",
       "SQL": "@file:SQL/deal-roster.sql",
-      "TechnicalDescription": "Grain: Deal. Returns the IsOpen / IsWon / IsLost / IsClosed flags on every row so a consumer can branch on behaviour rather than on the status name it was given for display — the vocabulary rule reaching one layer past the query. Carries AmountIsComputed so a grid can mark a stated figure instead of presenting it as settled. IsPastExpectedClose is computed against SYSUTCDATETIME because everything stored is UTC. Filtered on expected close for open deals and actual close for closed, so one period filter behaves across a mixed set. Returns every deal; PipelineIncludeInForecast lets a consumer leave open deals in pipelines flagged out of the forecast out of current-book figures.",
+      "TechnicalDescription": "Grain: Deal. Returns the IsOpen / IsWon / IsLost / IsClosed flags on every row so a consumer can branch on behaviour rather than on the status name it was given for display — the vocabulary rule reaching one layer past the query. Carries AmountIsComputed so a grid can mark a stated figure instead of presenting it as settled. IsPastExpectedClose compares ExpectedCloseDate against the business day from __mj_BizAppsCommon.fnBusinessToday(), not the UTC day (bc-aidp-next-golive#168). Filtered on expected close for open deals and actual close for closed, so one period filter behaves across a mixed set. Returns every deal; PipelineIncludeInForecast lets a consumer leave open deals in pipelines flagged out of the forecast out of current-book figures.",
       "Status": "Approved",
       "QualityRank": 8,
       "ExecutionCostRank": 2,
@@ -49,8 +49,8 @@
       "    e.g. true"
     ],
     "sync": {
-      "lastModified": "2026-09-28T21:43:50.402Z",
-      "checksum": "17a398c4b36530eafec9910b7be1af67d874fc500d89a586b255a1f7ab0c7dd6"
+      "lastModified": "2026-10-11T21:19:34.269Z",
+      "checksum": "4773db574dcaec6e572f336d5c4426fafc3d79779c1fbb020234ed3de538e657"
     }
   }
 ]

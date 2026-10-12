@@ -1,42 +1,33 @@
-# `scripts/dev/` — development-only helpers
+# `scripts/dev/` — development-only seeds
 
-Not migrations, not seeds that ship. Nothing here runs automatically, and nothing here belongs in a
-production database.
+Not migrations, not seeds that ship; nothing here belongs in a production database. Each script is
+idempotent. `scripts/seed-demo-data.sh` runs all three, in the order below, once it has settled the
+pipeline companies.
 
-## `orders-product-standin.sql` + `orders-product-seed.sql`
+## `seed-orders-catalog.sql`
 
-A **stand-in** for `__mj_BizAppsOrders.Product` so the deal-line product picker can be built and
-demonstrated on a host that does not have bizapps-orders.
+Seeds orders' `Product` catalogue for the product picker and the close-won handoff. The selling
+company is the one the first active pipeline belongs to; a second company carries the products the
+cross-tenant check (PP2) must not see. **The rows make each picker filter observable**, not realistic:
+all four `Status` values, availability windows that are open-ended, already closed and not yet open,
+and one subscription product so the term start shows.
 
-**Why a stand-in rather than orders' real migrations:** orders cannot be applied to a Sales host. Its
-schema has hard foreign keys into `__mj_BizAppsAccounting`, and accounting has one into
-`__mj_BizAppsTasks` — so applying orders means applying three apps. `Product` itself is self-contained
-(its only FKs are to four lookup tables in orders' own schema, to `__mj.Company`, and to itself), which
-is what makes a faithful stand-in possible at all. See `docs/KNOWN-ISSUES.md` KI-10.
+Needs an active pipeline (`scripts/seed-dev-data.sh`), a second `Company`, and orders'
+`metadata/product-types` and `metadata/revenue-recognition-types` pushed. Without orders'
+`metadata/subscription-types` it still seeds, with no subscription product.
 
-**The DDL is transcribed verbatim** from orders'
-`migrations/V202607061432__v0.1.x__Tables_and_Objects.sql` — same columns, same CHECK constraints, same
-filtered-unique SKU index. A picker built against it is built against real shapes.
+## `seed-revenue-stack.sql`
 
-**The seed is chosen to make each filter dimension observable**, not to look realistic: two companies,
-all four `Status` values, and windows that are open-ended, already closed, and not yet open.
+Makes a host able to book a close-won order. For every company it adds an `AccountingCompanyProfile`
+(USD), journal-entry sequences for 2025–2028, nine GL accounts with a company-level link per role, and
+a price rule for each `Active` product that has none — so it runs after the catalogue.
 
-### Applying it
+Needs accounting's `metadata/gl-account-roles` and `metadata/currencies` pushed; its header lists the
+other metadata pushes it assumes.
 
-```bash
-sqlcmd -S localhost,1433 -d <host-db> -U <user> -P <pass> -C -b -i scripts/dev/orders-product-standin.sql
-sqlcmd -S localhost,1433 -d <host-db> -U <user> -P <pass> -C -b -i scripts/dev/orders-product-seed.sql
-```
+## `seed-contract-template.sql`
 
-The entity still has to be registered for `RunView` to resolve it, and **hand-inserting metadata rows is
-not enough** — see KI-10. That requires orders' own CodeGen.
-
-### Removing it
-
-```sql
-DROP VIEW __mj_BizAppsOrders.vwProducts;
--- then drop the FKs, the five tables, and the schema
-```
-
-The real swap is: drop `__mj_BizAppsOrders` entirely and let orders' migrations create it. Nothing here
-is shaped differently from what orders produces, so that is a deletion rather than a reconciliation.
+Gives contracts a Published, usable `ContractTemplate` (a demo version of the shipped Master Agreement
+type), so a close-won contract can be created on a host built from migrations. It does nothing when
+contracts is not installed or already has a Published, usable template. Needs contracts'
+`metadata/contract-template-types` pushed.

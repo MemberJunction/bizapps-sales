@@ -1,5 +1,17 @@
 # @mj-biz-apps/sales-server
 
+## 6.13.0
+
+### Patch Changes
+
+- 2e66781: MemberJunction and other BizApps packages are peer dependencies with caret ranges (nothing in `dependencies`), so a host keeps one copy of each. The common, orders and tasks packages moved from `dependencies` to `peerDependencies`; every such peer has an exact `devDependencies` anchor for local builds. Adds `check-dependency-model` to CI.
+- Updated dependencies [29675ee]
+- Updated dependencies [2e66781]
+- Updated dependencies [86030e7]
+  - @mj-biz-apps/sales-core-entities-server@6.13.0
+  - @mj-biz-apps/sales-actions@6.13.0
+  - @mj-biz-apps/sales-entities@6.13.0
+
 ## 6.12.3
 
 ### Patch Changes

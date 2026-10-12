@@ -39,13 +39,12 @@ rows, therefore run CodeGen" — and it is wrong for a reason that is not obviou
 **CodeGen is not a metadata-repair tool. It is a whole-schema regeneration tool that happens to write
 metadata as part of its output.** Pointing it at a one-column gap asks it to regenerate everything, and
 everything includes objects whose current definition it may not be able to reproduce — because the app
-capture is stale, because a sibling app's entities are not loaded, or because an IsA relationship resolves
-differently on the second pass than the first.
+capture is stale, or because a sibling app's entities are not loaded.
 
-This repository's own `CLAUDE.md` already records a measured instance of that last case: a second full
-CodeGen pass regenerated `vwDeals` with eleven virtual lookup columns where the first produced ten, without
-adding the matching `EntityField` row — leaving every Deal insert failing on a column-count mismatch. Same
-family: a tool that is correct end-to-end and destructive when interrupted or misfed.
+A run can also stop one pass short. The pass that adds a column to a view registers that column's
+`EntityField` row only on the next pass (`docs/KNOWN-ISSUES.md` KI-7), so stopping after it leaves every
+insert on the entity failing on a column-count mismatch. Same family: a tool that is correct end-to-end and
+destructive when interrupted or misfed.
 
 ---
 
@@ -66,7 +65,8 @@ theoretical:
   specifically, if anyone else is working against the host: a normal full backup resets their differential
   base.
 * Run it against a database you own, never a shared host.
-* One pass, not two. Pass 2 must be `--skipdb`.
+* Run it until it reports `success: true` and every entity's field count matches its view (KI-7). One
+  pass is not always enough, and a `success: false` pass leaves the database inconsistent.
 * Confirm every sibling app's entities are loaded before starting, since an unresolved sibling is what
   makes the capture incomplete.
 

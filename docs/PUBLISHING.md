@@ -87,7 +87,7 @@ This follows MJ (`MJ/metadata/CLAUDE.md` §1b and §10):
    small files instead of one per build, and drift from the real push output.
 
 `lint:distribution` is not a currency gate. `pnpm run check:release-seed` is, without a database.
-It checks two things:
+It checks three things:
 
 1. every `primaryKey.ID` under `metadata/` appears in some `migrations/*.sql`;
 2. for every query, the SQL the **latest** migration seeds for its ID equals its `@file:` SQL.
@@ -117,7 +117,7 @@ migration already carries.
 
 The property that still matters at install is "can a stranger install this app from migrations
 alone and get a working one?" — answered by a clean install from migrations, once per release
-(`scripts/rebuild-db.sh` / bootstrap-clean-db).
+(the migrations-only build below).
 
 The seed must be generated against a host built **from migrations only**, where `mj sync push` has
 never run. Its rows are then exactly what a fresh install at the last release has, so the generator
@@ -132,6 +132,7 @@ a fresh install does not have.
 #    docs/WORKSPACE-SETUP.md §1-4 covers standing the clones up; the migrate calls are:
 DB=MJ_Sales_Seed
 DB_DATABASE=$DB pnpm exec mj migrate --schema __mj                    --dir ../MJ/migrations
+DB_DATABASE=$DB pnpm exec mj migrate --schema __mj_BizAppsCommon      --dir ../bizapps-common/migrations
 DB_DATABASE=$DB pnpm exec mj migrate --schema __mj_BizAppsTasks       --dir ../bizapps-tasks/migrations
 DB_DATABASE=$DB pnpm exec mj migrate --schema __mj_BizAppsAccounting  --dir ../bizapps-accounting/migrations
 DB_DATABASE=$DB pnpm exec mj migrate --schema __mj_BizAppsOrders      --dir ../bizapps-orders/migrations
@@ -214,21 +215,15 @@ placeholder. `@mj-biz-apps/sales-integration-tests` is the one in this repo.
 ## Version policy
 
 `fixed` versioning moves all five packages, `mj-app.json` and the git tag together, so there is one
-number to reason about.
+number to reason about. Which bump a change needs is in [`.changeset/README.md`](../.changeset/README.md).
+One part is enforced, not conventional: any change under `migrations/` needs at least a `minor`.
+The `migration changeset` check fails a PR into `next` that adds one with a patch changeset, and
+`rr: minor bump` fails the release PR.
 
-- **minor** — any change under `migrations/`. This is enforced, not conventional: the `migration changeset`
-  check fails a PR into `next` that adds one with a patch changeset, and `rr: minor bump` fails the
-  release PR.
-- **patch** — code-only changes.
-- **major** — a breaking schema change. Read
-  [`PUBLISH_NO_BREAK_POLICY.md`](https://github.com/MemberJunction/MJ/blob/next/packages/OpenApp/PUBLISH_NO_BREAK_POLICY.md)
-  first: within a published major, only additive schema changes are allowed. The baseline
-  (`V202608042101`) was edited in place pre-publication; **that practice ends at the first
-  release** and its own header says so. From here, schema changes are new `V…` files.
+Schema changes are new `V…` files; the baseline (`V202608042101`) is not edited. Within a published
+major only additive schema changes are allowed — see MJ's
+[`PUBLISH_NO_BREAK_POLICY.md`](https://github.com/MemberJunction/MJ/blob/next/packages/OpenApp/PUBLISH_NO_BREAK_POLICY.md).
 
 The dependency ranges in `mj-app.json` are resolved against the sibling repos' published tags, not
-their `main` branches — `>=5.33.0 <6.0.0` for common, `>=1.2.0 <2.0.0` for tasks (the seed writes
-`TaskType.Code`, which arrives in 1.2.x), `>=5.1.0 <6.0.0` for orders, `>=0.2.0 <1.0.0` for
-accounting, `>=0.1.1 <1.0.0` for contracts. A range no published tag satisfies fails the install at
-resolution with `no published version at … satisfies`; two of these were in exactly that state
-before the first Open App release.
+their `main` branches. A range no published tag satisfies fails the install at resolution with
+`no published version at … satisfies`.
