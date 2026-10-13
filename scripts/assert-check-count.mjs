@@ -24,7 +24,7 @@
  * 2. **Bundles are CONDITIONAL.** Orders expects every bundle unconditionally. Sales runs standalone,
  *    and three of its bundles need orders while a fourth needs contracts — so a straight port fails on a
  *    sales-only host by demanding bundles that cannot exist there. Expectation follows what the run
- *    actually had linked, which the runner reports in its `downstream packages ->` line.
+ *    actually had present, which the runner reports in its `sibling apps ->` line.
  *
  * 3. **The header format differs.** Sales prints `=== bundle (N of M checks) ===`, which carries both
  *    the number that RAN and the number REGISTERED. That is strictly more information than orders' `(N
@@ -52,6 +52,7 @@ import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname } from 'node:path';
+import { parseAppPresence } from './app-presence.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(readFileSync(join(root, 'scripts', 'expected-check-counts.json'), 'utf8'));
@@ -94,11 +95,13 @@ function runSuite() {
             maxBuffer: 64 * 1024 * 1024,
             // RUN_MUTATION_TESTS is mandatory: without it the runner skips every check and reports a
             // green nothing. MJ_INTEGRATION_LOG is redirected so this run does not clobber the log a
-            // human may be reading -- the verdict comes from stdout, never from disk.
+            // human may be reading -- the verdict comes from stdout, never from disk. A caller's own
+            // MJ_INTEGRATION_LOG wins, so a host running several checkouts can keep each gate's log apart.
             env: {
                 ...process.env,
                 RUN_MUTATION_TESTS: '1',
-                MJ_INTEGRATION_LOG: join(root, 'test-harnesses', '.integration-log.gate.txt'),
+                MJ_INTEGRATION_LOG:
+                    process.env.MJ_INTEGRATION_LOG ?? join(root, 'test-harnesses', '.integration-log.gate.txt'),
             },
         });
     } catch (err) {
@@ -134,27 +137,17 @@ function readFreshLog(logPath) {
 const log = process.argv[2] ? readFreshLog(process.argv[2]) : runSuite();
 
 /**
- * Which sibling apps the RUN had available.
+ * Which sibling apps the RUN had PRESENT.
  *
- * Taken from the runner's own `downstream packages -> pkg: loaded | pkg: absent` line rather than by
- * probing this process, so the expectation is judged against the environment the checks actually ran
- * in. A gate that probed its own node_modules could demand bundles from a run that never had them.
+ * Taken from the runner's own `sibling apps -> app: present | app: <reason>` line rather than by probing
+ * this process, so the expectation is judged against the environment the checks actually ran in. A gate
+ * that probed its own node_modules could demand bundles from a run that never had them.
+ *
+ * Present means linked AND installed: the package loaded and the host registers the app's entities
+ * (#89). The rule and the line format live in `app-presence.mjs`, shared with the runner.
  */
-function linkedApps() {
-    const line = log.match(/downstream packages -> (.*)$/m);
-    const linked = new Set();
-    if (!line) {
-        return { linked, reported: false };
-    }
-    for (const [app, pkg] of Object.entries(manifest.probes)) {
-        if (new RegExp(`${pkg.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')}:\\s*loaded`).test(line[1])) {
-            linked.add(app);
-        }
-    }
-    return { linked, reported: true };
-}
-
-const { linked, reported } = linkedApps();
+const { presence, reported } = parseAppPresence(log);
+const linked = new Set([...presence].filter(([, state]) => state === 'present').map(([app]) => app));
 
 /** The bundles this host is expected to have run, and how many checks each must register. */
 const expected = new Map();
@@ -218,11 +211,12 @@ const missingApps = requiredApps.filter((app) => !linked.has(app));
 if (reported && missingApps.length > 0) {
     console.error(
         `\n\u2716 Integration coverage assertion FAILED\n\n` +
-            `  \u00b7 These sibling apps are NOT linked: ${missingApps.join(', ')}\n` +
+            `  \u00b7 These sibling apps are NOT present: ` +
+            `${missingApps.map((app) => `${app} (${presence.get(app) ?? 'not reported'})`).join(', ')}\n` +
             `    Every bundle that names one was skipped, so the suite measured a fraction of itself and\n` +
             `    the tally below is not evidence of anything. mj-app.json declares orders a hard\n` +
             `    dependency; a host without it is misconfigured rather than minimal.\n\n` +
-            `  Link them and re-run -- see docs/WORKSPACE-SETUP.md.\n`,
+            `  Link and migrate them, then re-run -- see docs/WORKSPACE-SETUP.md.\n`,
     );
     process.exit(1);
 }
@@ -231,7 +225,7 @@ if (expected.size === 0) {
     console.error(
         `\n\u2716 Integration coverage assertion FAILED\n\n` +
             `  \u00b7 NO bundles were expected on this host. Every bundle in the manifest requires a` +
-            ` sibling app, and this run reported none linked (${[...linked].join(", ") || "none"}).\n` +
+            ` sibling app, and this run reported none present (${[...linked].join(", ") || "none"}).\n` +
             `    A run that expects nothing passes while measuring nothing.\n\n` +
             `  Link the sibling apps and re-run -- see docs/WORKSPACE-SETUP.md.\n`,
     );
@@ -255,7 +249,7 @@ const problems = [];
 
 if (!reported) {
     problems.push(
-        'the log has no "downstream packages ->" line, so which siblings were linked cannot be ' +
+        'the log has no "sibling apps ->" line, so which siblings were present cannot be ' +
             'determined — this log did not come from test-harnesses/integration.mjs',
     );
 }
@@ -271,7 +265,7 @@ if (skipped > 0) {
 }
 if (ran < expectedTotal) {
     problems.push(
-        `only ${ran} checks ran; this host's linked apps (${[...linked].join(', ') || 'none'}) mean ` +
+        `only ${ran} checks ran; this host's present apps (${[...linked].join(', ') || 'none'}) mean ` +
             `${expectedTotal} were expected — ${expectedTotal - ran} are missing, which a passing tally ` +
             'would have hidden.',
     );
@@ -282,22 +276,23 @@ if (failed > 0) {
 
 // Per bundle, so the message names the gap rather than only the total.
 for (const [bundle, spec] of expected) {
-    const header = log.match(new RegExp(`=== ${bundle} \\((\\d+) of (\\d+) check`));
+    const header = log.match(new RegExp(`=== ${bundle} \\((\\d+) of (\\d+) checks?(?:, (\\d+) left out)?\\)`));
     if (!header) {
         problems.push(
-            `bundle '${bundle}' never ran${spec.requires ? ` (${spec.requires} IS linked, so it should have)` : ''}` +
+            `bundle '${bundle}' never ran${spec.requires ? ` (${spec.requires} IS present, so it should have)` : ''}` +
                 ' — is it missing from the runner\'s list?',
         );
         continue;
     }
-    const [, actuallyRan, registered] = header.map(Number);
+    // `left out` counts checks whose RequiresApp is not present; they are not missing, they cannot run.
+    const [, actuallyRan, registered, leftOut = 0] = header.map((v) => Number(v ?? 0));
     if (registered !== spec.count) {
         problems.push(
             `bundle '${bundle}' registers ${registered} checks, expected ${spec.count} (${spec.ids}) — ` +
                 'a check was added or deleted without updating scripts/expected-check-counts.json',
         );
     }
-    if (actuallyRan < registered) {
+    if (actuallyRan + leftOut < registered) {
         problems.push(`bundle '${bundle}' registered ${registered} checks but ran only ${actuallyRan}`);
     }
 }
@@ -308,7 +303,7 @@ for (const [bundle, spec] of expected) {
 for (const bundle of Object.keys(manifest.bundles)) {
     if (!expected.has(bundle) && new RegExp(`=== ${bundle} \\(`).test(log)) {
         problems.push(
-            `bundle '${bundle}' ran, but ${manifest.bundles[bundle].requires} is not reported as linked ` +
+            `bundle '${bundle}' ran, but ${manifest.bundles[bundle].requires} is not reported as present ` +
                 '— the run and the manifest disagree about what this host has',
         );
     }
@@ -332,6 +327,6 @@ console.log(
     `✓ coverage assertion passed — ${ran} checks ran across ${expected.size} bundles ` +
         `(${passed} passed, ${failed} failed)` +
         (skippedBundles.length
-            ? `\n  not expected on this host (app not linked): ${skippedBundles.join(', ')}`
+            ? `\n  not expected on this host (app not present): ${skippedBundles.join(', ')}`
             : ''),
 );
