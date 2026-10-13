@@ -2,7 +2,8 @@
  * @fileoverview The forecast snapshot job — writes `ForecastSnapshot` rows from whatever source is set.
  *
  * Same three-part shape as the activity sync, deliberately: a seam (`IForecastSource`), a process-wide
- * factory whose default reads nothing, and an entry point an MJ Action calls on a cron. Sales has no
+ * factory, and an entry point an MJ Action calls on a cron. Unlike the activity sync, the factory's default
+ * reads a real source: the forecast queries exist, so there is something to measure. Sales has no
  * other precedent for a scheduled job, so the second one matching the first is worth more than any
  * variation would be.
  *
@@ -13,6 +14,7 @@ import { BusinessTimeZoneEngine, CalendarDayIn, ToCalendarDay, UTC_ZONE } from '
 import type { mjBizAppsSalesForecastSnapshotEntity } from '@mj-biz-apps/sales-entities';
 
 import type { ForecastPeriod, IForecastSource } from './ForecastSource.js';
+import { QueryForecastSource } from './QueryForecastSource.js';
 
 const E_FORECAST_SNAPSHOT = 'MJ_BizApps_Sales: Forecast Snapshots';
 
@@ -30,17 +32,30 @@ export interface ForecastSnapshotResult {
 export type ForecastSourceFactory = (contextUser: UserInfo) => IForecastSource | null;
 
 /**
- * THE PROCESS-WIDE FACTORY, and the single line a landed query changes.
+ * The query the daily capture reads by default: `metadata/queries/.forecast-by-owner.json`.
  *
- * Default is NULL — no source — which makes a scheduled run a no-op that says so. That is the same
- * inversion the activity sync uses and for the same reason: the job must be real and Active for the chain
- * to be provably firing, and a default that measured anything would either invent numbers or fail hourly.
- *
- * A forecast row is the case where invented numbers matter most. An activity nobody sent is obviously
- * wrong when a human reads it; a plausible commit figure is not, and it would be indistinguishable from a
- * real one the moment it is in the table.
+ * Owner grain rather than `Sales: Forecast by Category`, because `forecast-history.sql` partitions its
+ * movement windows by `OwnerEmployeeID` (D-32). Category rows carry no owner, so a history built from
+ * them has one partition per pipeline and no owner names.
  */
-let forecastSourceFactory: ForecastSourceFactory = () => null;
+export const DEFAULT_FORECAST_QUERY = 'Sales: Forecast by Owner';
+
+/**
+ * THE PROCESS-WIDE FACTORY. By default it reads {@link DEFAULT_FORECAST_QUERY}.
+ *
+ * This defaulted to null while the forecast queries did not exist, so the seeded job could ship Active
+ * and say "nothing to measure" rather than fail daily. The queries shipped and the default did not move,
+ * so every scheduled run reported success and wrote nothing (#216).
+ *
+ * The default lives here rather than in the server package's startup, so every process that loads this
+ * package (MJAPI, the integration checks, a script) captures through the same source. A test that needs
+ * another source swaps it with {@link SetForecastSourceFactory} and restores the previous one.
+ *
+ * A missing or renamed query is not silent: `QueryForecastSource` refuses by name, and `Capture` turns a
+ * refusal with no rows into a failed run.
+ */
+let forecastSourceFactory: ForecastSourceFactory = (contextUser) =>
+    new QueryForecastSource(DEFAULT_FORECAST_QUERY, contextUser);
 
 /** Replace the factory. Returns the previous one, so a check can restore it. */
 export function SetForecastSourceFactory(factory: ForecastSourceFactory): ForecastSourceFactory {
@@ -272,9 +287,8 @@ export class ForecastSnapshotJob {
 /**
  * Runs one capture with whatever source is registered. What the Action calls.
  *
- * Returns an honest no-op when no source is set, rather than an error: that is the ordinary state until
- * the forecast queries land, and an hourly-or-daily job reporting failure for it would be red from the
- * day it shipped.
+ * A factory that returns null is a no-op that says so, rather than an error. The default never does; only
+ * a caller that swapped the factory for one that returns null reaches it.
  */
 export async function RunForecastSnapshot(
     provider: IMetadataProvider,
@@ -292,8 +306,8 @@ export async function RunForecastSnapshot(
             SkippedAsAlreadyCaptured: 0,
             Period: null,
             Issues: [
-                'No forecast source is registered. The chain is wired; the MJ Queries it reads from do not '
-                    + 'exist yet, so there is nothing to measure.',
+                'No forecast source is registered: the source factory returned none, so nothing was '
+                    + `measured. The default reads '${DEFAULT_FORECAST_QUERY}'; something replaced it.`,
             ],
         };
     }

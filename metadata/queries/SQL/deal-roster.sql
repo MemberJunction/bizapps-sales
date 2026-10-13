@@ -118,6 +118,22 @@ WHERE 1 = 1
   {% if PeriodStart %}
   AND COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) >= {{ PeriodStart | sqlString }}
   {% endif %}
+  /**
+   * CLOSED DEALS FROM A DATE ON; EVERY OTHER DEAL ALWAYS (bizapps-sales#209).
+   *
+   * The Sales section's first load shipped the whole book, closed deals included, and the browser
+   * reduced it. Its dashboard figures read only open deals, and the won figures come from
+   * `Sales: Dashboard Summary`, so the only closed deals it renders are the board's, which shows those
+   * closed in the current fiscal quarter. This bounds the closed rows and leaves the rest alone:
+   * open deals and status-less ones are kept whatever their dates, unlike `PeriodStart`, which windows
+   * every row.
+   *
+   * A closed deal with neither close date is left out: nothing says when it closed.
+   */
+  {% if ClosedSince %}
+  AND (ISNULL(st.IsClosed, 0) = 0
+       OR COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) >= {{ ClosedSince | sqlString }})
+  {% endif %}
   {% if PeriodEnd %}
   AND COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) <= {{ PeriodEnd | sqlString }}
   {% endif %}

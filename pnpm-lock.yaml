@@ -34,8 +34,8 @@ importers:
   .:
     dependencies:
       '@mj-biz-apps/orders-entities':
-        specifier: ^5.26.0
-        version: 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+        specifier: ^5.30.0
+        version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
     devDependencies:
       '@changesets/cli':
         specifier: ^2.31.1
@@ -112,6 +112,9 @@ importers:
       dotenv:
         specifier: ^17.2.3
         version: 17.2.4
+      jsdom:
+        specifier: ^26.1.0
+        version: 26.1.0
       mrmime:
         specifier: 2.0.1
         version: 2.0.1
@@ -124,6 +127,9 @@ importers:
       rollup:
         specifier: ^4.43.0
         version: 4.64.0
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
       simple-git:
         specifier: ^3.31.1
         version: 3.36.0
@@ -143,7 +149,7 @@ importers:
   packages/Actions:
     dependencies:
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 6.12.3
+        specifier: 6.14.0
         version: link:../CoreEntitiesServer
       zod:
         specifier: ^3.25.76
@@ -192,7 +198,7 @@ importers:
         specifier: 21.1.3
         version: 21.1.3(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(@angular/platform-browser@21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(rxjs@7.8.2)
       '@mj-biz-apps/sales-entities':
-        specifier: 6.12.3
+        specifier: 6.14.0
         version: link:../Entities
     devDependencies:
       '@angular/compiler':
@@ -201,6 +207,9 @@ importers:
       '@angular/compiler-cli':
         specifier: 21.1.3
         version: 21.1.3(@angular/compiler@21.1.3)(typescript@5.9.3)
+      '@angular/platform-browser':
+        specifier: 21.1.3
+        version: 21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))
       '@memberjunction/actions-base':
         specifier: 6.1.5
         version: 6.1.5
@@ -241,11 +250,11 @@ importers:
         specifier: ^5.50.1
         version: 5.50.1(af550fe9eed2a1028e079b1484c0b664)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.26.0
-        version: 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+        specifier: 5.30.0
+        version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       '@mj-biz-apps/orders-ng':
-        specifier: 5.26.0
-        version: 5.26.0(1966e92b8e2ec7f1f1b3972acd46f0bf)
+        specifier: 5.30.0
+        version: 5.30.0(4d093f3a2993400400260f17cceeee64)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -253,7 +262,7 @@ importers:
   packages/CoreEntitiesServer:
     dependencies:
       '@mj-biz-apps/sales-entities':
-        specifier: 6.12.3
+        specifier: 6.14.0
         version: link:../Entities
     devDependencies:
       '@memberjunction/core':
@@ -275,8 +284,8 @@ importers:
         specifier: ^5.50.1
         version: 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.26.0
-        version: 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+        specifier: 5.30.0
+        version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       '@mj-biz-apps/tasks-core':
         specifier: 1.4.1
         version: 1.4.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
@@ -309,8 +318,8 @@ importers:
         specifier: ^5.50.1
         version: 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.26.0
-        version: 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+        specifier: 5.30.0
+        version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       ts-node-dev:
         specifier: ^2.0.0
         version: 2.0.0(@types/node@22.20.1)(typescript@5.9.3)
@@ -333,16 +342,16 @@ importers:
         specifier: ^5.50.1
         version: 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
       '@mj-biz-apps/orders-entities':
-        specifier: ^5.26.0
-        version: 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+        specifier: ^5.30.0
+        version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 6.12.3
+        specifier: 6.14.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: 6.12.3
+        specifier: 6.14.0
         version: link:../Entities
       '@mj-biz-apps/sales-server':
-        specifier: 6.12.3
+        specifier: 6.14.0
         version: link:../Server
     devDependencies:
       '@mj-biz-apps/tasks-entities':
@@ -361,13 +370,13 @@ importers:
   packages/Server:
     dependencies:
       '@mj-biz-apps/sales-actions':
-        specifier: 6.12.3
+        specifier: 6.14.0
         version: link:../Actions
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: 6.12.3
+        specifier: 6.14.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: 6.12.3
+        specifier: 6.14.0
         version: link:../Entities
       class-validator:
         specifier: ^0.14.3
@@ -406,7 +415,6 @@ packages:
   '@angular/animations@21.1.3':
     resolution: {integrity: sha512-UADMncDd9lkmIT1NPVFcufyP5gJHMPzxNaQpojiGrxT1aT8Du30mao0KSrB4aTwcicv6/cdD5bZbIyg+FL6LkQ==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
-    deprecated: '@angular/animations is deprecated. Use `animate.enter` and `animate.leave` instead. For more information see: https://v22.angular.dev/guide/animations.'
     peerDependencies:
       '@angular/core': 21.1.3
 
@@ -2468,15 +2476,12 @@ packages:
 
   '@microsoft/mgt-element@4.6.1':
     resolution: {integrity: sha512-zfbAIQRRLzUVJFM4LYcL3UbQnSgKCB+iOutaSXa3g8gaph3dl2iilgzwoSp2Qi6ySocsbd7RzOT3G4xLu+7PTw==}
-    deprecated: 'Microsoft Graph Toolkit was retired on 2026-08-28 and is no longer maintained. You are welcome to fork the repository to maintain your own version: https://github.com/microsoftgraph/microsoft-graph-toolkit'
 
   '@microsoft/mgt-msal2-provider@4.6.1':
     resolution: {integrity: sha512-UCWPhYiQTKBzAF/0omyZLTzJZK+2pQaDz50ZFdLEEpSmH2b8UKFn4uLn28p4oXfkt2w8UR0Oc/BgZJ8eFz1gHA==}
-    deprecated: 'Microsoft Graph Toolkit was retired on 2026-08-28 and is no longer maintained. You are welcome to fork the repository to maintain your own version: https://github.com/microsoftgraph/microsoft-graph-toolkit'
 
   '@microsoft/mgt-sharepoint-provider@4.6.1':
     resolution: {integrity: sha512-897s5D0X5wssdk9hHVWbmQJUG3bro9+eYdSwd16tTA2nbDxhu18z+II2V4jpf81sWybFXBz8E9ZM7X/0LTk/lQ==}
-    deprecated: 'Microsoft Graph Toolkit was retired on 2026-08-28 and is no longer maintained. You are welcome to fork the repository to maintain your own version: https://github.com/microsoftgraph/microsoft-graph-toolkit'
 
   '@microsoft/microsoft-graph-client@3.0.2':
     resolution: {integrity: sha512-eYDiApYmiGsm1s1jfAa/rhB2xQCsX4pWt0vCTd1LZmiApMQfT/c0hXj2hvpuGz5GrcLdugbu05xB79rIV57Pjw==}
@@ -2523,40 +2528,40 @@ packages:
   '@mixmark-io/domino@2.2.0':
     resolution: {integrity: sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==}
 
-  '@mj-biz-apps/accounting-engine-base@0.20.0':
-    resolution: {integrity: sha512-EU/K2nsYfBHGVLziu870BqTgbJRYh4Mf9G5+r1cx7ivo2O3ASFfwKRSOnLQzQLgVrPO/Hdr2Up9jWoNNXGutlQ==}
+  '@mj-biz-apps/accounting-engine-base@0.22.0':
+    resolution: {integrity: sha512-Dq6ZLRO81NyAfsS6gmOS5/IkRY6OuQUT+Ufwh1u0nBR/5WJxy4dZWT96jFbDTr49E7pCI4v84nYUrxBugmmvcQ==}
     peerDependencies:
       '@memberjunction/core': ^6.1.5
       '@memberjunction/global': ^6.1.5
 
-  '@mj-biz-apps/accounting-entities@0.20.0':
-    resolution: {integrity: sha512-t002dP0ifnucIbR1gaQ4uLBCpXtcGLtT2pvV6RSSsa+X8l4+0n+9bTedEXonSf2K8zKUaLO6ypCtQQ5F0tpNcw==}
+  '@mj-biz-apps/accounting-entities@0.22.0':
+    resolution: {integrity: sha512-0gOk6tCaqK62Rd8+cuT1HRFu1nYg0lL/4UX540qHlFXdGczBVbffJHg2UX1qQop0AZPseVnzHPaHI+aS1Ym4Qw==}
     peerDependencies:
       '@memberjunction/core': ^6.1.5
       '@memberjunction/global': ^6.1.5
       '@mj-biz-apps/common-entities': ^5.50.1
 
-  '@mj-biz-apps/accounting-ng@0.20.0':
-    resolution: {integrity: sha512-UwWTSK1GflLX9LxQoZfSHgGIz15oM7hdYi4nQ6DGVgvum4ecfaiktyYYJobYrz4epi3Wsc0hRAOeVCxq67c8yA==}
+  '@mj-biz-apps/accounting-ng@0.22.0':
+    resolution: {integrity: sha512-9V2yUjdHCASF1O58xfQu4IK1v7PyCeFa3Khbt/MYJVhi4f6732vHka+aRGyrWANOVxGpyM/foBndEztafZ2ftw==}
     peerDependencies:
       '@angular/animations': 21.1.3
       '@angular/cdk': ^21.1.3
       '@angular/common': 21.1.3
       '@angular/core': 21.1.3
       '@angular/forms': 21.1.3
-      '@memberjunction/actions-base': ^6.1.0-edge.7
+      '@memberjunction/actions-base': ^6.1.5
       '@memberjunction/core': ^6.1.5
-      '@memberjunction/core-entities': ^6.1.0-edge.7
+      '@memberjunction/core-entities': ^6.1.5
       '@memberjunction/global': ^6.1.5
-      '@memberjunction/graphql-dataprovider': ^6.1.0-edge.7
-      '@memberjunction/ng-base-forms': ^6.1.0-edge.7
-      '@memberjunction/ng-base-types': ^6.1.0-edge.7
-      '@memberjunction/ng-entity-viewer': ^6.1.0-edge.7
-      '@memberjunction/ng-hierarchy-tree': ^6.1.0-edge.7
-      '@memberjunction/ng-link-directives': ^6.1.0-edge.7
-      '@memberjunction/ng-shared': ^6.1.0-edge.7
-      '@memberjunction/ng-shared-generic': ^6.1.0-edge.7
-      '@memberjunction/ng-ui-components': ^6.1.0-edge.7
+      '@memberjunction/graphql-dataprovider': ^6.1.5
+      '@memberjunction/ng-base-forms': ^6.1.5
+      '@memberjunction/ng-base-types': ^6.1.5
+      '@memberjunction/ng-entity-viewer': ^6.1.5
+      '@memberjunction/ng-hierarchy-tree': ^6.1.5
+      '@memberjunction/ng-link-directives': ^6.1.5
+      '@memberjunction/ng-shared': ^6.1.5
+      '@memberjunction/ng-shared-generic': ^6.1.5
+      '@memberjunction/ng-ui-components': ^6.1.5
       '@mj-biz-apps/common-entities': ^5.50.1
       '@mj-biz-apps/common-ng': ^5.50.1
       rxjs: ^7.8.2
@@ -2595,14 +2600,15 @@ packages:
       '@memberjunction/ng-shared': ^6.1.0-edge.6
       '@memberjunction/ng-ui-components': ^6.1.0-edge.6
 
-  '@mj-biz-apps/orders-entities@5.26.0':
-    resolution: {integrity: sha512-+nA8JCm54ePURwaqSL077XwnU+abBdJgoVni27l+yiw8JQ4pGXqGyOnAvMitefYuF/b4v+SyQ9o2Gbq1TIyDlA==}
+  '@mj-biz-apps/orders-entities@5.30.0':
+    resolution: {integrity: sha512-gXaBOYU3yRnGw3qBkEzgWENAmGWlWnZQoya1gye4MP8CxirO8qIj5tn3W9bLxKLb1HJ2ej1Y5qKTfUpQ0OQ2CQ==}
     peerDependencies:
       '@memberjunction/core': ^6.1.5
       '@memberjunction/global': ^6.1.5
+      '@mj-biz-apps/common-entities': ^5.50.1
 
-  '@mj-biz-apps/orders-ng@5.26.0':
-    resolution: {integrity: sha512-aVMF7XDOge9GsyCgbVImm0mujHm7etR/DyWeYseYz6vuFcAP8CwFviGjJEsq5bj2sOMvSzjE8RoCDhKyQsBmpw==}
+  '@mj-biz-apps/orders-ng@5.30.0':
+    resolution: {integrity: sha512-2Kn4hjCP4+kJFqsJOrRwg+zvxsoPscodlAXfJ+LB7Ur+/WuR+LtO4Z5XuTrv/xWL6rZUU1kMYMdF9RFWUPvvkg==}
     peerDependencies:
       '@angular/animations': 21.1.3
       '@angular/cdk': '>=21.0.0 <22.0.0'
@@ -2611,17 +2617,23 @@ packages:
       '@angular/elements': ^21.1.3
       '@angular/forms': 21.1.3
       '@angular/platform-browser': 21.1.3
-      '@memberjunction/actions-base': ^6.1.4
+      '@memberjunction/actions-base': ^6.1.5
       '@memberjunction/core': ^6.1.5
-      '@memberjunction/core-entities': ^6.1.4
+      '@memberjunction/core-entities': ^6.1.5
       '@memberjunction/global': ^6.1.5
-      '@memberjunction/graphql-dataprovider': ^6.1.4
-      '@memberjunction/ng-base-forms': ^6.1.4
-      '@memberjunction/ng-entity-viewer': ^6.1.4
-      '@memberjunction/ng-filter-builder': ^6.1.4
-      '@memberjunction/ng-link-directives': ^6.1.4
-      '@memberjunction/ng-shared': ^6.1.4
-      '@memberjunction/ng-ui-components': ^6.1.4
+      '@memberjunction/graphql-dataprovider': ^6.1.5
+      '@memberjunction/ng-base-forms': ^6.1.5
+      '@memberjunction/ng-entity-viewer': ^6.1.5
+      '@memberjunction/ng-filter-builder': ^6.1.5
+      '@memberjunction/ng-graph-view': ^6.1.5
+      '@memberjunction/ng-hierarchy-tree': ^6.1.5
+      '@memberjunction/ng-link-directives': ^6.1.5
+      '@memberjunction/ng-shared': ^6.1.5
+      '@memberjunction/ng-ui-components': ^6.1.5
+      '@mj-biz-apps/accounting-engine-base': '>=0.21.0'
+      '@mj-biz-apps/accounting-ng': '>=0.21.0'
+      '@mj-biz-apps/common-entities': ^5.50.1
+      '@mj-biz-apps/common-ng': ^5.50.1
       zone.js: ^0.16.0
 
   '@mj-biz-apps/tasks-core@1.4.1':
@@ -3595,7 +3607,6 @@ packages:
 
   '@types/uuid@11.0.0':
     resolution: {integrity: sha512-HVyk8nj2m+jcFRNazzqyVKiZezyhDKrGUA3jlEcg/nZ6Ms+qHwocba1Y/AaVaznJTAM9xpdFSh+ptbNrhOGvZA==}
-    deprecated: This is a stub types definition. uuid provides its own type definitions, so you do not need this installed.
 
   '@types/validator@13.15.10':
     resolution: {integrity: sha512-T8L6i7wCuyoK8A/ZeLYt1+q0ty3Zb9+qbSSvrIVitzT3YjZqkTZ40IbRsPanlB4h1QB3JVL1SYCdR6ngtFYcuA==}
@@ -3735,12 +3746,10 @@ packages:
   '@xmldom/xmldom@0.8.14':
     resolution: {integrity: sha512-T4EDRUBVZYRldYApjEJiU0e1stYWaRAX7CuSnKzrpwdZKo53zGV8/pqfzV6FfwNl9YThD2OumQYvqtvjvgG7aQ==}
     engines: {node: '>=10.0.0'}
-    deprecated: this version has critical issues, please update to the latest version
 
   '@xmldom/xmldom@0.9.11':
     resolution: {integrity: sha512-tW8bcK3hsG0/uqSnNz6TK4BkcuZSezoU7DlnYssILmZDktPnSHHuDJJFM0AJv+13gz2r0iGdrj6qqKeUnxXEDg==}
     engines: {node: '>=14.6'}
-    deprecated: this version has critical issues, please update to the latest version
 
   a-sync-waterfall@1.0.1:
     resolution: {integrity: sha512-RYTOHHdWipFUliRFMCS4X2Yn2X8M87V/OpSqWzKKOGhzqyUxzyVmhHDH9sAvG+ZuQf/TAOFsLCpMw09I1ufUnA==}
@@ -4410,7 +4419,6 @@ packages:
   cron-parser@4.9.0:
     resolution: {integrity: sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q==}
     engines: {node: '>=12.0.0'}
-    deprecated: v4 is no longer maintained, upgrade to v5
 
   cross-fetch@3.2.0:
     resolution: {integrity: sha512-Q+xVJLoGOeIMXZmbUK4HYk+69cQH6LudR0Vu/pRm2YlU/hDV9CiS0gKUMaWY5f2NeUH9C1nV3bsTlCo0FsTV1Q==}
@@ -4425,7 +4433,6 @@ packages:
 
   crypto-js@4.2.0:
     resolution: {integrity: sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==}
-    deprecated: Active development of CryptoJS has been discontinued. This library is no longer maintained.
 
   css-select@5.2.2:
     resolution: {integrity: sha512-TizTzUddG/xYLA3NXodFM0fSbNizXjOKhqiQQwvhlspadZokn1KDy0NZFS0wuEubIYAV5/c1/lAr0TaaFXEXzw==}
@@ -5185,7 +5192,6 @@ packages:
   fstream@1.0.12:
     resolution: {integrity: sha512-WvJ193OHa0GHPEL+AycEJgxvBEwyfRkN1vhjca23OaPVMCaLCXTd5qAu82AjTcgP1UJmytkOKb63Ypde7raDIg==}
     engines: {node: '>=0.6'}
-    deprecated: This package is no longer supported.
 
   function-bind@1.1.2:
     resolution: {integrity: sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==}
@@ -5264,7 +5270,6 @@ packages:
 
   glob@10.5.0:
     resolution: {integrity: sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg==}
-    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
     hasBin: true
 
   glob@13.0.6:
@@ -5273,7 +5278,6 @@ packages:
 
   glob@7.2.3:
     resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
-    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
 
   globby@11.1.0:
     resolution: {integrity: sha512-jhIXaOzy1sb8IyocaruWSn1TjmnBVs8Ayhcy83rmxNJ8q2uWKCAj3CnJY+KpGSXCueAPc0i05kVvVKtP1t9S3g==}
@@ -5533,7 +5537,6 @@ packages:
 
   inflight@1.0.6:
     resolution: {integrity: sha512-k92I/b08q4wvFscXCLvqfsHCrjrF7yiXsQuIVvVE7N82W3+aqpzuUdBbfhWcy/FZR3/4IgflMgKLOsvPDrGCJA==}
-    deprecated: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
 
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
@@ -5755,7 +5758,6 @@ packages:
 
   jpeg-exif@1.1.4:
     resolution: {integrity: sha512-a+bKEcCjtuW5WTdgeXFzswSrdqi0jk4XlEtZlx5A94wCoBpFjfFTbo/Tra5SpNCl/YFZPvcV1dJc+TAYeg6ROQ==}
-    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
   js-md4@0.3.2:
     resolution: {integrity: sha512-/GDnfQYsltsjRswQhN9fhv3EMw2sCpUdrdxyWDOUK7eyD++r3gRhzgiQgc/x4MAv2i1iuQ4lxO5mvqM3vj4bwA==}
@@ -5935,7 +5937,6 @@ packages:
 
   lodash.get@4.4.2:
     resolution: {integrity: sha512-z+Uw/vLuy6gQe8cfaFWD7p0wVv8fJl3mbzXh33RS+0oW2wvUqiRXiQ69gLWSLpgB5/6sU+r6BlQR0MBILadqTQ==}
-    deprecated: This package is deprecated. Use the optional chaining (?.) operator instead.
 
   lodash.groupby@4.6.0:
     resolution: {integrity: sha512-5dcWxm23+VAoz+awKmBaiBvzox8+RqMgFhi7UvX9DHZr2HdxHXM/Wrf8cfKpsW37RNrvtPn6hSwNqurSILbmJw==}
@@ -5948,7 +5949,6 @@ packages:
 
   lodash.isequal@4.5.0:
     resolution: {integrity: sha512-pDo3lu8Jhfjqls6GkMgpahsF9kCyayhgykjyLMNFTKWrpVdAQtYyB4muAMWozBB4ig/dtWAmsMxLEI8wuz+DYQ==}
-    deprecated: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
 
   lodash.isfunction@3.0.9:
     resolution: {integrity: sha512-AirXNj15uRIMMPihnkInB4i3NHeb4iBtNg9WRWuK2o31S+ePwwNmDPaTL3o7dTJ+VXNZim7rFs4rxN4YU1oUJw==}
@@ -6357,7 +6357,6 @@ packages:
   node-domexception@1.0.0:
     resolution: {integrity: sha512-/jKZoMpw0F8GRwl4/eLROPA3cfcXtLApP0QzLmUT/HuPCZWyB7IY9ZrMeKw2O/nFIqPQB3PVM9aYm0F312AXDQ==}
     engines: {node: '>=10.5.0'}
-    deprecated: Use your platform's native DOMException instead
 
   node-ensure@0.0.0:
     resolution: {integrity: sha512-DRI60hzo2oKN1ma0ckc6nQWlHU69RH6xN0sjQTjMpChPfTYvKZdcQFfdYK2RWbJcKyUizSIy/l8OTGxMAM1QDw==}
@@ -6808,7 +6807,6 @@ packages:
   prebuild-install@7.1.3:
     resolution: {integrity: sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==}
     engines: {node: '>=10'}
-    deprecated: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
     hasBin: true
 
   prettier@2.8.8:
@@ -7022,7 +7020,6 @@ packages:
 
   rimraf@2.7.1:
     resolution: {integrity: sha512-uWjbaKIK3T1OSVptzX7Nl6PvQ3qAGtKEtVRjRuazjfL3Bx5eI409VZSqgND+4UNnmzLVdPj9FqFJNPqBZFve4w==}
-    deprecated: Rimraf versions prior to v4 are no longer supported
     hasBin: true
 
   rimraf@5.0.10:
@@ -7113,7 +7110,6 @@ packages:
 
   scmp@2.1.0:
     resolution: {integrity: sha512-o/mRQGk9Rcer/jEEw/yw4mwo3EU/NvYvp577/Btqrym9Qy5/MdWGBqipbALgd2lrdWTJ5/gqDusxfnQBxOxT2Q==}
-    deprecated: Just use Node.js's crypto.timingSafeEqual()
 
   seedrandom@3.0.5:
     resolution: {integrity: sha512-8OwmbklUNzwezjGInmZ+2clQmExQPvomqjL7LFqOYqtmuxRgQYqOD3mHaU+MvZn5FLUeVxVfQjwLZW/n/JFuqg==}
@@ -7686,12 +7682,10 @@ packages:
 
   uuid@8.3.2:
     resolution: {integrity: sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==}
-    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   uuid@9.0.1:
     resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
-    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   v8-compile-cache-lib@3.0.1:
@@ -7828,7 +7822,6 @@ packages:
   whatwg-encoding@3.1.1:
     resolution: {integrity: sha512-6qN4hJdMwfYBtE3YBTTHhoeuUrDBPZmbQaxWAqSALV/MeEnR5z1xd8UKud2RAkFoPkmB+hli1TZSnyi84xz1vQ==}
     engines: {node: '>=18'}
-    deprecated: Use @exodus/bytes instead for a more spec-conformant and faster implementation
 
   whatwg-fetch@3.6.20:
     resolution: {integrity: sha512-EqhiFU6daOA8kpjOWTL0olhVOF3i7OrFzSYiGsEMB8GcXS+RrzauAERX65xMeNWVqxA6HXH2m69Z9LaKKdisfg==}
@@ -15349,22 +15342,22 @@ snapshots:
 
   '@mixmark-io/domino@2.2.0': {}
 
-  '@mj-biz-apps/accounting-engine-base@0.20.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))':
+  '@mj-biz-apps/accounting-engine-base@0.22.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))':
     dependencies:
       '@memberjunction/core': 6.1.5
       '@memberjunction/global': 6.1.5
-      '@mj-biz-apps/accounting-entities': 0.20.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
+      '@mj-biz-apps/accounting-entities': 0.22.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
     transitivePeerDependencies:
       - '@mj-biz-apps/common-entities'
 
-  '@mj-biz-apps/accounting-entities@0.20.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))':
+  '@mj-biz-apps/accounting-entities@0.22.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))':
     dependencies:
       '@memberjunction/core': 6.1.5
       '@memberjunction/global': 6.1.5
       '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
       zod: 3.25.76
 
-  '@mj-biz-apps/accounting-ng@0.20.0(44948a5664a88c0b8fd82fe123ea797d)':
+  '@mj-biz-apps/accounting-ng@0.22.0(44948a5664a88c0b8fd82fe123ea797d)':
     dependencies:
       '@angular/animations': 21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))
       '@angular/cdk': 21.1.3(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(@angular/platform-browser@21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(rxjs@7.8.2)
@@ -15384,8 +15377,8 @@ snapshots:
       '@memberjunction/ng-shared': 6.1.5(b14ec32a77e1d61aee8a0029e59eeb48)
       '@memberjunction/ng-shared-generic': 6.1.5(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(@angular/platform-browser@21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(rxjs@7.8.2)
       '@memberjunction/ng-ui-components': 6.1.5(9b98b40171c6d483928873e5336cbf97)
-      '@mj-biz-apps/accounting-engine-base': 0.20.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
-      '@mj-biz-apps/accounting-entities': 0.20.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
+      '@mj-biz-apps/accounting-engine-base': 0.22.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
+      '@mj-biz-apps/accounting-entities': 0.22.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
       '@mj-biz-apps/common-ng': 5.50.1(af550fe9eed2a1028e079b1484c0b664)
       ag-grid-angular: 35.3.1(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))
@@ -15426,7 +15419,7 @@ snapshots:
       '@memberjunction/ng-ui-components': 6.1.5(9b98b40171c6d483928873e5336cbf97)
       '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
 
-  '@mj-biz-apps/orders-entities@5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)':
+  '@mj-biz-apps/orders-entities@5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))':
     dependencies:
       '@memberjunction/core': 6.1.5
       '@memberjunction/global': 6.1.5
@@ -15434,7 +15427,7 @@ snapshots:
       rxjs: 7.8.2
       zod: 3.25.76
 
-  '@mj-biz-apps/orders-ng@5.26.0(1966e92b8e2ec7f1f1b3972acd46f0bf)':
+  '@mj-biz-apps/orders-ng@5.30.0(4d093f3a2993400400260f17cceeee64)':
     dependencies:
       '@angular/animations': 21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))
       '@angular/cdk': 21.1.3(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(@angular/platform-browser@21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(rxjs@7.8.2)
@@ -15456,23 +15449,14 @@ snapshots:
       '@memberjunction/ng-link-directives': 6.1.5(b14ec32a77e1d61aee8a0029e59eeb48)
       '@memberjunction/ng-shared': 6.1.5(b14ec32a77e1d61aee8a0029e59eeb48)
       '@memberjunction/ng-ui-components': 6.1.5(9b98b40171c6d483928873e5336cbf97)
-      '@mj-biz-apps/accounting-engine-base': 0.20.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
-      '@mj-biz-apps/accounting-ng': 0.20.0(44948a5664a88c0b8fd82fe123ea797d)
+      '@mj-biz-apps/accounting-engine-base': 0.22.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
+      '@mj-biz-apps/accounting-ng': 0.22.0(44948a5664a88c0b8fd82fe123ea797d)
       '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
       '@mj-biz-apps/common-ng': 5.50.1(af550fe9eed2a1028e079b1484c0b664)
-      '@mj-biz-apps/orders-entities': 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+      '@mj-biz-apps/orders-entities': 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       ag-grid-angular: 35.3.1(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))
       ag-grid-community: 35.3.1
       zone.js: 0.16.2
-    transitivePeerDependencies:
-      - '@angular/router'
-      - '@fastify/websocket'
-      - '@memberjunction/ng-base-types'
-      - '@memberjunction/ng-shared-generic'
-      - crossws
-      - rxjs
-      - supports-color
-      - ws
 
   '@mj-biz-apps/tasks-core@1.4.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)':
     dependencies:

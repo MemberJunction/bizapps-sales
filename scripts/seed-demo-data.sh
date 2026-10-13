@@ -762,7 +762,7 @@ cat <<'NEXT'
 Demo data seeded. Remove it again with:
     scripts/seed-demo-data.sh --remove
 
-Walkthrough and talking points: docs/DEMO.md
+Test scenarios that use this data: docs/QA-GUIDE.md section 5
 NEXT
 
 # ── EXIT NON-ZERO IF THE PRICED HALF DID NOT LAND ────────────────────────────────────────────────

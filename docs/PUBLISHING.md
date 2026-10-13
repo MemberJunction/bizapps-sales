@@ -15,7 +15,7 @@ missing:
 | # | Artifact | Who produces it | What breaks without it |
 |---|---|---|---|
 | 1 | The five `@mj-biz-apps/sales-*` packages on npm | `changeset publish`, in `publish.yml` | MJAPI and MJExplorer have no code to load |
-| 2 | A **`vX.Y.Z` git tag** whose tree carries `mj-app.json` at that version | `ci/commit_push.mjs`, in `publish.yml` | `ResolveDependencyVersion` finds no candidate and the install fails at resolution |
+| 2 | A **`vX.Y.Z` git tag** whose tree carries `mj-app.json` at that version | `publish.yml`, after a successful publish (`mj-app.json` is synced in the Version Packages PR) | `ResolveDependencyVersion` finds no candidate and the install fails at resolution |
 | 3 | A **metadata seed migration** under `migrations/` | the build engineer, once per release — see below | the app installs with every table and no data; every step reports success |
 
 Number 2 is the one that is easy to get wrong from this repo's history. Before the release
@@ -37,38 +37,32 @@ contains a given metadata record — that proof is a clean install from migratio
 
 ## The release, end to end
 
-Releases run from `main`. `next` is the integration branch; **never commit to `main` directly** —
-the merge is the release trigger.
+`next` is the integration branch; **never commit to `main` directly**. The release is one
+machine-opened PR into `main`, and merging it is the release trigger. There is no hand-opened
+next -> main PR and no dispatch-driven publish.
 
 ```bash
 # 1. On your feature branch, describe the change. A schema change (anything under migrations/)
-#    must be at least a `minor` — publish.yml has a gate that refuses a patch carrying one.
+#    must be at least a `minor` — the `migration changeset` check refuses a PR into next that
+#    adds a migration with only a patch changeset.
 pnpm run change
 
-# 2. Merge the feature branch into next through a PR as usual. CI + the distribution gate run there.
-
-# 3. Release: merge next into main.
-git checkout main && git pull
-git merge --ff-only origin/next     # or open a next -> main PR
-git push origin main
+# 2. Merge the feature branch into next through a PR as usual. changes.yml (migration checks),
+#    build.yml (build + tests), CI and the distribution gate run there.
 ```
 
-Pushing `main` starts `.github/workflows/publish.yml`, which:
-
-1. validates the lockfile's case-sensitivity, migration filenames, that every non-private
-   `@mj-biz-apps/*` package already exists on npm, and each package's `repository.url` (npm
-   provenance needs it);
-2. runs the **distribution gate** — deliberately here as well as in its own paths-filtered
-   workflow, so a `workflow_dispatch` release from a branch that touched no metadata cannot ship a
-   stale seed — and the **release seed gate** (`check:release-seed`, below), which refuses a release
-   whose metadata is ahead of its Metadata_Sync;
-3. reads the highest bump the pending changesets declare, and **refuses a patch release that
-   carries a new migration**;
-4. runs `changeset version`, then asserts the resulting version is the one it predicted;
-5. rewrites `mj-app.json`'s `version` and derives `mjVersionRange` from
-   `packages/Entities/package.json`'s `@memberjunction/core` peer dependency;
-6. builds, publishes to npm via OIDC (no token), tags `vX.Y.Z`, pushes `main`, then merges `main`
-   back into `next` and refreshes the lockfile.
+3. Every push to `next` runs `.github/workflows/version.yml`, which keeps ONE **"Version Packages"**
+   PR open (head `changeset-release/main`, base `main`). It runs `pnpm run version:prepare` —
+   `changeset version`, `ci/sync-mj-app-version.mjs` (syncs `mj-app.json`'s `version` and
+   `mjVersionRange` from `packages/Entities/package.json`) and a lockfile refresh.
+4. That PR is the release. PRs into `main` run `release-readiness.yml` (the `rr:` checks: nothing pending, bump level,
+   metadata shipped, pg counterparts, release base current, migration immutability, packages on
+   npm), `build.yml`, and this repo's `repo: release seed` check (`repo-checks.yml`), which runs
+   `check:release-seed` on the release PR.
+5. Merging it pushes `main`, which starts `.github/workflows/publish.yml`: it validates the
+   lockfile, migration filenames, npm package existence, `repository.url` and package `files`,
+   builds, publishes to npm via OIDC (no token), tags `vX.Y.Z` only if something shipped, then opens
+   and merges a `release-back-merge/vX.Y.Z` PR into `next`.
 
 ### After it finishes
 
@@ -93,7 +87,7 @@ This follows MJ (`MJ/metadata/CLAUDE.md` §1b and §10):
    small files instead of one per build, and drift from the real push output.
 
 `lint:distribution` is not a currency gate. `pnpm run check:release-seed` is, without a database.
-It checks two things:
+It checks three things:
 
 1. every `primaryKey.ID` under `metadata/` appears in some `migrations/*.sql`;
 2. for every query, the SQL the **latest** migration seeds for its ID equals its `@file:` SQL.
@@ -110,9 +104,11 @@ It checks two things:
    While the newest seed is still uncommitted — you have just generated it from this tree — check 3
    is skipped and says so.
 
-**It is a release gate, not a PR gate:** `publish.yml` runs it whenever there are changesets to
-publish, so a release cannot ship metadata its migrations do not carry. Between releases it fails by
-design. Do not add it to `verify` or the distribution-gate workflow. A PR that changes `metadata/`
+**It is a release check, not a PR gate, and no workflow runs it:** run it on the Version Packages
+PR before merging, so a release does not ship metadata its migrations do not carry. (`rr: metadata
+shipped` is the CI backstop, but it only asserts that a Metadata_Sync migration was added since the
+last tag.) Between releases it fails by design. Do not add it to `verify` or the distribution-gate
+workflow. A PR that changes `metadata/`
 therefore has to reach `main` in the same release as the Metadata_Sync that carries it.
 
 Records deliberately left out of a release are listed in the script's `HELD_BACK` map, each with the
@@ -121,7 +117,7 @@ migration already carries.
 
 The property that still matters at install is "can a stranger install this app from migrations
 alone and get a working one?" — answered by a clean install from migrations, once per release
-(`scripts/rebuild-db.sh` / bootstrap-clean-db).
+(the migrations-only build below).
 
 The seed must be generated against a host built **from migrations only**, where `mj sync push` has
 never run. Its rows are then exactly what a fresh install at the last release has, so the generator
@@ -136,6 +132,7 @@ a fresh install does not have.
 #    docs/WORKSPACE-SETUP.md §1-4 covers standing the clones up; the migrate calls are:
 DB=MJ_Sales_Seed
 DB_DATABASE=$DB pnpm exec mj migrate --schema __mj                    --dir ../MJ/migrations
+DB_DATABASE=$DB pnpm exec mj migrate --schema __mj_BizAppsCommon      --dir ../bizapps-common/migrations
 DB_DATABASE=$DB pnpm exec mj migrate --schema __mj_BizAppsTasks       --dir ../bizapps-tasks/migrations
 DB_DATABASE=$DB pnpm exec mj migrate --schema __mj_BizAppsAccounting  --dir ../bizapps-accounting/migrations
 DB_DATABASE=$DB pnpm exec mj migrate --schema __mj_BizAppsOrders      --dir ../bizapps-orders/migrations
@@ -152,7 +149,7 @@ DB_DATABASE=$DB pnpm exec mj sync push --dir metadata --ci
 #    Sibling schemas (`__mj_BizAppsTasks`, `__mj_BizAppsOrders`) stay literal — `mj app install`
 #    supplies only `${mjSchema}` and `${flyway:defaultSchema}`, and neither of those is theirs.
 
-# 4. Placeholders, then the release seed gate publish.yml will run.
+# 4. Placeholders, then the release seed gate (CI also runs it on the release PR: `repo: release seed`).
 pnpm run lint:distribution
 pnpm run check:release-seed
 ```
@@ -218,20 +215,15 @@ placeholder. `@mj-biz-apps/sales-integration-tests` is the one in this repo.
 ## Version policy
 
 `fixed` versioning moves all five packages, `mj-app.json` and the git tag together, so there is one
-number to reason about.
+number to reason about. Which bump a change needs is in [`.changeset/README.md`](../.changeset/README.md).
+One part is enforced, not conventional: any change under `migrations/` needs at least a `minor`.
+The `migration changeset` check fails a PR into `next` that adds one with a patch changeset, and
+`rr: minor bump` fails the release PR.
 
-- **minor** — any change under `migrations/`. This is enforced, not conventional: `publish.yml`
-  fails a patch release that carries a new migration.
-- **patch** — code-only changes.
-- **major** — a breaking schema change. Read
-  [`PUBLISH_NO_BREAK_POLICY.md`](https://github.com/MemberJunction/MJ/blob/next/packages/OpenApp/PUBLISH_NO_BREAK_POLICY.md)
-  first: within a published major, only additive schema changes are allowed. The baseline
-  (`V202608042101`) was edited in place pre-publication; **that practice ends at the first
-  release** and its own header says so. From here, schema changes are new `V…` files.
+Schema changes are new `V…` files; the baseline (`V202608042101`) is not edited. Within a published
+major only additive schema changes are allowed — see MJ's
+[`PUBLISH_NO_BREAK_POLICY.md`](https://github.com/MemberJunction/MJ/blob/next/packages/OpenApp/PUBLISH_NO_BREAK_POLICY.md).
 
 The dependency ranges in `mj-app.json` are resolved against the sibling repos' published tags, not
-their `main` branches — `>=5.33.0 <6.0.0` for common, `>=1.2.0 <2.0.0` for tasks (the seed writes
-`TaskType.Code`, which arrives in 1.2.x), `>=5.1.0 <6.0.0` for orders, `>=0.2.0 <1.0.0` for
-accounting, `>=0.1.1 <1.0.0` for contracts. A range no published tag satisfies fails the install at
-resolution with `no published version at … satisfies`; two of these were in exactly that state
-before the first Open App release.
+their `main` branches. A range no published tag satisfies fails the install at resolution with
+`no published version at … satisfies`.

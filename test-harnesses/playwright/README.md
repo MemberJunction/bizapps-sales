@@ -1,163 +1,117 @@
 # playwright/ — Explorer GUI harness (bizapps-sales)
 
-Proves **create → read → update → delete of a Deal through the real MJ Explorer UI**, not through
-stored procedures or GraphQL. S1 already proved CRUD at both of those layers; neither proves the UI. A
-generated form can fail to render a field, a foreign-key lookup can fail to resolve, a save can
-silently no-op — and all three look identical to a passing API test.
+Drives the real MJ Explorer UI against a live host and, wherever the UI writes, reads the database
+rather than the screen. A generated form can fail to render a field, a lookup can fail to resolve, a
+save can silently no-op — and all three look identical to a passing API test.
 
 Re-runnable, self-cleaning, and it needs a human **once** (to log in) and never again.
+`COVERAGE-MAP.md` has one row per spec — what it drives, asserts and does not assert — and the latest
+measured run.
 
 ## Run it
 
 ```bash
-# from the repo root — servers must already be up (see below)
-npm run test:explorer:auth     # ONE TIME: headed, you complete the login. Saves .auth/user.json
-npm run test:explorer          # the CRUD run — no login, headed so you can watch
-PW_HEADLESS=1 npm run test:explorer      # unattended
-npm run test:explorer:report   # open the HTML report
+# from the repo root — the MJ host's MJAPI and MJExplorer must already be up
+pnpm run test:explorer:auth     # ONE TIME: headed, you complete the login. Saves .auth/user.json
+pnpm run test:explorer          # the suite — no login, headed so you can watch
+PW_HEADLESS=1 pnpm run test:explorer      # unattended
+pnpm run test:explorer:report   # open the HTML report
 ```
 
-The harness does **not** start servers. `lib/global-setup.ts` asserts they are reachable and fails with
-the exact fix command if not:
+The harness does **not** start servers. `docs/QA-GUIDE.md` §2 has their ports and how Explorer's
+identity provider is chosen. `lib/global-setup.ts` checks both servers are reachable before any test
+runs and fails with the fix if not.
 
-```bash
-# Sales ships no shells (apps/ was retired — an Open App runs inside an MJ host), so the servers
-# are the HOST's. From your MJ checkout, with bizapps-sales linked in:
-#   MJAPI      -> the port in the host's packages/MJAPI/.env  (4143 in the linking spike)
-#   MJExplorer -> MUST be 4341, the port the Entra redirect URI is registered for:
-#                 cd <MJ>/packages/MJExplorer && pnpm exec ng serve --port 4341
-# Full setup: docs/QA-GUIDE.md. The harness reads MJEXPLORER_URL / MJEXPLORER_PORT if you differ.
-```
+| Setting | Effect |
+|---|---|
+| `MJAPI_PORT` / `MJAPI_URL`, `MJEXPLORER_PORT` / `MJEXPLORER_URL` | Point at servers off the defaults in `lib/env.ts` |
+| `MJ_API_KEY` | Lets the preflight confirm MJAPI serves this app's metadata; the check is skipped without it |
+| `PW_HEADLESS=1` | Run the suite without a window |
+| `PW_FORCE_LOGIN=1` | Ignore the saved session and open a headed login — use it when a session has expired |
+| `PW_LOGIN_TIMEOUT_MS` | How long the login waits for a human (default 5 minutes) |
+| `PW_AUTH_ASSIST_PICK_ACCOUNT=1` | Clicks an account tile the identity provider already shows as signed in; types nothing |
+| `PW_SLOWMO=<ms>` | Pause between gestures so a person can follow the run |
+| `PW_WORKERS=<n>` | More than one worker; an experiment, see `run-suite.sh` |
+| `PW_NO_EPHEMERAL=1` | Use the signed-in user's saved Explorer workspace instead of a throwaway one |
+| `PW_PROBE=1` | Run the diagnostic probe specs `01`–`03` |
 
 ## Auth — how login works, and why it is the way it is
 
-**A human logs in once; the session is reused forever after.** The setup project opens a headed browser,
+**A human logs in once; the session is reused after that.** The setup project opens a headed browser,
 waits up to 5 minutes for the authenticated app shell to appear, and saves the browser session to
 `.auth/user.json`. It types nothing into the login form and stores no username or password.
 
-**`storageState` reuse works here because both MJ auth providers cache in `localStorage`** — verified in
-`@memberjunction/ng-auth-services/dist/lib/providers/mjexplorer-{msal,auth0}-provider.service.js`
-(`cacheLocation: 'localStorage'`). Once captured, `auth-setup` short-circuits: it is seeded with the
-saved state, detects "already authenticated", and exits in seconds without opening a window.
+**`storageState` reuse works here because MJ's MSAL and Auth0 providers cache in `localStorage`**
+(`cacheLocation` in `@memberjunction/ng-auth-services`). Once captured, `auth-setup` short-circuits: it is
+seeded with the saved state, detects "already authenticated", and exits in seconds without opening a
+window. An expired session is still a file on disk, so the setup then runs headless and waits for a
+login nobody can see; `PW_FORCE_LOGIN=1` replaces it.
 
 > **This is the opposite of the `bizapps-accounting` harness, deliberately.** That one authenticates
 > with an MJ magic-link token, which lives in **sessionStorage** — `storageState` cannot capture it, so
 > every one of its specs re-consumes the link. Same family, different auth mechanics, different correct
 > design. Do not "align" one with the other.
 
-### Which identity provider you get
+The harness is **provider-agnostic** — it waits for the app shell, not for a particular login form — so
+any provider works. Which one Explorer uses, and the redirect origin it needs, are in
+`docs/QA-GUIDE.md` §2.
 
-Angular's `ng serve` defaults to the **`development`** configuration, which swaps in
-`environment.development.ts` — and that file selects **Auth0** (`bluecypress-dev.us.auth0.com`), by
-design, for headless automation.
+## Navigation
 
-That tenant is the **"Headless Automation Test App"**: it has service accounts, **not** staff SSO, so
-normal `@bluecypress.io` credentials are rejected there. For a human-driven run use the `local_msal`
-configuration instead — it is `development` minus the environment-file replacement, so
-`environment.ts`'s `AUTH_TYPE: 'msal'` stays active and you authenticate against the real Blue Cypress
-tenant:
+The specs use two routes:
 
-```bash
-cd <MJ-checkout>/packages/MJExplorer && pnpm exec ng serve --port 4341
-```
+- **`/app/sales`** — the hand-built Deals section: Dashboard, All deals and Board on its left rail. A
+  deal opens as an Explorer record tab on the Deal form (`mjs-deal-form`); New deal opens an unsaved one.
+- **`/app/mjbizappssales`** — the CodeGen entity browser, one generated grid and form per entity. Specs
+  `00`–`04`, `10`, `20` and `30` drive it, and `40` reads its saved deal back there.
 
-The harness itself is **provider-agnostic** — it waits for the app shell, not for a particular login
-form — so either provider works.
-
-### Redirect URIs, and a trick worth reusing
-
-Both providers set their redirect from `window.location.origin`, so the port must be registered with the
-IdP. Probing the IdP directly answers that in seconds, with no login attempt burned:
-
-```bash
-# Auth0: an unregistered callback answers "Callback URL mismatch"
-curl -s "https://bluecypress-dev.us.auth0.com/authorize?client_id=<CID>&response_type=code&scope=openid&redirect_uri=http%3A%2F%2Flocalhost%3A4341"
-# Azure: an unregistered redirect answers AADSTS50011
-curl -s "https://login.microsoftonline.com/<TID>/oauth2/v2.0/authorize?client_id=<CID>&response_type=code&scope=openid&redirect_uri=http%3A%2F%2Flocalhost%3A4341"
-```
-
-Findings as of 2026-08-04: **Auth0 allows only ports 4200 and 4201.** **Azure allows any localhost
-port** (it has a documented localhost exception for public/SPA clients), which is why MSAL works on the
-plan's real 4341 with no IdP change at all.
-
-## Navigation — there is no hand-built UI yet, and none is needed
-
-This app ships no custom application or navigation until S3, but **CodeGen auto-creates one MJ
-Application per schema**, so the entities are fully reachable today:
-
-```
-/app/mjbizappssales     the generated Sales application
-  ↳ opens an entity grid automatically and collapses its left rail to icons
-  ↳ the "All" breadcrumb returns to the full entity list (19 entities)
-  ↳ each grid: (Default) view selector · filter box · Create · Export · view settings · ⋮ More actions
-  ↳ each record: a full generated form, Save Changes / Discard, and child-relationship sections
-```
-
-`specs/00-recon.spec.ts` re-derives all of this at runtime and prints it. Run it first when anything
-below stops matching — it is the map, and it is cheaper than guessing.
+`specs/00-recon.spec.ts` re-derives the route from the shell to an editable Deal at runtime and prints
+it. Run it first when anything below stops matching — it is the map, and it is cheaper than guessing.
 
 ## Files
 
 | Path | Role |
 |---|---|
-| `playwright.config.ts` | Two projects: `auth-setup` (headed, human login, once) and `crud` (reuses the session). Serial, 1 worker. |
+| `playwright.config.ts` | Two projects: `auth-setup` (headed, human login, once) and `crud` (every spec, reusing the session). One worker unless `PW_WORKERS` says otherwise. |
+| `auth.setup.ts` | One-time interactive auth capture, plus a recon dump to `.auth/recon.json`. |
 | `lib/env.ts` | Ports, URLs, entity names, the `PW-VERIFY` prefix, the seeded dev company. All env-overridable. |
 | `lib/global-setup.ts` | Preflight: servers reachable, MJAPI serving this app's metadata, plus a **pre-clean**. |
 | `lib/global-teardown.ts` | Unconditional cleanup, so a failed run never poisons the next one. |
-| `lib/cleanup.mjs` | FK-ordered SQL delete of every `PW-VERIFY*` row. Also runnable directly. |
+| `lib/cleanup.mjs` | FK-ordered SQL delete of every row named with a harness prefix (`PW-`, `TS-`, `BD-`, `AT-`, `CL-`, `RT-`), sparing the seeded `DEAL-90*` deals. Also runnable directly. |
+| `lib/test.ts` | The specs' `test`: each browser context gets a throwaway Explorer workspace, so a run never reads or writes the signed-in user's tabs. |
 | `lib/explorer.ts` | The console-error **keystone**, navigation, and the generated-form helpers. |
-| `lib/deal-form.ts` | Drives the Deal record form: fields by `data-field`, actions by `data-testid`, panels expanded before use. |
-| `lib/deal-flow.ts` | Compose, add lines, close, reopen and purge a deal through the Deal form. |
-| `auth.setup.ts` | One-time interactive auth capture + a recon dump. |
-| `specs/00-recon.spec.ts` | Living diagnostic: maps shell → app → entity → form. |
-| `specs/01-probe-form-dom.spec.ts` | Dumps form DOM around known labels (`PW_PROBE=1`). |
-| `specs/02-probe-delete-affordance.spec.ts` | Enumerates delete controls with geometry (`PW_PROBE=1`). |
-| `specs/10-deal-crud.spec.ts` | **The actual verification** — CRUD through the *generated* entity browser. |
-| `specs/40-deal-form.spec.ts` | Composes a deal across the Deal form's panels, adds priced lines, and reads it back through a **different** surface. |
-| `specs/41-deal-roundtrip.spec.ts` | **The related-record-collection round trip** — save, RE-OPEN, and prove the lines and dates came back; then remove a line and prove the removal survives another re-open. |
-| `specs/42-hero-short-window.spec.ts` | At a 1100 x 617 window (1920 x 1080 at 175%), the Deal header card shows all of its content after a save and in edit mode. |
-| `specs/50-sales-shell.spec.ts` | The section layout, the rail (no Workspace item), New deal opening the Deal form, and All-deals rows opening records. |
-| `specs/70-activity-timeline.spec.ts` | **NEVER RUN.** Logs an activity from the Deal form's Activity panel and asserts the `Activity` row, its `LoggedByUserID`, and the deal/account/contact links the `Sales.LogActivity` Action attaches. Plus: a refused log leaves no unreachable activity. |
-| `specs/80-board-drag.spec.ts` | **NEVER RUN.** Drags a card between stages and asserts the stage change, exactly one append-only event stamped with the DEPARTING probability and amount, and the order following the new stage. Plus: a drop onto a closing column is refused with a hint. |
+| `lib/deal-form.ts` | Drives the Deal record form: fields by `data-field`, actions by `data-testid`, panels expanded and sections revealed before use. |
+| `lib/deal-flow.ts` | Compose, add lines, close, reopen and purge a deal through the Deal form; `AssertBaseline` checks the seeded deals are untouched. |
+| `lib/db.ts` | Read-only database queries the specs assert against. |
+| `lib/mssql.d.ts` | Types for `mssql`, which ships none. |
+| `specs/` | 26 spec files. `COVERAGE-MAP.md` has one row per spec. |
+| `run-suite.sh` | Runs the suite in two phases: most specs at several workers, then the three that share seeded deals one at a time. Its header records that the split is not validated; one worker stays the default. |
+| `probe-cause3.mjs`, `probe-clear-recent.mjs`, `probe-recent-control.mjs` | One-off diagnostics from the August investigation of a deleted record that Explorer kept restoring. Not part of the suite. |
+| `package.json`, `tsconfig.json` | `type: module`, which Playwright needs to load `lib/env.ts`; and the typecheck-only config `test:spec-gate` uses. |
 
-### Two specs are written and have never been executed
+### Traps these specs have hit
 
-`70-activity-timeline` and `80-board-drag` cover the two newest surfaces in the tree, both of which had
-no spec at all. They were authored while Explorer and `MJ_V6_Host` were in use by another session, so
-**neither has run once** — not green, not red, not at all.
-
-That is recorded rather than hidden because an unrun spec and a passing spec look identical in a file
-listing, and the difference matters: **a spec that has never failed has never been shown to test
-anything.** Each file ends with a numbered list of mutations — the specific line to break and the
-assertion that must go red. The first thing the post-merge pass should do is work that list, THEN run
-them green. Doing it the other way round produces a green result with no evidence behind it, which is
-the state this harness exists to avoid.
-
-The precedent is in-repo: an integration check (`AC14`) spent a day asserting a defect, passing the
-whole time, because the fixture it drove reproduced the bug it was meant to catch. Only a mutation
-found it.
-
-### Three traps these specs have already hit
-
-None of them looks like a selector bug when it fires — all three read as data bugs, which is why they cost
+None of them looks like a selector bug when it fires — they read as data bugs, which is why they cost
 real time:
 
-1. **Every rail page stays in the DOM — hidden, not removed**, so the workspace's open documents survive a
-   page change. An unscoped `tr` / `.wl` locator therefore matches a HIDDEN roster row and fails on
-   visibility while the grid it meant to read is perfectly correct. Scope by page, or filter to `:visible`.
-2. **`innerText` cannot see an `<input>`'s value.** The workspace grids hold their data in inputs, so a
-   text assertion silently matches nothing but the `<select>` option labels. Read `inputValue()` instead —
-   `41-deal-roundtrip.spec.ts` has a `lineNames()` helper for exactly this.
-3. **The roster does not re-read after a save.** It loads its rows when the rail page mounts, so a deal
-   created in the same session is absent from it until the page is reloaded. A spec that saves and then
-   looks for its deal in the roster will fail in a way that reads exactly like a lost save. Reload first —
-   which is also the stronger test, since it discards all client state.
+1. **Pages and record tabs are hidden, not removed.** The Sales section keeps every rail page in the DOM
+   with `[hidden]`, and Explorer keeps every open record tab's form. The dashboard's Inspect card and All
+   deals are both `mj-entity-viewer`, so scope a locator to its page (`.wrap--list`, `.wrap--dashboard`,
+   as `50-sales-shell` does) and to the visible record (the hidden-tab rule below).
+2. **The Deal form shows one section at a time.** `OpenSection` expands a panel but does not move the
+   form's section rail, so a `:visible` locator for a control in another section finds nothing and the
+   failure reads like missing data. Call `RevealInForm` (`lib/deal-form.ts`) first.
+3. **A related grid loads only while its section is open.** The Internal team grid binds its loading to
+   the section being expanded, so after `OpenSection` alone it holds zero rows.
+   `76-team-roster-owner-stamp` opens the section through the form's rail button for that reason.
+4. **Angular bindings do not always reach the DOM.** A `<select>` bound with `[ngValue]` writes option
+   values as `"<index>: <value>"`, so an empty choice reads `"0: null"`, which is truthy; `74` pulls the
+   GUID out with a pattern. A radio's `[value]` binding never reaches `input.value`, which reads `"on"`;
+   the Close panel adds `data-status-id` for that reason (`60`).
 
-**Both specs leave their deals behind on purpose** (tagged `PW-…` / `RT-…`, unique per run) and only
-`PW-VERIFY*` rows are auto-cleaned. Re-running them repeatedly during debugging accumulates deals, and
-enough of them push a newly created one off the first page of the Deals grid — at which point the
-read-back assertion in `40` fails for a reason that has nothing to do with the code. Each spec's header
-carries the SQL to clear its own rows.
+Specs remove the rows they create in `afterAll`, by their own run tag, and `lib/cleanup.mjs` sweeps
+every harness prefix before and after a run. `70-lifecycle`, `71`, `78`, `80-cross-company-products`
+and `82` also check that the seeded deals are untouched (`AssertBaseline`).
 
 `.auth/`, `artifacts/`, `playwright-report/` and `test-results/` are all gitignored.
 **`.auth/user.json` is a live bearer token for a real account — never commit it.**
@@ -165,14 +119,16 @@ carries the SQL to clear its own rows.
 ## The keystone
 
 A UI that renders but logs a console error is broken in a way presence assertions cannot see, so every
-run captures `console.error` + `pageerror` and asserts the list is empty. Create/read/update are held to
-a **zero-error** standard; the delete steps tolerate exactly one documented error (below) and fail on
-anything else.
+run captures `console.error` + `pageerror` and asserts the list is empty. Two scoped lists in
+`lib/explorer.ts` each tolerate one documented shape and nothing else: `KNOWN_POST_DELETE_ERRORS` for
+the delete steps (finding 2 below), and `KNOWN_DEAD_RECORD_RESTORE_ERRORS` for Explorer restoring a
+record that has since been deleted.
 
-The allowlist in `lib/explorer.ts` is deliberately tiny. Two entries earn their place — the Font Awesome
-kit's 403 on localhost, and MSAL's 404 for a user with no Graph profile photo. A 404 on a *static asset*
-is noise; a 404 on anything else stays a real signal, because a blanket 404 filter would mask genuine
-backend failures.
+The global allowlist in `lib/explorer.ts` is deliberately tight. Four entries earn their place — the data
+provider's `MISSING FIELDS` notice for IsA children, an Angular `NG0100` scoped to MJ core's home-page
+widget, the Font Awesome kit's 403 on localhost, and MSAL's 404 for a user with no Graph profile photo.
+A 404 on a *static asset* is noise; a 404 on anything else stays a real signal, because a blanket 404
+filter would mask genuine backend failures.
 
 ## Findings from building this
 
@@ -184,9 +140,9 @@ Things the harness surfaced that are worth knowing, and are not bugs in this app
    `Error in BaseEntity.Load(MJ_BizApps_Sales: Deals, Key: ID=…)`. MJ Explorer's tab manager re-Loads
    the now-deleted record. Reproducible for every entity; the delete itself succeeds. An MJ-core
    tab-lifecycle concern — scoped in `KNOWN_POST_DELETE_ERRORS` rather than globally ignored.
-3. **The generated grid has no Delete control**, even with a row selected, and the `⋮ More actions`
-   overflow does not add one. Deletion is a **record-level** action: `button[title="Delete this Record"]`
-   on the open record, then a "Confirm Deletion" dialog.
+3. **The generated grid has no Delete control**, even with a row selected. Deletion is a
+   **record-level** action: open the record, then `button[title="Delete this Record"]` — behind the
+   record toolbar's "More actions" unless the user pinned it — then a "Confirm Deletion" dialog.
 4. **There are two "Delete" buttons in the DOM.** One is a hidden, pre-rendered confirmation button that
    still reports a non-zero bounding box — so "visible and sized" heuristics accept it and the click
    then times out. The real one carries a trash icon; the harness discriminates on that.
@@ -199,20 +155,30 @@ Things the harness surfaced that are worth knowing, and are not bugs in this app
    `enterEditMode`.
 7. **Soft cross-app references surface as raw UUID text boxes** — `Currency ID`, `Campaign ID`,
    `Contract ID`, `Renews Contract ID` — because they carry no FK (DG-6), so CodeGen cannot offer a
-   lookup. Correct for S1, and a real UX item for S3 to address.
+   lookup.
 8. **`MRR`/`ARR` render as "Mrr"/"Arr".** CodeGen's PascalCase word-splitting does not know they are
    acronyms. Cosmetic; fixable with a `DisplayName` in entity-field metadata.
 
 ## A killed mutation run leaves the mutant behind — `git status` before trusting a clean tree
 
 `test-harnesses/mutate-checks.mjs` copies a source file aside, edits it, builds, runs the suite, and
-restores from the copy in a `finally`. Kill the process between the edit and the restore — a Ctrl-C, a
-session ending — and **the mutation stays in the working tree and in `dist/`**.
+restores from the copy in a `finally`. Kill the process between the edit and the restore and **the
+mutation stays in the working tree and in `dist/`**.
 
 It has happened three times. Each looked like a puzzling test failure rather than a stranded edit,
 because `git diff` on a file nobody remembers touching is not where anyone looks first.
 
-So, after any interrupted run:
+**The driver now cleans up after itself** (`test-harnesses/mutation-run.mjs`). Ctrl-C, SIGTERM, closing
+the terminal or Ctrl-Break kills the build/suite's process tree, restores the source and rebuilds; a
+second Ctrl-C skips the rebuild. A kill no handler sees (SIGKILL, or a Windows console window closed
+before the rebuild finishes) is repaired by the **next** run, which restores and rebuilds before
+measuring anything. A marker that cannot be read, or that names paths outside the run's own files,
+stops the start with instructions instead of being acted on.
+
+**`.mutate-checks.run.json` at the repo root means a run may have a mutant applied.** It names the PID
+that owns it. If that PID is alive, the run is live: leave the tree alone (the driver itself refuses to
+start). If it is dead, start the driver again and it recovers. The steps below are only for when
+recovery reports that the backup is gone:
 
 ```bash
 git status --porcelain          # a modified source file you did not edit IS the mutant
@@ -399,17 +365,14 @@ page.locator('button[title="Delete this Record"]:visible').first()   // CSS pseu
 page.getByText(DEAL_NAME).filter({ visible: true }).first()          // filter, for getByText/getByRole
 ```
 
-This is not a style preference. It has cost real time four separate ways, and every one of them looked
+This is not a style preference. It has cost real time three separate ways, and every one of them looked
 like a product defect:
 
 - **`fieldLabelVisible`** matched the DEAL form's hidden `Name` input while a "New Deals Record" tab was
   still open, and asserted against the wrong form's value.
 - **`deleteRecordViaRecordView`** resolved `button[title="Delete this Record"]` **36 times, every one
   `hidden`**, and failed with *"the record view must expose Delete this Record"* — about a record view
-  that exposes it perfectly well. **The delete step never executed once**, so deletion through the UI went
-  unexercised by this suite for its entire life.
-- **`40-deal-workspace`'s row locator** resolved to a hidden ROSTER row instead of the entity-browser
-  grid, timing-dependent on whether the roster had loaded that deal — the worst kind of failure to read.
+  that exposes it perfectly well. Until the locator was scoped, the delete step never executed.
 - **A reload wait** written *while fixing the delete locator* made the identical mistake one step later:
   a bare `getByText(DEAL_NAME).first()` matched a hidden tab's copy and waited 30s for something that
   could never become visible.

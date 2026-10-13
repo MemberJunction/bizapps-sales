@@ -36,10 +36,11 @@ import { RegisterClass } from '@memberjunction/global';
  * ORDERS' OWN PREDICATE, imported rather than restated -- the same reason
  * `DealEntityServer` imports `CanTransition` from this module.
  *
- * `IsBooked` is `Confirmed | Posted | Fulfilled`, and orders documents it as "journal entries
- * exist and the receivable is real". Writing `status === 'Confirmed'` here instead would be a
- * vocabulary string-comparison against ANOTHER APP'S words -- exactly what the vocabulary gate
- * exists to catch -- and it would also be wrong twice over. See the refusal below.
+ * Orders documents `IsBooked` as "journal entries exist and the receivable is real". Its body is
+ * orders' business: today it is `status === 'Confirmed'`, since orders collapsed its lifecycle to
+ * Draft, Quoted, Confirmed and Voided. Writing that comparison here instead would be a vocabulary
+ * string-comparison against ANOTHER APP'S words -- exactly what the vocabulary gate exists to catch
+ * -- and would go stale the next time orders changes what "booked" means. See the refusal below.
  */
 import { IsBooked } from '@mj-biz-apps/orders-entities';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
@@ -64,6 +65,12 @@ import { DealEntityServer } from './DealEntityServer.js';
 import { OrdersIsInstalled } from './orders-availability.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
 import { CloseWonTaskDueAt, CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
+import {
+    AnswerAsNextTerm,
+    FindUnansweredSubscriptionLines,
+    SubscriptionChoiceIssue,
+    type UnansweredSubscriptionLine,
+} from './subscription-choice.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
@@ -99,6 +106,8 @@ interface CloseValidation {
     Issues: SalesCloseIssue[];
     /** The reason's name for the close event's note, or null when this close is not a loss. */
     LossReasonName: string | null;
+    /** A renewal deal's unanswered held-product lines, answered `ExtendExisting` inside the close. */
+    RenewalNextTerm: UnansweredSubscriptionLine[];
 }
 
 /** Defaults applied when a pipeline's policy is silent on a key. */
@@ -453,6 +462,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             await db.BeginTransaction();
             transactionOpen = true;
 
+            // Before the deal's save, which is what confirms the order and applies the answer.
+            await AnswerAsNextTerm(validation.RenewalNextTerm);
+
             for (const plan of routing) {
                 await this.execute(plan, deal, policy, provider, user);
             }
@@ -502,6 +514,31 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             // The save appended the close's `DealStageEvent` — one row, whether or not the stage moved.
             // Read AFTER it for the same reason `OrderID` is: the row does not exist until then.
             const stageEvent = deal.LastStageEventID;
+
+            /**
+             * TIE THE ORDER TO THE CONTRACT (contracts#77). Both exist by now: the routing loop stamped
+             * `ContractID`, and the order is the deal's own. Contracts copies the contract's renewal terms
+             * (annual increase, whether a discount continues) to the subscriptions that order creates, so
+             * the renewal pass in Orders prices from the paper rather than from hand-entered values.
+             *
+             * A warning, not a failure: the deal closed and both records are right. A missing link only
+             * means the terms have to be set on the subscriptions by hand.
+             */
+            const linkIssues: SalesCloseIssue[] = [];
+            if (target.IsWon && deal.ContractID && deal.OrderID) {
+                const link = await resolveSeam(user, provider).LinkOrderToContract({
+                    ContractID: deal.ContractID,
+                    OrderID: String(deal.OrderID),
+                });
+                if (!link.Success) {
+                    linkIssues.push({
+                        Section: 'deal',
+                        Field: null,
+                        Severity: 'warning',
+                        Message: link.Message ?? 'The order was not linked to the contract.',
+                    });
+                }
+            }
 
             /**
              * ── THE TASKS RUN **AFTER** THE SAVE, AND THAT IS THE FIX RATHER THAN A TIDY-UP ──────────
@@ -607,7 +644,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  * written inside `deal.Save()` a few lines further down. So a reader of the array reads
                  * the close in sequence, which is the only ordering that means anything here.
                  */
-                Issues: [...taskIssues, ...orderStatusIssues(deal), ...routingIssues(routing, false)],
+                Issues: [...taskIssues, ...linkIssues, ...orderStatusIssues(deal), ...routingIssues(routing, false)],
                 IsWon: target.IsWon,
                 IsLost: target.IsLost,
                 Locked: target.LocksDeal,
@@ -687,7 +724,36 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             issues.push(issue('party', 'A won deal must be attached to a customer.', 'AccountID'));
         }
 
-        return { Issues: issues, LossReasonName: lossReasonName };
+        const choice = target.IsWon
+            ? await this.subscriptionChoice(deal, provider, user)
+            : { Issues: [], RenewalNextTerm: [] };
+        issues.push(...choice.Issues);
+
+        return { Issues: issues, LossReasonName: lossReasonName, RenewalNextTerm: choice.RenewalNextTerm };
+    }
+
+    /**
+     * Lines for a product the customer already holds that have not said whether they extend it
+     * (golive #318). Refused on an ordinary deal; on a renewal deal they are the next term by
+     * definition, so they are answered that way inside the close instead. See `subscription-choice.ts`
+     * for why this cannot be left to orders' confirm.
+     */
+    private async subscriptionChoice(
+        deal: DealEntityServer,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<{ Issues: SalesCloseIssue[]; RenewalNextTerm: UnansweredSubscriptionLine[] }> {
+        if (!OrdersIsInstalled()) {
+            return { Issues: [], RenewalNextTerm: [] };
+        }
+        const unanswered = await FindUnansweredSubscriptionLines(deal, provider as unknown as IRunViewProvider, user);
+        if (unanswered.length === 0) {
+            return { Issues: [], RenewalNextTerm: [] };
+        }
+        if (await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user)) {
+            return { Issues: [], RenewalNextTerm: unanswered };
+        }
+        return { Issues: unanswered.map(SubscriptionChoiceIssue), RenewalNextTerm: [] };
     }
 
     /* ── Policy (§7.1) ──────────────────────────────────────────────────────── */
@@ -1206,22 +1272,20 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              *
              * ── WHY `IsBooked` AND NOT THE TWO OBVIOUS TESTS ────────────────────────────────────
              *
-             * Both alternatives are wrong, in opposite directions, and the data on the host showed it:
-             *
-             *   `Status === 'Confirmed'` UNDER-blocks. The lifecycle runs on to `Posted` and then
-             *   `Fulfilled`, so an equality test lets through precisely the orders whose ledger has
-             *   moved FURTHEST. It is also a string comparison against orders' vocabulary, which is the
-             *   shape rule two forbids.
+             *   `Status === 'Confirmed'` gives the same answer today, because orders' `IsBooked` is
+             *   exactly that comparison. Written here it is a string comparison against orders'
+             *   vocabulary, which is the shape rule two forbids, and it would not follow orders the
+             *   next time its lifecycle changes (it once ran on to `Posted` and `Fulfilled`).
              *
              *   `ConfirmedAt IS NOT NULL` OVER-blocks. That column is a timestamp, and an order that was
              *   confirmed and later VOIDED keeps it forever. Refusing there would block the one case
              *   where the ledger has been SETTLED: orders records a reversal as its own record (D53), so
              *   a voided order is not a live receivable and the deal behind it is safe to reopen.
              *
-             * `IsBooked` is the only one of the three that means "the ledger currently stands", and it
-             * gives the confirmed-then-voided case the right answer for free -- `IsBooked('Voided')` is
-             * false. The two directions are the point: a later "simplification" to
-             * `status === 'Confirmed'` breaks both, and `close-deal.CD23` exists to catch that.
+             * `IsBooked` is orders' own answer to "does the ledger currently stand", and it gives the
+             * confirmed-then-voided case the right answer for free -- `IsBooked('Voided')` is false.
+             * `close-deal.CD24` pins both halves: a booked order refuses the reopen, and a
+             * confirmed-then-voided one does not.
              *
              * ── WHAT IT SAYS, AND WHAT IT DELIBERATELY DOES NOT ─────────────────────────────────
              *

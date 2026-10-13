@@ -29,7 +29,7 @@ import {
 import type { SalesCloseDealOutput, mjBizAppsSalesPipelineEntity } from '@mj-biz-apps/sales-entities';
 import type { mjBizAppsTasksTaskTypeEntity } from '@mj-biz-apps/tasks-entities';
 
-import { InRolledBackTransaction, ProviderOf, TxOne } from '../fixture.js';
+import { InRolledBackTransaction, ProviderOf, TxOne, type SalesCheck } from '../fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -255,7 +255,7 @@ async function closeWonOnContractPipeline(
     return { dealID, out: out!, contractID: stamped.ContractID };
 }
 
-export const CloseWonTasksChecks: NamedCheck[] = [
+export const CloseWonTasksChecks: SalesCheck[] = [
     {
         Id: 'close-won-tasks.WT1',
         Name: 'WT1: an order-review task is created, typed as asked, and linked to the ORDER',
@@ -632,6 +632,8 @@ export const CloseWonTasksChecks: NamedCheck[] = [
         Id: 'close-won-tasks.WT10',
         Name: 'WT10: closing a deal as WON raises the tasks through Sales.CloseDeal, end to end',
         RequiresMutation: true,
+        // Closes onto a contract-creating pipeline, so it needs contracts installed, not only tasks.
+        RequiresApp: 'contracts',
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 /**
@@ -948,6 +950,8 @@ export const CloseWonTasksChecks: NamedCheck[] = [
         Id: 'close-won-tasks.WT14',
         Name: 'WT14: the contract-processing task links the CONTRACT, not the deal',
         RequiresMutation: true,
+        // Closes onto a contract-creating pipeline, so it needs contracts installed, not only tasks.
+        RequiresApp: 'contracts',
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 /**

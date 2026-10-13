@@ -64,6 +64,15 @@
  * save refuses a flagged line without one. The picker's list, its default and the figures beside it
  * all come from orders; this file only passes them through.
  *
+ * ── A DISCOUNT IS RECORDED AS A CONCESSION (golive#305) ─────────────────────────────────────────
+ *
+ * Discount % writes `OrderLine.DiscountPct`, and orders' confirm gate holds the order until an
+ * Approved Price concession covers it. So a discount that goes UP asks for a reason here, and once
+ * the order has saved the line, the reason is recorded as that concession. Orders values it and
+ * decides it: inside the rep's Sales Authority it is Approved on save, outside it the rep is told the
+ * order waits for approval. A failure to record it does not undo the saved line; the rep is told the
+ * confirm will be held until one is recorded.
+ *
  * @module @mj-biz-apps/sales-ng
  */
 import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
@@ -72,6 +81,7 @@ import { Metadata } from '@memberjunction/core';
 import { FormsModule } from '@angular/forms';
 import {
     AsDateValue,
+    HoldingSubscriberFor,
     IsLinePriceOverridden,
     LineNeedsOverrideReason,
     ListApplicablePrices,
@@ -85,16 +95,25 @@ import {
     type PriceOverrideKind,
     type mjBizAppsOrdersOrderLineEntity as OrderLineEntity,
 } from '@mj-biz-apps/orders-entities';
-import { MJOLinePricePickerComponent } from '@mj-biz-apps/orders-ng';
+import {
+    ContinuationStartFrom,
+    GetExistingHolding,
+    MJOLinePricePickerComponent,
+    type MJOExistingHolding,
+} from '@mj-biz-apps/orders-ng';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountFractionToPercent,
+    DiscountNeedsConcession,
     DiscountPercentToFraction,
+    DiscountReasonCategories,
     EffectiveTermStart,
     HasExplicitTermStart as StoresOwnTermStart,
     ResolveDealLockState,
     RoundDiscountPercent,
+    RecordDiscountConcession,
     ShouldOfferTermStart,
+    type DiscountReasonCategory,
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
@@ -216,6 +235,34 @@ interface RemoteOperationRouter {
                         </label>
                     </div>
 
+                    <!-- A RAISED DISCOUNT IS A CONCESSION, and orders will not confirm the order
+                         until one is approved. The reason is asked for here so it can be recorded
+                         the moment the line is saved. -->
+                    @if (NeedsDiscountReason) {
+                        <div class="mjs-le__row">
+                            <label class="mjs-le__field">
+                                <span class="mjs-le__label">Discount reason category</span>
+                                <select data-testid="line-discount-category" [(ngModel)]="DiscountCategory"
+                                        [disabled]="IsLocked">
+                                    <option [ngValue]="null" disabled>Choose one</option>
+                                    @for (c of ReasonCategories; track c) {
+                                        <option [ngValue]="c">{{ c }}</option>
+                                    }
+                                </select>
+                            </label>
+                            <label class="mjs-le__field">
+                                <span class="mjs-le__label">Discount reason</span>
+                                <textarea data-testid="line-discount-reason" rows="2" [(ngModel)]="DiscountReason"
+                                          [disabled]="IsLocked"
+                                          placeholder="Why value is given away on this line"></textarea>
+                            </label>
+                        </div>
+                        <small class="mjs-le__hint">
+                            Inside your Sales Authority the discount is approved when you save. Outside it, the
+                            order cannot be confirmed until an approver approves it.
+                        </small>
+                    }
+
                     @if (ShowPricePicker) {
                         <div class="mjs-le__field">
                             <span class="mjs-le__label">Price</span>
@@ -246,6 +293,46 @@ interface RemoteOperationRouter {
                         </label>
                     }
 
+                    <!-- The customer already holds this product (golive #318): the same question the
+                         order line asks. Unanswered, Close Won refuses the deal, except on a renewal
+                         deal, which adds the line as the next term. -->
+                    @if (Holding; as holding) {
+                        <div class="mjs-le__field" role="group" data-testid="line-subscription-choice"
+                             [attr.aria-label]="'Existing subscription ' + holding.SubscriptionNumber">
+                            <span class="mjs-le__label">Existing subscription</span>
+                            <span class="mjs-le__muted">
+                                The customer already holds {{ holding.SubscriptionNumber }} for this product
+                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd }}) }.
+                            </span>
+                            <div class="mjs-le__choices">
+                                <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-extend"
+                                        [class.is-selected]="Working.SubscriptionAction === 'ExtendExisting'"
+                                        [attr.aria-pressed]="Working.SubscriptionAction === 'ExtendExisting'"
+                                        [disabled]="IsLocked" [title]="BlockedReason"
+                                        (click)="SetSubscriptionAction('ExtendExisting')">
+                                    Add as next term
+                                    @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart }}) }
+                                </button>
+                                <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-new"
+                                        [class.is-selected]="Working.SubscriptionAction === 'CreateNew'"
+                                        [attr.aria-pressed]="Working.SubscriptionAction === 'CreateNew'"
+                                        [disabled]="IsLocked" [title]="BlockedReason"
+                                        (click)="SetSubscriptionAction('CreateNew')">
+                                    New subscription (keeps this line's dates)
+                                </button>
+                            </div>
+                            <small class="mjs-le__hint" [class.mjs-le__error]="!Working.SubscriptionAction">
+                                @if (Working.SubscriptionAction === 'CreateNew') {
+                                    Starts a separate subscription on this line's term start.
+                                } @else if (Working.SubscriptionAction === 'ExtendExisting') {
+                                    Adds a term to {{ holding.SubscriptionNumber }}, starting the day after its coverage ends.
+                                } @else {
+                                    Not chosen. Close Won asks for this, unless the deal is a renewal, which adds it as the next term.
+                                }
+                            </small>
+                        </div>
+                    }
+
                     <!-- PRICED BY ORDERS, NEVER ENTERED HERE. This is the whole point of the issue:
                          sales states intent, orders states price. -->
                     <div class="mjs-le__readonly">
@@ -271,8 +358,15 @@ interface RemoteOperationRouter {
                     @if (Error) { <p class="mjs-le__error">{{ Error }}</p> }
                 </div>
 
+                @if (Notice) { <p class="mjs-le__notice" data-testid="line-notice">{{ Notice }}</p> }
+
                 <!-- Confirm LEFT, cancel RIGHT (CLAUDE.md). -->
                 <footer class="mjs-le__foot">
+                    @if (Notice) {
+                        <!-- The line is saved; the rep has read what happens next. -->
+                        <button type="button" class="mjs-le__btn mjs-le__btn--primary" data-testid="line-done"
+                                (click)="Saved.emit()">Done</button>
+                    } @else {
                     <button type="button" class="mjs-le__btn mjs-le__btn--primary" data-testid="line-save"
                             [disabled]="!CanSave || Saving" (click)="Save()">
                         {{ Saving ? 'Saving…' : 'Save' }}
@@ -280,6 +374,7 @@ interface RemoteOperationRouter {
                     <button type="button" class="mjs-le__btn" [disabled]="Saving" (click)="Cancel()">Cancel</button>
                     @if (!CanSave && !Saving) {
                         <span class="mjs-le__muted">{{ BlockedReason }}</span>
+                    }
                     }
                     <!--
                          REMOVE SITS APART FROM THE PAIR ABOVE, pushed right by its own margin. Confirm
@@ -338,11 +433,16 @@ interface RemoteOperationRouter {
         .mjs-le__row { display: flex; gap: var(--mj-space-4); flex-wrap: wrap; }
         .mjs-le__row > .mjs-le__field { flex: 1 1 180px; }
         .mjs-le__field { display: flex; flex-direction: column; gap: 4px; }
+        .mjs-le__notice {
+            margin: 0 var(--mj-space-5) var(--mj-space-3); padding: var(--mj-space-3);
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md, 8px);
+            background: var(--mj-bg-surface-sunken);
+        }
         .mjs-le__label {
             font-size: var(--mj-text-xs); text-transform: uppercase; letter-spacing: .04em;
             color: var(--mj-text-muted); font-weight: 700;
         }
-        .mjs-le__field input, .mjs-le__field select {
+        .mjs-le__field input, .mjs-le__field select, .mjs-le__field textarea {
             padding: 8px 10px; border: 1px solid var(--mj-border-default);
             border-radius: var(--mj-radius-md, 8px); background: var(--mj-bg-surface);
             color: var(--mj-text-default); font: inherit; width: 100%;
@@ -378,6 +478,10 @@ interface RemoteOperationRouter {
             background: var(--mj-status-error, #b3261e); color: #fff; border-color: transparent;
         }
         .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+        .mjs-le__choices { display: flex; gap: var(--mj-space-2, 8px); flex-wrap: wrap; }
+        .mjs-le__choice.is-selected {
+            border-color: var(--mj-color-primary, #1268cf); color: var(--mj-color-primary, #1268cf);
+        }
         @media (max-width: 480px) {
             .mjs-le__row { flex-direction: column; }
         }
@@ -428,6 +532,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     /** The rules' answer for this line, from the last `Orders.PriceOrder`. Undefined until one reports it. */
     public EngineDefault: LineEngineDefault | null | undefined = undefined;
     public Working: OrderLineEntity | null = null;
+    /** The live subscription the line's customer already holds for its product, or null. */
+    public Holding: MJOExistingHolding | null = null;
     public Loading = true;
     public Saving = false;
     public Error: string | null = null;
@@ -435,6 +541,14 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     public DiscountRefusal: string | null = null;
     /** Whether this dialog created the line, so cancelling must take it back off the collection. */
     private IsNewLine = false;
+
+    /** The `DiscountPct` the line carried when it was last saved — what a raise is measured from. */
+    private savedDiscountPct: number | null = null;
+    private reasonCategories: DiscountReasonCategory[] | null = null;
+    public DiscountCategory: DiscountReasonCategory | null = null;
+    public DiscountReason = '';
+    /** What the rep must know after a save that recorded, or failed to record, a concession. */
+    public Notice: string | null = null;
 
     public get Title(): string { return this.LineID ? 'Edit line' : 'Add a product'; }
 
@@ -527,6 +641,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                 // legal value rather than at the one the database refuses.
                 this.Working.Quantity = 1;
             }
+            this.savedDiscountPct = this.Working.DiscountPct ?? null;
+            void this.refreshHolding();
             if (this.ShowPricePicker) {
                 // The picker's Default row needs orders' answer before anything is changed, and its list
                 // needs the applicable prices; a saved line otherwise opens with Default disabled.
@@ -607,10 +723,12 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (product) {
             this.Working.CompanyID = product.CompanyID;
         }
-        // The previous product's default and named prices say nothing about this one.
+        // The previous product's default, named prices and subscription answer say nothing about this one.
         this.EngineDefault = undefined;
         this.Applicable = [];
+        this.Working.SubscriptionAction = null;
         void this.refreshApplicable();
+        void this.refreshHolding();
         this.cdr.detectChanges();
     }
 
@@ -736,6 +854,43 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (!this.Working) return;
         // An emptied control means "use the order date", which is NULL in the column -- not the epoch.
         this.Working.ServicePeriodStart = value ? new Date(`${value}T00:00:00Z`) : null;
+    }
+
+    /* ── The customer already holds this product (golive #318) ─────────────────────── */
+
+    /**
+     * The subscription this line would extend at confirm, read with orders' rule so the deal and the
+     * order screen ask about the same lines. Renewal lines and one-time products are not asked. A failed
+     * read hides the question; Close Won still asks, because it reads the same rule on the server.
+     */
+    private async refreshHolding(): Promise<void> {
+        const line = this.Working;
+        const subscriber = line ? HoldingSubscriberFor(line, this.Deal?.OrderID_Object ?? null) : null;
+        if (!line?.ProductID || line.RenewsSubscriptionID || !this.SelectedProduct?.SubscriptionTypeID || !subscriber) {
+            this.Holding = null;
+            this.cdr.detectChanges();
+            return;
+        }
+        const productID = String(line.ProductID);
+        const holding = await GetExistingHolding(productID, subscriber.OrganizationID, subscriber.PersonID);
+        // A reply for a product the rep has since moved off is dropped rather than shown.
+        if (this.Working?.ProductID === productID) this.Holding = holding;
+        this.cdr.detectChanges();
+    }
+
+    /** Where the existing coverage ends, for the prompt. */
+    public get HoldingCoverageEnd(): string | null {
+        return toDateInput(this.Holding?.LatestTermEnd ?? null);
+    }
+
+    /** The start an extension would get: the day after the existing coverage ends. */
+    public get HoldingContinuationStart(): string | null {
+        return toDateInput(ContinuationStartFrom(this.Holding));
+    }
+
+    public SetSubscriptionAction(action: 'ExtendExisting' | 'CreateNew'): void {
+        if (this.IsLocked || !this.Working) return;
+        this.Working.SubscriptionAction = action;
     }
 
     public Money(n: number | null | undefined): string {
@@ -904,8 +1059,24 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             !!this.Working?.ProductID &&
             !this.DiscountRefusal &&
             !!this.Deal?.OrderID_Object &&
-            !LineNeedsOverrideReason(this.Working, this.EngineDefault)
+            !LineNeedsOverrideReason(this.Working, this.EngineDefault) &&
+            !this.MissingDiscountReason
         );
+    }
+
+    /** Whether the discount went up since the line was saved, so it needs a concession behind it. */
+    public get NeedsDiscountReason(): boolean {
+        return !!this.Working && DiscountNeedsConcession(this.savedDiscountPct, this.Working.DiscountPct);
+    }
+
+    /** Orders' concession reason categories, read from its entity metadata when first shown. */
+    public get ReasonCategories(): DiscountReasonCategory[] {
+        this.reasonCategories ??= DiscountReasonCategories();
+        return this.reasonCategories;
+    }
+
+    private get MissingDiscountReason(): boolean {
+        return this.NeedsDiscountReason && (!this.DiscountCategory || !this.DiscountReason.trim());
     }
 
     /**
@@ -925,6 +1096,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
         if (LineNeedsOverrideReason(this.Working, this.EngineDefault)) return 'Enter a reason for the price override.';
+        if (this.MissingDiscountReason) return 'Choose a category and enter a reason for the discount.';
         return this.DiscountRefusal ?? '';
     }
 
@@ -936,7 +1108,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
      * golive#206 item 1 names deleting alongside adding and editing.
      */
     public get CanRemove(): boolean {
-        return !!this.LineID && !this.IsLocked && !!this.Deal?.OrderID_Object;
+        return !!this.LineID && !this.IsLocked && !!this.Deal?.OrderID_Object && !this.Notice;
     }
 
     /** Two-step, because removing a product a rep meant to keep costs them a re-entry. */
@@ -1018,6 +1190,12 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                 return;
             }
             this.IsNewLine = false;
+            const notice = await this.recordDiscountConcession();
+            if (notice) {
+                // The line IS saved. Hold the dialog open on what happens next; Done reports the save.
+                this.Notice = notice;
+                return;
+            }
             this.Saved.emit();
         } catch (err) {
             this.Error = err instanceof Error ? err.message : String(err);
@@ -1025,6 +1203,34 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             this.Saving = false;
             this.cdr.detectChanges();
         }
+    }
+
+    /**
+     * Records a raised discount as the Price concession orders' confirm gate holds on. Runs after the
+     * order's save, because a concession names a persisted line and orders values it from what that
+     * line stores. Returns what the rep must be told, or null when the discount was approved.
+     */
+    private async recordDiscountConcession(): Promise<string | null> {
+        if (!this.Working || !this.NeedsDiscountReason || !this.DiscountCategory) return null;
+        const outcome = await RecordDiscountConcession({
+            OrderLineID: this.Working.ID,
+            ReasonCategory: this.DiscountCategory,
+            Reason: this.DiscountReason,
+        });
+        this.savedDiscountPct = this.Working.DiscountPct ?? null;
+        if (!outcome.Recorded) {
+            return (
+                `The line is saved, but its discount could not be recorded for approval: ${outcome.Message} ` +
+                `The order cannot be confirmed until a concession covering the discount is approved.`
+            );
+        }
+        if (outcome.AwaitingApproval) {
+            return (
+                'The line is saved. Its discount is outside your Sales Authority and is waiting for approval; ' +
+                'the order cannot be confirmed until it is approved.'
+            );
+        }
+        return null;
     }
 
     /**

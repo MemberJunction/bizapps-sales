@@ -60,16 +60,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Node 24 rather than the sibling repo's 22: this is the version the lockfile was produced with
       # (npm 11 / Node 24) and the version the build is actually developed against. Matching it keeps CI
       # resolving the same tree a developer gets.
       # Must precede setup-node: `cache: 'pnpm'` needs pnpm already on PATH. Version comes from
       # package.json's `packageManager: pnpm@10.33.0`, so CI and every developer resolve one pnpm.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: pnpm
@@ -150,18 +150,19 @@ jobs:
       - name: Harness selector gate (the harness only targets markup the app renders)
         run: npm run test:selector-gate
 
-      # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
-      # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a
-      # permanent red X asserting nothing. Guarded rather than omitted, so the first real test file
-      # switches this on with no workflow edit.
-      - name: Unit tests (if any exist)
-        run: |
-          if find packages -path '*/src/*' \( -name '*.test.ts' -o -name '*.spec.ts' \) -print -quit | grep -q .; then
-            echo "Test files found — running vitest."
-            npx vitest run
-          else
-            echo "::notice title=No unit tests yet::No *.test.ts / *.spec.ts under packages/*/src. This step self-enables when the first one lands."
-          fi
+      # THE MUTATION DRIVER EDITS SOURCE IN PLACE, so an interrupted run that does not clean up leaves a
+      # mutant that looks like an ordinary code change. This proves a signal restores the source, kills
+      # the build/suite's whole process tree and rebuilds, and that a run killed past any handler is
+      # recovered by the next start. Fixture build and suite, so no database.
+      - name: Mutation driver cleanup (an interrupted run leaves no mutant behind)
+        run: npm run test:mutate-harness
+
+      # The sibling-checkout resolver gives a sibling the copy its range or sales' override calls for,
+      # never sales' copy by accident (sales#231). Temp checkouts, no database.
+      - name: Sibling resolver (one copy of each BizApps package)
+        run: npm run test:one-copy-harness
+
+      # Unit tests run in the shared build.yml (`pnpm run test`, the root vitest suite).
 
       # Advisory, matching the sibling repo's judgement. migrations/_README.md requires a changeset on
       # any PR touching a migration, and that rule sat unenforced through several schema changes there.
@@ -169,8 +170,15 @@ jobs:
       # PR that legitimately has no version impact.
       - name: Changeset present?
         if: github.event_name == 'pull_request'
+        # Diff against the PR's base, not the tree: a changeset another PR left pending on the base
+        # branch would otherwise silence this warning for every later PR. The checkout is shallow, so
+        # fetch the base tip and compare the two trees directly (two-dot needs no merge base).
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          if [ ! -d .changeset ] || [ -z "$(find .changeset -name '*.md' ! -name 'README.md' -print -quit)" ]; then
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          added=$(git diff --name-only --diff-filter=A FETCH_HEAD HEAD -- '.changeset/*.md' | grep -v '^.changeset/README.md$' || true)
+          if [ -z "$added" ]; then
             echo "::warning title=No changeset::This PR carries no changeset. One is required for any change to migrations/ or a published package — run 'npx changeset'."
           else
             echo "Changeset present."

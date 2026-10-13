@@ -1,0 +1,39 @@
+[
+  {
+    "_comments": [
+      "API SCOPES FOR THE SALES REMOTE OPERATIONS (#186). Sales.CloseDeal and Sales.ReopenDeal declare RequiredScope",
+      "sales:write (metadata/remote-operations). Without these rows MJAPI refuses every API-key call to either",
+      "operation on a host that installs Sales.",
+      "",
+      "A parent `sales` with a write child, matching how MJ lays out its own scopes. The application ceiling that",
+      "allows it on MJAPI is in metadata/api-application-scopes. A host then only issues API keys."
+    ],
+    "fields": {
+      "Name": "sales",
+      "FullPath": "sales",
+      "Category": "Sales",
+      "Description": "Parent scope for Sales remote operations",
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "080F5DDA-E5CD-444A-9D61-1A89AE5DF423"
+    },
+    "relatedEntities": {
+      "MJ: API Scopes": [
+        {
+          "fields": {
+            "ParentID": "@parent:ID",
+            "Name": "write",
+            "FullPath": "sales:write",
+            "Category": "Sales",
+            "Description": "Sales operations that change data: close and reopen a deal",
+            "IsActive": true
+          },
+          "primaryKey": {
+            "ID": "038C63C1-2247-47D8-ADFB-594666717C86"
+          }
+        }
+      ]
+    }
+  }
+]

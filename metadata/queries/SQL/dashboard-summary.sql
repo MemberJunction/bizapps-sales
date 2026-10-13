@@ -101,6 +101,18 @@ SELECT
               AND d.ActualCloseDate <= {{ PeriodEnd | sqlString }}
               {% endif %}
              THEN 1 ELSE 0 END)                                                   AS WonCount,
+    -- The same deals as WonCount, summed: the forecast stack's Closed segment. A SUM of stored
+    -- answers, not pricing arithmetic. It moved here from the browser so the section need not load
+    -- every won deal to total them (bizapps-sales#209); the predicate is WonCount's, so the tile and
+    -- the segment count the same deals.
+    SUM(CASE WHEN st.IsWon = 1
+              {% if PeriodStart %}
+              AND d.ActualCloseDate >= {{ PeriodStart | sqlString }}
+              {% endif %}
+              {% if PeriodEnd %}
+              AND d.ActualCloseDate <= {{ PeriodEnd | sqlString }}
+              {% endif %}
+             THEN ISNULL(d.Amount, 0) ELSE 0 END)                                 AS WonAmount,
 
     -- Provenance for the open figure, so a tile can say how much of it nobody priced. Not currently
     -- rendered on the dashboard; it is here because the figure and its provenance should travel
