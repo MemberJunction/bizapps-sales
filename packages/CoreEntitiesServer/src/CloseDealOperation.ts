@@ -36,10 +36,11 @@ import { RegisterClass } from '@memberjunction/global';
  * ORDERS' OWN PREDICATE, imported rather than restated -- the same reason
  * `DealEntityServer` imports `CanTransition` from this module.
  *
- * `IsBooked` is `Confirmed | Posted | Fulfilled`, and orders documents it as "journal entries
- * exist and the receivable is real". Writing `status === 'Confirmed'` here instead would be a
- * vocabulary string-comparison against ANOTHER APP'S words -- exactly what the vocabulary gate
- * exists to catch -- and it would also be wrong twice over. See the refusal below.
+ * Orders documents `IsBooked` as "journal entries exist and the receivable is real". Its body is
+ * orders' business: today it is `status === 'Confirmed'`, since orders collapsed its lifecycle to
+ * Draft, Quoted, Confirmed and Voided. Writing that comparison here instead would be a vocabulary
+ * string-comparison against ANOTHER APP'S words -- exactly what the vocabulary gate exists to catch
+ * -- and would go stale the next time orders changes what "booked" means. See the refusal below.
  */
 import { IsBooked } from '@mj-biz-apps/orders-entities';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
@@ -1206,22 +1207,20 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              *
              * ── WHY `IsBooked` AND NOT THE TWO OBVIOUS TESTS ────────────────────────────────────
              *
-             * Both alternatives are wrong, in opposite directions, and the data on the host showed it:
-             *
-             *   `Status === 'Confirmed'` UNDER-blocks. The lifecycle runs on to `Posted` and then
-             *   `Fulfilled`, so an equality test lets through precisely the orders whose ledger has
-             *   moved FURTHEST. It is also a string comparison against orders' vocabulary, which is the
-             *   shape rule two forbids.
+             *   `Status === 'Confirmed'` gives the same answer today, because orders' `IsBooked` is
+             *   exactly that comparison. Written here it is a string comparison against orders'
+             *   vocabulary, which is the shape rule two forbids, and it would not follow orders the
+             *   next time its lifecycle changes (it once ran on to `Posted` and `Fulfilled`).
              *
              *   `ConfirmedAt IS NOT NULL` OVER-blocks. That column is a timestamp, and an order that was
              *   confirmed and later VOIDED keeps it forever. Refusing there would block the one case
              *   where the ledger has been SETTLED: orders records a reversal as its own record (D53), so
              *   a voided order is not a live receivable and the deal behind it is safe to reopen.
              *
-             * `IsBooked` is the only one of the three that means "the ledger currently stands", and it
-             * gives the confirmed-then-voided case the right answer for free -- `IsBooked('Voided')` is
-             * false. The two directions are the point: a later "simplification" to
-             * `status === 'Confirmed'` breaks both, and `close-deal.CD23` exists to catch that.
+             * `IsBooked` is orders' own answer to "does the ledger currently stand", and it gives the
+             * confirmed-then-voided case the right answer for free -- `IsBooked('Voided')` is false.
+             * `close-deal.CD24` pins both halves: a booked order refuses the reopen, and a
+             * confirmed-then-voided one does not.
              *
              * ── WHAT IT SAYS, AND WHAT IT DELIBERATELY DOES NOT ─────────────────────────────────
              *

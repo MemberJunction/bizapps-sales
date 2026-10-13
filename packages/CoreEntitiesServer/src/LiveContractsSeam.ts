@@ -246,16 +246,17 @@ export class LiveContractsSeam {
      * today's standard". Only the NULL survives a later change to policy. So a null override is passed
      * through as null and never filled in here.
      *
-     * ── THE DEFAULTS THAT DO NOT EXIST YET ──────────────────────────────────────────────────────
+     * ── WHERE THE DEFAULTS LIVE, AND WHEN THEY APPLY ────────────────────────────────────────────
      *
-     * Sales' descriptions say the standards (5% uplift, 90 days' notice) are "owned by the contracts
-     * ContractType". As of `origin/next` @ `d2f64e3` **they are not**: `ContractType` carries only
-     * Name, Description, RequiresExecutedDocument, ParentStatusRequirement and Status. Nothing applies
-     * a default anywhere — `applyContractTypeDefaults()` went with the v1 rebuild.
+     * Sales' descriptions say the standards (uplift, notice period) are "owned by the contracts
+     * ContractType". Contracts v0.2 added them there (`DefaultRenewalNoticeDays`,
+     * `DefaultAnnualIncreasePercent` and friends), but as a FORM PREFILL: they are copied into an
+     * unsaved contract when a user picks its type, and nothing reads them at save time. A contract
+     * this seam creates therefore keeps the nulls it is given.
      *
-     * This seam therefore populates NOTHING it was not told, so that when the columns arrive the
-     * defaults land where they belong — in contracts, applied once, rather than being pre-empted here
-     * by a value sales invented. See D-9.
+     * This seam still populates NOTHING it was not told. Copying the type's defaults here would put
+     * contracts' seeding rule in sales; if a close-won contract should carry them, contracts applies
+     * them. See D-9.
      */
     private setNegotiatedTerms(contract: BaseEntity, input: CreateFromDealInput): void {
         /** Stated on the deal as a fact about the paper, and stated the same way on the contract. */

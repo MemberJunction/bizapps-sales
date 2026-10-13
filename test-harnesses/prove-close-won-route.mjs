@@ -104,25 +104,25 @@ const policy = JSON.parse(contractPipe.CloseWonPolicy);
 
 // Does the type code the policy names actually exist in contracts' vocabulary?
 const typeRow = await one(
-    `SELECT ID, Name, ParentStatusRequirement FROM __mj_BizAppsContracts.ContractType WHERE Name = '${String(policy.ContractTypeCode ?? '').replace(/'/g, "''")}'`,
+    `SELECT ID, Name, MustBeChild FROM __mj_BizAppsContracts.ContractType WHERE Name = '${String(policy.ContractTypeCode ?? '').replace(/'/g, "''")}'`,
 );
 record(
     !!typeRow,
     `the policy's ContractTypeCode '${policy.ContractTypeCode}' resolves to a seeded contract type`,
     typeRow
-        ? `${typeRow.Name} — and it stands alone (ParentStatusRequirement null), which a close-won requires`
+        ? `${typeRow.Name} — and it stands alone (MustBeChild = 0), which a close-won requires`
         : 'NO MATCH — v2 seeds Order Form / Statement of Work / Payment Link / Change Order',
 );
 
 /**
  * A close-won names no parent contract, so the configured type must be one that STANDS ALONE.
- * `ParentStatusRequirement = 'Required'` (Change Order) is refused by contracts' own validation, and
+ * `MustBeChild = 1` (Change Order) is refused by contracts' own validation, and
  * that refusal is correct -- it is not something to work around at this end.
  */
 record(
-    !!typeRow && typeRow.ParentStatusRequirement === null,
+    !!typeRow && !typeRow.MustBeChild,
     'the configured type requires no parent contract, so a close-won can create it',
-    typeRow ? `ParentStatusRequirement = ${typeRow.ParentStatusRequirement ?? 'null'}` : 'n/a',
+    typeRow ? `MustBeChild = ${typeRow.MustBeChild ? 1 : 0}` : 'n/a',
 );
 
 const openIDs = (

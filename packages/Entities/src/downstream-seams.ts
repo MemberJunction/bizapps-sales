@@ -72,7 +72,7 @@ export interface ContractsCreateFromDealSeamInput {
      *
      * -- THE NAME SAYS `Code`, AND TODAY IT IS MATCHED ON `Name`. READ THIS BEFORE RENAMING IT. --
      *
-     * `ContractType` has no `Code` column as of contracts `origin/next` @ d2f64e3; it is identified by
+     * `ContractType` has no `Code` column in contracts v2; it is identified by
      * `Name` (unique) plus a fixed seeded UUID. So `LiveContractsSeam` probes the metadata and matches
      * on whichever identifier contracts actually offers, and says which one it used in the message it
      * returns -- the answer is never ambiguous at the call site.
@@ -86,9 +86,9 @@ export interface ContractsCreateFromDealSeamInput {
      * `Sales.CloseDeal` remote-operation contract and appears in generated code. Not worth doing to
      * describe a state that is meant to be temporary.
      *
-     * WHATEVER VALUE GOES HERE MUST NAME A TYPE THAT STANDS ALONE. A type whose
-     * `ParentStatusRequirement` is `'Required'` -- Change Order -- is refused by contracts' own
-     * validation when nothing names its parent, and a close-won has no parent contract to give it.
+     * WHATEVER VALUE GOES HERE MUST NAME A TYPE THAT STANDS ALONE. A type with `MustBeChild = 1`
+     * -- Change Order -- is refused by contracts' own validation when nothing names its parent, and a
+     * close-won has no parent contract to give it.
      */
     ContractTypeCode?: string | null;
     TermMonths?: number | null;

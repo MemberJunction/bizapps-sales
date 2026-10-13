@@ -107,7 +107,7 @@ with nothing mutated: AC6, AC8, AC12, AC13, AC16, AC19, CT1, CT5, CT6, SD6, WT10
 | `M-RB2` | `CloseDealOperation.ts` | CD24 | — |
 | `M-DS1` | `DealEntityServer.ts` | SD36 | — |
 | `M-DS2` | `DealEntityServer.ts` | SD37 | — |
-| `M-DS3` | `DealEntityServer.ts` | — | Declares nothing, so the driver prints OK on every run. Its note expects it to miss on seeded data |
+| `M-DS3` | `DealEntityServer.ts` | — (`expectMiss`) | Expected to miss on seeded data: the driver reports EXPECTED-MISS, and UNEXPECTED-HIT (exit 1) once an open-and-locking status is seeded |
 | `M-ST7` | `CloseDealOperation.ts` | CD17 | OK — fell CD4, CD5, CD13, CD14, CD17, CD18, CD20 · `b9e73d4`, 2026-08-23 |
 | `M-TN1` | `CloseWonTaskService.ts` | WT15 | OK — fell WT15 alone · `9724489`, 2026-08-23 |
 | `M-TL1` | `CloseWonTaskService.ts` | WT16 | OK — fell WT16 alone · `9724489`, 2026-08-23 |
