@@ -11,25 +11,16 @@
 -- 4.2 million on the first — where did it go?" cannot be answered from live data at all.
 --
 -- So the answer has to be captured, not derived. The `Sales.CaptureForecastSnapshot` Action writes one
--- row per company × pipeline × period, on a daily ScheduledJob. This query reads them.
+-- row per company × pipeline × owner × period, on a daily ScheduledJob. This query reads them.
 --
--- ⚠ OWNER GRAIN NEEDS THE COMPANION QUERY, and this query is built expecting it -- both LAG windows
--- below partition by OwnerEmployeeID and the Employee join projects OwnerName.
+-- THE ACTION IS THE WRITER (D-31): exactly one thing writes ForecastSnapshot, and
+-- `scripts/capture-forecast-snapshot.sql` is a manual tool that is deliberately unseeded rather than a
+-- second path. So "what grain do these rows have" is a question about WHICH QUERY THE ACTION READS.
 --
--- THE ACTION IS THE WRITER. That is settled (D-32), and it is the half a reader needs first: exactly one
--- thing writes ForecastSnapshot, and `scripts/capture-forecast-snapshot.sql` is a manual tool that is
--- deliberately unseeded rather than a second path. So "what grain do these rows have" is a question about
--- WHICH QUERY THE ACTION READS, and nothing else.
---
--- Today it reads `Sales: Forecast by Category`, which groups by company and pipeline only, so every
--- snapshot carries OwnerEmployeeID = NULL. That means "across all owners" and is correct for a rollup --
--- but it makes this query render THIN rather than broken: one partition, no owner names, and nothing
--- anywhere saying the grain is absent rather than the data empty.
---
--- `Sales: Forecast by Owner` is the companion that closes it. Same measures, same flags, same date split;
--- it adds `OwnerEmployeeID` and `OwnerName` to the projection and nothing else. Point the capture at that
--- query and these windows partition by a real owner, with no change here and no change to the Action --
--- its column mapping populates OwnerEmployeeID the moment a source query projects it.
+-- It reads `Sales: Forecast by Owner` by default (D-32, #216), which groups by the deal's owner stamp. So
+-- both LAG windows below partition by a real OwnerEmployeeID and the Employee join projects OwnerName.
+-- A NULL owner is an unassigned deal. Snapshots captured from `Sales: Forecast by Category` instead carry
+-- OwnerEmployeeID = NULL meaning "across all owners", and render as one partition with no owner names.
 --
 -- It is a COMPANION rather than a widened `Forecast by Category` deliberately: that query is published,
 -- the dashboard consumes it, and changing a report's row shape to serve a second consumer is how one
