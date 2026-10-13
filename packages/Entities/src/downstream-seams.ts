@@ -133,6 +133,15 @@ export interface ContractsRenewTermSeamInput {
     TermMonths?: number | null;
 }
 
+/**
+ * Link the order a won deal carries to the contract the close produced (contracts#77). Contracts copies
+ * the contract's renewal terms to the subscriptions that order creates.
+ */
+export interface ContractsLinkOrderSeamInput {
+    ContractID: string;
+    OrderID: string;
+}
+
 /** What either contracts call returns. */
 export interface ContractsSeamResult {
     Success: boolean;
@@ -178,6 +187,7 @@ export interface IDownstreamSeam {
      */
     CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult>;
     RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult>;
+    LinkOrderToContract(input: ContractsLinkOrderSeamInput): Promise<ContractsSeamResult>;
 }
 
 /**
@@ -209,6 +219,16 @@ export class StubDownstreamSeam implements IDownstreamSeam {
             Message:
                 'The renewal route was planned but not executed: bizapps-contracts is not installed in ' +
                 'this deployment, so its entities cannot be resolved.',
+        };
+    }
+
+    public async LinkOrderToContract(input: ContractsLinkOrderSeamInput): Promise<ContractsSeamResult> {
+        this.Attempts.push({ Target: 'ContractOrder', Payload: input });
+        return {
+            Success: false,
+            Message:
+                'The order was not linked to the contract: bizapps-contracts is not installed in this ' +
+                'deployment, so its entities cannot be resolved.',
         };
     }
 }

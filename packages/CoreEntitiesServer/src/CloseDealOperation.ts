@@ -504,6 +504,31 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             const stageEvent = deal.LastStageEventID;
 
             /**
+             * TIE THE ORDER TO THE CONTRACT (contracts#77). Both exist by now: the routing loop stamped
+             * `ContractID`, and the order is the deal's own. Contracts copies the contract's renewal terms
+             * (annual increase, whether a discount continues) to the subscriptions that order creates, so
+             * the renewal pass in Orders prices from the paper rather than from hand-entered values.
+             *
+             * A warning, not a failure: the deal closed and both records are right. A missing link only
+             * means the terms have to be set on the subscriptions by hand.
+             */
+            const linkIssues: SalesCloseIssue[] = [];
+            if (target.IsWon && deal.ContractID && deal.OrderID) {
+                const link = await resolveSeam(user, provider).LinkOrderToContract({
+                    ContractID: deal.ContractID,
+                    OrderID: String(deal.OrderID),
+                });
+                if (!link.Success) {
+                    linkIssues.push({
+                        Section: 'deal',
+                        Field: null,
+                        Severity: 'warning',
+                        Message: link.Message ?? 'The order was not linked to the contract.',
+                    });
+                }
+            }
+
+            /**
              * ── THE TASKS RUN **AFTER** THE SAVE, AND THAT IS THE FIX RATHER THAN A TIDY-UP ──────────
              *
              * This block used to sit twenty lines earlier, before `deal.Save()`, and it read
@@ -607,7 +632,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  * written inside `deal.Save()` a few lines further down. So a reader of the array reads
                  * the close in sequence, which is the only ordering that means anything here.
                  */
-                Issues: [...taskIssues, ...orderStatusIssues(deal), ...routingIssues(routing, false)],
+                Issues: [...taskIssues, ...linkIssues, ...orderStatusIssues(deal), ...routingIssues(routing, false)],
                 IsWon: target.IsWon,
                 IsLost: target.IsLost,
                 Locked: target.LocksDeal,
