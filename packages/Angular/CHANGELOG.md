@@ -1,5 +1,26 @@
 # @mj-biz-apps/sales-ng
 
+## 6.14.0
+
+### Minor Changes
+
+- 65ae0b7: A discount raised on a deal line is recorded as a Price concession in orders. The Add a product / Edit line dialog asks for a reason category and a reason when Discount % goes up, and after the order saves the line it records the concession: inside the rep's Sales Authority orders approves it on save; outside it the dialog says the order cannot be confirmed until it is approved, and shows orders' refusal when it could not be recorded. New exports from `sales-entities`: `DiscountNeedsConcession`, `DiscountReasonCategories`, `RecordDiscountConcession`. The `@mj-biz-apps/orders-*` floor moves to `^5.22.0`, the first release with the Order Concession entity.
+
+### Patch Changes
+
+- 7d83503: **A customer or contact created from a deal form field is linked under the ID that was actually written.** The "Create new" footer on the deal form's Account, Primary Contact and Billing Contact fields selected the new record with `Get('ID')`, which on MJ 6.1.x returns the browser's unwritten key for an IsA child (`SalesAccount`, `SalesContact`). The deal then pointed at a record that does not exist and the save was refused as "does not exist". The deal field panels now rebind the field to the key from `PrimaryKey`, the same read the deal workspace uses since #188. Fixes #202.
+- e0abd17: Deal form: the Motion panel's Order field no longer opens the draft order. It now shows the order's name as plain text, and edit mode no longer offers it. A won deal still reaches its order from the header chip (bc-aidp-next-golive#331).
+- 900cdb0: A deal line for a product the customer already holds now asks whether it is the next term of that subscription or a new subscription on its own dates, the same choice the order line offers, and saves the answer on the line (`OrderLine.SubscriptionAction`). Close Won refuses a deal while such a line has no answer, with one error per line in the `lines` section, because the close confirms the order and an unanswered line would otherwise be moved to start after the existing coverage ends. On a deal type that requires a renewal source, unanswered lines are answered "next term" inside the close instead of refused. Requires bizapps-orders with `FindUnansweredHeldLines`.
+- b3691c6: Requires bizapps-orders 5.30.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.30.0`, `mj-app.json` `>=5.30.0`). That release exports `FindUnansweredHeldLines` and `HoldingSubscriberFor`, which the Close Won check uses. orders 5.30.0 needs MemberJunction 6.1.5, so the `@memberjunction/*` ranges and `mjVersionRange` floor at 6.1.5. The lockfile resolves bizapps-accounting 0.22.0, which orders-ng 5.30.0 requires.
+- a28718b: The Sales section no longer spins forever when a load request fails. A failed read (a gateway 504, a timeout, a dropped connection) now clears the spinner and shows the reason with a Retry button on the dashboard, All deals and Board pages.
+- 698fa8c: The Sales section no longer loads every account and contact when it opens. It reads only the pipelines, stages and status types the board and the status pill use; the deal workspace still loads every lookup list. `DealWorkspaceService.LoadLookups` takes an optional list of lookup names, and its reads are defined once per name, so a result can no longer land in the wrong list.
+- 47604fc: The Sales section's first load no longer grows with closed-deal history. The roster now holds open deals plus deals closed in the current fiscal quarter. The board shows exactly that and says so in its header. The forecast stack's Closed segment comes from `Sales: Dashboard Summary`'s new `WonAmount`, and the Won inspect list is filtered on the server with the Won tile's own predicate. `Sales: Deal Roster` gains an optional `ClosedSince` parameter. `DealWorkspaceService.LoadRoster` now takes it and throws when the query fails, instead of returning an empty roster.
+- Updated dependencies [65ae0b7]
+- Updated dependencies [ced96e0]
+- Updated dependencies [b3691c6]
+- Updated dependencies [9a57950]
+  - @mj-biz-apps/sales-entities@6.14.0
+
 ## 6.13.0
 
 ### Patch Changes

@@ -1,5 +1,17 @@
 # @mj-biz-apps/sales-entities
 
+## 6.14.0
+
+### Minor Changes
+
+- 65ae0b7: A discount raised on a deal line is recorded as a Price concession in orders. The Add a product / Edit line dialog asks for a reason category and a reason when Discount % goes up, and after the order saves the line it records the concession: inside the rep's Sales Authority orders approves it on save; outside it the dialog says the order cannot be confirmed until it is approved, and shows orders' refusal when it could not be recorded. New exports from `sales-entities`: `DiscountNeedsConcession`, `DiscountReasonCategories`, `RecordDiscountConcession`. The `@mj-biz-apps/orders-*` floor moves to `^5.22.0`, the first release with the Order Concession entity.
+- ced96e0: Closing a won deal links its order to the contract the close produced (`MJ_BizApps_Contracts: Contract Orders`), so contracts copies the contract's annual increase and carry-discount term to the order's subscriptions (bizapps-contracts#77). `IDownstreamSeam` gains `LinkOrderToContract`. A contracts release without order links is reported as a close warning, not a failure.
+- 9a57950: The 6.14 Metadata_Sync ships what metadata/ changed since 6.13: the `sales` and `sales:write` API scopes with MJAPI's ceiling for `sales:write`, and the new SQL of Sales: Dashboard Summary (with its WonAmount field), Sales: Deal Roster (with its ClosedSince parameter) and Sales: Forecast History. It has a Postgres counterpart, and `mj app remove` retires the two scopes. The seed is idempotent and safe on a host that already ran `mj sync push`.
+
+### Patch Changes
+
+- b3691c6: Requires bizapps-orders 5.30.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.30.0`, `mj-app.json` `>=5.30.0`). That release exports `FindUnansweredHeldLines` and `HoldingSubscriberFor`, which the Close Won check uses. orders 5.30.0 needs MemberJunction 6.1.5, so the `@memberjunction/*` ranges and `mjVersionRange` floor at 6.1.5. The lockfile resolves bizapps-accounting 0.22.0, which orders-ng 5.30.0 requires.
+
 ## 6.13.0
 
 ### Minor Changes

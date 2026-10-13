@@ -1,5 +1,20 @@
 # @mj-biz-apps/sales-actions
 
+## 6.14.0
+
+### Patch Changes
+
+- b3691c6: Requires bizapps-orders 5.30.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.30.0`, `mj-app.json` `>=5.30.0`). That release exports `FindUnansweredHeldLines` and `HoldingSubscriberFor`, which the Close Won check uses. orders 5.30.0 needs MemberJunction 6.1.5, so the `@memberjunction/*` ranges and `mjVersionRange` floor at 6.1.5. The lockfile resolves bizapps-accounting 0.22.0, which orders-ng 5.30.0 requires.
+- Updated dependencies [ed649bb]
+- Updated dependencies [089e4d7]
+- Updated dependencies [900cdb0]
+- Updated dependencies [bb6025d]
+- Updated dependencies [ced96e0]
+- Updated dependencies [b3691c6]
+- Updated dependencies [c5d7b0b]
+- Updated dependencies [5d4c5f3]
+  - @mj-biz-apps/sales-core-entities-server@6.14.0
+
 ## 6.13.0
 
 ### Patch Changes
