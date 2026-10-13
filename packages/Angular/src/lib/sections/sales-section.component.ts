@@ -48,7 +48,7 @@ import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-sha
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 import { EntityViewerModule, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
-import { LoadDealPipelineView, DealInListWhere } from '../pages/deal-views';
+import { LoadDealPipelineView, DealInListWhere, DealWonInPeriodWhere } from '../pages/deal-views';
 import type { ResourceData } from '@memberjunction/core-entities';
 import {
     MJButtonDirective,
@@ -74,6 +74,7 @@ import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 import { DealBoardComponent, DEFAULT_DISPLAY_CURRENCY } from '../board/deal-board.component';
 import {
     DealWorkspaceService,
+    SECTION_LOOKUP_KEYS,
     type DealDashboardSummary,
     type DealRosterRow,
 } from '../workspace/deal-workspace.service';
@@ -115,6 +116,7 @@ import {
  */
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
+const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 
 /** One KPI tile. `Tone` drives colour only — no behaviour hangs off it. */
 interface SalesKpi {
@@ -158,7 +160,11 @@ export class MJSSalesSectionComponent implements OnInit {
 
     public Page = '';
     public Loading = true;
-    /** Every deal. The BOARD renders from this, so a pipeline flagged out of the forecast stays viewable. */
+    /**
+     * Every open deal, and the closed deals closed since the start of the current fiscal quarter
+     * (bizapps-sales#209). The BOARD renders from this, so a pipeline flagged out of the forecast stays
+     * viewable. The dashboard reads only its open deals; won figures come from the summary query.
+     */
     public Deals: DealRosterRow[] = [];
     /**
      * What the dashboard's current-book figures read: `Deals` minus open deals in pipelines flagged
@@ -172,6 +178,16 @@ export class MJSSalesSectionComponent implements OnInit {
      * the dashboard keeps its tiles unavailable for as long as this is set (see `TileSummary`).
      */
     public RosterError: string | null = null;
+    /**
+     * Why the last `Refresh()` could not finish, or null. While set, every page shows this with a
+     * Retry button in place of its content (bizapps-sales#195).
+     *
+     * Separate from `RosterError`, which the dashboard survives with its tiles marked unavailable: this
+     * one means the load as a whole stopped, so nothing below it is known to be current.
+     */
+    public LoadError: string | null = null;
+    /** Identifies the newest `Refresh()`, so a slower superseded one cannot clear its spinner or error. */
+    private refreshToken = 0;
     /** Which slice the inspect grid is showing. Default is closing-soonest (the DB-oracle spec). */
     public InspectFilter: InspectKey = 'closing';
     /**
@@ -273,10 +289,40 @@ export class MJSSalesSectionComponent implements OnInit {
 
     // ── Data ───────────────────────────────────────────────────────────────────
 
+    /**
+     * Loads everything the section shows. Never rejects.
+     *
+     * ── WHY THE SPINNER IS CLEARED IN `finally` (bizapps-sales#195) ──────────────────────────────
+     *
+     * The data provider THROWS on a transport failure — a gateway 504, a timeout, a dropped
+     * connection — rather than returning `Success: false`. Any one of the reads below can therefore
+     * reject, and `Loading = false` used to sit after all of them: one failed request left the page on
+     * its spinner for good, with the rejection unhandled because `ngOnInit` awaits this uncaught.
+     * Clearing it in `finally` covers every exit, including ones added later; the failure is shown as
+     * `LoadError` with a Retry instead.
+     */
     public async Refresh(): Promise<void> {
+        const token = ++this.refreshToken;
         this.Loading = true;
+        this.LoadError = null;
         this.cdr.detectChanges();
+        try {
+            await this.load();
+        } catch (e) {
+            if (token === this.refreshToken) {
+                this.LoadError = e instanceof Error ? e.message : String(e);
+                LogError(`Sales: the section failed to load - ${this.LoadError}`);
+            }
+        } finally {
+            if (token === this.refreshToken) {
+                this.Loading = false;
+                this.cdr.detectChanges();
+            }
+        }
+    }
 
+    /** The reads behind `Refresh()`. Throws on any failure the reads themselves do not absorb. */
+    private async load(): Promise<void> {
         /**
          * THE BUSINESS ZONE IS LOADED BEFORE ANYTHING ASKS WHAT DAY IT IS (bc-aidp-next-golive#168).
          *
@@ -301,10 +347,10 @@ export class MJSSalesSectionComponent implements OnInit {
         const window = this.Window;
 
         const [roster, lookups, summary, winRate] = await Promise.all([
-            this.loadRoster(),
-            // Still needed: the BOARD renders from these, and StatusTone reads them for the roster
-            // pill. The KPI tiles no longer do -- their flags are applied server-side by the query.
-            this.service.LoadLookups(),
+            this.loadRoster(this.BoardClosedWindow.Start),
+            // Only the lists the BOARD and the status pill read. Accounts and contacts are the deal
+            // workspace's pickers and grow with the customer base, so they are not loaded here.
+            this.service.LoadLookups(SECTION_LOOKUP_KEYS),
             // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
             this.service.LoadDashboardSummary(window),
             // The window reaches win rate through parameters the query ALREADY declared -- it filters
@@ -321,23 +367,22 @@ export class MJSSalesSectionComponent implements OnInit {
         this.DealEntityInfo = new Metadata().Entities.find((e) => e.Name === E_DEAL) ?? null;
         await this.refreshInspectView();
         await this.refreshAllDealsView();
-        this.Loading = false;
         if (roster && !roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
             this.Message = '';
         }
-        this.cdr.detectChanges();
     }
 
     /**
      * The roster, or null when it could not be read, with the reason kept in `RosterError`.
      *
-     * `LoadRoster` throws when the query definition is older than the app (bizapps-sales#137). Left to
-     * escape, that rejects `Refresh()` with `Loading` still set, and the page spins forever.
+     * `LoadRoster` throws when the query definition is older than the app (bizapps-sales#137) or the
+     * query fails. Left to escape, that rejects `Refresh()` with `Loading` still set, and the page spins
+     * forever.
      */
-    private async loadRoster(): Promise<DealRosterRow[] | null> {
+    private async loadRoster(closedSince: string | null): Promise<DealRosterRow[] | null> {
         try {
-            const roster = await this.service.LoadRoster();
+            const roster = await this.service.LoadRoster(closedSince);
             this.RosterError = null;
             return roster;
         } catch (e) {
@@ -385,6 +430,20 @@ export class MJSSalesSectionComponent implements OnInit {
         return ResolvePeriod(this.Period, this.FiscalStart.Start, BusinessToday());
     }
 
+    /**
+     * The closed deals the board shows: those closed in the current fiscal quarter, whatever period the
+     * dashboard has selected (bizapps-sales#209). Fixed, so the board does not move when the period
+     * selector does, and bounded, so the section's first load does not grow with deal history.
+     */
+    public get BoardClosedWindow(): PeriodWindow {
+        return ResolvePeriod('quarter', this.FiscalStart.Start, BusinessToday());
+    }
+
+    /** "from 1 Jul 2026" — the board's closed-deal bound, for its header. */
+    public get BoardClosedLabel(): string {
+        return FormatWindow({ ...this.BoardClosedWindow, End: null });
+    }
+
     /** "1 Jul 2026 – 30 Sep 2026" — the bounds spelled out, for a footnote. */
     public get WindowLabel(): string {
         return FormatWindow(this.Window);
@@ -408,8 +467,8 @@ export class MJSSalesSectionComponent implements OnInit {
      * The roster is deliberately not refetched. It is not period-bound — the board, the stage mix,
      * the close buckets and commit-by-owner all read that same array and must not move when a
      * dashboard control changes — and re-fetching it would also blank those surfaces mid-interaction
-     * for no gain. The stack's Closed segment narrows from the roster already in hand, through the
-     * same predicate the server applies to the tile.
+     * for no gain. The stack's Closed segment is the summary's `WonAmount`, re-read here with the tile
+     * (bizapps-sales#209).
      */
     public async SetPeriod(key: PeriodKey): Promise<void> {
         if (key === this.Period) {
@@ -613,10 +672,21 @@ export class MJSSalesSectionComponent implements OnInit {
         return ClosingSoon(this.forecastDeals, 8);
     }
 
+    /**
+     * The roster rows behind the selected inspect slice. Empty for `won`: the roster holds only this
+     * quarter's closed deals, so that slice is filtered on the server instead (see
+     * `refreshInspectView`).
+     */
     public get InspectRows(): DealRosterRow[] {
-        // The window is passed so the `won` slice lists exactly the deals the Won tile counted. Every
-        // other slice ignores it -- they are about the open book, which the period does not bound.
-        return FilterInspect(this.forecastDeals, this.InspectFilter, BusinessToday(), this.Window);
+        if (this.InspectFilter === 'won') {
+            return [];
+        }
+        return FilterInspect(this.forecastDeals, this.InspectFilter, BusinessToday());
+    }
+
+    /** How many deals the inspect grid lists. For `won`, the Won tile's count, which the grid matches. */
+    public get InspectCount(): number | null {
+        return this.InspectFilter === 'won' ? (this.summary?.WonCount ?? null) : this.InspectRows.length;
     }
 
     public get InspectLabel(): string {
@@ -663,8 +733,20 @@ export class MJSSalesSectionComponent implements OnInit {
             this.InspectView = null;
             return;
         }
-        const where = DealInListWhere(this.InspectRows.map((d) => d.ID));
-        this.InspectView = await LoadDealPipelineView(this.DealEntityInfo, where);
+        this.InspectView = await LoadDealPipelineView(this.DealEntityInfo, this.inspectWhere());
+    }
+
+    /**
+     * The inspect grid's filter. `won` is the Won tile's own predicate on the Deals view, so the grid
+     * lists every won deal in the period, not only those in the roster (bizapps-sales#209). Every other
+     * slice is a list of roster IDs.
+     */
+    private inspectWhere(): string {
+        if (this.InspectFilter !== 'won') {
+            return DealInListWhere(this.InspectRows.map((d) => d.ID));
+        }
+        const statusEntity = new Metadata().Entities.find((e) => e.Name === E_DEAL_STATUS_TYPE);
+        return statusEntity ? DealWonInPeriodWhere(statusEntity, this.Window) : '1 = 0';
     }
 
     private async refreshAllDealsView(): Promise<void> {
@@ -682,12 +764,17 @@ export class MJSSalesSectionComponent implements OnInit {
     /**
      * The forecast stack. `Closed` is bounded by the selected period; the open segments never are.
      *
+     * `Closed` is the summary query's `WonAmount`, the amounts of the deals the Won tile counts. The
+     * roster no longer carries every won deal (bizapps-sales#209), so the open segments come from the
+     * roster and the closed one from SQL. While the summary is unavailable, so is `Closed`: 0, beside
+     * the tiles' "figures unavailable".
+     *
      * `Total` is therefore the sum of two different questions — what landed in the window, and what is
      * open right now — which is exactly what the card's header tells the reader. See
      * {@link ForecastSlices} for why it is built this way rather than windowing all four.
      */
     public get Stack(): { Closed: number; Commit: number; BestOnly: number; PipeOnly: number; Total: number } {
-        const s = ForecastSlices(this.forecastDeals, this.Window);
+        const s = { ...ForecastSlices(this.forecastDeals, this.Window), Closed: this.summary?.WonAmount ?? 0 };
         const Total = s.Closed + s.Commit + s.BestOnly + s.PipeOnly;
         return { ...s, Total };
     }

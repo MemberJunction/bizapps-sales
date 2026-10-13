@@ -1,9 +1,9 @@
 /**
  * @fileoverview The real forecast source — an MJ Query, run by name.
  *
- * Written now, against queries that do not exist yet, so that when they land the only change is which
- * source the factory returns. It is complete and its one unproven part is
- * the mapping — `readRow` below — which a single run against a real query settles.
+ * Written before the forecast queries existed, so that when they landed the only change was which source
+ * the factory returns. It is now the default source, reading `Sales: Forecast by Owner`
+ * (`DEFAULT_FORECAST_QUERY`). `readRow` below is the mapping; FS11 checks it against a real query.
  *
  * ── IT REFUSES CLEARLY RATHER THAN RETURNING NOTHING ────────────────────────────────────────────
  *

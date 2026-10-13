@@ -78,6 +78,8 @@
 
           @if (Loading) {
             <mj-loading></mj-loading>
+          } @else if (LoadError) {
+            <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
           } @else {
             <div class="kpis">
               @for (kpi of Kpis; track kpi.Label) {
@@ -225,7 +227,7 @@
             <div class="card">
               <div class="ch">
                 Inspect
-                <span class="r">{{ InspectLabel }} · {{ InspectRows.length }} shown</span>
+                <span class="r">{{ InspectLabel }} · {{ InspectCount ?? '—' }} shown</span>
               </div>
               @if (InspectFilter !== 'closing') {
                 <div class="filter-bar">
@@ -257,6 +259,8 @@
 
           @if (Loading) {
             <mj-loading></mj-loading>
+          } @else if (LoadError) {
+            <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
           } @else if (DealEntityInfo) {
             <div class="mjs-viewer-host mjs-viewer-host--page">
               <mj-entity-viewer
@@ -275,10 +279,15 @@
              nothing to lose by tearing it down, and a hidden board with a horizontal scroller is a
              layout hazard on the pages that are showing. -->
         <div class="wrap wrap--board" [hidden]="Page !== 'board'">
-          <div class="sechead"><h2>Board</h2></div>
+          <div class="sechead">
+            <h2>Board</h2>
+            <span class="muted" data-testid="sales-board-scope">Open deals, and deals closed {{ BoardClosedLabel }}</span>
+          </div>
 
           @if (Loading) {
             <mj-loading></mj-loading>
+          } @else if (LoadError) {
+            <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
           } @else if (Page === 'board') {
             <mjs-deal-board
               [Deals]="Deals"
@@ -289,6 +298,21 @@
               (StageMoved)="Refresh()"></mjs-deal-board>
           }
         </div>
+
+        <!-- A load that stopped part-way (bizapps-sales#195). Shown in place of each page's content rather
+             than beside it, because nothing that page would draw is known to be current. -->
+        <ng-template #loadFailed>
+          <div class="load-failed" role="alert" data-testid="sales-load-failed">
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+            <div class="load-failed__body">
+              <b>The deals could not be loaded.</b>
+              <span class="load-failed__reason">{{ LoadError }}</span>
+            </div>
+            <button type="button" mjButton variant="outline" data-testid="sales-load-retry" (click)="Refresh()">
+              <i class="fa-solid fa-arrow-rotate-right" aria-hidden="true"></i> Retry
+            </button>
+          </div>
+        </ng-template>
 
       </mj-page-body-interior>
     </mj-left-nav-content>

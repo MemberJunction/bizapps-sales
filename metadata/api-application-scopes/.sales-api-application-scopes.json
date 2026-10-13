@@ -1,0 +1,20 @@
+[
+  {
+    "_comments": [
+      "THE MJAPI CEILING FOR THE SALES SCOPES (#186). An API key's scopes are intersected with what its application",
+      "allows, so a scope with no application row is refused on every key. Include on every resource (`*`), as MJ",
+      "grants its own scopes; which keys carry them is the host's choice."
+    ],
+    "fields": {
+      "ApplicationID": "@lookup:MJ: API Applications.Name=MJAPI",
+      "ScopeID": "@lookup:MJ: API Scopes.FullPath=sales:write",
+      "ResourcePattern": "*",
+      "PatternType": "Include",
+      "IsDeny": false,
+      "Priority": 0
+    },
+    "primaryKey": {
+      "ID": "E8CDF57F-53DF-4646-B1BD-F86CACBD3BD6"
+    }
+  }
+]

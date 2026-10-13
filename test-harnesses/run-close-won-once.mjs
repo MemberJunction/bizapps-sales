@@ -62,7 +62,7 @@ const { UserCache } = await import('@memberjunction/generic-database-provider');
 const provider = await setupSQLServerClient(
     new SQLServerProviderConfigData(pool, process.env.MJ_CORE_SCHEMA || '__mj'),
 );
-await UserCache.Instance.Refresh(pool);
+await UserCache.Instance.Refresh(provider);
 const user = UserCache.Users.find((u) => u?.Type?.trim().toLowerCase() === 'owner') ?? UserCache.Users[0];
 if (!user) { console.error('no context user in UserCache'); process.exit(2); }
 

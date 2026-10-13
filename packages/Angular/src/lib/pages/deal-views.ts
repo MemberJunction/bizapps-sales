@@ -12,6 +12,7 @@ import { Metadata, RunView } from '@memberjunction/core';
 import type { EntityInfo } from '@memberjunction/core';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import { MJS_ENTITIES } from '../data/entity-names';
+import type { PeriodWindow } from './dashboard-period';
 
 export const SALES_PIPELINE_VIEW_NAME = 'Sales: Pipeline';
 
@@ -127,6 +128,31 @@ export function DealInListWhere(ids: readonly string[]): string {
     const clean = ids.filter(Boolean);
     if (!clean.length) return '1 = 0';
     return `ID IN (${clean.map((id) => `'${id.replace(/'/g, "''")}'`).join(',')})`;
+}
+
+const sqlString = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+
+/**
+ * The deals the Won tile counts, as a filter on the Deals view (bizapps-sales#209).
+ *
+ * The same predicate as `WonCount` in `dashboard-summary.sql`: the status's `IsWon` FLAG, and
+ * `ActualCloseDate` inside the window when it has bounds. With no bounds ("All time") every won deal
+ * matches, including one with no close date; with bounds such a deal does not. Applied on the server,
+ * so the list no longer depends on the browser holding every won deal.
+ *
+ * `statusTable` is the Deal Status Types entity's schema and base table, read from metadata so the
+ * schema name is not hardcoded here.
+ */
+export function DealWonInPeriodWhere(
+    statusTable: { SchemaName: string; BaseTable: string },
+    window?: PeriodWindow,
+): string {
+    const parts = [
+        `DealStatusTypeID IN (SELECT ID FROM [${statusTable.SchemaName}].[${statusTable.BaseTable}] WHERE IsWon = 1)`,
+    ];
+    if (window?.Start) parts.push(`ActualCloseDate >= ${sqlString(window.Start)}`);
+    if (window?.End) parts.push(`ActualCloseDate <= ${sqlString(window.End)}`);
+    return parts.join(' AND ');
 }
 
 export { MJS_ENTITIES };
