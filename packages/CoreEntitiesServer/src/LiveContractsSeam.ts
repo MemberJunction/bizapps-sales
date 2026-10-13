@@ -59,6 +59,36 @@ const E_CONTRACT_TYPE = 'MJ_BizApps_Contracts: Contract Types';
 /** Sales' own, needed only to name the CREATING entity in contracts' polymorphic provenance pair. */
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 
+/** One candidate row from the contract-type lookup. `Code` is absent on a contracts with no such column. */
+type ContractTypeMatch = { ID: string; Code?: string | null; Name: string };
+
+/** The `By` note when contracts has no `Code` column, so Name is the only identifier on offer. */
+const NAME_ONLY = ' (matched on Name — contracts has no Code column on ContractType)';
+
+/**
+ * Choose the contract type a policy value names: a `Code` match first, then a `Name` match.
+ *
+ * Exported for the unit test; the seam is its only caller.
+ */
+export function pickContractType(
+    rows: ContractTypeMatch[],
+    value: string,
+    hasCode: boolean,
+): { ID: string | null; By: string } {
+    // The database compared case-insensitively to return these rows, so the pick does too; an exact
+    // comparison here would drop a row SQL Server already matched.
+    const same = (a: string | null | undefined): boolean => (a ?? '').toLowerCase() === value.toLowerCase();
+    const byCode = hasCode ? rows.find((row) => same(row.Code)) : undefined;
+    if (byCode) {
+        return { ID: byCode.ID, By: '' };
+    }
+    const byName = rows.find((row) => same(row.Name));
+    if (!byName) {
+        return { ID: null, By: hasCode ? '' : NAME_ONLY };
+    }
+    return { ID: byName.ID, By: hasCode ? ' (matched on Name — no contract type has that Code)' : NAME_ONLY };
+}
+
 /**
  * The seam input plus the one field the shared type does not carry yet.
  *
@@ -325,18 +355,21 @@ export class LiveContractsSeam {
     /**
      * The contract type the policy named.
      *
-     * ── WHY THIS PROBES FOR A COLUMN ────────────────────────────────────────────────────────────
+     * ── CODE FIRST, NAME AS A FALLBACK ──────────────────────────────────────────────────────────
      *
      * Sales' policy field is `ContractTypeCode`, and resolving a CODE is the right shape: sales does
-     * not know contracts' vocabulary and must not bake its UUIDs. But `ContractType` has no `Code`
-     * column — it is identified by `Name` (unique) and a fixed seeded UUID. Filtering on `Code`, as
-     * the previous version did, ran against a column that does not exist, so the lookup could only
-     * ever fail.
+     * not know contracts' vocabulary and must not bake its UUIDs. A code also survives a rename, which
+     * a display name does not.
      *
-     * Rather than fail the whole route over a missing column, this asks the METADATA which identifier
-     * contracts actually offers, uses that, and reports which one it used so the answer is never
-     * ambiguous. When contracts adds `Code` — as tasks just did on `TaskType`, for the same reason —
-     * this starts preferring it with no change here. See D-12.
+     * Contracts did not always have a `Code` on `ContractType` (bizapps-contracts#96 added one), and the
+     * two apps release separately. So the value is matched against `Code` when the column exists, and
+     * against `Name` when no `Code` matches. That keeps every combination working: an older contracts
+     * with no `Code`, a newer one where the policy already names the code (`ORDER_FORM`), and a newer
+     * one where the policy still names the label (`Order Form`). A Code match always wins over a Name
+     * match, and a Name match is reported in `By`, so the answer is never ambiguous about which
+     * identifier it used.
+     *
+     * One query, not two: both columns are read for the candidate rows and the winner is picked here.
      *
      * ── THIS IS NOT A VOCABULARY COMPARISON ─────────────────────────────────────────────────────
      *
@@ -351,23 +384,23 @@ export class LiveContractsSeam {
 
         const info: EntityInfo | undefined = this.provider.Entities.find((e) => e.Name === E_CONTRACT_TYPE);
         const hasCode = info?.Fields?.some((f) => f.Name === 'Code') === true;
-        const column = hasCode ? 'Code' : 'Name';
-        const by = hasCode ? '' : ' (matched on Name — contracts has no Code column on ContractType)';
+        const literal = `'${String(code).replace(/'/g, "''")}'`;
+        const filter = hasCode ? `Code = ${literal} OR Name = ${literal}` : `Name = ${literal}`;
 
-        const r = await new RunView().RunView<{ ID: string }>(
+        const r = await new RunView().RunView<ContractTypeMatch>(
             {
                 EntityName: E_CONTRACT_TYPE,
-                ExtraFilter: `${column} = '${String(code).replace(/'/g, "''")}'`,
+                ExtraFilter: filter,
                 ResultType: 'simple',
-                Fields: ['ID'],
+                Fields: hasCode ? ['ID', 'Code', 'Name'] : ['ID', 'Name'],
             },
             this.user,
         );
         if (!r?.Success) {
             LogError(`LiveContractsSeam could not read contract types: ${r?.ErrorMessage ?? 'unknown error'}`);
-            return { ID: null, By: by };
+            return { ID: null, By: '' };
         }
-        return { ID: (r.Results ?? [])[0]?.ID ?? null, By: by };
+        return pickContractType(r.Results ?? [], code, hasCode);
     }
 
     /**
