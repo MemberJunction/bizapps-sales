@@ -3,12 +3,12 @@
  *
  * ── WHY THIS IS A SEAM, FOR THE SAME REASON THE MAILBOX WAS ─────────────────────────────────────
  *
- * The measures come from MJ Queries that another session is building right now: nothing named `%Deal%`,
- * `%Forecast%` or `%Pipeline%` exists in `MJ: Queries` yet, on any branch. So the queries are the one
- * thing behind this interface, and the snapshot writer, the period arithmetic, the re-run guard, the
- * Action and the scheduled job are all in front of it and provable today.
+ * The measures come from MJ Queries, which were written after the snapshot job. So the queries are the
+ * one thing behind this interface, and the snapshot writer, the period arithmetic, the re-run guard, the
+ * Action and the scheduled job are all in front of it and provable with a fixture.
  *
- * When their queries land, a deployment swaps the factory and nothing else moves. That is the same shape
+ * The queries have landed and the factory's default now reads `Sales: Forecast by Owner`; nothing else
+ * moved. That is the same shape
  * `IActivitySource` uses for the mailbox and `LiveOrdersSeam`/`LiveContractsSeam` use for the downstream
  * apps, so it is the third instance of an established pattern rather than a new idea.
  *

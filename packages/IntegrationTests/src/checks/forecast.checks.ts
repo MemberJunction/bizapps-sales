@@ -1,11 +1,10 @@
 /**
- * @fileoverview `forecast` — FS1–FS8. The ForecastSnapshot scheduled job (#40).
+ * @fileoverview `forecast` — FS1–FS15. The ForecastSnapshot scheduled job (#40).
  *
- * The measures come from MJ Queries another session is building; nothing named `%Forecast%` exists in
- * `MJ: Queries` yet. So these drive the REAL writer, the REAL re-run guard and the REAL period arithmetic
- * through a fixture source, exactly as the activity checks do for the mailbox. The one thing left
- * unproven is whether `QueryForecastSource.readRow` maps a real query's columns — which one run against a
- * landed query settles.
+ * FS1–FS10 drive the REAL writer, the REAL re-run guard and the REAL period arithmetic through a fixture
+ * source, exactly as the activity checks do for the mailbox. FS11–FS12 prove `QueryForecastSource.readRow`
+ * against a real query, and FS13 and FS15 prove the default factory reads `Sales: Forecast by Owner` and
+ * writes owner-grain rows with nothing swapped in (#216).
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
@@ -15,6 +14,7 @@ import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '
 import {
     CurrentForecastSourceFactory,
     CurrentMonthPeriod,
+    DEFAULT_FORECAST_QUERY,
     FixtureForecastSource,
     ForecastSnapshotJob,
     QueryForecastSource,
@@ -33,6 +33,8 @@ const E_DEAL = 'MJ_BizApps_Sales: Deals';
 /** The seeded rows, from `metadata/`. Fixed there, so fixed here. */
 /** The real query, as registered in `MJ: Queries` by `metadata/queries/.forecast-by-category.json`. */
 const FORECAST_QUERY = 'Sales: Forecast by Category';
+/** The owner-grain companion, from `metadata/queries/.forecast-by-owner.json`. The default source. */
+const FORECAST_BY_OWNER_QUERY = 'Sales: Forecast by Owner';
 
 /**
  * A window WIDE ENOUGH to contain the demo data, for the checks that drive the real query.
@@ -135,26 +137,31 @@ const job = new ForecastSnapshotJob();
 export const ForecastChecks: NamedCheck[] = [
     {
         Id: 'forecast.FS1',
-        Name: 'FS1: with NO source registered the run is a success that writes nothing',
+        Name: 'FS1: with a factory that returns NO source the run is a success that writes nothing',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 /**
-                 * THE DEFAULT, ASSERTED. The daily job ships Active, so the default factory returning null
-                 * is what makes that safe. If somebody registers a real source as the default this goes red
-                 * rather than the job quietly writing forecast numbers nobody asked for.
+                 * NO SOURCE, SET EXPLICITLY. The default reads a real query (FS13), so the no-source path
+                 * is reached only by a factory that returns null. Swapped in here and restored in
+                 * `finally`, so a failure cannot leave later checks without the default.
                  */
-                const before = (await snapshotsFor(ctx)).length;
-                const result = await RunForecastSnapshot(ProviderOf(ctx), ctx.User, new Date());
+                const previous = SetForecastSourceFactory(() => null);
+                try {
+                    const before = (await snapshotsFor(ctx)).length;
+                    const result = await RunForecastSnapshot(ProviderOf(ctx), ctx.User, new Date());
 
-                Assert(result.Success, `the no-source run must succeed — ${result.Issues.join(' | ')}`);
-                AssertEqual(result.Written, 0, 'and write nothing');
-                AssertEqual(result.Period, null, 'and report no period, because it measured none');
-                Assert(
-                    result.Issues.some((i) => i.includes('no forecast source') || i.includes('No forecast source')),
-                    `it must SAY why nothing happened — got ${JSON.stringify(result.Issues)}`,
-                );
-                AssertEqual((await snapshotsFor(ctx)).length, before, 'the table did not move');
+                    Assert(result.Success, `the no-source run must succeed — ${result.Issues.join(' | ')}`);
+                    AssertEqual(result.Written, 0, 'and write nothing');
+                    AssertEqual(result.Period, null, 'and report no period, because it measured none');
+                    Assert(
+                        result.Issues.some((i) => i.includes('No forecast source')),
+                        `it must SAY why nothing happened — got ${JSON.stringify(result.Issues)}`,
+                    );
+                    AssertEqual((await snapshotsFor(ctx)).length, before, 'the table did not move');
+                } finally {
+                    SetForecastSourceFactory(previous);
+                }
             }),
     },
     {
@@ -404,7 +411,7 @@ export const ForecastChecks: NamedCheck[] = [
                  * for the first would put a measured zero in a forecast series.
                  *
                  * Uses a name nothing could plausibly define, so this cannot start passing for the wrong
-                 * reason when the real forecast queries land.
+                 * reason if a query is added later.
                  */
                 const missing = 'FS8 — no such forecast query exists';
                 const source = new QueryForecastSource(missing, ctx.User);
@@ -451,7 +458,7 @@ export const ForecastChecks: NamedCheck[] = [
             const row = jobs[0];
 
             AssertEqual(String(row['CronExpression']), '0 0 2 * * *', 'daily at 02:00, six-field');
-            AssertEqual(String(row['Status']), 'Active', 'Active — safe because the source factory is null');
+            AssertEqual(String(row['Status']), 'Active', 'Active — the default source reads a real query, and a missing one fails the run by name');
             AssertEqual(String(row['ConcurrencyMode']), 'Skip', 'concurrent captures would both pass the guard');
             AssertEqual(
                 String(row['MissedRunPolicy']),
@@ -496,10 +503,10 @@ export const ForecastChecks: NamedCheck[] = [
                     SetForecastSourceFactory(previous);
                 }
 
-                /** Restored, so FS1's assertion about the default is not left depending on run order. */
+                /** Restored, so FS13's assertion about the default is not left depending on run order. */
                 Assert(
-                    CurrentForecastSourceFactory()(ctx.User) === null,
-                    'the default factory must be restored — otherwise FS1 passes or fails by ordering',
+                    CurrentForecastSourceFactory() === previous,
+                    'the previous factory must be restored — otherwise FS13 and FS15 pass or fail by ordering',
                 );
             }),
     },
@@ -681,21 +688,21 @@ export const ForecastChecks: NamedCheck[] = [
     },
     {
         Id: 'forecast.FS13',
-        Name: 'FS13: the DEFAULT factory is still the empty fixture — a real source is a swap, not a default',
+        Name: 'FS13: the DEFAULT factory reads Sales: Forecast by Owner',
         RequiresMutation: false,
         Fn: async (ctx) => {
             /**
-             * THE SEAM SURVIVES BEING PROVEN. Pointing the source at a real query is what FS11 and FS12
-             * do explicitly; the DEFAULT must stay null, because that is what stops the seeded hourly-daily
-             * job writing anything by accident. Making the live source the default would be the easy way to
-             * test it and would silently arm a scheduled job against production data.
+             * THE DEFAULT, ASSERTED (#216). It returned null while the queries did not exist, and kept
+             * returning null after they shipped, so the seeded daily job reported success and wrote
+             * nothing on every host. Asserted by name, so a default pointed at the category query (no
+             * owner grain) goes red too.
              */
-            AssertEqual(
-                CurrentForecastSourceFactory()(ctx.User),
-                null,
-                'the default forecast source must remain null — FS1 depends on it, and so does the safety of '
-                    + 'shipping the daily job Active',
-            );
+            const source = CurrentForecastSourceFactory()(ctx.User);
+            Assert(source !== null, 'the default factory must return a source — null is the #216 bug');
+            Assert(source instanceof QueryForecastSource, 'and it must be a query source, not a fixture');
+            AssertEqual(source.Name, DEFAULT_FORECAST_QUERY, 'reading the default query');
+            AssertEqual(DEFAULT_FORECAST_QUERY, FORECAST_BY_OWNER_QUERY, 'which is the owner-grain query');
+            AssertEqual(source.IsLive, true, 'and recording itself as live in provenance');
         },
     },
     {
@@ -758,6 +765,53 @@ export const ForecastChecks: NamedCheck[] = [
                     Number(dashboardBefore['WonCount']),
                     'and the won tile is unchanged',
                 );
+            }),
+    },
+    {
+        Id: 'forecast.FS15',
+        Name: 'FS15: a run with NOTHING swapped in writes one snapshot per owner-grain row of the default query',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE PATH THE SCHEDULED JOB TAKES (#216): `RunForecastSnapshot` with the default factory,
+                 * no fixture and no explicit source. Only the period is named, so the run reads the seeded
+                 * demo year instead of whatever the current month holds. The stored rows are compared to
+                 * the owner query's own output, keyed by company, pipeline AND owner.
+                 */
+                const direct = await queryRows(ctx, FORECAST_BY_OWNER_QUERY, {
+                    PeriodStart: LIVE_PERIOD.PeriodStart.toISOString().slice(0, 10),
+                    PeriodEnd: LIVE_PERIOD.PeriodEnd.toISOString().slice(0, 10),
+                });
+                Assert(direct.length > 0, 'setup: zero rows would make this vacuous — seed demo data first');
+                Assert(
+                    direct.some((r) => r['OwnerEmployeeID'] !== null && r['OwnerEmployeeID'] !== undefined),
+                    'setup: no deal in the window has an owner, so the owner grain cannot be observed',
+                );
+
+                const before = (await snapshotsFor(ctx, LIVE_PERIOD)).length;
+                const result = await RunForecastSnapshot(ProviderOf(ctx), ctx.User, new Date(), LIVE_PERIOD);
+                Assert(result.Success, `the default run failed — ${result.Issues.join(' | ')}`);
+                AssertEqual(result.Measured, direct.length, 'it measured every row the owner query returned');
+                AssertEqual(result.Written, direct.length, 'and wrote one snapshot each');
+
+                const stored = await snapshotsFor(ctx, LIVE_PERIOD);
+                AssertEqual(stored.length - before, direct.length, 'the new snapshots are in the table');
+
+                const key = (r: Record<string, unknown>): string =>
+                    [r['CompanyID'], r['PipelineID'], r['OwnerEmployeeID']]
+                        .map((v) => String(v ?? '-').toLowerCase())
+                        .join('|');
+                const ours = stored.filter((r) => {
+                    const provenance = JSON.parse(String(r['SnapshotJSON'] ?? '{}')) as { Source?: string };
+                    return provenance.Source === DEFAULT_FORECAST_QUERY;
+                });
+                for (const raw of direct) {
+                    const row = ours.find((s) => key(s) === key(raw));
+                    Assert(!!row, `no snapshot stored for the owner-grain row ${key(raw)}`);
+                    AssertEqual(Number(row!['CommitAmount']), Number(raw['CommitAmount']), 'commit round-trips');
+                    AssertEqual(Number(row!['ClosedAmount']), Number(raw['ClosedWonAmount']), 'and the closed figure');
+                }
             }),
     },
 ];

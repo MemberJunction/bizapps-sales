@@ -44,7 +44,6 @@ as a written question rather than becoming a GitHub issue.
 | D-14 | Bound `Contract.AnnualIncreasePercent` at 100, or state that it stores a fraction. | Contracts |
 | D-28 | Is forecasting monthly? | Finance |
 | D-30 | Should the forecast measures get their own sanity checks, and where? | Owner of the queries |
-| D-32 | Register a forecast source and point it at `Sales: Forecast by Owner`; today the daily snapshot writes nothing. | Sales, [#216](https://github.com/MemberJunction/bizapps-sales/issues/216) |
 | D-34 | Rename `Pipeline.RequiresDealLines`, or correct its description. | Sales |
 
 DN-19's remaining work is tracked in GitHub as #202 and #207.
@@ -114,7 +113,7 @@ records a trap or a measurement rather than a decision.
 | D-29 | Decided | A same-day re-run skips |
 | D-30 | Open | Sanity checks for the forecast measures |
 | D-31 | Decided | One `ForecastSnapshot` writer: the Action |
-| D-32 | Open | Snapshots have no owner grain, and no source is registered |
+| D-32 | Built | The daily snapshot reads `Sales: Forecast by Owner` by default |
 | D-33 | Note | Open and won deals sit on different date columns |
 | D-34 | Open | `Pipeline.RequiresDealLines` outlived `DealLine` |
 
@@ -1093,11 +1092,11 @@ plain script was chosen over an Action (written before the Action existed), and 
 behaviour, now marked as losing to D-29. Running both would make `ForecastSnapshot` mean different
 things on different days.
 
-The Action writes nothing yet; see D-32.
+The Action reads `Sales: Forecast by Owner` by default; see D-32.
 
 ---
 
-## D-32 · OPEN: snapshots carry no owner grain, and no source is registered
+## D-32 · BUILT: the daily snapshot reads `Sales: Forecast by Owner` by default
 
 `forecast-history.sql` partitions its `LAG` windows by `OwnerEmployeeID` and joins `Employee` for an
 owner name, so it expects owner-grained rows. `Sales: Forecast by Category` groups by company and
@@ -1105,13 +1104,15 @@ pipeline only, so a snapshot read from it carries `OwnerEmployeeID = null`, mean
 (asserted by `FS11`), and the history renders thin rather than broken.
 
 **A companion query, not a reshape.** `Sales: Forecast by Category` is published and the dashboard reads
-it, so the owner grain belongs in a second query rather than in a changed row shape. It exists:
-`Sales: Forecast by Owner` (172a6d8) projects `CompanyID`, `PipelineID` and `OwnerEmployeeID`, and
-`FORECAST_QUERY_COLUMNS.OwnerEmployeeID` is already mapped.
+it, so the owner grain belongs in a second query rather than in a changed row shape:
+`Sales: Forecast by Owner` (172a6d8) projects `CompanyID`, `PipelineID` and `OwnerEmployeeID`.
 
-**What is missing:** nothing points the capture at it. Outside the integration checks no forecast
-source is registered (only tests call `SetForecastSourceFactory`), so the daily job reports success and
-writes nothing. Tracked as #216.
+**Built (#216):** until then nothing pointed the capture at it. The source factory defaulted to none,
+only tests replaced it, and the daily job reported success while writing nothing. The factory's default
+in `ForecastSnapshotJob.ts` now returns a `QueryForecastSource` for `DEFAULT_FORECAST_QUERY`
+(`Sales: Forecast by Owner`). It is set in the package rather than at server startup, so MJAPI and the
+integration checks capture through the same source. `FS13` asserts the default by name; `FS15` runs the
+default path and compares the stored rows to the query's own, by company, pipeline and owner.
 
 ---
 
