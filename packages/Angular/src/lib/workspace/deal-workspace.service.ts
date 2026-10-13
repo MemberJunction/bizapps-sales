@@ -87,6 +87,8 @@ export interface DealDashboardSummary {
     TotalCount: number;
     PastExpectedCloseCount: number;
     WonCount: number;
+    /** The amounts of the deals `WonCount` counts: the forecast stack's Closed segment. */
+    WonAmount: number;
     /** How much of the open figure the orders engine priced, and how much a person typed. */
     OpenPricedAmount: number;
     OpenStatedAmount: number;
@@ -413,16 +415,6 @@ export class DealWorkspaceService {
     }
 
     /**
-     * The deal roster — what the dashboard and the list both read.
-     *
-     * ONE `RunViews` call for deals AND accounts. The account read exists only to resolve customer
-     * names (KI-8); doing it per row would be the "never query in a loop" rule broken in the most
-     * expensive possible place.
-     *
-     * Returns an empty array on failure rather than throwing, because a roster that cannot load should
-     * render as an empty list with a message, not take the whole section down.
-     */
-    /**
      * The deal roster, from the `Sales: Deal Roster` MJ Query.
      *
      * -- WHAT THIS REPLACED, AND WHY IT IS NOT JUST A RELOCATION --
@@ -442,15 +434,23 @@ export class DealWorkspaceService {
      * (DealName, AccountName, StageName); DealRosterRow names them for a component (Name,
      * CustomerName, PipelineStage). Mapping here keeps both audiences served and means renaming a
      * column on either side is a one-file change.
+     *
+     * `closedSince` drops closed deals that closed before it; open deals always come back
+     * (bizapps-sales#209). Omitted, every deal comes back.
+     *
+     * THROWS WHEN THE QUERY FAILS, rather than returning an empty roster. An empty roster reads as a
+     * database with no deals. The likeliest failure once `closedSince` is passed is a host whose query
+     * definition predates the parameter, which MJ refuses as an unknown parameter; the section shows the
+     * reason instead of an empty dashboard.
      */
-    public async LoadRoster(): Promise<DealRosterRow[]> {
+    public async LoadRoster(closedSince?: string | null): Promise<DealRosterRow[]> {
         const result = await new RunQuery().RunQuery({
             QueryName: 'Sales: Deal Roster',
             CategoryPath: 'Sales',
+            ...(closedSince ? { Parameters: { ClosedSince: closedSince } } : {}),
         });
         if (!result?.Success) {
-            LogError(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
-            return [];
+            throw new Error(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
         }
         const rows = (result.Results ?? []) as Record<string, unknown>[];
         // Throws on a query definition older than this mapper, rather than letting bool() read the
@@ -882,6 +882,7 @@ export class DealWorkspaceService {
             TotalCount: num(row['TotalCount']),
             PastExpectedCloseCount: num(row['PastExpectedCloseCount']),
             WonCount: num(row['WonCount']),
+            WonAmount: num(row['WonAmount']),
             OpenPricedAmount: num(row['OpenPricedAmount']),
             OpenStatedAmount: num(row['OpenStatedAmount']),
             OpenNoAmountCount: num(row['OpenNoAmountCount']),
