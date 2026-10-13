@@ -9,7 +9,7 @@
 -- schema. Without this file they survive a remove, and the next install re-INSERTs the same fixed
 -- UUIDs and fails on a primary-key collision. That is the whole reason the file exists.
 --
--- WHAT IS LISTED BELOW IS ONLY THE ROOTS -- 33 rows, the ones the seed creates that nothing else
+-- WHAT IS LISTED BELOW IS ONLY THE ROOTS -- 35 rows, the ones the seed creates that nothing else
 -- creates. Their children are NOT listed, because listing them is what breaks: a static delete
 -- list only orders rows the SEED made, while a real installation also holds runtime children
 -- (action execution logs, scheduled-job runs, query permissions, tasks) that a pristine canary
@@ -103,6 +103,11 @@ INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'RemoteOperation',         'D4F8A162-0002-4E71-B0A8-3F17C5E2D802', 0),  -- Close Deal
     ('${mjSchema}', 'RemoteOperation',         'D4F8A162-0003-4E71-B0A8-3F17C5E2D802', 0),  -- Reopen Deal
     ('${mjSchema}', 'RemoteOperationCategory', 'D4F8A162-9C35-4E71-B0A8-3F17C5E2D801', 0),  -- Deal Lifecycle
+    -- API scopes. APIApplicationScope.ScopeID and APIKeyScope.ScopeID are NOT NULL, so MJAPI's
+    -- ceiling row and any key's grant follow; the child is listed too, since APIScope.ParentID
+    -- is nullable and would otherwise only be released.
+    ('${mjSchema}', 'APIScope',                '038C63C1-2247-47D8-ADFB-594666717C86', 0),  -- sales:write
+    ('${mjSchema}', 'APIScope',                '080F5DDA-E5CD-444A-9D61-1A89AE5DF423', 0),  -- sales
     -- Scheduled jobs. `ScheduledJobRun.ScheduledJobID` is NOT NULL, so the run history follows.
     ('${mjSchema}', 'ScheduledJob',            '5A1E5000-0000-4000-8000-000000000201', 0),  -- Sales -- Activity Sync (hourly) (retired; same reason as the Action row)
     ('__mj_BizAppsCommon', 'ActivitySyncExtension', 'A7C4E2B1-5D83-4F0A-9C1E-6B8D2F4A90C3', 0),  -- Sales.DealLinker
