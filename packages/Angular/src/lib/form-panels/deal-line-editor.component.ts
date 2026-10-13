@@ -64,6 +64,15 @@
  * save refuses a flagged line without one. The picker's list, its default and the figures beside it
  * all come from orders; this file only passes them through.
  *
+ * ── A DISCOUNT IS RECORDED AS A CONCESSION (golive#305) ─────────────────────────────────────────
+ *
+ * Discount % writes `OrderLine.DiscountPct`, and orders' confirm gate holds the order until an
+ * Approved Price concession covers it. So a discount that goes UP asks for a reason here, and once
+ * the order has saved the line, the reason is recorded as that concession. Orders values it and
+ * decides it: inside the rep's Sales Authority it is Approved on save, outside it the rep is told the
+ * order waits for approval. A failure to record it does not undo the saved line; the rep is told the
+ * confirm will be held until one is recorded.
+ *
  * @module @mj-biz-apps/sales-ng
  */
 import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
@@ -89,12 +98,16 @@ import { MJOLinePricePickerComponent } from '@mj-biz-apps/orders-ng';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountFractionToPercent,
+    DiscountNeedsConcession,
     DiscountPercentToFraction,
+    DiscountReasonCategories,
     EffectiveTermStart,
     HasExplicitTermStart as StoresOwnTermStart,
     ResolveDealLockState,
     RoundDiscountPercent,
+    RecordDiscountConcession,
     ShouldOfferTermStart,
+    type DiscountReasonCategory,
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
@@ -216,6 +229,34 @@ interface RemoteOperationRouter {
                         </label>
                     </div>
 
+                    <!-- A RAISED DISCOUNT IS A CONCESSION, and orders will not confirm the order
+                         until one is approved. The reason is asked for here so it can be recorded
+                         the moment the line is saved. -->
+                    @if (NeedsDiscountReason) {
+                        <div class="mjs-le__row">
+                            <label class="mjs-le__field">
+                                <span class="mjs-le__label">Discount reason category</span>
+                                <select data-testid="line-discount-category" [(ngModel)]="DiscountCategory"
+                                        [disabled]="IsLocked">
+                                    <option [ngValue]="null" disabled>Choose one</option>
+                                    @for (c of ReasonCategories; track c) {
+                                        <option [ngValue]="c">{{ c }}</option>
+                                    }
+                                </select>
+                            </label>
+                            <label class="mjs-le__field">
+                                <span class="mjs-le__label">Discount reason</span>
+                                <textarea data-testid="line-discount-reason" rows="2" [(ngModel)]="DiscountReason"
+                                          [disabled]="IsLocked"
+                                          placeholder="Why value is given away on this line"></textarea>
+                            </label>
+                        </div>
+                        <small class="mjs-le__hint">
+                            Inside your Sales Authority the discount is approved when you save. Outside it, the
+                            order cannot be confirmed until an approver approves it.
+                        </small>
+                    }
+
                     @if (ShowPricePicker) {
                         <div class="mjs-le__field">
                             <span class="mjs-le__label">Price</span>
@@ -271,8 +312,15 @@ interface RemoteOperationRouter {
                     @if (Error) { <p class="mjs-le__error">{{ Error }}</p> }
                 </div>
 
+                @if (Notice) { <p class="mjs-le__notice" data-testid="line-notice">{{ Notice }}</p> }
+
                 <!-- Confirm LEFT, cancel RIGHT (CLAUDE.md). -->
                 <footer class="mjs-le__foot">
+                    @if (Notice) {
+                        <!-- The line is saved; the rep has read what happens next. -->
+                        <button type="button" class="mjs-le__btn mjs-le__btn--primary" data-testid="line-done"
+                                (click)="Saved.emit()">Done</button>
+                    } @else {
                     <button type="button" class="mjs-le__btn mjs-le__btn--primary" data-testid="line-save"
                             [disabled]="!CanSave || Saving" (click)="Save()">
                         {{ Saving ? 'Saving…' : 'Save' }}
@@ -280,6 +328,7 @@ interface RemoteOperationRouter {
                     <button type="button" class="mjs-le__btn" [disabled]="Saving" (click)="Cancel()">Cancel</button>
                     @if (!CanSave && !Saving) {
                         <span class="mjs-le__muted">{{ BlockedReason }}</span>
+                    }
                     }
                     <!--
                          REMOVE SITS APART FROM THE PAIR ABOVE, pushed right by its own margin. Confirm
@@ -338,11 +387,16 @@ interface RemoteOperationRouter {
         .mjs-le__row { display: flex; gap: var(--mj-space-4); flex-wrap: wrap; }
         .mjs-le__row > .mjs-le__field { flex: 1 1 180px; }
         .mjs-le__field { display: flex; flex-direction: column; gap: 4px; }
+        .mjs-le__notice {
+            margin: 0 var(--mj-space-5) var(--mj-space-3); padding: var(--mj-space-3);
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md, 8px);
+            background: var(--mj-bg-surface-sunken);
+        }
         .mjs-le__label {
             font-size: var(--mj-text-xs); text-transform: uppercase; letter-spacing: .04em;
             color: var(--mj-text-muted); font-weight: 700;
         }
-        .mjs-le__field input, .mjs-le__field select {
+        .mjs-le__field input, .mjs-le__field select, .mjs-le__field textarea {
             padding: 8px 10px; border: 1px solid var(--mj-border-default);
             border-radius: var(--mj-radius-md, 8px); background: var(--mj-bg-surface);
             color: var(--mj-text-default); font: inherit; width: 100%;
@@ -436,6 +490,14 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     /** Whether this dialog created the line, so cancelling must take it back off the collection. */
     private IsNewLine = false;
 
+    /** The `DiscountPct` the line carried when it was last saved — what a raise is measured from. */
+    private savedDiscountPct: number | null = null;
+    private reasonCategories: DiscountReasonCategory[] | null = null;
+    public DiscountCategory: DiscountReasonCategory | null = null;
+    public DiscountReason = '';
+    /** What the rep must know after a save that recorded, or failed to record, a concession. */
+    public Notice: string | null = null;
+
     public get Title(): string { return this.LineID ? 'Edit line' : 'Add a product'; }
 
     public async ngOnInit(): Promise<void> {
@@ -527,6 +589,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                 // legal value rather than at the one the database refuses.
                 this.Working.Quantity = 1;
             }
+            this.savedDiscountPct = this.Working.DiscountPct ?? null;
             if (this.ShowPricePicker) {
                 // The picker's Default row needs orders' answer before anything is changed, and its list
                 // needs the applicable prices; a saved line otherwise opens with Default disabled.
@@ -904,8 +967,24 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             !!this.Working?.ProductID &&
             !this.DiscountRefusal &&
             !!this.Deal?.OrderID_Object &&
-            !LineNeedsOverrideReason(this.Working, this.EngineDefault)
+            !LineNeedsOverrideReason(this.Working, this.EngineDefault) &&
+            !this.MissingDiscountReason
         );
+    }
+
+    /** Whether the discount went up since the line was saved, so it needs a concession behind it. */
+    public get NeedsDiscountReason(): boolean {
+        return !!this.Working && DiscountNeedsConcession(this.savedDiscountPct, this.Working.DiscountPct);
+    }
+
+    /** Orders' concession reason categories, read from its entity metadata when first shown. */
+    public get ReasonCategories(): DiscountReasonCategory[] {
+        this.reasonCategories ??= DiscountReasonCategories();
+        return this.reasonCategories;
+    }
+
+    private get MissingDiscountReason(): boolean {
+        return this.NeedsDiscountReason && (!this.DiscountCategory || !this.DiscountReason.trim());
     }
 
     /**
@@ -925,6 +1004,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
         if (LineNeedsOverrideReason(this.Working, this.EngineDefault)) return 'Enter a reason for the price override.';
+        if (this.MissingDiscountReason) return 'Choose a category and enter a reason for the discount.';
         return this.DiscountRefusal ?? '';
     }
 
@@ -936,7 +1016,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
      * golive#206 item 1 names deleting alongside adding and editing.
      */
     public get CanRemove(): boolean {
-        return !!this.LineID && !this.IsLocked && !!this.Deal?.OrderID_Object;
+        return !!this.LineID && !this.IsLocked && !!this.Deal?.OrderID_Object && !this.Notice;
     }
 
     /** Two-step, because removing a product a rep meant to keep costs them a re-entry. */
@@ -1018,6 +1098,12 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                 return;
             }
             this.IsNewLine = false;
+            const notice = await this.recordDiscountConcession();
+            if (notice) {
+                // The line IS saved. Hold the dialog open on what happens next; Done reports the save.
+                this.Notice = notice;
+                return;
+            }
             this.Saved.emit();
         } catch (err) {
             this.Error = err instanceof Error ? err.message : String(err);
@@ -1025,6 +1111,34 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             this.Saving = false;
             this.cdr.detectChanges();
         }
+    }
+
+    /**
+     * Records a raised discount as the Price concession orders' confirm gate holds on. Runs after the
+     * order's save, because a concession names a persisted line and orders values it from what that
+     * line stores. Returns what the rep must be told, or null when the discount was approved.
+     */
+    private async recordDiscountConcession(): Promise<string | null> {
+        if (!this.Working || !this.NeedsDiscountReason || !this.DiscountCategory) return null;
+        const outcome = await RecordDiscountConcession({
+            OrderLineID: this.Working.ID,
+            ReasonCategory: this.DiscountCategory,
+            Reason: this.DiscountReason,
+        });
+        this.savedDiscountPct = this.Working.DiscountPct ?? null;
+        if (!outcome.Recorded) {
+            return (
+                `The line is saved, but its discount could not be recorded for approval: ${outcome.Message} ` +
+                `The order cannot be confirmed until a concession covering the discount is approved.`
+            );
+        }
+        if (outcome.AwaitingApproval) {
+            return (
+                'The line is saved. Its discount is outside your Sales Authority and is waiting for approval; ' +
+                'the order cannot be confirmed until it is approved.'
+            );
+        }
+        return null;
     }
 
     /**
