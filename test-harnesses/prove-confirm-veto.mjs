@@ -10,6 +10,8 @@
  */
 import 'dotenv/config';
 import sql from 'mssql';
+import { pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
 
 const DB = process.env.DB_DATABASE;
 let pass = 0, fail = 0;
@@ -38,7 +40,10 @@ const user = UserCache.Users.find((u) => u?.Type?.trim().toLowerCase() === 'owne
 console.log(`\n  database: ${DB}\n  user: ${user?.Name ?? '(none)'}`);
 
 // Sales' bootstrap is what registers the vetoer; orders' lookup is what the save consults.
-const salesCES = await importSibling('@mj-biz-apps/sales-core-entities-server');
+// Sales' OWN package, so it is imported directly rather than through `importSibling`. That helper
+// resolves SIBLING checkouts, and since #231 it deliberately refuses to hand a sibling this
+// checkout's copy — which made it return a module without this repo's own exports.
+const salesCES = await import(pathToFileURL(resolve('packages/CoreEntitiesServer/dist/index.js')).href);
 const orders = await importSibling('@mj-biz-apps/orders-entities');
 
 console.log('\n-- the seam is wired on a real host --');
