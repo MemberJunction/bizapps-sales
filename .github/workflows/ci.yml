@@ -157,6 +157,11 @@ jobs:
       - name: Mutation driver cleanup (an interrupted run leaves no mutant behind)
         run: npm run test:mutate-harness
 
+      # The sibling-checkout resolver gives a sibling the copy its range or sales' override calls for,
+      # never sales' copy by accident (sales#231). Temp checkouts, no database.
+      - name: Sibling resolver (one copy of each BizApps package)
+        run: npm run test:one-copy-harness
+
       # Unit tests run in the shared build.yml (`pnpm run test`, the root vitest suite).
 
       # Advisory, matching the sibling repo's judgement. migrations/_README.md requires a changeset on

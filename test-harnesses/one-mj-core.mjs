@@ -29,6 +29,21 @@
  *     (peerDependencies first, then dependencies, then devDependencies; a package that declares nothing
  *     takes it). Failing that, a sibling's import takes sales' copy if its range accepts that, and
  *     otherwise keeps its own.
+ *   - A package `pnpm-workspace.yaml` overrides is checked against the OVERRIDE's range, not the
+ *     requester's, for every requester. That is what pnpm does in sales' own install: the override
+ *     replaces every request for the package in the graph, so one copy serves them all. A sibling whose
+ *     own range the override replaced and whose range refuses the build is recorded, and the runner
+ *     prints it as a warning (sales#231).
+ *
+ * ── ONE `nextResolve` PER HOOK CALL ─────────────────────────────────────────────────────────────
+ *
+ * On Node 24.19, a `nextResolve` call with a substituted `parentURL` followed by a second call with the
+ * real one returns the FIRST call's result for the second (ESM; measured with two folders that each
+ * hold a different copy of one package). The first version of the sibling rule probed sales' copy that
+ * way and then fell back to the requester's own resolution, so a requester whose range refused both
+ * the build and sales' copy got sales' copy anyway: orders 5.30.0 (common-entities `5.49.0`) and
+ * accounting 0.21.2 (`^5.50.2`) loaded sales' common-entities 5.50.1 beside common's build of 5.50.1
+ * (sales#231). Sales' copy is therefore probed on disk, and each path below calls `nextResolve` once.
  *
  * Why the building checkout and not sales' copy: it is the newest on the host, and the range is the
  * requester's own statement of what it works with. An equal-version rule (the first version of this
@@ -74,7 +89,39 @@ const manifests = new Map();
 /** The sibling build of each `@mj-biz-apps/*` package, found once per name. */
 const siblingBuilds = new Map();
 
+/** Each requester whose own range refused the sibling build but was replaced by sales' override. */
+const overriddenRefusals = new Map();
+
 let state = 'not installed';
+
+/**
+ * The `@mj-biz-apps/*` entries of the `overrides:` block in sales' `pnpm-workspace.yaml`, by name.
+ * Read from the file rather than listed here, so the harness follows the install when the override set
+ * changes. Only the flat `'name': 'range'` lines that block uses are read.
+ */
+function readBizAppsOverrides() {
+    const overrides = new Map();
+    let text = '';
+    try {
+        text = readFileSync(join(REPO_ROOT, 'pnpm-workspace.yaml'), 'utf8');
+    } catch {
+        return overrides;
+    }
+    let inBlock = false;
+    for (const line of text.split(/\r?\n/)) {
+        if (/^overrides:\s*$/.test(line)) {
+            inBlock = true;
+            continue;
+        }
+        if (!inBlock || /^\s*(#|$)/.test(line)) continue;
+        if (!/^\s/.test(line)) break;
+        const entry = line.match(/^\s+['"]?(@mj-biz-apps\/[^'":\s]+)['"]?\s*:\s*['"]?([^'"#]+?)['"]?\s*(#.*)?$/);
+        if (entry) overrides.set(entry[1], entry[2]);
+    }
+    return overrides;
+}
+
+const OVERRIDES = readBizAppsOverrides();
 
 function realFile(url) {
     if (!url?.startsWith('file:')) return null;
@@ -146,20 +193,23 @@ function packageName(specifier) {
 }
 
 /**
- * The first of sales' packages that can see `specifier`'s package, or null.
+ * The first of sales' packages that can see `specifier`'s package, with the version of the copy it sees,
+ * or null.
  *
- * Checked on disk rather than by calling the next resolver and catching its failure: on Node 24 a
- * failed `nextResolve` with a substituted parent poisons the later call with the original parent, which
- * then fails naming sales' anchor. Only a resolution known to succeed is delegated.
+ * Checked on disk rather than by calling the next resolver: on Node 24 a `nextResolve` with a
+ * substituted parent carries over to the hook's next `nextResolve` (see "ONE `nextResolve` PER HOOK
+ * CALL"), whether the first call failed or succeeded. Only a resolution that will be returned is
+ * delegated.
  */
-function anchorFor(specifier) {
+function testedCopy(specifier) {
     const name = packageName(specifier);
     for (const consumer of CONSUMERS) {
         const pkgDir = join(REPO_ROOT, 'packages', consumer);
         if (!existsSync(join(pkgDir, 'package.json'))) continue;
-        if (existsSync(join(pkgDir, 'node_modules', name, 'package.json'))
-            || existsSync(join(REPO_ROOT, 'node_modules', name, 'package.json'))) {
-            return pathToFileURL(join(pkgDir, 'package.json')).href;
+        const copyDir = [join(pkgDir, 'node_modules', name), join(REPO_ROOT, 'node_modules', name)]
+            .find((dir) => existsSync(join(dir, 'package.json')));
+        if (copyDir) {
+            return { anchor: pathToFileURL(join(pkgDir, 'package.json')).href, version: manifestAt(copyDir)?.version ?? null };
         }
     }
     return null;
@@ -167,8 +217,8 @@ function anchorFor(specifier) {
 
 /** Resolve `specifier` as one of sales' own packages would, or null when none of them can. */
 function resolveFromTestedCheckout(specifier, context, nextResolve) {
-    const anchor = anchorFor(specifier);
-    return anchor ? nextResolve(specifier, { ...context, parentURL: anchor }) : null;
+    const copy = testedCopy(specifier);
+    return copy ? nextResolve(specifier, { ...context, parentURL: copy.anchor }) : null;
 }
 
 /** The range the package owning `file` declares for `name`, or null when it declares none. */
@@ -188,11 +238,6 @@ function accepts(range, version) {
     return semver.satisfies(version, range, { includePrerelease: true });
 }
 
-function versionAt(url) {
-    const file = realFile(url);
-    return file ? owningPackage(file)?.manifest.version ?? null : null;
-}
-
 /**
  * MJ: always this checkout's copy. Every app floors MJ at the same LTS release, and one core is what the
  * checks need; a sibling that needs a newer MJ than this checkout installs is a host to rebuild, not
@@ -203,18 +248,39 @@ function resolveMJ(specifier, context, nextResolve) {
 }
 
 /**
+ * The range a requester is held to: sales' override for the package when there is one, as pnpm applies
+ * it in sales' install, otherwise the requester's own. A requester whose own range would have refused
+ * the build is recorded, so the run can say whose range the override set aside.
+ */
+function effectiveRange(parentFile, name, built) {
+    const own = declaredRange(parentFile, name);
+    const override = OVERRIDES.get(name);
+    if (override === undefined) return own;
+    // A range semver cannot read (`workspace:*`) is the build's own workspace asking for itself; the
+    // build is that same file, so nothing was set aside.
+    if (built && semver.validRange(own) && !accepts(own, built.version) && accepts(override, built.version)) {
+        const requester = owningPackage(parentFile);
+        const refusals = overriddenRefusals.get(name) ?? new Map();
+        refusals.set(`${requester?.manifest.name ?? parentFile}@${requester?.manifest.version ?? '?'}`, own);
+        overriddenRefusals.set(name, refusals);
+    }
+    return override;
+}
+
+/**
  * BizApps: the sibling checkout that builds the package when the requester's range accepts it; for a
  * sibling's import, sales' copy when its range accepts that; otherwise the requester's own. Subpath
  * imports keep their own resolution, and the copy count reports it if that loads a second copy.
+ * Every path calls `nextResolve` at most once.
  */
 function resolveBizApps(specifier, context, nextResolve, parentFile, fromSibling) {
     const name = packageName(specifier);
-    const range = declaredRange(parentFile, name);
     const built = specifier === name ? siblingBuild(name) : null;
+    const range = effectiveRange(parentFile, name, built);
     if (built && accepts(range, built.version)) return { url: built.url, shortCircuit: true };
     if (fromSibling) {
-        const shared = resolveFromTestedCheckout(specifier, context, nextResolve);
-        if (shared && accepts(range, versionAt(shared.url))) return shared;
+        const shared = testedCopy(specifier);
+        if (shared && accepts(range, shared.version)) return nextResolve(specifier, { ...context, parentURL: shared.anchor });
     }
     return nextResolve(specifier, context);
 }
@@ -274,4 +340,13 @@ export function BizAppsDuplicates() {
     return [...bizAppsCopies]
         .filter(([, copies]) => copies.size > 1)
         .map(([name, copies]) => ({ name, copies: [...copies].map(([dir, version]) => `${version} ${dir}`) }));
+}
+
+/**
+ * For each overridden `@mj-biz-apps/*` package, the requesters whose own range refused the sibling build
+ * and were given it because sales' override replaced that range, as `name@version (range)`.
+ */
+export function OverriddenRanges() {
+    return [...overriddenRefusals]
+        .map(([name, refusals]) => ({ name, override: OVERRIDES.get(name), requesters: [...refusals].map(([who, range]) => `${who} (${range})`) }));
 }

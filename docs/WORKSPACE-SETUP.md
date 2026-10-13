@@ -708,6 +708,12 @@ returns whichever copy was created first. The runner prints `MJ core instances -
 copies. A copy left over means a package's declared range does not accept the version the sibling builds:
 check that sibling out at a version inside the range. It needs Node 22.15 or 23.5+ (`module.registerHooks`).
 
+The packages `pnpm-workspace.yaml` overrides (`common-entities`, `common-ng`, `common-activity-sync`) are the
+exception, as they are in sales' own install: every importer is held to the override's range, so it gets
+the common checkout's build even when its own range asks for something else. The runner lists each range
+it set aside as a warning before the checks. With common 5.50.1, orders 5.30.0 (pins `common-entities`
+5.49.0) and accounting 0.21.2 (`^5.50.2`) beside sales, both of those are on that list (sales#231).
+
 **A regenerated class manifest can want a package the host has not linked.** MJAPI's and MJExplorer's
 `prestart` run `mj codegen manifest`, which walks whatever is linked in the workspace *at that moment* and
 emits imports for it. Link a new app into `/c/v6` and the next `npm start` in MJ begins importing it — and
