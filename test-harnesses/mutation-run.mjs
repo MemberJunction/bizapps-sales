@@ -5,10 +5,14 @@
  * ── THREE WAYS A RUN ENDS, AND WHAT EACH ONE LEAVES ────────────────────────────────────────────
  *
  *   1. It finishes. The driver's own `finally` restores each mutant and rebuilds `dist/`.
- *   2. It is SIGNALLED -- Ctrl-C, SIGTERM, Ctrl-Break on Windows. The handlers here kill the build or
- *      suite's whole process tree, restore the source, rebuild `dist/`, remove the temp backups and exit
- *      130 / 143 / 149. A second signal skips the rebuild; the next run does it instead.
- *   3. It is killed in a way no handler sees -- SIGKILL, a closed window, Windows' TerminateProcess.
+ *   2. It is SIGNALLED -- Ctrl-C, SIGTERM, a closed terminal (SIGHUP), Ctrl-Break on Windows. The
+ *      handlers here kill the build or suite's whole process tree, restore the source, rebuild `dist/`,
+ *      remove the temp backups and exit 130 / 143 / 129 / 149. A second signal skips the rebuild; the
+ *      next run does it instead. SIGHUP needs its own handler because the commands run in their own
+ *      session (below), so the terminal's hangup reaches only this process, never them.
+ *   3. It is killed in a way no handler sees -- SIGKILL, Windows' TerminateProcess, or a closed console
+ *      window on Windows, which ends the process a few seconds after its SIGHUP whether or not the
+ *      rebuild has finished.
  *      Nothing in this process can run, so the cleanup moves to the NEXT start: the run marker below
  *      names the mutant and its backup, and a later run whose marker names a dead PID restores and
  *      rebuilds before it measures anything.
@@ -25,6 +29,11 @@
  * have a mutant applied or a mutated `dist/`, and names the PID that owns it. A start that finds a LIVE
  * PID there refuses to run: two drivers mutating one tree measure each other.
  *
+ * Creating the marker is the lock, so it is exclusive: a start that checked "no marker" and then wrote
+ * one let two drivers launched together both proceed. Every write goes through a temp file, so a kill
+ * mid-write never leaves a half-written marker, and a marker that cannot be read or names paths outside
+ * the run's own files stops the start rather than being acted on.
+ *
  * ── WHY THE COMMANDS ARE SPAWNED, NOT `execSync`'d ─────────────────────────────────────────────
  *
  * `execSync` blocks the event loop, so a signal handler cannot run until the child exits on its own --
@@ -40,16 +49,19 @@
  * set prints a warning, because a stray value reports results the real suite never produced.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, linkSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 export const MARKER_NAME = '.mutate-checks.run.json';
 export const REAL_BUILD_COMMAND = 'npm run build:packages';
 const REAL_TEST_COMMAND = 'node test-harnesses/integration.mjs';
 
 /** 128 + the signal number, the shell's convention. SIGBREAK exists only on Windows. */
-const EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGBREAK: 149 };
+const EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129, SIGBREAK: 149 };
+
+/** `safety` is made with this prefix, and every `backup` lives in a `safety` folder. */
+const SAFETY_PREFIX = 'mj-mutate-';
 
 /** How long a killed tree gets to go before it is killed without asking. */
 const KILL_GRACE_MS = 5_000;
@@ -70,25 +82,42 @@ export function restore(abs, backup) {
  */
 export async function startMutationRun(repo) {
     const ctx = {
+        repo,
         markerPath: join(repo, MARKER_NAME),
         commands: readCommands(),
         procs: createProcessTracker(repo),
         state: null,
     };
     installSignalHandlers(ctx);
-    await recoverStrandedRun(ctx);
-
-    ctx.state = {
+    const state = {
         pid: process.pid,
         startedAt: new Date().toISOString(),
-        safety: mkdtempSync(join(tmpdir(), 'mj-mutate-')),
+        safety: null,
         mutant: null,
         file: null,
         backup: null,
         distDirty: false,
     };
+    await claimTree(ctx, state);
+    // No await from here to the return, so no signal handler can see the state half set up. The temp
+    // folder is made only now, so a start that refuses leaves nothing behind.
+    ctx.state = state;
+    state.safety = mkdtempSync(join(tmpdir(), SAFETY_PREFIX));
     writeMarker(ctx);
     return createRunHandle(ctx);
+}
+
+/**
+ * Recovers or refuses whatever marker is there, then creates ours exclusively. Losing the create means
+ * another driver claimed the tree in between, so the loop goes round once more and meets its marker.
+ */
+async function claimTree(ctx, state) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+        await recoverStrandedRun(ctx);
+        if (createMarker(ctx, state)) return;
+    }
+    console.error(`\n✖ another driver keeps claiming this tree (${ctx.markerPath}). Nothing was run.\n`);
+    process.exit(2);
 }
 
 /** What the driver calls as it goes. Each state change is written to the marker before it matters. */
@@ -127,8 +156,30 @@ function readCommands() {
     return { build: build ?? REAL_BUILD_COMMAND, test: test ?? REAL_TEST_COMMAND, testSeamed: Boolean(test) };
 }
 
+/** Written beside the marker, so the rename or link never crosses a filesystem. */
+function stageMarker(ctx, state) {
+    const staged = `${ctx.markerPath}.${process.pid}.tmp`;
+    writeFileSync(staged, `${JSON.stringify(state, null, 2)}\n`);
+    return staged;
+}
+
+/** A rename replaces the marker whole, so a kill mid-write leaves the old marker or the new one. */
 function writeMarker(ctx) {
-    writeFileSync(ctx.markerPath, `${JSON.stringify(ctx.state, null, 2)}\n`);
+    renameSync(stageMarker(ctx, ctx.state), ctx.markerPath);
+}
+
+/** A hard link fails if the marker exists, which makes the first write the lock. False if we lost. */
+function createMarker(ctx, state) {
+    const staged = stageMarker(ctx, state);
+    try {
+        linkSync(staged, ctx.markerPath);
+        return true;
+    } catch (err) {
+        if (err.code === 'EEXIST') return false;
+        throw err;
+    } finally {
+        rmSync(staged, { force: true });
+    }
 }
 
 // ── processes ──────────────────────────────────────────────────────────────────────────────────
@@ -272,8 +323,12 @@ function abandonRebuild(ctx, exitCode) {
 
 // ── recovery ───────────────────────────────────────────────────────────────────────────────────
 
-/** EPERM means it exists and belongs to someone else, which is still alive. */
+/**
+ * EPERM means it exists and belongs to someone else, which is still alive. Our own PID is not a live
+ * run: it is a dead run's PID the OS has since handed to us, most often after a reboot or in a container.
+ */
 function isAlive(pid) {
+    if (pid === process.pid) return false;
     try {
         process.kill(pid, 0);
         return true;
@@ -283,8 +338,8 @@ function isAlive(pid) {
 }
 
 async function recoverStrandedRun(ctx) {
-    if (!existsSync(ctx.markerPath)) return;
-    const prior = JSON.parse(readFileSync(ctx.markerPath, 'utf8'));
+    const prior = readMarker(ctx);
+    if (!prior) return;
     if (isAlive(prior.pid)) refuseLiveRun(ctx, prior);
 
     console.log(`  recovering a run that ended without cleaning up (PID ${prior.pid}, started ${prior.startedAt}).`);
@@ -307,6 +362,58 @@ async function recoverStrandedRun(ctx) {
     }
     if (prior.safety) rmSync(prior.safety, { recursive: true, force: true });
     rmSync(ctx.markerPath, { force: true });
+}
+
+/** Null when there is no marker. A marker that cannot be read or trusted stops the start. */
+function readMarker(ctx) {
+    let prior;
+    try {
+        prior = JSON.parse(readFileSync(ctx.markerPath, 'utf8'));
+    } catch (err) {
+        if (err.code === 'ENOENT') return null;
+        refuseBadMarker(ctx, `cannot be read (${err.message})`);
+    }
+    const problem = markerProblem(ctx, prior);
+    if (problem) refuseBadMarker(ctx, problem);
+    return prior;
+}
+
+/**
+ * Recovery copies `backup` over `file` and deletes `safety`, so each must be one of the run's own
+ * paths: the source file inside this repo, and a temp folder this driver would have made.
+ */
+function markerProblem(ctx, prior) {
+    if (typeof prior !== 'object' || prior === null) return 'does not hold a run';
+    if (!Number.isInteger(prior.pid) || prior.pid <= 0) return `names no valid PID (${prior.pid})`;
+    if (prior.file != null && !isInsideRepo(ctx, prior.file)) return `names a source file outside this repo: ${prior.file}`;
+    if (prior.backup != null && !isSafetyDir(dirname(prior.backup))) return `names a backup outside a ${SAFETY_PREFIX}* folder: ${prior.backup}`;
+    if (prior.safety != null && !isSafetyDir(prior.safety)) return `names a temp folder not called ${SAFETY_PREFIX}*: ${prior.safety}`;
+    return null;
+}
+
+/** Compared as real paths: on macOS `/var` is a link to `/private/var`, and a link can point outside. */
+function isInsideRepo(ctx, file) {
+    if (typeof file !== 'string') return false;
+    const abs = resolve(ctx.repo, file);
+    const rel = relative(realPath(ctx.repo), join(realPath(dirname(abs)), basename(abs)));
+    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+function realPath(path) {
+    try {
+        return realpathSync(path);
+    } catch {
+        return path;
+    }
+}
+
+const isSafetyDir = (dir) => typeof dir === 'string' && isAbsolute(dir) && basename(dir).startsWith(SAFETY_PREFIX);
+
+function refuseBadMarker(ctx, problem) {
+    console.error(`\n✖ the run marker ${ctx.markerPath} ${problem}. Nothing was run.`
+        + '\n  If no mutation run is live, check `git diff` for a mutant left in the source and undo it by hand,'
+        + ` run \`${REAL_BUILD_COMMAND}\`, then delete the marker.\n`);
+    process.exit(3);
 }
 
 /** Two drivers mutating one tree measure each other, and the other run is not ours to stop. */
