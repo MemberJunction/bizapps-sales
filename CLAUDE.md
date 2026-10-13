@@ -210,9 +210,9 @@ the thing it names is broken?"** The incidents behind rules 5–8: `docs/history
   avoid reserved words as column names (this is why `ForecastSnapshot` has `CommitAmount`, not
   `Commit`). No migration has a PostgreSQL counterpart yet (#197).
 - `CONFIRM_DROP=<database> scripts/rebuild-db.sh` drops and rebuilds a local database from migrations:
-  MJ core, then common, tasks, accounting and orders from sibling checkouts, then sales. It names the
-  database to DESTROY; there is no default. It applies every migration as shipped and leaves the
-  working tree untouched. Run `pnpm run mj:codegen` after it as a drift check: SQL it writes to
+  MJ core, then common, tasks, accounting, orders and contracts from sibling checkouts, then sales.
+  It names the database to DESTROY; there is no default. It applies every migration as shipped and
+  leaves the working tree untouched. Run `pnpm run mj:codegen` after it as a drift check: SQL it writes to
   `migrations/codegen/` is a change no migration carries, and ships in a new `V…` file.
 - **Restart the host's MJAPI AND MJExplorer after a rebuild.** They cache entity metadata at startup,
   and a rebuild re-mints every entity ID and Application row. The symptom is not an error: MJExplorer

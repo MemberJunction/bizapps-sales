@@ -11,14 +11,15 @@
 # WHAT IT DOES
 #   1. drop + recreate the database
 #   2. MJ core schema at the pinned version
-#   3-6. bizapps-common, bizapps-tasks, bizapps-accounting and bizapps-orders, each migrated by its
-#        own CLI from its own checkout (SIBLINGS, below)
-#   7. this app's migrations, unchanged
+#   3-7. bizapps-common, bizapps-tasks, bizapps-accounting, bizapps-orders and bizapps-contracts,
+#        each migrated by its own CLI from its own checkout (SIBLINGS, below)
+#   8. this app's migrations, unchanged
 #
-# WHAT IT DELIBERATELY DOES NOT DO:
-#   * no bizapps-contracts step. Sales has no FK into it -- measured 2026-08-25: sales' only
-#     cross-schema FKs are to __mj, __mj_BizAppsCommon and __mj_BizAppsOrders. If that changes,
-#     contracts goes LAST, after sales.
+#   IT USED TO SKIP CONTRACTS, because sales has no FK into its schema. It still has none, but
+#   V202609282300__v6.9.x__Metadata_Sync.sql points Deal.ContractID's EntityField at contracts'
+#   Contract entity, and that metadata FK fails without contracts installed. mj-app.json lists
+#   contracts as a dependency, so every install has it. The trim this script used to do hid the
+#   failure: against a trimmed baseline the update matched no row.
 #
 #   IT USED TO SKIP ORDERS AND ACCOUNTING TOO, on the grounds that "DealLine.ProductID and
 #   Deal.ContractID are SOFT references (DG-6), so the sales baseline stands up with only common
@@ -140,6 +141,7 @@ SIBLINGS=(
     "bizapps-tasks:__mj_BizAppsTasks"
     "bizapps-accounting:__mj_BizAppsAccounting"
     "bizapps-orders:__mj_BizAppsOrders"
+    "bizapps-contracts:__mj_BizAppsContracts"
 )
 
 # FAIL BEFORE DROPPING ANYTHING, not halfway through. A missing sibling used to surface as a sed
@@ -154,7 +156,7 @@ for entry in "${SIBLINGS[@]}"; do
         echo "sibling has no CLI: $dir (run pnpm install there)" >&2; exit 1; }
 done
 
-say "1/7  Recreating ${DB_DATABASE}"
+say "1/8  Recreating ${DB_DATABASE}"
 $SQLCMD -d master -Q "
     IF DB_ID('${DB_DATABASE}') IS NOT NULL
     BEGIN
@@ -163,7 +165,7 @@ $SQLCMD -d master -Q "
     END
     CREATE DATABASE [${DB_DATABASE}];"
 
-say "2/7  MJ core @ ${MJ_VERSION}"
+say "2/8  MJ core @ ${MJ_VERSION}"
 $MJ migrate -t "${MJ_VERSION}"
 
 
@@ -173,16 +175,12 @@ for entry in "${SIBLINGS[@]}"; do
     name="${entry%%:*}"; schema="${entry#*:}"; n=$((n+1))
     var="BIZAPPS_$(printf '%s' "${name#bizapps-}" | tr '[:lower:]' '[:upper:]')_REPO"
     dir="${!var:-$ROOT/../$name}"
-    say "$n/7  $name -> $schema"
+    say "$n/8  $name -> $schema"
     ( cd "$dir" && DB_DATABASE="$DB_DATABASE" \
         node node_modules/@memberjunction/cli/bin/run.js migrate --schema "$schema" --dir ./migrations )
 done
 
-# bizapps-contracts is deliberately NOT here: sales has no FK into it -- measured: sales' only
-# cross-schema FKs are to __mj, __mj_BizAppsCommon and __mj_BizAppsOrders. If that changes, contracts
-# goes LAST, after sales.
-
-say "7/7  bizapps-sales"
+say "8/8  bizapps-sales"
 
 # CLEAR OLD CODEGEN OUTPUT, so after the CodeGen drift check migrations/codegen/ holds only what
 # CodeGen emitted against THIS database. Left over from an earlier run, a file there would read as drift that
