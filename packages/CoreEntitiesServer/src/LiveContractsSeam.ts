@@ -49,6 +49,7 @@ import {
 } from '@memberjunction/core';
 import type {
     ContractsCreateFromDealSeamInput,
+    ContractsLinkOrderSeamInput,
     ContractsRenewTermSeamInput,
     ContractsSeamResult,
 } from '@mj-biz-apps/sales-entities';
@@ -56,6 +57,7 @@ import type {
 /** Contracts' entity names — these strings are the whole dependency. Sales imports no contracts code. */
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_CONTRACT_TYPE = 'MJ_BizApps_Contracts: Contract Types';
+const E_CONTRACT_ORDER = 'MJ_BizApps_Contracts: Contract Orders';
 
 /** Sales' own, needed only to name the CREATING entity in contracts' polymorphic provenance pair. */
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
@@ -477,6 +479,66 @@ export class LiveContractsSeam {
                 '(SupersededByContractID) is a contracts modelling decision that has not been made.',
         };
     }
+
+    public async LinkOrderToContract(input: ContractsLinkOrderSeamInput): Promise<ContractsSeamResult> {
+        if (!ContractsIsInstalled()) {
+            return { Success: false, Message: 'bizapps-contracts is not installed in this deployment.' };
+        }
+        return LinkOrderToContract(input, this.provider, this.user);
+    }
+}
+
+/**
+ * Record that the contract governs the order (contracts#77). Contracts' own save copies the contract's
+ * renewal terms to the subscriptions the order creates, so this only writes the link.
+ *
+ * A contracts release older than the link has no such entity. That is reported, not treated as a
+ * failure of the close: the contract and order both exist, they are just not tied together yet.
+ *
+ * An existing link is left alone, so closing the same deal twice (reopen, close again) does not trip
+ * the unique pair.
+ */
+export async function LinkOrderToContract(
+    input: ContractsLinkOrderSeamInput,
+    provider: IMetadataProvider,
+    user: UserInfo,
+): Promise<ContractsSeamResult> {
+    if (!new Metadata().Entities.some((e) => e.Name === E_CONTRACT_ORDER)) {
+        return {
+            Success: false,
+            ContractID: input.ContractID,
+            Message:
+                'The order was not linked to the contract: the installed bizapps-contracts has no order ' +
+                'links, so its renewal terms will not reach the subscriptions. Link them once contracts is upgraded.',
+        };
+    }
+    const existing = await new RunView().RunView<{ ID: string }>(
+        {
+            EntityName: E_CONTRACT_ORDER,
+            ExtraFilter: `ContractID='${input.ContractID}' AND OrderID='${input.OrderID}'`,
+            Fields: ['ID'],
+            ResultType: 'simple',
+        },
+        user,
+    );
+    if (!existing.Success) {
+        return { Success: false, ContractID: input.ContractID, Message: `Could not check the order link: ${existing.ErrorMessage}` };
+    }
+    if (existing.Results.length > 0) {
+        return { Success: true, ContractID: input.ContractID };
+    }
+    const link = await provider.GetEntityObject<BaseEntity>(E_CONTRACT_ORDER, user);
+    link.NewRecord();
+    link.Set('ContractID', input.ContractID);
+    link.Set('OrderID', input.OrderID);
+    if (!(await link.Save())) {
+        return {
+            Success: false,
+            ContractID: input.ContractID,
+            Message: `The order was not linked to the contract: ${link.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+        };
+    }
+    return { Success: true, ContractID: input.ContractID };
 }
 
 /** Anti-tree-shaking anchor. */
