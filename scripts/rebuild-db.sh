@@ -2,18 +2,18 @@
 #
 # Rebuild the local development database from scratch.
 #
-# WHY THIS EXISTS: a local database built from migrations alone, every app in dependency order. It
-# was written for the pre-release practice of editing the baseline migration in place, which ended
-# with the first release (docs/history/migrations-baseline-in-place.md), and it still trims the
-# baseline's generated half before applying it (TRIM, below). On success the trimmed baseline is left
-# in the working tree. It is a shipped migration: never commit it trimmed or re-appended (#217).
+# WHY THIS EXISTS: a local database built from migrations alone, every app in dependency order,
+# the same files an install applies. Every migration is applied as shipped and the working tree is
+# left untouched. It once trimmed the baseline's generated half first, for the pre-release practice of
+# editing the baseline in place (docs/history/migrations-baseline-in-place.md); that left a shipped
+# migration modified in the working tree and built a database no install gets (#217).
 #
 # WHAT IT DOES
 #   1. drop + recreate the database
 #   2. MJ core schema at the pinned version
 #   3-6. bizapps-common, bizapps-tasks, bizapps-accounting and bizapps-orders, each migrated by its
 #        own CLI from its own checkout (SIBLINGS, below)
-#   7. this app's migrations, after trimming the baseline's generated half
+#   7. this app's migrations, unchanged
 #
 # WHAT IT DELIBERATELY DOES NOT DO:
 #   * no bizapps-contracts step. Sales has no FK into it -- measured 2026-08-25: sales' only
@@ -27,10 +27,10 @@
 #   The steps the header promised would "arrive when S2 wires the pricing bridge" are now present.
 #
 # AFTER THIS, still by hand (they need judgement, not automation):
-#   pnpm run mj:codegen                    # regenerate entity metadata + SQL objects in the database
+#   pnpm run mj:codegen                    # drift check: SQL it writes to migrations/codegen/ is a
+#                                          #   schema change no migration carries -- ship it in a new V file
 #   pnpm mj sync push --dir metadata       # seed the type tables
-#   git checkout -- migrations/V202608042101__v0.1.x__Tables_and_Objects.sql   # undo the trim
-# Do not run scripts/append-codegen.sh: it writes generated SQL into the baseline, a shipped migration.
+#   pnpm run build
 #
 # Usage: scripts/rebuild-db.sh
 set -euo pipefail
@@ -182,60 +182,11 @@ done
 # cross-schema FKs are to __mj, __mj_BizAppsCommon and __mj_BizAppsOrders. If that changes, contracts
 # goes LAST, after sales.
 
-# TRIM THE GENERATED HALF BEFORE APPLYING. Once CodeGen output lives in the baseline, a rebuild
-# produces a database whose entity metadata is ALREADY current — so the next CodeGen run has nothing
-# to do and emits only a delta, which append-codegen.sh then refuses (rightly) as a partial. The
-# cycle is only self-consistent if the rebuild applies the hand-authored DDL alone and CodeGen
-# regenerates the rest from scratch. This is what makes "edit the baseline in place" safe.
-say "7/7  bizapps-sales (hand-authored DDL only)"
-MARKER='CODEGEN OUTPUT — GENERATED CODE BELOW THIS LINE'
-SALES_MIGRATION=$(grep -rl "$MARKER" "$ROOT/migrations"/*.sql | head -1)
-if [[ -n "$SALES_MIGRATION" ]]; then
-    MARKER_LINE=$(grep -n "$MARKER" "$SALES_MIGRATION" | head -1 | cut -d: -f1)
-    BANNER_END=$(awk -v s="$MARKER_LINE" 'NR>=s && /^-- =+$/ { print NR; exit }' "$SALES_MIGRATION")
-    GENERATED_LINES=$(( $(wc -l < "$SALES_MIGRATION") - BANNER_END ))
-    if (( GENERATED_LINES > 0 )); then
-        printf '  trimming %s lines of generated output (CodeGen will regenerate them)\n' "$GENERATED_LINES"
+say "7/7  bizapps-sales"
 
-        # PUT IT BACK IF THIS RUN DOES NOT FINISH.
-        #
-        # The trim is deliberate and the normal flow regenerates it (rebuild -> codegen -> append).
-        # A FAILED run is the problem: the script exits with the baseline gutted -- 34513 lines
-        # deleted from a TRACKED file, sitting in the working tree with nothing saying so. Not
-        # hypothetical: on 2026-08-27 step 7 failed on a missing procedure, reported that error
-        # correctly, and left a second silent one behind for whoever ran git status next.
-        #
-        # Restored from a COPY rather than with a git checkout, so an uncommitted edit above the
-        # banner survives too. On success the copy is removed and the file stays trimmed, which is
-        # what the next step wants.
-        cp "$SALES_MIGRATION" "$SALES_MIGRATION.pre-trim"
-        trap 'rc=$?; if [[ -f "${SALES_MIGRATION:-}.pre-trim" ]]; then
-                  if (( rc != 0 )); then
-                      mv -f "$SALES_MIGRATION.pre-trim" "$SALES_MIGRATION"
-                      echo "  restored the untrimmed baseline - this run did not finish" >&2
-                  else
-                      rm -f "$SALES_MIGRATION.pre-trim"
-                  fi
-              fi' EXIT
-
-        head -n "$BANNER_END" "$SALES_MIGRATION" > "$SALES_MIGRATION.tmp"
-        mv "$SALES_MIGRATION.tmp" "$SALES_MIGRATION"
-        # RECORD WHAT WE TRIMMED, so append-codegen.sh has something to compare against. Its shrink
-        # guard exists to catch a partial CodeGen run being appended over a full one — but it
-        # compares the incoming output against what is CURRENTLY below the banner, and by this point
-        # that is zero. In the normal flow (rebuild -> codegen -> append) the guard could therefore
-        # never fire, which is the one flow it was written for.
-        mkdir -p "$ROOT/migrations/codegen"
-        printf '%s\n' "$GENERATED_LINES" > "$ROOT/migrations/codegen/.previous-generated-lines"
-    fi
-fi
-
-# STALE EMITS ARE DEBRIS, AND THEY ACCUMULATE INTO THE BASELINE. append-codegen.sh concatenates
-# EVERY file in migrations/codegen/, so runs left over from previous rebuilds are appended again on
-# the next one. In the sibling repo that was not hypothetical: the baseline reached 309k lines
-# carrying EIGHT stacked copies of every view and procedure before anyone noticed, because each copy
-# is valid SQL and the last one wins. Clearing here means the emits appended are exactly the ones
-# this rebuild produced.
+# CLEAR OLD CODEGEN OUTPUT, so after the CodeGen drift check migrations/codegen/ holds only what
+# CodeGen emitted against THIS database. Left over from an earlier run, a file there would read as drift that
+# is not. The folder is gitignored.
 find "$ROOT/migrations/codegen" -maxdepth 1 -name '*.sql' -delete 2>/dev/null || true
 
 # --schema is REQUIRED, not optional. Without it `mj migrate` uses the CORE schema's flyway history,
@@ -246,8 +197,7 @@ $MJ migrate --schema __mj_BizAppsSales --dir "$ROOT/migrations"
 say "Done"
 cat <<'NEXT'
 Next, in order:
-  npm run mj:codegen
-  scripts/append-codegen.sh
+  pnpm run mj:codegen                 # any SQL in migrations/codegen/ afterwards is drift: ship it in a new V migration
   pnpm mj sync push --dir metadata
-  npm run build
+  pnpm run build
 NEXT

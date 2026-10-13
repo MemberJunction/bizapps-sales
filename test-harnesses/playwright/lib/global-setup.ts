@@ -85,7 +85,7 @@ export default async function globalSetup(): Promise<void> {
         `The usual cause is MJAPI having booted BEFORE the schema/metadata landed — restart it:\n` +
         `      npm run start:api\n` +
         `If that does not fix it, the database may be missing the migration or the seeds:\n` +
-        `      scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh && npm run mj -- sync push --dir metadata\n`,
+        `      CONFIRM_DROP=<scratch database> scripts/rebuild-db.sh && pnpm mj sync push --dir metadata\n`,
     );
   }
 

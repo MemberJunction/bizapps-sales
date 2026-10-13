@@ -50,7 +50,7 @@ bizapps-sales/
     CoreEntitiesServer/- @mj-biz-apps/sales-core-entities-server (Save() overrides, the close lock, Sales.CloseDeal)
     Angular/           - @mj-biz-apps/sales-ng (generated forms, the Deals section)
     IntegrationTests/  - @mj-biz-apps/sales-integration-tests (private; the integration check bundles)
-  scripts/             - CI gates, rebuild-db.sh, append-codegen.sh, seeds, release checks
+  scripts/             - CI gates, rebuild-db.sh, seeds, release checks
   test-harnesses/      - integration runner, mutation driver, Playwright Explorer harness
 ```
 
@@ -211,9 +211,9 @@ the thing it names is broken?"** The incidents behind rules 5–8: `docs/history
   `Commit`). No migration has a PostgreSQL counterpart yet (#197).
 - `CONFIRM_DROP=<database> scripts/rebuild-db.sh` drops and rebuilds a local database from migrations:
   MJ core, then common, tasks, accounting and orders from sibling checkouts, then sales. It names the
-  database to DESTROY; there is no default. It trims the baseline's generated half in the working tree,
-  a step left from the retired baseline-in-place loop (`docs/history/migrations-baseline-in-place.md`):
-  never commit the baseline afterwards (#217).
+  database to DESTROY; there is no default. It applies every migration as shipped and leaves the
+  working tree untouched. Run `pnpm run mj:codegen` after it as a drift check: SQL it writes to
+  `migrations/codegen/` is a change no migration carries, and ships in a new `V…` file.
 - **Restart the host's MJAPI AND MJExplorer after a rebuild.** They cache entity metadata at startup,
   and a rebuild re-mints every entity ID and Application row. The symptom is not an error: MJExplorer
   pops an **`mj-app-access-dialog`** saying the application doesn't exist. A reload is not enough.

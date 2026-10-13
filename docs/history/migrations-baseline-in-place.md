@@ -47,5 +47,6 @@ scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped al
 - Not restarting both servers after a rebuild cost a Playwright debugging cycle in Phase 2. `ng serve`'s
   watch mode rebuilds the bundle on a package change but does not re-read metadata.
 
-`scripts/rebuild-db.sh` still trims the baseline's generated half, and its header still describes this
-loop.
+`scripts/rebuild-db.sh` kept trimming the baseline's generated half after the loop ended, leaving a
+shipped migration modified in the working tree. The trim and `append-codegen.sh` were removed for
+#217; the rebuild now applies every migration as shipped.
