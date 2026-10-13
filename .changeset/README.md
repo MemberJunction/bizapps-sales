@@ -6,30 +6,39 @@ file here (other than this one) describes one user-visible change and the versio
 
 ## The rule for this repo
 
-**Every PR that changes a published package must carry a changeset.** Create one with:
+**Every PR that changes a published package or anything under `migrations/` must carry a
+changeset.** Create one with:
 
 ```bash
-npx changeset
+pnpm run change    # the changesets CLI; `npx changeset` is the same
 ```
 
 **The bump level follows semver, and `minor` is required for exactly two things:** anything under
 `migrations/`, and any change to a package's public API — a removed or renamed export, a changed
 exported signature, a new required argument. Everything else is `patch`: user-facing copy, UI
-behaviour, and server-side fixes that keep their signatures. `major` is for a break a consumer
-cannot absorb by reading the CHANGELOG.
+behaviour, and server-side fixes that keep their signatures. `major` moves only with
+MemberJunction's major version (this repo went to 6.x with MJ 6), and a schema change that is not
+additive waits for it; MJ's
+[`PUBLISH_NO_BREAK_POLICY.md`](https://github.com/MemberJunction/MJ/blob/next/packages/OpenApp/PUBLISH_NO_BREAK_POLICY.md)
+lists what counts as additive.
 
-> This file used to say *"or changes a published package, MUST carry a changeset with at least a
-> `minor` bump"*. That is stricter than MJ's rule and stricter than what this repo actually merges,
-> and it produced one wrong review finding before anyone checked it against practice. `CLAUDE.md`
-> was corrected; this file was not, so the two contradicted each other on a rule that had already
-> misled a review once. See **Changesets** in `CLAUDE.md`, which remains the fuller statement.
+`fixed: [["@mj-biz-apps/*"]]` in `config.json` moves every package in this repo to one version. The
+level you pick sets that version and the CHANGELOG entry, not which packages move, so a migration-only
+change can name any `@mj-biz-apps/*` package.
 
-CI emits a **warning** — not a failure — when a PR has none. That is deliberate: a hard gate would put a
-red X on documentation-only PRs that legitimately have no version impact, and the sibling repo's
-experience is that such an X is quickly learned and then ignored. Treat the warning as a review item.
+CI emits a **warning** — not a failure — when the tree holds no changeset at all. It checks the tree,
+not the PR's diff, so a changeset another PR left pending on `next` silences it: check your own PR.
+Warning rather than failing is deliberate: a hard gate would put a red X on documentation-only PRs
+that legitimately have no version impact, and the sibling repo's experience is that such an X is
+quickly learned and then ignored. Treat the warning as a review item.
+
+The `migrations/` half of the rule is enforced: the `migration changeset` check fails a PR into `next`
+that adds a migration with only a patch changeset, and `rr: minor bump` fails the release PR. Nothing
+checks the public-API half.
 
 `baseBranch` is **`next`**, the integration branch, not `main`. `main` is the release branch and only
 ever receives the coordinating release PR.
 
-`@mj-biz-apps/sales-integration-tests` is in `ignore` because it is `private: true` — it is never
-published, so it has no version anyone consumes.
+`@mj-biz-apps/sales-integration-tests` is `private: true`, so `changeset publish` skips it; it still
+versions with the `fixed` group. It is not in `ignore`, and should not be: `changeset version` refuses
+a changeset that names both ignored and non-ignored packages.

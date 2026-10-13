@@ -12,7 +12,8 @@ file honestly, mark what you know.
 
 ## 0. Decide whether to file at all
 
-- A **nit** (cosmetic, no user impact, no data risk) does **not** get filed during the pilot.
+- A **nit** (cosmetic, no user impact, no data risk) does **not** get filed during the pilot (the
+  bug form and this skill, on trial in this repo before an intake workflow is added).
   Note it in the **local log** and stop. The local log is, in order: the repo's `BUGS.md` at
   its root (create it if absent: a heading and one dated bullet per entry), or an MJDev
   workspace's `MJDEV-ISSUES.md` / `MJ-UPSTREAM.md` when you are working inside one. It is a
@@ -43,9 +44,9 @@ Run what applies and paste the results; do not ask the user for things you can r
 ```sh
 git rev-parse --abbrev-ref HEAD; git rev-parse --short HEAD          # branch @ commit
 node -e "console.log(require('./node_modules/@memberjunction/core/package.json').version)" 2>/dev/null \
-  || cat packages/MJCore/package.json | grep '"version"'               # ACTUAL MJ version
+  || grep -m1 '"version"' packages/MJCore/package.json 2>/dev/null    # ACTUAL MJ version (the fallback is for the MJ repo itself)
 cat package.json | grep -E '"(name|version)"' | head -2                # this app's name + version
-ls node_modules/@memberjunction/ 2>/dev/null | head -0; for d in ../*/package.json; do :; done   # (adapt) linked apps + versions
+node -e 'const fs=require("fs");for(const d of [".",...(fs.existsSync("packages")?fs.readdirSync("packages").map(p=>"packages/"+p):[])]){const s=d+"/node_modules/@mj-biz-apps";if(fs.existsSync(s))for(const n of fs.readdirSync(s))try{const p=require("./"+s+"/"+n+"/package.json");console.log(p.name,p.version)}catch{}}' | sort -u   # open-app packages + versions
 node -v; (pnpm -v 2>/dev/null || npm -v)                               # Node + package manager
 ```
 
@@ -74,7 +75,7 @@ Do NOT include the machine: no OS, no hardware, no hostname. Software versions o
 ## 4. File the issue
 
 Write the body with **exactly these headings** (the web form produces the same ones, and the
-intake workflow parses them):
+planned intake workflow will parse them):
 
 ```md
 ### Summary
@@ -123,7 +124,8 @@ live on a release line.
 Then:
 
 ```sh
-# labels: use only the ones the repo has (check first); the workflow adds sev:/target: from the body
+# labels: use only the ones the repo has (check first). No workflow applies sev:/target: labels
+# yet; severity and target line stay in the body for triage until the intake workflow is added.
 gh label list --repo <owner/repo> --limit 200 --json name -q '.[].name' > /tmp/labels.txt
 LABELS="bug"
 grep -qx needs-triage /tmp/labels.txt && LABELS="$LABELS,needs-triage"

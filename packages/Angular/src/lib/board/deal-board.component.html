@@ -169,7 +169,7 @@
 
                 <div class="db-card__foot">
                   <span class="db-card__owner">{{ deal.OwnerEmployee ?? 'Unassigned' }}</span>
-                  <span class="db-card__close">{{ deal.ExpectedCloseDate ? (deal.ExpectedCloseDate | date:'MMM d, y') : 'No date' }}</span>
+                  <span class="db-card__close">{{ DisplayDay(deal.ExpectedCloseDate) ? (DisplayDay(deal.ExpectedCloseDate) | date:'MMM d, y':'UTC') : 'No date' }}</span>
                 </div>
 
                 <div class="db-card__ghost" *cdkDragPreview>{{ deal.Name }}</div>

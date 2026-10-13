@@ -60,19 +60,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Node 24 rather than the sibling repo's 22: this is the version the lockfile was produced with
       # (npm 11 / Node 24) and the version the build is actually developed against. Matching it keeps CI
       # resolving the same tree a developer gets.
       # Must precede setup-node: `cache: 'pnpm'` needs pnpm already on PATH. Version comes from
       # package.json's `packageManager: pnpm@10.33.0`, so CI and every developer resolve one pnpm.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: pnpm
+
+      # ===================================================================================
+      # GATE 0 — the dependency model. A host installs ONE copy of MemberJunction and one copy of each
+      # Open App; a published package that lists @memberjunction/* or another app's @mj-biz-apps/*
+      # package in `dependencies` (or pins its peer with ~ or an exact version) brings its own copy and
+      # splits the class-factory registry, with no error. Needs only Node, so it runs before install.
+      # The self-test proves the check can fail before its pass is trusted.
+      # ===================================================================================
+      - name: Dependency model gate (host-provided packages are caret peers only)
+        run: |
+          node .github/scripts/check-dependency-model.mjs --self-test
+          node .github/scripts/check-dependency-model.mjs
 
       # postinstall runs scripts/link-local-apps.mjs, which is a clean no-op while .mj-links.json has an
       # empty `links` map. That changes at S2, when the unpublished siblings get linked — at which point
@@ -138,18 +150,7 @@ jobs:
       - name: Harness selector gate (the harness only targets markup the app renders)
         run: npm run test:selector-gate
 
-      # Unit tests when there are any. Today the packages declare vitest but ship no test files, and
-      # `vitest run` EXITS NON-ZERO on "no test files found" — so an unconditional step would be a
-      # permanent red X asserting nothing. Guarded rather than omitted, so the first real test file
-      # switches this on with no workflow edit.
-      - name: Unit tests (if any exist)
-        run: |
-          if find packages -path '*/src/*' \( -name '*.test.ts' -o -name '*.spec.ts' \) -print -quit | grep -q .; then
-            echo "Test files found — running vitest."
-            npx vitest run
-          else
-            echo "::notice title=No unit tests yet::No *.test.ts / *.spec.ts under packages/*/src. This step self-enables when the first one lands."
-          fi
+      # Unit tests run in the shared build.yml (`pnpm run test`, the root vitest suite).
 
       # Advisory, matching the sibling repo's judgement. migrations/_README.md requires a changeset on
       # any PR touching a migration, and that rule sat unenforced through several schema changes there.

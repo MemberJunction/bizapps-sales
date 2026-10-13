@@ -6,9 +6,8 @@ about the mechanism: *"Read models as MJ Queries (parameterized, permissioned) f
 rather than hand-rolled Angular aggregation — so Skip, the query builder and report snapshots all get
 them for free."*
 
-That last clause is the reason these exist as queries rather than as more component code. The dashboard
-already computes four of these measures correctly in TypeScript; nothing else in the product can reach
-them there.
+That last clause is the reason these exist as queries rather than as component code. The dashboard's
+four tiles read `Sales: Dashboard Summary`, one of the queries here.
 
 ## The four rules every query in this directory follows
 
@@ -55,9 +54,9 @@ the grain, the dimension and the measures on them are unchanged, only the source
 ## What is deliberately not here
 
 - **Pipeline coverage vs. quota** (§9.3) needs a `Quota` table, deferred to v2 by `docs/DECISIONS.md`
-  D-2. No query can be written for it.
+  D2. No query can be written for it.
 - **Point-in-time forecast** (§9.4) reads `ForecastSnapshot`, not `Deal`. The snapshot query is here;
-  what fills the table is the `Sales.CaptureForecastSnapshot` Action, on the seeded `Sales - Forecast Snapshot (daily)` ScheduledJob. (`scripts/capture-forecast-snapshot.sql` is a manual tool and is deliberately unseeded.) Live
+  what fills the table is the `Sales.CaptureForecastSnapshot` Action, on the seeded `Sales — Forecast Snapshot (daily)` ScheduledJob. (`scripts/capture-forecast-snapshot.sql` is a manual tool and is deliberately unseeded.) Live
   and point-in-time are different questions and stay different queries.
 
 ## The forecast pair, and why there are two live ones

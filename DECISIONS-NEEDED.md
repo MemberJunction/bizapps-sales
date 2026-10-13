@@ -1,27 +1,141 @@
 # DECISIONS NEEDED
 
-Choices made where a second reading was defensible. Each one was **decided and implemented** — the rule
-was "if two options are equally defensible, take the one that touches fewer files, record the other here,
-and move on." So none of these blocks anything; they are here so the rejected option is visible rather
-than lost.
+Calls made while building sales where a second reading was defensible, kept so the rejected option
+stays visible, and the questions that still need someone to rule. App-wide rulings live in
+[`docs/DECISIONS.md`](docs/DECISIONS.md).
 
-Anything genuinely undecidable without Josue or Amith is marked **OPEN**.
+Most entries were decided and built when they were written. [Open questions](#open-questions) come
+first; [Status of every entry](#status-of-every-entry) gives the state of the rest.
 
-## TWO NUMBERING SCHEMES, DELIBERATELY NOT RECONCILED
+## IDs
 
-This file was written twice, independently, on two branches that had not met: `DN-n` on
-`feature/embed-order-on-deal`, and `D-n` on `feature/closewon-tasks` (raised while rewriting the demo
-seed and assessing the pipeline-board rebase). Both are kept, under their original numbers.
+- **Two series.** `DN-n` began on the embedded-order rework and `D-n` on the close-won-tasks branch.
+  Both were kept when the branches merged, because code, metadata and commit messages cite both.
+- **One entry per ID.** DN-16 to DN-21, D-31 and D-32 had each been used twice by sessions that had
+  not merged. On 2026-10-11 the entry the repository cites kept its number, and the other was
+  renumbered or folded into a related entry; see [Renumbered IDs](#renumbered-ids). A renumbered entry
+  names its old ID under its heading.
+- **`D-3`, `D-4` and `D-6` are the master plan's.** Migrations, seeds and code use them that way, so
+  this file's own D-3, D-4 and D-6 were renumbered or retired. Their rulings are `docs/DECISIONS.md`
+  D2, D5 and "Master plan D-6".
+- **The other series are in `docs/DECISIONS.md`:** `D1`–`D7` (no hyphen), `I1`–`I10`, and the
+  prefixed `D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL` and `D-FY`. A bare `Dn` cited as orders'
+  (`D8`, `D53`) is orders' own log.
+- **New entries** take the next free number: `DN-29`, `D-35`.
 
-**Renumbering would have been the tidier merge and the wrong one.** These identifiers are cited from
-commit messages, from code comments and from `docs/DECISIONS.md`, none of which a renumber can reach —
-so a tidy file would have silently invalidated every reference pointing into it. Two prefixes is a
-smaller cost than a corpus of dangling citations.
+## Open questions
 
-They are not duplicates of each other. Where they touch the same subject they reached the same answer
-from different directions, and both readings are worth having: `DN-11` and `D-1` are both about which
-stage means "agreement or higher", and `D-3` and this audit's backlog both flag
-`Pipeline.RequiresDealLines` as the last surviving echo of a retired table.
+Each needs a ruling, or work in another repository. A question that needs a person to rule stays here
+as a written question rather than becoming a GitHub issue.
+
+| ID | Question | Waiting on |
+|---|---|---|
+| DN-10 | Should the winning stage declare `Confirmed` instead of `Quoted`, so that entering it books the order? | Finance |
+| DN-11 | Remove the dead `OneTimeLinesTo` policy key, and the `BillingFrequency` and `CommittedAmount` seam fields sales never sends? | Product; it narrows a published input |
+| DN-12 | How does an order-status warning from a board drag reach the rep? | Product |
+| DN-25 | `mj sync push` cannot re-push a query's parameters. | MJ core, MJ#4545 |
+| DN-27 | Is a per-deal attribution-coverage report worth its own query? | Product |
+| DN-28 | Should a parked status (`On Hold`) survive a later stage move? | Product |
+| D-5 | Confirm that every stage move appends a `DealStageEvent`, and decide whether an importer gets an audited way to suppress it. | Product |
+| D-9 | Should a contract created at Closed Won take its type's renewal defaults? | Product, with contracts |
+| D-11 | Is a renewal a new child contract, or one that supersedes the original? | Contracts |
+| D-12 | Add `ContractType.Code`, so the seam stops matching on `Name`. | Contracts, [bizapps-contracts#96](https://github.com/MemberJunction/bizapps-contracts/issues/96) |
+| D-13 | Seed `TaskTypeStatus` for Contract Processing once finance confirms its steps? | Finance |
+| D-14 | Bound `Contract.AnnualIncreasePercent` at 100, or state that it stores a fraction. | Contracts |
+| D-28 | Is forecasting monthly? | Finance |
+| D-30 | Should the forecast measures get their own sanity checks, and where? | Owner of the queries |
+| D-32 | Register a forecast source and point it at `Sales: Forecast by Owner`; today the daily snapshot writes nothing. | Sales, [#216](https://github.com/MemberJunction/bizapps-sales/issues/216) |
+| D-34 | Rename `Pipeline.RequiresDealLines`, or correct its description. | Sales |
+
+DN-19's remaining work is tracked in GitHub as #202 and #207.
+
+## Status of every entry
+
+**Open** needs a ruling or work. **Decided**, **Built**, **Fixed** and **Resolved** are settled.
+**Superseded** was overtaken by a later entry or change. **Tracked** continues as GitHub issues.
+**Moved** belongs to bizapps-common, which has owned the Outlook ingest since 2026-08-30. **Note**
+records a trap or a measurement rather than a decision.
+
+| ID | Status | Subject |
+|---|---|---|
+| DN-1 | Decided | Every check bundle requires bizapps-orders |
+| DN-2 | Decided | Four save-deal checks retired; SD19 replaces them |
+| DN-3 | Decided | Embedded-order lines insert, edit and remove through `deal.Save()` |
+| DN-4 | Fixed | CD13 read a column it did not select |
+| DN-5 | Decided | `Deal.Amount` caches the order's total, with provenance (D-2) |
+| DN-6 | Decided | KI-20 was fixed in bizapps-orders |
+| DN-7 | Fixed | The order-provisioning guard |
+| DN-8 | Resolved | Deals with an order open again |
+| DN-9 | Decided | A product line needs a saved deal |
+| DN-10 | Open | Which stage, if any, declares `Confirmed` |
+| DN-11 | Open | Dead `OneTimeLinesTo` and unsent contracts-seam fields |
+| DN-12 | Open | A board-drag warning has nowhere to go |
+| DN-13 | Fixed | The mutation driver restored from `HEAD` |
+| DN-14 | Resolved | KI-22's cause: orders' push order and a CodeGen self-import |
+| DN-15 | Resolved | The demo seeds priced and stated deals |
+| DN-16 | Resolved | Contracts became usable; CT1 and CT4 written |
+| DN-17 | Fixed | A first line was written to an orphan order |
+| DN-18 | Resolved | A reopen restores the stage and the order |
+| DN-19 | Tracked | An inline-created customer bound to an unwritten id |
+| DN-20 | Built | A booked order refuses the reopen |
+| DN-21 | Decided | What the demo's attribution values prove |
+| DN-22 | Note | SD25 and AC9 measured; neither reproduced |
+| DN-23 | Decided | One writer for the stage log; transitions are declared |
+| DN-24 | Note | `mj sync push` resets the seeded pipelines to Default Company |
+| DN-25 | Open | `mj sync push` cannot re-push query parameters |
+| DN-26 | Fixed | `Sales: Slipped Deals` could never return a row |
+| DN-27 | Open | A per-deal attribution-coverage report |
+| DN-28 | Open | A parked status does not survive a later stage move |
+| D-1 | Superseded | Which stage means "agreement or higher" (D-OS1) |
+| D-2 | Decided | A lined deal's `Amount` caches `OrderHeader.TotalGross` |
+| D-5 | Open | The stage-event append on every write path |
+| D-7 | Resolved | The contracts seam had nowhere to run |
+| D-8 | Resolved | Task-type metadata pushes once tasks has migrated |
+| D-9 | Open | Renewal defaults for a contract created at Closed Won |
+| D-10 | Resolved | Contracts chooses the current template |
+| D-11 | Open | What shape a renewal takes |
+| D-12 | Open | `ContractType` has no `Code` |
+| D-13 | Open | Review steps as `TaskTypeStatus` rather than prose |
+| D-14 | Open | The domain of the annual increase |
+| D-15 | Moved | The ingest's dedupe key |
+| D-16 | Moved | Meetings through MJ's provider or a direct Graph call |
+| D-17 | Moved | `GetMessages` had no date filter |
+| D-18 | Moved | Direction is inferred, and there is no Bcc |
+| D-19 | Fixed | The relevance filter folds case in the query |
+| D-20 | Resolved | One activity links to every matched deal |
+| D-21 | Moved | Sync-rule precedence |
+| D-22 | Resolved | The activity pane writes through `Sales.LogActivity` |
+| D-23 | Superseded | Sales' scheduled sync job was retired |
+| D-24 | Note | `QuoteSchemaAndView` error at harness start |
+| D-25 | Decided | A cancelled meeting is stored `Cancelled` |
+| D-26 | Moved | The calendar watermark lives in `Settings` |
+| D-27 | Moved | An index on `LOWER(ContactMethod.Value)` |
+| D-28 | Open | Is forecasting monthly? |
+| D-29 | Decided | A same-day re-run skips |
+| D-30 | Open | Sanity checks for the forecast measures |
+| D-31 | Decided | One `ForecastSnapshot` writer: the Action |
+| D-32 | Open | Snapshots have no owner grain, and no source is registered |
+| D-33 | Note | Open and won deals sit on different date columns |
+| D-34 | Open | `Pipeline.RequiresDealLines` outlived `DealLine` |
+
+## Renumbered IDs
+
+Changed on 2026-10-11. Commit messages written before then may use the old ID; "earlier" and "later"
+are the two entries' order in this file.
+
+| Was | Now | Entry |
+|---|---|---|
+| DN-16, the later entry | DN-23 | the `PipelineStageID` trigger has one writer |
+| DN-17, the earlier entry | DN-24 | `mj sync push` resets the seeded pipelines to Default Company |
+| DN-18, the earlier entry | DN-25 | `mj sync push` cannot re-push query parameters |
+| DN-19, the earlier entry | DN-26 | `Sales: Slipped Deals` could never return a row |
+| DN-20, the earlier entry | DN-27 | the involvement report's coverage column |
+| DN-21, the later entry | DN-28 | `SelectableStatuses()`, and whether parking survives a stage move |
+| D-3 | D-34 | `Pipeline.RequiresDealLines` |
+| D-4 | retired | demo order numbers; superseded by DN-15, after which orders' own sequence mints them |
+| D-6 | retired | `board-move` as an unconditional bundle; answered by DN-1 |
+| D-31, the earlier entry | folded into D-8 | MJ_V6_Host's tasks schema |
+| D-32, the earlier entry | folded into D-8 | what the tasks migration changed |
 
 ---
 
@@ -75,29 +189,21 @@ of SD15 (`PaymentMethod` defaults from metadata) is untouched.
 
 ---
 
-## DN-3 — The two-level save graph: insert and edit work, REMOVE does not
+## DN-3 — The two-level save graph: insert, edit and remove all go through `deal.Save()`
 
 **Taken:** rewrote SD6, SD13 and SD14 against `deal.OrderID_Object.Lines` — the collection belongs to the
 deal's **embedded order**, while `Save()` is still issued on the **deal**. Then ran them, which is the
 part that mattered.
 
-**Result — and the first draft of this entry guessed it wrong, which is why the run happened:**
-
 | Verb | Through `deal.Save()` | Check |
 |---|---|---|
 | INSERT | ✅ | SD1, SD19, SD20 |
 | EDIT | ✅ | SD14 |
-| **REMOVE** | ❌ **silently dropped, save returns true** | SD6, now a tripwire |
+| REMOVE | ✅ since KI-20 was fixed in bizapps-orders (DN-6) | SD6 |
 
-So an embedded record DOES join the parent's save plan — for two verbs out of three. The third is
-**KI-20**, and it is not about embedding at all: the same removal fails through `order.Save()` too, while
-removing one of the deal's OWN instalments deletes fine. `test-harnesses/prove-line-removal.mjs` prints
-that whole matrix, including the control, and cleans up after itself.
-
-**Cause, located:** `OrderEntityServer.Save()` in bizapps-orders passes `SkipRelatedCollections: true`
-(correctly — lines must not insert before they are priced) and its hand-rolled `savePendingLines()`
-iterates `this.Lines.Items`. Inserts and updates, off the survivors. Nothing ever asks the collection for
-its pending removals.
+So an embedded record joins the parent's save plan for all three verbs. Until the KI-20 fix a removal
+was silently dropped while the save returned true, through `order.Save()` as well, and SD6 was its
+tripwire.
 
 ---
 
@@ -116,45 +222,33 @@ back, not just the query.
 
 ---
 
-## DN-5 — OPEN: the header roll-up is still unasserted
+## DN-5 — DECIDED by D-2: `Deal.Amount` is a cached copy of the order's total
 
-The §6 definition-of-done check — `Deal.Amount` for a lined deal equals what `Orders.PreviewOrder`
-returns for the same draft — is **still not built**, and the rework changed its shape rather than
-removing it. The per-line half is covered by SD19. What nothing asserts is the deal-level number:
-`Deal.Amount`, `AmountIsComputed`, `AmountComputedAt`, `AmountSourceHash`.
+The §6 definition-of-done check — a lined deal's `Deal.Amount` equals what orders computes for the same
+draft — was unbuilt, and it turned on one question: is `Amount` still a cached answer with provenance,
+or a read-through of the order's total that makes `AmountIsComputed`, `AmountComputedAt` and
+`AmountSourceHash` dead weight?
 
-**The question for Josue/Amith:** with the order embedded and orders owning every line figure, is
-`Deal.Amount` still a cached PreviewOrder answer with provenance — or is it now simply a read-through of
-the order's total, making the three provenance columns dead weight? The answer decides whether that
-check gets written or those columns get dropped. Not something to infer from the code.
+Answered on 2026-08-31 by D-2 (shape 2): a lined deal caches `OrderHeader.TotalGross`, and the three
+columns stay as its provenance; the hash fingerprints the order and its total. `save-deal.SD21` asserts
+the amount equals the order's total and that the provenance is stamped; `SD22` and `SD41` cover a
+hand-typed figure.
 
 ---
 
-## DN-6 — OPEN, and the one worth waking up to: who fixes KI-20?
+## DN-6 — DECIDED: KI-20 was fixed in bizapps-orders
 
-**The user-visible consequence:** the deal workspace's delete-line affordance does not work. A rep removes
-a line, the row disappears from the grid, the save reports success — and the line is back on reload. This
-is in sales' own UI, on a surface that is part of the demo.
+The deal's delete-line affordance reported success and the line came back on reload, because orders'
+save never processed the collection's pending removals (KI-20). Three options were recorded:
 
-Nothing was changed to work around it tonight. Three options, and the choice is not mine to make:
+- **A. Fix it in bizapps-orders**, so every caller gets it. Needs care, because it is the booking path.
+- **B. Work around it in sales** by deleting the removed line rows here. Rejected: it puts a second app
+  in charge of deleting orders' rows, and would duplicate whatever rule orders writes.
+- **C. Leave it**, with SD6 as a tripwire.
 
-**A. Fix it in bizapps-orders** — `savePendingLines()` (or `persistPreparedLines()`) processes the
-collection's pending deletions. Correct place, one app, one method, and it fixes every consumer rather
-than just sales. Needs care: it is the booking path, and trigger 51003 freezes a line on a Confirmed
-order, so the deletion has to be scoped to the states where it is legal. **My recommendation.**
-
-**B. Work around it in sales** — `DealWorkspaceService` deletes the removed line rows itself. Fast, and
-entirely inside this repo. Rejected as a default because it puts a second app in charge of deleting
-orders' rows and would silently duplicate whatever rule orders eventually writes. Also does nothing for
-any other caller.
-
-**C. Leave it** — SD6 stays a tripwire, the delete affordance stays broken, KI-20 stays open. Defensible
-only if line deletion is not in the near-term demo path.
-
-**Why this is not a judgement call I made unilaterally:** option A is a change in another repo, tonight's
-brief scopes me to this one, and my one previous rebuild of orders disrupted a second instance's checks.
-Option B is a change I could have made and deliberately did not, because it is the kind of workaround that
-is very hard to remove later.
+**A was taken.** `OrderEntityServer.Save()` now drains `Lines.Removed`, renumbers the survivors and
+recomputes the header (golive#187, closed 2026-09-14). `save-deal.SD6` asserts the removal and the
+re-sequencing, and the deal form removes a line through `Lines.Remove()` + `order.Save()`.
 
 ---
 
@@ -175,28 +269,21 @@ branch was unreachable from the only path anyone had exercised.
 
 ---
 
-## DN-8 — OPEN: the deal workspace cannot reopen a deal, and the fix is in another repo
+## DN-8 — RESOLVED: deals with an order open again; both causes were outside this repo
 
-**Explorer pass, 2026-08-20.** Creating a deal works; its order is provisioned; the numbers land in the
-database. **Reopening it does not** — and since every deal now has an order, that is every deal.
+**Explorer pass, 2026-08-20.** A deal with an order could be created but not reopened, and since every
+deal has an order, that was every deal. Two causes, KI-21 and KI-22 in `docs/KNOWN-ISSUES.md`:
 
-Two causes, found in sequence, both outside this repo. Full detail in `docs/KNOWN-ISSUES.md`:
+- **KI-21.** A host running sales must also register orders' server package in `mj.config.cjs` →
+  `dynamicPackages.server[]`, which `mj app install` writes; otherwise orders' resolvers never enter the
+  GraphQL schema. An install rule rather than a defect.
+- **KI-22.** Orders' generated code was behind the database. Re-running orders' CodeGen, the fix this
+  entry proposed, was not the cause. DN-14 found it: orders' metadata push order, fixed in
+  bizapps-orders, and a CodeGen self-import, fixed in MJ on 2026-08-26.
 
-* **KI-21 — orders was never installed as an Open App on this host.** Its schema was migrated and its
-  entities registered, but `mj.config.cjs` → `dynamicPackages.server[]` listed only sales, so orders'
-  resolvers never entered the GraphQL schema. **Fixed locally** by adding the entry by hand; the proper
-  fix is `mj app install` for bizapps-orders. This one matters for the AWS install: a dependency
-  declaration in `mj-app.json` does not make a host register that dependency's server package.
-* **KI-22 — orders' generated resolvers are behind the database.** ⚠️ **UPDATED 2026-08-20 — see DN-14; the fix below was tried and does not work.** `vwOrderHeaders` and `EntityField`
-  both carry `RootReversesOrderHeaderID` (MJ's recursive-hierarchy column for the self-referencing
-  `ReversesOrderHeaderID`); orders' committed generated code does not. The client builds its selection
-  set from metadata, so every Order Header read asks for a field the schema lacks. **NOT fixed.**
-
-**The decision:** re-running orders' CodeGen file pass and rebuilding it (`npm run mj:codegen:files &&
-npm run build` in bizapps-orders) is almost certainly all it takes. It was not run because it is another
-repo, on a database shared with a second working session, and CLAUDE.md records a measured case of a
-second CodeGen pass corrupting a database. That is a call for Josue, in the morning, with the stack quiet
-— not something to do unattended at 07:40.
+This entry held back from running CodeGen partly because CLAUDE.md then said a second CodeGen pass
+corrupts a database. That rule was reversed on 2026-09-20: run CodeGen until it reports
+`success: true` and per-entity parity is clean.
 
 ---
 
@@ -224,11 +311,9 @@ workaround dressed as a feature.
 cases at the cost of the thing that gating buys — a rep learning about a refusal before they lose their
 work. Worth revisiting only if pre-save line entry turns out to matter.
 
-**Still unverified**, because DN-8 blocks it: that adding a line to an ALREADY-SAVED deal now works
-end-to-end through the UI. The blocker was identified from metadata (`CompanyID` was the only line-level
-refusal; `UnitPrice` initialises to 0 and does not trip validation), and `save-deal.SD19` covers the same
-write through the entity layer — but the UI path itself has not been seen green. **It is the first thing
-to re-check once KI-22 is fixed.**
+**Verified since.** Once DN-8 cleared, `79-embedded-order-refresh` added a line to a just-saved deal
+through the browser and found it on the deal's own order (DN-17). The deal form's line editor keeps the
+same gate: *"Save the deal first — a product line needs its order."*
 
 ---
 
@@ -239,20 +324,18 @@ example in the same message says Closed Won → `Confirmed`. We asked which he i
 **`Quoted` on the winning stage**, per the instruction to assume and note.
 
 **Why it is not a coin toss.** `Confirmed` is the irreversible step in orders: it books journal entries
-(their D8), freezes every line with trigger 51003, and is reachable only forward or to `Voided`
-afterwards. Seeding it on the winning stage means **a rep dragging a card to Closed Won posts to the
-ledger**. That may be exactly what Andrew wants — back-office entry does confirm directly — but it is a
-different sentence from "a quote becomes a signed quote", and the two readings are one seeded field
-apart.
+(their D8), freezes every line with trigger 51003, and nothing leaves it — orders gives `Confirmed` no
+onward status, so undoing one takes a reversal order (their D53). Seeding it on the winning stage means
+**a rep dragging a card to Closed Won posts to the ledger**. That may be exactly what the request meant —
+back-office entry does confirm directly — but it is a different sentence from "a quote becomes a signed
+quote", and the two readings are one seeded field apart.
 
-`Confirmed` is therefore seeded **nowhere** today. To change it:
+`Confirmed` is therefore seeded **nowhere** today. To change it, set `OrderStatusOnEntry` on the `SIGNED`
+stage in `metadata/pipeline-stages/.sales-pipeline-stages.json`, plus the matching literal in
+`scripts/seed-demo-data.sh`. The code needs no change — that is the point of D-OS1. CO3 and CO5 assert
+the MECHANISM and stay green either way, which is why they were reframed.
 
-```sql
-UPDATE __mj_BizAppsSales.PipelineStage SET OrderStatusOnEntry = N'Confirmed' WHERE Code = 'SIGNED';
-```
-
-plus the matching literal in `scripts/seed-demo-data.sh`. The code needs no change — that is the point of
-D-OS1. CO3 and CO5 assert the MECHANISM and stay green either way, which is why they were reframed.
+The stories record the same open decision: golive#35 (S-US3) and golive#115 (S-US5).
 
 ---
 
@@ -267,13 +350,13 @@ contract is its own decision. Removing it is a five-minute change of exactly the
 **A deployment setting it is configuring nothing**, which is the argument for removing it rather than
 documenting it.
 
-**Three more joined it on 2026-08-20**, from the v6 contracts-seam merge:
-`ContractsCreateFromDealSeamInput` still declares `BillingFrequency`, `CommittedAmount` and `Lines`, and
-`buildContractInput()` no longer sends any of them. They were `ContractTerm` and `ContractLine` columns,
-and contracts deleted both tables — so unlike `OneTimeLinesTo` these have nowhere to go rather than
-merely being unread. Same decision, four fields now: narrow the seam shape in one pass, or leave it
-documented. Leaving it has a real cost — a reader of the interface reasonably concludes sales can send a
-committed amount, and it cannot.
+**More joined it on 2026-08-20**, from the v6 contracts-seam merge: `ContractsCreateFromDealSeamInput`
+declared `BillingFrequency`, `CommittedAmount` and `Lines`, and `buildContractInput()` sends none of them.
+They were `ContractTerm` and `ContractLine` columns, and contracts deleted both tables — so unlike
+`OneTimeLinesTo` these have nowhere to go rather than merely being unread. `Lines` has since been
+removed; `BillingFrequency` and `CommittedAmount` are still declared. Same decision, three fields now:
+narrow the shapes in one pass, or leave them documented. Leaving them has a real cost — a reader of the
+interface reasonably concludes sales can send a committed amount, and it cannot.
 
 ---
 
@@ -317,54 +400,21 @@ the tool at exactly the moment a new check most needs proving.
 
 ---
 
-## DN-14 — ROOT CAUSE FOUND (2026-08-20). Was: KI-22 is an INSTALL problem, not a CodeGen one
+## DN-14 — RESOLVED: KI-22 was orders' metadata push order plus a CodeGen self-import
 
-DN-8 said orders' CodeGen files pass was "almost certainly all it takes". **It was tried, twice, and it
-is not.** Full detail in `docs/KNOWN-ISSUES.md` KI-22; the short version:
+DN-8 guessed that re-running orders' CodeGen file pass was all it would take. Tried twice, it was not:
+each pass fixed one symptom and exposed the next, because the host had never received orders'
+metadata (`EntityField.EmbeddedRecord`, `RelatedRecordCollection`, and whatever drives
+`entityPackageName`), so no regeneration could reproduce orders' committed code.
 
-* Round 1 (files only) restored `RootReversesOrderHeaderID` and **removed**
-  `OrderHeaderEntity.InitialPaymentDetailID_Object`. `orders-entities` stopped compiling.
-* Round 2 (after setting the missing `EntityField.EmbeddedRecord` rows by hand) restored the embeds and
-  produced a **self-import** in `entity_subclasses.ts` plus the loss of `OrderHeader.Lines`.
+**The cause was one line of JSON.** Orders' `metadata/.mj-sync.json` listed 7 of 23 directories in
+`directoryOrder`, so `queries` sorted ahead of `query-categories` and `mj sync push` halted at 14 of 23
+directories; the nine after it, `entity-fields` and `entity-relationships` among them, never ran.
+Listing `query-categories` before `queries` took the push to 23 of 23 with 0 errors. That order is on
+bizapps-orders `next`.
 
-Everything was restored — orders' generated files to HEAD, the seven metadata rows to NULL — and orders
-builds again with its `dist` matching its committed source. A full database backup was taken first and
-still exists: `/var/opt/mssql/data/MJ_V6_Host_pre_orderstatusonentry.bak`.
-
-**What this establishes:** MJ_V6_Host is missing at least three classes of orders' metadata —
-`EntityField.EmbeddedRecord` (zero rows host-wide), `RelatedRecordCollection` (`OrderHeader.Lines`), and
-whatever drives `entityPackageName`. No regeneration against this host can reproduce orders' committed
-code, because the host was never given orders' metadata. `mj sync push --dir metadata` in bizapps-orders
-gets 14 of 23 directories in and stops on a missing `MJ: Query Categories` row named `Orders`.
-
-**That was the right shape and the wrong depth. The blocker turned out to be one line of JSON.**
-
-Andrew's hypothesis, measured: orders' `metadata/.mj-sync.json` listed 7 of 23 directories in
-`directoryOrder`, and `query-categories` was not one of them — so it fell to alphabetical ordering, where
-`queries` sorts first ('i' < 'y' at index 4) and every query was pushed ahead of the category it
-references. `sync push` halted there, and the NINE directories after it never ran, including
-`entity-fields` and `entity-relationships`. Adding `query-categories` before `queries` takes the push
-from 14 of 23 to **23 of 23, 0 errors**, and restores every piece of metadata KI-22 was about.
-
-**Regenerating then works too, except for one line:** CodeGen emits
-`import { mjBizAppsCommonAddressEntity } from '@mj-biz-apps/orders-entities'` — a self-import, which is
-the `entityPackageName` limitation `packages/Entities/src/deal-entity.ts` documents at length. Corrected
-by hand as a diagnostic, all four orders packages build, `DEAL-9001` opens in the workspace, and its
-order lines render with orders' prices (Qty 3 × 229 = 687), matching the database exactly, with zero
-console errors.
-
-**What is left to decide, and it is now small and specific:**
-
-1. **Land the `.mj-sync.json` fix in orders.** One line; it is in the orders working tree, uncommitted.
-   This is the whole install fix and it is not controversial.
-2. **The `entityPackageName` self-import is an MJ CodeGen bug** and needs fixing there. Do NOT reach for
-   the schema-map variant — measured both ways, it makes CodeGen exclude those schemas from generation
-   entirely (`deal-entity.ts`). Until it is fixed, orders cannot be regenerated cleanly on any host
-   carrying common's schema, and the hand-correction on this host is a diagnostic that the next CodeGen
-   run will wipe.
-
-DN-8's premise — "almost certainly all it takes" — was wrong about the mechanism and right that it was
-small. What made it look deep was that each attempt fixed one symptom and exposed the next.
+**Regenerating then hit an MJ CodeGen bug:** orders' `entity_subclasses.ts` imported from its own
+package. MJ fixed it on 2026-08-26 by importing peer entity classes through `entityImportPackages`.
 
 ---
 
@@ -417,37 +467,27 @@ by `save-deal.SD24` and its mutant `M-PV1`.
 
 ---
 
-## DN-18 — OPEN: `mj sync push` cannot write `MJ: Query Parameters` on this host
+## DN-25 — OPEN upstream (MJ#4545): `mj sync push` cannot re-push `MJ: Query Parameters`
+
+*Numbered DN-18 until 2026-10-11.*
 
 Pushing `metadata/queries` fails with `Failed to save MJ: Query Parameters record at MJ: Queries[0]/MJ:
-Query Parameters[0]: Error executing SQL`, and **rolls back cleanly** — nothing is half-written.
+Query Parameters[0]: Error executing SQL`, and **rolls back cleanly** — nothing is half-written. The
+queries and their parameters land on a clean database; every push after that fails, so a change to a
+query definition cannot be pushed.
 
-**The 13 queries and their 58 parameters are already in the database and complete**, so this is not a
-blocker for reading the reports. It is a blocker for CHANGING them: the file is now the only correct copy
-until this is fixed, and a push cannot carry an edit across.
+**The mechanism, found later:** MJ's push extracts parameters from the Nunjucks template and inserts
+them, then inserts the file's own declarations and hits `UQ_QueryParameter_QueryID_Name`. Parameter
+persistence should upsert on `(QueryID, Name)`. Filed as MJ#4545.
 
-Two observations, and I am deliberately not claiming the mechanism:
-
-* The push attempts to **CREATE** parameters that already exist, with freshly generated UUIDs, rather
-  than matching them. So even without the SQL error, re-pushing would duplicate rather than update.
-  Whether the definitions should carry stable parameter UUIDs is a real question for whoever owns them.
-* The error output includes a table definition listing `__mj_CreatedAt`, `__mj_UpdatedAt`, `CreatedAt`
-  AND `UpdatedAt`, which looks like the `@ResultTable`-versus-columns mismatch CLAUDE.md documents. I
-  checked and could NOT substantiate it: `spCreateQueryParameter` declares no such columns and the
-  entity's registered fields match the view exactly. So the four-timestamp table comes from somewhere
-  else in MJ core's save path and I stopped rather than guess further.
-
-**Needs someone with MJ core context.** Everything above is what a reader needs to not repeat the
-investigation.
-
-**Meanwhile:** `metadata/queries/SQL/slippage.sql` was fixed (see below) and the live `Query.SQL` was
-updated with a targeted `UPDATE __mj.Query SET SQL = <file contents>` — the same content the push would
-have written, verified by executing the stored SQL afterwards. That is a workaround and it is recorded as
-one; it does not scale to a parameter or definition change.
+**Meanwhile** a change to a query's SQL reaches a database only by updating `__mj.Query.SQL` directly,
+as DN-26's fix did. That does not scale to a parameter change.
 
 ---
 
-## DN-19 — RESOLVED: `Sales: Slipped Deals` could never have returned a row
+## DN-26 — RESOLVED: `Sales: Slipped Deals` could never have returned a row
+
+*Numbered DN-19 until 2026-10-11.*
 
 **A real defect, found by fixing the seed rather than by reading the query.** The join was
 
@@ -475,7 +515,9 @@ the join, instead of taking the whole report down again.
 
 ---
 
-## DN-20 — OPEN: the involvement report promised a column it does not ship, and coverage is the wrong grain
+## DN-27 — OPEN: the involvement report promised a column it does not ship, and coverage is the wrong grain
+
+*Numbered DN-20 until 2026-10-11.*
 
 `deal-involvement-by-rep.sql`'s header said `AttributionCoveragePct` "exposes that ratio per deal-set".
 **There is no such column.** The SELECT ships `AvgAttributionPct` and `UnstatedAttributionCount`. Found by
@@ -494,13 +536,6 @@ satisfy a comment is the wrong order of operations.
 ---
 
 ## DN-21 — DECIDED: what the demo's attribution values are chosen to prove
-
-> **NUMBERING COLLISION, not yet resolved.** Two entries in this file are numbered DN-21: this one, and
-> "REPORT ONLY: does `SelectableStatuses()` still need to offer anything?" further down. Two sessions
-> allocated the number independently. Left as-is rather than renumbered from here, because a reference to
-> either from a commit message or an issue would silently retarget; whoever renumbers should grep for
-> `DN-21` across the repo first. Flagged so a reader who follows a reference to "DN-21" knows to check
-> which one they landed on.
 
 Recorded because the numbers look arbitrary and are not.
 
@@ -523,7 +558,9 @@ money. The reconciliation was judged the more valuable of the two. That is the t
 
 ---
 
-## DN-17 — NOT A DECISION, A TRAP: `mj sync push` resets the seeded pipelines to Default Company
+## DN-24 — NOT A DECISION, A TRAP: `mj sync push` resets the seeded pipelines to Default Company
+
+*Numbered DN-17 until 2026-10-11.*
 
 Recorded because it cost a confusing suite run and will do so again. `metadata/pipelines/` seeds the
 B2B and D2C pipelines against `Default Company` — the only company a bare install is guaranteed to
@@ -586,74 +623,36 @@ name and broke on a rename. Same discipline, another app's vocabulary.
 ---
 
 
-## D-1 · Which pipeline stage means "agreement or higher"?
+## D-1 · SUPERSEDED by D-OS1: which pipeline stage means "agreement or higher"?
 
-**Where it bites:** the seed script sets every embedded order to `Draft`.
-
-The model says an order advances to `Quoted` when its deal reaches the agreement stage or higher.
-Nothing in the schema says which stage that is. `PipelineStage` has `DisplayOrder`, so "or higher" is
-expressible as arithmetic, but identifying the *threshold* stage would mean comparing a stage name in
-code — which `npm run test:vocabulary-gate` fails the build over, correctly.
-
-Neither seeded pipeline even has a stage called Agreement: B2B runs Discovery → Qualification →
-Proposal → Negotiation → Signed → Lost, and D2C runs Introduced → Evaluating → Booked.
-
-**Interim choice:** seed every order `Draft`. It is what deal creation genuinely produces, and it is
-what an unadvanced order actually is — so the demo is honest rather than aspirational.
-
-**What is needed:** a behaviour flag on `PipelineStage` (a `QuotesOrder BIT` set on every stage at or
-above the threshold keeps "or higher" out of code entirely), plus a ruling on which stages carry it
-per pipeline. Once that exists, the seed should set `Quoted` on the deals sitting at or beyond it —
-DEAL-9001 is at Negotiation and is the obvious candidate.
+The seed set every embedded order to `Draft`, because nothing in the schema named the threshold stage
+and comparing a stage name in code fails the vocabulary gate. The answer arrived as data on each stage,
+`PipelineStage.OrderStatusOnEntry` (`docs/DECISIONS.md` D-OS1): on the seeded B2B pipeline, Proposal,
+Negotiation and Signed declare `Quoted`. Whether any stage should declare `Confirmed` is DN-10.
 
 ---
 
-## D-2 · `Deal.Amount` is no longer maintained by anything
+## D-2 · DECIDED: a lined deal's `Amount` is a cached copy of the order's `TotalGross`
 
-**Where it bites:** the seeded header amounts, and the pipeline board's column totals.
+Once a deal's lines moved onto its embedded order, nothing reconciled `Deal.Amount` with them, and the
+board summed `Deal.Amount`. On the reseeded demo data the two were 43–50% apart on every lined deal, so
+the board's column totals were precise and wrong. Three shapes were on the table:
 
-`Deal.Amount` is seeded as a human's stated figure with `AmountIsComputed = 0`, which was always the
-design. What changed is that the line items which used to sit beside it now live on the embedded
-order, and **nothing reconciles the two**. A deal can carry `Amount = 185000` while its order lines
-say something else entirely, and no code notices.
+1. a read-through of the order's total, retiring `AmountIsComputed`, `AmountComputedAt` and
+   `AmountSourceHash`;
+2. a cached copy whose hash fingerprints the order rather than the retired deal lines, so a surface can
+   still say the figure is stale;
+3. a human estimate the board stops summing, showing an order-derived total instead.
 
-The pipeline board sums `Deal.Amount` for its column totals, so it will show figures that are
-unpriced, stale, or both — silently.
-
-**Now measured, on the reseeded demo data.** The board sums `Deal.Amount`; the embedded order lines say
-something else entirely:
-
-| Deal | `Deal.Amount` (what the board shows) | Order lines (what is being sold) |
-|---|---|---|
-| DEAL-9001 | 185,000 | 106,080 |
-| DEAL-9003 | 96,000 | 73,080 |
-| DEAL-9007 | 9,500 | 4,775 |
-
-That is a 43–50% divergence on every lined deal, and nothing anywhere reconciles it. The board's column
-totals are therefore confidently wrong rather than obviously missing, which is the worse failure — a
-blank total invites a question, a precise one does not.
-
-**Interim choice:** seeded amounts left as-is and deliberately NOT reconciled to the order lines. The
-figures differ, visibly, which is more useful than quietly making them agree in seed data and
-discovering the gap in production.
-
-**What is needed:** a decision on what `Deal.Amount` means now. Three shapes, and they are not
-equivalent:
-
-1. a read-through of the embedded order's total — one number, always current, and the three
-   provenance columns (`AmountIsComputed`, `AmountComputedAt`, `AmountSourceHash`) retire with it;
-2. a cached answer whose hash fingerprints the ORDER's lines rather than the retired deal lines, so
-   the UI can still say *"stale, reprice"*;
-3. it stays a human's estimate and the board stops summing it, showing an order-derived total instead.
-
-**Decided (shape 2, 2026-08-31).** Lined deals cache `OrderHeader.TotalGross` onto `Deal.Amount` —
-same job as that header total, copied not summed. A typed figure survives only while the order has
-no priced total (`save-deal.SD21` / `SD22` / `SD41`). Seeded `AmountIsComputed = 0` rows with lines
-will reconcile on the next save.
+**Decided: shape 2 (2026-08-31).** A lined deal caches `OrderHeader.TotalGross` onto `Deal.Amount`,
+copied, never summed in sales. A typed figure survives only while the order has no priced total
+(`save-deal.SD21`, `SD22`, `SD41`). This also answers DN-5.
 
 ---
 
-## D-3 · `Pipeline.RequiresDealLines` survived a table that did not
+## D-34 · `Pipeline.RequiresDealLines` survived a table that did not
+
+*Numbered D-3 until 2026-10-11; `D-3` is the master plan's quota question.*
 
 The column still exists post-rework and the seed still sets it (`0` on the header-only pipeline).
 Its description still reads *"whether deals carry catalog lines"*, which now has to be read as "whether
@@ -663,20 +662,6 @@ the deal's embedded ORDER carries lines" — the flag outlived the table it was 
 
 **What is needed:** either a rename (`RequiresOrderLines`) or an updated column description. Low
 urgency, but the current name will mislead exactly once per newcomer.
-
----
-
-## D-4 · Demo order numbers are a reserved prefix, not sequence-minted
-
-Real orders take their number from orders' own sequence (`ORD-000035`). The seed cannot reach that —
-it is `sqlcmd` with no provider — so demo orders are `ORD-DEMO-9001/9003/9007`.
-
-**Interim choice:** the `ORD-DEMO-9%` prefix. It keeps the seed idempotent, lets teardown match
-exactly its own rows, and can never collide with a sequence-minted number.
-
-**What is needed:** confirmation that a visibly-fake order number is acceptable in the demo. If it is
-not, the alternative is provisioning through the entity layer, which means the seed stops being a SQL
-script — a much larger change.
 
 ---
 
@@ -702,122 +687,60 @@ gives it 'an explicit, audited path'), rather than a general-purpose off switch.
 
 ---
 
-## D-6 · `board-move` is registered as an unconditional bundle
+## D-7 · RESOLVED: the contracts seam has somewhere to run
 
-I added `board-move` to `scripts/expected-check-counts.json` with `requires: null`, so the coverage gate
-expects it on every host. BD1–BD4 drive a deal through the entity and read `DealStageEvent`; they touch
-no sibling app directly.
-
-**But saving a deal now provisions its embedded order**, which does need orders. On a host without
-orders the save may refuse and all four would fail for a reason none of them are about.
-
-**Interim choice:** `requires: null`, because it is true of what the checks themselves read, and it was
-correct on the host I verified against.
-
-**What is needed:** a decision on whether every bundle that saves a deal now implicitly requires orders.
-If so, `board-move` should be `requires: "orders"` — and so should `save-deal`.
----
-
-## D-7 · The contracts seam has nowhere to run, on any database here
-
-**Raised by:** rewriting `LiveContractsSeam` onto the v6 entity path.
-
-Measured, not assumed. Both local databases:
-
-| | `__mj_BizAppsContracts` tables | `MJ_BizApps_Contracts%` entities |
-|---|---|---|
-| MJ_V6_Host | 0 | 0 |
-| MJ_V6_Tasks2 | 0 | 0 |
-
-So every call to `CreateContractFromDeal` returns *"bizapps-contracts is not installed in this
-deployment"* and stops at the guard. The rewrite is typechecked and vocabulary-clean, and **not one
-line of its body has ever executed.**
-
-This matters more than it sounds, because it is the second half of the same story: the seam's previous
-version dispatched `Contracts.SaveContract`, an operation deleted in the 2026-08-18 rebuild, and got
-back *"not registered in this process"* every time. Two different failures, one indistinguishable
-symptom — the contract route never runs — which is why it kept being read as a stack-configuration
-problem. The dispatch bug is now fixed. The *environment* half is not.
-
-**Interim choice:** the seam refuses honestly and the close records an unexecuted plan with a reason,
-which is the same shape every other unroutable target uses.
-
-**What is needed:** contracts installed in a database somebody can point a harness at. Until then the
-only assurance available is that the code matches the schema on `origin/next` (`d2f64e3`), which is
-what this rewrite is. Note the local contracts checkout sits on `local/pnpm-v6-conversion` and was
-deliberately not disturbed — installing it is a separate, deliberate act.
+When `LiveContractsSeam` was rewritten onto the v6 entity path, neither local database had contracts
+installed, so none of its body had executed and every call stopped at *"bizapps-contracts is not
+installed in this deployment"*. Contracts was installed and seeded on MJ_V6_Host on 2026-08-20 (DN-16).
+`close-won-contract.CT1` now creates a contract through the seam, and `CT7` saves an Order Form carrying
+contracts' current template.
 
 ---
 
-## D-8 · The task-type metadata cannot be pushed until tasks migrates
+## D-8 · RESOLVED: the task-type metadata pushes once tasks has migrated
 
-**Raised by:** moving Order Review and Contract Processing into `metadata/task-types/`.
+`metadata/task-types/` declares `TaskType.Code`. Until the bizapps-tasks migration that adds the column
+was applied, `mj sync push` refused the directory at validation, before writing anything, and pushes
+ran with `--exclude task-types`. Once it was applied to MJ_V6_Host (2026-08-20), a full push with no
+exclusion ran 15 of 15 directories with 0 errors. `task-types` reported no changes, because the
+migration's name-derived fallback produced the same codes this repo declares. `CloseWonTaskService`
+still matches on `Name` on a host without the column, and `WT12` covers both paths.
 
-The rows carry `Code`, which bizapps-tasks PR #42 added on 2026-08-20. Neither local database has that
-migration applied, and `mj sync push` refuses the whole directory:
-
-```
-1. Field "Code" does not exist on entity "MJ_BizApps_Tasks: Task Types"
-2. Field "Code" does not exist on entity "MJ_BizApps_Tasks: Task Types"
-✗ Validation failed with 2 error(s)
-```
-
-It fails at VALIDATION, before writing anything, so there is no partial state to clean up — the good
-outcome, and worth recording because it means the dependency is explicit rather than silent.
-
-**Interim choice:** ship the rows with `Code`. Writing them without it would produce metadata that
-pushes today and is wrong tomorrow, and `TaskType.Code` is NOT NULL, so a row seeded without one
-cannot exist on a migrated database anyway.
-
-**What is needed:** the PR #42 migration applied wherever these rows are wanted — which is an ordering
-constraint on deployment, not a code change. `CloseWonTaskService` already tolerates the older shape at
-runtime by matching on `Name`; it is only the PUSH that is blocked.
+**Two notes on that host, from applying it** (the earlier D-31 and D-32 until 2026-10-11). MJ_V6_Host's
+tasks schema came from MJ core's migrations rather than bizapps-tasks', so the migration was applied by
+hand and no Flyway history row was invented; an MJ core migration adding the same column would fail
+there. It also adds two foreign keys from the tasks schema into `__mj.Action`. A rebuilt host is
+unaffected.
 
 ---
 
-## D-9 · `ContractType` has no renewal-default columns, and nothing applies defaults
+## D-9 · OPEN: should a contract created at Closed Won take its type's renewal defaults?
 
-Sales' own column descriptions say the standards live in contracts: *"the standard annual increase,
-whose default (5%) lives on the contracts ContractType"* and *"the standard cancellation-notice period
-(default 90 days, owned by the contracts ContractType)"*. As of `origin/next` @ `d2f64e3` they do not.
-`ContractType` carries Name, Description, RequiresExecutedDocument, ParentStatusRequirement and Status
-— nothing else — and `applyContractTypeDefaults()` went with the v1 rebuild.
+Sales' renewal columns are named `…Override` because NULL means *"use the standard"*, a different fact
+from *"we negotiated a number that equals today's standard"*; only the NULL survives a later change to
+policy. When this was raised, contracts' `ContractType` had no default columns, so the seam passes an
+override through when the deal states one and populates nothing otherwise.
 
-This is why sales' columns are named `…Override`: NULL means *"use the standard"*, which is a different
-fact from *"we negotiated a number that happens to equal today's standard"*. Only the NULL survives a
-later change to policy.
+Contracts added `DefaultAutoRenew`, `DefaultRenewalNoticeDays`, `DefaultCancellationWindowDays` and
+`DefaultAnnualIncreasePercent` on 2026-09-14 (golive#217). They are a starting point, not a rule:
+`ContractEntity.SeedRenewalDefaultsFromType()` copies them onto an unsaved contract when its form picks
+a type, and nothing applies them at save time. The seam does not call it, so a contract created at
+Closed Won still has NULL renewal terms unless the deal negotiated them.
 
-**Interim choice:** the seam passes an override through when the deal states one and populates nothing
-when it does not. A null therefore reaches contracts as a null, which is the honest handoff — and it
-means the defaults, when they exist, land in one place rather than being pre-empted by a value sales
-invented.
-
-**What is needed:** the columns on `ContractType`, and something that applies them. Until then a
-contract auto-created at Closed Won has NULL renewal terms unless the deal negotiated them explicitly,
-and nothing anywhere fills that in.
+**What is needed:** a ruling on whether the seam seeds those defaults for a contract it creates. The
+unmounted deal workspace still hardcodes placeholders for the same standards
+(`STANDARD_ANNUAL_INCREASE_PCT = 5` and `STANDARD_CANCELLATION_NOTICE_DAYS = 90` in
+`deal-workspace.types.ts`).
 
 ---
 
-## D-10 · `ContractTemplate` has no `Status`, so the current template cannot be chosen
+## D-10 · RESOLVED: contracts chooses the current template
 
-`ContractTemplate` carries Name, VersionLabel, `IntroducedDate`, SourceURL and Description. There is no
-way to ask which one is current.
-
-`IntroducedDate` is deliberately NOT used. Picking the newest by date is exactly the date-guessing the
-`Status` column Andrew asked for exists to eliminate, and it would silently attach next year's paper to
-this year's deal the day somebody loads a draft template.
-
-There is a stronger reason to leave this alone, and it is contracts' own: `ContractTemplateID` is
-*"nullable because a contract created automatically at Closed Won has none until finance reads the
-PDF"*. That describes this call site exactly. A template arrives when a human establishes which one was
-signed — which is, not coincidentally, one of the steps the Contract Processing task exists to carry.
-
-**Interim choice:** the seam honours a supplied `ContractTemplateID` and never selects one. Nothing in
-sales supplies one today.
-
-**What is needed:** `ContractTemplate.Status`, if template selection is ever supposed to be automatic.
-If it is not — and contracts' column note suggests it is not — then this is closed rather than pending,
-and the note should say so.
+`ContractTemplate` had no way to say which template was current, and picking the newest by
+`IntroducedDate` would attach next year's paper to this year's deal. The seam honours a supplied
+`ContractTemplateID` and never selects one. Contracts now defaults the newest published, usable
+template itself (golive#218), including for a contract the close creates (golive#269);
+`close-won-contract.CT7` asserts an Order Form saves with it.
 
 ---
 
@@ -935,235 +858,100 @@ perform, and would break the handoff that currently works.
 
 **What is needed, from Marcelo:** an upper bound on `CK_Contract_AnnualIncrease` matching sales' 0–100,
 or an explicit statement that contracts stores a fraction — in which case sales must convert and this
-becomes a real defect rather than a latent one. One line either way. Related to D-9: the same column is
-where the missing `ContractType` default would land.
-
-### Addendum to D-9 — the workspace constants become reads
-
-`packages/Angular/src/lib/workspace/deal-workspace.types.ts` carries two placeholders:
-
-```ts
-export const STANDARD_ANNUAL_INCREASE_PCT = 5;
-export const STANDARD_CANCELLATION_NOTICE_DAYS = 90;
-```
-
-They are shown as **placeholder text only** and never written into a draft, which is what makes the
-override/null distinction survive to the database — the file's own comment says so and it is correct.
-But they are hardcoded copies of values that are supposed to live on contracts' `ContractType`, and
-`ContractType` has no such columns (D-9). So today the deal workspace tells an AD what they are
-departing from using a number sales invented.
-
-**When Marcelo adds the renewal-default columns, both constants become reads** — the workspace resolves
-them from the contract type rather than declaring them — and `LiveContractsSeam.setNegotiatedTerms()`
-picks the defaults up on the same change. Until then a policy change in contracts would leave these two
-numbers stale, and nothing would notice: the form would display last year's standard while the database
-held this year's.
-
-Noted here rather than fixed because there is nothing to read from yet, and because a placeholder that
-is never persisted is a display bug at worst — the deal itself stays honest.
+becomes a real defect rather than a latent one. One line either way. Related to D-9: contracts'
+`DefaultAnnualIncreasePercent`, added since, has the same open upper bound.
 
 ---
 
-# ACTIVITIES AND THE OUTLOOK INGEST — D-15 … D-24
+# ACTIVITIES AND THE OUTLOOK INGEST — D-15 … D-27
 
-Raised while building S-US9 (#119) and the ingest behind S-US10 (#120), on
-`feature/activities-and-ingest`, pinned to `ba07f7e`.
-
-> **Two numbering series live in this file, deliberately.** The `DN-n` items are the embedded-order
-> rework's; the `D-n` items are one continuous series begun on `feature/closewon-tasks`. As of the
-> three-way integration **all of D-1…D-24 are here**, so the caveat this note used to carry — that
-> only D-9…D-12 had merged — is spent. Renumbering either series would break cross-references already
-> written into code comments on three branches and reachable by no rename, so the prefixes stay.
->
-> The overlaps are worth knowing rather than deduplicating: `DN-11`/`D-1` both ask which stage means
-> "agreement or higher" and reached the same answer from opposite ends, and `D-9`/`D-10` are the
-> contracts-side gaps this branch's audit re-derived independently from the schema.
-
-Each item below has a defensible interim choice already in the code. None blocks the work.
+Raised while building S-US9 (golive#119) and the ingest behind S-US10 (golive#120). **The ingest moved
+to bizapps-common's Activity Sync engine on 2026-08-30** (084591a). Sales keeps `DealMatcher`, the
+`Sales.DealLinker` extension, manual logging and the deal timeline. The entries marked MOVED are
+common's to answer and stay here as the record of what was raised.
 
 ---
 
-## D-15 · The dedupe key is Graph's message id, not the RFC-822 `Message-ID`
+## D-15 · MOVED to bizapps-common: the dedupe key is Graph's message id, not the RFC-822 `Message-ID`
 
-`UQ_Activity_External` is unique on `(SourceSystem, ExternalID)`, and the ingest keys on
-`('Microsoft365', <graph message id>)` — as briefed, and the right key for one mailbox.
-
-**What it bounds:** a Graph message id is per-mailbox. The RFC-822 `Message-ID` header is the same string
-for every recipient of the same message. So **the same email ingested from two mailboxes produces two
-Activity rows**, and dedupe cannot see they are one message. Today one mailbox is in scope, so nothing is
-wrong; the day a second is added, every internal thread involving two colleagues doubles.
-
-**Interim choice:** the Graph id, with `IncludeHeaders: true` on the fetch so the RFC header reaches
-`Activity.Details` and a later migration could promote it.
-
-**What is needed:** a ruling on whether multi-mailbox ingestion is in scope. If it is, the key becomes the
-RFC `Message-ID` where present — which means a column, because `Details` is not indexable, plus a decision
-about rows already keyed the other way.
+Graph's message id is per mailbox, so one email ingested from two mailboxes made two `Activity` rows.
+Whether multi-mailbox ingestion is in scope, and so whether the key becomes the RFC `Message-ID`, is
+common's question now.
 
 ---
 
-## D-16 · Meetings need either an MJ provider extension or a direct Graph call
+## D-16 · MOVED to bizapps-common: meetings through MJ's provider, or a direct Graph call
 
-**Verified, not assumed.** `BaseCommunicationProvider`'s abstract surface is `SendSingleMessage`,
-`GetMessages`, `ForwardMessage`, `ReplyToMessage`, `CreateDraft`. There is **no event or calendar method
-of any kind**, so meetings cannot be fetched through the Communication abstraction as it stands.
-
-Two routes, not equivalent:
-
-1. **Extend MJ's provider base** with a calendar surface. Right in the long run, benefits every app, and
-   is a change to MJ core this repository cannot make alone.
-2. **Call Graph `/events` directly from sales**, outside the abstraction. Available immediately, and
-   permanently a second way of doing the same thing — the duplication `BaseCommunicationProvider` exists
-   to prevent.
-
-**Interim choice:** neither, and the interface is shaped so either fits. `NormalizedItem` already carries
-`TypeCode`, `EndedAt` and `Location`, and `IActivitySource.Kind` is `'Message' | 'Calendar'`, so a calendar
-source satisfies the same interface and slots in beside the message source with no redesign. Nothing about
-meetings is half-built.
-
-**What is needed:** a ruling on route 1 vs route 2. S-US10 asks for meetings explicitly — "Meetings
-involving a deal's contacts appear on the deal" — so this is an acceptance criterion, not a nicety.
+MJ's `BaseCommunicationProvider` had no calendar method, so sales built meetings on a direct Graph
+`/events` call as a working assumption, behind the same source interface as mail so it could be swapped
+in one file. MJ's provider contract gained calendar retrieval on 2026-09-07. Where the calendar code
+lives is common's question now.
 
 ---
 
-## D-17 · `GetMessages` has no date filter, so incremental sync is fetch-and-discard
+## D-17 · MOVED to bizapps-common: `GetMessages` had no date filter, so incremental sync was fetch-and-discard
 
-`GetMessagesParams` is `{ Identifier, NumMessages, UnreadOnly, IncludeHeaders, ContextData }`. There is no
-"since". A Graph-backed source cannot ask for "messages after the watermark" — it fetches the most recent
-`NumMessages` and the caller discards what it has already seen.
-
-**What it bounds:** if more messages arrive between two runs than the limit, the oldest are **missed and
-never retried**, because the watermark advances past them. The window is `limit` messages per run per
-mailbox against an hourly schedule.
-
-**Interim choice:** the caller-side discard, plus an explicit issue when every fetched message was newer
-than the watermark AND the batch was full — the one observable signature of that overflow. The fixture
-source applies the watermark properly, so it is deliberately the stricter of the two.
-
-**What is needed:** either a date-filtered fetch on MJ's provider (`GetMessagesParams.Since`), or an
-agreed limit and cadence with the overflow signal wired to something that notices. A busy shared mailbox
-on an hourly run at limit 100 is the case to size against.
+`GetMessagesParams` had no "since", so each run fetched the newest `NumMessages` and dropped what the
+watermark had passed. More arrivals between two runs than the limit lost the oldest for good, and the
+interim answer was a per-run limit plus an issue raised when a full batch was entirely newer than the
+watermark. MJ's `GetMessages` has had date bounds since 2026-09-04; whether common's source uses them
+is common's to check.
 
 ---
 
-## D-18 · Direction is inferred, and there is no Bcc
+## D-18 · MOVED to bizapps-common: direction is inferred, and there is no Bcc
 
-`GetMessageMessage` carries `From`, `To`, `ToRecipients`, `CCRecipients`, `ReplyTo` — nothing stating
-inbound versus outbound, and no Bcc field at all.
-
-**Interim choice:** `Direction` is inferred by comparing the sender to the mailbox being read. Correct for
-ordinary mail. **Wrong for a message sent by a delegate** on somebody else's behalf, which lands as
-Inbound to the delegate's mailbox. Bcc recipients are not dropped so much as never delivered by the
-contract.
-
-**What is needed:** confirmation that delegate-sent mail is out of scope, or a direction signal on MJ's
-message type. The Bcc gap is probably acceptable — a Bcc is deliberately invisible to recipients — but it
-should be an accepted absence rather than an unnoticed one.
+MJ's message type carries no inbound or outbound flag and no Bcc field, so direction was inferred by
+comparing the sender with the mailbox read, which files a delegate's sent mail as inbound. The ask, a
+direction signal on MJ's message type or confirmation that delegate mail is out of scope, moved with
+the ingest.
 
 ---
 
-## D-19 · `ContactMethod.Value` is not normalized at write time
+## D-19 · RESOLVED: the relevance filter folds case in the query
 
-The relevance filter matches an address against `ContactMethod.Value` with an `IN` list, then re-folds case
-in memory. The `IN` keeps whatever index exists on `Value`; the in-memory fold is what makes the match
-certain.
+`ContactMethod.Value` is not normalized, SQL Server's default collation ignores case and PostgreSQL's
+does not, and production is PostgreSQL. A bare `Value IN (…)` would therefore have missed a
+differently-cased address there with no error. The filter now matches `LOWER(Value) IN (…)` on both
+engines.
 
-**Why it matters:** SQL Server's default collation is case-insensitive, so `Ada@Example.com` matches today.
-**PostgreSQL's is not**, and production is Postgres. Wrapping the column in `LOWER()` would be portable but
-non-sargable, discarding the index on the one query that runs against every participant of every message.
-
-**Interim choice:** `IN` plus the in-memory fold. Correct on SQL Server; on Postgres a differently-cased
-stored address is a genuine miss — a relevant message quietly treated as irrelevant, which is the failure
-direction that produces no error at all.
-
-**What is needed:** `ContactMethod.Value` normalized (lower-cased) at write time in bizapps-common, or a
-functional index on `LOWER(Value)`. **This is the one item here that becomes a real defect at the Postgres
-conversion** rather than at some later feature.
+**How this was nearly missed.** The first check asserted the behaviour and stayed green with the fix
+reverted, because SQL Server's collation did the work either way: it measured the database, not the
+code. `AC12` asserts the SQL itself contains `LOWER(Value)`, and goes red on that mutant. `LOWER()` is
+non-sargable, so the index that restores performance is D-27.
 
 ---
 
-## D-20 · One message that belongs to two deals is filed against only the first
+## D-20 · RESOLVED: one activity is linked to every deal it belongs to
 
-`DealMatcher` deliberately returns EVERY open deal a participant points at, because a customer with two
-live pursuits emails about both and picking one would hide the message from the other.
-
-But the writer keys on `(SourceSystem, ExternalID)`, which is unique — so the second deal hits the
-idempotency short-circuit and is counted as a duplicate rather than gaining its own `Regarding` link. The
-loop breaks after the first deal, which is at least honest about what happened.
-
-**Interim choice:** file against the first match. The only alternative available today would be to
-fabricate a distinct `ExternalID` per deal, which defeats dedupe entirely — the same message would
-re-import on every run once its deal set changed.
-
-**What is needed:** a writer that APPENDS a link to an existing activity when the external key already
-exists, rather than short-circuiting. Small change to `ActivityWriterService`, plus a decision about
-whether one activity linked to two deals is the intended model — it is the shape `ActivityLink` supports,
-but nothing has said it is wanted.
+`DealMatcher` returns every open deal a participant points at, but the writer keyed on the unique
+`(SourceSystem, ExternalID)` and filed the message against the first deal only. Under common's engine,
+`Sales.DealLinker` adds a `Regarding` link for every match on the one `Activity`.
 
 ---
 
-## D-21 · The sync-rule precedence is a convention, not a stated one
+## D-21 · MOVED to bizapps-common: the sync-rule precedence is a convention, not a stated one
 
-`ActivitySyncRule` has `Sequence`, `Action` (Include/Exclude), `Direction`, `DateFrom`/`DateTo` and a
-free-text `Filter`. Nothing in the schema or its descriptions says how the rules combine.
-
-**Interim choice:** `Sequence` order, **last match wins, default include** — the ordinary firewall
-convention and what a reader of those two columns would expect. `Filter` is **not evaluated at all**: it is
-free text with no stated grammar, and inventing one here would oblige every future consumer to match an
-undocumented dialect.
-
-**What is needed:** the precedence written down wherever `ActivitySyncRule` is documented, and either a
-grammar for `Filter` or an agreement that it is operator notes rather than a predicate.
+`ActivitySyncRule` has `Sequence`, `Action`, `Direction`, a date range and a free-text `Filter`, and
+nothing states how rules combine. Sales applied them in `Sequence` order, last match wins, default
+include, and did not evaluate `Filter`. Stating the precedence, and a grammar for `Filter`, is common's
+now.
 
 ---
 
-## D-22 · The workspace writes activities directly rather than through the writer service
+## D-22 · RESOLVED: the activity pane writes through `Sales.LogActivity`
 
-`ActivityWriterService` is the canonical composition — one `Activity`, N `ActivityLink` rows, one
-transaction, dedupe, party resolution. It is server-side, and an Angular component must not import a server
-package.
-
-So the timeline component writes the same two records by hand: an `Activity` and its `Regarding` link, and
-**nothing else** — no party links, no external key, no dedupe. Those are exactly the parts that need the
-deal's account and contact resolved, and exactly the parts the ingest depends on being right.
-
-**Interim choice:** the manual path's minimum. A hand-logged activity is reachable from its deal and
-correctly typed; it just does not carry the account and contact as participants, which the service would
-have added.
-
-**What is needed:** a thin remote operation — `Sales.LogActivity` — wrapping the writer, so the browser
-uses the real composition instead of a reduced copy. That is the pattern the close flow already uses, and
-it would delete the duplication rather than manage it.
+An Angular package cannot import the server's `ActivityWriterService`, so the timeline wrote an
+`Activity` and its `Regarding` link by hand, without party links, an external key or dedupe. It now
+calls the `Sales.LogActivity` Action, which wraps the writer (0f2ee0a, 2026-08-21).
 
 ---
 
-## D-23 · The scheduled job is written but not seeded
+## D-23 · SUPERSEDED: sales' scheduled sync job was retired
 
-MJ's `SchedulingEngine` is the mechanism, as briefed — no external cron. `ActivitySyncJob.Run()` is the
-callable half and is complete: it enumerates Active Microsoft365 connections and runs each independently,
-so one failing mailbox cannot stop the others.
-
-**What is deliberately not done is seeding the `ScheduledJob` row.** Every source available today either
-refuses (the Graph source, until the tenant policy exists) or is a fixture, which has no business running
-in a deployment. An `Active` hourly job would write to `ActivitySyncConnection.LastError` once an hour
-forever, and the operator surface that exists to make a broken sync visible would be permanently red for a
-sync nobody switched on.
-
-**What turning it on takes**, for whoever does it:
-
-| Field | Value |
-|---|---|
-| `JobTypeID` | `3B94DD43-E961-4D85-B7F4-B6783D748766` — the seeded **Action** type (`ActionScheduledJobDriver`) |
-| `CronExpression` | `0 0 * * * *` — hourly. Six fields; seconds come first in this dialect |
-| `Status` | `Active` (`CK_ScheduledJob_Status`: Pending/Active/Paused/Disabled/Expired) |
-| `ConcurrencyMode` | `Skip` — a run overlapping the previous one would double-fetch the same window |
-| `MissedRunPolicy` | `RunOnce`, not `RunAll` — catching up ten missed hours would fetch the same recent messages ten times |
-| `Configuration` | JSON naming the per-run limit; must satisfy `CK_ScheduledJob_Configuration_IsJson` |
-
-**What is needed first:** an MJ Action wrapping `ActivitySyncJob.Run()`. Sales' `Actions` package is
-currently empty — this would be its first — so there is no local precedent for the metadata shape, which is
-why it is a decision rather than a guess. And it is downstream of the tenant policy in any case: until that
-exists there is nothing for an hourly job to read.
+`Sales.SyncActivities` and its hourly `ScheduledJob` were seeded Active over two empty fixtures, so the
+chain fired every hour and wrote nothing. Both were retired on 2026-08-30 (bcea2ef) when the ingest
+moved to bizapps-common, whose engine owns the trigger.
 
 ---
 
@@ -1181,197 +969,45 @@ branches.
 symptom rather than a code fault, and this is where it was first seen.
 
 ---
----
 
-# UPDATES — what shipped since D-15…D-24 were written
+## D-25 · DECIDED: a cancelled meeting is stored `Cancelled`
 
-Three of the items above have moved. Recorded here rather than edited in place, so the reasoning that
-was current when a decision was taken stays readable next to what was done about it.
-
----
-
-## D-16 — UPDATED: meetings are BUILT, on a recorded assumption
-
-Previously: "neither route taken, the interface is shaped so either fits."
-
-**Now built.** `MSGraphCalendarSource` calls Graph `/events` **directly**, outside MJ's Communication
-abstraction. This is **route 2, taken as a working assumption and not as a ruling** — the reason being
-that there is nothing to extend today: every abstract method on `BaseCommunicationProvider` is
-message-shaped, so route 1 would mean shipping no meetings at all while waiting on another repository.
-
-**It remains reversible for one file.** The calendar source sits behind `IActivitySource` exactly as the
-message source does; the relevance filter, the deal matcher, the writer, the dedupe, the watermark, the
-Action and the scheduled job neither know nor care which produced an item. If Amith rules that a calendar
-surface belongs in MJ core, `MSGraphCalendarSource` is replaced and nothing else moves.
-
-**One thing found while building it that argues FOR the direct call:** unlike `GetMessages`, `/events`
-accepts a date filter. So the calendar has none of D-17's fetch-and-discard overflow risk — it can ask
-for "events since the watermark" and get exactly that. A provider-base surface would have to expose the
-same, or meetings would regress to the mail behaviour.
-
-**Still needed:** the ruling. This is now a question of where the code lives, not whether meetings work.
+The ingest hardcoded `Activity.Status = 'Completed'`, so a cancelled meeting read as one that happened.
+`CK_Activity_Status` already allows `'Cancelled'`, so this was a bug fixed rather than vocabulary
+invented. `Outcome` stays NULL: the nearest seeded value, `NoShow`, is a different fact (a meeting that
+went ahead without someone), and nothing in `CK_Activity_Outcome` means "did not occur". Cancelled
+meetings are still filed, because "they cancelled" belongs on the timeline. `AC18` asserts both
+directions.
 
 ---
 
-## D-19 — RESOLVED, and the check had to be rebuilt to prove it
+## D-26 · MOVED to bizapps-common: the calendar watermark lives in `Settings`, a shared bag
 
-The filter now folds case in the query: `LOWER(Value) IN (…)`. Correct on both engines.
-
-**Worth recording HOW this was nearly missed.** The first version of the check asserted the behaviour —
-a mixed-case address matching a lower-case stored value. It passed. Then the mutation pass reverted the
-fix, and **all seventeen checks stayed green**, because SQL Server's default collation is
-case-insensitive and does the work either way. The check was measuring the database, not the code.
-
-So the filter is built by an exported `BuildContactMethodFilter()` and AC12 asserts the SQL itself
-contains `LOWER(Value)`. White-box, deliberately: on this engine the SQL is the *only* observable
-difference, and a check that cannot fail until production is not a check. Re-ran the mutant afterwards
-and AC12 goes red.
-
-**Still recommended, and now only a performance matter rather than a correctness one:** a functional
-index on `LOWER(Value)` in bizapps-common. `LOWER()` is non-sargable, so any plain index on `Value` is
-now unusable for this read. That is somebody else's schema, and the read is per-participant-per-message,
-so it is worth doing before volume arrives.
+Mail advanced `ActivitySyncConnection.LastSyncAt`; the calendar kept its own `CalendarLastSyncAt` key in
+the JSON `Settings` column, because one watermark for both skips any meeting older than the newest
+email (`AC14`). The risk is two consumers choosing the same key; whether common would rather own a
+second column is its call.
 
 ---
 
-## D-23 — SUPERSEDED: the job IS seeded, and Active
+## D-27 · MOVED to bizapps-common: an index on `LOWER(ContactMethod.Value)`
 
-Previously: "the callable half is complete; the row is deliberately not seeded, because an Active hourly
-job would write to `LastError` once an hour forever."
-
-**That objection was answered by changing the default source rather than by leaving the row out.** The
-factory's default is now two EMPTY fixtures — one per surface — so the hourly run does the whole
-pipeline and writes nothing. The job log reads as an hourly success that fetched zero items, and
-`LastError` stays clean. AC17 asserts exactly that, so replacing the default with anything that reads
-goes red rather than quietly writing fabricated activities into a real database every hour.
-
-**Shipped, in `metadata/`:**
-
-| Row | Value |
-|---|---|
-| Action Category | `Sales` — sales had none; MJ's ~50 seeded categories are its own connectors |
-| Action | `Sync Activities`, DriverClass `Sales.SyncActivities`, Type Custom, Active |
-| Action Param | `Limit`, Input, default 100 — see D-17 for why it is not just a performance dial |
-| ScheduledJob | Action type, `0 0 * * * *`, UTC, Active, ConcurrencyMode `Skip`, MissedRunPolicy `RunOnce`, MaxRuntimeMinutes 20 |
-
-Pushed to MJ_V6_Host and verified: four rows created, `Configuration.ActionID` resolves to the real
-Action, DriverClass matches the registered class. AC15 asserts that agreement, because the one silent
-failure mode here is a dangling `ActionID` — the job fires on time, resolves nothing, and reports no
-error.
-
-`NextRunAt` is null until the SchedulingEngine's first tick computes it; that is the engine's job, not a
-seed value, and an MJAPI restart populates it.
-
-**Still needed:** nothing to make the chain fire. Only a real source for it to read.
+D-19's case fold makes the per-participant lookup non-sargable. The fix is in common's schema: a
+functional index (a computed column plus an index on SQL Server), or lower-casing `Value` at write time
+so a plain index works.
 
 ---
 
-## D-25 · A cancelled meeting is captured, but its status is not modelled
+# FORECAST SNAPSHOT — D-28 … D-33
 
-`MSGraphCalendarSource` reads `isCancelled` and carries it into `Activity.Details` as `Cancelled: true`,
-so the fact survives and a surface can badge it. But `Activity.Status` is hardcoded `'Completed'` by the
-ingest for every item, so a cancelled meeting is stored as completed.
-
-**Interim choice:** capture it and leave the status alone. Dropping cancelled meetings would be wrong —
-"they cancelled" is exactly the kind of thing a rep wants on a timeline — and `CK_Activity_Status` does
-allow `'Cancelled'`, so the value exists.
-
-**What is needed:** a ruling on whether a cancelled meeting should read as `Cancelled` (accurate about
-the meeting, but it then looks like a *task* that was cancelled in any generic activity view) or as
-`Completed` with a badge (accurate about the record, vaguer about the world). It is one line in the
-ingest either way, and it wants a product answer rather than a developer's guess.
-
----
-
-## D-26 · The per-surface watermark uses `Settings`, which is a shared bag
-
-Messages advance `ActivitySyncConnection.LastSyncAt`; the calendar advances a `CalendarLastSyncAt` key
-inside `Settings`, an existing nullable JSON column.
-
-**Why it is split at all:** one watermark for both surfaces takes the max of the two, so a meeting older
-than the newest email is judged already-seen and **skipped forever** — the calendar source never even
-being asked for it. No error, and no row missing from anything anyone counts. AC14 is the regression
-test.
-
-**Why `Settings` rather than a column:** a column means a migration in bizapps-common for a field only
-this app reads. The write merges rather than replaces, so anything else keeping state there survives.
-
-**What is needed:** agreement that `Settings` is a legitimate place for a consumer's own state, or a
-second watermark column if bizapps-common would rather own it explicitly. The risk of the current shape
-is collision — two apps choosing the same key — and it is small but real.
-
----
----
-
-# ROUND TWO — D-25 decided, D-27…D-30
-
----
-
-## D-25 — DECIDED: a cancelled meeting is `Cancelled`
-
-**Ruling taken here, not deferred.** A meeting that did not happen is not a completed activity, and
-anyone reading a timeline would be misled by one that says it was.
-
-**And no vocabulary had to be invented,** which is the part worth recording: `CK_Activity_Status` already
-allows `'Cancelled'`. The value was there the whole time and the earlier version simply was not using it
-— it hardcoded `'Completed'` for every ingested item. So this is a bug fixed rather than a model
-extended.
-
-`NormalizedItem.Cancelled` is now a first-class field rather than a marker buried in `Raw`, because the
-ingest branches on it and a fact nothing can act on without knowing which provider shape to look inside
-is not really recorded. Messages always report false: a sent mail cannot be un-sent.
-
-**`Outcome` is deliberately left NULL.** The nearest seeded value is `NoShow`, and that is a *different
-fact*: a no-show is a meeting that went ahead and somebody failed to attend. Reusing it for a meeting
-called off in advance would put a false claim in a column reports read, which is worse than an empty one.
-Nothing in `CK_Activity_Outcome` means "did not occur", and inventing a value was explicitly off the
-table.
-
-AC18 asserts both directions and that neither gains an outcome. Cancelled meetings are still **filed** —
-"they cancelled" is a fact a rep wants on the timeline, not something to drop.
-
----
-
-## D-27 · UPSTREAM (bizapps-common): a functional index on `LOWER(ContactMethod.Value)`
-
-**Not built here, by instruction — it is another repository's schema and we are not touching other
-repos.** Recorded with the reasoning so it can go upstream intact.
-
-**What changed and why the index is now needed.** The relevance filter matches a message participant's
-address against `ContactMethod.Value`. It used a bare `Value IN (…)`, which relies on the database
-collation being case-insensitive: true on SQL Server, **false on PostgreSQL**, and production is Postgres.
-On Postgres a differently-cased stored address simply would not come back, the message would be judged
-irrelevant, and it would never link — no error, no missing row anyone counts. So the filter now folds
-case explicitly: `LOWER(Value) IN (…)`.
-
-**The cost, stated plainly.** `LOWER(Value)` is non-sargable, so any plain index on `Value` is no longer
-usable for this read — and this is the read that runs for **every participant of every message on every
-sync run**, which is the highest-frequency query the ingest makes. It is correct now and it will not
-scale.
-
-**The fix, for whoever owns bizapps-common:**
-
-```sql
-CREATE INDEX IX_ContactMethod_ValueLower ON __mj_BizAppsCommon.ContactMethod (LOWER(Value));
-```
-
-SQL Server needs a computed column plus an index on it; Postgres supports the expression index directly.
-Either way it restores the index for this pattern without changing any consumer.
-
-**A second, better option worth putting to them:** normalize `Value` to lower case at write time in
-`ContactMethodEntityServer`. Then a plain index works, every consumer's comparison gets simpler, and the
-case question stops existing. It is a bigger change — existing rows need a backfill — and it is theirs to
-weigh.
-
-**Why this is not urgent yet:** no `ActivitySyncConnection` is Active anywhere, so the query runs only in
-checks. It becomes a real performance matter on the day a mailbox is connected, which is the same day the
-tenant policy lands.
+The daily `ForecastSnapshot` capture and the queries it reads.
 
 ---
 
 ## D-28 · The snapshot period is the calendar month, because nothing stores a fiscal one
 
-`CurrentMonthPeriod()` returns the current calendar month in UTC when no period is supplied.
+When no period is supplied, the job snapshots the current calendar month. Since golive#168 the month is
+chosen in the business time zone; it was UTC before.
 
 **This is a choice, not a derivation.** Sales has no fiscal calendar — no `FiscalPeriod` table, nothing on
 `Company` naming a year end, nothing anywhere that says when a quarter begins. So "the current period"
@@ -1381,9 +1017,8 @@ Monthly is very likely right; most forecasting is. But if Blue Cypress forecasts
 offset from January, every snapshot is filed against the wrong window — and the rows would look
 perfectly reasonable, because a period is just two dates.
 
-**Interim choice:** calendar month, UTC, computed with `getUTC*` throughout. FS7 asserts the boundary with
-a fixed instant late on a month end (which is already the next month east of Greenwich) and both a leap
-and a common February.
+**Interim choice:** the calendar month. FS7 asserts the boundary with a fixed instant late on a month end
+and both a leap and a common February.
 
 **What is needed:** confirmation that forecasting is monthly and calendar-aligned, or a fiscal calendar to
 read from. The Action already accepts an explicit `PeriodStart`/`PeriodEnd` pair, so a caller who knows
@@ -1409,21 +1044,20 @@ better can override it today — both or neither, never one.
 
 ---
 
-## D-29 · A snapshot is skipped once per day per grain, rather than versioned
+## D-29 · DECIDED: a same-day re-run skips, rather than replaces, a capture
 
-`ForecastSnapshot` has no unique index, correctly: the table is a series and `CapturedAt` distinguishes
-captures, so "what did we think on the 1st" stays answerable.
+`ForecastSnapshot` has no unique index, correctly: the table is a series, and `CapturedAt` keeps "what
+did we think on the 1st" answerable. To stop a double run adding two captures minutes apart,
+`ForecastSnapshotJob` skips a grain already captured today and counts it.
 
-But that means nothing stops a double-run adding two captures minutes apart, which is noise rather than
-history. So the writer skips a grain already captured **today** and counts it.
+**Skip, not replace.** `scripts/capture-forecast-snapshot.sql` replaces instead, arguing that duplicate
+captures double every movement calculation in `forecast-history.sql`, whose `LAG` windows step by
+`CapturedAt`. That is true and does not discriminate: both leave one row per day. What decides is what
+`CapturedAt` is for, which holds only if the first capture survives. A replace rewrites recorded
+history and leaves nothing to notice; a duplicate is at least visible.
 
-**Skipped rather than updated**, because overwriting a capture edits provenance — the one thing rule 3
-forbids — and a second measurement of the same day is not more true than the first. FS3 asserts the
-original figure survives a second run carrying a different one.
-
-**What is needed:** confirmation that one capture per day per grain is the intended granularity. If
-somebody wants intra-day forecast movement the guard has to go, and then the daily cron and the guard are
-both wrong rather than just one of them.
+`FS3` asserts that a second capture carrying a different figure leaves the original standing. Intra-day
+movement, if it is ever wanted, needs both this guard and the daily schedule changed.
 
 ---
 
@@ -1445,200 +1079,39 @@ naturally as checks against the queries themselves, on the session that owns the
 
 ---
 
-# D-8 — RESOLVED, and one thing about MJ_V6_Host that outlives it
+## D-31 · DECIDED: one writer for `ForecastSnapshot`, and it is the Action
 
-## The push exclusion is gone
+On `a2abcfd`, the first tree carrying both, two writers existed: the `Sales.CaptureForecastSnapshot`
+Action on a seeded daily `ScheduledJob`, and `scripts/capture-forecast-snapshot.sql`, which nothing
+ran. They differ in grain (the script adds the owner) and in a same-day re-run (the script replaces;
+the Action skips, D-29).
 
-`metadata/task-types/` declared `TaskType.Code` against a host that lacked the column, so
-`mj sync push --dir metadata` failed validation and had to be run with `--exclude task-types`.
+**Ruling: the Action is the writer.** The script stays as an unseeded manual tool, because it is the
+only per-owner capture and shows what an owner-grain source must project (D-32). Its header now says so
+first, and three claims in it were corrected: that a nightly job ran it (none was ever seeded), that a
+plain script was chosen over an Action (written before the Action existed), and its replace-on-re-run
+behaviour, now marked as losing to D-29. Running both would make `ForecastSnapshot` mean different
+things on different days.
 
-**bizapps-tasks PR #42 has now been applied to MJ_V6_Host and the exclusion is unnecessary.** Verified by
-running the full push with no exclusion: 15 of 15 directories, `task-types` processed as *2 records, no
-changes*, 0 errors.
-
-*No changes* rather than *2 updated* is worth noticing — the migration's own fallback
-(`UPDATE TaskType SET Code = UPPER(REPLACE(Name,' ','_')) WHERE Code IS NULL`) derived `ORDER_REVIEW` and
-`CONTRACT_PROCESSING` for the two sales-owned rows, which is exactly what this repo declares. The two
-conventions agreed without being coordinated, so the push had nothing to do.
-
-### The edit `docs/INTEGRATION-LOG.md` needs, and why not by me
-
-That file was added after this branch's point and lives in another session's working tree, so the block
-below is written out rather than applied. It replaces the `--exclude task-types` bullet at lines 98–101.
-
-**It deliberately says two things, because saying only the first would mislead.** The task-types
-exclusion is gone; query re-push is a *separate* open defect. Somebody who hits the second and reads a
-note claiming pushes are clean would reasonably conclude the first had regressed.
-
-> ### Known-incomplete, deliberately
->
-> * **`metadata/task-types/` now pushes cleanly — the `--exclude` is gone.** It declares
->   `TaskType.Code`, which bizapps-tasks PR #42 added, and that migration is applied to MJ_V6_Host.
->   `mj sync push --dir metadata` needs no exclusion: verified at 15/15 directories, 0 errors, with
->   `task-types` reporting *2 records, no changes*. No changes rather than 2 updated because the
->   migration's own name-derived fallback produced `ORDER_REVIEW` and `CONTRACT_PROCESSING`, which is
->   exactly what this repo declares — the two conventions agreed without being coordinated.
->   `CloseWonTaskService` resolves by `Code` on this host; `WT12` asserts the probe follows what
->   `EntityField` metadata offers, in both directions, so the `Name` fallback stays covered for hosts
->   that predate the migration (exercised on MJ_V6_Tasks2).
->
-> * **`MJ: Query Parameters` still fails on re-push, and it is a different problem.** MJ's push extracts
->   query parameters from the Nunjucks template and then collides with the files' own explicit
->   declarations, hitting `UQ_QueryParameter_QueryID_Name` and rolling the whole push back. So the 13
->   queries land once on a clean database and fail on every push after. An open MJ defect, unrelated to
->   task-types — **do not read it as the exclusion having regressed.** Verify the queries with a count,
->   not with the push's exit code.
->
-> ### Environment debt on MJ_V6_Host, from applying PR #42
->
-> * **The tasks schema there is managed by MJ core, and PR #42 is applied but untracked.** The Flyway
->   history records four tasks migrations and all four are MJ core's (`v6/V2026…__v6.1.x__…`); none of
->   bizapps-tasks' own has ever run, not even its baseline. So `mj migrate` from bizapps-tasks is the
->   wrong tool for this host — it would try to create tables that already exist. PR #42 was applied
->   directly instead, placeholders substituted, and **no Flyway row was fabricated**: claiming a history
->   under bizapps-tasks' versioning would be false, and claiming one under MJ core's would assert MJ
->   shipped something it has not.
->
->   **The consequence:** the migration's first statement is a bare `ALTER TABLE … ADD Code` with no
->   existence guard, so **a future equivalent from MJ core will fail on this host**. Five minutes to fix
->   when it happens — mark it applied, or guard the ALTER — but invisible until then, which is the worst
->   shape for environment debt. A rebuild from zero is unaffected.
->
-> * **PR #42 adds cross-schema foreign keys from an app schema into MJ core.**
->   `FK_TaskType_OnCreateAction` and `FK_TaskType_OnStatusChangeAction` both reference
->   `__mj.Action(ID)`. That is the intended workflow-hooks feature, but it is a change to the dependency
->   graph rather than just a column: the tasks schema now has a structural dependency on MJ core's
->   `Action` table, and anything that drops or reorders those objects has to account for it.
-
+The Action writes nothing yet; see D-32.
 
 ---
 
-## D-31 · MJ_V6_Host's tasks schema is managed by MJ core, and PR #42 was applied out-of-band
+## D-32 · OPEN: snapshots carry no owner grain, and no source is registered
 
-**Found while applying it, and it matters more than the migration itself.**
+`forecast-history.sql` partitions its `LAG` windows by `OwnerEmployeeID` and joins `Employee` for an
+owner name, so it expects owner-grained rows. `Sales: Forecast by Category` groups by company and
+pipeline only, so a snapshot read from it carries `OwnerEmployeeID = null`, meaning "across all owners"
+(asserted by `FS11`), and the history renders thin rather than broken.
 
-The Flyway history on MJ_V6_Host records four tasks migrations and **all four are MJ core's**, under
-`v6/V2026…__v6.1.x__…` names. None of bizapps-tasks' own migrations — not even its baseline
-`B202604011500__v1.0.x_Schema_and_Tables.sql` — has ever been applied there.
+**A companion query, not a reshape.** `Sales: Forecast by Category` is published and the dashboard reads
+it, so the owner grain belongs in a second query rather than in a changed row shape. It exists:
+`Sales: Forecast by Owner` (172a6d8) projects `CompanyID`, `PipelineID` and `OwnerEmployeeID`, and
+`FORECAST_QUERY_COLUMNS.OwnerEmployeeID` is already mapped.
 
-So `mj migrate` from bizapps-tasks is **not** the tool for this host: it would try to run that baseline
-over tables that already exist. The PR #42 script was therefore applied directly, with its two
-placeholders substituted (`${flyway:defaultSchema}` → `__mj_BizAppsTasks`, `${mjSchema}` → `__mj`), under
-`sqlcmd -b` so it would stop on the first error. It did not stop; every statement succeeded.
-
-**No Flyway history row was fabricated for it,** deliberately. Inventing one under bizapps-tasks'
-versioning would claim a history this host does not have, and inventing one under MJ core's would claim
-MJ shipped something it has not. The honest state is that the schema change is present and untracked.
-
-**The consequence, which somebody will meet:** the migration is **not idempotent** — its first statement
-is a bare `ALTER TABLE … ADD Code` with no existence guard. If MJ core later ships an equivalent
-migration, it will fail on this host because the column is already there. That is a five-minute fix when
-it happens (mark it applied, or guard the ALTER) but it is invisible until it happens, which is why it is
-written down here.
-
-A rebuild from zero is unaffected: whichever source ships the tasks schema will bring `Code` with it.
-
----
-
-## D-32 · What PR #42 actually did, for the record
-
-Read before applying, and it does more than add a column. Nothing was unexpected, and two things are
-worth naming.
-
-**Structural:**
-
-| Change | Detail |
-|---|---|
-| `TaskType.Code` | `NVARCHAR(50)`, backfilled, then set `NOT NULL` with `UQ_TaskType_Code` |
-| `TaskType` action hooks | `OnCreateActionID`, `OnStatusChangeActionID` |
-| `TaskTypeStatus` | new table + entity (19 `EntityField` rows), per-type lifecycle |
-| `Task.TaskTypeStatusID` | nullable FK to the new table |
-| Generated half | 34 `DROP` + recreate of tasks' own views, sprocs, functions and triggers |
-
-**The two worth naming:**
-
-1. **It adds cross-schema foreign keys into MJ core.** `FK_TaskType_OnCreateAction` and
-   `FK_TaskType_OnStatusChangeAction` both reference `__mj.Action(ID)`. That is the intended "workflow
-   action hooks" feature, but it is a new structural dependency from the tasks schema onto MJ core, and it
-   is the only thing this migration does outside its own schema besides metadata registration.
-
-2. **The generated half drops and recreates 34 objects.** That is the same class of statement that took
-   out contracts' views and procedures, so it was checked rather than assumed: **all 34 DROPs are
-   `${flyway:defaultSchema}`-qualified**, no statement names a hardcoded schema, and every `DELETE FROM`
-   is inside a generated `spDelete…` body rather than at top level. Only two schemas are referenced in the
-   whole 5,257-line script — tasks' own and `__mj` — and the only entity registered is
-   `MJ_BizApps_Tasks: Task Type Status`. Nothing reaches another app.
-
-**Pre-flight checks run before applying,** because `UQ_TaskType_Code` is UNIQUE and the fallback derives
-codes from names: no collisions among the seven rows, none over 50 characters, and all five hardcoded
-backfill IDs matched real rows on this host — which is what gives `Follow-up` the correct `FOLLOW_UP`
-rather than the hyphenated `FOLLOW-UP` the fallback would have produced.
-
-A `COPY_ONLY` full backup was taken first and verified with `RESTORE VERIFYONLY … WITH CHECKSUM`:
-`MJ_V6_Host_preTasksPR42_20260821T005446Z.bak`. `COPY_ONLY` because the database is in FULL recovery and
-two other sessions are working against it — a normal full backup would have reset their differential base.
-
----
-
-## D-31 · Two writers for `ForecastSnapshot` now exist on the same tree, and only one is wired
-
-Found on `a2abcfd`, which is the first tree carrying both halves. **This is the item on this list that
-needs a decision rather than a note.**
-
-| | `Sales.CaptureForecastSnapshot` (Action + ScheduledJob) | `scripts/capture-forecast-snapshot.sql` |
-|---|---|---|
-| Grain | company × pipeline | company × pipeline × **owner** |
-| Source | `Sales: Forecast by Category` through `IForecastSource` | inline SQL over `vwDeals` |
-| Same-day re-run | **skips** — the first capture survives | **deletes and re-inserts** — the last survives |
-| Period | current calendar month, UTC | current calendar month, UTC |
-| Wired to a `ScheduledJob` row | **yes**, seeded in `metadata/scheduled-jobs/` | **no** — its comment says "an MJ Scheduled Job, nightly" but nothing seeds one |
-
-So today the Action is the one that actually runs, and the script is documentation of an intent.
-
-**On skip versus replace, their reasoning is better than mine was and still does not separate the two.**
-The script argues that duplicate captures "silently double every movement calculation in
-`forecast-history.sql`" — which is true and concrete: that query uses
-`LAG(…) OVER (PARTITION BY … ORDER BY CapturedAt)`, so a second capture on the same day inserts a
-spurious zero-delta step into the movement column. But **skip and replace both produce one row per day**,
-so both avoid it. The only difference is which reading survives when two runs disagree: mine keeps the
-earlier (provenance-preserving, D-29), theirs keeps the later (freshest). Both are defensible and the
-choice should be made once, not twice.
-
-**The grain difference is the substantive one, and it is not symmetrical.** See D-32.
-
-**What is needed:** one writer. If it is the Action, it needs an owner-grain query (D-32) and a ruling on
-skip versus replace. If it is the script, my `ScheduledJob` row should point at something that runs it —
-and the seam, the fixture source and FS1–FS13 lose their subject, which would be worth saying out loud
-rather than leaving as dead code.
-
----
-
-## D-32 · The forecast query cannot produce the owner grain `forecast-history.sql` is built to read
-
-`Sales: Forecast by Category` groups by `d.CompanyID, d.Company, d.PipelineID, d.Pipeline` and does not
-project `OwnerEmployeeID` at all. So every snapshot my source produces carries `OwnerEmployeeID = null`.
-
-That is **correct rather than broken** — null means "across all owners" on `ForecastSnapshot`, which is
-the honest description of a company-by-pipeline rollup, and FS11 asserts it deliberately rather than
-tolerating it.
-
-**But `forecast-history.sql` partitions by `OwnerEmployeeID`** in both of its `LAG` windows, and joins
-`__mj.Employee` to project an `OwnerName` column. It is built expecting the per-owner grain. Fed only
-null-owner rows it still works — every row lands in one partition and `OwnerName` is always null — but it
-delivers materially less than it was written to show, and nothing anywhere reports that the grain is
-missing rather than empty.
-
-The SQL capture script does produce the owner grain: its `GROUP BY` is
-`d.CompanyID, d.PipelineID, d.OwnerEmployeeID`.
-
-**Interim choice:** the source maps what the query projects and no more. Deriving an owner grain here
-would mean grouping deals by owner inside the source — a second implementation of a measure, which is
-exactly what D-30 refuses.
-
-**What is needed:** an owner-grain forecast query (`Sales: Forecast by Category and Owner`, or an
-`IncludeOwner` parameter on the existing one), owned by whoever owns the queries. The mapping is already
-ready for it — `FORECAST_QUERY_COLUMNS.OwnerEmployeeID` is declared and will populate the moment a query
-projects that column, with no code change here.
+**What is missing:** nothing points the capture at it. Outside the integration checks no forecast
+source is registered (only tests call `SetForecastSourceFactory`), so the daily job reports success and
+writes nothing. Tracked as #216.
 
 ---
 
@@ -1666,100 +1139,10 @@ capture failure.
 person to see a zero `ClosedAmount` beside a large `PipelineAmount` does not treat it as a bug.
 
 ---
----
 
-# RULINGS — D-29, D-31 and D-32 settled
+## DN-23 — DECIDED: the `PipelineStageID` trigger has ONE writer now, and the phase is DECLARED
 
-Three items above moved from open to decided. Recorded here rather than edited in place, so the reasoning
-that was current when each was raised stays readable beside what was decided.
-
----
-
-## D-29 — DECIDED: skip, not replace, on a same-day re-run
-
-`ForecastSnapshotJob` skips a grain already captured today. The first capture stands.
-
-**Their argument was better than mine and still did not choose.** `capture-forecast-snapshot.sql` argued
-that duplicate captures double every movement calculation in `forecast-history.sql`, whose `LAG` windows
-step by `CapturedAt`. That is true and concrete — and it does not discriminate, because **skip and replace
-both yield exactly one row per day.** Both avoid the doubling. The only difference is which reading
-survives when two runs of the same day disagree.
-
-**What chooses is what `CapturedAt` is for.** It answers *"what did we think on the 1st"*, and that only
-holds if the first capture survives. Replace lets a later run silently rewrite recorded history — and
-unlike a duplicate, which is visible as two rows anyone can see, an overwrite leaves nothing behind to
-notice. That is the failure you cannot detect afterwards, so it is the one to refuse.
-
-FS3 asserts it directly: a second capture carrying a different figure leaves the original standing.
-
----
-
-## D-31 — DECIDED: one writer, and it is the Action
-
-`Sales.CaptureForecastSnapshot`, driven by the seeded `Sales — Forecast Snapshot (daily)` ScheduledJob, is
-the writer. `scripts/capture-forecast-snapshot.sql` is **demoted to an unseeded manual tool** and its
-header now says so at the very top, before a reader meets anything else.
-
-**Kept rather than deleted, for one reason:** it is the only working per-owner capture in the repo. The
-Action's source reads `Sales: Forecast by Category`, which cannot produce the owner grain (D-32), and when
-a companion query is written that script's `GROUP BY d.CompanyID, d.PipelineID, d.OwnerEmployeeID` is the
-reference for what it must project. Deleting it would throw away the specification along with the code.
-
-Three claims in its header were corrected because they were false or superseded:
-
-* *"An MJ Scheduled Job, nightly"* — **never true.** Nothing ever seeded one. A comment claiming a schedule
-  that does not exist is how somebody concludes snapshots are being captured when they are not.
-* *"deliberately a plain SQL script rather than an Action"* — the argument predates the Action existing, so
-  it is no longer the choice on offer.
-* Its replace-on-re-run behaviour is now marked as disagreeing with the Action, with the Action winning
-  and the reasoning from D-29 stated inline.
-
-**Nothing seeds it and nothing should.** Two writers for one table is worse than either of them, and these
-two disagree about same-day re-runs — so running both would make `ForecastSnapshot` mean different things
-on different days.
-
----
-
-## D-32 — NAMED LIMITATION, deliberately not fixed: the snapshot has no owner grain
-
-**The gap.** `Sales: Forecast by Category` groups by `CompanyID, Company, PipelineID, Pipeline` and does not
-project `OwnerEmployeeID`. So every snapshot the Action writes carries `OwnerEmployeeID = null`, meaning
-"across all owners" — correct for a company-by-pipeline rollup, and asserted deliberately by FS11 rather
-than tolerated.
-
-**Why it matters.** `forecast-history.sql` partitions both of its `LAG` windows by `OwnerEmployeeID` and
-joins `__mj.Employee` to project `OwnerName`. The reporting layer expects the owner grain. Fed only
-null-owner rows it still runs — every row lands in one partition, `OwnerName` is always null — so it
-**shows materially less than it was written to show, without failing.** Nothing reports that the grain is
-missing rather than empty.
-
-**The fix, stated and not built: a COMPANION owner-grain query.** Not a change to the existing query's
-shape. `Sales: Forecast by Category` is published and `Approved`, and **it has no in-repo consumer** — so
-the blast radius of altering its projection cannot be established from here.
-
-That claim needs stating carefully, because an earlier draft supported it with "there is no `RunQuery` in
-the Angular package at all" — which was true only of this branch. `feature/dashboard-queries`, which lands
-after `a2abcfd`, adds two `RunQuery` call sites in `deal-workspace.service.ts`; with the one in
-`QueryForecastSource` that is three in the repository. A reader post-merge would have found them,
-concluded the note was wrong, and reasonably discounted the rest of this item along with it.
-
-The conclusion survives, and was re-checked against that branch rather than assumed: those two call sites
-name `Sales: Dashboard Summary` and `Sales: Deal Roster`, and **an exhaustive scan of every `.ts` file on
-`feature/dashboard-queries` finds none naming `Sales: Forecast by Category`.** Its readers are MJ
-Explorer, metadata-defined dashboards and people — none of which this repository can enumerate, which is
-exactly why a companion is safer than a reshape. Adding `Sales: Forecast by Category and
-Owner` beside it changes nothing for existing readers. Owned by whoever owns the queries.
-
-**What makes it cheap when it happens:** `FORECAST_QUERY_COLUMNS.OwnerEmployeeID` is already declared, and
-`readRow` reads every measure through a candidate-name list. The moment a query projects that column the
-mapping populates it — **no change in this repo at all.** The grain arrives; the code does not move.
-
-**And what to watch for meanwhile:** a forecast history view that looks thin rather than broken. That is
-the shape this limitation produces, and it is the reason it is written down instead of left to be noticed.
-
----
-
-## DN-16 — the `PipelineStageID` trigger has ONE writer now, and the phase is DECLARED (decided)
+*Numbered DN-16 until 2026-10-11.*
 
 **Decided here, not deferred**, because the alternative was a fifth clause on a gate nobody could read
 whole. Recorded because the shape is a precedent, not because anything is outstanding.
@@ -1915,124 +1298,76 @@ Any run that hits this leaks an order.
 
 ---
 
-## DN-18 — A reopen never asks for the order back, so there is nothing to report
+## DN-18 — RESOLVED: a reopen restores the stage, and asks for the order back
 
-**Found by `71-lost-and-reopen` on 2026-08-21. RESOLVED — see `docs/DECISIONS.md` D-OS4.** Kept for the
-diagnosis below, which is still accurate and still worth reading; the framing above it was not.
+Found by `71-lost-and-reopen` on 2026-08-21. Close a deal as lost into a stage declaring
+`OrderStatusOnEntry = 'Voided'`, reopen it, and the order stayed `Voided` with nothing on screen saying
+so: a deal that looks workable, pointing at an order that cannot be revived. The order-status writer
+keys on the stage changing, and neither the browser's close nor its reopen moved the stage. The first
+write-up blamed orders for refusing to un-void; orders never refused, which is why nothing was
+reported.
 
-### What was true then, and what was wrong with how it was written
+Resolved in three parts:
 
-Close a deal as lost into a stage declaring `OrderStatusOnEntry = 'Voided'`, then reopen it. The deal
-reopened, the append-only log kept both events, and the order stayed `Voided` — **and the screen said
-nothing about the order at all.**
-
-The diagnosis of the SILENCE was right. The reason given for it was not: this said S-US8 wants a reopen
-that "reports that orders refused because `Voided` is terminal". Orders refuses no such thing —
-`TRANSITIONS.Voided` is `['Draft', 'Quoted']` and `Confirmed` is the terminal status (D-OS4). There was
-never a refusal to report, which is exactly why nothing was reported. The order now comes back on
-reopen, and a refusal that genuinely happens still warns.
-
-### Where it is NOT broken, which took two fixes to establish
-
-- **`Sales.ReopenDeal` is correct.** Its success output carries `Issues: orderStatusIssues(deal)`.
-- **The workspace WAS dropping those issues** — `ApplyCloseIssues` was called only on the `!Success`
-  branch, so every warning on a *successful* close or reopen was discarded. That is now fixed: both
-  handlers call `SurfaceOperationIssues` after the reload, merged as advisories so a succeeded operation
-  never leaves the form unsaveable. This mattered beyond the reopen — it is also why a stubbed contract
-  seam and an unraisable finance task were invisible on a successful close.
-- **And the fix changes nothing here**, because there is no warning to surface. The order-status writer
-  keys on the stage CHANGING, and `DealWorkspaceComponent.ReopenDeal()` sends `{ DealID, Reason }` with no
-  `StageID`. No stage entry, no attempt, nothing to refuse.
-
-### The decision
-
-1. **Re-apply the current stage's `OrderStatusOnEntry` on reopen.** Cheap, and it makes reopen symmetrical
-   with the close that voided the order. But the writer deliberately keys on a stage *change*, so this
-   needs an explicit "re-apply" path rather than passing the stage the deal is already in — and that path
-   is new machinery on the trigger DN-16 just consolidated.
-2. **Offer the rep a stage on the reopen panel.** Truer to S-US8 (a reopened deal usually belongs in a
-   different stage than the one it was lost in) and it makes the order attempt a consequence of a real
-   stage entry rather than a special case. More UI, and it asks the rep a question they may not expect.
-
-Either way the outcome the app must never have is the current one: a deal that looks workable, pointing at
-an order that cannot be revived, with nothing on screen saying so.
+- **The reopen restores the prior stage.** With no `StageID`, `Sales.ReopenDeal` lands on the close
+  event's `DealStageEvent.FromStageID` (`close-deal.CD18`, mutants `M-RO1` and `M-RO2`). `CD19` pins the
+  status-only close, where there is nothing to restore.
+- **The close moves the stage.** With no `ClosingStageID`, `Sales.CloseDeal` moves into the stage whose
+  declared status matches the outcome (`CD22`, mutant `M-CS1`), so a close from the browser leaves the
+  reopen something to restore. `SD35` and `CD17` keep the closing status authoritative when it does.
+- **The order comes back.** `Voided` is not terminal in orders, so after the stage plan a reopen returns
+  a voided, unbooked order to `Draft` (`docs/DECISIONS.md` D-OS4, `CD31`, `CD33`). A refusal orders does
+  make still reaches the rep as a warning.
 
 ---
 
-## DN-19 — ⚠️ INTERMITTENT: an inline-created customer can be bound to an id that was never written
+## DN-19 — CAUSE FOUND (#188): the "intermittent" wrong id after an inline create happens on every IsA create
 
-**Found while diagnosing `72-inline-create` on 2026-08-21. Evidence captured once, decisively; NOT
-reproduced on the two runs after it. Recorded because of what it does, not how often it does it.**
+Found while diagnosing `72-inline-create` on 2026-08-21. A customer created from the slide-in was bound
+to an id present in neither `Organization` nor `SalesAccount`, while the row was written under another
+id. The picker showed the right name, so the deal pointed at nothing behind a form that looked
+finished. It reproduced on one run in three.
 
-### The measurement that matters
+**The cause, found on 2026-10-06 (#188).** MJ 6.1.4 creates an IsA child over GraphQL without sending
+its key: the client mints one, the server mints another and writes both tables under it, and the client
+goes on reporting its own. That happens on every create. It looked intermittent because the picker
+usually recovers the real row by its name, and binds nothing only when its reload has not caught up.
+`SalesContact` and `Person` have the same shape.
 
-One run of the slide-in create, read through Angular's dev hooks and checked straight against the
-database:
-
-| | |
-|---|---|
-| Account row written | `7F220478-2A4B-43C0-94F7-2F88E9727D22` |
-| `deal.AccountID` bound by the picker | `c7afc84f-f956-4627-b4fd-1f84b176bffa` |
-| That id in `__mj_BizAppsCommon.Organization` | **0 rows** |
-| That id in `__mj_BizAppsSales.SalesAccount` | **0 rows** |
-| Organizations with that name | 1 |
-| What the picker displayed | the new customer's name, correctly |
-
-So the deal was pointing at nothing, and **the screen agreed with the rep**. That is the worst failure
-shape this surface has: a dangling FK behind a form that looks finished.
-
-### What it is NOT
-
-Two later runs did **not** reproduce it. On both, the client's id matched the row exactly and the IsA pair
-was intact — `Organization` and `SalesAccount` on the same UUID, one lookup entry, no duplicate. So this is
-not "the create path always returns the wrong id", and any write-up saying so would be overclaiming.
-
-The likeliest shape, stated as a hypothesis rather than a finding: it interacts with the read-after-write
-lag already documented in `CreateRelated`. When the reload misses the just-written row, the old code
-synthesised an option from `created.Get('ID')` — and on that run, that id was not the one on disk.
-
-### The change made, which is safe either way
-
-`CreateRelated` no longer trusts the reported id on its own. When the id does not resolve in the reloaded
-lookup it now looks for the **canonical row by label** and binds that — the real row was in the list all
-along, and the old code walked past it because it only ever looked the id up. If two rows share the label
-it refuses and asks the rep to pick, rather than guessing. The synthetic-option fallback survives for the
-genuine read-after-write case, where nothing about the record is in the lookup at all.
-
-That change can only ever bind a row the picker is actually offering, so it removes the dangling-FK
-outcome whatever the underlying cause turns out to be.
-
-### What is still open
-
-- **`72-inline-create` is still red**, reporting `Received: "null"` — nothing bound. Verified separately
-  that the flow binds correctly in isolation (`accountID` matched the row, no message, no duplicate), so
-  the spec is failing on something the isolated probe does not reproduce: timing, or its own second
-  attempt. **Not diagnosed.** It is the one item from this session I could not take to a conclusion.
-- **Why the reported id ever differs from the written one** is unexplained and is the real question. It
-  sits on the IsA create path (`SalesAccount` extends common's `Organization`, shared PK), which is
-  upstream of this repo — the same territory as KI-1. Worth a characterisation run: create N accounts
-  through the slide-in and compare reported id to written id each time.
+**Meanwhile**, sales binds only an id it can show exists, else the one row with that name, else nothing
+(`create-related-unverified-id.test.ts`), and the server refuses a deal whose customer does not exist.
+Removing those workarounds once MJ's 6.1 line sends the key is #207. A new deal that still will not save
+after an inline create is #202.
 
 ---
 
-## DN-20 — NOT BUILT: a reopen should be hard-blocked when the order is already Confirmed
+## DN-20 — BUILT: a reopen is refused once the order has booked
 
-**Raised by Finance and noted here deliberately without building it.** A reopen today succeeds whatever
-state the order is in — it restores the prior stage (DN-18) and reports what the order refused. Finance
-asked for something stronger: when the order has been **Confirmed**, a reopen should be refused outright,
-because the ledger has moved and the correct instrument is a reversing or change order rather than an
-edited deal.
+Raised by Finance: once the order has booked, the ledger has moved, and the instrument is an
+order-side one rather than an edited deal. Built on 2026-08-24 (35eb8f5) as a fifth refusal in
+`Sales.ReopenDeal`, before its transaction opens (`CloseDealOperation.ts`, "A BOOKED ORDER REFUSES THE
+REOPEN OUTRIGHT").
 
-That is a **new requirement, not an inference** from anything already in the tree, and it needs a
-`ConfirmedAt` (or equivalent) check on `OrderHeader` that this repo does not currently read. It also needs
-a decision about what the refusal says and what it points the rep at — a reversing order is an orders
-concept and sales would be naming a workflow it does not own.
+- **It reads orders' own `IsBooked`** rather than restating the rule. When this was built that meant
+  `Confirmed`, `Posted` or `Fulfilled`; since orders collapsed its lifecycle (KI-27) it means
+  `Confirmed`. A `ConfirmedAt IS NOT NULL` test would also refuse an order confirmed and later voided,
+  which CD24 asserts is allowed.
+- **The message names the order and hands off to orders.** It names no remedy, because the right
+  instrument depends on the order's status and is orders' to say.
+- **An unreadable order is refused too**, since its ledger state is unknown.
 
-Its own cycle. Recorded so it is not half-built as a side effect of DN-18.
+`close-deal.CD24` asserts both directions, and mutants `M-RB1` and `M-RB2` prove it can fail.
 
 ---
 
-## DN-21 — REPORT ONLY: does `SelectableStatuses()` still need to offer anything?
+## DN-28 — OPEN: a parked status does not survive a later stage move
+
+*Numbered DN-21 until 2026-10-11, as "REPORT ONLY: does `SelectableStatuses()` still need to offer
+anything?"*
+
+**Where this stands.** The workspace picker below is no longer mounted; the deal form's status control
+offers every status, and a locking pick runs the close (`close-deal.CD27`). The question that stands is
+the write path's, in the recommendation: a parked status is overwritten by the next stage move.
 
 Asked while deriving the deal's status from its stage, and **not changed** — this is a UI question.
 
@@ -2139,33 +1474,6 @@ regression this DN exists to prevent, and `SD34` proves only the same-save half.
 
 **Out of scope on purpose:** the redundant open row can be dropped from the picker today under any of the
 three, since the stage fills it either way. That is a one-line filter and does not need this decision.
-
----
-
-## DN-18 addendum (2026-08-21) — the reopen half is BUILT; the close half is the remaining decision
-
-The reopen now derives its landing stage from `DealStageEvent.FromStageID` when the caller names none
-(`close-deal.CD18`, mutant-proven by `M-RO1` and `M-RO2`), and the no-op direction is pinned by `CD19`.
-`input.StageID` stays an override, so an agent, an importer and an API caller get the same restoration a
-rep does.
-
-**What that did NOT fix, and could not:** `DealWorkspaceComponent.ConfirmClose()` sends no
-`ClosingStageID`. So a close driven from the browser never moves the stage; its event records
-`FromStageID === ToStageID`; and the reopen correctly derives the stage the deal is already in. The
-mechanism is right and the UI cannot reach it — the exact mirror of the reopen's missing `StageID`.
-
-`71-lost-and-reopen` demonstrates this and stays red: it moves the deal into the losing stage with a plain
-save, then closes through the panel, so the close is status-only by construction.
-
-**The decision, and it is the same shape as the one just made:** derive the closing stage in the operation
-— the pipeline stage whose declared `DealStatusType` matches the outcome (`IsWon`/`IsLost`, by flag) — or
-offer the rep a closing stage on the close panel. Deriving it keeps the write-path principle and makes
-close/reopen symmetrical; asking is truer to a rep who may want a specific stage. Not guessed at here.
-
-**One caution for whoever builds it:** a close that moves the stage into one declaring a LOCKING status
-now depends on `applyStageDefaults`'s new gate (`SD35`) to not double-close, and on the declared-transition
-suppression to keep the closing status authoritative (`CD17`). Both are in place and mutant-proven; the
-point is that they are load-bearing for that change rather than incidental.
 
 ---
 

@@ -19,6 +19,10 @@
  *   - `DealNumber` — a gap-free counter taken from a locked row, inside the save's transaction.
  *   - The OWNER STAMP — `Deal.OwnerEmployeeID` derived from the `DealTeamMember` carrying the owner
  *     role, resolved from `DealRole.IsOwnerRole` rather than from any role name.
+ *   - The STAGE-EVENT APPEND (D-BD2). A stage move, or a close or reopen declared through
+ *     {@link DealEntityServer.DeclareTransition}, appends one `DealStageEvent` stamping
+ *     `AmountAtTransition` and `ProbabilityAtTransition`, inside the save's transaction — see
+ *     {@link DealEntityServer.saveWithinScope}.
  *
  * WHAT THIS FILE MUST NEVER DO. Arithmetic on money. No summing lines into `Amount`, no applying
  * `RequestedDiscountPct`, no checking that the payment schedule adds up. `Amount` is a cached answer
@@ -33,13 +37,6 @@
  *   - The CLOSE LOCK (S4). Once the deal's status carries `DealStatusType.LocksDeal = 1`, the header
  *     (except Description / NextStep), its lines, its instalments and its team are immutable, and
  *     reopening goes through `Sales.ReopenDeal`, which records a reason.
- *
- * ── STILL TO COME (deliberately not stubbed) ────────────────────────────────────────────────────
- *   - `DealStageEvent` append on ORDINARY stage transition, stamping `AmountAtTransition` and
- *     `ProbabilityAtTransition`. `Sales.CloseDeal` already stamps the CLOSE transition; consolidating
- *     the two into a single writer here is D-BD2. It must be inside the graph's transaction, which
- *     since MJ `47ff71d68b` means a scope opened around `super.Save()` rather than a graph-node
- *     branch — see the note on {@link DealEntityServer.Save}.
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */

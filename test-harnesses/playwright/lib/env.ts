@@ -2,7 +2,8 @@
  * Environment for the bizapps-sales Explorer GUI harness.
  *
  * Everything here is env-overridable so the harness follows the ports rather than dictating them.
- * Defaults match master plan §2 (MJAPI 4141 / MJExplorer 4341) and the repo's `.env`.
+ * Defaults are the ports this repo assumes for the MJ host: MJAPI 4143, MJExplorer 4341
+ * (`docs/QA-GUIDE.md` §2).
  *
  * NOTE ON PORT DISCOVERY. The sibling bizapps-accounting harness reads live ports from
  * `mjdev ps <slug> --json`, because it runs inside an mjdev workspace that assigns them. This repo
@@ -24,12 +25,11 @@ export const REPO_ROOT = path.resolve(HARNESS_DIR, '..', '..');
  *
  * 4141 is sales' own `GRAPHQL_PORT`, which `docs/QA-GUIDE.md` explicitly tells you to ignore: sales
  * retired its `apps/` importers and no longer ships an API, so nothing reads that value. The API a
- * tester connects to is the HOST's, and `/c/v6/MJ/.env` serves it on 4143 -- which is also what
+ * tester connects to is the HOST's, and the host's `.env` serves it on 4143 -- which is also what
  * QA-GUIDE's port table and MJExplorer's own `environment.ts` (`GRAPHQL_URI`) say.
  *
  * The old default therefore pointed at a port whose only definition is a vestigial line, and the
  * preflight failed before the browser opened on every invocation that forgot `MJAPI_PORT=4143`.
- * `docs/EXPLORER-SPEC-STATUS.md` recorded that as a standing papercut rather than fixing it.
  *
  * Still env-overridable, which is what the sales-only host needs: `MJ_BizAppsSales_V6` is configured
  * on 4141, so point at it with `MJAPI_PORT=4141`.

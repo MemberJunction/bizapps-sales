@@ -10,61 +10,48 @@ layer of the BizApps revenue stack:
 sales (deal) → contracts (agreement) → orders (order+payment+subscription) → accounting (JE ledger) → ERP
 ```
 
-**The app's source of truth is `plans/bizapps-sales-master.md`.** It currently lives on the
-`an-master-plan` branch, not on `next` — read it with
-`git show origin/an-master-plan:plans/bizapps-sales-master.md`. It stays there deliberately
-(`docs/DECISIONS.md` D7). Where this file and the master plan disagree, the master plan wins — **except**
-where `docs/DECISIONS.md` records a ruling that supersedes it.
+**The app's source of truth is `plans/bizapps-sales-master.md`.** It stays on the `an-master-plan`
+branch (`docs/DECISIONS.md` D7); read it with
+`git show origin/an-master-plan:plans/bizapps-sales-master.md`. Where this file and the master plan
+disagree, the master plan wins — **except** where `docs/DECISIONS.md` records a ruling that supersedes
+it.
 
-**Read these two first:**
-- **`docs/DECISIONS.md`** — the rulings that govern this app, each with its reasoning. Includes one
-  documented divergence from the master plan (`ForecastSnapshot` column names, D6).
+**Read first:**
+- **`docs/DECISIONS.md`** — the rulings that govern this app, each with its reasoning.
 - **`docs/KNOWN-ISSUES.md`** — live risks that cannot be fixed from this repo.
-- **`docs/INTEGRATION-LOG.md`** — which branch HEAD each integration consumed, and the expected shape it
-  was checked against. Read it before merging feature branches together: twice an integration has been
-  reported complete against branch names while the branches had moved on, and the second time it was
-  green while missing an entire story's read model. A green suite cannot detect work that never arrived.
-- **`docs/PUBLISHING.md`** — how a release is cut, and the two ways this app can be "published" while
-  still being uninstallable. Read it before touching `metadata/`. PRs contribute declarative JSON
-  only (fields, `@lookup`/`@file`/`@parent`, a `uuidgen` primaryKey, no `sync` block, no
-  `*__Metadata_Sync.sql`). The build engineer generates ONE consolidated Metadata_Sync per release
-  from a clean DB. `pnpm run lint:distribution` checks only that shipped SQL uses placeholders
-  `mj app install` can resolve — it is not a metadata↔seed currency gate. `check:release-seed` is;
-  `publish.yml` runs it, so a release fails while `metadata/` is ahead of its Metadata_Sync.
-  The model: [Release Metadata Migrations Guide](https://github.com/MemberJunction/MJ/blob/next/guides/RELEASE_METADATA_MIGRATIONS_GUIDE.md). This repo's recipe: [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
+- **`docs/PUBLISHING.md`** — how a release is cut. Read it before touching `metadata/`.
+- **`docs/README.md`** — every doc in the repo, and whether it is current or history.
 
-> ## ⚠️ KNOWN ISSUE — read before touching the IsA extensions
->
-> **`AllowMultipleSubtypes` is `false` on common's `Person` and `Organization`.** MJ's IsA defaults to
-> *disjoint* — one child type per parent. Sales is currently the **first and only** app extending either,
-> so it chains correctly **today** and `SalesAccount` / `SalesContact` are verified working.
->
-> **The moment a second app (ATS, certification) extends `Person` with the flag still false, that app
-> silently mis-chains at runtime** — no error, no failed migration, just wrong records.
->
-> The fix belongs in **`bizapps-common`**, not here (`docs/DECISIONS.md` D1). Full detail, including the
-> query to check it, is in **`docs/KNOWN-ISSUES.md` KI-1**.
+**Metadata PRs contribute declarative JSON only:** fields, `@lookup`/`@file`/`@parent`, a `uuidgen`
+primaryKey, no `sync` block, no `*__Metadata_Sync.sql`. The build engineer generates ONE consolidated
+Metadata_Sync per release from a clean DB; the model is MJ's
+[Release Metadata Migrations Guide](https://github.com/MemberJunction/MJ/blob/next/guides/RELEASE_METADATA_MIGRATIONS_GUIDE.md).
+`pnpm run lint:distribution` checks only that shipped SQL uses placeholders `mj app install` can
+resolve. `check:release-seed` is the metadata↔seed currency gate; `repo: release seed` (`repo-checks.yml`)
+runs it on the Version Packages PR, so a release can't merge while `metadata/` is ahead of its
+Metadata_Sync.
 
 ## Repository Structure
 
 ```
 bizapps-sales/
-  mj-app.json          - MJ Open App manifest (schema, deps, ports, startupExports)
-  mj.config.cjs        - CodeGen + server config; DB credentials come from .env
+  mj-app.json          - MJ Open App manifest (schema, dependencies, packages, mjVersionRange)
+  mj.config.cjs        - CodeGen + CLI config; DB credentials come from .env
   codegen-schema-info.json - the IsA (Table-Per-Type) declarations
-  .mj-links.json       - local sibling links (EMPTY today — see the file's own comment)
-  migrations/          - B... schema + SchemaInfo, V... tables + the CodeGen half
-  metadata/            - type-table seeds, pushed with `mj sync push`
-  apps/
-    MJAPI/             - GraphQL API server (port 4141)
-    MJExplorer/        - Angular UI application (port 4341)
+  .env.example         - every environment variable the repo reads, with placeholders
+  .mj-links.json       - local sibling links (empty: every dependency is published to npm)
+  migrations/          - B... schema, V... changes; the baseline carries its CodeGen half below a banner
+  migrations-teardown/ - retires this app's rows from __mj on `mj app remove`
+  metadata/            - type-table seeds and app metadata, pushed with `mj sync push`
   packages/
-    Entities/          - @mj-biz-apps/sales-entities (CodeGen-generated entity subclasses)
+    Entities/          - @mj-biz-apps/sales-entities (generated entities, remote-operation contracts, shared rules)
     Actions/           - @mj-biz-apps/sales-actions
     Server/            - @mj-biz-apps/sales-server (bootstrap + GraphQL resolvers)
-    CoreEntitiesServer/- @mj-biz-apps/sales-core-entities-server (Save() overrides; the close lock)
-    Angular/           - @mj-biz-apps/sales-ng (generated forms + future UI)
-    IntegrationTests/  - @mj-biz-apps/sales-integration-tests (dispatched by `mj test`)
+    CoreEntitiesServer/- @mj-biz-apps/sales-core-entities-server (Save() overrides, the close lock, Sales.CloseDeal)
+    Angular/           - @mj-biz-apps/sales-ng (generated forms, the Deals section)
+    IntegrationTests/  - @mj-biz-apps/sales-integration-tests (private; the integration check bundles)
+  scripts/             - CI gates, rebuild-db.sh, append-codegen.sh, seeds, release checks
+  test-harnesses/      - integration runner, mutation driver, Playwright Explorer harness
 ```
 
 ---
@@ -75,28 +62,32 @@ These are not style preferences. Each one is a guarantee the app sells, and each
 failure mode that arrives by accretion if it is not defended.
 
 ### 1. Sales NEVER computes money
-
-Every number comes back from `Orders.PreviewOrder`. This app records **intent** — product, quantity,
-requested discount, term — and asks.
+Orders computes every number. A deal's lines are `OrderLine` rows on the `OrderHeader` that
+`DealEntityServer` provisions for the deal (`Deal.OrderID`). Sales records **intent** on them —
+product, quantity, requested discount, term — and orders prices them.
 
 **Never, in any file:** multiply quantity by price · apply a discount percentage · compute tax ·
-prorate a partial period · sum lines into a header total · round anything.
+prorate a partial period · sum lines into a header total · round anything. `pnpm run test:money-gate`
+watches for this; it is a heuristic, not a proof.
 
-- `DealLine.ResolvedUnitPrice` / `ResolvedExtendedAmount` / `PriceComponentsJSON` / `PricedAt` are
-  **write-only** — populated from a PreviewOrder response, never computed locally, never hand-edited.
+- `UnitPrice`, `PriceComponentsJSON`, the line's `CompanyID` and every total are **orders' fields** —
+  never computed in sales, never hand-edited.
 - `Deal.Amount` is a **cached copy of `OrderHeader.TotalGross`** with provenance: `AmountIsComputed`,
-  `AmountComputedAt`, `AmountSourceHash`. Lined deals always take the order total (sales never sums
-  lines). A typed figure survives only on a header-only deal.
-- An override price (`DealLine.OverrideUnitPrice`) is an **input** to the engine, never a replacement.
-- On close, the same draft goes to `Orders.CreateOrderInState`. The quote and the invoice cannot
-  disagree, because they are the same computation run twice.
+  `AmountComputedAt`, `AmountSourceHash` (`DealEntityServer.refreshAmountFromOrder`). Lined deals always
+  take the order total (sales never sums lines). A typed figure survives only on a header-only deal.
+- An override price on a line is an **input** to orders' pricing, never a replacement for the totals
+  orders computes on top of it.
+- A rep enters a discount as a **percent**; `OrderLine.DiscountPct` stores a **fraction**. Convert only
+  in `packages/Entities/src/discount-conversion.ts` (`pnpm run test:discount-gate`), never at a call
+  site (D-DL2).
+- Closing does not create or price a second order. The deal's own order changes status when the deal
+  enters a stage that names one (`PipelineStage.OrderStatusOnEntry`).
 
 ### 2. Domain vocabulary is DATA, never code
-
-Ten type tables carry the **behaviour flags** the engine branches on. The engine reads
+Type tables carry the **behaviour flags** the engine branches on. The engine reads
 `DealStatusType.IsWon`; it **never** compares a status or stage name.
 
-- **`npm run test:vocabulary-gate` enforces this.** It is green today and must stay green. Read
+- **`pnpm run test:vocabulary-gate` enforces this.** It is green today and must stay green. Read
   `scripts/assert-no-vocabulary-comparisons.mjs` before arguing with it.
 - CHECK constraints are for **structural invariants only** — exactly-one-of FKs, date ordering,
   non-negative or bounded numerics. **Never** for domain vocabulary.
@@ -106,27 +97,27 @@ Ten type tables carry the **behaviour flags** the engine branches on. The engine
   **Never a SQL `INSERT` in a migration.**
 
 ### 3. Provenance is immutable — "pen, not pencil"
-
 - `DealStageEvent` is **append-only**, never edited, and stamps `AmountAtTransition` /
-  `ProbabilityAtTransition`. Without those stamps, "what did we think the forecast was on the 1st" is
-  unanswerable once amounts change.
-- When a deal enters a status where `DealStatusType.LocksDeal = 1`, the deal, its lines and its team
-  become **immutable — enforced in `DealEntityServer.Save()`, never in the UI**, so an Action, an
-  agent or a raw `BaseEntity.Save()` all hit the same wall. Reopening goes through
+  `ProbabilityAtTransition`. `DealEntityServer` appends it inside the save's transaction. Without those
+  stamps, "what did we think the forecast was on the 1st" is unanswerable once amounts change.
+- When a deal enters a status where `DealStatusType.LocksDeal = 1`, the deal, its order's lines, its
+  payment schedule and its team become **immutable — enforced on the server, never in the UI**
+  (`DealEntityServer.Save()`, and `DealLockOrderLineVeto` for saves made through orders), so an Action,
+  an agent or a raw `BaseEntity.Save()` all hit the same wall. Reopening goes through
   `Sales.ReopenDeal`, which records a reason.
-- The HubSpot importer must **bypass the lock by an explicit, audited path** — historical deals
-  arrive already closed — and must preserve **original timestamps** on `DealStageEvent.ChangedAt`.
+- The HubSpot importer (not built yet) must **bypass the lock by an explicit, audited path** —
+  historical deals arrive already closed — and must preserve **original timestamps** on
+  `DealStageEvent.ChangedAt`.
 
-### Two traps named in the plan, worth knowing before you write a query
-
+### Two traps worth knowing before you write a query
 - **Attribution double-count.** A deal with an AE, an SE and an SDR has three `DealTeamMember` rows;
   summing `Deal.Amount` across that table **triple-counts the deal**. Every by-rep or by-role rollup
   must either filter to the owner role (`DealRole.IsOwnerRole = 1`) or weight by `AttributionPct`.
   State which, in the report definition. There is no safe default serving both "bookings by AE" and
   "deals I was involved in".
-- **Denormalized stamps are server-maintained.** `Deal.OwnerEmployeeID` and `DealLine.CompanyID` are
-  written by entity-server code. **Never hand-set them.** `DealTeamMember` is the source of truth for
-  membership, including the owner.
+- **Denormalized stamps are server-maintained.** `DealEntityServer` writes `Deal.OwnerEmployeeID` from
+  the owner-role team member; orders stamps `OrderLine.CompanyID` from the product. **Never hand-set
+  them.** `DealTeamMember` is the source of truth for membership, including the owner.
 
 ---
 
@@ -152,341 +143,114 @@ Ten type tables carry the **behaviour flags** the engine branches on. The engine
 `packages/*/src/generated/`, `packages/Angular/src/lib/generated/` — CodeGen overwrites it.
 
 ### 5. ON A MERGE FROM A FAR-BEHIND BRANCH, BUILD BEFORE YOU TRUST A CLEAN AUTO-MERGE
-
-**The conflicts are the safe part. The damage hides in the hunks git merged cleanly.**
-
-A conflict is git telling you it needs a human. It stops, you read both sides, you decide. The
-dangerous hunk is the one it resolved silently — because "no conflict" means "no textual overlap", which
-is not the same claim as "the result is correct."
-
-Two measured instances, both on merges from branches that were thousands of lines behind:
-
-- **`sales-section.component.ts` appended a second, byte-identical `const E_ACCOUNT`.** Both sides added
-  the *same* declaration at *different offsets*, so git saw two unrelated additions and kept both. A
-  duplicate block-scoped `const` does not compile. Six files conflicted in that merge and every one of
-  them resolved correctly; the only breakage came from the file that merged clean.
-- **`sales-section.component.ts` kept a consumer and dropped its producer** (`open` / `openValue`) — the
-  same file, a different merge, and the same shape: each side's edit was individually sensible and the
-  combination was not.
-
-**The practice: `npm run build` immediately after a stale merge, BEFORE the suite.** Not after — the
-build is what catches this class, in seconds, and the suite is a slower instrument that can pass while a
-duplicate declaration or an orphaned reference sits in a file no check imports. A cache hit is not a
-compile: if turbo reports `FULL TURBO` on a merge that changed source, force it.
-
-Corollary for review: after a stale merge, read the diff against your own pre-merge tip
-(`git diff <pre-merge-sha> --stat`) rather than the merge's conflict list. A merge that *should* be
-content-neutral and is not has just told you something, and the conflict list will not mention it.
+The damage hides in the hunks git merged cleanly: "no conflict" means "no textual overlap", not
+"correct". Run `pnpm run build` immediately after a stale merge, BEFORE the suite; if turbo reports
+`FULL TURBO` on a merge that changed source, force it. Review `git diff <pre-merge-sha> --stat`, not the
+conflict list. When merging feature branches together, record the head you actually merged
+(`git rev-parse`), not the branch name: a green suite cannot detect work that never arrived.
 
 ### 6. NEVER KILL A PROCESS YOU CANNOT PROVE YOU OWN
-
-**Walking the parent chain until you reach `claude.exe` proves nothing. There are 20+ of those on this
-machine.** A session did exactly that tonight and killed another session's runs.
-
-**The test is your OWN `claude.exe` PID, not the existence of one.** Get the PID of the `claude.exe` that
-is your own parent, walk the candidate process's chain, and require that the `claude.exe` it reaches is
-*that same PID*. Anything else belongs to another session.
-
-**`ps -W` prints no command-line arguments, so it can NEVER find a run by script name.** If you are
-matching on `integration.mjs` or `mutate-checks.mjs` in `ps -W` output you are matching nothing, and a
-filter that matches nothing looks exactly like a filter that matched safely — the same failure shape as a
-CSS selector that hits no elements, and as an assertion below an unconditional `return`. Use
-`Get-CimInstance Win32_Process` (which has `CommandLine` and `ParentProcessId`) or do not filter by
-script at all.
-
-If you cannot establish ownership, **do not kill it.** A run you did not start is someone's two-hour
-measurement. Say what you see and ask.
-
-**And know why the orphans are there at all: a Bash tool call that hits its ten-minute ceiling DETACHES
-the process, it does not kill it.** Six survived up to two hours on one evening, each holding or queuing
-on the suite applock, so every fresh attempt queued behind an earlier one *of the same session* — which
-reads as a hang with no visible cause. Two consequences worth holding together: a run that seems stuck is
-most likely waiting on your own orphan, and the documented "stranded mutation recovery" (`git checkout --`
-plus a rebuild) is **actively destructive against a live run**, because it compiles and tests unmutated
-code out from under it. Full procedure in `test-harnesses/playwright/README.md`.
+- **The test is your OWN `claude.exe` PID, not the existence of one:** the candidate's parent chain must
+  reach the `claude.exe` that is your own parent. Anything else belongs to another session.
+- **`ps -W` prints no command-line arguments**, so it can never find a run by script name. Use
+  `Get-CimInstance Win32_Process` (it has `CommandLine` and `ParentProcessId`).
+- If you cannot establish ownership, **do not kill it.** Say what you see and ask.
+- **A Bash call that hits its ten-minute ceiling DETACHES the process; it does not kill it.** A run that
+  seems stuck is most likely queued on the suite lock behind your own orphan.
+- The stranded-mutation recovery (`git checkout --` plus a rebuild) is **destructive against a live
+  run**: it compiles and tests unmutated code out from under it.
 
 ### 7. WHILE A MUTATION RUN IS LIVE, THE TREE IS NOT EVIDENCE
-
-The mutation driver **edits source in place**, builds, runs the suite, then restores. For the whole of
-that window the working tree legitimately contains code nobody wrote, and every tool that reads it is
-reporting on a deliberate lie.
-
-Measured, on myself: mid-merge the anchor check reported a mutant's `from` string missing, and I read it
-as the merge having reverted a repair. It had not — my own background mutation run had that exact
-mutation applied at that moment, so the anchor genuinely did not match its own mutated source. **A
-`git add -A` there would have committed a mutated source file**, and the commit would have looked
-ordinary.
-
-So, while any mutation run is live:
-- **Do not stage or commit.** Not `git add -A`, not `git commit -a`.
-- **Do not treat `git status`, a grep, or an anchor check as truth.** A clean status is not proof either;
-  the driver restores source but `dist/` can still hold the mutation, which is the sibling rule the
-  Playwright README records after a full suite read *119 passed, 6 failed* against correct source.
-- **Wait for the run to report, then re-read.** If you did not start the run, see rule 6 — it is not
-  yours to stop so that your tree becomes readable.
-
-This is the same family as rule 5: the dangerous state is the one that looks normal.
+The mutation driver **edits source in place**, builds, runs the suite, then restores. While any mutation
+run is live, **do not stage or commit** (you would commit a mutant), and **do not treat `git status`, a
+grep or an anchor check as truth**: the driver restores source, but `dist/` can still hold the mutation.
+Wait for the run to report, then re-read. If you did not start the run, see rule 6.
 
 ### 8. THE DEFENCE IS NOT CARE. IT IS ARRANGING FOR THE CLAIM TO BE RE-CHECKED WHEN IT IS USED
-
-Every defect worth the name in this repo has been the same one wearing a different costume: **a claim
-that was true when somebody checked it, and stayed asserted after it stopped being true.** Not a mistake
-at the moment of writing — correct then, and left standing.
-
-Measured instances, all of them:
-
-| The claim | True when | Wrong by |
-|---|---|---|
-| `links[0]` is the row I mean | one row existed | a second row arrived |
-| a mutant's `from` anchor matches | before the edit | the edit that moved the line |
-| `next` is 222 commits behind | when the report was written | 20 commits later |
-| "Sales runs standalone" | before `DealLine` was retired | the redesign |
-| `selected === 0` catches a vacuous run | when zero was the only way to run nothing | 7 of 132 |
-| a declaration is cleared | on the exit that had the clear | three exits added later |
-| the tree is clean | before a mutation run started | the run |
-| activities checks assume an empty host | before the feature was used | the first real ingest |
-
-**Care does not help.** Every one of those was written by someone being careful, and several carry a
-comment correctly predicting the failure that then happened anyway — the `_declaredTransition` clear
-describes its own consequence precisely and only one of four exits performed it.
-
-**What helps is making the check happen where the claim is USED, not where it was made.**
+Most defects here were **a claim that was true when somebody checked it, and stayed asserted after it
+stopped being true.** Make the check happen where the claim is USED, not where it was made:
 
 * Do not index a collection and then assert which row it is — **find the row, then assert about it.**
 * Run the anchor validator **after** an edit, not before. Before tells you the state you are leaving.
 * **Filter, do not count.** `exactly one link` is a statement about today's data; `the link to the ORDER`
   is a statement about the requirement.
-* A guard keyed on a **cause** survives a new code path; one keyed on a **threshold** does not. `skipped
-  > 0` cannot be outgrown; `selected === 0` was outgrown twice.
+* A guard keyed on a **cause** survives a new code path; one keyed on a **threshold** does not.
 * Prefer `try/finally` to a clear at each exit. The bug is always the exit somebody adds later.
 * Scope a check to **its own fixtures**. A check that requires a globally empty table is asserting
   something about the world, not about the code.
-* **Measure the number rather than relaying it.** A relayed figure is indistinguishable from a measured
-  one right up until it matters.
+* **Measure the number rather than relaying it.**
 
-And the tell, which is worth more than the list: **a green result nobody investigates.** A red is
-examined; a pass is not. So the highest-value question about any check is not "does it pass" but
-**"what would make it pass while the thing it names is broken?"** Every entry in that table answers it.
+The tell is **a green result nobody investigates.** Ask of any check: **"what would make it pass while
+the thing it names is broken?"** The incidents behind rules 5–8: `docs/history/agent-working-rules.md`.
 
 ---
 
 ## Environment & Database
 
-- Repo-root `.env` holds this repo's configuration — the CLI (`mj migrate`, `mj codegen`, `mj sync`) and
-  `scripts/*.sh` read it from here. Sales no longer ships an MJAPI, so there is no `apps/MJAPI/.env`
-  symlink any more: the SERVER's env belongs to the MJ host you link into (`packages/MJAPI/.env` there),
-  and the CLI reads it from the host's repo root. See `docs/QA-GUIDE.md`.
-- Local dev DB: **`MJ_BizAppsSales`** on SQL Server, MJ core pinned by `MJ_CORE_VERSION` in `.env`.
-  That version must satisfy `mj-app.json`'s `mjVersionRange` **and** match what `@memberjunction/*`
-  actually resolved to — a DB behind the packages driving it produces "column does not exist" on core
-  metadata.
+- Repo-root `.env` (gitignored; copy `.env.example`) configures the CLI (`mj migrate`, `mj codegen`,
+  `mj sync`, `mj test`), `scripts/*.sh` and the test harnesses. Sales ships no server: the MJ host's
+  MJAPI reads the host's own `.env` (`docs/QA-GUIDE.md`).
+- `MJ_CORE_VERSION` pins the MJ core `scripts/rebuild-db.sh` installs; unset, it uses the installed
+  `@memberjunction/cli` version. It must satisfy `mj-app.json`'s `mjVersionRange` **and** match what
+  `@memberjunction/*` actually resolved to — a DB behind the packages driving it produces "column does
+  not exist" on core metadata.
+- **Always use the WORKSPACE CLI**, never a global `mj`: `pnpm run mj -- <command>`, or
+  `node node_modules/@memberjunction/cli/bin/run.js` as every script does. A globally installed CLI
+  ships its own published packages and cannot see this repo's private ones.
 
-  > **✅ CLOSED 2026-08-25.** `.env` and `docs/QA-GUIDE.md` now read `v6.1.0-edge.3`, matching the
-  > packages. Measured before changing anything: upgrading a database from edge.2 to edge.3 applied
-  > **14 migrations in 54 seconds** and left sales untouched -- 20 entities, 338 EntityFields, **0
-  > unregistered columns**, all five sales migrations still green, `spCreateDeal` still taking
-  > `@OrderID`. It is an incremental migration, not a rebuild.
-  >
-  > It had to close because the first registry publish is imminent and every dependency sales declares
-  > is already published, including `@memberjunction/core@6.1.0-edge.3`. A tester installing published
-  > sales packages would otherwise get edge.3 CODE against an edge.2 DATABASE, which is the exact
-  > failure the rule above describes.
-  >
-  > The original note, kept because the reasoning is still the reasoning:
-  >
-  > **⚠️ KNOWN MISMATCH, recorded deliberately rather than fixed (2026-08-24).** The package pins now say
-  > **`6.1.0-edge.3`** (52 of them, across 7 manifests) while `.env` still reads
-  > `MJ_CORE_VERSION=v6.1.0-edge.2`. The bump was needed because published `edge.2` does **not** contain
-  > `DeclareEmbeddedRecord` and sales cannot build against it from a registry; `edge.3` does.
-  >
-  > It is **inert for resolution today**: this tree resolves `@memberjunction/*` through symlinks to the
-  > local MJ checkout, so a range in a manifest moves nothing until someone installs from a registry.
-  > `mjVersionRange` (`>=6.0.0 <7.0.0`) is satisfied either way. What the `.env` value actually drives is
-  > the **database** level, so closing the gap means a migration — which is the right change at the
-  > wrong moment when another session is using the shared host.
-  >
-  > **Close it before the first registry install, not before.** Until then the rule above still holds and
-  > this is the documented exception to it.
-- **Always use the WORKSPACE CLI**, never a global `mj`: every script runs
-  `node node_modules/@memberjunction/cli/bin/run.js`. A globally installed CLI ships its own
-  published packages and cannot see this repo's private ones. (The global `mj` on this machine is
-  behind; it does not matter, and it is not what these scripts call.)
-
-### Ports
-- MJAPI GraphQL: **4141** (`GRAPHQL_PORT`) · MJExplorer: **4341**
-- Chosen to avoid every other MJ environment: MJ core 4001/4201, common 4101/4301,
-  accounting 4102/4302, orders 4103/4303, contracts 4151/4351.
-
-### The migration loop — ADDITIVE-ONLY (this repo has published)
-
-> **⛔ BASELINE-IN-PLACE IS OVER. CLOSED 2026-09-18.** Schema changes are **new migration files**. Do
-> not edit an applied one, and that includes the baseline.
->
-> **Why, in one sentence:** an applied migration's content is part of its checksum, so editing it makes
-> Flyway refuse the whole run on every host that already has it — and there are such hosts now, the UAT
-> environment among them, which nobody is going to rebuild to accommodate a doc edit.
->
-> **How to tell this switch had already happened, which is the part that was missed:** `migrations/`
-> holds five additive files after the baseline, including `V202608251930__v5.2.x__Metadata_Sync.sql`.
-> The bullet below always said *"switch to additive-only at first publish"*; the first publish was
-> `V202608251930`, three weeks before this note. The directory was the evidence and the rule was read
-> instead of the directory — which is how a corrected `AmountSourceHash` description was first written
-> as an edit to `V202608042101` (#108) before being redone as a new migration.
->
-> `V202609020650`'s own header already states the discipline: it is numbered before its partner
-> deliberately, *"so no already-computed migration checksum changes."* Follow that file, not this
-> section's history.
->
-> **What this changes in practice:** a schema change is a new `V<YYYYMMDDHHMM>__v<X.Y>.x__<Name>.sql`,
-> idempotent where it can be, guarded where it cannot. `scripts/rebuild-db.sh` is still how you get a
-> clean local database and still how a release seed is generated — it is the EDITING of the baseline
-> that is retired, not rebuilding.
-
-The original note is kept below, because its reasoning is still the reasoning for the phase it
-described — and because the condition it depended on is exactly what stopped being true:
-
-**(Historical — pre-publish.)** Schema changes **edit the baseline migration in place**; do not stack
-fix-up migrations. That is only safe because rebuilding from zero is routine:
-
-```bash
-CONFIRM_DROP=<database> scripts/rebuild-db.sh   # drop+create, MJ core, bizapps-common, this app's DDL
-#   ^ names the database to DESTROY. There is no default: the script refuses rather than fall back
-#     to .env, whose value is your everyday host.
-npm run mj:codegen                       # PASS 1 — entity metadata + SQL objects
-scripts/append-codegen.sh                # fold generated SQL below the baseline's banner
-pnpm mj sync push --dir metadata    # seed the type tables + remote-operation rows
-npm run mj:codegen:files                 # PASS 2 — FILES ONLY (--skipdb). See the warning below.
-npm run build
-scripts/seed-dev-data.sh && scripts/seed-demo-data.sh   # the rebuild dropped all data
-# THEN RESTART MJAPI **AND** MJExplorer — see below.
-```
-
-- **RESTART BOTH SERVERS AFTER A REBUILD.** They cache entity metadata at startup, and a rebuild
-  re-mints every entity ID and Application row — so a server started before the rebuild is holding IDs
-  that no longer exist. The symptom is not an error: MJExplorer pops an **`mj-app-access-dialog`**
-  saying *the application doesn't exist*, which reads exactly like a broken permission or a bad
-  `DriverClass`. It cost a Playwright debugging cycle in Phase 2 chasing the spec instead of the
-  servers. `ng serve`'s watch mode rebuilds the BUNDLE on a package change but does not re-read
-  metadata, so a reload is not enough — restart the process.
-- **Do not run the seeds twice concurrently.** Both scripts take table locks; two copies deadlock on
-  each other and present as a hang, not an error. If it happens, kill the `sqlcmd` processes and then
-  clear any session left holding a transaction (`KILL <spid>` for sleeping sessions with
-  `open_transaction_count > 0`), or the next provider startup times out at 15s with
-  `Cannot read properties of undefined (reading 'find')`.
-
-- **`append-codegen.sh` is NOT optional.** The generated half of the baseline is what makes a fresh
-  `mj migrate` produce a *working* database rather than bare tables. It has been lost once in the
-  sibling repo and is unrecoverable without another full rebuild.
-- `rebuild-db.sh` **trims** the generated half before applying, so CodeGen regenerates it in full.
-  Skip the trim and CodeGen emits only a delta, which `append-codegen.sh` rightly refuses.
-- **CODEGEN RUNS TWICE, and pass 2 MUST be `--skipdb`.** Remote operations generate *from metadata
-  rows*, not from the schema, so pass 1 cannot see an operation `sync push` has not inserted yet —
-  `remote_operations.ts` comes out holding only MJ's core operations and every `Sales.*` shell is
-  silently missing. The symptom is a compile error naming an operation class that plainly exists in
-  metadata. Pass 2 emits them, and `--skipdb` (`npm run mj:codegen:files`) restricts it to TypeScript,
-  Angular and GraphQL files.
-
-  > ### ⚠️ CODEGEN LAGS BY ONE PASS WHEN A NEW VIRTUAL COLUMN APPEARS — ✅ CORRECTED 2026-09-20
-  >
-  > **This block used to read "A FULL SECOND CODEGEN PASS CORRUPTS THE DATABASE", and that rule is
-  > backwards.** Measured on 2026-09-20, after giving `Sales Contacts` a name field — which makes every
-  > view with an FK to it gain a name column:
-  >
-  > | | Deals | Deal Contact Roles | CodeGen said |
-  > |---|---|---|---|
-  > | after pass 1 | 59 fields / **61** columns | 10 / **11** | `success: false` |
-  > | after pass 2 | **61 / 61** | **11 / 11** | `success: true` |
-  >
-  > The **first** pass left the corruption; the **second** repaired it. `createNewEntityFieldsFromSchema`
-  > builds `EntityField` rows by reading the base view's columns, so on the pass that CREATES those
-  > columns they are not yet visible to it. The next pass sees them and registers them.
-  >
-  > The original incident below is the same lag seen from the other side: pass 1 could not resolve the
-  > IsA-derived `Account` join, pass 2 added the column, and metadata was one pass behind *then*. One
-  > mechanism, not two rules.
-  >
-  > **So the rule is: run CodeGen until it reports `success: true` AND per-entity parity is clean.**
-  > Not "never run it twice" — that wording is why this repo went weeks unable to pick up the contact
-  > name columns at all. Verify explicitly; the integrity check is not sufficient on its own:
-  >
-  > ```sql
-  > SELECT e.Name, e.BaseView,
-  >   (SELECT COUNT(*) FROM __mj.EntityField f WHERE f.EntityID = e.ID) AS Fields,
-  >   (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS c
-  >     WHERE c.TABLE_SCHEMA = e.SchemaName AND c.TABLE_NAME = e.BaseView) AS ViewCols
-  > FROM __mj.Entity e WHERE e.SchemaName = '__mj_BizAppsSales';   -- every row must match
-  > ```
-  >
-  > **`entityFieldsSequenceCheck` points at the wrong entity.** On the failing pass it reported a
-  > sequence mismatch on `Deal Contact Roles` and said *nothing* about `Deals` being 59-vs-61 — the one
-  > that breaks inserts. A `success: false` naming one entity is not a statement about the others.
-  >
-  > **And `git checkout` is not an undo.** Pass 1 writes views, sprocs and `EntityField` rows. Take a
-  > `BACKUP DATABASE` first and `RESTORE VERIFYONLY` it; that is what made the 2026-09-20 run safe.
-  >
-  > The original entry, kept because the failure it describes is real and the mechanism is worth
-  > reading — only its *rule* was wrong:
-  >
-  > Running plain `mj:codegen` a second time regenerated `vwDeals` with **eleven** virtual lookup
-  > columns where pass 1 produced ten — it added an `Account` join, derived from the `SalesAccount`
-  > IsA child, that pass 1 had not been able to resolve yet. It did **not** add the matching
-  > `EntityField` row. The result: `vwDeals`/`spCreateDeal` return 56 columns while `Deal` has 55
-  > registered fields, and since `SQLServerDataProvider` builds its `@ResultTable` from *entity
-  > metadata* and then does `INSERT INTO @ResultTable EXEC spCreateDeal`, **every Deal insert fails**
-  > with *"Column name or number of supplied values does not match table definition"* — inside a
-  > transaction that then aborts. It also silently drifts the live DB away from the baseline, because
-  > `append-codegen.sh` is (correctly) not re-run.
-  >
-  > ~~A single pass is self-consistent; two full passes are not.~~ (Corrected above: the lag is one
-  > pass, in whichever direction the new column appears.) This is an IsA-ordering effect, so it will
-  > bite hardest on `SalesAccount`/`SalesContact` and anything else extending a parent entity — which
-  > is exactly where it bit again in 2026-09-20.
-  >
-  > One detail in the paragraph above is worth stating precisely, because it misleads: the `Deal`
-  > TABLE never changes. `spCreateDeal` ends in `SELECT * FROM vwDeals`, and the provider declares
-  > `@ResultTable` with one column per `EntityField`, filled by a POSITIONAL `INSERT ... EXEC`. It is
-  > the save-capture *width* that fails, not anything about the table.
-
-  **Do NOT re-run `append-codegen.sh` after pass 2** either: with the generated half already in place
-  a full pass emits only a delta, which the script rightly refuses — and with `--skipdb` there is no
-  SQL to fold in at all.
+### Migrations — additive only
+- A schema change is a **new** `V<YYYYMMDDHHMM>__v<X.Y>.x__<Name>.sql`. **Never edit an applied
+  migration, the baseline included:** its content is part of its checksum, and Flyway refuses the whole
+  run on every host that already has it.
+- Migrations run once, in order, so a V migration has **no `IF` guards**: add new columns in **one**
+  `ALTER TABLE` with their constraints inline. Guards are noise and make the PostgreSQL conversion
+  harder.
 - Never add `__mj_CreatedAt`/`__mj_UpdatedAt` columns or FK indexes — CodeGen does both.
-- ~~Switch to **additive-only** migrations at first publish.~~ **Done — at
-  `V202608251930__v5.2.x__Metadata_Sync.sql`.** See the block at the top of this section.
 - **Author for PostgreSQL from day one.** Production is PG; keep the T-SQL converter-friendly and
   avoid reserved words as column names (this is why `ForecastSnapshot` has `CommitAmount`, not
-  `Commit`). Run the conversion once the baseline is stable.
+  `Commit`). No migration has a PostgreSQL counterpart yet (#197).
+- `CONFIRM_DROP=<database> scripts/rebuild-db.sh` drops and rebuilds a local database from migrations:
+  MJ core, then common, tasks, accounting and orders from sibling checkouts, then sales. It names the
+  database to DESTROY; there is no default. It trims the baseline's generated half in the working tree,
+  a step left from the retired baseline-in-place loop (`docs/history/migrations-baseline-in-place.md`):
+  never commit the baseline afterwards (#217).
+- **Restart the host's MJAPI AND MJExplorer after a rebuild.** They cache entity metadata at startup,
+  and a rebuild re-mints every entity ID and Application row. The symptom is not an error: MJExplorer
+  pops an **`mj-app-access-dialog`** saying the application doesn't exist. A reload is not enough.
+- **Seed with `scripts/seed-dev-data.sh`, then `scripts/seed-demo-data.sh`, never concurrently.** Both
+  take table locks; two copies deadlock and present as a hang. If it happens, kill your `sqlcmd`
+  processes and any sleeping session with `open_transaction_count > 0`, or the next provider startup
+  times out.
 
 ### Integration tests
-**`RUN_MUTATION_TESTS=1` is mandatory** or the suites run ZERO checks and pass vacuously.
-Integration checks hit a LIVE database with nothing mocked; each check rolls back. None exist yet — the
-two the definition of done requires are specified in `packages/IntegrationTests/src/index.ts` and land
-with S2.
+Check bundles live in `packages/IntegrationTests/src/checks/`; `scripts/expected-check-counts.json` is
+the single source for each bundle's check count and the sibling app it requires. Checks hit a LIVE
+database with nothing mocked, each in a transaction that rolls back, and discover their fixture from the
+seeds.
+- `pnpm run test:coverage-gate` runs the suite and fails if fewer checks ran than the JSON declares.
+- `pnpm run test:integration` runs the suite on its own.
+- **`RUN_MUTATION_TESTS=1` is mandatory** when you call `node test-harnesses/integration.mjs` directly:
+  without it every check that writes is skipped, and the run fails. The two scripts above set it for you.
 
 ### Explorer UI harness (`test-harnesses/playwright/`)
-Proves create/read/update/delete **through the real Explorer UI**, which no API-level test can: a
-generated form can fail to render a field, a lookup can fail to resolve, a save can silently no-op, and
-all three look identical to a passing GraphQL test.
+Proves create/read/update/delete **through the real Explorer UI**: a form that fails to render a field,
+a lookup that fails to resolve and a save that silently no-ops all look like a passing GraphQL test.
 
 ```bash
-# Sales runs inside an MJ host — start the HOST's MJAPI (4143 in the linking spike) and its
-# MJExplorer on 4341, the port the Entra redirect URI is registered for. See docs/QA-GUIDE.md.
-pnpm run test:explorer:auth        # ONE TIME: headed, a human logs in. Session is then reused forever
+# Sales runs inside an MJ host: start the HOST's MJAPI and MJExplorer first (docs/QA-GUIDE.md).
+# The harness defaults to MJAPI on 4143 and MJExplorer on 4341; MJAPI_PORT / MJEXPLORER_PORT override.
+pnpm run test:explorer:auth        # ONE TIME: headed, a human logs in. Session is then reused
 pnpm run test:explorer             # the CRUD run
 PW_HEADLESS=1 pnpm run test:explorer   # unattended
 ```
 
-- **Use `start:explorer:msal` for anything involving a human login.** Plain `ng serve` defaults to
-  Angular's `development` configuration, which selects the **Auth0 automation tenant** — service accounts,
-  not staff SSO, so your own credentials are rejected there. `local_msal` keeps `environment.ts`'s
-  `AUTH_TYPE: 'msal'` active instead.
 - Session reuse works because both auth providers cache in `localStorage`. **`.auth/user.json` is a live
   bearer token — it is gitignored and must never be committed.**
 - Read `test-harnesses/playwright/README.md` before changing selectors; it records the delete-affordance
   and view-vs-edit-mode traps that cost real time to find.
 
 ### CI (`.github/workflows/ci.yml`)
-**EIGHT gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
+**TEN gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
 listed the first and third; five more have been added since and went unrecorded. That understatement is
 not harmless — a reviewer who believes CI only greps and builds will reason that a template change, a
 copy change or a query comment cannot be caught by it, and will hand-check things CI already covers
@@ -502,6 +266,8 @@ while trusting things it does not:
 6. **`python3 scripts/assert-no-comment-drift.py`** — a documented column that is not returned.
 7. **`npm run test:spec-gate`** — Playwright specs typecheck (it does NOT run them).
 8. **Unit tests**, guarded on any existing.
+9. **`npm run test:selector-gate`** — every selector the Playwright harness names is in a mounted template.
+10. **`node .github/scripts/check-dependency-model.mjs`** — runs first, before install: `@memberjunction/*` and other apps' `@mj-biz-apps/*` packages are caret peers (exact `devDependencies` anchors), never `dependencies`.
 
 Plus a non-blocking changeset presence check.
 
@@ -514,24 +280,11 @@ The Explorer UI harness is deliberately **not** in CI: it needs a live database,
 one-time interactive human login. Run it locally before merging.
 
 ### Changesets
-**Every PR that changes a published package must carry a changeset** — `npx changeset`. CI warns rather
-than fails, so treat the warning as a review item. `baseBranch` is `next`.
-
-**The bump level follows semver, and `minor` is required for exactly two things:** anything under
-`migrations/`, and any change to a package's public API — a removed or renamed export, a changed
-exported signature, a new required argument. Everything else is `patch`: user-facing copy, UI
-behaviour, and server-side fixes that keep their signatures. `major` is for a break a consumer cannot
-absorb by reading the CHANGELOG.
-
-> This paragraph used to read *"or changes a published package, must carry a changeset with at least a
-> `minor` bump"*, which is stricter than MJ's rule and stricter than what this repo actually merges —
-> `deal-hero-focus-new-record`, `deal-hero-number-collapsed`, `deal-pipeline-leads-when-unsaved` and
-> `deal-hero-drop-dead-focus-call` all landed as `patch` with no migration. It produced one wrong
-> review finding on sales#79/#80 before anyone checked it against practice. Andrew's `minor` call on
-> sales#72 was right for the OTHER reason: it removed an exported symbol.
-
-`fixed: [["@mj-biz-apps/*"]]` in `.changeset/config.json` means the whole family versions together, so
-the level you pick drives the CHANGELOG's accuracy rather than which packages move.
+Every PR that changes a published package or anything under `migrations/` carries a changeset
+(`pnpm run change`). The bump rules are in
+**`.changeset/README.md`**. `fixed: [["@mj-biz-apps/*"]]` in `.changeset/config.json` versions the whole
+family together: every package moves on every release, so the level you pick sets the version and the
+CHANGELOG entry, not which packages move.
 
 ---
 
@@ -539,30 +292,40 @@ the level you pick drives the CHANGELOG's accuracy rather than which packages mo
 
 AIDP Next runs MemberJunction's 6.1 LTS line, pinned exactly in `aidp-next/package.json`. This repo builds, tests and runs CodeGen against that same version, so what passes here is what runs there (bc-aidp-next-golive#298).
 
-- **Declared ranges.** Every `@memberjunction/*` range in `dependencies`, `devDependencies` and `peerDependencies` is `^6.1.N`, where 6.1.N is the LTS release AIDP Next runs: a floor, not a cap. Never an edge or prerelease range (`6.1.0-edge.x` sorts *before* 6.1.0 and has none of the LTS fixes). Packages MJ versions separately (`@memberjunction/connector-*`, `@memberjunction/skyway-*`) keep their own ranges.
+- **Declared ranges.** A published package lists `@memberjunction/*` only in `peerDependencies`, as `^6.1.N`, where 6.1.N is the LTS release AIDP Next runs: a floor, not a cap. Its `devDependencies` anchor the same 6.1.N exactly for local builds; nothing goes in `dependencies` (CI's dependency model gate). Never an edge or prerelease range (`6.1.0-edge.x` sorts *before* 6.1.0 and has none of the LTS fixes). Packages MJ versions separately (`@memberjunction/connector-*`, `@memberjunction/skyway-*`) keep their own ranges.
 - **`pnpm.overrides`.** `@memberjunction/core` and `@memberjunction/global` carry the same floor (for example `"^6.1.5"`), so every request in the graph resolves to one copy. Two copies of `core` split the ClassFactory: registrations land in one factory while the resolver reads the other, and nothing errors. Overrides are workspace-local and never published. Do not exact-pin sibling `@mj-biz-apps/*` packages here; how the apps declare each other is bc-aidp-next-golive#265.
 - **One copy of each.** After any install, `pnpm why @memberjunction/core` must show a single version. A sibling app package that exact-pins an old MJ build brings a second copy in (for example `@mj-biz-apps/common-ng@5.37.0` pinned edge.3 packages); fix it by raising that package's floor, not with more overrides.
-- **Bumping to a new 6.1.N**, when AIDP Next moves: raise every `^6.1.N` floor and both overrides; `pnpm install`; confirm one copy; set `mjVersionRange` in `mj-app.json` to `>=6.1.N <7.0.0` by hand (this repo has no sync script); rebuild the database from migrations on MJ core `v6.1.N` and regenerate (below); run the full test suite; add a `patch` changeset; commit the lockfile. If CI then fails on the lockfile although a clean local install works, GitHub is testing the merge with `next`: merge `next` in, run `pnpm install --no-frozen-lockfile`, and commit the lockfile.
+- **Bumping to a new 6.1.N**, when AIDP Next moves: raise every `^6.1.N` floor, every exact `6.1.N` devDependencies anchor and both overrides; `pnpm install`; confirm one copy; set `mjVersionRange` in `mj-app.json` to `>=6.1.N <7.0.0` (the Version Packages PR re-derives it from `packages/Entities`' `@memberjunction/core` peer via `ci/sync-mj-app-version.mjs`, so the two must agree); rebuild the database from migrations on MJ core `v6.1.N` and regenerate (below); run the full test suite; add a `patch` changeset; commit the lockfile. If CI then fails on the lockfile although a clean local install works, GitHub is testing the merge with `next`: merge `next` in, run `pnpm install --no-frozen-lockfile`, and commit the lockfile.
 - **Never patch MemberJunction.** No `pnpm patch`, `patchedDependencies`, patch-package or `sed` against `@memberjunction/*` `dist/`. That is AIDP Next's hard rule (`.github/workflows/MJ_PATCH_REGISTER.md` in aidp-next). Fix MJ on its `next` branch and bring the fix to the line with the `backport lts/6.1` label, or with a hand-port PR against `lts/6.1` when the fix can't be isolated; then wait for the patch release.
 
 ### CodeGen output must be reproducible from this repo
 
 Generated files are committed, and AIDP Next ships them as they are: it excludes every `__mj_BizApps*` schema from its own CodeGen and installs the published packages. So the committed output has to be what this repo's toolchain produces from its migrations.
 
-- Run CodeGen only with this repo's pinned MJ version, against a database built from migrations (MJ core `v6.1.N`, then the apps this one depends on, then this repo), after `mj sync push` of `metadata/`.
+- Run CodeGen only with this repo's pinned MJ version, against a database built from migrations (MJ core `v6.1.N`, then the apps this one depends on, then this repo), after `mj sync push` of `metadata/`. Remote operations generate from metadata rows, so an operation not yet pushed is silently missing from `remote_operations.ts`.
 - Set an AI key in your gitignored `.env`: `AI_VENDOR_API_KEY__GeminiLLM` (every CodeGen prompt ranks Gemini first), or `AI_VENDOR_API_KEY__OpenRouterLLM`. Without one, CodeGen silently drops AI-written output: check-constraint `Validate*()` methods, display names, descriptions and form layouts.
 - Never hand-edit generated files, and never paste in generated output from another toolchain or another database. That is how OrderLine lost `OrderHeader`'s `@Field` (bc-aidp-next-golive#295).
 - Review what AI wrote. Validators, names and descriptions are not deterministic between runs.
 - If CodeGen has to create metadata in the database that the generated code depends on (fields, value lists, relationships, validator code), ship it in a migration in the same PR. Otherwise every host installed from migrations drifts from the code.
+- **Run CodeGen until it reports `success: true` AND per-entity parity is clean.** A pass that creates a view column registers its `EntityField` only on the next pass, and a view wider than its entity's fields fails every insert. `entityFieldsSequenceCheck` can name the wrong entity, so check parity yourself — every row must match:
 
-## NPM Workspace Management
-- Define dependencies in the individual package's `package.json`, then run **`npm install` at the
-  repository root**. **Never** run `npm install` inside a package directory.
+  ```sql
+  SELECT e.Name, e.BaseView,
+    (SELECT COUNT(*) FROM __mj.EntityField f WHERE f.EntityID = e.ID) AS Fields,
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS c
+      WHERE c.TABLE_SCHEMA = e.SchemaName AND c.TABLE_NAME = e.BaseView) AS ViewCols
+  FROM __mj.Entity e WHERE e.SchemaName = '__mj_BizAppsSales';
+  ```
+- **`git checkout` is not an undo.** A CodeGen pass writes views, procedures and `EntityField` rows. On a database you care about, take a `BACKUP DATABASE` first and `RESTORE VERIFYONLY` it. The measurements: `docs/history/codegen-one-pass-lag.md`.
+- `pnpm run mj:codegen:files` (`--skipdb`) regenerates the TypeScript, Angular and GraphQL files without touching the database.
 
-## Build Commands
+## pnpm Workspace and Build Commands
+- Define dependencies in the individual package's `package.json`, then run **`pnpm install` at the
+  repository root**. **Never** run an install inside a package directory.
 - `pnpm run build` (all, Turborepo) · `build:generated` · `build:packages`
 - **No `start:*` scripts.** Sales ships no shells; the MJ host runs MJAPI/MJExplorer (`docs/QA-GUIDE.md`)
-- `pnpm run verify` — the vocabulary gate plus a full build
+- `pnpm run verify` — the vocabulary, money, comment-drift, distribution, spec-typecheck and selector
+  gates, then the build and unit tests, then the discount and validation gates (they read `dist/`).
 
 ---
 
@@ -634,40 +397,12 @@ Built on MJ's Angular Generic components — `kanban`, `timeline`, `filter-build
 
 ---
 
-## Build Sequence (where we are)
-
-| Phase | Work | State |
-|---|---|---|
-| **S0** | Repo bootstrap, `mj-app.json`, ports, CI | done |
-| **S1** | Baseline migration + CodeGen: type tables, identity, pipelines, deal + lines + team + events | done |
-| **S2** | Pricing bridge — `DealLine` ↔ `Orders.PreviewOrder`, provenance stamping, the §6 integration check | next |
-| **S3** | Pipeline board + deal workspace + deal team + activity timeline | |
-| **S4** | `Sales.CloseDeal` + policy evaluation + close lock + `Contracts.CreateFromDeal`/`RenewTerm` | |
-| **S5** | Dashboards: MJ Queries for the §9 measures, forecast snapshots, velocity | |
-| **S6** | HubSpot import + reconciliation report | |
-| **S7** | Cutover — run parallel for one full sales cycle before turning HubSpot off | |
-
-**S2 is where `.mj-links.json` starts mattering**: `Orders.PreviewOrder` means bizapps-orders and
-(transitively) bizapps-accounting must be checked out as peers **and built**, since neither is
-published. Sales is three symlink-hops deep at that point; read `.mj-links.json` in full first —
-`type-graphql`, `graphql` and `reflect-metadata` must collapse to a single copy or `buildSchema` dies
-on a decorator that is perfectly correct.
-
-## Known upstream dependencies
-- **`AllowMultipleSubtypes = true` on common's Person and Organization** — see the ⚠️ block at the top of
-  this file and `docs/KNOWN-ISSUES.md` KI-1. Fix belongs in `bizapps-common`; **do not edit it from here**.
-- **From orders:** `Subscription.BillingMode` (`Self | External`) and the customer×product×time
-  pricing-resolver slot. Neither exists yet; contracts' C0 is the orders PR that adds them. **This is the
-  critical path for S2** — nothing in the pricing bridge can land until it does.
-- **From contracts:** `Contracts.CreateFromDeal` and `Contracts.RenewTerm`. Contracts is README-only.
-- **From common:** the Activity spine, for the timeline in S3.
-
 ## Deferred by decision (not oversights)
 Recorded in full in `docs/DECISIONS.md`; listed here so nobody "fixes" them:
 - **Quota / attainment** — v2. No `Quota` table (D2).
 - **Territory** — a label on `SalesAccount`, not a routing engine (D3).
-- **`Pipeline.CompanyID` stays NOT NULL** — confirm-only with Amith/Johanna, no schema change either
-  way (D5).
+- **`Pipeline.CompanyID` stays NOT NULL**; each line takes its company from its product, so a deal can
+  still span companies (D5, ratified 2026-08-26).
 - **`ForecastSnapshot` columns are `*Amount`-suffixed**, diverging from master plan §9.5's bare
   `Commit`/`BestCase`/`Pipeline`/`Closed`. **The shipped names are authoritative** — `COMMIT` is reserved
   in T-SQL and Postgres, and prod is Postgres (D6).
