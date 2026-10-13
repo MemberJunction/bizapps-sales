@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import sql from 'mssql';
 
-import { BizAppsDuplicates, MJCoreInstances, ShareTestedCheckoutPackages } from './one-mj-core.mjs';
+import { BizAppsDuplicates, MJCoreInstances, OverriddenRanges, ShareTestedCheckoutPackages } from './one-mj-core.mjs';
 // Symlinked sibling directories count; the shared helper says why.
 import { listDirs } from './sibling-resolve.mjs';
 import { formatAppPresence, judgeAppPresence, presentApps } from '../scripts/app-presence.mjs';
@@ -503,7 +503,27 @@ if (coreInstances.length > 1) {
  * journal-entry server failed on `FiscalYearStartFor is not a function` with nothing naming the cause.
  * one-mj-core.mjs gives every requester the sibling checkout's build when its declared range accepts
  * it; a copy left over means some requester's range refused it.
+ *
+ * A package sales' `pnpm-workspace.yaml` overrides is held to the override's range for every requester,
+ * as in sales' own install. A sibling whose own range the build does not meet still gets the build, and
+ * is listed here as a warning rather than a failure: it runs against a version it does not declare
+ * (sales#231).
  */
+const overriddenRanges = OverriddenRanges();
+if (overriddenRanges.length > 0) {
+    console.warn(
+        [
+            '',
+            '  ⚠ Sibling ranges set aside by sales\' pnpm-workspace.yaml overrides (each gets the sibling build):',
+            ...overriddenRanges.flatMap(({ name, override, requesters }) => [
+                `    ${name} -> ${override}`,
+                ...requesters.map((r) => `      ${r}`),
+            ]),
+            '',
+        ].join(String.fromCharCode(10)),
+    );
+}
+
 const bizAppsDuplicates = BizAppsDuplicates();
 console.log(`  BizApps packages loaded more than once -> ${SHARING === 'installed' ? bizAppsDuplicates.length : 'not counted'}`);
 if (bizAppsDuplicates.length > 0) {
