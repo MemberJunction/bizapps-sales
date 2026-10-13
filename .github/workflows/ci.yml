@@ -158,8 +158,15 @@ jobs:
       # PR that legitimately has no version impact.
       - name: Changeset present?
         if: github.event_name == 'pull_request'
+        # Diff against the PR's base, not the tree: a changeset another PR left pending on the base
+        # branch would otherwise silence this warning for every later PR. The checkout is shallow, so
+        # fetch the base tip and compare the two trees directly (two-dot needs no merge base).
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          if [ ! -d .changeset ] || [ -z "$(find .changeset -name '*.md' ! -name 'README.md' -print -quit)" ]; then
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          added=$(git diff --name-only --diff-filter=A FETCH_HEAD HEAD -- '.changeset/*.md' | grep -v '^.changeset/README.md$' || true)
+          if [ -z "$added" ]; then
             echo "::warning title=No changeset::This PR carries no changeset. One is required for any change to migrations/ or a published package — run 'npx changeset'."
           else
             echo "Changeset present."

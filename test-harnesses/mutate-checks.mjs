@@ -761,7 +761,7 @@ const MUTATIONS = [
     //    a vocabulary nobody has seeded yet, and no check can prove it until someone seeds an
     //    open-and-locking status. Recorded rather than dropped, so the next reader knows it was measured
     //    and why it cannot fall.
-    { id: 'M-DS3', file: DES, expect: [],
+    { id: 'M-DS3', file: DES, expect: [], expectMiss: true,
       from: "                ExtraFilter: 'IsActive = 1 AND IsOpen = 1 AND LocksDeal = 0',",
       to: "                ExtraFilter: 'IsActive = 1 AND IsOpen = 1',",
       note: 'the locking guard is dropped -- EXPECTED TO MISS on seeded data; it guards vocabulary that does not exist yet' },
@@ -926,6 +926,19 @@ const MUTATIONS = [
       note: 'the month boundary is read in the host timezone, so a snapshot lands in the previous period' }
 ];
 
+/**
+ * AN EMPTY `expect` MUST SAY IT IS ON PURPOSE.
+ *
+ * The hit test is `expect.every(...)`, which is true for an empty list, so a mutant that declared no
+ * target printed OK on every run whatever the suite did. A mutant that is EXPECTED to miss now says so
+ * with `expectMiss: true` and gets its own verdict; an empty `expect` without it is refused here.
+ */
+const undeclared = MUTATIONS.filter((m) => m.expect.length === 0 && !m.expectMiss);
+if (undeclared.length) {
+    console.error(`\n✖ empty expect without expectMiss: ${undeclared.map((m) => m.id).join(', ')}\n`);
+    process.exit(2);
+}
+
 const wanted = new Set(process.argv.slice(2).filter((a) => !a.startsWith('--')));
 
 /**
@@ -949,8 +962,21 @@ if (wanted.size) {
     }
 }
 if (process.argv.includes('--list')) {
-    for (const m of MUTATIONS) console.log(`${m.id.padEnd(8)} ${m.file.padEnd(56)} expect ${m.expect.join(',')}`);
+    for (const m of MUTATIONS) {
+        console.log(`${m.id.padEnd(8)} ${m.file.padEnd(56)} ${m.expectMiss ? 'expected to miss' : `expect ${m.expect.join(',')}`}`);
+    }
     process.exit(0);
+}
+
+/**
+ * One mutant's line verdict. An expected-miss mutant has no target to fell, so OK and MISS mean nothing
+ * for it: it reports EXPECTED-MISS while nothing falls, and UNEXPECTED-HIT once something does -- the
+ * sign that the vocabulary it waits for has been seeded and the declaration needs a real `expect`.
+ */
+function verdict(m, failed, incomplete, hit) {
+    if (incomplete) return 'INCOMPLETE';
+    if (m.expectMiss) return failed.length ? 'UNEXPECTED-HIT' : 'EXPECTED-MISS';
+    return hit ? 'OK' : 'MISS';
 }
 
 const FAIL_RE = /^ {2,}✖ ([A-Z]+\d+):/gmu;
@@ -1226,7 +1252,7 @@ for (const m of MUTATIONS) {
         const hit = !incomplete && m.expect.every((id) => failed.includes(id));
         results.push({ ...m, failed, tally: tally?.[0], contended, stillContended });
         console.log(
-            `${m.id.padEnd(7)} ${(incomplete ? 'INCOMPLETE' : hit ? 'OK' : 'MISS').padEnd(10)} failed=${(failed.join(',') || '-').padEnd(24)} ` +
+            `${m.id.padEnd(7)} ${verdict(m, failed, incomplete, hit).padEnd(14)} failed=${(failed.join(',') || '-').padEnd(24)} ` +
             `expect=${m.expect.join(',').padEnd(12)} (${tally?.[0] ?? 'NO TALLY'}, ${Math.round((Date.now() - started) / 1000)}s)` +
             (stillContended ? '  ⚠ CONTENDED — result unreliable' : contended ? `  (re-ran ${contended}x after deadlock)` : ''),
         );
@@ -1291,13 +1317,22 @@ if (collateral.length) {
         + `not aimed at them and may not be on their path: ${collateral.sort().join(', ')}`,
     );
 }
-const missed = ran.filter((r) => !r.expect.every((id) => r.failed.includes(id)));
+const missed = ran.filter((r) => !r.expectMiss && !r.expect.every((id) => r.failed.includes(id)));
 if (missed.length) {
     console.log('\n  MISSES — read these, they are usually findings and not retries:');
     for (const m of missed) console.log(`    ${m.id}: expected ${m.expect.join(',')}, got ${m.failed.join(',') || 'nothing'}`);
+}
+const expectedMisses = ran.filter((r) => r.expectMiss && r.failed.length === 0);
+if (expectedMisses.length) {
+    console.log(`\n  expected to miss, and did (not counted as proven): ${expectedMisses.map((r) => r.id).join(', ')}`);
+}
+const unexpectedHits = ran.filter((r) => r.expectMiss && r.failed.length > 0);
+if (unexpectedHits.length) {
+    console.log('\n  UNEXPECTED HITS — declared to miss but felled checks; give them a real `expect`:');
+    for (const m of unexpectedHits) console.log(`    ${m.id}: got ${m.failed.join(',')}`);
 }
 const skipped = results.filter((r) => r.skipped);
 if (skipped.length) console.log(`\n  skipped: ${skipped.map((r) => `${r.id} (${r.skipped})`).join(', ')}`);
 
 if (existsSync(safety)) rmSync(safety, { recursive: true, force: true });
-process.exit(missed.length || skipped.length ? 1 : 0);
+process.exit(missed.length || unexpectedHits.length || skipped.length ? 1 : 0);
