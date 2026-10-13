@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import sql from 'mssql';
 
-import { MJCoreInstances, ShareTestedCheckoutPackages } from './one-mj-core.mjs';
+import { BizAppsDuplicates, MJCoreInstances, ShareTestedCheckoutPackages } from './one-mj-core.mjs';
 
 dotenv.config();
 
@@ -485,6 +485,35 @@ if (coreInstances.length > 1) {
             '',
             '  Sibling checkouts normally share this checkout\'s copy through test-harnesses/one-mj-core.mjs.',
             '  If sharing is not "installed" above, run on a Node that has module.registerHooks.',
+            '',
+        ].join(String.fromCharCode(10)),
+    );
+    process.exit(2);
+}
+
+/**
+ * ── SO IS A BIZAPPS PACKAGE LOADED TWICE ──────────────────────────────────────────────────────────
+ *
+ * Two copies of one `@mj-biz-apps/*` package mean two sets of its classes, and `BaseSingleton` keys an
+ * instance by class name in a global store, so `X.Instance` returns whichever copy was created first.
+ * Measured (sales#211): three `accounting-engine-base` copies, orders' 0.17.0 won, and accounting's
+ * journal-entry server failed on `FiscalYearStartFor is not a function` with nothing naming the cause.
+ * one-mj-core.mjs gives every requester the sibling checkout's build when its declared range accepts
+ * it; a copy left over means some requester's range refused it.
+ */
+const bizAppsDuplicates = BizAppsDuplicates();
+console.log(`  BizApps packages loaded more than once -> ${SHARING === 'installed' ? bizAppsDuplicates.length : 'not counted'}`);
+if (bizAppsDuplicates.length > 0) {
+    console.error(
+        [
+            '',
+            `✖ ${bizAppsDuplicates.length} @mj-biz-apps PACKAGE(S) ARE LOADED MORE THAN ONCE. Their singletons and`,
+            '  registrations split between the copies. Loaded from:',
+            '',
+            ...bizAppsDuplicates.flatMap(({ name, copies }) => [`    ${name}`, ...copies.map((c) => `      ${c}`)]),
+            '',
+            '  Each extra copy belongs to a package whose declared range does not accept the version the',
+            '  sibling checkout builds. Check that checkout out at a version inside that range, or raise the range.',
             '',
         ].join(String.fromCharCode(10)),
     );

@@ -19,22 +19,32 @@
  *
  * ── WHAT THIS DOES ──────────────────────────────────────────────────────────────────────────────
  *
- * A module resolve hook. When a file OUTSIDE this checkout imports `@memberjunction/*` or
- * `@mj-biz-apps/*`, the specifier resolves as follows:
+ * A module resolve hook, with a load hook that counts what it produced.
  *
- *   - `@memberjunction/*` always resolves from the packages that declare sales' dependencies
- *     (`packages/IntegrationTests` first), so a sibling gets the exact MJ copy sales' own code uses;
- *   - `@mj-biz-apps/*` resolves to sales' copy, or for a package sales does not install to the sibling
- *     checkout that builds it, but ONLY when that copy is the same version the sibling would have
- *     loaded. A sibling built against a newer BizApps package than sales installs keeps its own copy,
- *     because the older one can lack exports it imports (measured: orders 5.29.0 against sales'
- *     orders-entities 5.26.0).
+ *   - `@memberjunction/*`, imported by a file OUTSIDE this checkout, always resolves from the packages
+ *     that declare sales' dependencies (`packages/IntegrationTests` first), so a sibling gets the exact
+ *     MJ copy sales' own code uses.
+ *   - `@mj-biz-apps/*`, imported by ANY file, this checkout's included, resolves to the sibling checkout
+ *     that builds the package whenever the importing package's declared range accepts that version
+ *     (peerDependencies first, then dependencies, then devDependencies; a package that declares nothing
+ *     takes it). Failing that, a sibling's import takes sales' copy if its range accepts that, and
+ *     otherwise keeps its own.
  *
- * Files inside this checkout resolve normally, so a host where nothing lives outside it (a single
- * install, or a joined workspace) behaves exactly as before.
+ * Why the building checkout and not sales' copy: it is the newest on the host, and the range is the
+ * requester's own statement of what it works with. An equal-version rule (the first version of this
+ * file) left three `accounting-engine-base` copies in one process (0.21.2 from accounting, 0.20.0 from
+ * sales' install, 0.17.0 from orders' lockfile), and `BaseSingleton` keys its instance by class name in
+ * a global store, so `AccountingEngineBase.Instance` returned whichever copy was created first. Orders'
+ * 0.17.0 won and accounting's journal-entry server failed on `FiscalYearStartFor is not a function`
+ * (sales#211). Sales' own imports go through the same rule so that its older copy of a package a
+ * sibling builds is not loaded beside the sibling's.
  *
- * The hook also records every file `@memberjunction/core` resolved to, so a run can state how many
- * instances it loaded instead of a reader inferring it from a crash.
+ * On a host where nothing lives outside this checkout (a single install, or a joined workspace) no
+ * sibling builds anything, so resolution is unchanged.
+ *
+ * The hooks record every file `@memberjunction/core` resolved to, and every directory an
+ * `@mj-biz-apps/*` package was loaded from, so a run can state what it loaded instead of a reader
+ * inferring it from a crash.
  *
  * `module.registerHooks` runs in-thread and covers `import` and `require` alike. It needs Node 22.15
  * or 23.5+; on an older Node this reports that it could not install and the instance count says what
@@ -45,6 +55,8 @@ import * as nodeModule from 'node:module';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import semver from 'semver';
+
 const REPO_ROOT = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '..'));
 
 /** Sales' packages, in the order a downstream name is looked up. IntegrationTests owns the checks. */
@@ -52,6 +64,15 @@ const CONSUMERS = ['IntegrationTests', 'CoreEntitiesServer', 'Entities', 'Server
 
 /** Every file `@memberjunction/core` resolved to in this process. */
 const coreFiles = new Set();
+
+/** For each `@mj-biz-apps/*` package loaded, the directories it was loaded from, with their versions. */
+const bizAppsCopies = new Map();
+
+/** package.json contents by directory, null where there is none. Read once per directory. */
+const manifests = new Map();
+
+/** The sibling build of each `@mj-biz-apps/*` package, found once per name. */
+const siblingBuilds = new Map();
 
 let state = 'not installed';
 
@@ -68,8 +89,32 @@ function insideRepo(file) {
     return file === REPO_ROOT || file.startsWith(REPO_ROOT + sep);
 }
 
-/** The built entry of an `@mj-biz-apps/*` package in a sibling checkout, matched by package.json name. */
-function siblingEntry(name) {
+function manifestAt(dir) {
+    if (!manifests.has(dir)) {
+        let manifest = null;
+        try {
+            manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+        } catch {
+            // no package.json here, or an unreadable one
+        }
+        manifests.set(dir, manifest);
+    }
+    return manifests.get(dir);
+}
+
+/** The nearest named package above `file`: its directory and manifest, or null. */
+function owningPackage(file) {
+    let dir = dirname(file);
+    while (dir !== dirname(dir)) {
+        const manifest = manifestAt(dir);
+        if (manifest?.name) return { dir, manifest };
+        dir = dirname(dir);
+    }
+    return null;
+}
+
+/** The built entry and version of an `@mj-biz-apps/*` package in a sibling checkout, matched by name. */
+function findSiblingBuild(name) {
     const parent = dirname(REPO_ROOT);
     let repos = [];
     try {
@@ -81,17 +126,18 @@ function siblingEntry(name) {
         const pkgDir = join(parent, repo, 'packages');
         if (join(parent, repo) === REPO_ROOT || !existsSync(pkgDir)) continue;
         for (const sub of readdirSync(pkgDir, { withFileTypes: true }).filter((d) => d.isDirectory())) {
-            const manifest = join(pkgDir, sub.name, 'package.json');
-            try {
-                if (JSON.parse(readFileSync(manifest, 'utf8')).name !== name) continue;
-            } catch {
-                continue;
-            }
+            const manifest = manifestAt(join(pkgDir, sub.name));
+            if (manifest?.name !== name) continue;
             const entry = join(pkgDir, sub.name, 'dist', 'index.js');
-            return existsSync(entry) ? pathToFileURL(entry).href : null;
+            return existsSync(entry) ? { url: pathToFileURL(entry).href, version: manifest.version } : null;
         }
     }
     return null;
+}
+
+function siblingBuild(name) {
+    if (!siblingBuilds.has(name)) siblingBuilds.set(name, findSiblingBuild(name));
+    return siblingBuilds.get(name);
 }
 
 /** `@scope/name` of a specifier that may carry a subpath. */
@@ -125,22 +171,26 @@ function resolveFromTestedCheckout(specifier, context, nextResolve) {
     return anchor ? nextResolve(specifier, { ...context, parentURL: anchor }) : null;
 }
 
-/** The version of the package that owns `file`, found by walking up to its package.json. */
-function versionOf(file, name) {
-    let dir = dirname(file);
-    while (dir !== dirname(dir)) {
-        const manifest = join(dir, 'package.json');
-        if (existsSync(manifest)) {
-            try {
-                const pkg = JSON.parse(readFileSync(manifest, 'utf8'));
-                if (pkg.name === name) return pkg.version ?? null;
-            } catch {
-                return null;
-            }
-        }
-        dir = dirname(dir);
-    }
-    return null;
+/** The range the package owning `file` declares for `name`, or null when it declares none. */
+function declaredRange(file, name) {
+    const manifest = owningPackage(file)?.manifest;
+    return manifest?.peerDependencies?.[name] ?? manifest?.dependencies?.[name] ?? manifest?.devDependencies?.[name] ?? null;
+}
+
+/**
+ * Whether a requester that declared `range` can take `version`. No declaration accepts anything; a range
+ * semver cannot read (`workspace:*`) accepts nothing, which leaves a package inside its own workspace on
+ * its own resolution, the same file.
+ */
+function accepts(range, version) {
+    if (range === null) return true;
+    if (!version || !semver.validRange(range)) return false;
+    return semver.satisfies(version, range, { includePrerelease: true });
+}
+
+function versionAt(url) {
+    const file = realFile(url);
+    return file ? owningPackage(file)?.manifest.version ?? null : null;
 }
 
 /**
@@ -153,24 +203,20 @@ function resolveMJ(specifier, context, nextResolve) {
 }
 
 /**
- * BizApps: the shared copy only when it is the SAME VERSION the sibling would load. Measured: orders
- * 5.29.0's server classes import an export orders-entities 5.26.0 does not have, so pointing them at
- * sales' older copy breaks the load. A sibling newer than what sales installs keeps its own copy.
+ * BizApps: the sibling checkout that builds the package when the requester's range accepts it; for a
+ * sibling's import, sales' copy when its range accepts that; otherwise the requester's own. Subpath
+ * imports keep their own resolution, and the copy count reports it if that loads a second copy.
  */
-function resolveBizApps(specifier, context, nextResolve) {
-    const own = nextResolve(specifier, context);
-    const ownFile = realFile(own.url);
+function resolveBizApps(specifier, context, nextResolve, parentFile, fromSibling) {
     const name = packageName(specifier);
-    if (!ownFile) return own;
-    let shared = resolveFromTestedCheckout(specifier, context, nextResolve);
-    if (!shared && specifier === name) {
-        const url = siblingEntry(name);
-        if (url) shared = { url, shortCircuit: true };
+    const range = declaredRange(parentFile, name);
+    const built = specifier === name ? siblingBuild(name) : null;
+    if (built && accepts(range, built.version)) return { url: built.url, shortCircuit: true };
+    if (fromSibling) {
+        const shared = resolveFromTestedCheckout(specifier, context, nextResolve);
+        if (shared && accepts(range, versionAt(shared.url))) return shared;
     }
-    const sharedFile = shared && realFile(shared.url);
-    if (!sharedFile || sharedFile === ownFile) return own;
-    const ownVersion = versionOf(ownFile, name);
-    return ownVersion && ownVersion === versionOf(sharedFile, name) ? shared : own;
+    return nextResolve(specifier, context);
 }
 
 function resolve(specifier, context, nextResolve) {
@@ -179,8 +225,8 @@ function resolve(specifier, context, nextResolve) {
     let result;
     if (fromSibling && specifier.startsWith('@memberjunction/')) {
         result = resolveMJ(specifier, context, nextResolve);
-    } else if (fromSibling && specifier.startsWith('@mj-biz-apps/')) {
-        result = resolveBizApps(specifier, context, nextResolve);
+    } else if (parentFile && specifier.startsWith('@mj-biz-apps/')) {
+        result = resolveBizApps(specifier, context, nextResolve, parentFile, fromSibling);
     } else {
         result = nextResolve(specifier, context);
     }
@@ -191,8 +237,20 @@ function resolve(specifier, context, nextResolve) {
     return result;
 }
 
+/** Records the directory and version of every `@mj-biz-apps/*` package a module is loaded from. */
+function load(url, context, nextLoad) {
+    const file = url.startsWith('file:') ? fileURLToPath(url) : null;
+    const owner = file && owningPackage(file);
+    if (owner?.manifest.name.startsWith('@mj-biz-apps/')) {
+        const copies = bizAppsCopies.get(owner.manifest.name) ?? new Map();
+        copies.set(owner.dir, owner.manifest.version);
+        bizAppsCopies.set(owner.manifest.name, copies);
+    }
+    return nextLoad(url, context);
+}
+
 /**
- * Install the hook once per process. Call it before the first sibling package is imported; files this
+ * Install the hooks once per process. Call it before the first sibling package is imported; files this
  * checkout has already loaded keep the copies they resolved, which are the ones siblings are pointed at.
  */
 export function ShareTestedCheckoutPackages() {
@@ -201,7 +259,7 @@ export function ShareTestedCheckoutPackages() {
         state = `unavailable on Node ${process.versions.node} (module.registerHooks needs 22.15 or 23.5+)`;
         return state;
     }
-    nodeModule.registerHooks({ resolve });
+    nodeModule.registerHooks({ resolve, load });
     state = 'installed';
     return state;
 }
@@ -209,4 +267,11 @@ export function ShareTestedCheckoutPackages() {
 /** The files `@memberjunction/core` resolved to so far. More than one means more than one MJ core. */
 export function MJCoreInstances() {
     return [...coreFiles];
+}
+
+/** Every `@mj-biz-apps/*` package loaded from more than one directory, with each copy's version and path. */
+export function BizAppsDuplicates() {
+    return [...bizAppsCopies]
+        .filter(([, copies]) => copies.size > 1)
+        .map(([name, copies]) => ({ name, copies: [...copies].map(([dir, version]) => `${version} ${dir}`) }));
 }
