@@ -1,5 +1,28 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.14.0
+
+### Minor Changes
+
+- ced96e0: Closing a won deal links its order to the contract the close produced (`MJ_BizApps_Contracts: Contract Orders`), so contracts copies the contract's annual increase and carry-discount term to the order's subscriptions (bizapps-contracts#77). `IDownstreamSeam` gains `LinkOrderToContract`. A contracts release without order links is reported as a close warning, not a failure.
+
+### Patch Changes
+
+- ed649bb: A contract created at Closed Won now takes its Contract Type's renewal defaults for every renewal field the deal left unset. The deal's Auto-renew answer and any negotiated cancellation window or uplift still win.
+- 089e4d7: Closed Won finds the contract type a policy names by contracts' `Code` first and its `Name` second,
+  so a policy keeps working before and after contracts adds `ContractType.Code`, and a renamed type no
+  longer stops contract creation once the policy names its code.
+- 900cdb0: A deal line for a product the customer already holds now asks whether it is the next term of that subscription or a new subscription on its own dates, the same choice the order line offers, and saves the answer on the line (`OrderLine.SubscriptionAction`). Close Won refuses a deal while such a line has no answer, with one error per line in the `lines` section, because the close confirms the order and an unanswered line would otherwise be moved to start after the existing coverage ends. On a deal type that requires a renewal source, unanswered lines are answered "next term" inside the close instead of refused. Requires bizapps-orders with `FindUnansweredHeldLines`.
+- bb6025d: The daily forecast snapshot now writes rows. The forecast source factory defaulted to none and nothing replaced it outside tests, so every scheduled `Sales.CaptureForecastSnapshot` run reported success and wrote no `ForecastSnapshot` rows. The default now reads the `Sales: Forecast by Owner` query (exported as `DEFAULT_FORECAST_QUERY`), so each run writes one row per company, pipeline and owner for the current month. The no-source messages now say the default was replaced rather than that the queries do not exist.
+- b3691c6: Requires bizapps-orders 5.30.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.30.0`, `mj-app.json` `>=5.30.0`). That release exports `FindUnansweredHeldLines` and `HoldingSubscriberFor`, which the Close Won check uses. orders 5.30.0 needs MemberJunction 6.1.5, so the `@memberjunction/*` ranges and `mjVersionRange` floor at 6.1.5. The lockfile resolves bizapps-accounting 0.22.0, which orders-ng 5.30.0 requires.
+- c5d7b0b: Ship the `sales` and `sales:write` API scopes with an MJAPI ceiling, so an API key can be granted `Sales.CloseDeal` and `Sales.ReopenDeal` (#186).
+- 5d4c5f3: Correct comments that described contracts v1 and orders' old booked statuses. The close-won route probe reads contracts v2's `MustBeChild`; the two probes built on the removed customer XOR constraint are deleted. The mutation driver gives expected-miss mutants their own verdict instead of a vacuous OK, CI's changeset warning looks at the PR rather than the tree, and the Explorer harness preflight points at the QA guide instead of commands that do not exist.
+- Updated dependencies [65ae0b7]
+- Updated dependencies [ced96e0]
+- Updated dependencies [b3691c6]
+- Updated dependencies [9a57950]
+  - @mj-biz-apps/sales-entities@6.14.0
+
 ## 6.13.0
 
 ### Patch Changes
