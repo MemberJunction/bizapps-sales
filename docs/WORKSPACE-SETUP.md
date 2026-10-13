@@ -836,9 +836,14 @@ lock the same version (four on 2026-10-09: sales, accounting 0.21.2, orders 5.29
 on 6.1.5), and checks fail with errors such as `IsFieldReadableByUser is not a function` or
 `BindProvider is not a function`. `test-harnesses/one-mj-core.mjs` prevents it: the integration runner,
 `seed-demo-lines.mjs` and every harness that uses `importSibling` resolve a sibling's `@memberjunction/*`
-imports from this checkout, and its `@mj-biz-apps/*` imports from this checkout (or the sibling that builds
-the package) when the version matches. The runner prints `MJ core instances -> 1` and stops before any
-check if it counts more than one. It needs Node 22.15 or 23.5+ (`module.registerHooks`).
+imports from this checkout. Every `@mj-biz-apps/*` import, this checkout's own included, resolves to the
+sibling checkout that builds the package whenever the importing package's declared range accepts that
+version, so each BizApps package loads once. Without that, one package can load at several versions (three
+`accounting-engine-base` copies on 2026-10-09), and a singleton such as `AccountingEngineBase.Instance`
+returns whichever copy was created first. The runner prints `MJ core instances -> 1` and
+`BizApps packages loaded more than once -> 0`, and stops before any check if either is higher, naming the
+copies. A copy left over means a package's declared range does not accept the version the sibling builds:
+check that sibling out at a version inside the range. It needs Node 22.15 or 23.5+ (`module.registerHooks`).
 
 **A regenerated class manifest can want a package the host has not linked.** MJAPI's and MJExplorer's
 `prestart` run `mj codegen manifest`, which walks whatever is linked in the workspace *at that moment* and
