@@ -40,6 +40,7 @@
 import {
     BaseEntity,
     LogError,
+    LogStatus,
     Metadata,
     RunView,
     type EntityInfo,
@@ -216,7 +217,8 @@ export class LiveContractsSeam {
             contract.Set('HasModifications', input.StandardAgreementModified === true);
 
             this.setProvenance(contract, input.DealID);
-            this.setNegotiatedTerms(contract, input);
+            const stated = this.setNegotiatedTerms(contract, input);
+            await this.seedTypeDefaults(contract, stated);
 
             const template = this.templateID(input);
             if (template) {
@@ -276,21 +278,22 @@ export class LiveContractsSeam {
      * today's standard". Only the NULL survives a later change to policy. So a null override is passed
      * through as null and never filled in here.
      *
-     * ── WHERE THE DEFAULTS LIVE, AND WHEN THEY APPLY ────────────────────────────────────────────
+     * ── WHERE THE STANDARD COMES FROM ───────────────────────────────────────────────────────────
      *
-     * Sales' descriptions say the standards (uplift, notice period) are "owned by the contracts
-     * ContractType". Contracts v0.2 added them there (`DefaultRenewalNoticeDays`,
-     * `DefaultAnnualIncreasePercent` and friends), but as a FORM PREFILL: they are copied into an
-     * unsaved contract when a user picks its type, and nothing reads them at save time. A contract
-     * this seam creates therefore keeps the nulls it is given.
+     * The standard lives on contracts' `ContractType` (`DefaultAutoRenew`, `DefaultRenewalNoticeDays`,
+     * `DefaultCancellationWindowDays`, `DefaultAnnualIncreasePercent`). This method writes only what the
+     * deal states and returns those field names; `seedTypeDefaults()` then has contracts fill the rest
+     * from the type. Sales never copies a default value itself. See D-9.
      *
-     * This seam still populates NOTHING it was not told. Copying the type's defaults here would put
-     * contracts' seeding rule in sales; if a close-won contract should carry them, contracts applies
-     * them. See D-9.
+     * @returns the renewal fields this deal stated, which seeding must not overwrite.
      */
-    private setNegotiatedTerms(contract: BaseEntity, input: CreateFromDealInput): void {
+    private setNegotiatedTerms(contract: BaseEntity, input: CreateFromDealInput): string[] {
+        const stated: string[] = [];
+
+
         /** Stated on the deal as a fact about the paper, and stated the same way on the contract. */
         contract.Set('AutoRenew', input.AutoRenew === true);
+        stated.push('AutoRenew');
 
         /**
          * `CancellationNoticeDaysOverride` → `CancellationWindowDays`, and the names differing is not
@@ -300,15 +303,54 @@ export class LiveContractsSeam {
          * `RenewalNoticeDays` is deliberately left alone. Contracts' own description warns that it is
          * "NOT the same field as CancellationWindowDays even though many agreements set them equal —
          * conflating them silently is how a notice obligation gets missed". Sales holds no equivalent,
-         * so it says nothing rather than reusing the number it does have.
+         * so it says nothing rather than reusing the number it does have, and the type's default fills it.
          */
         if (input.CancellationNoticeDaysOverride != null) {
             contract.Set('CancellationWindowDays', input.CancellationNoticeDaysOverride);
+            stated.push('CancellationWindowDays');
         }
 
         const uplift = this.annualIncrease(input.AnnualIncreasePctOverride);
         if (uplift != null) {
             contract.Set('AnnualIncreasePercent', uplift);
+            stated.push('AnnualIncreasePercent');
+        }
+        return stated;
+    }
+
+    /**
+     * Have contracts fill the renewal fields the deal left unset from the contract's type.
+     *
+     * Contracts applies its type defaults only when the creator asks: its form does it on a type pick,
+     * and nothing does it at save time (bizapps-contracts#97). The documented order for a caller outside
+     * the form is: set the type and the known fields, mark each known field as edited, seed, save.
+     *
+     * `AutoRenew` is always marked. The deal's checkbox is a statement about the paper, and a No from it
+     * is an answer, not a gap for the type's default to fill.
+     *
+     * The methods are reached by name, not by import: sales reads contracts through entity names only,
+     * so it still installs where contracts is absent or older. If they are missing or the seed fails, the
+     * contract saves with the deal's terms alone, which is what it did before this call existed.
+     */
+    private async seedTypeDefaults(contract: BaseEntity, stated: readonly string[]): Promise<void> {
+        const seedable = contract as BaseEntity & {
+            MarkRenewalFieldEdited?: (field: string) => void;
+            SeedRenewalDefaultsFromType?: () => Promise<boolean>;
+        };
+        if (
+            typeof seedable.MarkRenewalFieldEdited !== 'function' ||
+            typeof seedable.SeedRenewalDefaultsFromType !== 'function'
+        ) {
+            LogStatus('LiveContractsSeam: this contracts build has no renewal-default seeding; saving the deal terms only.');
+            return;
+        }
+        try {
+            for (const field of stated) {
+                seedable.MarkRenewalFieldEdited(field);
+            }
+            await seedable.SeedRenewalDefaultsFromType();
+        } catch (err) {
+            LogError(`LiveContractsSeam: seeding renewal defaults from the contract type failed; saving the deal terms only: ${err}`);
         }
     }
 

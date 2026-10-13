@@ -832,6 +832,17 @@ const MUTATIONS = [
       to: "contract.Set('HasModifications', false);",
       note: 'the rep answered and the contract ignores it' },
 
+    // CT8's two mutants, one per claim. Without the seed, the fields the deal left unset stay NULL;
+    // without the AutoRenew mark, the type's Yes overwrites the deal's No.
+    { id: 'M-CT4', file: LCS, expect: ['CT8'],
+      from: '            await seedable.SeedRenewalDefaultsFromType();',
+      to: '            void seedable;',
+      note: 'the seam never asks contracts for the type defaults' },
+    { id: 'M-CT5', file: LCS, expect: ['CT8'],
+      from: "        stated.push('AutoRenew');",
+      to: '',
+      note: "the deal's Auto-renew answer is left open for the type default to overwrite" },
+
     // THE SECOND HOP of the same wiring, and a different question: does anything notice if the close
     // stops REPORTING the flag? First time it was asked, NOTHING DID -- fifty checks green while a
     // negotiated agreement reached finance marked standard. CT6 was written for this mutant.

@@ -37,7 +37,6 @@ as a written question rather than becoming a GitHub issue.
 | DN-27 | Is a per-deal attribution-coverage report worth its own query? | Product |
 | DN-28 | Should a parked status (`On Hold`) survive a later stage move? | Product |
 | D-5 | Confirm that every stage move appends a `DealStageEvent`, and decide whether an importer gets an audited way to suppress it. | Product |
-| D-9 | Should a contract created at Closed Won take its type's renewal defaults? | Product, with contracts |
 | D-11 | Is a renewal a new child contract, or one that supersedes the original? | Contracts |
 | D-12 | Add `ContractType.Code`, so the seam stops matching on `Name`. | Contracts, [bizapps-contracts#96](https://github.com/MemberJunction/bizapps-contracts/issues/96) |
 | D-13 | Seed `TaskTypeStatus` for Contract Processing once finance confirms its steps? | Finance |
@@ -90,7 +89,7 @@ records a trap or a measurement rather than a decision.
 | D-5 | Open | The stage-event append on every write path |
 | D-7 | Resolved | The contracts seam had nowhere to run |
 | D-8 | Resolved | Task-type metadata pushes once tasks has migrated |
-| D-9 | Open | Renewal defaults for a contract created at Closed Won |
+| D-9 | Resolved | Renewal defaults for a contract created at Closed Won |
 | D-10 | Resolved | Contracts chooses the current template |
 | D-11 | Open | What shape a renewal takes |
 | D-12 | Open | `ContractType` has no `Code` |
@@ -713,7 +712,7 @@ unaffected.
 
 ---
 
-## D-9 · OPEN: should a contract created at Closed Won take its type's renewal defaults?
+## D-9 · RESOLVED: a contract created at Closed Won takes its type's renewal defaults
 
 Sales' renewal columns are named `…Override` because NULL means *"use the standard"*, a different fact
 from *"we negotiated a number that equals today's standard"*; only the NULL survives a later change to
@@ -726,8 +725,15 @@ Contracts added `DefaultAutoRenew`, `DefaultRenewalNoticeDays`, `DefaultCancella
 a type, and nothing applies them at save time. The seam does not call it, so a contract created at
 Closed Won still has NULL renewal terms unless the deal negotiated them.
 
-**What is needed:** a ruling on whether the seam seeds those defaults for a contract it creates. The
-unmounted deal workspace still hardcodes placeholders for the same standards
+**Ruling (bizapps-contracts#97):** yes, and the caller asks for it. Contracts keeps seeding out of its
+server save, because a form save reaches the server without the form's record of which fields the user
+answered, and seeding there would overwrite those answers. The seam writes what the deal states, marks
+those fields (always including `AutoRenew`, since the deal's checkbox is an answer), then calls
+`SeedRenewalDefaultsFromType()`, so the type fills only what the deal left unset. Sales still copies no
+default value itself, and a null override still means "use the standard". `close-won-contract.CT8`
+asserts both halves.
+
+The unmounted deal workspace still hardcodes placeholders for the same standards
 (`STANDARD_ANNUAL_INCREASE_PCT = 5` and `STANDARD_CANCELLATION_NOTICE_DAYS = 90` in
 `deal-workspace.types.ts`).
 
