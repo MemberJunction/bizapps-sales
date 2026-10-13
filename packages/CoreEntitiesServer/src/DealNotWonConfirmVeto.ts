@@ -39,7 +39,7 @@
  * @module @mj-biz-apps/sales-core-entities-server
  */
 
-import { RunView, type UserInfo } from '@memberjunction/core';
+import { LogError, RunView, type UserInfo } from '@memberjunction/core';
 import {
     RegisterOrderConfirmVeto,
     type OrderConfirmContext,
@@ -107,6 +107,11 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
             user ?? undefined,
         );
         if (!result.Success) {
+            // The throw is the seam's "could not tell", which the caller turns into a refusal naming the
+            // fault. Without this line that refusal is the ONLY trace: the host that refused the confirm
+            // logs nothing, so the operator sees a blocked confirm and no reason for it. The sibling veto
+            // logs here for the same reason.
+            LogError(`DealNotWonConfirmVeto: could not read the deal for order ${orderID}: ${result.ErrorMessage}`);
             throw new Error(`the deal behind this order could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
         }
         return (result.Results ?? []).map((row) => ({
@@ -147,6 +152,7 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
             user ?? undefined,
         );
         if (!result.Success) {
+            LogError(`DealNotWonConfirmVeto: could not read status ids ${list}: ${result.ErrorMessage}`);
             throw new Error(`the deal's status could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
         }
         return new Set((result.Results ?? []).filter((row) => row.IsWon === true).map((row) => row.ID));

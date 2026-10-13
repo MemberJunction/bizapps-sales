@@ -1,6 +1,22 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { RunView } from '@memberjunction/core';
-import { DealNotWonConfirmVeto } from '../DealNotWonConfirmVeto.js';
+
+/**
+ * `LogError` is captured rather than left to the console, so a failed read can be ASSERTED to reach
+ * the log and not merely be thrown. The module is mocked the way the sibling veto's suite mocks it,
+ * and the real `RunView` class is spread through untouched — this file patches its prototype, so it
+ * has to be the same class object the subject constructs.
+ *
+ * Both imports are dynamic for the usual reason: the hoisted factory below runs when the mocked
+ * module is first imported, and a static import at the top would reach `logged` before it exists.
+ */
+const logged: string[] = [];
+vi.mock('@memberjunction/core', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@memberjunction/core')>();
+    return { ...actual, LogError: (message: unknown) => { logged.push(String(message)); } };
+});
+
+const { RunView } = await import('@memberjunction/core');
+const { DealNotWonConfirmVeto } = await import('../DealNotWonConfirmVeto.js');
 
 /**
  * AN ORDER WHOSE DEAL IS NOT WON MAY NOT BE CONFIRMED (bc-aidp-next-golive#323).
@@ -21,7 +37,7 @@ const WON = 'ssssssss-0000-4000-8000-00000000win1';
 const OPEN = 'ssssssss-0000-4000-8000-0000000open1';
 
 const original = RunView.prototype.RunView;
-afterEach(() => { RunView.prototype.RunView = original; });
+afterEach(() => { RunView.prototype.RunView = original; logged.length = 0; });
 
 type Deal = { ID: string; DealNumber: string | null; DealStatusTypeID: string | null };
 
@@ -31,8 +47,19 @@ type Deal = { ID: string; DealNumber: string | null; DealStatusTypeID: string | 
  */
 function withData(deal: Deal | Deal[] | null, statuses: Record<string, boolean>, fail?: 'deal' | 'status') {
     const asked: string[] = [];
-    RunView.prototype.RunView = (async ({ EntityName, ExtraFilter }: { EntityName: string; ExtraFilter: string }) => {
+    /**
+     * The WHOLE argument object and the user, not just the two fields the branching needs.
+     *
+     * While this captured only `EntityName` and `ExtraFilter`, four mutations lived through the suite:
+     * deleting `OrderBy: 'ID'`, dropping `.trim()` on `DealNumber`, removing the quote-doubling in
+     * `SafeID` and replacing `user ?? undefined` with a bare `undefined`. Each is a property the
+     * header argues for, and none of them was reachable from an assertion.
+     */
+    const calls: { args: Record<string, unknown>; user: unknown }[] = [];
+    RunView.prototype.RunView = (async (args: { EntityName: string; ExtraFilter: string }, user: unknown) => {
+        const { EntityName, ExtraFilter } = args;
         asked.push(EntityName);
+        calls.push({ args, user });
         if (EntityName.includes('Deal Status Types')) {
             if (fail === 'status') return { Success: false, ErrorMessage: 'status view is down', Results: [] };
             // Handles both `ID = 'x'` and the batched `ID IN ('x', 'y')`.
@@ -45,7 +72,7 @@ function withData(deal: Deal | Deal[] | null, statuses: Record<string, boolean>,
         if (fail === 'deal') return { Success: false, ErrorMessage: 'deal view is down', Results: [] };
         return { Success: true, Results: deal ? (Array.isArray(deal) ? deal : [deal]) : [] };
     }) as unknown as typeof RunView.prototype.RunView;
-    return { asked };
+    return { asked, calls };
 }
 
 const ctx = { OrderHeaderID: ORDER, FromStatus: 'Quoted', ContextUser: null };
@@ -196,5 +223,92 @@ describe('when a read fails', () => {
     it('throws rather than allowing, when the status cannot be read', async () => {
         withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: WON }, {}, 'status');
         await expect(veto().MayConfirm(ctx)).rejects.toThrow(/status could not be read/);
+    });
+});
+
+/**
+ * WHAT THE READS THEMSELVES PROMISE.
+ *
+ * The cases above all assert the VERDICT, which leaves the arguments behind it free to drift: four
+ * mutations to this file's subject survived the suite because nothing looked at them. These do.
+ * Each one pins a property the header argues for, and each fails if that property is removed.
+ */
+describe('the reads the veto makes', () => {
+    it('orders the deal read by ID, because the refusal names deals in a stable order', async () => {
+        const { calls } = withData(
+            [
+                { ID: 'dddddddd-0000-4000-8000-000000000002', DealNumber: 'DEAL-B', DealStatusTypeID: OPEN },
+                { ID: DEAL, DealNumber: 'DEAL-A', DealStatusTypeID: OPEN },
+            ],
+            { [OPEN]: false },
+        );
+        await veto().MayConfirm(ctx);
+        const dealRead = calls.find((c) => String(c.args.EntityName).includes('Deals'));
+        expect(dealRead, 'the deal read must happen at all').toBeTruthy();
+        expect(dealRead!.args.OrderBy, 'without an ORDER BY a view promises nothing twice running').toBe('ID');
+    });
+
+    it('forwards the signed-in user to every read, so the rows are the ones that user may see', async () => {
+        const user = { ID: 'user-1', Name: 'A Rep' } as never;
+        const { calls } = withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: OPEN }, { [OPEN]: false });
+        await veto().MayConfirm({ OrderHeaderID: ORDER, FromStatus: 'Quoted', ContextUser: user });
+        expect(calls.length, 'both reads happen').toBe(2);
+        for (const c of calls) {
+            expect(c.user, 'a read made as nobody is not the same read').toBe(user);
+        }
+    });
+
+    it('passes undefined rather than null when there is no user, which is what RunView expects', async () => {
+        const { calls } = withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: OPEN }, { [OPEN]: false });
+        await veto().MayConfirm(ctx);
+        expect(calls[0].user).toBeUndefined();
+    });
+
+    it('doubles a quote in the order id instead of building a filter that breaks', async () => {
+        const { calls } = withData(null, {});
+        await veto().MayConfirm({ OrderHeaderID: "abc' OR 1=1 --", FromStatus: 'Quoted', ContextUser: null });
+        expect(calls[0].args.ExtraFilter).toContain("abc'' OR 1=1 --");
+    });
+
+    it('trims a padded deal number, so the refusal reads as the rep would write it', async () => {
+        withData({ ID: DEAL, DealNumber: '  DEAL-002148  ', DealStatusTypeID: OPEN }, { [OPEN]: false });
+        const refusal = (await veto().MayConfirm(ctx)) ?? '';
+        expect(refusal).toContain('Deal DEAL-002148 is');
+        expect(refusal, 'the padding must not survive into the sentence').not.toContain('  DEAL-002148');
+    });
+
+    it('falls back to the id when the deal number is only whitespace', async () => {
+        withData({ ID: DEAL, DealNumber: '   ', DealStatusTypeID: OPEN }, { [OPEN]: false });
+        const refusal = (await veto().MayConfirm(ctx)) ?? '';
+        expect(refusal, 'a blank name is no name — the id is what the rep can search on').toContain(DEAL);
+    });
+});
+
+/**
+ * A REFUSAL CAUSED BY AN UNREADABLE DEAL LEAVES A TRACE ON THE HOST THAT REFUSED IT.
+ *
+ * The throw becomes a refusal in Orders, so without a line here the Sales host that actually failed
+ * the read logs nothing: an operator sees a confirm blocked by "a check from another app could not
+ * be completed" and has nowhere to look for the cause. The sibling veto logs for the same reason.
+ */
+describe('a read failure reaches the log, not only the caller', () => {
+    it('logs the deal read failure, naming the order', async () => {
+        withData(null, {}, 'deal');
+        await expect(veto().MayConfirm(ctx)).rejects.toThrow();
+        expect(logged.join(' ')).toContain('DealNotWonConfirmVeto');
+        expect(logged.join(' '), 'the order is the thing to look up').toContain(ORDER);
+        expect(logged.join(' '), 'and the underlying error, not just that one happened').toContain('deal view is down');
+    });
+
+    it('logs the status read failure too', async () => {
+        withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: WON }, {}, 'status');
+        await expect(veto().MayConfirm(ctx)).rejects.toThrow();
+        expect(logged.join(' ')).toContain('status view is down');
+    });
+
+    it('logs NOTHING on an ordinary refusal — that is a verdict, not a fault', async () => {
+        withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: OPEN }, { [OPEN]: false });
+        expect(await veto().MayConfirm(ctx)).not.toBeNull();
+        expect(logged, 'a refused confirm is the veto working, and must not read as an error').toEqual([]);
     });
 });
