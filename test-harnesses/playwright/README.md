@@ -168,10 +168,12 @@ mutation stays in the working tree and in `dist/`**.
 It has happened three times. Each looked like a puzzling test failure rather than a stranded edit,
 because `git diff` on a file nobody remembers touching is not where anyone looks first.
 
-**The driver now cleans up after itself** (`test-harnesses/mutation-run.mjs`). Ctrl-C, SIGTERM or
-Ctrl-Break kills the build/suite's process tree, restores the source and rebuilds; a second Ctrl-C skips
-the rebuild. A kill no handler sees (SIGKILL, a closed window) is repaired by the **next** run, which
-restores and rebuilds before measuring anything.
+**The driver now cleans up after itself** (`test-harnesses/mutation-run.mjs`). Ctrl-C, SIGTERM, closing
+the terminal or Ctrl-Break kills the build/suite's process tree, restores the source and rebuilds; a
+second Ctrl-C skips the rebuild. A kill no handler sees (SIGKILL, or a Windows console window closed
+before the rebuild finishes) is repaired by the **next** run, which restores and rebuilds before
+measuring anything. A marker that cannot be read, or that names paths outside the run's own files,
+stops the start with instructions instead of being acted on.
 
 **`.mutate-checks.run.json` at the repo root means a run may have a mutant applied.** It names the PID
 that owns it. If that PID is alive, the run is live: leave the tree alone (the driver itself refuses to

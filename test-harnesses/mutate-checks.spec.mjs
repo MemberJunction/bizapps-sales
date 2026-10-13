@@ -15,6 +15,10 @@
  * bizapps-common checked a grandchild a few milliseconds after the driver exited and failed 1 run in
  * 5 locally and 1 in 2 in CI.
  *
+ * OWN TEMP FOLDER. Each fixture's driver gets `TMPDIR` (and Windows' `TEMP`/`TMP`) inside the fixture,
+ * so the leak check and the cleanup look only at backups this test made. Watching the shared temp
+ * folder for new `mj-mutate-*` folders deleted a real run's backups when one started mid-test.
+ *
  * Run: node --test test-harnesses/mutate-checks.spec.mjs
  */
 import { test } from 'node:test';
@@ -29,9 +33,9 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..');
 const MARKER = '.mutate-checks.run.json';
-const SIGNAL_EXIT = { SIGINT: 130, SIGTERM: 143 };
+const SIGNAL_EXIT = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
 const NO_POSIX_SIGNALS = process.platform === 'win32'
-    && 'Windows cannot deliver SIGINT/SIGTERM to another process; Ctrl-C there is checked by hand';
+    && 'Windows cannot deliver SIGINT/SIGTERM/SIGHUP to another process; Ctrl-C there is checked by hand';
 
 /** The source files the mutants edit, read from the driver's own `--list`. */
 function mutantFiles() {
@@ -80,6 +84,7 @@ if (existsSync('hang')) {
 function makeFixture({ hang = true } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'mutate-checks-spec-'));
     mkdirSync(join(root, 'test-harnesses'));
+    mkdirSync(join(root, 'tmp'));
     for (const name of ['mutate-checks.mjs', 'mutation-run.mjs']) cpSync(join(HERE, name), join(root, 'test-harnesses', name));
     for (const file of FILES) {
         mkdirSync(dirname(join(root, file)), { recursive: true });
@@ -101,10 +106,14 @@ function fingerprintOf(root) {
 
 /** With no IDs the driver runs every mutant, so a test waits for whichever applies first. */
 function startDriver(root, ids = []) {
+    const tmp = join(root, 'tmp');
     const child = spawn(process.execPath, [join(root, 'test-harnesses', 'mutate-checks.mjs'), ...ids], {
         cwd: root,
         env: {
             ...process.env,
+            TMPDIR: tmp,
+            TEMP: tmp,
+            TMP: tmp,
             MUTATE_CHECKS_BUILD_COMMAND: `"${process.execPath}" build.mjs`,
             MUTATE_CHECKS_TEST_COMMAND: `"${process.execPath}" suite.mjs`,
         },
@@ -126,17 +135,19 @@ async function waitFor(what, predicate, timeoutMs = 15_000) {
     assert.fail(`timed out waiting for ${what}`);
 }
 
-async function waitForExit(child, timeoutMs = 15_000) {
+async function withDeadline(promise, what, timeoutMs = 15_000) {
     let timer;
     const timeout = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`driver did not exit:\n${child.output}`)), timeoutMs);
+        timer = setTimeout(() => reject(new Error(`timed out waiting for ${typeof what === 'function' ? what() : what}`)), timeoutMs);
     });
     try {
-        return await Promise.race([child.exited, timeout]);
+        return await Promise.race([promise, timeout]);
     } finally {
         clearTimeout(timer);
     }
 }
+
+const waitForExit = (child, timeoutMs) => withDeadline(child.exited, () => `the driver to exit:\n${child.output}`, timeoutMs);
 
 function isAlive(pid) {
     try {
@@ -150,7 +161,7 @@ function isAlive(pid) {
 const readPids = (root) => JSON.parse(readFileSync(join(root, 'pids.json'), 'utf8'));
 const builds = (root) => (existsSync(join(root, 'builds.log')) ? readFileSync(join(root, 'builds.log'), 'utf8').trim().split('\n') : []);
 const readMarker = (root) => JSON.parse(readFileSync(join(root, MARKER), 'utf8'));
-const backupDirs = () => new Set(readdirSync(tmpdir()).filter((name) => name.startsWith('mj-mutate-')));
+const backupDirs = (fixture) => readdirSync(join(fixture.root, 'tmp')).filter((name) => name.startsWith('mj-mutate-'));
 
 /** Waits until a mutant is on disk AND the suite has started against it. */
 async function waitForSuite(fixture) {
@@ -159,20 +170,18 @@ async function waitForSuite(fixture) {
 }
 
 /** Best effort, so a failing test does not leave a sleeping process on the machine. */
-function cleanUp(fixture, dirsBefore) {
+function cleanUp(fixture) {
     if (existsSync(join(fixture.root, 'pids.json'))) {
         for (const pid of Object.values(readPids(fixture.root))) {
             try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
         }
     }
-    for (const name of backupDirs()) if (!dirsBefore.has(name)) rmSync(join(tmpdir(), name), { recursive: true, force: true });
     rmSync(fixture.root, { recursive: true, force: true });
 }
 
 for (const signal of Object.keys(SIGNAL_EXIT)) {
     test(`${signal} mid-suite kills the process tree, restores the source, rebuilds, and leaves nothing behind`, { skip: NO_POSIX_SIGNALS }, async () => {
         const fixture = makeFixture();
-        const dirsBefore = backupDirs();
         try {
             const driver = startDriver(fixture.root);
             await waitForSuite(fixture);
@@ -186,17 +195,15 @@ for (const signal of Object.keys(SIGNAL_EXIT)) {
             await waitFor('the grandchild to die', () => !isAlive(grandchild), 5_000);
             assert.equal(builds(fixture.root).at(-1), `done ${fixture.original}`, 'the last build must be a completed rebuild of the restored source');
             assert.ok(!existsSync(join(fixture.root, MARKER)), 'the run marker must be removed');
-            const leaked = [...backupDirs()].filter((name) => !dirsBefore.has(name));
-            assert.deepEqual(leaked, [], `backup dir(s) leaked: ${leaked.join(', ')}`);
+            assert.deepEqual(backupDirs(fixture), [], 'no backup dir may be left behind');
         } finally {
-            cleanUp(fixture, dirsBefore);
+            cleanUp(fixture);
         }
     });
 }
 
 test('a second signal skips the rebuild, keeps the marker, and the next run finishes the rebuild', { skip: NO_POSIX_SIGNALS }, async () => {
     const fixture = makeFixture();
-    const dirsBefore = backupDirs();
     try {
         writeFileSync(join(fixture.root, 'slow-rebuild'), '');
         const driver = startDriver(fixture.root);
@@ -224,13 +231,12 @@ test('a second signal skips the rebuild, keeps the marker, and the next run fini
         assert.equal(builds(fixture.root)[1], `done ${fixture.original}`, 'the next run rebuilds the restored source before its first mutant');
         assert.ok(!existsSync(join(fixture.root, MARKER)), 'the marker must be gone once the next run finishes');
     } finally {
-        cleanUp(fixture, dirsBefore);
+        cleanUp(fixture);
     }
 });
 
 test('a run killed past any handler is restored and rebuilt by the next start', async () => {
     const fixture = makeFixture();
-    const dirsBefore = backupDirs();
     try {
         const driver = startDriver(fixture.root);
         await waitForSuite(fixture);
@@ -254,13 +260,12 @@ test('a run killed past any handler is restored and rebuilt by the next start', 
         assert.equal(fingerprintOf(fixture.root), fixture.original);
         assert.ok(!existsSync(join(fixture.root, MARKER)));
     } finally {
-        cleanUp(fixture, dirsBefore);
+        cleanUp(fixture);
     }
 });
 
 test('a marker naming a live PID refuses to run and changes nothing', async () => {
     const fixture = makeFixture();
-    const dirsBefore = backupDirs();
     try {
         const live = { pid: process.pid, startedAt: 'earlier', safety: null, mutant: 'M-LIVE', file: join(fixture.root, FILES[0]), backup: null, distDirty: true };
         writeFileSync(join(fixture.root, MARKER), JSON.stringify(live));
@@ -274,6 +279,68 @@ test('a marker naming a live PID refuses to run and changes nothing', async () =
         assert.equal(fingerprintOf(fixture.root), fixture.original);
         assert.deepEqual(builds(fixture.root), [], 'nothing may build under a live run');
     } finally {
-        cleanUp(fixture, dirsBefore);
+        cleanUp(fixture);
     }
 });
+
+test('two drivers started together: exactly one runs, the other refuses', { skip: NO_POSIX_SIGNALS }, async () => {
+    const fixture = makeFixture();
+    const drivers = [startDriver(fixture.root), startDriver(fixture.root)];
+    try {
+        const first = Promise.race(drivers.map((driver) => driver.exited.then(({ code }) => ({ driver, code }))));
+        const refused = await withDeadline(first, 'one of the two drivers to refuse -- both are running');
+        assert.equal(refused.code, 2, refused.driver.output);
+        assert.match(refused.driver.output, /another mutation run is live in this tree|another driver keeps claiming/);
+
+        const runner = drivers.find((driver) => driver !== refused.driver);
+        await waitForSuite(fixture);
+        runner.kill('SIGKILL');
+        await waitForExit(runner);
+        assert.equal(backupDirs(fixture).length, 1, 'only the driver that runs may make a backup dir');
+    } finally {
+        // When both ran, SIGTERM lets each kill its own tree; cleanUp only knows the last suite's PIDs.
+        for (const driver of drivers) if (driver.exitCode === null) driver.kill('SIGTERM');
+        await Promise.allSettled(drivers.map((driver) => waitForExit(driver)));
+        cleanUp(fixture);
+    }
+});
+
+const deadRun = (fields) => JSON.stringify({ pid: 999_999, startedAt: 'earlier', safety: null, mutant: null, file: null, backup: null, distDirty: false, ...fields });
+
+/**
+ * Every untrusted path points at a DECOY inside the fixture, never at a real folder: a driver whose
+ * checks are broken copies over or deletes what the marker names, and this test must survive that.
+ * The one path that must sit outside the fixture, the outside file, is paired with a backup that does
+ * not exist, so even a broken driver stops before it copies anything there.
+ */
+const DECOY = 'decoy';
+for (const [what, marker, message] of [
+    ['a half-written marker', () => '{"pid": 1', /cannot be read/],
+    ['an empty marker', () => '', /cannot be read/],
+    ['a marker naming a file outside the repo', (root) => deadRun({ mutant: 'M-X', file: join(root, '..', DECOY), backup: join(root, 'tmp', 'mj-mutate-x', 'b') }), /source file outside this repo/],
+    ['a marker naming a backup outside a mj-mutate- folder', (root) => deadRun({ mutant: 'M-X', file: FILES[0], backup: join(root, DECOY, 'b') }), /backup outside a mj-mutate-\* folder/],
+    ['a marker naming a temp folder of another name', (root) => deadRun({ safety: join(root, DECOY) }), /temp folder not called mj-mutate-\*/],
+]) {
+    test(`${what} stops the start with a message and changes nothing`, async () => {
+        const fixture = makeFixture();
+        try {
+            mkdirSync(join(fixture.root, DECOY));
+            writeFileSync(join(fixture.root, DECOY, 'b'), 'decoy');
+            const content = marker(fixture.root);
+            writeFileSync(join(fixture.root, MARKER), content);
+            const driver = startDriver(fixture.root);
+            const { code } = await waitForExit(driver);
+
+            assert.equal(code, 3, driver.output);
+            assert.match(driver.output, message);
+            assert.match(driver.output, /then delete the marker/);
+            assert.equal(readFileSync(join(fixture.root, MARKER), 'utf8'), content, 'the marker is left for a person to read');
+            assert.equal(fingerprintOf(fixture.root), fixture.original);
+            assert.deepEqual(builds(fixture.root), [], 'nothing may build');
+            assert.deepEqual(backupDirs(fixture), [], 'a refused start makes no backup dir');
+            assert.equal(readFileSync(join(fixture.root, DECOY, 'b'), 'utf8'), 'decoy', 'the decoy is untouched');
+        } finally {
+            cleanUp(fixture);
+        }
+    });
+}
