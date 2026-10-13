@@ -82,10 +82,10 @@ export default async function globalSetup(): Promise<void> {
   if (!meta.ok) {
     throw new Error(
       `\nMJAPI is up but is not serving this app's metadata correctly.\n  ${meta.detail}\n\n` +
-        `The usual cause is MJAPI having booted BEFORE the schema/metadata landed — restart it:\n` +
-        `      npm run start:api\n` +
-        `If that does not fix it, the database may be missing the migration or the seeds:\n` +
-        `      scripts/rebuild-db.sh && npm run mj:codegen && scripts/append-codegen.sh && npm run mj -- sync push --dir metadata\n`,
+        `The usual cause is MJAPI having booted BEFORE the schema/metadata landed — restart the HOST's\n` +
+        `MJAPI and MJExplorer from the MJ checkout (this repo has no start scripts).\n` +
+        `If that does not fix it, the database may be missing the migrations or the seeds: see\n` +
+        `docs/QA-GUIDE.md sections 1-3 (how the app runs, configuration, seeding).\n`,
     );
   }
 

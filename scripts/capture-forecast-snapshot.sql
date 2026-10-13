@@ -10,12 +10,11 @@
 --
 -- Its original header argued for being a plain script rather than an Action.
 -- That argument predates the Action existing and is no longer the choice on
--- offer; it is left corrected rather than deleted because THIS IS THE ONLY
--- WORKING PER-OWNER CAPTURE IN THE REPO. The Action's source reads
--- `Sales: Forecast by Category`, which groups by company and pipeline only, so
--- the owner grain that `forecast-history.sql` partitions its LAG windows by
--- cannot come from it yet. When a companion owner-grain query is written, the
--- GROUP BY at the bottom of this file is the reference for what it must project.
+-- offer; it is left corrected rather than deleted because it is a working
+-- per-owner capture to run by hand. The Action now reads `Sales: Forecast by
+-- Owner`, which groups by the same owner stamp as the GROUP BY at the bottom of
+-- this file, so both capture the grain `forecast-history.sql` partitions its LAG
+-- windows by. Keep the two grains the same if either changes.
 --
 -- Run it by hand if you need a one-off capture and understand that it REPLACES
 -- today's rows. Do not seed a ScheduledJob for it.

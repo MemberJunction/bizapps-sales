@@ -36,7 +36,10 @@
     "remote-operation-categories MUST precede remote-operations: the operation rows resolve their",
     "CategoryID with @lookup against a category by Name, so the category has to exist first. This is",
     "the first entry in this list where the ordering is genuinely load-bearing rather than",
-    "precautionary — get it wrong and the push fails on an unresolvable lookup."
+    "precautionary — get it wrong and the push fails on an unresolvable lookup.",
+    "",
+    "api-scopes then api-application-scopes follow it: an application-scope row resolves its ScopeID with",
+    "@lookup against a scope by FullPath, so the scope has to exist first (#186)."
   ],
   "_comment_queries": [
     "query-categories MUST precede queries, and the ordering is load-bearing in a way that is easy to",
@@ -73,6 +76,8 @@
     "task-types",
     "remote-operation-categories",
     "remote-operations",
+    "api-scopes",
+    "api-application-scopes",
     "query-categories",
     "queries",
     "action-categories",

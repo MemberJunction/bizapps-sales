@@ -72,7 +72,7 @@ export interface ContractsCreateFromDealSeamInput {
      *
      * -- THE NAME SAYS `Code`, AND TODAY IT IS MATCHED ON `Name`. READ THIS BEFORE RENAMING IT. --
      *
-     * `ContractType` has no `Code` column as of contracts `origin/next` @ d2f64e3; it is identified by
+     * `ContractType` has no `Code` column in contracts v2; it is identified by
      * `Name` (unique) plus a fixed seeded UUID. So `LiveContractsSeam` probes the metadata and matches
      * on whichever identifier contracts actually offers, and says which one it used in the message it
      * returns -- the answer is never ambiguous at the call site.
@@ -86,9 +86,9 @@ export interface ContractsCreateFromDealSeamInput {
      * `Sales.CloseDeal` remote-operation contract and appears in generated code. Not worth doing to
      * describe a state that is meant to be temporary.
      *
-     * WHATEVER VALUE GOES HERE MUST NAME A TYPE THAT STANDS ALONE. A type whose
-     * `ParentStatusRequirement` is `'Required'` -- Change Order -- is refused by contracts' own
-     * validation when nothing names its parent, and a close-won has no parent contract to give it.
+     * WHATEVER VALUE GOES HERE MUST NAME A TYPE THAT STANDS ALONE. A type with `MustBeChild = 1`
+     * -- Change Order -- is refused by contracts' own validation when nothing names its parent, and a
+     * close-won has no parent contract to give it.
      */
     ContractTypeCode?: string | null;
     TermMonths?: number | null;
@@ -131,6 +131,15 @@ export interface ContractsRenewTermSeamInput {
     ContractID: string;
     DealID: string;
     TermMonths?: number | null;
+}
+
+/**
+ * Link the order a won deal carries to the contract the close produced (contracts#77). Contracts copies
+ * the contract's renewal terms to the subscriptions that order creates.
+ */
+export interface ContractsLinkOrderSeamInput {
+    ContractID: string;
+    OrderID: string;
 }
 
 /** What either contracts call returns. */
@@ -178,6 +187,7 @@ export interface IDownstreamSeam {
      */
     CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult>;
     RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult>;
+    LinkOrderToContract(input: ContractsLinkOrderSeamInput): Promise<ContractsSeamResult>;
 }
 
 /**
@@ -209,6 +219,16 @@ export class StubDownstreamSeam implements IDownstreamSeam {
             Message:
                 'The renewal route was planned but not executed: bizapps-contracts is not installed in ' +
                 'this deployment, so its entities cannot be resolved.',
+        };
+    }
+
+    public async LinkOrderToContract(input: ContractsLinkOrderSeamInput): Promise<ContractsSeamResult> {
+        this.Attempts.push({ Target: 'ContractOrder', Payload: input });
+        return {
+            Success: false,
+            Message:
+                'The order was not linked to the contract: bizapps-contracts is not installed in this ' +
+                'deployment, so its entities cannot be resolved.',
         };
     }
 }

@@ -239,7 +239,7 @@ describe('Sales.CloseDeal configures the zone, then stamps and dates its tasks f
         };
         // The reads, stubbed at the operation's own private seams.
         op.loadStatusFlags = async () => WON;
-        op.validate = async () => ({ Issues: [], LossReasonName: null });
+        op.validate = async () => ({ Issues: [], LossReasonName: null, RenewalNextTerm: [] });
         op.resolvePolicy = async () => ({ CloseWonTasks: { DueInDays: DUE_IN_DAYS } });
         op.planRouting = async () => [];
         op.closingStageForOutcome = async () => null;

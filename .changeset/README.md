@@ -26,9 +26,8 @@ lists what counts as additive.
 level you pick sets that version and the CHANGELOG entry, not which packages move, so a migration-only
 change can name any `@mj-biz-apps/*` package.
 
-CI emits a **warning** — not a failure — when the tree holds no changeset at all. It checks the tree,
-not the PR's diff, so a changeset another PR left pending on `next` silences it: check your own PR.
-Warning rather than failing is deliberate: a hard gate would put a red X on documentation-only PRs
+CI emits a **warning** — not a failure — when the PR adds no changeset. It compares the PR against
+its base branch, so a changeset another PR left pending on `next` does not count. Warning rather than failing is deliberate: a hard gate would put a red X on documentation-only PRs
 that legitimately have no version impact, and the sibling repo's experience is that such an X is
 quickly learned and then ignored. Treat the warning as a review item.
 

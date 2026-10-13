@@ -150,6 +150,18 @@ jobs:
       - name: Harness selector gate (the harness only targets markup the app renders)
         run: npm run test:selector-gate
 
+      # THE MUTATION DRIVER EDITS SOURCE IN PLACE, so an interrupted run that does not clean up leaves a
+      # mutant that looks like an ordinary code change. This proves a signal restores the source, kills
+      # the build/suite's whole process tree and rebuilds, and that a run killed past any handler is
+      # recovered by the next start. Fixture build and suite, so no database.
+      - name: Mutation driver cleanup (an interrupted run leaves no mutant behind)
+        run: npm run test:mutate-harness
+
+      # The sibling-checkout resolver gives a sibling the copy its range or sales' override calls for,
+      # never sales' copy by accident (sales#231). Temp checkouts, no database.
+      - name: Sibling resolver (one copy of each BizApps package)
+        run: npm run test:one-copy-harness
+
       # Unit tests run in the shared build.yml (`pnpm run test`, the root vitest suite).
 
       # Advisory, matching the sibling repo's judgement. migrations/_README.md requires a changeset on
@@ -158,8 +170,15 @@ jobs:
       # PR that legitimately has no version impact.
       - name: Changeset present?
         if: github.event_name == 'pull_request'
+        # Diff against the PR's base, not the tree: a changeset another PR left pending on the base
+        # branch would otherwise silence this warning for every later PR. The checkout is shallow, so
+        # fetch the base tip and compare the two trees directly (two-dot needs no merge base).
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          if [ ! -d .changeset ] || [ -z "$(find .changeset -name '*.md' ! -name 'README.md' -print -quit)" ]; then
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          added=$(git diff --name-only --diff-filter=A FETCH_HEAD HEAD -- '.changeset/*.md' | grep -v '^.changeset/README.md$' || true)
+          if [ -z "$added" ]; then
             echo "::warning title=No changeset::This PR carries no changeset. One is required for any change to migrations/ or a published package — run 'npx changeset'."
           else
             echo "Changeset present."

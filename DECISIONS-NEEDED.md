@@ -37,14 +37,12 @@ as a written question rather than becoming a GitHub issue.
 | DN-27 | Is a per-deal attribution-coverage report worth its own query? | Product |
 | DN-28 | Should a parked status (`On Hold`) survive a later stage move? | Product |
 | D-5 | Confirm that every stage move appends a `DealStageEvent`, and decide whether an importer gets an audited way to suppress it. | Product |
-| D-9 | Should a contract created at Closed Won take its type's renewal defaults? | Product, with contracts |
 | D-11 | Is a renewal a new child contract, or one that supersedes the original? | Contracts |
 | D-12 | Add `ContractType.Code`, so the seam stops matching on `Name`. | Contracts, [bizapps-contracts#96](https://github.com/MemberJunction/bizapps-contracts/issues/96) |
 | D-13 | Seed `TaskTypeStatus` for Contract Processing once finance confirms its steps? | Finance |
 | D-14 | Bound `Contract.AnnualIncreasePercent` at 100, or state that it stores a fraction. | Contracts |
 | D-28 | Is forecasting monthly? | Finance |
 | D-30 | Should the forecast measures get their own sanity checks, and where? | Owner of the queries |
-| D-32 | Register a forecast source and point it at `Sales: Forecast by Owner`; today the daily snapshot writes nothing. | Sales, [#216](https://github.com/MemberJunction/bizapps-sales/issues/216) |
 | D-34 | Rename `Pipeline.RequiresDealLines`, or correct its description. | Sales |
 
 DN-19's remaining work is tracked in GitHub as #202 and #207.
@@ -91,7 +89,7 @@ records a trap or a measurement rather than a decision.
 | D-5 | Open | The stage-event append on every write path |
 | D-7 | Resolved | The contracts seam had nowhere to run |
 | D-8 | Resolved | Task-type metadata pushes once tasks has migrated |
-| D-9 | Open | Renewal defaults for a contract created at Closed Won |
+| D-9 | Resolved | Renewal defaults for a contract created at Closed Won |
 | D-10 | Resolved | Contracts chooses the current template |
 | D-11 | Open | What shape a renewal takes |
 | D-12 | Open | `ContractType` has no `Code` |
@@ -114,7 +112,7 @@ records a trap or a measurement rather than a decision.
 | D-29 | Decided | A same-day re-run skips |
 | D-30 | Open | Sanity checks for the forecast measures |
 | D-31 | Decided | One `ForecastSnapshot` writer: the Action |
-| D-32 | Open | Snapshots have no owner grain, and no source is registered |
+| D-32 | Built | The daily snapshot reads `Sales: Forecast by Owner` by default |
 | D-33 | Note | Open and won deals sit on different date columns |
 | D-34 | Open | `Pipeline.RequiresDealLines` outlived `DealLine` |
 
@@ -714,7 +712,7 @@ unaffected.
 
 ---
 
-## D-9 · OPEN: should a contract created at Closed Won take its type's renewal defaults?
+## D-9 · RESOLVED: a contract created at Closed Won takes its type's renewal defaults
 
 Sales' renewal columns are named `…Override` because NULL means *"use the standard"*, a different fact
 from *"we negotiated a number that equals today's standard"*; only the NULL survives a later change to
@@ -727,8 +725,15 @@ Contracts added `DefaultAutoRenew`, `DefaultRenewalNoticeDays`, `DefaultCancella
 a type, and nothing applies them at save time. The seam does not call it, so a contract created at
 Closed Won still has NULL renewal terms unless the deal negotiated them.
 
-**What is needed:** a ruling on whether the seam seeds those defaults for a contract it creates. The
-unmounted deal workspace still hardcodes placeholders for the same standards
+**Ruling (bizapps-contracts#97):** yes, and the caller asks for it. Contracts keeps seeding out of its
+server save, because a form save reaches the server without the form's record of which fields the user
+answered, and seeding there would overwrite those answers. The seam writes what the deal states, marks
+those fields (always including `AutoRenew`, since the deal's checkbox is an answer), then calls
+`SeedRenewalDefaultsFromType()`, so the type fills only what the deal left unset. Sales still copies no
+default value itself, and a null override still means "use the standard". `close-won-contract.CT8`
+asserts both halves.
+
+The unmounted deal workspace still hardcodes placeholders for the same standards
 (`STANDARD_ANNUAL_INCREASE_PCT = 5` and `STANDARD_CANCELLATION_NOTICE_DAYS = 90` in
 `deal-workspace.types.ts`).
 
@@ -1093,11 +1098,11 @@ plain script was chosen over an Action (written before the Action existed), and 
 behaviour, now marked as losing to D-29. Running both would make `ForecastSnapshot` mean different
 things on different days.
 
-The Action writes nothing yet; see D-32.
+The Action reads `Sales: Forecast by Owner` by default; see D-32.
 
 ---
 
-## D-32 · OPEN: snapshots carry no owner grain, and no source is registered
+## D-32 · BUILT: the daily snapshot reads `Sales: Forecast by Owner` by default
 
 `forecast-history.sql` partitions its `LAG` windows by `OwnerEmployeeID` and joins `Employee` for an
 owner name, so it expects owner-grained rows. `Sales: Forecast by Category` groups by company and
@@ -1105,13 +1110,15 @@ pipeline only, so a snapshot read from it carries `OwnerEmployeeID = null`, mean
 (asserted by `FS11`), and the history renders thin rather than broken.
 
 **A companion query, not a reshape.** `Sales: Forecast by Category` is published and the dashboard reads
-it, so the owner grain belongs in a second query rather than in a changed row shape. It exists:
-`Sales: Forecast by Owner` (172a6d8) projects `CompanyID`, `PipelineID` and `OwnerEmployeeID`, and
-`FORECAST_QUERY_COLUMNS.OwnerEmployeeID` is already mapped.
+it, so the owner grain belongs in a second query rather than in a changed row shape:
+`Sales: Forecast by Owner` (172a6d8) projects `CompanyID`, `PipelineID` and `OwnerEmployeeID`.
 
-**What is missing:** nothing points the capture at it. Outside the integration checks no forecast
-source is registered (only tests call `SetForecastSourceFactory`), so the daily job reports success and
-writes nothing. Tracked as #216.
+**Built (#216):** until then nothing pointed the capture at it. The source factory defaulted to none,
+only tests replaced it, and the daily job reported success while writing nothing. The factory's default
+in `ForecastSnapshotJob.ts` now returns a `QueryForecastSource` for `DEFAULT_FORECAST_QUERY`
+(`Sales: Forecast by Owner`). It is set in the package rather than at server startup, so MJAPI and the
+integration checks capture through the same source. `FS13` asserts the default by name; `FS15` runs the
+default path and compares the stored rows to the query's own, by company, pipeline and owner.
 
 ---
 

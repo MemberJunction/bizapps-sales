@@ -31,8 +31,8 @@ const pool = await new sql.ConnectionPool({
 
 const { setupSQLServerClient, SQLServerProviderConfigData } = await import('@memberjunction/sqlserver-dataprovider');
 const { UserCache } = await import('@memberjunction/generic-database-provider');
-await setupSQLServerClient(new SQLServerProviderConfigData(pool, process.env.MJ_CORE_SCHEMA || '__mj'));
-await UserCache.Instance.Refresh(pool);
+const provider = await setupSQLServerClient(new SQLServerProviderConfigData(pool, process.env.MJ_CORE_SCHEMA || '__mj'));
+await UserCache.Instance.Refresh(provider);
 const user = UserCache.Users.find((u) => u?.Type?.trim().toLowerCase() === 'owner') ?? UserCache.Users[0];
 await import('@mj-biz-apps/sales-server').then((m) => m.LoadBizAppsSalesServer?.());
 try { (await import('@mj-biz-apps/orders-server')).LoadBizAppsOrdersServer(); } catch { /* reported below */ }

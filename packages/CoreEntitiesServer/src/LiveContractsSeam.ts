@@ -40,6 +40,7 @@
 import {
     BaseEntity,
     LogError,
+    LogStatus,
     Metadata,
     RunView,
     type EntityInfo,
@@ -48,6 +49,7 @@ import {
 } from '@memberjunction/core';
 import type {
     ContractsCreateFromDealSeamInput,
+    ContractsLinkOrderSeamInput,
     ContractsRenewTermSeamInput,
     ContractsSeamResult,
 } from '@mj-biz-apps/sales-entities';
@@ -55,9 +57,40 @@ import type {
 /** Contracts' entity names — these strings are the whole dependency. Sales imports no contracts code. */
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_CONTRACT_TYPE = 'MJ_BizApps_Contracts: Contract Types';
+const E_CONTRACT_ORDER = 'MJ_BizApps_Contracts: Contract Orders';
 
 /** Sales' own, needed only to name the CREATING entity in contracts' polymorphic provenance pair. */
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
+
+/** One candidate row from the contract-type lookup. `Code` is absent on a contracts with no such column. */
+type ContractTypeMatch = { ID: string; Code?: string | null; Name: string };
+
+/** The `By` note when contracts has no `Code` column, so Name is the only identifier on offer. */
+const NAME_ONLY = ' (matched on Name — contracts has no Code column on ContractType)';
+
+/**
+ * Choose the contract type a policy value names: a `Code` match first, then a `Name` match.
+ *
+ * Exported for the unit test; the seam is its only caller.
+ */
+export function pickContractType(
+    rows: ContractTypeMatch[],
+    value: string,
+    hasCode: boolean,
+): { ID: string | null; By: string } {
+    // The database compared case-insensitively to return these rows, so the pick does too; an exact
+    // comparison here would drop a row SQL Server already matched.
+    const same = (a: string | null | undefined): boolean => (a ?? '').toLowerCase() === value.toLowerCase();
+    const byCode = hasCode ? rows.find((row) => same(row.Code)) : undefined;
+    if (byCode) {
+        return { ID: byCode.ID, By: '' };
+    }
+    const byName = rows.find((row) => same(row.Name));
+    if (!byName) {
+        return { ID: null, By: hasCode ? '' : NAME_ONLY };
+    }
+    return { ID: byName.ID, By: hasCode ? ' (matched on Name — no contract type has that Code)' : NAME_ONLY };
+}
 
 /**
  * The seam input plus the one field the shared type does not carry yet.
@@ -186,7 +219,8 @@ export class LiveContractsSeam {
             contract.Set('HasModifications', input.StandardAgreementModified === true);
 
             this.setProvenance(contract, input.DealID);
-            this.setNegotiatedTerms(contract, input);
+            const stated = this.setNegotiatedTerms(contract, input);
+            await this.seedTypeDefaults(contract, stated);
 
             const template = this.templateID(input);
             if (template) {
@@ -246,20 +280,22 @@ export class LiveContractsSeam {
      * today's standard". Only the NULL survives a later change to policy. So a null override is passed
      * through as null and never filled in here.
      *
-     * ── THE DEFAULTS THAT DO NOT EXIST YET ──────────────────────────────────────────────────────
+     * ── WHERE THE STANDARD COMES FROM ───────────────────────────────────────────────────────────
      *
-     * Sales' descriptions say the standards (5% uplift, 90 days' notice) are "owned by the contracts
-     * ContractType". As of `origin/next` @ `d2f64e3` **they are not**: `ContractType` carries only
-     * Name, Description, RequiresExecutedDocument, ParentStatusRequirement and Status. Nothing applies
-     * a default anywhere — `applyContractTypeDefaults()` went with the v1 rebuild.
+     * The standard lives on contracts' `ContractType` (`DefaultAutoRenew`, `DefaultRenewalNoticeDays`,
+     * `DefaultCancellationWindowDays`, `DefaultAnnualIncreasePercent`). This method writes only what the
+     * deal states and returns those field names; `seedTypeDefaults()` then has contracts fill the rest
+     * from the type. Sales never copies a default value itself. See D-9.
      *
-     * This seam therefore populates NOTHING it was not told, so that when the columns arrive the
-     * defaults land where they belong — in contracts, applied once, rather than being pre-empted here
-     * by a value sales invented. See D-9.
+     * @returns the renewal fields this deal stated, which seeding must not overwrite.
      */
-    private setNegotiatedTerms(contract: BaseEntity, input: CreateFromDealInput): void {
+    private setNegotiatedTerms(contract: BaseEntity, input: CreateFromDealInput): string[] {
+        const stated: string[] = [];
+
+
         /** Stated on the deal as a fact about the paper, and stated the same way on the contract. */
         contract.Set('AutoRenew', input.AutoRenew === true);
+        stated.push('AutoRenew');
 
         /**
          * `CancellationNoticeDaysOverride` → `CancellationWindowDays`, and the names differing is not
@@ -269,15 +305,54 @@ export class LiveContractsSeam {
          * `RenewalNoticeDays` is deliberately left alone. Contracts' own description warns that it is
          * "NOT the same field as CancellationWindowDays even though many agreements set them equal —
          * conflating them silently is how a notice obligation gets missed". Sales holds no equivalent,
-         * so it says nothing rather than reusing the number it does have.
+         * so it says nothing rather than reusing the number it does have, and the type's default fills it.
          */
         if (input.CancellationNoticeDaysOverride != null) {
             contract.Set('CancellationWindowDays', input.CancellationNoticeDaysOverride);
+            stated.push('CancellationWindowDays');
         }
 
         const uplift = this.annualIncrease(input.AnnualIncreasePctOverride);
         if (uplift != null) {
             contract.Set('AnnualIncreasePercent', uplift);
+            stated.push('AnnualIncreasePercent');
+        }
+        return stated;
+    }
+
+    /**
+     * Have contracts fill the renewal fields the deal left unset from the contract's type.
+     *
+     * Contracts applies its type defaults only when the creator asks: its form does it on a type pick,
+     * and nothing does it at save time (bizapps-contracts#97). The documented order for a caller outside
+     * the form is: set the type and the known fields, mark each known field as edited, seed, save.
+     *
+     * `AutoRenew` is always marked. The deal's checkbox is a statement about the paper, and a No from it
+     * is an answer, not a gap for the type's default to fill.
+     *
+     * The methods are reached by name, not by import: sales reads contracts through entity names only,
+     * so it still installs where contracts is absent or older. If they are missing or the seed fails, the
+     * contract saves with the deal's terms alone, which is what it did before this call existed.
+     */
+    private async seedTypeDefaults(contract: BaseEntity, stated: readonly string[]): Promise<void> {
+        const seedable = contract as BaseEntity & {
+            MarkRenewalFieldEdited?: (field: string) => void;
+            SeedRenewalDefaultsFromType?: () => Promise<boolean>;
+        };
+        if (
+            typeof seedable.MarkRenewalFieldEdited !== 'function' ||
+            typeof seedable.SeedRenewalDefaultsFromType !== 'function'
+        ) {
+            LogStatus('LiveContractsSeam: this contracts build has no renewal-default seeding; saving the deal terms only.');
+            return;
+        }
+        try {
+            for (const field of stated) {
+                seedable.MarkRenewalFieldEdited(field);
+            }
+            await seedable.SeedRenewalDefaultsFromType();
+        } catch (err) {
+            LogError(`LiveContractsSeam: seeding renewal defaults from the contract type failed; saving the deal terms only: ${err}`);
         }
     }
 
@@ -325,18 +400,21 @@ export class LiveContractsSeam {
     /**
      * The contract type the policy named.
      *
-     * ── WHY THIS PROBES FOR A COLUMN ────────────────────────────────────────────────────────────
+     * ── CODE FIRST, NAME AS A FALLBACK ──────────────────────────────────────────────────────────
      *
      * Sales' policy field is `ContractTypeCode`, and resolving a CODE is the right shape: sales does
-     * not know contracts' vocabulary and must not bake its UUIDs. But `ContractType` has no `Code`
-     * column — it is identified by `Name` (unique) and a fixed seeded UUID. Filtering on `Code`, as
-     * the previous version did, ran against a column that does not exist, so the lookup could only
-     * ever fail.
+     * not know contracts' vocabulary and must not bake its UUIDs. A code also survives a rename, which
+     * a display name does not.
      *
-     * Rather than fail the whole route over a missing column, this asks the METADATA which identifier
-     * contracts actually offers, uses that, and reports which one it used so the answer is never
-     * ambiguous. When contracts adds `Code` — as tasks just did on `TaskType`, for the same reason —
-     * this starts preferring it with no change here. See D-12.
+     * Contracts did not always have a `Code` on `ContractType` (bizapps-contracts#96 added one), and the
+     * two apps release separately. So the value is matched against `Code` when the column exists, and
+     * against `Name` when no `Code` matches. That keeps every combination working: an older contracts
+     * with no `Code`, a newer one where the policy already names the code (`ORDER_FORM`), and a newer
+     * one where the policy still names the label (`Order Form`). A Code match always wins over a Name
+     * match, and a Name match is reported in `By`, so the answer is never ambiguous about which
+     * identifier it used.
+     *
+     * One query, not two: both columns are read for the candidate rows and the winner is picked here.
      *
      * ── THIS IS NOT A VOCABULARY COMPARISON ─────────────────────────────────────────────────────
      *
@@ -351,23 +429,23 @@ export class LiveContractsSeam {
 
         const info: EntityInfo | undefined = this.provider.Entities.find((e) => e.Name === E_CONTRACT_TYPE);
         const hasCode = info?.Fields?.some((f) => f.Name === 'Code') === true;
-        const column = hasCode ? 'Code' : 'Name';
-        const by = hasCode ? '' : ' (matched on Name — contracts has no Code column on ContractType)';
+        const literal = `'${String(code).replace(/'/g, "''")}'`;
+        const filter = hasCode ? `Code = ${literal} OR Name = ${literal}` : `Name = ${literal}`;
 
-        const r = await new RunView().RunView<{ ID: string }>(
+        const r = await new RunView().RunView<ContractTypeMatch>(
             {
                 EntityName: E_CONTRACT_TYPE,
-                ExtraFilter: `${column} = '${String(code).replace(/'/g, "''")}'`,
+                ExtraFilter: filter,
                 ResultType: 'simple',
-                Fields: ['ID'],
+                Fields: hasCode ? ['ID', 'Code', 'Name'] : ['ID', 'Name'],
             },
             this.user,
         );
         if (!r?.Success) {
             LogError(`LiveContractsSeam could not read contract types: ${r?.ErrorMessage ?? 'unknown error'}`);
-            return { ID: null, By: by };
+            return { ID: null, By: '' };
         }
-        return { ID: (r.Results ?? [])[0]?.ID ?? null, By: by };
+        return pickContractType(r.Results ?? [], code, hasCode);
     }
 
     /**
@@ -401,6 +479,66 @@ export class LiveContractsSeam {
                 '(SupersededByContractID) is a contracts modelling decision that has not been made.',
         };
     }
+
+    public async LinkOrderToContract(input: ContractsLinkOrderSeamInput): Promise<ContractsSeamResult> {
+        if (!ContractsIsInstalled()) {
+            return { Success: false, Message: 'bizapps-contracts is not installed in this deployment.' };
+        }
+        return LinkOrderToContract(input, this.provider, this.user);
+    }
+}
+
+/**
+ * Record that the contract governs the order (contracts#77). Contracts' own save copies the contract's
+ * renewal terms to the subscriptions the order creates, so this only writes the link.
+ *
+ * A contracts release older than the link has no such entity. That is reported, not treated as a
+ * failure of the close: the contract and order both exist, they are just not tied together yet.
+ *
+ * An existing link is left alone, so closing the same deal twice (reopen, close again) does not trip
+ * the unique pair.
+ */
+export async function LinkOrderToContract(
+    input: ContractsLinkOrderSeamInput,
+    provider: IMetadataProvider,
+    user: UserInfo,
+): Promise<ContractsSeamResult> {
+    if (!new Metadata().Entities.some((e) => e.Name === E_CONTRACT_ORDER)) {
+        return {
+            Success: false,
+            ContractID: input.ContractID,
+            Message:
+                'The order was not linked to the contract: the installed bizapps-contracts has no order ' +
+                'links, so its renewal terms will not reach the subscriptions. Link them once contracts is upgraded.',
+        };
+    }
+    const existing = await new RunView().RunView<{ ID: string }>(
+        {
+            EntityName: E_CONTRACT_ORDER,
+            ExtraFilter: `ContractID='${input.ContractID}' AND OrderID='${input.OrderID}'`,
+            Fields: ['ID'],
+            ResultType: 'simple',
+        },
+        user,
+    );
+    if (!existing.Success) {
+        return { Success: false, ContractID: input.ContractID, Message: `Could not check the order link: ${existing.ErrorMessage}` };
+    }
+    if (existing.Results.length > 0) {
+        return { Success: true, ContractID: input.ContractID };
+    }
+    const link = await provider.GetEntityObject<BaseEntity>(E_CONTRACT_ORDER, user);
+    link.NewRecord();
+    link.Set('ContractID', input.ContractID);
+    link.Set('OrderID', input.OrderID);
+    if (!(await link.Save())) {
+        return {
+            Success: false,
+            ContractID: input.ContractID,
+            Message: `The order was not linked to the contract: ${link.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+        };
+    }
+    return { Success: true, ContractID: input.ContractID };
 }
 
 /** Anti-tree-shaking anchor. */
