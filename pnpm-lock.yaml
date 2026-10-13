@@ -34,8 +34,8 @@ importers:
   .:
     dependencies:
       '@mj-biz-apps/orders-entities':
-        specifier: ^5.26.0
-        version: 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+        specifier: ^5.30.0
+        version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
     devDependencies:
       '@changesets/cli':
         specifier: ^2.31.1
@@ -247,11 +247,11 @@ importers:
         specifier: ^5.50.1
         version: 5.50.1(af550fe9eed2a1028e079b1484c0b664)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.26.0
-        version: 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+        specifier: 5.30.0
+        version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       '@mj-biz-apps/orders-ng':
-        specifier: 5.26.0
-        version: 5.26.0(1966e92b8e2ec7f1f1b3972acd46f0bf)
+        specifier: 5.30.0
+        version: 5.30.0(695c6b1ec19bf69c811acd27fa60c60a)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -281,8 +281,8 @@ importers:
         specifier: ^5.50.1
         version: 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.26.0
-        version: 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+        specifier: 5.30.0
+        version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       '@mj-biz-apps/tasks-core':
         specifier: 1.4.1
         version: 1.4.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
@@ -315,8 +315,8 @@ importers:
         specifier: ^5.50.1
         version: 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
       '@mj-biz-apps/orders-entities':
-        specifier: 5.26.0
-        version: 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+        specifier: 5.30.0
+        version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       ts-node-dev:
         specifier: ^2.0.0
         version: 2.0.0(@types/node@22.20.1)(typescript@5.9.3)
@@ -339,8 +339,8 @@ importers:
         specifier: ^5.50.1
         version: 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
       '@mj-biz-apps/orders-entities':
-        specifier: ^5.26.0
-        version: 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+        specifier: ^5.30.0
+        version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       '@mj-biz-apps/sales-core-entities-server':
         specifier: 6.13.0
         version: link:../CoreEntitiesServer
@@ -2601,14 +2601,15 @@ packages:
       '@memberjunction/ng-shared': ^6.1.0-edge.6
       '@memberjunction/ng-ui-components': ^6.1.0-edge.6
 
-  '@mj-biz-apps/orders-entities@5.26.0':
-    resolution: {integrity: sha512-+nA8JCm54ePURwaqSL077XwnU+abBdJgoVni27l+yiw8JQ4pGXqGyOnAvMitefYuF/b4v+SyQ9o2Gbq1TIyDlA==}
+  '@mj-biz-apps/orders-entities@5.30.0':
+    resolution: {integrity: sha512-gXaBOYU3yRnGw3qBkEzgWENAmGWlWnZQoya1gye4MP8CxirO8qIj5tn3W9bLxKLb1HJ2ej1Y5qKTfUpQ0OQ2CQ==}
     peerDependencies:
       '@memberjunction/core': ^6.1.5
       '@memberjunction/global': ^6.1.5
+      '@mj-biz-apps/common-entities': ^5.50.1
 
-  '@mj-biz-apps/orders-ng@5.26.0':
-    resolution: {integrity: sha512-aVMF7XDOge9GsyCgbVImm0mujHm7etR/DyWeYseYz6vuFcAP8CwFviGjJEsq5bj2sOMvSzjE8RoCDhKyQsBmpw==}
+  '@mj-biz-apps/orders-ng@5.30.0':
+    resolution: {integrity: sha512-2Kn4hjCP4+kJFqsJOrRwg+zvxsoPscodlAXfJ+LB7Ur+/WuR+LtO4Z5XuTrv/xWL6rZUU1kMYMdF9RFWUPvvkg==}
     peerDependencies:
       '@angular/animations': 21.1.3
       '@angular/cdk': '>=21.0.0 <22.0.0'
@@ -2617,17 +2618,23 @@ packages:
       '@angular/elements': ^21.1.3
       '@angular/forms': 21.1.3
       '@angular/platform-browser': 21.1.3
-      '@memberjunction/actions-base': ^6.1.4
+      '@memberjunction/actions-base': ^6.1.5
       '@memberjunction/core': ^6.1.5
-      '@memberjunction/core-entities': ^6.1.4
+      '@memberjunction/core-entities': ^6.1.5
       '@memberjunction/global': ^6.1.5
-      '@memberjunction/graphql-dataprovider': ^6.1.4
-      '@memberjunction/ng-base-forms': ^6.1.4
-      '@memberjunction/ng-entity-viewer': ^6.1.4
-      '@memberjunction/ng-filter-builder': ^6.1.4
-      '@memberjunction/ng-link-directives': ^6.1.4
-      '@memberjunction/ng-shared': ^6.1.4
-      '@memberjunction/ng-ui-components': ^6.1.4
+      '@memberjunction/graphql-dataprovider': ^6.1.5
+      '@memberjunction/ng-base-forms': ^6.1.5
+      '@memberjunction/ng-entity-viewer': ^6.1.5
+      '@memberjunction/ng-filter-builder': ^6.1.5
+      '@memberjunction/ng-graph-view': ^6.1.5
+      '@memberjunction/ng-hierarchy-tree': ^6.1.5
+      '@memberjunction/ng-link-directives': ^6.1.5
+      '@memberjunction/ng-shared': ^6.1.5
+      '@memberjunction/ng-ui-components': ^6.1.5
+      '@mj-biz-apps/accounting-engine-base': '>=0.21.0'
+      '@mj-biz-apps/accounting-ng': '>=0.21.0'
+      '@mj-biz-apps/common-entities': ^5.50.1
+      '@mj-biz-apps/common-ng': ^5.50.1
       zone.js: ^0.16.0
 
   '@mj-biz-apps/tasks-core@1.4.1':
@@ -15432,7 +15439,7 @@ snapshots:
       '@memberjunction/ng-ui-components': 6.1.5(9b98b40171c6d483928873e5336cbf97)
       '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
 
-  '@mj-biz-apps/orders-entities@5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)':
+  '@mj-biz-apps/orders-entities@5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))':
     dependencies:
       '@memberjunction/core': 6.1.5
       '@memberjunction/global': 6.1.5
@@ -15440,7 +15447,7 @@ snapshots:
       rxjs: 7.8.2
       zod: 3.25.76
 
-  '@mj-biz-apps/orders-ng@5.26.0(1966e92b8e2ec7f1f1b3972acd46f0bf)':
+  '@mj-biz-apps/orders-ng@5.30.0(695c6b1ec19bf69c811acd27fa60c60a)':
     dependencies:
       '@angular/animations': 21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))
       '@angular/cdk': 21.1.3(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(@angular/platform-browser@21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(rxjs@7.8.2)
@@ -15466,19 +15473,10 @@ snapshots:
       '@mj-biz-apps/accounting-ng': 0.20.0(44948a5664a88c0b8fd82fe123ea797d)
       '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
       '@mj-biz-apps/common-ng': 5.50.1(af550fe9eed2a1028e079b1484c0b664)
-      '@mj-biz-apps/orders-entities': 5.26.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)
+      '@mj-biz-apps/orders-entities': 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       ag-grid-angular: 35.3.1(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))
       ag-grid-community: 35.3.1
       zone.js: 0.16.2
-    transitivePeerDependencies:
-      - '@angular/router'
-      - '@fastify/websocket'
-      - '@memberjunction/ng-base-types'
-      - '@memberjunction/ng-shared-generic'
-      - crossws
-      - rxjs
-      - supports-color
-      - ws
 
   '@mj-biz-apps/tasks-core@1.4.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)':
     dependencies:
