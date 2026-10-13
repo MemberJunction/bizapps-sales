@@ -406,23 +406,25 @@ sqlcmd -S localhost,1433 -U sa -P "$PW" -C -Q "CREATE DATABASE MJ_QA;"
 Give **every** repo a `.env` pointing at it (`DB_DATABASE=MJ_QA`, plus host/port/credentials). Then migrate
 in this order — it is the dependency order, and it is not negotiable:
 
-| # | Repo | Command | Expect (measured 2026-10-08) |
+| # | Repo | Command | Expect (measured 2026-10-13) |
 |---|---|---|---|
 | 1 | MJ v6.1.5 | `node packages/MJCLI/bin/run.js migrate` | 89 applied |
 | 2 | common 5.50.1 | `… migrate --schema __mj_BizAppsCommon --dir ./migrations` | 37 |
 | 3 | tasks 1.4.1 | `… migrate --schema __mj_BizAppsTasks --dir ./migrations` | 7 |
-| 4 | accounting 0.20.0 | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 22 |
-| 5 | orders 5.26.0 | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 66 |
-| 6 | **contracts** 0.7.2 | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 9 |
-| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 15 |
+| 4 | accounting 0.22.0 | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 23 |
+| 5 | orders 5.30.0 | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 73 |
+| 6 | **contracts** 0.7.3 | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 9 |
+| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 16 |
 
 The counts are for the versions named: the ones this repo's lockfile resolves, and contracts' latest
 release (sales does not declare contracts). Another version of a sibling applies a different number;
 what matters is that each step reports no failure.
 
-> ⚠️ **Contracts migrates after the apps it references.** It FKs into common, tasks, orders AND
-> accounting, so it follows all four. Contracts 0.7.x installs on a fresh database in this order
-> (measured 2026-10-06 and 2026-10-08). **KI-13** records the earlier baseline that hardcoded other apps'
+> ⚠️ **Contracts migrates after common, and before sales.** Contracts 0.7.3's migrations reference only
+> MJ core (`__mj`) and common (`__mj_BizAppsCommon`), so any position after common works; it stays at 6
+> to keep one order for everyone. Sales must follow it: sales' metadata points `Deal.ContractID` at
+> contracts' Contract entity. Contracts 0.7.x installs on a fresh database in this order
+> (measured 2026-10-06, 2026-10-08 and 2026-10-13). **KI-13** records the earlier baseline that hardcoded other apps'
 > entity UUIDs and did not install; read it if you are installing a contracts release older than 0.7.
 
 > ⚠️ **Re-measure these counts against an empty database when you change them.** This table once
