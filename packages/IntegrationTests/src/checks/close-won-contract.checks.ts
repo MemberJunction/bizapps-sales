@@ -1,5 +1,5 @@
 /**
- * @fileoverview `close-won-contract` — CT1 and CT4, against contracts' v2 schema.
+ * @fileoverview `close-won-contract` — CT1 and CT4–CT8, against contracts' v2 schema.
  *
  * ── HOW THIS BUNDLE GOT HERE, BECAUSE THE HISTORY IS THE ARGUMENT ───────────────────────────────
  *
@@ -106,7 +106,12 @@ async function anyContractTypeName(ctx: Ctx): Promise<string> {
  * payload and what contracts does with it. That a contract is PLANNED at all is `close-deal.CD1`'s job,
  * and a check going through the close would fail for either reason.
  */
-async function createContract(ctx: Ctx, typeName: string | null, modified?: boolean) {
+async function createContract(
+    ctx: Ctx,
+    typeName: string | null,
+    modified?: boolean,
+    terms: { AutoRenew?: boolean; CancellationNoticeDaysOverride?: number | null } = {},
+) {
     const f = await ResolveSalesFixture(ctx);
     const seam = new LiveContractsSeam(ctx.User, ProviderOf(ctx));
     return seam.CreateContractFromDeal({
@@ -117,6 +122,7 @@ async function createContract(ctx: Ctx, typeName: string | null, modified?: bool
         AccountID: f.AccountID,
         StartDate: '2026-09-01',
         ...(modified === undefined ? {} : { StandardAgreementModified: modified }),
+        ...terms,
     });
 }
 
@@ -377,6 +383,50 @@ export const CloseWonContractChecks: NamedCheck[] = [
                     published.some((t) => String(t.ID).toLowerCase() === String(contract.ContractTemplateID).toLowerCase()),
                     'and it is a Published, usable one',
                 );
+            }),
+    },
+    {
+        Id: 'close-won-contract.CT8',
+        Name: 'CT8: the type\'s renewal defaults fill what the deal left unset, and never what it stated',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * bizapps-contracts#97. Contracts applies its type defaults only when the creator asks,
+                 * so the seam marks what the deal stated and then asks. The type is given all four
+                 * defaults here, inside the rolled-back transaction, so the result does not depend on the
+                 * host's seed data.
+                 *
+                 * The deal states Auto-renew = No (by omission, which the seam sends as No) and a
+                 * cancellation window. Both must survive, the type's Yes included. The deal says nothing
+                 * about the notice period or the uplift, so those come from the type.
+                 */
+                requireContracts();
+                const [type] = await rows(ctx, E_CONTRACT_TYPE, `Status = 'Active' AND MustBeChild = 0`);
+                Assert(!!type, 'contracts has no standalone active contract type, so the seam has nothing to resolve');
+
+                const typeEntity = await ProviderOf(ctx).GetEntityObject<BaseEntity>(E_CONTRACT_TYPE, ctx.User);
+                const key = new CompositeKey();
+                key.KeyValuePairs.push({ FieldName: 'ID', Value: String(type.ID) });
+                Assert(await typeEntity.InnerLoad(key), 'the contract type reloads');
+                Assert(
+                    typeEntity.Fields.some((f) => f.Name === 'DefaultRenewalNoticeDays'),
+                    'this contracts build has no ContractType renewal defaults, so there is nothing to seed',
+                );
+                typeEntity.Set('DefaultAutoRenew', true);
+                typeEntity.Set('DefaultRenewalNoticeDays', 45);
+                typeEntity.Set('DefaultCancellationWindowDays', 20);
+                typeEntity.Set('DefaultAnnualIncreasePercent', 3);
+                Assert(await typeEntity.Save(), `the type defaults could not be set — ${typeEntity.LatestResult?.CompleteMessage}`);
+
+                const result = await createContract(ctx, String(type.Name), undefined, { CancellationNoticeDaysOverride: 10 });
+                Assert(result.Success, `the contract was not created — ${result.Message}`);
+
+                const [contract] = await rows(ctx, E_CONTRACT, `ID = '${result.ContractID}'`);
+                AssertEqual(contract?.AutoRenew, false, 'the deal\'s No stands against the type\'s Yes');
+                AssertEqual(contract?.CancellationWindowDays, 10, 'the negotiated cancellation window stands');
+                AssertEqual(contract?.RenewalNoticeDays, 45, 'the notice period the deal left unset comes from the type');
+                AssertEqual(Number(contract?.AnnualIncreasePercent), 3, 'the uplift the deal left unset comes from the type');
             }),
     },
 ];

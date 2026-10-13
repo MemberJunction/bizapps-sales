@@ -115,6 +115,8 @@ with nothing mutated: AC6, AC8, AC12, AC13, AC16, AC19, CT1, CT5, CT6, SD6, WT10
 | `M-WT4L` | `CloseWonTaskService.ts` | WT4 | OK — fell WT4, WT14 · `9724489`, 2026-08-23 |
 | `M-CT1` | `LiveContractsSeam.ts` | CT4 | — |
 | `M-CT2` | `LiveContractsSeam.ts` | CT5 | — |
+| `M-CT4` | `LiveContractsSeam.ts` | CT8 | — |
+| `M-CT5` | `LiveContractsSeam.ts` | CT8 | — |
 | `M-CT3` | `CloseDealOperation.ts` | CT6 | — |
 | `M-RI1` | `CloseDealOperation.ts` | CD23 | OK — fell CD23 alone · `33dd263`, 2026-08-23 |
 | `M-RI2` | `CloseDealOperation.ts` | CD23 | OK — fell CD23, CD7 · `33dd263`, 2026-08-23 |
