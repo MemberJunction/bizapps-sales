@@ -250,7 +250,7 @@ PW_HEADLESS=1 pnpm run test:explorer   # unattended
   and view-vs-edit-mode traps that cost real time to find.
 
 ### CI (`.github/workflows/ci.yml`)
-**TEN gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
+**ELEVEN gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
 listed the first and third; five more have been added since and went unrecorded. That understatement is
 not harmless — a reviewer who believes CI only greps and builds will reason that a template change, a
 copy change or a query comment cannot be caught by it, and will hand-check things CI already covers
@@ -268,6 +268,7 @@ while trusting things it does not:
 8. **Unit tests**, guarded on any existing.
 9. **`npm run test:selector-gate`** — every selector the Playwright harness names is in a mounted template.
 10. **`node .github/scripts/check-dependency-model.mjs`** — runs first, before install: `@memberjunction/*` and other apps' `@mj-biz-apps/*` packages are caret peers (exact `devDependencies` anchors), never `dependencies`.
+11. **`npm run test:mutate-harness`** — an interrupted mutation run leaves no mutant in the tree or `dist/`.
 
 Plus a non-blocking changeset presence check.
 

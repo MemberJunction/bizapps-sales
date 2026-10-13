@@ -150,6 +150,13 @@ jobs:
       - name: Harness selector gate (the harness only targets markup the app renders)
         run: npm run test:selector-gate
 
+      # THE MUTATION DRIVER EDITS SOURCE IN PLACE, so an interrupted run that does not clean up leaves a
+      # mutant that looks like an ordinary code change. This proves a signal restores the source, kills
+      # the build/suite's whole process tree and rebuilds, and that a run killed past any handler is
+      # recovered by the next start. Fixture build and suite, so no database.
+      - name: Mutation driver cleanup (an interrupted run leaves no mutant behind)
+        run: npm run test:mutate-harness
+
       # Unit tests run in the shared build.yml (`pnpm run test`, the root vitest suite).
 
       # Advisory, matching the sibling repo's judgement. migrations/_README.md requires a changeset on
