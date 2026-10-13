@@ -17,9 +17,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * the sibling veto's tests do. Only the database is replaced.
  */
 const runView = vi.fn();
+/**
+ * `LogError` is CAPTURED rather than silenced. A check that cannot run is the one case where this
+ * service routes anyway, so the log line is the only record that it happened — silencing it in the
+ * suite would leave the one trace of a degraded route unasserted.
+ */
+const logged: string[] = [];
 vi.mock('@memberjunction/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@memberjunction/core')>();
-    return { ...actual, LogError: () => undefined, RunView: class { public RunView = runView; } };
+    return {
+        ...actual,
+        LogError: (message: unknown) => { logged.push(String(message)); },
+        RunView: class { public RunView = runView; },
+    };
 });
 
 const { CloseWonTaskService } = await import('../CloseWonTaskService.js');
@@ -34,6 +44,7 @@ const USER = { ID: 'user-1' } as never;
 
 afterEach(() => {
     runView.mockReset();
+    logged.length = 0;
 });
 
 type Opts = {
@@ -145,5 +156,43 @@ describe('routing a close-won task to its configured assignee', () => {
         const h = harness({ recordID: "abc' OR 1=1 --", exists: false });
         await route(h);
         expect(runView.mock.calls[0][0].ExtraFilter).toContain("abc'' OR 1=1 --");
+    });
+});
+
+/**
+ * WHAT THE EXISTENCE READ ITSELF PROMISES.
+ *
+ * The cases above assert the ROUTING VERDICT, which leaves the read behind it free to drift: dropping
+ * the context user and removing either log line all survived those assertions. The user matters because
+ * a check made as nobody can answer "not there" about a record the caller can see perfectly well, and
+ * the logs matter because "could not tell" is the one path that routes anyway.
+ */
+describe('the existence read itself', () => {
+    it('is made as the context user, not as nobody', async () => {
+        const h = harness({ recordID: REAL, exists: true });
+        await route(h);
+        expect(runView.mock.calls[0][1], 'a check made as nobody answers a different question').toBe(USER);
+    });
+
+    it('logs when the check cannot run, because that route went ahead unverified', async () => {
+        const h = harness({ recordID: REAL, readFails: true });
+        await route(h);
+        expect(logged.join(' ')).toContain('CloseWonTaskService');
+        expect(logged.join(' '), 'the entity being checked').toContain(PEOPLE);
+        expect(logged.join(' '), 'and the underlying reason').toContain('connection reset');
+    });
+
+    it('logs when the check throws', async () => {
+        const h = harness({ recordID: REAL, readThrows: true });
+        await route(h);
+        expect(logged.join(' ')).toContain('CloseWonTaskService');
+        expect(logged.join(' ')).toContain('connection reset');
+    });
+
+    it('logs nothing when the assignee is simply absent — that is an answer, not a fault', async () => {
+        const h = harness({ recordID: GHOST, exists: false });
+        await route(h);
+        expect(logged, 'a missing assignee is reported to the caller as an Issue, not to the log as an error')
+            .toEqual([]);
     });
 });
