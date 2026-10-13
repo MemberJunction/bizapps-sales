@@ -227,7 +227,7 @@
             <div class="card">
               <div class="ch">
                 Inspect
-                <span class="r">{{ InspectLabel }} · {{ InspectRows.length }} shown</span>
+                <span class="r">{{ InspectLabel }} · {{ InspectCount ?? '—' }} shown</span>
               </div>
               @if (InspectFilter !== 'closing') {
                 <div class="filter-bar">
@@ -279,7 +279,10 @@
              nothing to lose by tearing it down, and a hidden board with a horizontal scroller is a
              layout hazard on the pages that are showing. -->
         <div class="wrap wrap--board" [hidden]="Page !== 'board'">
-          <div class="sechead"><h2>Board</h2></div>
+          <div class="sechead">
+            <h2>Board</h2>
+            <span class="muted" data-testid="sales-board-scope">Open deals, and deals closed {{ BoardClosedLabel }}</span>
+          </div>
 
           @if (Loading) {
             <mj-loading></mj-loading>
