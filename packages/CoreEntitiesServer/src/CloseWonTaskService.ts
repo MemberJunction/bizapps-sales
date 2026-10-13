@@ -676,6 +676,39 @@ export class CloseWonTaskService {
             return null;
         }
 
+        /**
+         * AND THE RECORD HAS TO BE THERE (bc-aidp-next-golive#326).
+         *
+         * `TaskAssignment.AssigneeRecordID` is polymorphic, so there is no foreign key and the database
+         * cannot refuse a row pointing at nobody. On QA fourteen close-won tasks carried a People id that
+         * is not in People -- the id the seeded policy used to ship -- and every one read as assigned
+         * while no queue held them. That is the worse of the two failures: an unrouted task at least
+         * reads as unrouted, and the Issue above says so.
+         *
+         * Checked by READING the row, not by validating the id's shape. A well-formed id for a person
+         * who was never seeded is exactly the case that caused this.
+         */
+        const present = await this.assigneeExists(input.Assignee!.EntityName, input.Assignee!.RecordID, contextUser);
+        if (present === false) {
+            result.Issues.push(
+                `The ${kind} task was created but NOT routed: the configured assignee `
+                    + `'${input.Assignee!.RecordID}' does not exist in ${input.Assignee!.EntityName}. `
+                    + "Point CloseWonTasks.AssigneeRecordID on the pipeline's CloseWonPolicy at a real record.",
+            );
+            return null;
+        }
+        if (present === null) {
+            /**
+             * COULD NOT TELL, so route anyway and say so. A transient read failure must not quietly stop
+             * routing a deployment that is configured correctly -- that would trade this defect for a
+             * worse one. Routing is what happens today; the Issue is what is new.
+             */
+            result.Issues.push(
+                `The ${kind} task's assignee could not be verified before routing; if it is wrong, the `
+                    + 'task will look assigned to nobody.',
+            );
+        }
+
         try {
             const assignment = await this.assignments.assignToTask(
                 {
@@ -690,6 +723,38 @@ export class CloseWonTaskService {
             return assignment.Get('ID') as string;
         } catch (err) {
             result.Issues.push(`The ${kind} task was created but could not be routed: ${String(err)}`);
+            return null;
+        }
+    }
+
+    /**
+     * Whether the assignee record exists: true, false, or NULL for "could not tell".
+     *
+     * Three states rather than two, because the caller treats them differently -- see the note at the
+     * call site. `ResultType: 'count_only'` so this asks the database a question about existence
+     * rather than loading a person nobody reads.
+     */
+    private async assigneeExists(
+        entityName: string,
+        recordID: string,
+        contextUser: UserInfo,
+    ): Promise<boolean | null> {
+        try {
+            const view = await new RunView().RunView(
+                {
+                    EntityName: entityName,
+                    ExtraFilter: `ID = '${recordID.replace(/'/g, "''")}'`,
+                    ResultType: 'count_only',
+                },
+                contextUser,
+            );
+            if (!view.Success) {
+                LogError(`CloseWonTaskService: assignee check failed on ${entityName}: ${view.ErrorMessage}`);
+                return null;
+            }
+            return (view.TotalRowCount ?? 0) > 0;
+        } catch (err) {
+            LogError(`CloseWonTaskService: assignee check threw on ${entityName}: ${String(err)}`);
             return null;
         }
     }
