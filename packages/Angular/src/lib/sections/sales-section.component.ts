@@ -74,6 +74,7 @@ import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 import { DealBoardComponent, DEFAULT_DISPLAY_CURRENCY } from '../board/deal-board.component';
 import {
     DealWorkspaceService,
+    SECTION_LOOKUP_KEYS,
     type DealDashboardSummary,
     type DealRosterRow,
 } from '../workspace/deal-workspace.service';
@@ -302,9 +303,9 @@ export class MJSSalesSectionComponent implements OnInit {
 
         const [roster, lookups, summary, winRate] = await Promise.all([
             this.loadRoster(),
-            // Still needed: the BOARD renders from these, and StatusTone reads them for the roster
-            // pill. The KPI tiles no longer do -- their flags are applied server-side by the query.
-            this.service.LoadLookups(),
+            // Only the lists the BOARD and the status pill read. Accounts and contacts are the deal
+            // workspace's pickers and grow with the customer base, so they are not loaded here.
+            this.service.LoadLookups(SECTION_LOOKUP_KEYS),
             // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
             this.service.LoadDashboardSummary(window),
             // The window reaches win rate through parameters the query ALREADY declared -- it filters
