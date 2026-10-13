@@ -25,6 +25,8 @@ import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { ShareTestedCheckoutPackages } from './one-mj-core.mjs';
+
 /** The built entry point of a sibling package, or null when it is absent or unbuilt. */
 export function resolveSiblingPackage(name, from = process.cwd()) {
     const parent = join(from, '..');
@@ -67,6 +69,8 @@ export function resolveSiblingPackage(name, from = process.cwd()) {
  * two registries and a last-one-wins race that is invisible until something resolves the wrong class.
  */
 export async function importSibling(name) {
+    // A sibling checkout must load THIS checkout's MJ core, not its own (sales#200).
+    ShareTestedCheckoutPackages();
     try {
         return await import(name);
     } catch (err) {
