@@ -29,9 +29,9 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@mj-biz-apps/sales-actions": "6.15.0",
-    "@mj-biz-apps/sales-core-entities-server": "6.15.0",
-    "@mj-biz-apps/sales-entities": "6.15.0",
+    "@mj-biz-apps/sales-actions": "^6.15.0",
+    "@mj-biz-apps/sales-core-entities-server": "^6.15.0",
+    "@mj-biz-apps/sales-entities": "^6.15.0",
     "class-validator": "^0.14.3"
   },
   "peerDependencies": {
