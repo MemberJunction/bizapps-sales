@@ -38,6 +38,7 @@ import { DealActivityTimelineComponent } from '../activities/deal-activity-timel
 import { SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { MJSDealLineEditorComponent } from './deal-line-editor.component';
+import { MJSDealAccountEditComponent } from './deal-account-edit.component';
 import { BusinessDayOf, DealCloseDay } from './deal-close-day';
 
 const E = MJS_ENTITIES.Deal;
@@ -78,8 +79,16 @@ async function LoadLossReasons(): Promise<LossReasonOption[]> {
     }));
 }
 
-/** One pipeline the deal may sit in. */
+/** One pipeline the deal may sit in, with the company it sells as. */
 export interface PipelineOption {
+    ID: string;
+    Name: string;
+    CompanyID: string;
+    CompanyName: string | null;
+}
+
+/** One selling company, offered because at least one active pipeline sells as it. */
+export interface SellingCompanyOption {
     ID: string;
     Name: string;
 }
@@ -106,15 +115,20 @@ export interface PipelineStageOption {
  * the one that did not.
  */
 async function LoadPipelines(): Promise<PipelineOption[]> {
-    const result = await new RunView().RunView<{ ID: string; Name: string }>({
+    const result = await new RunView().RunView<{ ID: string; Name: string; CompanyID: string; Company: string | null }>({
         EntityName: MJS_ENTITIES.Pipeline,
         ExtraFilter: 'IsActive = 1',
         OrderBy: 'DisplayRank ASC, Name ASC',
         ResultType: 'simple',
-        Fields: ['ID', 'Name'],
+        Fields: ['ID', 'Name', 'CompanyID', 'Company'],
     });
     if (!result?.Success) return [];
-    return (result.Results ?? []).map((r) => ({ ID: String(r.ID), Name: String(r.Name) }));
+    return (result.Results ?? []).map((r) => ({
+        ID: String(r.ID),
+        Name: String(r.Name),
+        CompanyID: String(r.CompanyID),
+        CompanyName: r.Company ?? null,
+    }));
 }
 
 /**
@@ -1449,7 +1463,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     selector: 'mjs-deal-pipeline-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule],
+    imports: [CommonModule, FormsModule, BaseFormsModule, MJSDealAccountEditComponent],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="pipeline" SectionName="Pipeline" Icon="fa-solid fa-diagram-project"
@@ -1460,6 +1474,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
+                        @if (f.name === 'AccountID') {
+                            <mjs-deal-account-edit [Record]="Record" [Form]="FormComponent" [DealEditMode]="EditMode" />
+                        }
                     </div>
                 }
 
@@ -1473,6 +1490,31 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      Pipeline is here too because choosing one chooses which stages exist; a plain
                      binding gives nowhere to clear a stage that has just become meaningless. The deal
                      workspace has always done both, which is why testers were told to use it. -->
+                <!-- SELLING COMPANY IS CHOSEN BY MOVING THE PIPELINE (sales#253). The server stamps
+                     Deal.CompanyID from the pipeline on every save, so this never writes CompanyID:
+                     picking a company moves the deal to that company's first pipeline, and the
+                     Pipeline list below then offers only that company's pipelines. Gated on
+                     PipelineID because that is the field it writes. -->
+                <div class="mjs-field" data-field="SellingCompany">
+                    <div class="mj-forms-field"
+                         [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineID')">
+                        <label class="mj-forms-field-label">Selling Company</label>
+                        @if (EditMode && FieldEditable('PipelineID')) {
+                            <select [ngModel]="CurrentCompanyID" data-testid="deal-selling-company"
+                                    (ngModelChange)="SetSellingCompany($event)"
+                                    [compareWith]="CompareID">
+                                <option [ngValue]="null" disabled>— choose —</option>
+                                @for (c of SellingCompanyOptions; track c.ID) {
+                                    <option [ngValue]="c.ID">{{ c.Name }}</option>
+                                }
+                            </select>
+                            <small class="mjs-field__hint">Changing it moves the deal to that company's pipeline.</small>
+                        } @else {
+                            <div class="mj-forms-field-value">{{ CurrentCompanyName ?? '—' }}</div>
+                        }
+                    </div>
+                </div>
+
                 <div class="mjs-field" data-field="PipelineID">
                     <!-- The editing modifier class is MJ's own marker for a field it is currently
                          letting you edit, and FieldIsEditable in the Explorer harness reads exactly
@@ -1719,9 +1761,57 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
 
     /* ── Pipeline and stage (bc-aidp-next-golive#291) ───────────────────────── */
 
-    /** Every pipeline that may be chosen. */
+    /**
+     * The pipelines that may be chosen: the current selling company's, or every one while the deal has
+     * no pipeline yet. Moving to another company's pipeline goes through `SetSellingCompany`, so the
+     * company a rep sees on the picker above is always the one the deal will save as.
+     */
     public get PipelineOptions(): PipelineOption[] {
-        return this.pipelines();
+        const companyID = this.CurrentCompanyID;
+        if (!companyID) return this.pipelines();
+        const key = companyID.toLowerCase();
+        return this.pipelines().filter((p) => p.CompanyID.toLowerCase() === key);
+    }
+
+    /** Every company at least one active pipeline sells as, in pipeline rank order. */
+    public get SellingCompanyOptions(): SellingCompanyOption[] {
+        const seen = new Map<string, SellingCompanyOption>();
+        for (const p of this.pipelines()) {
+            const key = p.CompanyID.toLowerCase();
+            if (!seen.has(key)) seen.set(key, { ID: p.CompanyID, Name: p.CompanyName ?? p.CompanyID });
+        }
+        return [...seen.values()];
+    }
+
+    /**
+     * The company the deal sells as, read off its CURRENT pipeline rather than `Deal.CompanyID`. The
+     * server stamps that column from the pipeline on save, so before a save the pipeline is the only
+     * value that is already right.
+     */
+    public get CurrentCompanyID(): string | null {
+        return this.currentPipeline?.CompanyID ?? null;
+    }
+
+    public get CurrentCompanyName(): string | null {
+        return this.currentPipeline?.CompanyName ?? null;
+    }
+
+    private get currentPipeline(): PipelineOption | null {
+        const id = String(this.Record?.PipelineID ?? '').toLowerCase();
+        if (!id) return null;
+        return this.pipelines().find((p) => p.ID.toLowerCase() === id) ?? null;
+    }
+
+    /**
+     * Changes the selling company by moving the deal to that company's first pipeline (by display
+     * rank). A deal already in one of the company's pipelines stays where it is.
+     */
+    public SetSellingCompany(companyID: string | null): void {
+        if (!this.Record || !companyID) return;
+        const key = companyID.toLowerCase();
+        if (this.CurrentCompanyID?.toLowerCase() === key) return;
+        const first = this.pipelines().find((p) => p.CompanyID.toLowerCase() === key);
+        if (first) this.SetPipeline(first.ID);
     }
 
     /**
@@ -2198,7 +2288,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
     selector: 'mjs-deal-party-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, BaseFormsModule],
+    imports: [CommonModule, BaseFormsModule, MJSDealAccountEditComponent],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="party" SectionName="Account &amp; people" Icon="fa-solid fa-building"
@@ -2209,6 +2299,9 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
+                        @if (f.name === 'AccountID') {
+                            <mjs-deal-account-edit [Record]="Record" [Form]="FormComponent" [DealEditMode]="EditMode" />
+                        }
                     </div>
                 }
             </div>
