@@ -1,5 +1,15 @@
 # @mj-biz-apps/sales-server
 
+## 6.15.1
+
+### Patch Changes
+
+- 19ecdc2: The packages' dependencies on each other are caret ranges (`^6.15.0`) instead of exact versions. A host that pins or overrides one package of this app at a later compatible version no longer forces an exact-match copy of its siblings. Changesets keeps the caret and moves its floor on each release.
+- Updated dependencies [19ecdc2]
+  - @mj-biz-apps/sales-actions@6.15.1
+  - @mj-biz-apps/sales-core-entities-server@6.15.1
+  - @mj-biz-apps/sales-entities@6.15.1
+
 ## 6.15.0
 
 ### Minor Changes
