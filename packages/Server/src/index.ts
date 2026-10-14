@@ -16,7 +16,11 @@ import { LoadSalesDealEntities } from '@mj-biz-apps/sales-entities';
 // the OwnerEmployeeID stamp derived from the team roster. The deal's own child collections are Related
 // Record Collections now, so no hand-rolled tree lives here any more. The close lock lands at S4.
 import '@mj-biz-apps/sales-core-entities-server';
-import { LoadDealLockOrderLineVeto, LoadSalesCoreEntitiesServer } from '@mj-biz-apps/sales-core-entities-server';
+import {
+    LoadDealLockOrderLineVeto,
+    LoadDealNotWonConfirmVeto,
+    LoadSalesCoreEntitiesServer,
+} from '@mj-biz-apps/sales-core-entities-server';
 import { LoadCaptureForecastSnapshotAction } from './custom/forecast-snapshot.action.js';
 import { LoadLogActivityAction } from './custom/log-activity.action.js';
 import { LoadDetectWonDealsWithUnconfirmedOrdersAction } from './custom/won-deal-order-detector.action.js';
@@ -75,6 +79,13 @@ export function LoadBizAppsSalesServer(): void {
      * hoisting, and not at all until orders ships the version carrying it.
      */
     LoadDealLockOrderLineVeto();
+
+    /**
+     * And the other direction (bc-aidp-next-golive#323): an order whose deal is NOT Won may not be
+     * confirmed. A deal closed Won, reopened, and its order confirmed anyway booked against a deal
+     * sitting Open. Same seam shape, same package reasoning as the note above.
+     */
+    LoadDealNotWonConfirmVeto();
 
     LoadCaptureForecastSnapshotAction();
     LoadLogActivityAction();

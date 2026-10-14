@@ -109,6 +109,7 @@ export type {
  * scheduled job calls.
  */
 export * from './DealLockOrderLineVeto.js';
+export * from './DealNotWonConfirmVeto.js';
 export * from './forecast/ForecastSource.js';
 export * from './forecast/FixtureForecastSource.js';
 export * from './forecast/QueryForecastSource.js';
