@@ -222,11 +222,13 @@ export class DealTeamMemberEntityServer extends mjBizAppsSalesDealTeamMemberEnti
             return null;
         }
 
-        const roleName = role.Name ?? 'that role';
+        // "someone in the X role" rather than "a X": the article would depend on the role name's first
+        // letter, and the seeded name reads "a Owner / AE".
+        const inRole = role.Name ? `the ${role.Name} role` : 'that role';
         const who = existing.Employee ? ` (${existing.Employee})` : '';
         return (
-            `This deal already has a ${roleName}${who}. Change that row's employee instead of adding a `
-            + `second one.`
+            `This deal already has someone in ${inRole}${who}. Change that row's employee instead `
+            + `of adding a second one.`
         );
     }
 

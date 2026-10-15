@@ -52,6 +52,7 @@ function member(opts: Opts) {
         LoadedTeams: string[];
         SavedDeals: string[];
         LoadedDeals: string[];
+        Refusals: string[];
     };
 
     const dealID = 'DealID' in opts ? opts.DealID : DEAL_A;
@@ -106,7 +107,11 @@ function member(opts: Opts) {
      * Absent, a refusal throws while reporting the refusal, which hides the reason behind a TypeError.
      */
     Object.defineProperty(instance, 'Fields', { value: [], writable: true });
-    Object.defineProperty(instance, 'RegisterResultHistoryEntry', { value: () => undefined, writable: true });
+    const refusals: string[] = [];
+    Object.defineProperty(instance, 'RegisterResultHistoryEntry', {
+        value: (result: { Message: string }) => refusals.push(result.Message),
+        writable: true,
+    });
 
     /**
      * The single-holder check reads `DealRole.AllowsMultiplePerDeal` and then the deal's rows in that
@@ -128,6 +133,7 @@ function member(opts: Opts) {
     Object.defineProperty(instance, 'LoadedTeams', { get: () => loadedTeams });
     Object.defineProperty(instance, 'SavedDeals', { get: () => savedDeals });
     Object.defineProperty(instance, 'LoadedDeals', { get: () => loadedDeals });
+    Object.defineProperty(instance, 'Refusals', { get: () => refusals });
     return instance;
 }
 
@@ -261,6 +267,10 @@ describe('a role that admits only one holder per deal', () => {
         const m = member({ singleHolderRole: true, existingHolder: 'Erica Chen', IsSaved: false });
         expect(await runSave(m), 'the save must be refused').toBe(false);
         expect(m.SavedDeals, 'and the deal must not be touched').toEqual([]);
+        expect(m.Refusals).toEqual([
+            "This deal already has someone in the Owner / AE role (Erica Chen). Change that row's employee "
+                + 'instead of adding a second one.',
+        ]);
     });
 
     it('allows the FIRST holder — there is nobody to collide with', async () => {
