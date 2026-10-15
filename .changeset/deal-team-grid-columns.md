@@ -1,5 +1,5 @@
 ---
-"@mj-biz-apps/sales-entities": patch
+"@mj-biz-apps/sales-entities": minor
 ---
 
 A deal's Internal team grid shows the member, role, attribution and dates instead of ID columns.
