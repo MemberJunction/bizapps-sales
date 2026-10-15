@@ -121,7 +121,7 @@ const GUID_SHAPE = /^[0-9a-fA-F-]{36}$/;
 interface PartyCheck {
     EntityName: string;
     ID: string;
-    Label: 'customer' | 'primary contact';
+    Label: 'customer' | 'primary contact' | 'billing contact';
 }
 
 /**
@@ -2479,10 +2479,13 @@ export class DealEntityServer extends DealEntity {
     /* ── Parties ────────────────────────────────────────────────────────────── */
 
     /**
-     * Refuses a customer or primary contact that this save writes and the database no longer holds.
+     * Refuses a customer, primary contact or billing contact that this save writes and the database no
+     * longer holds.
      *
      * Only a value the caller SUPPLIES is checked. One already on disk is guaranteed by
-     * `FK_Deal_SalesAccount` and `FK_Deal_PrimaryContact`, so reading it again proves nothing. A
+     * `FK_Deal_SalesAccount`, `FK_Deal_PrimaryContact` and `FK_Deal_BillingContact`, so reading it again
+     * proves nothing. The billing contact does not reach the embedded order, but a stale one still fails
+     * on its own foreign key as a SQL error rather than by name. A
      * supplied value can name a row that does not exist in two measured ways: it was picked from a list
      * read before a data reload re-keyed the customers, or the inline-create slide-in reported an id
      * other than the one it wrote (`DECISIONS-NEEDED.md` DN-19, the "INTERMITTENT" entry).
@@ -2542,6 +2545,9 @@ export class DealEntityServer extends DealEntity {
         }
         if (this.PrimaryContactID && this.callerSuppliedValue('PrimaryContactID', this.PrimaryContactID)) {
             checks.push({ EntityName: SALES_CONTACT_ENTITY, ID: this.PrimaryContactID, Label: 'primary contact' });
+        }
+        if (this.BillingContactID && this.callerSuppliedValue('BillingContactID', this.BillingContactID)) {
+            checks.push({ EntityName: SALES_CONTACT_ENTITY, ID: this.BillingContactID, Label: 'billing contact' });
         }
         return checks;
     }
