@@ -192,7 +192,29 @@ interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder:
 interface NamedRow { ID: string; Name: string }
 interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean; LocksDeal: boolean }
 interface LossReasonRow extends NamedRow { RequiresNotes: boolean }
-interface ContactRow { ID: string; FirstName: string | null; LastName: string | null; Email: string | null }
+export interface ContactRow {
+    ID: string;
+    FirstName: string | null;
+    LastName: string | null;
+    Email: string | null;
+    DisplayNameAndEmail: string | null;
+}
+
+/**
+ * A contact's label in the workspace's contact lists: "Name (email)", the same text the deal form's
+ * contact picker shows (#254). A native select can only jump to an option by its first letters, so
+ * the email cannot be searched here, but it tells two people with the same name apart.
+ *
+ * `DisplayNameAndEmail` comes from vwSalesContacts. The fallbacks cover a row without it.
+ */
+export function ContactOptionLabel(c: ContactRow): string {
+    return (
+        c.DisplayNameAndEmail?.trim() ||
+        [c.FirstName, c.LastName].filter(Boolean).join(' ').trim() ||
+        c.Email ||
+        '(unnamed contact)'
+    );
+}
 interface EmployeeRow { ID: string; FirstLast: string | null }
 
 /** One named lookup list. */
@@ -282,12 +304,14 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
         },
     ),
     Contacts: lookupRead<ContactRow>(
-        { EntityName: E_CONTACT, OrderBy: 'LastName ASC', ResultType: 'simple', Fields: ['ID', 'FirstName', 'LastName', 'Email'] },
+        {
+            EntityName: E_CONTACT,
+            OrderBy: 'LastName ASC',
+            ResultType: 'simple',
+            Fields: ['ID', 'FirstName', 'LastName', 'Email', 'DisplayNameAndEmail'],
+        },
         (rows, into) => {
-            into.Contacts = rows.map<DealLookup>((c) => ({
-                ID: c.ID,
-                Name: [c.FirstName, c.LastName].filter(Boolean).join(' ').trim() || c.Email || '(unnamed contact)',
-            }));
+            into.Contacts = rows.map<DealLookup>((c) => ({ ID: c.ID, Name: ContactOptionLabel(c) }));
         },
     ),
     Employees: lookupRead<EmployeeRow>(

@@ -65,6 +65,7 @@ import { RegisterClass } from '@memberjunction/global';
 // still belong to orders. Sales never becomes the thing that computes money.
 import { mjBizAppsOrdersOrderHeaderEntity } from '@mj-biz-apps/orders-entities';
 
+import { ContactsFromAccount, type ContactPair } from './account-contact-defaults';
 import { BillingContactFromPrimary } from './billing-contact-default';
 import {
     mjBizAppsSalesDealEntity,
@@ -79,6 +80,15 @@ export const DEAL_DEFAULT_PAYMENT_METHOD = 'ACH';
 interface DealRoleIDRow {
     ID: string;
 }
+
+/** The account's default contacts, as the account-defaults lookup selects them. */
+interface AccountContactDefaultsRow {
+    DefaultPrimaryContactID: string | null;
+    DefaultBillingContactID: string | null;
+}
+
+/** A record id the account-defaults lookup may put in a filter. Anything else is refused, not quoted. */
+const GUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**
  * Records a blocking problem. Separated from {@link warn} because only a failure clears
@@ -278,6 +288,78 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
         if (billing) {
             super.Set('BillingContactID', billing);
         }
+    }
+
+    /**
+     * ── CHOOSING AN ACCOUNT FILLS THE DEAL'S EMPTY CONTACTS FROM IT (#254) ────────────────────────
+     *
+     * The rule is {@link ContactsFromAccount}; this reads the account and applies it. The deal form and
+     * the deal workspace call it after the rep changes the account.
+     *
+     * WHY A METHOD THE SURFACES CALL, NOT PART OF `Set`. Filling needs the account's row, which is a
+     * database read, and `Set` cannot wait for one. A read started inside `Set` and left running could
+     * land after the save it was meant to feed, or after the rep had picked a different account.
+     *
+     * BILLING IS WRITTEN BEFORE PRIMARY, so the account's billing default wins over the
+     * primary-fills-billing rule in `Set`. When the account has no billing default, writing the primary
+     * then fills an empty billing contact from it, as picking a primary by hand does.
+     *
+     * @returns the fields it filled; empty when there was nothing to fill, or when the account changed
+     *          while the read was in flight (that account's own call fills from it).
+     */
+    public async FillContactsFromAccount(): Promise<Array<keyof ContactPair>> {
+        const accountID = this.AccountID;
+        if (!accountID) {
+            return [];
+        }
+        const defaults = await this.ReadAccountContactDefaults(accountID);
+        if (this.AccountID?.toLowerCase() !== accountID.toLowerCase()) {
+            return [];
+        }
+        const writes = ContactsFromAccount(
+            { PrimaryContactID: this.PrimaryContactID, BillingContactID: this.BillingContactID },
+            defaults,
+        );
+        const filled: Array<keyof ContactPair> = [];
+        if (writes.BillingContactID) {
+            this.Set('BillingContactID', writes.BillingContactID);
+            filled.push('BillingContactID');
+        }
+        if (writes.PrimaryContactID) {
+            this.Set('PrimaryContactID', writes.PrimaryContactID);
+            filled.push('PrimaryContactID');
+        }
+        return filled;
+    }
+
+    /**
+     * The account's two default contacts. Throws when the read fails, so a caller can say the defaults
+     * were not applied rather than leave the fields empty without a word.
+     *
+     * Protected so tests can stand in for the database.
+     */
+    protected async ReadAccountContactDefaults(accountID: string): Promise<ContactPair> {
+        if (!GUID_PATTERN.test(accountID)) {
+            throw new Error(`DealEntity: the deal's account id "${accountID}" is not a record id.`);
+        }
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await provider.RunView<AccountContactDefaultsRow>(
+            {
+                EntityName: 'MJ_BizApps_Sales: Sales Accounts',
+                ExtraFilter: `ID = '${accountID}'`,
+                ResultType: 'simple',
+                Fields: ['DefaultPrimaryContactID', 'DefaultBillingContactID'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            throw new Error(`DealEntity: could not read the account's default contacts: ${result.ErrorMessage}`);
+        }
+        const row = (result.Results ?? [])[0];
+        return {
+            PrimaryContactID: row?.DefaultPrimaryContactID ?? null,
+            BillingContactID: row?.DefaultBillingContactID ?? null,
+        };
     }
 
     /**

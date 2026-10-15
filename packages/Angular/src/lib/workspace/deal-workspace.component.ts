@@ -574,6 +574,25 @@ export class DealWorkspaceComponent implements OnInit {
         this.Touch();
     }
 
+    /**
+     * Records the chosen account, then fills the deal's empty contacts from the account's defaults
+     * (#254). The rule and the read are `DealEntity.FillContactsFromAccount`, which the deal form calls
+     * too. A failed read leaves the contacts as they were and says so; the account stays chosen.
+     */
+    public async OnAccountChange(deal: DealEntity): Promise<void> {
+        this.Touch();
+        try {
+            const filled = await deal.FillContactsFromAccount();
+            if (filled.length > 0) {
+                this.Touch();
+                this.cdr.detectChanges();
+            }
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            this.Fail(`The account's default contacts were not filled in: ${reason}`);
+        }
+    }
+
     // ── Related records: the account and the contacts ──────────────────────────
 
     /**

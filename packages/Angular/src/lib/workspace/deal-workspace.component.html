@@ -276,7 +276,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Customer</span>
-              <select [(ngModel)]="deal.AccountID" [disabled]="!IsFieldEditable('AccountID')" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.AccountID" [disabled]="!IsFieldEditable('AccountID')" (ngModelChange)="OnAccountChange(deal)">
                 <option [ngValue]="null">— choose —</option>
                 @for (a of Lookups.Accounts; track a.ID) {
                   <option [ngValue]="a.ID">{{ a.Name }}</option>
