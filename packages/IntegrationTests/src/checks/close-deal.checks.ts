@@ -3047,10 +3047,15 @@ export const CloseDealChecks: NamedCheck[] = [
                       WHERE s.PipelineID = '${f.OrderOnlyPolicyPipelineID}' AND t.IsLost = 1`,
                     'CD37: retire the losing stages inside the rolled-back transaction',
                 );
-                Assert(
-                    !(await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsLost = 1')),
-                    'setup: the pipeline must have no active losing stage',
+                // `stageDeclaring` reads through `TxOne`, which throws on no rows, so the absence is
+                // counted here instead.
+                const remaining = await TxAll<{ ID: string }>(
+                    ctx,
+                    `SELECT s.ID FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.OrderOnlyPolicyPipelineID}' AND s.IsActive = 1 AND t.IsLost = 1`,
                 );
+                AssertEqual(remaining.length, 0, 'setup: the pipeline must have no active losing stage');
 
                 const start = f.OrderOnlyPolicyStageID;
                 const dealID = await openDeal(ctx, f, f.OrderOnlyPolicyPipelineID, start, 'CD37 no losing stage');
