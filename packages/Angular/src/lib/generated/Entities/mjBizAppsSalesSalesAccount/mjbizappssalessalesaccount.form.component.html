@@ -144,6 +144,24 @@
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
+            FieldName="DefaultPrimaryContactID"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+            LinkType="Record"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="DefaultBillingContactID"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+            LinkType="Record"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
             FieldName="Name"
             Type="textbox"
             [EditMode]="EditMode"

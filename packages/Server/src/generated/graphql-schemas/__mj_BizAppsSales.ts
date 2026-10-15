@@ -4463,6 +4463,14 @@ export class mjBizAppsSalesSalesAccount_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field({nullable: true, description: `Contact a new deal for this account starts with as its Primary Contact. Copied onto a deal only when the deal's Primary Contact is empty; the deal's value stays editable.`}) 
+    @MaxLength(36)
+    DefaultPrimaryContactID?: string;
+        
+    @Field({nullable: true, description: `Contact a new deal for this account starts with as its Billing Contact. Copied onto a deal only when the deal's Billing Contact is empty; the deal's value stays editable. Empty means the deal's billing contact follows its primary contact.`}) 
+    @MaxLength(36)
+    DefaultBillingContactID?: string;
+        
     @Field({nullable: true}) 
     @MaxLength(255)
     Name?: string;
@@ -4524,6 +4532,14 @@ export class mjBizAppsSalesSalesAccount_ {
     @MaxLength(200)
     LeadSourceType?: string;
         
+    @Field({nullable: true}) 
+    @MaxLength(704)
+    DefaultPrimaryContact?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(704)
+    DefaultBillingContact?: string;
+        
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
         
@@ -4575,6 +4591,12 @@ export class CreatemjBizAppsSalesSalesAccountInput {
 
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
+
+    @Field({ nullable: true })
+    DefaultPrimaryContactID: string | null;
+
+    @Field({ nullable: true })
+    DefaultBillingContactID: string | null;
 
     @Field({ nullable: true })
     Name?: string;
@@ -4663,6 +4685,12 @@ export class UpdatemjBizAppsSalesSalesAccountInput {
 
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
+
+    @Field({ nullable: true })
+    DefaultPrimaryContactID?: string | null;
+
+    @Field({ nullable: true })
+    DefaultBillingContactID?: string | null;
 
     @Field({ nullable: true })
     Name?: string;
