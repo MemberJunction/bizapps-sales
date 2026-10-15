@@ -14,7 +14,7 @@
 import { ChangeDetectorRef, Component, ViewChild, ViewEncapsulation, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { BaseEntity, CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions } from '@memberjunction/core';
+import { BaseEntity, CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions, type RunViewParams } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent, type FormContext, type FormNavigationEvent } from '@memberjunction/ng-base-forms';
@@ -3493,6 +3493,9 @@ export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
     }
 }
 
+/** Undated instalments first on every platform, then by date, then by DisplayOrder within a date. */
+export const SCHEDULE_DATE_ORDER = 'CASE WHEN PaymentDate IS NULL THEN 0 ELSE 1 END, PaymentDate ASC, DisplayOrder ASC';
+
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-related-payment-schedule',
     skipNullKeyWarning: true,
@@ -3511,7 +3514,7 @@ export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
             [BadgeCount]="FormComponent.GetSectionRowCount('payment-schedule')">
             @if (Record.IsSaved) {
                 <mj-explorer-entity-data-grid
-                    [Params]="FormComponent.BuildRelationshipViewParamsByEntityName(Entity, 'DealID')"
+                    [Params]="ScheduleParams"
                     [NewRecordValues]="FormComponent.NewRecordValues(Entity, 'DealID')"
                     [AllowLoad]="FormComponent.IsSectionExpanded('payment-schedule')"
                     [ShowToolbar]="true"
@@ -3527,6 +3530,24 @@ export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
 })
 export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealPaymentSchedule;
+
+    /**
+     * Instalments by payment date, then by DisplayOrder within a date (bizapps-sales#314).
+     *
+     * The relationship params carry no sort, and with none the grid sends no ORDER BY, so rows came
+     * back in storage order. Undated rows ("on execution") sort first, and the CASE says so rather
+     * than relying on NULL placement: SQL Server puts NULL first ascending, PostgreSQL puts it last.
+     * DisplayOrder is only the tie-break; rows added through this grid skip the collection's
+     * sequencer and save it as 0. The deal workspace keeps entry order on purpose. A rep can still
+     * re-sort by clicking a column header.
+     */
+    public get ScheduleParams(): RunViewParams {
+        const params = this.FormComponent.BuildRelationshipViewParamsByEntityName(this.Entity, 'DealID');
+        // No relationship found, or one bound to a saved view that carries its own sort.
+        if (!params.EntityName) return params;
+        return { ...params, OrderBy: SCHEDULE_DATE_ORDER };
+    }
+
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('payment-schedule', event.totalRowCount);
     }
