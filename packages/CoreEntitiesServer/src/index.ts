@@ -56,6 +56,7 @@ export * from './orders-availability.js';
 
 /** The REAL contracts handoff — selected automatically when contracts' entities are registered. */
 export * from './LiveContractsSeam.js';
+export * from './ContractOrderRelink.js';
 
 /**
  * The finance tasks a won deal raises (S-US2 #34, S-US3 #35).
