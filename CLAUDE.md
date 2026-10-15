@@ -250,7 +250,7 @@ PW_HEADLESS=1 pnpm run test:explorer   # unattended
   and view-vs-edit-mode traps that cost real time to find.
 
 ### CI (`.github/workflows/ci.yml`)
-**TWELVE gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
+**THIRTEEN gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
 listed the first and third; five more have been added since and went unrecorded. That understatement is
 not harmless — a reviewer who believes CI only greps and builds will reason that a template change, a
 copy change or a query comment cannot be caught by it, and will hand-check things CI already covers
@@ -270,6 +270,7 @@ while trusting things it does not:
 10. **`node .github/scripts/check-dependency-model.mjs`** — runs first, before install: `@memberjunction/*` and other apps' `@mj-biz-apps/*` packages are caret peers (exact `devDependencies` anchors), never `dependencies`.
 11. **`npm run test:mutate-harness`** — an interrupted mutation run leaves no mutant in the tree or `dist/`.
 12. **`npm run test:one-copy-harness`** — on sibling-checkout hosts, each `@mj-biz-apps/*` import gets the copy its range or sales' override calls for.
+13. **`pnpm run test:token-gate`** — every `var(--mj-…)` in `packages/Angular` is a token MJ defines (`scripts/mj-tokens.json`). An unknown name drops its rule silently.
 
 Plus a non-blocking changeset presence check.
 
@@ -297,7 +298,7 @@ AIDP Next runs MemberJunction's 6.1 LTS line, pinned exactly in `aidp-next/packa
 - **Declared ranges.** A published package lists `@memberjunction/*` only in `peerDependencies`, as `^6.1.N`, where 6.1.N is the LTS release AIDP Next runs: a floor, not a cap. Its `devDependencies` anchor the same 6.1.N exactly for local builds; nothing goes in `dependencies` (CI's dependency model gate). Never an edge or prerelease range (`6.1.0-edge.x` sorts *before* 6.1.0 and has none of the LTS fixes). Packages MJ versions separately (`@memberjunction/connector-*`, `@memberjunction/skyway-*`) keep their own ranges.
 - **Overrides (`overrides:` in `pnpm-workspace.yaml`).** `@memberjunction/core` and `@memberjunction/global` carry the same floor (for example `"^6.1.5"`), so every request in the graph resolves to one copy. Two copies of `core` split the ClassFactory: registrations land in one factory while the resolver reads the other, and nothing errors. Overrides are workspace-local and never published. They do not go under `package.json`'s `pnpm` field: pnpm 10.33 warns that it no longer reads that field, and the field is deprecated. Do not exact-pin sibling `@mj-biz-apps/*` packages here; how the apps declare each other is bc-aidp-next-golive#265.
 - **One copy of each.** After any install, `pnpm why @memberjunction/core` must show a single version. A sibling app package that exact-pins an old MJ build brings a second copy in (for example `@mj-biz-apps/common-ng@5.37.0` pinned edge.3 packages); fix it by raising that package's floor, not with more overrides.
-- **Bumping to a new 6.1.N**, when AIDP Next moves: raise every `^6.1.N` floor, every exact `6.1.N` devDependencies anchor and both overrides; `pnpm install`; confirm one copy; set `mjVersionRange` in `mj-app.json` to `>=6.1.N <7.0.0` (the Version Packages PR re-derives it from `packages/Entities`' `@memberjunction/core` peer via `ci/sync-mj-app-version.mjs`, so the two must agree); rebuild the database from migrations on MJ core `v6.1.N` and regenerate (below); run the full test suite; add a `patch` changeset; commit the lockfile. If CI then fails on the lockfile although a clean local install works, GitHub is testing the merge with `next`: merge `next` in, run `pnpm install --no-frozen-lockfile`, and commit the lockfile.
+- **Bumping to a new 6.1.N**, when AIDP Next moves: raise every `^6.1.N` floor, every exact `6.1.N` devDependencies anchor and both overrides; `pnpm install`; confirm one copy; run `node scripts/refresh-mj-tokens.mjs` (the token gate fails until `scripts/mj-tokens.json` matches the new anchor); set `mjVersionRange` in `mj-app.json` to `>=6.1.N <7.0.0` (the Version Packages PR re-derives it from `packages/Entities`' `@memberjunction/core` peer via `ci/sync-mj-app-version.mjs`, so the two must agree); rebuild the database from migrations on MJ core `v6.1.N` and regenerate (below); run the full test suite; add a `patch` changeset; commit the lockfile. If CI then fails on the lockfile although a clean local install works, GitHub is testing the merge with `next`: merge `next` in, run `pnpm install --no-frozen-lockfile`, and commit the lockfile.
 - **Never patch MemberJunction.** No `pnpm patch`, `patchedDependencies`, patch-package or `sed` against `@memberjunction/*` `dist/`. That is AIDP Next's hard rule (`.github/workflows/MJ_PATCH_REGISTER.md` in aidp-next). Fix MJ on its `next` branch and bring the fix to the line with the `backport lts/6.1` label, or with a hand-port PR against `lts/6.1` when the fix can't be isolated; then wait for the patch release.
 
 ### CodeGen output must be reproducible from this repo
@@ -326,7 +327,7 @@ Generated files are committed, and AIDP Next ships them as they are: it excludes
   repository root**. **Never** run an install inside a package directory.
 - `pnpm run build` (all, Turborepo) · `build:generated` · `build:packages`
 - **No `start:*` scripts.** Sales ships no shells; the MJ host runs MJAPI/MJExplorer (`docs/QA-GUIDE.md`)
-- `pnpm run verify` — the vocabulary, money, comment-drift, distribution, spec-typecheck and selector
+- `pnpm run verify` — the vocabulary, money, token, comment-drift, distribution, spec-typecheck and selector
   gates, then the build and unit tests, then the discount and validation gates (they read `dist/`).
 
 ---
@@ -380,7 +381,8 @@ Built on MJ's Angular Generic components — `kanban`, `timeline`, `filter-build
 
 - Standalone components with `inject()`; `@if`/`@for`/`@switch`, not `*ngIf`/`*ngFor`
 - **PascalCase for public members** (properties, methods, `@Input()`, `@Output()`); camelCase private
-- **Semantic `--mj-*` tokens, no hardcoded colors.** Verify in dark mode.
+- **Semantic `--mj-*` tokens, no hardcoded colors.** Verify in dark mode. Only names in
+  `scripts/mj-tokens.json`; `pnpm run test:token-gate` rejects any other.
 - `<mj-loading>` only — never a custom spinner
 - **Confirm/submit LEFT, cancel RIGHT**
 - Font Awesome for icons

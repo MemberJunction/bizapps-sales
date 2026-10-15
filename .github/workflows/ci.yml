@@ -106,6 +106,14 @@ jobs:
         run: pnpm run test:money-gate
 
       # ===================================================================================
+      # GATE 1c - every var(--mj-...) is a token MJ defines. CSS drops a declaration that
+      # reads an unknown custom property without a word, which shipped the deal activity
+      # form with invisible inputs and an invisible save button.
+      # ===================================================================================
+      - name: MJ token gate (every --mj-* name is defined by MemberJunction)
+        run: pnpm run test:token-gate
+
+      # ===================================================================================
       # GATE 2 — the two pure-function gates, which were NOT in CI until now.
       #
       # `test:discount-gate` has existed and been described as a gate since the DealLine retirement, and

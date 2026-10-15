@@ -389,9 +389,9 @@ function money(n: number | null | undefined): string {
          * would read as an unstyled paragraph.
          */
         .mjs-flag--guide {
-            background: var(--mj-status-info-bg, var(--mj-color-surface-raised));
-            border-left-color: var(--mj-status-info, var(--mj-color-primary));
-            color: var(--mj-status-info-text, var(--mj-color-text-primary));
+            background: var(--mj-status-info-bg, var(--mj-bg-surface-sunken));
+            border-left-color: var(--mj-status-info, var(--mj-brand-primary));
+            color: var(--mj-status-info-text, var(--mj-text-primary));
             margin-top: var(--mj-space-2);
         }
         .mjs-deal-hero--collapsed { padding: 12px 20px; gap: 0; margin-bottom: var(--mj-space-3); }
