@@ -10,9 +10,9 @@
  */
 import { AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CompositeKey } from '@memberjunction/core';
+import { CompositeKey, Metadata, RunView } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
-import { RegisterClassEx } from '@memberjunction/global';
+import { EscapeSQLString, RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule, FormChromeCoordinator } from '@memberjunction/ng-base-forms';
 import { RelatedChipsComponent, type BizAppsRelatedLink } from '@mj-biz-apps/common-ng';
 import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
@@ -419,6 +419,10 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     /** The links last published to the chip row, and the state they were built from. */
     private relatedFor: string | null = null;
     private relatedLinks: BizAppsRelatedLink[] = [];
+    /** The orders that reverse this deal's order, oldest first. Read in {@link resolveReversals}. */
+    private reversalOrderIDs: string[] = [];
+    /** Guards against a slower reversal read for a previous record landing after the form moved on. */
+    private reversalsGeneration = 0;
 
     /**
      * May the deal's Name be typed into right now? (bc-aidp-next-golive#206 item 3)
@@ -644,6 +648,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         const state = {
             IsWon: this.IsWon,
             OrderID: this.Record?.OrderID,
+            ReversalOrderIDs: this.reversalOrderIDs,
             ContractID: this.Record?.ContractID,
             RenewsContractID: this.Record?.RenewsContractID,
         };
@@ -675,6 +680,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
 
     private async refreshNotices(): Promise<void> {
         await this.resolveLock();
+        await this.resolveReversals();
         await this.resolveStale();
         this.cdr.detectChanges();
     }
@@ -686,6 +692,37 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;
         this.LockNotice = lock.Notice;
+    }
+
+    /**
+     * The orders that reverse this deal's order, for the Reversal chips (MemberJunction/bizapps-orders#740).
+     *
+     * A REVERSE READ: the reversal holds the id (`ReversesOrderHeaderID`), the deal does not, so the
+     * chip row cannot find them from the deal row alone. Skipped before the win, when the chips are
+     * gated off anyway. A failed read — orders not installed, or the user cannot read orders — leaves
+     * no reversal chips, the same answer the chip row gives a link it cannot resolve.
+     */
+    private async resolveReversals(): Promise<void> {
+        const generation = ++this.reversalsGeneration;
+        const orderID = this.Record?.OrderID;
+        let ids: string[] = [];
+        if (this.IsWon && orderID) {
+            try {
+                const result = await RunView.FromMetadataProvider(this.FormComponent?.ProviderToUse ?? Metadata.Provider).RunView<{ ID: string }>({
+                    EntityName: MJS_FOREIGN_ENTITIES.OrderHeader,
+                    Fields: ['ID'],
+                    ExtraFilter: `ReversesOrderHeaderID = '${EscapeSQLString(String(orderID))}'`,
+                    OrderBy: '__mj_CreatedAt ASC',
+                    ResultType: 'simple',
+                });
+                ids = result?.Success ? (result.Results ?? []).map((r) => r.ID) : [];
+            } catch {
+                ids = [];
+            }
+        }
+        if (generation === this.reversalsGeneration) {
+            this.reversalOrderIDs = ids;
+        }
     }
 
     /**
