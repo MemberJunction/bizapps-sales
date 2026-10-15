@@ -69,6 +69,7 @@ import {
     mjBizAppsSalesDealEntity,
     mjBizAppsSalesDealPaymentScheduleEntity,
 } from './generated/entity_subclasses';
+import { DealTeamMemberEntity } from './deal-team-member-entity';
 
 /** The house default the form pre-fills for a new deal's payment method. */
 export const DEAL_DEFAULT_PAYMENT_METHOD = 'ACH';
@@ -432,7 +433,7 @@ export class DealPaymentScheduleEntity extends mjBizAppsSalesDealPaymentSchedule
 }
 
 /**
- * Anchor that keeps the three registrations above from being tree-shaken.
+ * Anchor that keeps the shared registrations (these and `DealTeamMemberEntity`) from being tree-shaken.
  *
  * THIS LOOKS POINTLESS AND IS NOT. `@RegisterClass` registers as a side effect of the module being
  * imported, and nothing references these classes by name — so a bundler is entirely correct to elide
@@ -440,7 +441,7 @@ export class DealPaymentScheduleEntity extends mjBizAppsSalesDealPaymentSchedule
  * this file quietly stops applying. Touching the symbols is what keeps the import alive.
  */
 export function LoadSalesDealEntities(): void {
-    const anchors: unknown[] = [DealEntity, DealPaymentScheduleEntity];
+    const anchors: unknown[] = [DealEntity, DealPaymentScheduleEntity, DealTeamMemberEntity];
     if (anchors.length === 0) {
         throw new Error('LoadSalesDealEntities: registration anchors were tree-shaken away.');
     }
