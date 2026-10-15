@@ -1,5 +1,7 @@
 # @mj-biz-apps/sales-entities
 
+## 6.15.2
+
 ## 6.15.1
 
 ## 6.15.0
