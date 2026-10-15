@@ -8,7 +8,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { Metadata, RunView } from '@memberjunction/core';
+import { BaseEntity, Metadata, RunView } from '@memberjunction/core';
 import type { EntityInfo } from '@memberjunction/core';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import { MJS_ENTITIES } from '../data/entity-names';
@@ -70,16 +70,19 @@ export function DealActivityGridState(): { sortSettings: { field: string; dir: '
 }
 
 /**
- * Load the shared pipeline view, overlaying an optional extra WhereClause without saving.
- * Falls back to an in-memory view with the same GridState when the metadata row is not pushed yet.
+ * Read the shared pipeline view once. Falls back to an in-memory view with the same GridState when the
+ * metadata row is not pushed yet.
+ *
+ * ── ONE READ, MANY GRIDS (bizapps-sales#261) ────────────────────────────────────────────────────
+ *
+ * The inspect strip and All Deals each used to read this view by name, one after the other, after
+ * every other read on the section had finished, and the inspect strip read it again on every slice
+ * click. The view does not change between those reads, so the caller reads it once and gives each grid
+ * its own copy through {@link DealPipelineViewWith}, which costs no round trip.
  */
-export async function LoadDealPipelineView(
-    entity: EntityInfo,
-    whereClause?: string,
-): Promise<MJUserViewEntityExtended> {
+export async function LoadDealPipelineViewTemplate(entity: EntityInfo): Promise<MJUserViewEntityExtended> {
     const named = await loadViewByName(SALES_PIPELINE_VIEW_NAME);
     if (named) {
-        if (whereClause != null) named.WhereClause = whereClause;
         return named;
     }
     const grid = DealPipelineGridState();
@@ -87,11 +90,39 @@ export async function LoadDealPipelineView(
         EntityID: entity.ID,
         Entity: entity.Name,
         Name: SALES_PIPELINE_VIEW_NAME,
-        WhereClause: whereClause ?? '',
+        WhereClause: '',
         GridState: JSON.stringify(grid),
         GridStateObject: grid,
         OrderByClause: 'ExpectedCloseDate ASC',
     } as unknown as MJUserViewEntityExtended;
+}
+
+/**
+ * A copy of `template` with `whereClause` overlaid, never saved. With no clause the copy keeps the
+ * template's own.
+ *
+ * A COPY, not the template itself: each grid re-runs when its `ViewEntity` changes identity, and two
+ * grids holding one object would share one WhereClause. The saved view is copied through
+ * `LoadFromData`, which reads nothing from the server.
+ */
+export async function DealPipelineViewWith(
+    template: MJUserViewEntityExtended,
+    whereClause?: string,
+): Promise<MJUserViewEntityExtended> {
+    // The fallback view is a plain object typed as the entity, so the type system cannot see this branch.
+    const copy = template instanceof BaseEntity
+        ? await copyEntity(template)
+        : ({ ...(template as object) } as MJUserViewEntityExtended);
+    if (whereClause != null) {
+        copy.WhereClause = whereClause;
+    }
+    return copy;
+}
+
+async function copyEntity(template: MJUserViewEntityExtended): Promise<MJUserViewEntityExtended> {
+    const copy = await new Metadata().GetEntityObject<MJUserViewEntityExtended>('MJ: User Views');
+    await copy.LoadFromData(template.GetAll());
+    return copy;
 }
 
 export function SyntheticActivityView(entity: EntityInfo, whereClause: string): MJUserViewEntityExtended {
@@ -108,20 +139,15 @@ export function SyntheticActivityView(entity: EntityInfo, whereClause: string): 
 }
 
 async function loadViewByName(name: string): Promise<MJUserViewEntityExtended | null> {
+    // One round trip: the row comes back as the entity object, rather than an ID to `Load` afterwards.
     const rv = new RunView();
-    const found = await rv.RunView<{ ID: string }>({
+    const found = await rv.RunView<MJUserViewEntityExtended>({
         EntityName: 'MJ: User Views',
         ExtraFilter: `Name = '${name.replace(/'/g, "''")}'`,
-        Fields: ['ID'],
         MaxRows: 1,
-        ResultType: 'simple',
+        ResultType: 'entity_object',
     });
-    const id = found.Success ? found.Results?.[0]?.ID : undefined;
-    if (!id) return null;
-    const md = new Metadata();
-    const view = await md.GetEntityObject<MJUserViewEntityExtended>('MJ: User Views');
-    const ok = await view.Load(id);
-    return ok ? view : null;
+    return found.Success ? (found.Results?.[0] ?? null) : null;
 }
 
 export function DealInListWhere(ids: readonly string[]): string {
