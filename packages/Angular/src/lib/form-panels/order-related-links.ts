@@ -62,6 +62,24 @@ function holds(id: string | null | undefined): id is string {
 }
 
 /**
+ * Which order's id to look the deal up by: the order itself, or — for a reversal — the order it reverses.
+ *
+ * A REVERSAL HAS NO DEAL OF ITS OWN (MemberJunction/bizapps-orders#740). A return, cancellation or
+ * credit memo is a new order that points back through `ReversesOrderHeaderID`; `Deal.OrderID` still
+ * names the original. Looking the deal up by the reversal's own id finds nothing, so the reversal's
+ * header went blank. One hop back reaches the deal that produced what is being reversed.
+ *
+ * One hop, not a walk to the root: a reversal of a reversal points at an order that has no deal
+ * either, and following the chain further would be guessing at a relationship the data does not hold.
+ */
+export function DealLookupOrderID(order: { ID?: string | null; ReversesOrderHeaderID?: string | null } | null | undefined): string | null {
+    const reverses = order?.ReversesOrderHeaderID;
+    if (holds(reverses)) return reverses;
+    const own = order?.ID;
+    return holds(own) ? own : null;
+}
+
+/**
  * The relationships this order offers, in reading order, for `bizapps-related-chips`.
  *
  * ORDER IS THE CHAIN WALKED BACKWARDS: the deal is what produced the order, and the contract is what
