@@ -65,6 +65,9 @@ const DEAL_TEAM_MEMBER_ENTITY = 'MJ_BizApps_Sales: Deal Team Members';
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_ROLE_ENTITY = 'MJ_BizApps_Sales: Deal Roles';
 
+/** The `DealRole` columns the save checks read. */
+type DealRoleRules = { Name: string | null; AllowsMultiplePerDeal: boolean | null; IsOwnerRole: boolean | null };
+
 @RegisterClass(BaseEntity, DEAL_TEAM_MEMBER_ENTITY)
 export class DealTeamMemberEntityServer extends mjBizAppsSalesDealTeamMemberEntity {
     /**
@@ -105,16 +108,17 @@ export class DealTeamMemberEntityServer extends mjBizAppsSalesDealTeamMemberEnti
          * this check and the derivation answering the same question. Whether ownership should respect
          * `IsActive` at all is open and deliberately not decided here.
          */
-        let duplicate: string | null;
+        let refusal: string | null;
         try {
-            duplicate = await this.duplicateRoleRefusal();
+            const role = await this.readRole();
+            refusal = this.ownerWithoutEmployeeRefusal(role) ?? (await this.duplicateRoleRefusal(role));
         } catch (err) {
             // Fail closed on a READ failure, the same way the stage/pipeline check does: a lookup that
             // errored proves nothing, and the message names the lookup rather than the row.
-            return this.refuseSave(`could not check this deal's team for a duplicate role: ${err}`);
+            return this.refuseSave(`could not check this row's role against the deal's team: ${err}`);
         }
-        if (duplicate) {
-            return this.refuseSave(duplicate);
+        if (refusal) {
+            return this.refuseSave(refusal);
         }
 
         const before = this.priorSnapshot();
@@ -162,6 +166,53 @@ export class DealTeamMemberEntityServer extends mjBizAppsSalesDealTeamMemberEnti
     }
 
     /**
+     * The role this row names, read once for both role checks. NULL when the row names no role or the
+     * role row cannot be found; a failed READ throws, and `Save` turns that into a refusal.
+     */
+    private async readRole(): Promise<DealRoleRules | null> {
+        const roleID = this.DealRoleID;
+        if (!roleID) {
+            return null;
+        }
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const roleRead = await view.RunView<DealRoleRules>(
+            {
+                EntityName: DEAL_ROLE_ENTITY,
+                ExtraFilter: `ID = '${roleID}'`,
+                ResultType: 'simple',
+                Fields: ['Name', 'AllowsMultiplePerDeal', 'IsOwnerRole'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!roleRead.Success) {
+            throw new Error(`could not read the deal role: ${roleRead.ErrorMessage}`);
+        }
+        return (roleRead.Results ?? [])[0] ?? null;
+    }
+
+    /**
+     * Refuses an owner-role row that names a Person instead of an Employee.
+     *
+     * A team row holds exactly one of `EmployeeID` and `PersonID`, and the grid offers a picker for
+     * each. The owner stamp reads only `EmployeeID` (`stampOwnerFromTeam`), so an owner row saved with
+     * a Person went through and left the deal with no owner, while the grid showed one. The People
+     * picker also lists every contact and synced person, so picking from it by mistake is easy when
+     * the same name appears in both. Refusing here names the field to use instead.
+     *
+     * Read from `DealRole.IsOwnerRole`, the same flag the stamp resolves the owner role by.
+     */
+    private ownerWithoutEmployeeRefusal(role: DealRoleRules | null): string | null {
+        if (!role?.IsOwnerRole || this.EmployeeID) {
+            return null;
+        }
+        const roleName = role.Name ?? 'owner';
+        return (
+            `The ${roleName} must be an employee, because the deal's owner is read from the Employee field. `
+            + `Choose them in Employee and leave Person empty.`
+        );
+    }
+
+    /**
      * Refuses a second holder of a role the data says admits only one.
      *
      * Reads the rule from `DealRole.AllowsMultiplePerDeal` rather than naming Owner, so this is the
@@ -173,32 +224,15 @@ export class DealTeamMemberEntityServer extends mjBizAppsSalesDealTeamMemberEnti
      * reference row is missing would be a worse failure than the one being prevented. A failed READ
      * throws instead, and `Save` turns that into a refusal that names the lookup.
      */
-    private async duplicateRoleRefusal(): Promise<string | null> {
+    private async duplicateRoleRefusal(role: DealRoleRules | null): Promise<string | null> {
         const dealID = this.DealID;
         const roleID = this.DealRoleID;
-        if (!dealID || !roleID) {
+        // Truthy means the role admits several, which is the default for everything but Owner / AE.
+        if (!dealID || !roleID || !role || role.AllowsMultiplePerDeal) {
             return null;
         }
 
         const view = this.ProviderToUse as unknown as IRunViewProvider;
-
-        const roleRead = await view.RunView<{ Name: string | null; AllowsMultiplePerDeal: boolean | null }>(
-            {
-                EntityName: DEAL_ROLE_ENTITY,
-                ExtraFilter: `ID = '${roleID}'`,
-                ResultType: 'simple',
-                Fields: ['Name', 'AllowsMultiplePerDeal'],
-            },
-            this.ContextCurrentUser,
-        );
-        if (!roleRead.Success) {
-            throw new Error(`could not read the deal role: ${roleRead.ErrorMessage}`);
-        }
-        const role = (roleRead.Results ?? [])[0];
-        // Truthy means the role admits several, which is the default for everything but Owner / AE.
-        if (!role || role.AllowsMultiplePerDeal) {
-            return null;
-        }
 
         /**
          * EXCLUDE SELF, or every later edit to the owner row refuses itself. `IsSaved` is the test
