@@ -1240,7 +1240,11 @@ export class DealEntityServer extends DealEntity {
      * legal -- `OrderHeader` has no XOR across them, checked against `sys.check_constraints`. Do not
      * carry the contract's exactly-one rule across by analogy; it is that table's rule, not a house style.
      * `Deal.AccountID` is a `SalesAccount`, an IsA child of common's `Organization`, so its key IS an
-     * organization key; `PrimaryContactID` is a `SalesContact`, an IsA child of `Person`.
+     * organization key; both contact columns are `SalesContact`s, an IsA child of `Person`.
+     *
+     * The person billed is the Billing Contact, falling back to the Primary Contact when it is empty --
+     * empty means "bill the primary contact" (the column's own description). It read only the primary
+     * contact before #312, so a different billing contact never reached the order.
      */
     private provisionEmbeddedOrder(): void {
         /**
@@ -1274,7 +1278,7 @@ export class DealEntityServer extends DealEntity {
         order.CompanyID = this.CompanyID;
         order.OrderType = 'Sale';
         order.BillToOrganizationID = this.AccountID ?? null;
-        order.BillToPersonID = this.PrimaryContactID ?? null;
+        order.BillToPersonID = this.BillingContactID || this.PrimaryContactID || null;
     }
 
     /**
