@@ -40,6 +40,16 @@ import {
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
 import { SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
+import {
+    CompanyLabel,
+    InitialCompanyID,
+    OrderPipelinesByCompany,
+    PipelineCompanies,
+    PipelineLabel,
+    PipelinesForCompany,
+    type CompanyPipeline,
+    type PipelineCompany,
+} from '../data/company-pipelines';
 import { MJSDealLineEditorComponent } from './deal-line-editor.component';
 import { BusinessDayOf, DealCloseDay } from './deal-close-day';
 import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
@@ -82,11 +92,8 @@ async function LoadLossReasons(): Promise<LossReasonOption[]> {
     }));
 }
 
-/** One pipeline the deal may sit in. */
-export interface PipelineOption {
-    ID: string;
-    Name: string;
-}
+/** One pipeline the deal may sit in, with the company it sells as (#327). */
+export type PipelineOption = CompanyPipeline;
 
 /**
  * One stage, carrying the pipeline that owns it — the whole point of the list — and the defaults a
@@ -109,17 +116,43 @@ export interface PipelineStageOption extends StageDefaults {
  * Every other vocabulary list in this file and in `deal-workspace.service.ts` already reads
  * `DisplayRank ASC, Name ASC` — loss reasons, deal types, status types, forecast categories. This was
  * the one that did not.
+ *
+ * Grouped by company on top of that (#327): `OrderPipelinesByCompany` is the order the workspace and
+ * the board use too, so the three lists still agree.
  */
 async function LoadPipelines(): Promise<PipelineOption[]> {
-    const result = await new RunView().RunView<{ ID: string; Name: string }>({
+    const result = await new RunView().RunView<PipelineRow>({
         EntityName: MJS_ENTITIES.Pipeline,
         ExtraFilter: 'IsActive = 1',
         OrderBy: 'DisplayRank ASC, Name ASC',
         ResultType: 'simple',
-        Fields: ['ID', 'Name'],
+        Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'],
     });
     if (!result?.Success) return [];
-    return (result.Results ?? []).map((r) => ({ ID: String(r.ID), Name: String(r.Name) }));
+    return OrderPipelinesByCompany((result.Results ?? []).map(ToPipelineOption));
+}
+
+/** A pipeline row as `ResultType: 'simple'` returns it. */
+interface PipelineRow {
+    ID: string;
+    Name: string;
+    Code: string;
+    CompanyID: string;
+    Company: string | null;
+    IsDefault: boolean;
+    DisplayRank: number;
+}
+
+function ToPipelineOption(r: PipelineRow): PipelineOption {
+    return {
+        ID: String(r.ID),
+        Name: String(r.Name),
+        Code: String(r.Code ?? ''),
+        CompanyID: String(r.CompanyID),
+        CompanyName: r.Company ?? null,
+        IsDefault: !!r.IsDefault,
+        DisplayRank: Number(r.DisplayRank ?? 0),
+    };
 }
 
 /**
@@ -1512,6 +1545,25 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      Pipeline is here too because choosing one chooses which stages exist; a plain
                      binding gives nowhere to clear a stage that has just become meaningless. The deal
                      workspace has always done both, which is why testers were told to use it. -->
+                <!-- COMPANY FIRST, then its pipelines (#327). Not a field of the deal: the deal's
+                     company is the pipeline's, so this only narrows the Pipeline list, and choosing a
+                     company picks that company's first pipeline. Hidden when one company owns every
+                     pipeline, where it would offer no choice. -->
+                @if (EditMode && FieldEditable('PipelineID') && CompanyOptions.length > 1) {
+                    <div class="mjs-field" data-field="PipelineCompany">
+                        <div class="mj-forms-field mj-forms-field--editing">
+                            <label class="mj-forms-field-label">Company</label>
+                            <select [ngModel]="SelectedCompanyID" data-testid="deal-pipeline-company"
+                                    (ngModelChange)="SetCompany($event)"
+                                    [compareWith]="CompareID">
+                                @for (c of CompanyOptions; track c.CompanyID) {
+                                    <option [ngValue]="c.CompanyID">{{ CompanyText(c) }}</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                }
+
                 <div class="mjs-field" data-field="PipelineID">
                     <!-- The editing modifier class is MJ's own marker for a field it is currently
                          letting you edit, and FieldIsEditable in the Explorer harness reads exactly
@@ -1533,7 +1585,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                     [compareWith]="CompareID">
                                 <option [ngValue]="null" [disabled]="Record.IsSaved">— choose —</option>
                                 @for (p of PipelineOptions; track p.ID) {
-                                    <option [ngValue]="p.ID">{{ p.Name }}</option>
+                                    <option [ngValue]="p.ID">{{ PipelineText(p) }}</option>
                                 }
                             </select>
                         } @else {
@@ -1763,9 +1815,36 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
 
     /* ── Pipeline and stage (bc-aidp-next-golive#291) ───────────────────────── */
 
-    /** Every pipeline that may be chosen. */
+    /** The selected company's pipelines, in picker order (#327). */
     public get PipelineOptions(): PipelineOption[] {
-        return this.pipelines();
+        return PipelinesForCompany(this.pipelines(), this.SelectedCompanyID);
+    }
+
+    /** Every company that owns a pipeline, default company first. */
+    public get CompanyOptions(): PipelineCompany[] {
+        return PipelineCompanies(this.pipelines());
+    }
+
+    /**
+     * The current pipeline's company, else the default company. Derived rather than stored: choosing a
+     * company also chooses its pipeline, so the pipeline always says which company is selected.
+     */
+    public get SelectedCompanyID(): string | null {
+        return InitialCompanyID(this.pipelines(), this.Record?.PipelineID ?? null);
+    }
+
+    /** Moves the deal to the company's first pipeline, which clears a stage the old one owned. */
+    public SetCompany(companyID: string | null): void {
+        const first = PipelinesForCompany(this.pipelines(), companyID)[0];
+        if (first) this.SetPipeline(first.ID);
+    }
+
+    public PipelineText(pipeline: PipelineOption): string {
+        return PipelineLabel(pipeline);
+    }
+
+    public CompanyText(company: PipelineCompany): string {
+        return CompanyLabel(company);
     }
 
     /**
@@ -1863,7 +1942,8 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public get CurrentPipelineName(): string | null {
         const id = String(this.Record?.PipelineID ?? '').toLowerCase();
         if (!id) return null;
-        return this.pipelines().find((p) => p.ID.toLowerCase() === id)?.Name ?? null;
+        const pipeline = this.pipelines().find((p) => p.ID.toLowerCase() === id);
+        return pipeline ? PipelineLabel(pipeline) : null;
     }
 
     public get CurrentStageName(): string | null {

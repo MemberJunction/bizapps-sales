@@ -115,8 +115,17 @@ import {
     type DealLookup,
     type DealWorkspaceLookups,
     type DealWorkspacePane,
+    type PipelineLookup,
     type StageLookup,
 } from './deal-workspace.types';
+import {
+    CompanyLabel,
+    InitialCompanyID,
+    PipelineCompanies,
+    PipelineLabel,
+    PipelinesForCompany,
+    type PipelineCompany,
+} from '../data/company-pipelines';
 
 /**
  * The provider's remote-operation entry point, typed for the two calls this surface makes.
@@ -1275,6 +1284,37 @@ export class DealWorkspaceComponent implements OnInit {
             return 'No customer selected';
         }
         return this.Lookups.Accounts.find((a) => a.ID === id)?.Name ?? '(unknown account)';
+    }
+
+    /* ── Company filter over the pipeline list (#327) ───────────────────────── */
+
+    /** Every company that owns a pipeline, default company first. */
+    public get PipelineCompanyOptions(): PipelineCompany[] {
+        return PipelineCompanies(this.Lookups.Pipelines);
+    }
+
+    /** The deal's pipeline's company, else the default company. Derived: the pipeline says it. */
+    public SelectedCompanyIDFor(deal: DealEntity): string | null {
+        return InitialCompanyID(this.Lookups.Pipelines, deal.PipelineID ?? null);
+    }
+
+    /** The selected company's pipelines, in picker order. */
+    public PipelinesFor(deal: DealEntity): PipelineLookup[] {
+        return PipelinesForCompany(this.Lookups.Pipelines, this.SelectedCompanyIDFor(deal));
+    }
+
+    /** Moves the deal to the company's first pipeline, through the same path a pipeline pick takes. */
+    public SelectCompany(deal: DealEntity, companyID: string | null): void {
+        const first = PipelinesForCompany(this.Lookups.Pipelines, companyID)[0];
+        if (first) this.SelectPipeline(deal, first.ID);
+    }
+
+    public PipelineText(pipeline: PipelineLookup): string {
+        return PipelineLabel(pipeline);
+    }
+
+    public CompanyText(company: PipelineCompany): string {
+        return CompanyLabel(company);
     }
 
     public get CompanyName(): string | null {
