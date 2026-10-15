@@ -770,7 +770,18 @@ export const CloseDealChecks: NamedCheck[] = [
                             + `${warnings.length} warning(s) in Issues: ${JSON.stringify(out.Issues)}`,
                     );
                     for (const r of refused) {
-                        const carried = warnings.find((w) => w.Message.includes(r.Target));
+                        /**
+                         * ANCHORED AT THE START, not `includes` (bc-aidp-next-golive#326).
+                         *
+                         * A route Issue is built as `${Target} was planned but not created: ...`, so it
+                         * LEADS with the target. Every other warning on a close names itself first ("The
+                         * ContractProcessing task was created but NOT routed: ...") -- and that one
+                         * contains the substring "Contract", so a loose match picked the TASK's Issue for
+                         * the Contract route and then compared it against the route's reason. The check
+                         * read as a drift between the two channels when the channels agreed fine; it was
+                         * the matcher that was wrong. Invisible until a close could raise both at once.
+                         */
+                        const carried = warnings.find((w) => w.Message.startsWith(r.Target));
                         Assert(
                             !!carried,
                             `${r.Target} was refused and no Issue names it — a caller reading Issues alone `

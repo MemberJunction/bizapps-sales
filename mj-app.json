@@ -19,7 +19,7 @@
       "repository": "https://github.com/MemberJunction/bizapps-common"
     },
     "mj-bizapps-tasks": {
-      "version": ">=1.2.0 <2.0.0",
+      "version": ">=1.7.0 <2.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-tasks"
     },
     "mj-bizapps-accounting": {
