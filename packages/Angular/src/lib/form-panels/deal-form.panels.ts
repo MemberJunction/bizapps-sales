@@ -515,6 +515,52 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     private noLinkContextSource?: FormContext;
     private noLinkContext?: FormContext;
 
+    /**
+     * ── CHOOSING AN ACCOUNT FILLS THE DEAL'S EMPTY CONTACTS FROM IT (#254) ────────────────────────
+     *
+     * `mj-form-field` writes the account through `Record.Set` and then emits `ValueChange`, so the
+     * deal already holds the new account when this runs. The rule and the read live on the entity
+     * (`DealEntity.FillContactsFromAccount`), which the deal workspace calls too.
+     *
+     * A failed read leaves the contacts as they were and says so under the fields; the account the rep
+     * chose stays chosen.
+     */
+    public async OnFieldValueChange(change: { FieldName: string }): Promise<void> {
+        if (change.FieldName !== 'AccountID' || !this.Record) {
+            return;
+        }
+        this.AccountDefaultsError.set(null);
+        try {
+            const filled = await this.Record.FillContactsFromAccount();
+            if (filled.length > 0) {
+                this.contactRenderKey.update((k) => k + 1);
+            }
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            this.AccountDefaultsError.set(`The account's default contacts were not filled in: ${reason}`);
+        }
+    }
+
+    /**
+     * The `@for` track key. Contact fields carry a counter that a fill bumps.
+     *
+     * WHY THE FIELDS ARE REBUILT. `mj-form-field` is OnPush and does not watch its record, so a value
+     * written in code after an async read leaves the control showing the old one: its inputs did not
+     * change and nothing marked it. A new track key gives the contact fields new instances, which read
+     * the record afresh. Only the contact fields, so the account control the rep just used is left as
+     * it is.
+     */
+    public FieldTrackKey(f: DealFieldSpec): string {
+        return CREATION_PARTY_CONTACT_FIELDS.includes(f.name) ? `${f.name}:${this.contactRenderKey()}` : f.name;
+    }
+
+    /**
+     * Signals for the reason the Pipeline panel's lists are signals: the host is OnPush, and a signal
+     * read in the template marks this panel without `inject()`, which would stop tests constructing it.
+     */
+    public readonly AccountDefaultsError = signal<string | null>(null);
+    private readonly contactRenderKey = signal(0);
+
     public DrawsOwnMoney(f: DealFieldSpec): boolean {
         return f.currency === true && !(this.EditMode && this.FieldEditable(f.name));
     }
@@ -707,6 +753,9 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
  * deal with?" would answer the question with nothing.
  */
 const CREATION_PARTY_FIELDS: readonly string[] = ['AccountID', 'PrimaryContactID', 'BillingContactID'];
+
+/** The contact fields an account's defaults fill (#254), which the panels rebuild after a fill. */
+const CREATION_PARTY_CONTACT_FIELDS: readonly string[] = ['PrimaryContactID', 'BillingContactID'];
 
 /**
  * The deal's foreign keys whose related entity is an IsA child (`SalesAccount` extends Organization,
@@ -1455,12 +1504,15 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         <mj-collapsible-panel SectionKey="pipeline" SectionName="Pipeline" Icon="fa-solid fa-diagram-project"
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
-                @for (f of Fields; track f.name) {
+                @for (f of Fields; track FieldTrackKey(f)) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                            (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
+                            (ValueChange)="OnFieldValueChange($event)" (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
                     </div>
+                }
+                @if (AccountDefaultsError()) {
+                    <div class="mjs-hint" data-testid="account-defaults-error">{{ AccountDefaultsError() }}</div>
                 }
 
                 <!-- PIPELINE AND STAGE ARE NOT GENERIC FIELDS HERE, for the reason Status is not:
@@ -2204,12 +2256,15 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         <mj-collapsible-panel SectionKey="party" SectionName="Account &amp; people" Icon="fa-solid fa-building"
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
-                @for (f of Fields; track f.name) {
+                @for (f of Fields; track FieldTrackKey(f)) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                            (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
+                            (ValueChange)="OnFieldValueChange($event)" (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
                     </div>
+                }
+                @if (AccountDefaultsError()) {
+                    <div class="mjs-hint" data-testid="account-defaults-error">{{ AccountDefaultsError() }}</div>
                 }
             </div>
         </mj-collapsible-panel>
