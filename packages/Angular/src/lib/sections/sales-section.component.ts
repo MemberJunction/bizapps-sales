@@ -48,7 +48,12 @@ import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-sha
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 import { EntityViewerModule, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
-import { LoadDealPipelineView, DealInListWhere, DealWonInPeriodWhere } from '../pages/deal-views';
+import {
+    DealInListWhere,
+    DealPipelineViewWith,
+    DealWonInPeriodWhere,
+    LoadDealPipelineViewTemplate,
+} from '../pages/deal-views';
 import type { ResourceData } from '@memberjunction/core-entities';
 import {
     MJButtonDirective,
@@ -232,6 +237,12 @@ export class MJSSalesSectionComponent implements OnInit {
     public DealEntityInfo: EntityInfo | null = null;
     public InspectView: MJUserViewEntityExtended | null = null;
     public AllDealsView: MJUserViewEntityExtended | null = null;
+    /**
+     * The shared pipeline view, read once per `Refresh()`. Both grids, and every inspect slice click,
+     * take a copy of it instead of reading it again (bizapps-sales#261). Null when the Deals entity is
+     * not in metadata.
+     */
+    private pipelineView: MJUserViewEntityExtended | null = null;
 
 
     /**
@@ -345,8 +356,9 @@ export class MJSSalesSectionComponent implements OnInit {
          */
         this.FiscalStart = await this.service.LoadFiscalYearStart();
         const window = this.Window;
+        this.DealEntityInfo = new Metadata().Entities.find((e) => e.Name === E_DEAL) ?? null;
 
-        const [roster, lookups, summary, winRate] = await Promise.all([
+        const [roster, lookups, summary, winRate, pipelineView] = await Promise.all([
             this.loadRoster(this.BoardClosedWindow.Start),
             // Only the lists the BOARD and the status pill read. Accounts and contacts are the deal
             // workspace's pickers and grow with the customer base, so they are not loaded here.
@@ -356,6 +368,9 @@ export class MJSSalesSectionComponent implements OnInit {
             // The window reaches win rate through parameters the query ALREADY declared -- it filters
             // on ActualCloseDate, the same dimension the Won tile now uses, so the two cannot drift.
             this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
+            // The grids' saved view. It depends on nothing above, so it no longer waits for all of it
+            // and then runs twice in a row (bizapps-sales#261).
+            this.DealEntityInfo ? LoadDealPipelineViewTemplate(this.DealEntityInfo) : Promise.resolve(null),
         ]);
         this.Deals = roster ?? [];
         this.forecastDeals = InForecast(this.Deals);
@@ -364,9 +379,9 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Stages = lookups.Stages;
         this.DealStatusTypes = lookups.DealStatusTypes;
         this.applyWinRate(winRate);
-        this.DealEntityInfo = new Metadata().Entities.find((e) => e.Name === E_DEAL) ?? null;
-        await this.refreshInspectView();
-        await this.refreshAllDealsView();
+        this.pipelineView = pipelineView;
+        // Copies of the view already read; neither goes back to the server.
+        await Promise.all([this.refreshInspectView(), this.refreshAllDealsView()]);
         if (roster && !roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
             this.Message = '';
@@ -729,11 +744,7 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private async refreshInspectView(): Promise<void> {
-        if (!this.DealEntityInfo) {
-            this.InspectView = null;
-            return;
-        }
-        this.InspectView = await LoadDealPipelineView(this.DealEntityInfo, this.inspectWhere());
+        this.InspectView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView, this.inspectWhere()) : null;
     }
 
     /**
@@ -750,11 +761,7 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private async refreshAllDealsView(): Promise<void> {
-        if (!this.DealEntityInfo) {
-            this.AllDealsView = null;
-            return;
-        }
-        this.AllDealsView = await LoadDealPipelineView(this.DealEntityInfo);
+        this.AllDealsView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView) : null;
     }
 
     public OnAllDealsOpened(event: RecordOpenedEvent): void {
