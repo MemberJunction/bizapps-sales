@@ -49,6 +49,7 @@ import {
     type SalesReopenDealOutput,
     type DealEntity,
     type mjBizAppsSalesDealEntity,
+    type mjBizAppsSalesPipelineStageEntity,
 } from '@mj-biz-apps/sales-entities';
 import {
     DEFAULT_DUE_IN_DAYS,
@@ -3128,6 +3129,66 @@ export const CloseDealChecks: NamedCheck[] = [
                     String(row.ForecastCategoryTypeID ?? '').toLowerCase(),
                     String(startStage.ForecastCategoryTypeID ?? '').toLowerCase(),
                     'and in the forecast category of the stage it returned to',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD39',
+        Name: 'CD39: a pipeline cannot lose its last active won stage through a stage save; a second one lets it',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * bc-aidp-next-golive#345. CD37 shows what a close does on a pipeline with no losing
+                 * stage: it stays put and warns. This is the other half: a stage edit cannot put a
+                 * pipeline into that state. Through the entity, so the server-side refusal is what is
+                 * tested, not a form.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const winning = await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsWon = 1');
+                Assert(!!winning, 'the pipeline needs a stage declaring a WON status');
+                const others = await TxOne<{ N: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.OrderOnlyPolicyPipelineID}' AND s.IsActive = 1 AND t.IsWon = 1
+                        AND s.ID <> '${winning!.ID}'`,
+                );
+                AssertEqual(Number(others.N), 0, 'setup: the won stage must be the pipeline\'s only one');
+
+                const stage = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesPipelineStageEntity>(
+                    'MJ_BizApps_Sales: Pipeline Stages', ctx.User,
+                );
+                Assert(await stage.Load(winning!.ID), 'the won stage loads');
+                stage.IsActive = false;
+                Assert(!(await stage.Save()), 'deactivating the only won stage must be refused');
+                Assert(
+                    (stage.LatestResult?.Message ?? '').includes('no active won stage'),
+                    `the refusal says why; it reads '${stage.LatestResult?.Message}'`,
+                );
+
+                // A second won stage on the same pipeline makes the first one free to go.
+                const spare = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesPipelineStageEntity>(
+                    'MJ_BizApps_Sales: Pipeline Stages', ctx.User,
+                );
+                spare.NewRecord();
+                spare.PipelineID = f.OrderOnlyPolicyPipelineID;
+                spare.Name = 'CD39 second won stage';
+                spare.Code = 'CD39WON';
+                spare.DisplayOrder = 999;
+                spare.Probability = 100;
+                spare.DealStatusTypeID = f.WonStatusID;
+                spare.IsActive = true;
+                Assert(await spare.Save(), `the second won stage saves — ${spare.LatestResult?.CompleteMessage ?? ''}`);
+
+                const again = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesPipelineStageEntity>(
+                    'MJ_BizApps_Sales: Pipeline Stages', ctx.User,
+                );
+                Assert(await again.Load(winning!.ID), 'the won stage loads again');
+                again.IsActive = false;
+                Assert(
+                    await again.Save(),
+                    `with another won stage active, deactivating this one is allowed — ${again.LatestResult?.CompleteMessage ?? ''}`,
                 );
             }),
     },
