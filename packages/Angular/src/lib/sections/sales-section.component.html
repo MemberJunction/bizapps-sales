@@ -205,19 +205,20 @@
               <!--
                 Win rate is period-bound, so like the Won tile it shows PENDING rather than the
                 previous period's rate while a period change is in flight — the header beside it has
-                already moved to the new window.
+                already moved to the new window. It is also pending while the section's own read of it
+                is still out: the tiles above no longer wait for it.
               -->
               <div class="card">
                 <div class="ch">Win rate <span class="r">closed deals · count and value · {{ WindowLabel }}</span></div>
                 <div class="winrate">
                   <div class="kpi">
                     <div class="l">By count</div>
-                    <div class="v">{{ PeriodLoading ? '…' : Pct(WinRateByCount) }}</div>
-                    <div class="f">{{ PeriodLoading ? 'counting…' : WinWonCount + ' won / ' + WinClosedCount + ' closed' }}</div>
+                    <div class="v" data-testid="sales-winrate-count">{{ PeriodLoading || DetailLoading ? '…' : Pct(WinRateByCount) }}</div>
+                    <div class="f">{{ PeriodLoading || DetailLoading ? 'counting…' : WinWonCount + ' won / ' + WinClosedCount + ' closed' }}</div>
                   </div>
                   <div class="kpi">
                     <div class="l">By value</div>
-                    <div class="v">{{ PeriodLoading ? '…' : Pct(WinRateByValue) }}</div>
+                    <div class="v">{{ PeriodLoading || DetailLoading ? '…' : Pct(WinRateByValue) }}</div>
                     <div class="f">Won $ over closed $</div>
                   </div>
                 </div>
@@ -236,7 +237,9 @@
                 </div>
               }
               <div class="mjs-viewer-host">
-                @if (DealEntityInfo) {
+                @if (DetailLoading) {
+                  <mj-loading></mj-loading>
+                } @else if (DealEntityInfo) {
                   <mj-entity-viewer
                     [Entity]="DealEntityInfo"
                     [ViewEntity]="InspectView"
@@ -257,7 +260,7 @@
             <span class="r">Every deal, with the same columns as Inspect — grid, cards, or timeline</span>
           </div>
 
-          @if (Loading) {
+          @if (Loading || DetailLoading) {
             <mj-loading></mj-loading>
           } @else if (LoadError) {
             <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
@@ -284,7 +287,7 @@
             <span class="muted" data-testid="sales-board-scope">Open deals, and deals closed {{ BoardClosedLabel }}</span>
           </div>
 
-          @if (Loading) {
+          @if (Loading || DetailLoading) {
             <mj-loading></mj-loading>
           } @else if (LoadError) {
             <ng-container *ngTemplateOutlet="loadFailed"></ng-container>

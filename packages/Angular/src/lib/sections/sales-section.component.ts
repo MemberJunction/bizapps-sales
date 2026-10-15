@@ -83,7 +83,12 @@ import {
     type DealDashboardSummary,
     type DealRosterRow,
 } from '../workspace/deal-workspace.service';
-import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
+import type {
+    DealStatusLookup,
+    DealWorkspaceLookups,
+    PipelineLookup,
+    StageLookup,
+} from '../workspace/deal-workspace.types';
 import {
     CloseBuckets,
     ClosingSoon,
@@ -164,7 +169,14 @@ export class MJSSalesSectionComponent implements OnInit {
     private readonly nav = inject(NavigationService);
 
     public Page = '';
+    /** The dashboard's figures (roster and summary) have not landed yet. */
     public Loading = true;
+    /**
+     * The reads the dashboard's figures do not need are still out: the board's lookups, the win rate
+     * and the grids' view. The tiles show without waiting for them (bizapps-sales#261); each surface
+     * that does need them shows its own loading state until this clears.
+     */
+    public DetailLoading = true;
     /**
      * Every open deal, and the closed deals closed since the start of the current fiscal quarter
      * (bizapps-sales#209). The BOARD renders from this, so a pipeline flagged out of the forecast stays
@@ -310,15 +322,16 @@ export class MJSSalesSectionComponent implements OnInit {
      * reject, and `Loading = false` used to sit after all of them: one failed request left the page on
      * its spinner for good, with the rejection unhandled because `ngOnInit` awaits this uncaught.
      * Clearing it in `finally` covers every exit, including ones added later; the failure is shown as
-     * `LoadError` with a Retry instead.
+     * `LoadError` with a Retry instead. `DetailLoading` is cleared there for the same reason.
      */
     public async Refresh(): Promise<void> {
         const token = ++this.refreshToken;
         this.Loading = true;
+        this.DetailLoading = true;
         this.LoadError = null;
         this.cdr.detectChanges();
         try {
-            await this.load();
+            await this.load(token);
         } catch (e) {
             if (token === this.refreshToken) {
                 this.LoadError = e instanceof Error ? e.message : String(e);
@@ -327,13 +340,14 @@ export class MJSSalesSectionComponent implements OnInit {
         } finally {
             if (token === this.refreshToken) {
                 this.Loading = false;
+                this.DetailLoading = false;
                 this.cdr.detectChanges();
             }
         }
     }
 
     /** The reads behind `Refresh()`. Throws on any failure the reads themselves do not absorb. */
-    private async load(): Promise<void> {
+    private async load(token: number): Promise<void> {
         /**
          * THE BUSINESS ZONE IS LOADED BEFORE ANYTHING ASKS WHAT DAY IT IS (bc-aidp-next-golive#168).
          *
@@ -358,34 +372,64 @@ export class MJSSalesSectionComponent implements OnInit {
         const window = this.Window;
         this.DealEntityInfo = new Metadata().Entities.find((e) => e.Name === E_DEAL) ?? null;
 
-        const [roster, lookups, summary, winRate, pipelineView] = await Promise.all([
-            this.loadRoster(this.BoardClosedWindow.Start),
+        const period = this.Period;
+
+        /**
+         * EVERY READ STARTS NOW; THE DASHBOARD WAITS ONLY FOR ITS OWN TWO (bizapps-sales#261).
+         *
+         * The tiles, the stack and the current-book cards read the roster and the summary and nothing
+         * else, so they show as soon as those two land. The rest is already in flight and fills in
+         * behind them. The no-op `catch` only stops a fast failure there from being reported as
+         * unhandled while the first two are still awaited; `loadDetail` still awaits it and throws.
+         */
+        const detail = Promise.all([
             // Only the lists the BOARD and the status pill read. Accounts and contacts are the deal
             // workspace's pickers and grow with the customer base, so they are not loaded here.
             this.service.LoadLookups(SECTION_LOOKUP_KEYS),
-            // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
-            this.service.LoadDashboardSummary(window),
             // The window reaches win rate through parameters the query ALREADY declared -- it filters
             // on ActualCloseDate, the same dimension the Won tile now uses, so the two cannot drift.
             this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
-            // The grids' saved view. It depends on nothing above, so it no longer waits for all of it
-            // and then runs twice in a row (bizapps-sales#261).
+            // The grids' saved view, read once for both grids.
             this.DealEntityInfo ? LoadDealPipelineViewTemplate(this.DealEntityInfo) : Promise.resolve(null),
+        ]);
+        detail.catch(() => undefined);
+
+        const [roster, summary] = await Promise.all([
+            this.loadRoster(this.BoardClosedWindow.Start),
+            // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
+            this.service.LoadDashboardSummary(window),
         ]);
         this.Deals = roster ?? [];
         this.forecastDeals = InForecast(this.Deals);
         this.summary = TileSummary(summary, this.RosterError);
-        this.Pipelines = lookups.Pipelines;
-        this.Stages = lookups.Stages;
-        this.DealStatusTypes = lookups.DealStatusTypes;
-        this.applyWinRate(winRate);
-        this.pipelineView = pipelineView;
-        // Copies of the view already read; neither goes back to the server.
-        await Promise.all([this.refreshInspectView(), this.refreshAllDealsView()]);
         if (roster && !roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
             this.Message = '';
         }
+        if (token === this.refreshToken) {
+            this.Loading = false;
+            this.cdr.detectChanges();
+        }
+
+        await this.loadDetail(detail, period);
+    }
+
+    /** The second half of `load()`: what the board, the win rate and the grids read. */
+    private async loadDetail(
+        detail: Promise<[DealWorkspaceLookups, Record<string, unknown>[], MJUserViewEntityExtended | null]>,
+        period: PeriodKey,
+    ): Promise<void> {
+        const [lookups, winRate, pipelineView] = await detail;
+        this.Pipelines = lookups.Pipelines;
+        this.Stages = lookups.Stages;
+        this.DealStatusTypes = lookups.DealStatusTypes;
+        // A period picked while this was out has already read its own win rate; this one is stale.
+        if (period === this.Period) {
+            this.applyWinRate(winRate);
+        }
+        this.pipelineView = pipelineView;
+        // Copies of the view already read; neither goes back to the server.
+        await Promise.all([this.refreshInspectView(), this.refreshAllDealsView()]);
     }
 
     /**
