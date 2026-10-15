@@ -4,7 +4,7 @@
 
 Close-won tasks stop being routed to somebody who is not there.
 
-The seeded `CloseWonPolicy` on both pipelines sent every Order Review and Contract Processing task to a People id that no migration in any repo creates. Where that row happened to exist by hand it worked; on QA it never existed, so fourteen tasks read as assigned while no queue held them and the order review control never ran. `TaskAssignment.AssigneeRecordID` is polymorphic, so there is no foreign key and nothing refused the row.
+The seeded `CloseWonPolicy` on both pipelines sent every Order Review and Contract Processing task to a People id created in exactly one place: `scripts/seed-demo-data.sh`, where it is the demo's partner rep. A host that ran the demo seed worked; every other host did not. On QA that row never existed, so the tasks read as assigned while no queue held them and the order review control never ran. `TaskAssignment.AssigneeRecordID` is polymorphic, so there is no foreign key and nothing refused the row.
 
 `CloseWonTaskService` now reads the assignee record before writing the assignment. A record that is not there refuses to route and names the id, the entity and the policy key to fix — an unrouted task at least reads as unrouted. A check that cannot run routes anyway and records that it could not tell, so a transient database problem does not quietly stop routing a deployment that is configured correctly.
 

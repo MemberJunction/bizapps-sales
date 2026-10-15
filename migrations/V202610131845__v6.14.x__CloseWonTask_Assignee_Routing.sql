@@ -3,9 +3,10 @@
 -- order review reach the approvals inbox (bc-aidp-next-golive#326).
 -- =============================================================================
 -- WHAT WENT WRONG. The seeded CloseWonPolicy on both pipelines routed every
--- close-won task to People id C0111111-0000-4000-A000-000000000004. No migration
--- in any repo creates that row. Where someone had made it by hand it worked; on QA
--- it never existed, so fourteen Order Review and Contract Processing tasks carried
+-- close-won task to People id C0111111-0000-4000-A000-000000000004. That row is
+-- created in exactly one place -- scripts/seed-demo-data.sh, where it is the demo's
+-- PARTNER REP -- so a host that ran the demo seed worked and every other host did
+-- not. On QA it never existed, so the Order Review and Contract Processing tasks carried
 -- an assignee that is not a person. TaskAssignment.AssigneeRecordID is polymorphic,
 -- so there is no foreign key and nothing refused the row -- the tasks read as
 -- assigned while no queue held them, which is why the order review control never ran.

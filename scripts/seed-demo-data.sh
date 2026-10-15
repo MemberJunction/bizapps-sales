@@ -418,6 +418,31 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe2)
 -- second, so demonstrating two is this seed's job.
 UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = @co2 WHERE ID = @pipe2 AND CompanyID <> @co2;
 
+-- ── THE DEMO OWNS ITS OWN FINANCE ASSIGNEE (bc-aidp-next-golive#326) ──────────────────────────
+--
+-- The shipped policy in `metadata/pipelines/` no longer names a person. That id was THIS seed's
+-- partner rep (@c4 above), so on any host without this seed the close-won tasks pointed at somebody
+-- who does not exist -- they read as assigned while no queue held them, which is worse than
+-- unrouted because unrouted says so. The app now ships `AssigneeRecordID: null` and reports an
+-- unrouted task naming the key to set.
+--
+-- Which leaves the demo to say who ITS assignee is, and it cannot do that through the INSERTs
+-- above: both are guarded by IF NOT EXISTS and a metadata push has already created these rows, so
+-- on every host that has one the INSERT never fires. The repoints only move the company. Without
+-- the statement below the demo would raise close-won tasks that route nowhere, and the thing this
+-- seed exists to demonstrate would quietly stop demonstrating it.
+--
+-- MATCHED ON `null`, not applied unconditionally: a host that has already configured a real
+-- finance assignee keeps the one it chose. The spacing matches what the metadata ships -- the
+-- INSERTs above write the same key without a space, and those rows already carry the id.
+UPDATE __mj_BizAppsSales.Pipeline
+   SET CloseWonPolicy = REPLACE(
+           CloseWonPolicy,
+           '"AssigneeRecordID": null',
+           '"AssigneeRecordID": "C0111111-0000-4000-A000-000000000004"')
+ WHERE ID IN (@pipe1, @pipe2)
+   AND CloseWonPolicy LIKE '%"AssigneeRecordID": null%';
+
 DECLARE @t1 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000001';
 DECLARE @t2 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000002';
 DECLARE @t3 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000003';

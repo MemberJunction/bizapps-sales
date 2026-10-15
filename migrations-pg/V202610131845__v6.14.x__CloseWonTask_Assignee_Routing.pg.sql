@@ -18,7 +18,7 @@
 
 SET standard_conforming_strings = on;
 
--- 1. Stop pointing the close-won tasks at a People row that no migration creates.
+-- 1. Stop pointing the close-won tasks at a People row only the demo seed creates.
 --    Filtered on the placeholder, so a deployment that already configured a real person keeps it.
 UPDATE "__mj_BizAppsSales"."Pipeline"
    SET "CloseWonPolicy" = REPLACE(
