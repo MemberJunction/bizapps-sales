@@ -505,7 +505,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 validation.LossReasonName,
             );
 
-            if (!(await deal.Save())) {
+            // The close stamps are writable only inside this call (#252); every other save refuses them.
+            if (!(await deal.BeginClose(() => deal.Save()))) {
                 throw new Error(
                     `the deal could not be saved: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
                 );

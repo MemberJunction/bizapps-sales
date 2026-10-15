@@ -26,6 +26,7 @@ import {
 } from '@memberjunction/ng-entity-viewer';
 import {
     DealEntity,
+    IsDealCloseStamp,
     IsDealFieldEditableWhileLocked,
     LoadDealStatusOptions,
     type DealStatusOption,
@@ -579,6 +580,8 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
          * visible and still navigable. What goes away is the invitation to type into them.
          */
         if (this.Fields?.find((f) => f.name === fieldName)?.serverMaintained === true) return false;
+        // The close stamps likewise, from the set the entity server refuses writes against (#252).
+        if (IsDealCloseStamp(fieldName)) return false;
 
         const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
         const locked = form?.IsLocked === true;
@@ -742,9 +745,11 @@ function isCreatedPartyField(fieldName: string): fieldName is CreatedPartyField 
 /**
  * Pipeline and stage are no longer in `PIPELINE_FIELDS`, so naming them here would filter for fields
  * that are not in the list. The dedicated controls render on a new deal unconditionally, which is
- * what this subset existed to arrange for them.
+ * what this subset existed to arrange for them. *
+ * `ExpectedCloseDate` is here because it moved into `PIPELINE_FIELDS` (#252) and was already offered
+ * on a new deal from the Commercial panel; leaving it out would have dropped it from creation.
  */
-const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID'];
+const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedCloseDate'];
 
 /**
  * Every field the party panel owns, at module scope rather than as an instance initializer.
@@ -1253,7 +1258,6 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 tone: this.IsLost ? 'muted' : 'success',
             };
         }
-        if (this.Record?.ActualCloseDate) return { label: 'Closed', tone: 'success' };
         if (n === null) return { label: 'No close date', tone: 'muted' };
         // SPELLED OUT, not "12d" / "3d past" (golive#231). The tile is read at a glance by someone who
         // is not holding the convention in their head, and "3d past" has to be decoded.
@@ -1293,9 +1297,14 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return this.G('DealStatusType') || 'No status set';
     }
 
-    /** "Won" / "Lost" once decided, "Closes" while it is still ahead. */
+    /**
+     * "Won" / "Lost" once decided, "Expected close" while it is still ahead.
+     *
+     * Says EXPECTED (#252): the date under an open deal's label is a forecast, and "Closes" read as
+     * a statement of fact to a rep deciding which close date to fill in.
+     */
     public get CloseTileLabel(): string {
-        if (!this.IsClosed) return 'Closes';
+        if (!this.IsClosed) return 'Expected close';
         if (this.IsWon) return 'Won';
         if (this.IsLost) return 'Lost';
         return 'Closed';
@@ -2187,6 +2196,10 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         { name: 'DealTypeID', type: 'textbox', link: 'Record' },
         { name: 'ForecastCategoryTypeID', type: 'textbox', link: 'Record' },
         { name: 'Probability', type: 'number' },
+        // Beside stage and probability, where a rep forecasting the deal looks for it. It sat in
+        // Commercial, and a rep who could not find it typed the expected day into Actual Close Date
+        // instead (#252). One binding: it is no longer in COMMERCIAL_FIELDS.
+        { name: 'ExpectedCloseDate', type: 'datepicker' },
 ];
 
 @RegisterClassEx(BaseFormPanel, {
@@ -2262,7 +2275,6 @@ const COMMERCIAL_FIELDS: DealFieldSpec[] = [
     { name: 'EstimatedProjectWeeks', type: 'number' },
     { name: 'MRR', type: 'number', currency: true },
     { name: 'ARR', type: 'number', currency: true },
-    { name: 'ExpectedCloseDate', type: 'datepicker' },
     { name: 'StartDate', type: 'datepicker' },
     { name: 'ExecutionDate', type: 'datepicker' },
     { name: 'AutoRenew', type: 'checkbox' },

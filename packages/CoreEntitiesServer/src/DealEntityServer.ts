@@ -57,6 +57,7 @@ import { RegisterClass } from '@memberjunction/global';
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
 import { CanTransition, IsBooked, IsEditable, type OrderStatus } from '@mj-biz-apps/orders-entities';
 import {
+    DealCloseStampFields,
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
     DealEntity,
@@ -427,6 +428,18 @@ export class DealEntityServer extends DealEntity {
                 'A loss reason is required to close a deal as lost. Set LossReasonID alongside the ' +
                 'status, or close the deal through Sales.CloseDeal.',
             );
+        }
+
+        /**
+         * THE CLOSE STAMPS ARE WRITTEN BY THE CLOSE AND THE REOPEN, AND BY NOTHING ELSE (#252).
+         *
+         * Refused on an OPEN deal too, which the lock below cannot do: it only looks at deals that are
+         * already closed. Runs before it so a refused save costs nothing, and so the message names the
+         * stamp rather than the lock.
+         */
+        const stampRefusal = this.closeStampEditRefusal();
+        if (stampRefusal) {
+            return this.refuseSave(stampRefusal);
         }
 
         /**
@@ -2171,6 +2184,61 @@ export class DealEntityServer extends DealEntity {
         'Team',
         'PaymentSchedule',
     ]);
+
+    /**
+     * Set only for the duration of {@link BeginClose}: the one path that may write the close stamps.
+     *
+     * Grants nothing else. The close lock still runs, and passes because the deal is still open on
+     * disk while it closes; this only answers {@link closeStampEditRefusal}.
+     */
+    private _closeInProgress = false;
+
+    /**
+     * Runs `body` with the close stamps writable, and always restores them.
+     *
+     * `Sales.CloseDeal` is the only caller. The `finally` is the same guarantee {@link BeginReopen}
+     * gives: an exception inside the close must not leave the stamps writable for later saves.
+     */
+    public async BeginClose<T>(body: () => Promise<T>): Promise<T> {
+        this._closeInProgress = true;
+        try {
+            return await body();
+        } finally {
+            this._closeInProgress = false;
+        }
+    }
+
+    /**
+     * Why this save is refused for writing a close stamp, or null if it may proceed.
+     *
+     * ── WHY IT REFUSES RATHER THAN PUTTING THE VALUE BACK ──────────────────────────────────────────
+     *
+     * The owner stamp is overwritten and reported, because its right value is derivable here. A close
+     * stamp's is not: it is the record of a close that did or did not happen. With the form rendering
+     * the stamps read-only, the callers left are an import, an agent, an Action, or a page left open
+     * while someone else closed or reopened the deal -- and every one of those wants to be told,
+     * not to have the save half-apply.
+     *
+     * `callerSuppliedValue` is the create-versus-update question `ownerStampEditRefusal` once got
+     * wrong, so a deal CREATED with a stamp is refused too.
+     */
+    private closeStampEditRefusal(): string | null {
+        if (this._closeInProgress || this._reopenInProgress) {
+            return null;
+        }
+        const supplied = DealCloseStampFields().filter((name) =>
+            this.callerSuppliedValue(name, this.GetFieldByName(name)?.Value),
+        );
+        if (supplied.length === 0) {
+            return null;
+        }
+        return (
+            `${JoinLabels(supplied.map(DealFieldLabel))} cannot be edited: closing the deal sets the ` +
+            'close stamps and reopening it clears them. To record when the deal is expected to close, ' +
+            'use Expected Close Date. If this page was open while the deal was closed or reopened, ' +
+            'reload it and try again. Nothing was changed.'
+        );
+    }
 
     /**
      * Runs `body` with the close lock suppressed, and always restores it.

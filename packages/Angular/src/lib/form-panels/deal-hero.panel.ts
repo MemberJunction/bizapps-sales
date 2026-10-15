@@ -598,8 +598,8 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         return !!(this.Record?.ClosedAt ?? this.Record?.ActualCloseDate);
     }
 
-    /** "Closed" once it has happened, "Close" while it is still a forecast. */
-    public get CloseStatLabel(): string { return this.IsClosed ? 'Closed' : 'Close'; }
+    /** "Closed" once it has happened, "Expected close" while it is still a forecast (#252). */
+    public get CloseStatLabel(): string { return this.IsClosed ? 'Closed' : 'Expected close'; }
 
     /**
      * The date it closed on, or the date it is expected to.
