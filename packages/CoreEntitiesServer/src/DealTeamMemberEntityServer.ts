@@ -58,7 +58,7 @@ import {
     LogError,
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
-import { mjBizAppsSalesDealTeamMemberEntity } from '@mj-biz-apps/sales-entities';
+import { DealTeamMemberEntity } from '@mj-biz-apps/sales-entities';
 import { DealEntityServer } from './DealEntityServer.js';
 
 const DEAL_TEAM_MEMBER_ENTITY = 'MJ_BizApps_Sales: Deal Team Members';
@@ -69,7 +69,7 @@ const DEAL_ROLE_ENTITY = 'MJ_BizApps_Sales: Deal Roles';
 type DealRoleRules = { Name: string | null; AllowsMultiplePerDeal: boolean | null; IsOwnerRole: boolean | null };
 
 @RegisterClass(BaseEntity, DEAL_TEAM_MEMBER_ENTITY)
-export class DealTeamMemberEntityServer extends mjBizAppsSalesDealTeamMemberEntity {
+export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
     /**
      * The deal and role this row held BEFORE this save, captured while `OldValue` still describes the
      * persisted row.
