@@ -122,6 +122,12 @@ export * from './forecast/ForecastSnapshotJob.js';
 export * from './finance-exceptions/FinanceExceptionBridge.js';
 export * from './finance-exceptions/WonDealOrderDetector.js';
 
+/**
+ * PER-COMPANY PIPELINES (#327). Copies the default pipeline and its stages onto every company that
+ * lacks one; the `Sales.CopyDefaultPipelineToCompanies` Action calls it.
+ */
+export * from './pipelines/CopyDefaultPipeline.js';
+
 import { LoadActivitySyncEngine } from '@mj-biz-apps/common-activity-sync';
 import { DealEntityServer } from './DealEntityServer.js';
 import { DealTeamMemberEntityServer } from './DealTeamMemberEntityServer.js';

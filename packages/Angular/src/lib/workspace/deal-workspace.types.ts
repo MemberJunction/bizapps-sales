@@ -14,6 +14,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
+import type { CompanyPipeline } from '../data/company-pipelines';
 import type { DealWorkspaceSection } from './deal-workspace.validation';
 
 /** The minimum a picker needs. Anything richer belongs in a dedicated shape below. */
@@ -22,11 +23,11 @@ export interface DealLookup {
     Name: string;
 }
 
-/** A pipeline carries its company, because `Deal.CompanyID` is derived from it and never chosen. */
-export interface PipelineLookup extends DealLookup {
-    CompanyID: string;
-    CompanyName: string | null;
-}
+/**
+ * A pipeline carries its company, because `Deal.CompanyID` is derived from it and never chosen. Code,
+ * IsDefault and DisplayRank are what the pickers group and order by (#327, `company-pipelines.ts`).
+ */
+export interface PipelineLookup extends DealLookup, CompanyPipeline {}
 
 /** Stages are filtered by pipeline, so the pipeline has to travel with them. */
 export interface StageLookup extends DealLookup {

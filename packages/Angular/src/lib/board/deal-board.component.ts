@@ -41,6 +41,7 @@
  */
 import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import {
     ChangeDetectorRef,
     Component,
@@ -54,6 +55,14 @@ import { FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 
 import { DealWorkspaceService, type DealRosterRow } from '../workspace/deal-workspace.service';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
+import {
+    CompanyLabel,
+    CompanyOfPipeline,
+    DefaultCompanyID,
+    PipelineCompanies,
+    PipelinesForCompany,
+    type PipelineCompany,
+} from '../data/company-pipelines';
 
 /**
  * A `DATE` column's day, as a value the `date` pipe can format with `'UTC'` (bc-aidp-next-golive#168).
@@ -139,7 +148,7 @@ export interface BoardColumn {
 @Component({
     selector: 'mjs-deal-board',
     standalone: true,
-    imports: [CommonModule, CdkDropList, CdkDrag],
+    imports: [CommonModule, FormsModule, CdkDropList, CdkDrag],
     templateUrl: './deal-board.component.html',
     styleUrls: ['./deal-board.component.css'],
 })
@@ -163,13 +172,46 @@ export class DealBoardComponent {
     public Message: string | null = null;
     public Moving = false;
 
-    /** The pipeline actually in view — the chosen one, or the first that has any stages. */
+    /** The company filter's choice; null until a rep picks one, which means the default company. */
+    public SelectedCompanyID: string | null = null;
+
+    /** Every company that owns a pipeline, default company first (#327). */
+    public get Companies(): PipelineCompany[] {
+        return PipelineCompanies(this.Pipelines);
+    }
+
+    /** The company in view — the chosen one, or the default pipeline's company. */
+    public get ActiveCompanyID(): string | null {
+        return this.SelectedCompanyID ?? DefaultCompanyID(this.Pipelines);
+    }
+
+    /** The tabs: the active company's pipelines, in picker order. */
+    public get CompanyPipelines(): PipelineLookup[] {
+        return PipelinesForCompany(this.Pipelines, this.ActiveCompanyID);
+    }
+
+    /** The pipeline actually in view — the chosen one, or the company's first that has any stages. */
     public get ActivePipelineID(): string | null {
         if (this.SelectedPipelineID) {
             return this.SelectedPipelineID;
         }
-        const withStages = this.Pipelines.find((p) => this.Stages.some((s) => s.PipelineID === p.ID));
-        return withStages?.ID ?? this.Pipelines[0]?.ID ?? null;
+        const pipelines = this.CompanyPipelines;
+        const withStages = pipelines.find((p) => this.Stages.some((s) => s.PipelineID === p.ID));
+        return withStages?.ID ?? pipelines[0]?.ID ?? null;
+    }
+
+    /** A new company drops a pipeline that belongs to the old one; the company's first takes over. */
+    public SelectCompany(companyID: string | null): void {
+        this.SelectedCompanyID = companyID;
+        if (CompanyOfPipeline(this.Pipelines, this.SelectedPipelineID) !== companyID) {
+            this.SelectedPipelineID = null;
+        }
+        this.Message = null;
+        this.cdr.detectChanges();
+    }
+
+    public CompanyText(company: PipelineCompany): string {
+        return CompanyLabel(company);
     }
 
     /**

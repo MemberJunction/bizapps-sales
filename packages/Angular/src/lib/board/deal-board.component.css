@@ -26,6 +26,15 @@
     color: var(--mj-text-muted);
 }
 
+.db-company {
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 6px;
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-primary);
+    font-size: 0.8125rem;
+}
+
 .db-bar__pipes {
     display: flex;
     gap: 0.25rem;

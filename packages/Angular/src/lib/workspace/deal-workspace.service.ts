@@ -19,6 +19,7 @@ import { Injectable } from '@angular/core';
 import { EntitySaveOptions, LogError, LogStatus, Metadata, RunQuery, RunView, RunViewParams, type RunViewResult } from '@memberjunction/core';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 
+import { OrderPipelinesByCompany } from '../data/company-pipelines';
 import { AssertRosterColumns } from './deal-roster.columns';
 
 import {
@@ -186,7 +187,7 @@ export interface DealSaveOutcome {
 }
 
 /** Row shapes as they come back from RunView with `ResultType: 'simple'`. */
-interface PipelineRow { ID: string; Name: string; CompanyID: string; Company: string | null }
+interface PipelineRow { ID: string; Name: string; Code: string; CompanyID: string; Company: string | null; IsDefault: boolean; DisplayRank: number }
 interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null }
 interface NamedRow { ID: string; Name: string }
 interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean; LocksDeal: boolean }
@@ -217,9 +218,18 @@ function lookupRead<T>(params: RunViewParams, apply: (rows: T[], into: DealWorks
  */
 const LOOKUP_READS: Record<LookupKey, LookupRead> = {
     Pipelines: lookupRead<PipelineRow>(
-        { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'CompanyID', 'Company'] },
+        { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'] },
         (rows, into) => {
-            into.Pipelines = rows.map<PipelineLookup>((p) => ({ ID: p.ID, Name: p.Name, CompanyID: p.CompanyID, CompanyName: p.Company ?? null }));
+            // Grouped by company, default company first (#327): the same order the form and the board use.
+            into.Pipelines = OrderPipelinesByCompany(rows.map<PipelineLookup>((p) => ({
+                ID: p.ID,
+                Name: p.Name,
+                Code: p.Code ?? '',
+                CompanyID: p.CompanyID,
+                CompanyName: p.Company ?? null,
+                IsDefault: !!p.IsDefault,
+                DisplayRank: Number(p.DisplayRank ?? 0),
+            })));
         },
     ),
     Stages: lookupRead<StageRow>(
