@@ -42,6 +42,7 @@ import { SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { MJSDealLineEditorComponent } from './deal-line-editor.component';
 import { BusinessDayOf, DealCloseDay } from './deal-close-day';
+import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -87,10 +88,11 @@ export interface PipelineOption {
     Name: string;
 }
 
-/** One stage, carrying the pipeline that owns it — the whole point of the list. */
-export interface PipelineStageOption {
-    ID: string;
-    Name: string;
+/**
+ * One stage, carrying the pipeline that owns it — the whole point of the list — and the defaults a
+ * save applies when a deal arrives in it, so the form can say so before the save (sales#247).
+ */
+export interface PipelineStageOption extends StageDefaults {
     PipelineID: string;
 }
 
@@ -132,18 +134,24 @@ async function LoadPipelines(): Promise<PipelineOption[]> {
  * alphabetically -- Discovery, Lost, Negotiation, Proposal, Qualification, Signed.
  */
 async function LoadPipelineStages(): Promise<PipelineStageOption[]> {
-    const result = await new RunView().RunView<{ ID: string; Name: string; PipelineID: string }>({
+    const result = await new RunView().RunView<{
+        ID: string; Name: string; PipelineID: string;
+        Probability: number | null; ForecastCategoryTypeID: string | null; ForecastCategoryType: string | null;
+    }>({
         EntityName: E_PIPELINE_STAGE,
         ExtraFilter: 'IsActive = 1',
         OrderBy: 'DisplayOrder ASC, Name ASC',
         ResultType: 'simple',
-        Fields: ['ID', 'Name', 'PipelineID'],
+        Fields: ['ID', 'Name', 'PipelineID', 'Probability', 'ForecastCategoryTypeID', 'ForecastCategoryType'],
     });
     if (!result?.Success) return [];
     return (result.Results ?? []).map((r) => ({
         ID: String(r.ID),
         Name: String(r.Name),
         PipelineID: String(r.PipelineID),
+        Probability: r.Probability == null ? null : Number(r.Probability),
+        ForecastCategoryTypeID: r.ForecastCategoryTypeID ?? null,
+        ForecastCategoryType: r.ForecastCategoryType ?? null,
     }));
 }
 
@@ -1486,6 +1494,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
+                        <!-- What a save will write here from the stage just picked (sales#247). Text
+                             only: the server stays the one writer of these two fields. -->
+                        @if (EditMode && StageMoveHint(f.name); as hint) {
+                            <small class="mjs-field__hint" [attr.data-testid]="'stage-move-hint-' + f.name">{{ hint }}</small>
+                        }
                     </div>
                 }
 
@@ -1810,6 +1823,32 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public SetStage(stageID: string | null): void {
         if (!this.Record) return;
         this.Record.PipelineStageID = stageID as unknown as string;
+    }
+
+    /**
+     * The line under Probability or Forecast category after a saved deal moves stage, saying what the
+     * save will write there (sales#247). Null for every other field and whenever the save writes nothing.
+     */
+    public StageMoveHint(fieldName: string): string | null {
+        if (fieldName !== 'Probability' && fieldName !== 'ForecastCategoryTypeID') return null;
+        return this.StageMoveHints[fieldName];
+    }
+
+    public get StageMoveHints(): StageMoveHints {
+        const rec = this.Record;
+        if (!rec) return { Probability: null, ForecastCategoryTypeID: null };
+        return StageMoveHintsFor(
+            {
+                IsSaved: rec.IsSaved,
+                PipelineStageID: rec.PipelineStageID ?? null,
+                LoadedStageID: (rec.GetFieldByName('PipelineStageID')?.OldValue as string | null | undefined) ?? null,
+                ProbabilityEdited: !!rec.GetFieldByName('Probability')?.Dirty,
+                ForecastCategoryEdited: !!rec.GetFieldByName('ForecastCategoryTypeID')?.Dirty,
+                Probability: rec.Probability ?? null,
+                ForecastCategoryTypeID: rec.ForecastCategoryTypeID ?? null,
+            },
+            this.stages(),
+        );
     }
 
     /** Ids round-trip through JSON in both cases, so the select compares them the way the rest does. */
