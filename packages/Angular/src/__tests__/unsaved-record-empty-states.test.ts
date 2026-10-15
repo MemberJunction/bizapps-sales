@@ -31,10 +31,11 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEAL = readFileSync(join(HERE, '..', 'lib', 'form-panels', 'deal-form.panels.ts'), 'utf8');
 const PARTY = readFileSync(join(HERE, '..', 'lib', 'form-panels', 'party-deals.panels.ts'), 'utf8');
+const ACCOUNT = readFileSync(join(HERE, '..', 'lib', 'form-panels', 'account-contacts.panel.ts'), 'utf8');
 
 type Panel = { label: string; source: string; anchor: string; message: string };
 
-/** The eight panels, and the sentence each must show a record that has not been saved. */
+/** The panels, and the sentence each must show a record that has not been saved. */
 const PANELS: Panel[] = [
     {
         label: 'Internal team',
@@ -83,6 +84,12 @@ const PANELS: Panel[] = [
         source: PARTY,
         anchor: "selector: 'mjs-person-deal-team-panel'",
         message: 'Save the person first. Their role on a deal is recorded once they exist.',
+    },
+    {
+        label: 'Contacts, on an account',
+        source: ACCOUNT,
+        anchor: "selector: 'mjs-account-contacts-panel'",
+        message: 'Save the account first. People are linked to it once it exists.',
     },
 ];
 
