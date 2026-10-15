@@ -692,9 +692,6 @@ REVOKE EXECUTE ON [${flyway:defaultSchema}].[spDeleteSalesAccount] FROM [cdp_Dev
 REVOKE EXECUTE ON [${flyway:defaultSchema}].[spDeleteSalesAccount] FROM [cdp_Integration]
 GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteSalesAccount] TO [cdp_Developer], [cdp_Integration];
 
-/* SQL text to delete unneeded entity fields (1 scoped entities) */
-EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='', @EntityIDs='15A9B6F8-9566-4A37-8588-2D00E8F1CB9A', @IncludedSchemaNames='${flyway:defaultSchema}';
-
 /* SQL text to insert 2 new entity field(s) */
 
       IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = 'cf73d195-9ab0-4034-84ec-a95c1906895c' OR (EntityID = '15A9B6F8-9566-4A37-8588-2D00E8F1CB9A' AND Name = 'DefaultPrimaryContact')) BEGIN
