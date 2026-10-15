@@ -95,7 +95,7 @@
             <div class="card">
               <div class="ch">
                 Forecast stack
-                <span class="r">{{ StackClosedNote }} · flags are cumulative</span>
+                <span class="r" title="Each open deal is counted once, in its highest forecast category: Commit, then Best Case, then the rest of the pipeline.">{{ StackClosedNote }}</span>
               </div>
               <div class="stack-pad">
                 @if (Stack.Total <= 0) {
@@ -150,21 +150,21 @@
                 </div>
               </div>
               <div class="card">
-                <div class="ch">Needs a person <span class="r">filters Inspect</span></div>
+                <div class="ch">Needs a person <span class="r">click one to list its deals below</span></div>
                 <div class="queues">
                   <button type="button" class="queue" (click)="SetInspect('slipped')">
                     <span class="qico"><i class="fa-solid fa-calendar-xmark" aria-hidden="true"></i></span>
-                    <span class="qbody"><b>Close date slipped</b><span class="muted">Open, ExpectedCloseDate already past</span></span>
+                    <span class="qbody" title="Open deals whose expected close date is before today"><b>Close date slipped</b><span class="muted">Open deals past their expected close date</span></span>
                     <span class="qcount">{{ SlippedDeals.length }}</span>
                   </button>
                   <button type="button" class="queue" (click)="SetInspect('noowner')">
                     <span class="qico"><i class="fa-solid fa-user-slash" aria-hidden="true"></i></span>
-                    <span class="qbody"><b>No owner</b><span class="muted">DealRole.IsOwnerRole empty</span></span>
+                    <span class="qbody" title="Open deals where no one on the deal team holds the owner role"><b>No owner</b><span class="muted">Open deals with no owner on the deal team</span></span>
                     <span class="qcount">{{ SilentCount }}</span>
                   </button>
                   <button type="button" class="queue" (click)="SetInspect('commit')">
                     <span class="qico"><i class="fa-solid fa-flag" aria-hidden="true"></i></span>
-                    <span class="qbody"><b>Commit this period</b><span class="muted">IncludeInCommit, still open</span></span>
+                    <span class="qbody" title="Every open deal in a Commit forecast category, whatever period is selected above"><b>Commit (open)</b><span class="muted">Open deals marked for commit</span></span>
                     <span class="qcount">{{ CommitCount }}</span>
                   </button>
                 </div>
@@ -187,7 +187,7 @@
 
             <div class="dash-split">
               <div class="card">
-                <div class="ch">Commit by owner <span class="r">IncludeInCommit $</span></div>
+                <div class="ch">Commit by owner <span class="r" title="Amount of open deals in a Commit forecast category, grouped by deal owner">open commit amount</span></div>
                 <div class="barlist">
                   @if (!Owners.length) {
                     <div class="empty">No commit deals.</div>
@@ -218,7 +218,7 @@
                   <div class="kpi">
                     <div class="l">By value</div>
                     <div class="v">{{ PeriodLoading ? '…' : Pct(WinRateByValue) }}</div>
-                    <div class="f">Won $ over closed $</div>
+                    <div class="f" title="Amount won divided by the amount of all deals closed in the period, won or lost">won amount ÷ closed amount</div>
                   </div>
                 </div>
               </div>

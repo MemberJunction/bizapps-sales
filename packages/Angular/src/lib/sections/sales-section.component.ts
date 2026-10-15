@@ -692,19 +692,19 @@ export class MJSSalesSectionComponent implements OnInit {
     public get InspectLabel(): string {
         switch (this.InspectFilter) {
             case 'closing':
-                return 'Closing soonest · click a deal → Explorer tab';
+                return 'Open deals closing soonest';
             case 'commit':
-                return 'IncludeInCommit, still open';
+                return 'Open deals marked for commit';
             case 'best':
-                return 'IncludeInBestCase (includes Commit)';
+                return 'Open best-case deals, including commit';
             case 'pipe':
                 return 'Open pipeline';
             case 'slipped':
-                return 'ExpectedCloseDate already past, still open';
+                return 'Open deals past their expected close date';
             case 'noowner':
-                return 'Open, no owner';
+                return 'Open deals with no owner';
             case 'won':
-                return this.Period === 'alltime' ? 'IsWon · all time' : `IsWon · closed ${this.WindowLabel}`;
+                return this.Period === 'alltime' ? 'Won deals · all time' : `Won deals closed ${this.WindowLabel}`;
             case 'week':
                 return 'Expected close in the next 7 days';
             case 'month':
