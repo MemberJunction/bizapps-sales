@@ -25,7 +25,12 @@ import { CompositeKey, RunView, type BaseEntity } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import { OrdersIsInstalled, type DealEntityServer } from '@mj-biz-apps/sales-core-entities-server';
 import { SalesCloseDealOperation, type SalesCloseDealInput, type SalesCloseDealOutput } from '@mj-biz-apps/sales-entities';
-import { CanTransition, ORDER_STATUSES } from '@mj-biz-apps/orders-entities';
+import {
+    CanTransition,
+    HostOrderConfirmVeto,
+    ORDER_STATUSES,
+    RegisterOrderConfirmVeto,
+} from '@mj-biz-apps/orders-entities';
 
 import { InRolledBackTransaction, ResolveSalesFixture, type SalesFixture } from '../fixture.js';
 import { SeedDealOnPipeline, type SeededOrderDeal } from './close-won-order.fixture.js';
@@ -121,14 +126,34 @@ async function moveToStage(ctx: Ctx, dealID: string, stageID: string): Promise<D
     return deal;
 }
 
-/** Puts an order into a given status directly, so a check can set up a refusal. */
+/**
+ * Puts an order into a given status directly, so a check can set up a refusal.
+ *
+ * STANDS OUTSIDE THE CROSS-APP CONFIRM VETO while it does, for the same reason it already stands
+ * outside the ordinary status rules: it is forcing a state, not exercising the path that reaches it.
+ *
+ * Since bc-aidp-next-golive#323, Sales refuses a confirm whose deal is not Won. The pair this file
+ * derives from orders' own `CanTransition` happens to start at `Confirmed`, so forcing that status on
+ * a freshly seeded deal — which is not Won yet — now asks the product to create exactly the state the
+ * veto exists to prevent. Clearing the veto around the write keeps the FIXTURE honest without
+ * weakening the rule: `DealNotWonConfirmVeto`'s own checks are what prove it still refuses.
+ */
 async function forceOrderStatus(ctx: Ctx, orderID: string, status: string): Promise<void> {
     const order = (await ctx.Provider.GetEntityObject(E_ORDER_HEADER, ctx.User)) as BaseEntity;
     const key = new CompositeKey();
     key.KeyValuePairs.push({ FieldName: 'ID', Value: orderID });
     Assert(await order.InnerLoad(key), `order ${orderID} could not be loaded`);
     order.Set('Status', status);
-    Assert(await order.Save(), `the order could not be moved to ${status}: ${order.LatestResult?.CompleteMessage ?? ''}`);
+    const veto = HostOrderConfirmVeto();
+    RegisterOrderConfirmVeto(null);
+    try {
+        Assert(
+            await order.Save(),
+            `the order could not be moved to ${status}: ${order.LatestResult?.CompleteMessage ?? ''}`,
+        );
+    } finally {
+        RegisterOrderConfirmVeto(veto);
+    }
 }
 
 /** One order header, read back through the entity layer. */
