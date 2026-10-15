@@ -96,6 +96,28 @@ interface StatusFlags {
 }
 
 /**
+ * Where a close lands and the figures it writes, resolved before the stamp (bc-aidp-next-golive#345).
+ *
+ * `StageID` is null when the caller named no stage and the pipeline has none for this outcome; the deal
+ * then stays where it is and `Issues` says so. `Probability` and `ForecastCategoryTypeID` are null when
+ * the close has nothing to say about them, and the deal keeps its own.
+ */
+interface ResolvedClosing {
+    StageID: string | null;
+    Probability: number | null;
+    ForecastCategoryTypeID: string | null;
+    Issues: SalesCloseIssue[];
+}
+
+/** The parts of a closing stage the close reads: its figures and the outcome its status declares. */
+interface ClosingStageRow {
+    Probability: number | null;
+    ForecastCategoryTypeID: string | null;
+    IsWon: boolean;
+    IsLost: boolean;
+}
+
+/**
  * What validation found, and the one fact it resolved on the way.
  *
  * `validate()` returned a bare issue array until the close event had to name the loss reason. It is the
@@ -128,6 +150,56 @@ const POLICY_DEFAULTS: SalesCloseWonPolicy = {
     // made it -- see `DECISIONS-NEEDED.md` DN-11. A deployment setting it is configuring nothing.
     OneTimeLinesTo: 'None',
 };
+
+/** A stage's figures and the outcome its status declares, or null when it cannot be read. */
+async function readStage(
+    stageID: string,
+    provider: IMetadataProvider,
+    user: UserInfo,
+): Promise<ClosingStageRow | null> {
+    const view = provider as unknown as IRunViewProvider;
+    const stages = await view.RunView(
+        {
+            EntityName: STAGE_ENTITY,
+            ExtraFilter: `ID = '${stageID}'`,
+            ResultType: 'simple',
+            Fields: ['Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'],
+        },
+        user,
+    );
+    const row = (stages.Success ? (stages.Results ?? [])[0] : undefined) as
+        | { Probability?: number | null; ForecastCategoryTypeID?: string | null; DealStatusTypeID?: string | null }
+        | undefined;
+    if (!row) {
+        return null;
+    }
+
+    let isWon = false;
+    let isLost = false;
+    if (row.DealStatusTypeID) {
+        const statuses = await view.RunView(
+            {
+                EntityName: DEAL_STATUS_ENTITY,
+                ExtraFilter: `ID = '${row.DealStatusTypeID}'`,
+                ResultType: 'simple',
+                Fields: ['IsWon', 'IsLost'],
+            },
+            user,
+        );
+        const status = (statuses.Success ? (statuses.Results ?? [])[0] : undefined) as
+            | { IsWon?: boolean; IsLost?: boolean }
+            | undefined;
+        isWon = status?.IsWon === true;
+        isLost = status?.IsLost === true;
+    }
+
+    return {
+        Probability: row.Probability ?? null,
+        ForecastCategoryTypeID: row.ForecastCategoryTypeID ?? null,
+        IsWon: isWon,
+        IsLost: isLost,
+    };
+}
 
 function issue(Section: SalesCloseIssue['Section'], Message: string, Field: string | null = null): SalesCloseIssue {
     return { Section, Field, Severity: 'error', Message };
@@ -434,13 +506,20 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              * is the right place for it to fail.
              */
 
+            /**
+             * The stage this close lands in, and the figures it carries. Resolved BEFORE the stamp
+             * because `stampClose` is synchronous and this needs reads, and before the preview so a
+             * preview can say when there is nowhere to land. `input.ClosingStageID` wins when supplied.
+             */
+            const closing = await this.resolveClosing(deal, input, target, provider, user);
+
             if (input.PreviewOnly) {
                 // Nothing written, nothing locked — the caller just wanted to see the consequences.
                 // A refusal IS one of those consequences, so the preview reports it too: a caller that
                 // previews before closing should not learn about it only after committing.
                 return {
                     Success: true,
-                    Issues: routingIssues(routing, true),
+                    Issues: [...closing.Issues, ...routingIssues(routing, true)],
                     IsWon: target.IsWon,
                     IsLost: target.IsLost,
                     Locked: false,
@@ -487,21 +566,13 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              */
             const taskIssues: SalesCloseIssue[] = [];
 
-            /**
-             * The stage this close lands in, resolved BEFORE the stamp because `stampClose` is
-             * synchronous and this needs two reads. `input.ClosingStageID` wins when supplied.
-             */
-            const derivedClosingStageID = input.ClosingStageID
-                ? null
-                : await this.closingStageForOutcome(deal.PipelineID, target, provider, user);
-
             this.stampClose(
                 deal,
                 input,
                 target,
                 routing,
                 user,
-                derivedClosingStageID,
+                closing,
                 validation.LossReasonName,
             );
 
@@ -646,7 +717,13 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  * written inside `deal.Save()` a few lines further down. So a reader of the array reads
                  * the close in sequence, which is the only ordering that means anything here.
                  */
-                Issues: [...taskIssues, ...linkIssues, ...orderStatusIssues(deal), ...routingIssues(routing, false)],
+                Issues: [
+                    ...closing.Issues,
+                    ...taskIssues,
+                    ...linkIssues,
+                    ...orderStatusIssues(deal),
+                    ...routingIssues(routing, false),
+                ],
                 IsWon: target.IsWon,
                 IsLost: target.IsLost,
                 Locked: target.LocksDeal,
@@ -880,7 +957,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
     /**
      * The stage a close should land in, when the caller did not name one.
      *
-     * ── THE MIRROR OF `priorStageFromCloseEvent`, AND THE OTHER HALF OF DN-18 ───────────────────────
+     * ── THE MIRROR OF `closeEventBeingUndone`, AND THE OTHER HALF OF DN-18 ───────────────────────
      *
      * `CD18` proves a reopen restores the stage the deal came from. It could not help a deal closed
      * through the browser, because `DealWorkspaceComponent.ConfirmClose()` sends no `ClosingStageID` — so
@@ -956,6 +1033,70 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         return row?.ID ? String(row.ID) : null;
     }
 
+    /**
+     * The stage a close lands in, the probability and forecast category it writes, and the warning when
+     * there is nowhere to land (bc-aidp-next-golive#345).
+     *
+     * ── WHY THE CLOSE WRITES THESE ITSELF ──────────────────────────────────────────────────────────
+     *
+     * A close declares its transition, and a declared transition switches the stage defaults off (`CD17`
+     * depends on it: the closing status must win over whatever the stage declares). That left nothing
+     * writing the probability, so a won deal kept the 50 it had in Proposal. The figures still come from
+     * the data, never from a constant chosen here:
+     *
+     *   · the landing stage's own `Probability` and `ForecastCategoryTypeID`, when that stage's status
+     *     declares the SAME outcome as the close — a Won close into a stage whose status is won;
+     *   · otherwise the outcome's flag: 100 for won, 0 for lost. A won deal has no other probability, and
+     *     this is the only answer for a status-only close on a pipeline with no stage for the outcome.
+     *     The forecast category is left as it is in that case: no type-table flag names a closed one.
+     *
+     * The stage's figures are not used when its status contradicts the close (`CD17`'s Lost-into-a-won-
+     * stage pairing), because then they describe the other outcome.
+     *
+     * ── THE WARNING ────────────────────────────────────────────────────────────────────────────────
+     *
+     * A pipeline with no active stage for the outcome still closes (see `closingStageForOutcome`), but the
+     * deal stays in an open stage. That used to be silent. It is now a warning, so the person closing it
+     * and anyone reading `Issues` learn the pipeline is missing a stage.
+     */
+    private async resolveClosing(
+        deal: DealEntityServer,
+        input: SalesCloseDealInput,
+        target: StatusFlags,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<ResolvedClosing> {
+        const stageID = input.ClosingStageID
+            ?? (await this.closingStageForOutcome(deal.PipelineID, target, provider, user));
+        const stage = stageID ? await readStage(stageID, provider, user) : null;
+
+        const stageAgrees = !!stage && stage.IsWon === target.IsWon && stage.IsLost === target.IsLost;
+        const flagProbability = target.IsWon ? 100 : target.IsLost ? 0 : null;
+        const probability = stageAgrees && stage.Probability !== null ? stage.Probability : flagProbability;
+        const forecastCategory = stageAgrees ? stage.ForecastCategoryTypeID : null;
+
+        const issues: SalesCloseIssue[] = [];
+        if (!stageID && (target.IsWon || target.IsLost)) {
+            const outcome = target.IsWon ? 'won' : 'lost';
+            issues.push({
+                Section: 'deal',
+                Field: 'PipelineStageID',
+                Severity: 'warning',
+                Message:
+                    `Closed as ${outcome}, but the ${deal.Pipeline ?? 'deal\'s'} pipeline has no active ${outcome} ` +
+                    `stage, so the deal stayed in ${deal.PipelineStage ?? 'its current stage'}. Add a ${outcome} ` +
+                    'stage to the pipeline so closed deals land in it.',
+            });
+        }
+
+        return {
+            StageID: stageID,
+            Probability: probability,
+            ForecastCategoryTypeID: forecastCategory,
+            Issues: issues,
+        };
+    }
+
     /* ── The close stamp (§7.2 step 6) ──────────────────────────────────────── */
 
     /**
@@ -995,7 +1136,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         target: StatusFlags,
         routing: SalesCloseRoutingResult[],
         user: UserInfo,
-        derivedClosingStageID: string | null,
+        closing: ResolvedClosing,
         lossReasonName: string | null,
     ): void {
         /**
@@ -1007,8 +1148,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
          * one.
          *
          * `DeclareTransition` hands the entity the one thing it could not derive — the routing note — and
-         * leaves the writing to the single writer, which also suppresses the stage defaults so a close's
-         * probability is not re-derived from the stage it lands in. The `From`/`To` stamps come out the
+         * leaves the writing to the single writer, which also suppresses the stage defaults: the close
+         * writes its own probability and forecast category below, from `resolveClosing`. The `From`/`To` stamps come out the
          * same, because the entity reads them from `OldValue`, which is what this method read too.
          *
          * The event id is no longer available here: it exists only once the save has appended the row.
@@ -1021,9 +1162,20 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         deal.DealStatusTypeID = target.ID;
         // Derived when the caller named no stage -- see closingStageForOutcome. This is what gives a
         // browser-driven close a stage to move into, and therefore gives the reopen something to restore.
-        const closingStage = input.ClosingStageID ?? derivedClosingStageID;
-        if (closingStage) {
-            deal.PipelineStageID = closingStage;
+        if (closing.StageID) {
+            deal.PipelineStageID = closing.StageID;
+        }
+        /**
+         * The close's own probability and forecast category (bc-aidp-next-golive#345). The declared
+         * transition switches the stage defaults off, so nothing else writes them: before this, every
+         * closed deal kept the figures it had while open. The event above still stamps the pre-close
+         * probability, because the entity reads it from `OldValue`. See `resolveClosing`.
+         */
+        if (closing.Probability !== null) {
+            deal.Probability = closing.Probability;
+        }
+        if (closing.ForecastCategoryTypeID) {
+            deal.ForecastCategoryTypeID = closing.ForecastCategoryTypeID;
         }
         if (input.LossReasonID) {
             deal.LossReasonID = input.LossReasonID;
@@ -1383,9 +1535,30 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * `OrderStatusOnEntry` fire so the order is asked to come back. A status-only close left the
              * stage where it was, so this resolves to the stage the deal is already in and nothing fires.
              */
-            const landingStage = input.StageID ?? (await this.priorStageFromCloseEvent(deal.ID, provider, user));
+            const undone = await this.closeEventBeingUndone(deal.ID, provider, user);
+            const landingStage = input.StageID ?? undone?.FromStageID ?? null;
+            const stageMoves =
+                !!landingStage && landingStage.toLowerCase() !== (deal.PipelineStageID ?? '').toLowerCase();
             if (landingStage) {
                 deal.PipelineStageID = landingStage;
+            }
+
+            /**
+             * THE FIGURES THE CLOSE OVERWROTE (bc-aidp-next-golive#345). The close writes 100 or 0 and,
+             * when it lands in a closing stage, that stage's forecast category. The declared transition
+             * keeps the stage defaults off here too, so the reopen puts them back itself: the probability
+             * from the close event's stamp, and the forecast category from the stage the deal returns to.
+             * The category is only taken when the stage actually moves; a deal that stays where it is
+             * keeps the category it has.
+             */
+            if (undone && undone.ProbabilityAtTransition !== null) {
+                deal.Probability = undone.ProbabilityAtTransition;
+            }
+            if (stageMoves && landingStage) {
+                const landing = await readStage(landingStage, provider, user);
+                if (landing?.ForecastCategoryTypeID) {
+                    deal.ForecastCategoryTypeID = landing.ForecastCategoryTypeID;
+                }
             }
             // The close stamps describe a close that is no longer in effect; clearing them keeps every
             // rollup that tests `ClosedAt IS NOT NULL` honest. The event above preserves the history
@@ -1542,12 +1715,19 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
      * Returns null when there is no close event to read — a deal closed by SQL, an import that wrote no
      * provenance, or a log that was never written. The reopen then leaves the stage alone rather than
      * guessing, which is the same answer as "the caller sent no StageID" and needs no extra branch.
+     *
+     * ── AND THE PROBABILITY THE CLOSE LEFT BEHIND (bc-aidp-next-golive#345) ───────────────────────────
+     *
+     * The close now writes 100 or 0, so a reopen that kept the deal's probability would leave a reopened
+     * deal at 100. The same event stamped the pre-close value in `ProbabilityAtTransition`; the reopen
+     * restores it, which is what "the reopen keeps the probability a human set" (`CD16`) means once the
+     * close no longer leaves it in place.
      */
-    private async priorStageFromCloseEvent(
+    private async closeEventBeingUndone(
         dealID: string,
         provider: IMetadataProvider,
         user: UserInfo,
-    ): Promise<string | null> {
+    ): Promise<{ FromStageID: string | null; ProbabilityAtTransition: number | null } | null> {
         const view = provider as unknown as IRunViewProvider;
 
         const locking = await view.RunView(
@@ -1576,16 +1756,23 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
                 ExtraFilter: `DealID = '${dealID}' AND ToDealStatusTypeID IN (${quoted})`,
                 OrderBy: 'ChangedAt DESC',
                 ResultType: 'simple',
-                Fields: ['FromStageID', 'ChangedAt'],
+                Fields: ['FromStageID', 'ProbabilityAtTransition', 'ChangedAt'],
             },
             user,
         );
         if (!events.Success) {
             return null;
         }
-        const row = (events.Results ?? [])[0] as { FromStageID?: string | null } | undefined;
-        const from = row?.FromStageID;
-        return from ? String(from) : null;
+        const row = (events.Results ?? [])[0] as
+            | { FromStageID?: string | null; ProbabilityAtTransition?: number | null }
+            | undefined;
+        if (!row) {
+            return null;
+        }
+        return {
+            FromStageID: row.FromStageID ? String(row.FromStageID) : null,
+            ProbabilityAtTransition: row.ProbabilityAtTransition ?? null,
+        };
     }
 
     /** The default landing status — chosen by the `IsOpen` FLAG, never by a status name. */
