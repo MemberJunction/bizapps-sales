@@ -68,6 +68,7 @@ import {
     MJSPersonDealsPanel,
 } from './lib/form-panels/party-deals.panels';
 import { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
+import { MJSDealStageEventNoticePanel } from './lib/form-panels/deal-stage-event-notice.panel';
 
 // Re-export for consumers
 export { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
@@ -116,6 +117,7 @@ export {
     MJSPersonDealTeamPanel,
 } from './lib/form-panels/party-deals.panels';
 export { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
+export { MJSDealStageEventNoticePanel, STAGE_EVENT_APPEND_ONLY_NOTICE } from './lib/form-panels/deal-stage-event-notice.panel';
 export {
     OrderRelatedLinks,
     OrderRelatedLinksKey,
@@ -156,6 +158,7 @@ export function LoadBizAppsSalesClient(): void {
     // The symptom would be a Deal form that lets you edit a locked deal — a missing guard, not an error.
     void DealFormComponentExtended;
     void DealStageEventFormComponentExtended;
+    void MJSDealStageEventNoticePanel;
     void MJSDealHeroPanel;
     void DealFormPolicy;
     void MJSDealOverviewPanel;
