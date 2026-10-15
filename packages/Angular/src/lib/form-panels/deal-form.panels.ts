@@ -22,6 +22,7 @@ import {
     EntityViewerModule,
     type AfterDataLoadEventArgs,
     type AfterRowDoubleClickEventArgs,
+    type GridColumnConfig,
     type RecordOpenedEvent,
 } from '@memberjunction/ng-entity-viewer';
 import {
@@ -2354,6 +2355,26 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
     public get Fields(): DealFieldSpec[] { return COMMERCIAL_FIELDS; }
 }
 
+/**
+ * THE COLUMNS OF "WHAT'S BEING SOLD", PRODUCT FIRST (sales#265).
+ *
+ * Without its own list the grid fell back to Order Line's default view, which orders owns and which
+ * puts line number, prices and fulfilment first and the product last, off the right edge at normal
+ * widths: a rep demoing a deal saw prices with no product beside them. A user who had saved Order
+ * Line columns in the entity browser got THOSE here instead; a host column list outranks that too.
+ *
+ * Nothing that only means something after confirm (fulfilment status) and nothing the rep cannot act
+ * on (line number: the grid is already sorted by it). Every figure is orders' own field, displayed
+ * as stored; sales computes none of them. Discount is not here yet: `DiscountPct` stores a fraction,
+ * and the grid has no format that shows 0.1 as 10%.
+ */
+export const DEAL_LINE_COLUMNS: GridColumnConfig[] = [
+    { field: 'Product', title: 'Product', width: 'auto' },
+    { field: 'Quantity', title: 'Quantity' },
+    { field: 'UnitPrice', title: 'Unit Price' },
+    { field: 'LineTotalNet', title: 'Line Total' },
+];
+
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-lines',
     skipNullKeyWarning: true,
@@ -2523,8 +2544,31 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     /** The line being edited; null means a new one. */
     public EditingLineID: string | null = null;
 
-    /** The grid itself, so a saved line can make it re-read rather than leaving it stale. */
-    @ViewChild(ExplorerEntityDataGridComponent) private linesGrid?: ExplorerEntityDataGridComponent;
+    /**
+     * The grid itself, so a saved line can make it re-read rather than leaving it stale, and so the
+     * panel can name its own columns.
+     *
+     * A setter rather than `ngAfterViewInit` because the grid renders only once the deal has an order:
+     * a deal saved for the first time gets its grid long after the panel's view initialised.
+     *
+     * The wrapper forwards no column list, so the list goes to the inner grid it exposes. Deferred a
+     * microtask because the query resolves after the inner grid's view was checked; changing its
+     * column definitions inside the same pass is an ExpressionChanged error in dev mode.
+     */
+    @ViewChild(ExplorerEntityDataGridComponent)
+    private set linesGrid(grid: ExplorerEntityDataGridComponent | undefined) {
+        const isNewGrid = grid !== this._linesGrid;
+        this._linesGrid = grid;
+        if (grid && isNewGrid) {
+            Promise.resolve().then(() => {
+                if (grid.innerGrid) grid.innerGrid.Columns = DEAL_LINE_COLUMNS;
+            });
+        }
+    }
+    private get linesGrid(): ExplorerEntityDataGridComponent | undefined {
+        return this._linesGrid;
+    }
+    private _linesGrid?: ExplorerEntityDataGridComponent;
 
     public AddLine(): void {
         this.EditingLineID = null;
@@ -2547,8 +2591,9 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
          * double-click with it. A rep could open a Won deal's line and type into all four fields; the
          * refusal arrived from the server veto after they pressed Save.
          *
-         * Nothing is lost by refusing: the grid already displays product, quantity, discount and the
-         * priced figures, so the editor offers no READING this panel does not. That is the difference
+         * Little is lost by refusing: the grid displays product, quantity and the priced figures
+         * (`DEAL_LINE_COLUMNS`). The requested discount is the one reading it lacks until the grid can
+         * show a stored fraction as a percent; the net figures already carry its effect. That is the difference
          * from the workspace's full line detail, which carries fields with no other surface and so
          * opens read-only instead of not at all.
          *
