@@ -216,5 +216,27 @@
       "lastModified": "2026-08-26T00:25:08.350Z",
       "checksum": "c9a706e41e3ba55b5e2d062559a5e9f946ef2e36fc6c3648eb47885a2ce03123"
     }
+  },
+  {
+    "_comments": [
+      "THE D2C PIPELINE HAD NO LOSING STAGE, so a lost D2C deal stayed in an open stage and kept its open",
+      "probability (bc-aidp-next-golive#345). Same shape as B2B's Lost: probability 0, the CLOSED forecast",
+      "category, the LOST status, and Voided on entry so a lost deal's order stops being actionable."
+    ],
+    "fields": {
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=D2C",
+      "Name": "Lost",
+      "Code": "LOST",
+      "DisplayOrder": 40,
+      "Probability": 0,
+      "ForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=CLOSED",
+      "DealStatusTypeID": "@lookup:MJ_BizApps_Sales: Deal Status Types.Code=LOST",
+      "OrderStatusOnEntry": "Voided",
+      "GuidanceMarkdown": "A loss reason is mandatory \u2014 it is the highest-value, most-skipped data in any CRM. Entering this stage VOIDS the order.",
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "58CC2FFF-21E8-4FB2-A1BA-3BBB1AA372F7"
+    }
   }
 ]
