@@ -10,7 +10,8 @@ Seeds orders' `Product` catalogue for the product picker and the close-won hando
 company is the one the first active pipeline belongs to; a second company carries the products the
 cross-tenant check (PP2) must not see. **The rows make each picker filter observable**, not realistic:
 all four `Status` values, availability windows that are open-ended, already closed and not yet open,
-and one subscription product so the term start shows.
+one subscription product so the term start shows, and one product that takes its service period
+from the line (close-deal.CD36).
 
 Needs an active pipeline (`scripts/seed-dev-data.sh`), a second `Company`, and orders'
 `metadata/product-types` and `metadata/revenue-recognition-types` pushed. Without orders'
