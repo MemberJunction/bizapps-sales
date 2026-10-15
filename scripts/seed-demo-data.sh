@@ -138,6 +138,8 @@ DELETE FROM __mj_BizAppsSales.Pipeline        WHERE Code IN ('B2B','D2C','ENT-NE
 -- script already applies to the company below: a record another app still points at is not sales' to
 -- delete. The SalesAccount/SalesContact rows go either way, because those ARE sales' -- it is only the
 -- shared parent that is spared.
+-- The Relationship rows go first: they reference both the demo Persons and Organizations below.
+DELETE FROM __mj_BizAppsCommon.Relationship   WHERE ID IN ('AC111111-0000-4000-A000-000000000001','AC111111-0000-4000-A000-000000000002','AC111111-0000-4000-A000-000000000003');
 DELETE FROM __mj_BizAppsSales.SalesContact    WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
 BEGIN TRY
     DELETE FROM __mj_BizAppsCommon.ContactMethod WHERE PersonID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
@@ -283,6 +285,25 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.SalesContact WHERE ID=@c3)
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.SalesContact WHERE ID=@c4)
   INSERT INTO __mj_BizAppsSales.SalesContact (ID, LifecycleStageTypeID, LeadSourceTypeID, Seniority, OptedOutOfOutreach)
     VALUES (@c4, @lcOpp, @lsPart, N'Partner Principal', 0);
+
+-- ==================== WHO WORKS WHERE — what fills an account's Contacts panel ====================
+--
+-- Sales Contacts carry no account column. The account's Contacts panel lists the people on the other
+-- end of an active Common Relationship with it (bizapps-sales#301), so without these rows every
+-- account opens with an empty list. Each contact is linked to the account its deals are on.
+--
+-- Ravi (@c4) is deliberately NOT linked: he is a partner rep (D-6), employed by a partner this seed
+-- does not model, and linking him to a customer would claim he works there.
+DECLARE @rtEmployee UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsCommon.RelationshipType WHERE Name=N'Employee');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsCommon.Relationship WHERE ID='AC111111-0000-4000-A000-000000000001')
+  INSERT INTO __mj_BizAppsCommon.Relationship (ID, RelationshipTypeID, FromPersonID, ToOrganizationID, Title, Status)
+    VALUES ('AC111111-0000-4000-A000-000000000001', @rtEmployee, @c1, @acc1, N'VP Operations', N'Active');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsCommon.Relationship WHERE ID='AC111111-0000-4000-A000-000000000002')
+  INSERT INTO __mj_BizAppsCommon.Relationship (ID, RelationshipTypeID, FromPersonID, ToOrganizationID, Title, Status)
+    VALUES ('AC111111-0000-4000-A000-000000000002', @rtEmployee, @c2, @acc2, N'Director of Plant Systems', N'Active');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsCommon.Relationship WHERE ID='AC111111-0000-4000-A000-000000000003')
+  INSERT INTO __mj_BizAppsCommon.Relationship (ID, RelationshipTypeID, FromPersonID, ToOrganizationID, Title, Status)
+    VALUES ('AC111111-0000-4000-A000-000000000003', @rtEmployee, @c3, @acc3, N'CFO', N'Active');
 
 -- ==================== CONTACT METHOD — what makes the Outlook demo show anything ====================
 --
