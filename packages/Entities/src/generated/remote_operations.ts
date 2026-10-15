@@ -116,7 +116,11 @@ export interface SalesReopenDealInput {
 /** Which pane of the deal workspace an issue belongs to. Matches the workspace's tab keys exactly. */
 export type SalesCloseSection = 'deal' | 'party' | 'lines' | 'schedule' | 'terms' | 'variances';
 
-export type SalesCloseSeverity = 'error' | 'warning';
+/**
+ * `info` is for something the close could not do YET that needs nobody's action: it will happen on its
+ * own later. It never blocks and never reads as a problem.
+ */
+export type SalesCloseSeverity = 'error' | 'warning' | 'info';
 
 /**
  * ONE ISSUE, STRUCTURED — never a joined string. `Section` is what lets a tab badge itself, `Field`

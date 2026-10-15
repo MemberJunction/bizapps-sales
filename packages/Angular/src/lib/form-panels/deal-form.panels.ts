@@ -31,6 +31,7 @@ import {
     type DealStatusOption,
     type SalesCloseDealInput,
     type SalesCloseDealOutput,
+    type SalesCloseIssue,
     type SalesReopenDealInput,
     type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
@@ -162,6 +163,17 @@ interface ReopenOutcome {
     ok: boolean;
     message: string;
     issues: string[];
+    /** `info` issues: something pending that needs no action. Shown apart so they don't read as problems. */
+    notes: string[];
+}
+
+/** The operation's issues as display strings, with `info` notes kept apart from the problems. */
+function splitIssues(issues: SalesCloseIssue[] | null | undefined): { issues: string[]; notes: string[] } {
+    const all = issues ?? [];
+    return {
+        issues: all.filter((i) => i.Severity !== 'info').map((i) => i.Message),
+        notes: all.filter((i) => i.Severity === 'info').map((i) => i.Message),
+    };
 }
 
 /**
@@ -230,12 +242,12 @@ async function RunClose(req: CloseRequest): Promise<ReopenOutcome> {
             },
         );
         if (!envelope.Success) {
-            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.CloseDeal could not be reached.', issues: [] };
+            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.CloseDeal could not be reached.', issues: [], notes: [] };
         }
         const out = envelope.Output;
         if (!out?.Success) {
-            const issues = (out?.Issues ?? []).map((i) => i.Message);
-            return { ok: false, message: issues[0] ?? 'The deal could not be closed.', issues };
+            const { issues, notes } = splitIssues(out?.Issues);
+            return { ok: false, message: issues[0] ?? 'The deal could not be closed.', issues, notes };
         }
         // WARNINGS ON A SUCCESSFUL CLOSE are the interesting ones -- a stubbed downstream, a finance
         // task that could not be routed, an order status orders refused. Reporting only failures would
@@ -243,13 +255,14 @@ async function RunClose(req: CloseRequest): Promise<ReopenOutcome> {
         return {
             ok: true,
             message: `Deal closed as ${req.target.Name}.`,
-            issues: (out.Issues ?? []).map((i) => i.Message),
+            ...splitIssues(out.Issues),
         };
     } catch (err) {
         return {
             ok: false,
             message: `The close did not complete: ${err instanceof Error ? err.message : String(err)}`,
             issues: [],
+            notes: [],
         };
     }
 }
@@ -293,23 +306,24 @@ async function RunReopen(dealID: string, reason: string, targetStatusID: string 
             { DealID: dealID, Reason: reason.trim(), DealStatusTypeID: targetStatusID },
         );
         if (!envelope.Success) {
-            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.ReopenDeal could not be reached.', issues: [] };
+            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.ReopenDeal could not be reached.', issues: [], notes: [] };
         }
         const out = envelope.Output;
         if (!out?.Success) {
-            const issues = (out?.Issues ?? []).map((i) => i.Message);
-            return { ok: false, message: issues[0] ?? 'The deal could not be reopened.', issues };
+            const { issues, notes } = splitIssues(out?.Issues);
+            return { ok: false, message: issues[0] ?? 'The deal could not be reopened.', issues, notes };
         }
         return {
             ok: true,
             message: 'Deal reopened. The close event remains in its history.',
-            issues: (out.Issues ?? []).map((i) => i.Message),
+            ...splitIssues(out.Issues),
         };
     } catch (err) {
         return {
             ok: false,
             message: `The reopen did not complete: ${err instanceof Error ? err.message : String(err)}`,
             issues: [],
+            notes: [],
         };
     }
 }
@@ -345,6 +359,7 @@ const CLOSE_ACTION_STYLES = `
     .mjs-close-action__msg { font-size: 0.82rem; color: var(--mj-status-success); }
     .mjs-close-action__msg.is-error { color: var(--mj-status-warning); font-weight: 500; }
     .mjs-close-action__issue { font-size: 0.78rem; color: var(--mj-status-warning); }
+    .mjs-close-action__note { font-size: 0.78rem; color: var(--mj-text-muted); }
 `;
 
 function money(n: number | null | undefined): string {
@@ -845,6 +860,7 @@ const FIELD_STYLES = `
     .mjs-reopen__msg { font-size: 0.82rem; color: var(--mj-status-success); }
     .mjs-reopen__msg.is-error { color: var(--mj-status-warning); font-weight: 500; }
     .mjs-reopen__issue { font-size: 0.78rem; color: var(--mj-status-warning); }
+    .mjs-reopen__note { font-size: 0.78rem; color: var(--mj-text-muted); }
     .mjs-field .mj-forms-field {
         display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 0;
     }
@@ -1659,6 +1675,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         @for (i of ActionIssues; track $index) {
                             <div class="mjs-reopen__issue">{{ i }}</div>
                         }
+                        @for (n of ActionInfoNotes; track $index) {
+                            <div class="mjs-reopen__note" data-testid="action-note">
+                                <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ n }}
+                            </div>
+                        }
                     </div>
                 </div>
             </div>
@@ -1907,6 +1928,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
             this.ReopenReason = '';
             this.ActionMessage = '';
             this.ActionIssues = [];
+            this.ActionInfoNotes = [];
             this.ActionFailed = false;
             return;
         }
@@ -1928,6 +1950,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
             this.CloseNotes = '';
             this.ActionMessage = '';
             this.ActionIssues = [];
+            this.ActionInfoNotes = [];
             this.ActionFailed = false;
             return;
         }
@@ -1977,6 +2000,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         this.CloseNotes = '';
         this.ActionMessage = '';
         this.ActionIssues = [];
+        this.ActionInfoNotes = [];
         this.ActionFailed = false;
     }
 
@@ -1986,6 +2010,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         this.Busy = true;
         this.ActionMessage = '';
         this.ActionIssues = [];
+        this.ActionInfoNotes = [];
         try {
             /**
              * UNSAVED EDITS ARE SAVED FIRST. A close routes the deal's lines, so closing the persisted
@@ -2010,6 +2035,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
             this.ActionFailed = !result.ok;
             this.ActionMessage = result.message;
             this.ActionIssues = result.issues;
+            this.ActionInfoNotes = result.notes;
             if (result.ok) {
                 this.CancelPendingOnly();
                 await this.refreshQuietly();
@@ -2046,6 +2072,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public ActionMessage = '';
     public ActionFailed = false;
     public ActionIssues: string[] = [];
+    public ActionInfoNotes: string[] = [];
 
     public get PendingReopenStatusName(): string {
         const id = String(this.PendingReopenStatusID ?? '').toLowerCase();
@@ -2074,6 +2101,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         this.ReopenReason = '';
         this.ActionMessage = '';
         this.ActionIssues = [];
+        this.ActionInfoNotes = [];
         this.ActionFailed = false;
     }
 
@@ -2082,6 +2110,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         this.Busy = true;
         this.ActionMessage = '';
         this.ActionIssues = [];
+        this.ActionInfoNotes = [];
         try {
             /**
              * WHAT THE USER TYPED IS SAVED FIRST -- see {@link MJSDealFieldPanel.SaveBeforeReload} for
@@ -2112,6 +2141,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
             this.ActionFailed = !result.ok;
             this.ActionMessage = result.message;
             this.ActionIssues = result.issues;
+            this.ActionInfoNotes = result.notes;
             if (result.ok) {
                 this.PendingReopenStatusID = null;
                 this.ReopenReason = '';
@@ -2787,7 +2817,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                  or whose finance task could not be routed reported NOTHING. golive#205 asks for exactly
                  the opposite: "Any downstream step that did not happen ... should show on the form
                  after the save." -->
-            @if (Message || Issues.length) {
+            @if (Message || Issues.length || InfoNotes.length) {
                 <div class="mjs-close-action">
                     @if (Message) {
                         <div class="mjs-close-action__msg" data-testid="close-message" [class.is-error]="MessageIsError">{{ Message }}</div>
@@ -2797,6 +2827,11 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                          itself is a duplicate-key error. -->
                     @for (i of Issues; track $index) {
                         <div class="mjs-close-action__issue">{{ i }}</div>
+                    }
+                    @for (n of InfoNotes; track $index) {
+                        <div class="mjs-close-action__note" data-testid="close-note">
+                            <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ n }}
+                        </div>
                     }
                 </div>
             }
@@ -2832,6 +2867,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
     public Message = '';
     public MessageIsError = false;
     public Issues: string[] = [];
+    public InfoNotes: string[] = [];
     /** Signals for the same reason the Pipeline panel uses them -- see the note on `statuses` there. */
     public readonly LossReasons = signal<LossReasonOption[]>([]);
 
@@ -2983,12 +3019,14 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Notes = '';
         this.Message = '';
         this.Issues = [];
+        this.InfoNotes = [];
     }
 
     public CancelClose(): void {
         this.PanelOpen = false;
         this.Message = '';
         this.Issues = [];
+        this.InfoNotes = [];
     }
 
     /**
@@ -3014,6 +3052,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Closing = true;
         this.Message = '';
         this.Issues = [];
+        this.InfoNotes = [];
         try {
             /**
              * `true` ENDS EDIT MODE, and that is load-bearing rather than cosmetic.
@@ -3053,7 +3092,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
             }
             const out = envelope.Output;
             if (!out?.Success) {
-                this.Issues = (out?.Issues ?? []).map((i) => i.Message);
+                ({ issues: this.Issues, notes: this.InfoNotes } = splitIssues(out?.Issues));
                 this.Fail(out?.Issues?.[0]?.Message ?? 'The deal could not be closed.');
                 return;
             }
@@ -3064,7 +3103,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
             // WARNINGS ON A SUCCESSFUL CLOSE are the interesting ones -- a stubbed downstream, a finance
             // task that could not be routed, an order status orders refused. Reporting only failures
             // would call a half-done close clean.
-            this.Issues = (out.Issues ?? []).map((i) => i.Message);
+            ({ issues: this.Issues, notes: this.InfoNotes } = splitIssues(out.Issues));
             // OUTSIDE the try that wraps the operation. The close is committed by this point, and a
             // reload that throws afterwards is a display problem -- letting it reach the catch below
             // replaced "Deal closed as Won." with "The close did not complete", on a deal that closed.
@@ -3082,6 +3121,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Message = '';
         this.MessageIsError = false;
         this.Issues = [];
+        this.InfoNotes = [];
     }
 
     public CancelReopen(): void {
@@ -3090,6 +3130,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Message = '';
         this.MessageIsError = false;
         this.Issues = [];
+        this.InfoNotes = [];
     }
 
     /**
@@ -3127,6 +3168,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Closing = true;
         this.Message = '';
         this.Issues = [];
+        this.InfoNotes = [];
         try {
             // Before the operation, never after: the record still holds the CLOSED status afterwards,
             // so a save then would write it back over the reopened row. Same reasoning as the Pipeline
@@ -3141,6 +3183,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
             // operation applies its own default.
             const result = await RunReopen(this.Record.ID, this.ResolvedReopenReason(), null);
             this.Issues = result.issues;
+            this.InfoNotes = result.notes;
             if (!result.ok) {
                 this.Fail(result.message);
                 return;
