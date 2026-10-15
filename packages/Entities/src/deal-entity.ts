@@ -65,6 +65,7 @@ import { RegisterClass } from '@memberjunction/global';
 // still belong to orders. Sales never becomes the thing that computes money.
 import { mjBizAppsOrdersOrderHeaderEntity } from '@mj-biz-apps/orders-entities';
 
+import { BillingContactFromPrimary } from './billing-contact-default';
 import {
     mjBizAppsSalesDealEntity,
     mjBizAppsSalesDealPaymentScheduleEntity,
@@ -250,6 +251,32 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
             await this.OrderID_LoadObject();
         }
         return saved;
+    }
+
+    /**
+     * ── PICKING A PRIMARY CONTACT FILLS AN EMPTY BILLING CONTACT (#312) ─────────────────────────────
+     *
+     * The rule is {@link BillingContactFromPrimary}; this is where it runs.
+     *
+     * WHY `Set` AND NOT THE `PrimaryContactID` SETTER. The deal form's `mj-form-field` writes through
+     * `Record.Set(FieldName, value)`, which never touches the generated accessor; the deal workspace's
+     * `ngModel` writes through the accessor, which calls `Set`. Overriding `Set` is the one place both
+     * reach, so the two surfaces cannot drift. Loads and `SetMany` hydrate through `SetLocal` and skip
+     * this, so reading a deal from the database never fills anything.
+     *
+     * `Value` is `unknown` because the base signature is untyped and this only forwards it.
+     */
+    public override Set(FieldName: string, Value: unknown): void {
+        if (FieldName !== 'PrimaryContactID') {
+            super.Set(FieldName, Value);
+            return;
+        }
+        const priorPrimary = this.PrimaryContactID;
+        super.Set(FieldName, Value);
+        const billing = BillingContactFromPrimary(priorPrimary, this.PrimaryContactID, this.BillingContactID);
+        if (billing) {
+            super.Set('BillingContactID', billing);
+        }
     }
 
     /**
