@@ -101,6 +101,31 @@ FROM @p s
 WHERE NOT EXISTS (SELECT 1 FROM __mj_BizAppsOrders.Product x WHERE x.ID = s.ID);
 
 /*
+    A PRODUCT WHOSE SERVICE PERIOD COMES FROM THE LINE (#328).
+
+    Orders asks the rep for a line's service period when its recognition type requires one and nothing
+    else dates it: not a subscription (the term dates it) and not an event (the event dates it). That is
+    the line the deal line editor shows Service start and end on, and close-deal.CD36 needs one. Chosen
+    by the RequiresServicePeriod flag, never by a recognition type's code.
+
+    Named to sort after the two Platform seats, so fixtures that take the first sellable products by
+    name keep the ones they had.
+*/
+DECLARE @revrecPeriod UNIQUEIDENTIFIER = (
+    SELECT TOP 1 ID FROM __mj_BizAppsOrders.RevenueRecognitionType
+     WHERE IsActive = 1 AND RequiresServicePeriod = 1 ORDER BY Sequence);
+
+IF @revrecPeriod IS NULL
+    PRINT 'NOTE: no active RevenueRecognitionType requires a service period, so no product takes its '
+        + 'service period from the line. Push orders'' metadata/revenue-recognition-types to enable it.';
+ELSE IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsOrders.Product WHERE ID = 'a0d50000-0000-4000-b000-00000000000a')
+    INSERT INTO __mj_BizAppsOrders.Product
+        (ID, Name, SKU, ProductTypeID, ProductCategoryID, CompanyID, Status, AvailableFrom, AvailableTo,
+         RevenueRecognitionTypeID, IsTaxable, SubscriptionTypeID)
+    VALUES ('a0d50000-0000-4000-b000-00000000000a', 'Services — Onboarding Programme', 'SVC-ONB', @ptype,
+            @catSell, @sellCo, 'Active', NULL, NULL, @revrecPeriod, 1, NULL);
+
+/*
     AND THE SAME LINKAGE ON A HOST THAT ALREADY HAS THESE ROWS.
 
     The insert above is guarded by NOT EXISTS, which is what makes this script idempotent -- and would

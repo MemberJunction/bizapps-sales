@@ -36,9 +36,12 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
-import { CanTransition, IsEditable } from '@mj-biz-apps/orders-entities';
+import { UUIDsEqual } from '@memberjunction/global';
+import { CanTransition, IsEditable, OrdersEngine } from '@mj-biz-apps/orders-entities';
 import {
     DealFieldsEditableWhileLocked,
+    E_ORDERS_PRODUCT,
+    ProductFilterFor,
     StubDownstreamSeam,
     SalesCloseDealOperation,
     SalesReopenDealOperation,
@@ -67,6 +70,7 @@ import {
     ResolveSalesFixture,
     SALES_SCHEMA,
     TxOne,
+    businessToday,
     type SalesFixture,
 } from '../fixture.js';
 
@@ -2952,7 +2956,164 @@ export const CloseDealChecks: NamedCheck[] = [
                 AssertEqual(Number(still.N), 1, 'setup: the deal must still be lost when this is asserted');
             }),
     },
+    {
+        Id: 'close-deal.CD36',
+        Name: 'CD36: a service period end set on a reopened deal\'s line survives the second won close (#328)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * #328: a deal closed Won with a service period START and no END was reopened, the end
+                 * set on its line, and the deal closed Won again; the order was reported to still show
+                 * the old period. Every step here is the one the deal workspace takes, on a fresh read
+                 * of the deal each time, and the line is read from the database after each.
+                 *
+                 * The line is edited THROUGH THE ORDER, as the deal line editor does: a deal's lines
+                 * are its order's lines, and the editor saves the order rather than the line.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const productID = await lineDatedProduct(ctx, f.PipelineCompanyID);
+                const dealID = await openDeal(
+                    ctx, f, f.ContractPolicyPipelineID, f.ContractPolicyStageID, 'CD36 reclose keeps the period',
+                );
+                const lineID = await addLine(ctx, dealID, productID, SERVICE_START);
+
+                const steps: string[] = [];
+                const record = async (step: string): Promise<LinePeriod> => {
+                    const now = await linePeriod(ctx, lineID);
+                    steps.push(`${step}: ${now.Start ?? 'null'} → ${now.End ?? 'null'} (order ${now.Status})`);
+                    return now;
+                };
+                await record('line added');
+
+                const first = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(first.Success, `the first won close failed: ${JSON.stringify(first.Issues)}`);
+                await record('closed Won');
+
+                const reopened = await reopen(ctx, { DealID: dealID, Reason: 'CD36: correcting the service period.' });
+                Assert(reopened.Success, `the reopen failed: ${JSON.stringify(reopened.Issues)}`);
+                await record('reopened');
+
+                await setLineEnd(ctx, dealID, lineID, SERVICE_END);
+                const edited = await record('end set and order saved');
+                AssertEqual(
+                    edited.End,
+                    '2027-01-31',
+                    `setup: the end set on the reopened deal's line did not persist. Steps: ${steps.join(' | ')}`,
+                );
+
+                const second = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(second.Success, `the second won close failed: ${JSON.stringify(second.Issues)}`);
+                const after = await record('closed Won again');
+
+                AssertEqual(
+                    after.Start,
+                    '2026-02-01',
+                    `the second close changed the line's service period start. Steps: ${steps.join(' | ')}`,
+                );
+                AssertEqual(
+                    after.End,
+                    '2027-01-31',
+                    `the second close lost the service period end set while the deal was reopened, so the ` +
+                        `order no longer agrees with the deal (#328). Steps: ${steps.join(' | ')}`,
+                );
+            }),
+    },
 ];
+
+/** The service period a rep states on a line whose dates only they can supply. */
+const SERVICE_START = new Date('2026-02-01T00:00:00Z');
+const SERVICE_END = new Date('2027-01-31T00:00:00Z');
+
+interface LinePeriod {
+    Start: string | null;
+    End: string | null;
+    Status: string;
+}
+
+/** A date column as the `YYYY-MM-DD` the line editor shows. */
+function dayOf(value: Date | string | null | undefined): string | null {
+    if (!value) {
+        return null;
+    }
+    return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+}
+
+/**
+ * A sellable product whose service period comes from the LINE: orders' `ServicePeriodSource` answers
+ * 'Line' for it, so nothing on the order dates it and the rep's dates are the only ones it has.
+ * Discovered through orders' own rule, never named.
+ */
+async function lineDatedProduct(ctx: Ctx, companyID: string): Promise<string> {
+    await OrdersEngine.Instance.Config(false, ctx.User);
+    const r = await new RunView().RunView<{ ID: string }>(
+        {
+            EntityName: E_ORDERS_PRODUCT,
+            ExtraFilter: `CompanyID = '${companyID.replace(/'/g, "''")}' AND (${ProductFilterFor(await businessToday(ctx))})`,
+            OrderBy: 'Name ASC',
+            ResultType: 'simple',
+            Fields: ['ID'],
+        },
+        ctx.User,
+    );
+    Assert(r.Success, `reading orders' catalogue failed — ${r.ErrorMessage}`);
+    const found = (r.Results ?? []).find((p) => OrdersEngine.Instance.ServicePeriodSource(p.ID) === 'Line');
+    Assert(
+        !!found,
+        'setup: no sellable product for this company takes its service period from the line. Seed one — '
+            + 'see scripts/dev/seed-orders-catalog.sql.',
+    );
+    return String(found?.ID);
+}
+
+/** Adds one line, dated from `start` with no end, to the deal's order and returns its id. */
+async function addLine(ctx: Ctx, dealID: string, productID: string, start: Date): Promise<string> {
+    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+    Assert(await deal.Load(dealID), `setup: deal ${dealID} could not be loaded`);
+    const order = deal.OrderID_Object;
+    Assert(!!order, 'setup: the deal has no embedded order');
+    const line = await order.Lines.Create();
+    line.ProductID = productID;
+    line.Quantity = 1;
+    line.ServicePeriodStart = start;
+    Assert(
+        await deal.Save(),
+        `setup: the line could not be saved — ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+    );
+    Assert(!!line.ID, 'setup: the saved line has no id');
+    return line.ID;
+}
+
+/** Sets the line's end the way the deal line editor does: on a fresh read, saving the ORDER. */
+async function setLineEnd(ctx: Ctx, dealID: string, lineID: string, end: Date): Promise<void> {
+    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+    Assert(await deal.Load(dealID), `deal ${dealID} could not be loaded`);
+    if (deal.OrderID && !deal.OrderID_Object) {
+        await deal.OrderID_LoadObject();
+    }
+    const order = deal.OrderID_Object;
+    Assert(!!order, 'the deal has no embedded order');
+    await order.Lines.Load(true);
+    const line = order.Lines.Items.find((l) => UUIDsEqual(l.ID, lineID));
+    Assert(!!line, `line ${lineID} is not on the deal's order`);
+    line.ServicePeriodEnd = end;
+    Assert(
+        await order.Save(),
+        `saving the order with the line's end failed — ${order.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+    );
+}
+
+/** The line's service period and its order's status, read from the database. */
+async function linePeriod(ctx: Ctx, lineID: string): Promise<LinePeriod> {
+    const row = await TxOne<{ ServicePeriodStart: Date | null; ServicePeriodEnd: Date | null; Status: string }>(
+        ctx,
+        `SELECT l.ServicePeriodStart, l.ServicePeriodEnd, o.Status
+           FROM ${ORDERS_SCHEMA}.OrderLine l
+           JOIN ${ORDERS_SCHEMA}.OrderHeader o ON o.ID = l.OrderHeaderID
+          WHERE l.ID = '${lineID}'`,
+    );
+    return { Start: dayOf(row.ServicePeriodStart), End: dayOf(row.ServicePeriodEnd), Status: String(row.Status) };
+}
 
 for (const check of CloseDealChecks) {
     IntegrationCheckRegistry.Instance.Register(check);
