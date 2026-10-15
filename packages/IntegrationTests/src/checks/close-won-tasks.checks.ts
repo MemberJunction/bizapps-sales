@@ -583,6 +583,51 @@ export const CloseWonTasksChecks: SalesCheck[] = [
             }),
     },
     {
+        Id: 'close-won-tasks.WT18',
+        Name: 'WT18: an assignment whose WRITE is refused leaves the task unrouted, not falsely routed',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE OTHER HALF OF golive#326's TITLE: "or to no one".
+                 *
+                 * WT7 covers an assignee that is unset and WT17 one that is not a record. This covers the
+                 * third shape, and it is the one nothing reported: tasks' `assignToTask` calls `Save()`
+                 * without reading its result and returns the entity either way, so a REFUSED write came
+                 * back looking like a success -- `NewRecord()` had already put an id on it. The task
+                 * recorded an AssignmentID with no TaskAssignment row behind it, which is exactly the
+                 * nine Order Review tasks on QA that have no assignment at all.
+                 *
+                 * The refusal is arranged through a real constraint rather than a stub:
+                 * `FK_TaskAssignment_Role` means a RoleID that is not a TaskRole cannot be inserted. So
+                 * the service runs for real, the database refuses the row for its own reasons, and what
+                 * is asserted is what the service does about it.
+                 */
+                requireTasks(ctx);
+                const input = await baseInput(ctx, false);
+                const ghostRole = 'c0ffee00-0000-4000-a000-00000000b0b1';
+                Assert(
+                    (await rows(ctx, E_TASK_ROLE, `ID = '${ghostRole}'`)).length === 0,
+                    'setup: the role id must not exist, or the write would succeed and prove nothing',
+                );
+                input.Assignee = { ...input.Assignee!, RoleID: ghostRole };
+
+                const out = await service.CreateCloseWonTasks(input, ProviderOf(ctx), ctx.User);
+
+                AssertEqual(out.Tasks.length, 1, 'the task is still created');
+                const review = out.Tasks[0];
+                AssertEqual(review.AssignmentID, null, 'and is NOT reported as routed');
+
+                const assigns = await rows(ctx, E_TASK_ASSIGNMENT, `TaskID = '${review.TaskID}'`);
+                AssertEqual(assigns.length, 0, 'no assignment row exists — which is the point');
+
+                Assert(
+                    out.Issues.some((i) => i.includes('did not save')),
+                    `the issue must say the write did not land — got ${JSON.stringify(out.Issues)}`,
+                );
+            }),
+    },
+    {
         Id: 'close-won-tasks.WT8',
         Name: 'WT8: a deal with no order raises NO order-review task, and says why',
         RequiresMutation: true,

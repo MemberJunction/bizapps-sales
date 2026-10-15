@@ -756,6 +756,14 @@ export class CloseWonTaskService {
      * Three states rather than two, because the caller treats them differently -- see the note at the
      * call site. `ResultType: 'count_only'` so this asks the database a question about existence
      * rather than loading a person nobody reads.
+     *
+     * AND NOT THROUGH THE INJECTED PROVIDER, which the note above `route`'s entity lookup might lead a
+     * reader to expect. That note is about the entity REGISTRY: resolving an EntityID from one provider
+     * and writing it through another is how an assignment ends up pointing at the wrong entity. This
+     * read resolves no id -- it asks whether a row is there -- and the row it asks about is a person who
+     * pre-dates the close, not something the injected provider has just written and only it can see. So
+     * `new RunView()` is used here, the same form every other read in this package takes. If the global
+     * provider cannot answer, that is the NULL case: the route goes ahead and says it could not tell.
      */
     private async assigneeExists(
         entityName: string,
