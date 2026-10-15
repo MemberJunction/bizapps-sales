@@ -392,6 +392,10 @@
     color: var(--mj-text-secondary);
 }
 
+.dw-issues__info {
+    color: var(--mj-status-info-text);
+}
+
 /* Visually hidden but available to screen readers — for header cells with only an icon below them. */
 .dw-sr {
     position: absolute;

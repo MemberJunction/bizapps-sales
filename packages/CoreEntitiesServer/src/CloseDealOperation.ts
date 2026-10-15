@@ -523,7 +523,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              * the renewal pass in Orders prices from the paper rather than from hand-entered values.
              *
              * A warning, not a failure: the deal closed and both records are right. A missing link only
-             * means the terms have to be set on the subscriptions by hand.
+             * means the terms have to be set on the subscriptions by hand. A `Pending` link (contracts
+             * too old to have links) is a note: the daily relink adds it after the upgrade.
              */
             const linkIssues: SalesCloseIssue[] = [];
             if (target.IsWon && deal.ContractID && deal.OrderID) {
@@ -535,7 +536,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     linkIssues.push({
                         Section: 'deal',
                         Field: null,
-                        Severity: 'warning',
+                        Severity: link.Pending ? 'info' : 'warning',
                         Message: link.Message ?? 'The order was not linked to the contract.',
                     });
                 }

@@ -103,6 +103,7 @@ import {
     ProjectValidation,
     type DealWorkspaceIssue,
     type DealWorkspaceSection,
+    type DealWorkspaceSeverity,
     type DealWorkspaceValidation,
 } from './deal-workspace.validation';
 import {
@@ -171,6 +172,11 @@ type DealDateField = 'ExecutionDate' | 'StartDate' | 'ExpectedCloseDate' | 'Next
  * what lets `IsFieldEditable` gate the create button with the same rule that gates the picker itself.
  */
 export type DealRelatedTarget = 'AccountID' | 'PrimaryContactID';
+
+/** The server's severity, kept as-is; anything unrecognised is treated as an error so it cannot pass unseen. */
+function toWorkspaceSeverity(severity: string): DealWorkspaceSeverity {
+    return severity === 'warning' || severity === 'info' ? severity : 'error';
+}
 
 @Component({
     standalone: true,
@@ -1620,7 +1626,7 @@ export class DealWorkspaceComponent implements OnInit {
         const advisories = issues.map<DealWorkspaceIssue>((i) => ({
             Section: this.toPaneSection(i.Section),
             Field: i.Field ?? null,
-            Severity: i.Severity === 'warning' ? 'warning' : 'error',
+            Severity: toWorkspaceSeverity(i.Severity),
             Message: i.Message,
             RowIndex: null,
         }));
@@ -1634,7 +1640,7 @@ export class DealWorkspaceComponent implements OnInit {
         const mapped = issues.map<DealWorkspaceIssue>((i) => ({
             Section: this.toPaneSection(i.Section),
             Field: i.Field ?? null,
-            Severity: i.Severity === 'warning' ? 'warning' : 'error',
+            Severity: toWorkspaceSeverity(i.Severity),
             Message: i.Message,
             RowIndex: null,
         }));
