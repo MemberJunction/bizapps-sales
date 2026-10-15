@@ -49,6 +49,8 @@ afterEach(() => {
 
 type Opts = {
     recordID?: string | null;
+    /** false = tasks' assignToTask returned an entity whose Save was refused. */
+    assignmentSaved?: boolean;
     exists?: boolean;
     readFails?: boolean;
     readThrows?: boolean;
@@ -56,7 +58,16 @@ type Opts = {
 };
 
 function harness(opts: Opts) {
-    const assignToTask = vi.fn(async () => ({ Get: () => 'assignment-1' }));
+    /**
+     * A real `BaseEntity` carries `IsSaved` whether or not the write landed — tasks' service returns
+     * it either way, because it never reads its own Save result. The stub has to do the same or the
+     * case this file is about cannot be expressed.
+     */
+    const assignToTask = vi.fn(async () => ({
+        Get: () => 'assignment-1',
+        IsSaved: opts.assignmentSaved !== false,
+        LatestResult: opts.assignmentSaved === false ? { CompleteMessage: 'refused by row-level security' } : null,
+    }));
     const instance = Object.create(CloseWonTaskService.prototype) as Record<string, never>;
     Object.defineProperty(instance, 'assignments', { value: { assignToTask }, writable: true });
 
@@ -194,5 +205,42 @@ describe('the existence read itself', () => {
         await route(h);
         expect(logged, 'a missing assignee is reported to the caller as an Issue, not to the log as an error')
             .toEqual([]);
+    });
+});
+
+/**
+ * "OR TO NO ONE" — THE OTHER HALF OF THE ISSUE'S TITLE (bc-aidp-next-golive#326).
+ *
+ * tasks' `assignToTask` does not read its own `Save()` result and returns the entity regardless, so
+ * a refused write is indistinguishable from a successful one by its return value alone: `NewRecord()`
+ * has already put an id on it. Handing that id back records an AssignmentID on the task with no
+ * TaskAssignment row behind it — which is why nine Order Review tasks on QA read as having no
+ * assignment at all while nothing anywhere reported a failure.
+ */
+describe('an assignment whose write did not land', () => {
+    it('is reported UNROUTED rather than handed back as an id', async () => {
+        const h = harness({ recordID: REAL, exists: true, assignmentSaved: false });
+        expect(await route(h), 'an id with no row behind it is worse than no id').toBeNull();
+    });
+
+    it('says why, carrying the reason the save gave', async () => {
+        const h = harness({ recordID: REAL, exists: true, assignmentSaved: false });
+        await route(h);
+        const issue = h.result.Issues.join(' ');
+        expect(issue).toContain('NOT routed');
+        expect(issue, 'the reason the write was refused').toContain('row-level security');
+    });
+
+    it('logs it, because the caller only sees a warning on an otherwise successful close', async () => {
+        const h = harness({ recordID: REAL, exists: true, assignmentSaved: false });
+        await route(h);
+        expect(logged.join(' ')).toContain('CloseWonTaskService');
+        expect(logged.join(' ')).toContain('did not save');
+    });
+
+    it('still routes normally when the write DID land', async () => {
+        const h = harness({ recordID: REAL, exists: true });
+        expect(await route(h)).toBe('assignment-1');
+        expect(h.result.Issues, 'a successful route reports nothing').toEqual([]);
     });
 });

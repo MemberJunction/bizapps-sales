@@ -720,6 +720,29 @@ export class CloseWonTaskService {
                 },
                 contextUser,
             );
+            /**
+             * AND THE WRITE HAS TO HAVE LANDED (bc-aidp-next-golive#326 — the "or to no one" half).
+             *
+             * tasks' `assignToTask` calls `Save()` without reading its result and returns the entity
+             * either way, so a REFUSED write comes back looking like a successful one: `NewRecord()`
+             * has already put an id on it, this method would hand that id back, and the task records
+             * an AssignmentID with no TaskAssignment row behind it. Nine Order Review tasks on QA are
+             * in exactly that state — the issue's title calls it "assigned to no one", and it is
+             * invisible precisely because the id looks fine.
+             *
+             * `IsSaved` is `_everSaved`, stamped only where a save actually applies, so it stays
+             * false after a refusal. Reporting the task UNROUTED is the honest answer: the work exists
+             * and nobody holds it. The fix in tasks is theirs to make; this stops us reporting a
+             * routing that did not happen.
+             */
+            if (!assignment?.IsSaved) {
+                const why = assignment?.LatestResult?.CompleteMessage ?? 'the write was refused without a reason';
+                LogError(`CloseWonTaskService: the ${kind} assignment did not save for task ${taskID}: ${why}`);
+                result.Issues.push(
+                    `The ${kind} task was created but NOT routed: the assignment did not save (${why}).`,
+                );
+                return null;
+            }
             return assignment.Get('ID') as string;
         } catch (err) {
             result.Issues.push(`The ${kind} task was created but could not be routed: ${String(err)}`);
