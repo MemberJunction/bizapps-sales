@@ -39,6 +39,10 @@ type Opts = {
     singleHolderRole?: boolean;
     /** The employee name already holding that role on this deal, if any. */
     existingHolder?: string;
+    /** Make this row's role the owner role (`DealRole.IsOwnerRole = 1`). */
+    ownerRole?: boolean;
+    /** The row's EmployeeID; null for a row that names a Person instead. */
+    EmployeeID?: string | null;
 };
 
 function member(opts: Opts) {
@@ -58,6 +62,10 @@ function member(opts: Opts) {
     const dealID = 'DealID' in opts ? opts.DealID : DEAL_A;
     Object.defineProperty(instance, 'DealID', { value: dealID, writable: true });
     Object.defineProperty(instance, 'DealRoleID', { value: 'role-owner', writable: true });
+    Object.defineProperty(instance, 'EmployeeID', {
+        value: 'EmployeeID' in opts ? opts.EmployeeID : 'eeeeeeee-0000-4000-8000-000000000001',
+        writable: true,
+    });
     Object.defineProperty(instance, 'IsActive', { value: true, writable: true });
     Object.defineProperty(instance, 'IsSaved', { value: opts.IsSaved ?? true, writable: true });
     Object.defineProperty(instance, 'ContextCurrentUser', { value: { ID: 'user' }, writable: true });
@@ -124,7 +132,11 @@ function member(opts: Opts) {
         if (EntityName === 'MJ_BizApps_Sales: Deal Roles') {
             return {
                 Success: true,
-                Results: [{ Name: 'Owner / AE', AllowsMultiplePerDeal: !(opts.singleHolderRole ?? false) }],
+                Results: [{
+                    Name: 'Owner / AE',
+                    AllowsMultiplePerDeal: !(opts.singleHolderRole ?? false),
+                    IsOwnerRole: opts.ownerRole ?? false,
+                }],
             };
         }
         return { Success: true, Results: opts.existingHolder ? [{ Employee: opts.existingHolder }] : [] };
@@ -287,6 +299,33 @@ describe('a role that admits only one holder per deal', () => {
     it('does not refuse the EXISTING row its own seat', async () => {
         // A saved row excludes itself, or every later edit to the owner row refuses itself.
         const m = member({ singleHolderRole: true, IsSaved: true });
+        expect(await runSave(m)).toBe(true);
+    });
+});
+
+/**
+ * THE OWNER ROW MUST NAME AN EMPLOYEE.
+ *
+ * A team row holds an Employee or a Person, and the grid offers a picker for each. The owner stamp
+ * reads only `EmployeeID`, so an owner row saved with a Person left the deal with no owner while the
+ * grid showed one. The People picker lists every contact and synced person, so the same name can
+ * appear there too, and choosing from the wrong picker was easy.
+ */
+describe('an owner-role row', () => {
+    it('is refused when it names a Person instead of an Employee', async () => {
+        const m = member({ ownerRole: true, EmployeeID: null, IsSaved: false });
+        expect(await runSave(m), 'the save must be refused').toBe(false);
+        expect(m.SavedDeals, 'and the deal must not be touched').toEqual([]);
+    });
+
+    it('saves when it names an Employee', async () => {
+        const m = member({ ownerRole: true, IsSaved: false });
+        expect(await runSave(m)).toBe(true);
+        expect(m.SavedDeals).toEqual([DEAL_A]);
+    });
+
+    it('does not apply to other roles, which may hold a Person', async () => {
+        const m = member({ ownerRole: false, EmployeeID: null, IsSaved: false });
         expect(await runSave(m)).toBe(true);
     });
 });
