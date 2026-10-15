@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-ng
 
+## 6.15.2
+
+### Patch Changes
+
+- 608f181: The deal's line editor asks for a service start and end on a line whose product earns over a period and that orders cannot date from an event or a subscription term, so the order can be confirmed. A window that ends before it starts blocks the save, and changing to a product dated elsewhere clears it.
+  - @mj-biz-apps/sales-entities@6.15.2
+
 ## 6.15.1
 
 ### Patch Changes

@@ -93,6 +93,7 @@ import {
     type ApplicablePrice,
     type LineEngineDefault,
     type PriceOverrideKind,
+    type ServicePeriodSource,
     type mjBizAppsOrdersOrderLineEntity as OrderLineEntity,
 } from '@mj-biz-apps/orders-entities';
 import {
@@ -291,6 +292,33 @@ interface RemoteOperationRouter {
                                 <small class="mjs-le__hint">order date</small>
                             }
                         </label>
+                    }
+
+                    <!-- SERVICE PERIOD: the product's recognition type earns over a window and nothing
+                         else dates this line (orders' ServicePeriodSource is 'Line'). Orders refuses to
+                         confirm the order until both dates are set, so they are asked for here. -->
+                    @if (ShowServicePeriod) {
+                        <div class="mjs-le__field" role="group" aria-label="Service period" data-testid="line-service-period">
+                            <div class="mjs-le__row">
+                                <label class="mjs-le__field">
+                                    <span class="mjs-le__label">Service start</span>
+                                    <input type="date" data-testid="line-service-start" [ngModel]="ServicePeriodInput('Start')"
+                                           (ngModelChange)="SetServicePeriod('Start', $event)"
+                                           [disabled]="IsLocked" [title]="BlockedReason" />
+                                </label>
+                                <label class="mjs-le__field">
+                                    <span class="mjs-le__label">Service end</span>
+                                    <input type="date" data-testid="line-service-end" [ngModel]="ServicePeriodInput('End')"
+                                           (ngModelChange)="SetServicePeriod('End', $event)"
+                                           [disabled]="IsLocked" [title]="BlockedReason" />
+                                </label>
+                            </div>
+                            @if (ServicePeriodBackwards) {
+                                <small class="mjs-le__error">The service end is before the start.</small>
+                            } @else if (ServicePeriodMissing) {
+                                <small class="mjs-le__hint">Both dates are needed before the order can be confirmed.</small>
+                            }
+                        </div>
                     }
 
                     <!-- The customer already holds this product (golive #318): the same question the
@@ -718,6 +746,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     public OnProductChange(productID: string | null): void {
         this.SchedulePrice();   // a priced input changed — ask Orders again
         if (!this.Working) return;
+        this.clearServicePeriodLeavingLineSource(productID);
         this.Working.ProductID = productID ?? '';
         const product = this.Products.find((p) => p.ID === productID) ?? null;
         if (product) {
@@ -854,6 +883,60 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (!this.Working) return;
         // An emptied control means "use the order date", which is NULL in the column -- not the epoch.
         this.Working.ServicePeriodStart = value ? new Date(`${value}T00:00:00Z`) : null;
+    }
+
+    /* ── Service period on lines nothing else dates ─────────────────────────────── */
+
+    /**
+     * Whether the rep has to state this line's service period: orders' own rule, so the deal asks for
+     * exactly the lines the order's Confirm refuses without one. Event and subscription lines are
+     * dated by orders at confirm and are not asked.
+     */
+    public get ShowServicePeriod(): boolean {
+        return !!this.Working?.ProductID && this.ServicePeriodSourceFor(this.Working.ProductID) === 'Line';
+    }
+
+    public ServicePeriodInput(end: 'Start' | 'End'): string | null {
+        return toDateInput(end === 'Start' ? this.Working?.ServicePeriodStart : this.Working?.ServicePeriodEnd);
+    }
+
+    /** An emptied control clears that end of the window. */
+    public SetServicePeriod(end: 'Start' | 'End', value: string): void {
+        this.SchedulePrice();   // a priced input changed — ask Orders again
+        if (!this.Working) return;
+        const date = value ? new Date(`${value}T00:00:00Z`) : null;
+        if (end === 'Start') this.Working.ServicePeriodStart = date;
+        else this.Working.ServicePeriodEnd = date;
+    }
+
+    /** Refused at save; the line's own validation and CK_OrderLine_ServicePeriod would refuse it too. */
+    public get ServicePeriodBackwards(): boolean {
+        const start = this.Working?.ServicePeriodStart;
+        const end = this.Working?.ServicePeriodEnd;
+        return this.ShowServicePeriod && !!start && !!end && new Date(end).getTime() < new Date(start).getTime();
+    }
+
+    /** Not a save blocker: orders only needs the dates at confirm, and a deal is often quoted before they are known. */
+    public get ServicePeriodMissing(): boolean {
+        return this.ShowServicePeriod && (!this.Working?.ServicePeriodStart || !this.Working?.ServicePeriodEnd);
+    }
+
+    /**
+     * A window typed for a product that needed one says nothing about the product replacing it. Left
+     * on an event line it stops orders stamping the event's dates (`applyEventServicePeriod` skips a
+     * line that already has either date), and left on a subscription line it reads as a term start.
+     */
+    private clearServicePeriodLeavingLineSource(nextProductID: string | null): void {
+        if (!this.Working) return;
+        const was = this.ServicePeriodSourceFor(this.Working.ProductID);
+        if (was !== 'Line' || this.ServicePeriodSourceFor(nextProductID) === 'Line') return;
+        this.Working.ServicePeriodStart = null;
+        this.Working.ServicePeriodEnd = null;
+    }
+
+    /** `NotRequired` until orders' cache has loaded, which is orders' own answer for an unknown product. */
+    private ServicePeriodSourceFor(productID: string | null | undefined): ServicePeriodSource {
+        return productID ? OrdersEngine.Instance.ServicePeriodSource(productID) : 'NotRequired';
     }
 
     /* ── The customer already holds this product (golive #318) ─────────────────────── */
@@ -1060,7 +1143,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             !this.DiscountRefusal &&
             !!this.Deal?.OrderID_Object &&
             !LineNeedsOverrideReason(this.Working, this.EngineDefault) &&
-            !this.MissingDiscountReason
+            !this.MissingDiscountReason &&
+            !this.ServicePeriodBackwards
         );
     }
 
@@ -1097,6 +1181,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (!this.Working?.ProductID) return 'Choose a product.';
         if (LineNeedsOverrideReason(this.Working, this.EngineDefault)) return 'Enter a reason for the price override.';
         if (this.MissingDiscountReason) return 'Choose a category and enter a reason for the discount.';
+        if (this.ServicePeriodBackwards) return 'Set a service end on or after the service start.';
         return this.DiscountRefusal ?? '';
     }
 

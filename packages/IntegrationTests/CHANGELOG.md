@@ -1,5 +1,13 @@
 # @mj-biz-apps/sales-integration-tests
 
+## 6.15.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.15.2
+- @mj-biz-apps/sales-entities@6.15.2
+- @mj-biz-apps/sales-server@6.15.2
+
 ## 6.15.1
 
 ### Patch Changes
