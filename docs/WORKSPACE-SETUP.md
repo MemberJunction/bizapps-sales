@@ -410,14 +410,14 @@ in this order — it is the dependency order, and it is not negotiable:
 |---|---|---|---|
 | 1 | MJ v6.1.5 | `node packages/MJCLI/bin/run.js migrate` | 89 applied |
 | 2 | common 5.50.1 | `… migrate --schema __mj_BizAppsCommon --dir ./migrations` | 37 |
-| 3 | tasks 1.4.1 | `… migrate --schema __mj_BizAppsTasks --dir ./migrations` | 7 |
+| 3 | tasks 1.7.0 | `… migrate --schema __mj_BizAppsTasks --dir ./migrations` | 9 |
 | 4 | accounting 0.22.0 | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 23 |
 | 5 | orders 5.30.0 | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 73 |
 | 6 | **contracts** 0.7.3 | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 9 |
-| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 16 |
+| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 19 |
 
-The counts are for the versions named: the ones this repo's lockfile resolves, and contracts' latest
-release (sales does not declare contracts). Another version of a sibling applies a different number;
+The counts are for the versions named, which are the ones this repo's lockfile resolves (contracts,
+accounting and `orders-core-entities-server` through `packages/IntegrationTests`' devDependencies). Another version of a sibling applies a different number;
 what matters is that each step reports no failure.
 
 > ⚠️ **Contracts migrates after common, and before sales.** Contracts 0.7.3's migrations reference only
@@ -634,8 +634,8 @@ RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs close-won-order     # 5
 # RUN_MUTATION_TESTS=1 node test-harnesses/smoke-close-won.mjs               # ⚠ SEE BELOW -- 5/11
 ```
 
-Each bundle's check count, and the app it needs, is in `scripts/expected-check-counts.json`: 150 checks
-across 10 bundles when every sibling app is installed.
+Each bundle's check count, and the app it needs, is in `scripts/expected-check-counts.json`: 160 checks
+across 11 bundles when every sibling app is installed.
 
 > ### ⚠ `smoke-close-won.mjs` IS ROTTED. It is commented out above, and 11/11 was never re-measured.
 >

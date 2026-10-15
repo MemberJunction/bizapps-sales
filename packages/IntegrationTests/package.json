@@ -17,7 +17,13 @@
   "author": "MemberJunction.com",
   "license": "BUSL-1.1",
   "devDependencies": {
-    "@mj-biz-apps/tasks-entities": "^1.4.1",
+    "@mj-biz-apps/accounting-core-entities-server": ">=0.22.0 <1.0.0",
+    "@mj-biz-apps/accounting-engine-base": ">=0.22.0 <1.0.0",
+    "@mj-biz-apps/accounting-entities": ">=0.22.0 <1.0.0",
+    "@mj-biz-apps/contracts-core-entities-server": ">=0.7.3 <1.0.0",
+    "@mj-biz-apps/contracts-entities": ">=0.7.3 <1.0.0",
+    "@mj-biz-apps/orders-core-entities-server": "^5.30.0",
+    "@mj-biz-apps/tasks-entities": "^1.7.0",
     "@types/node": "^22.10.2",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
