@@ -283,7 +283,7 @@ describe('creating a deal, on the section it opens on', () => {
         // Pipeline and Pipeline Stage are dedicated controls since golive#291 and render outside this
         // list; `the pipeline and stage controls` below is what keeps them from simply disappearing.
         expect(names(pipeline(false))).toEqual([
-            'DealTypeID', 'AccountID', 'PrimaryContactID', 'BillingContactID',
+            'DealTypeID', 'ExpectedCloseDate', 'AccountID', 'PrimaryContactID', 'BillingContactID',
         ]);
     });
 
@@ -317,7 +317,7 @@ describe('creating a deal, on the section it opens on', () => {
 
     it('puts everything back once the deal is saved', () => {
         expect(names(pipeline(true))).toEqual([
-            'DealTypeID', 'ForecastCategoryTypeID', 'Probability',
+            'DealTypeID', 'ForecastCategoryTypeID', 'Probability', 'ExpectedCloseDate',
         ]);
         expect(names(party(true))).toEqual([
             'AccountID', 'CompanyID', 'OwnerEmployeeID', 'PrimaryContactID', 'BillingContactID',

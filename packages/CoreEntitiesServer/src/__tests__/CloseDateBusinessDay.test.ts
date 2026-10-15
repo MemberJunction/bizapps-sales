@@ -219,6 +219,8 @@ describe('Sales.CloseDeal configures the zone, then stamps and dates its tasks f
                 calls.push('Save');
                 return true;
             },
+            // The close saves through this, the one path that may write the stamps (#252).
+            BeginClose: async <T>(body: () => Promise<T>): Promise<T> => body(),
         };
         h.user = { ID: 'u1' };
         h.provider = {

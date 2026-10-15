@@ -94,6 +94,30 @@ export function IsDealFieldEditableWhileLocked(fieldName: string, isLost: boolea
 }
 
 /**
+ * The close stamps: written by `Sales.CloseDeal`, cleared by `Sales.ReopenDeal`, and by nothing else
+ * (bizapps-sales#252).
+ *
+ * Not a lock rule -- they are frozen on an OPEN deal too. Every surface that asks "has this deal
+ * closed?" reads these stamps, because they are what the close writes when it actually runs. A stamp
+ * typed onto an open deal therefore made the whole header call it closed: a rep looking for where to
+ * enter an expected close found Actual Close Date, typed a future day, and the deal read "Closed".
+ *
+ * Here for the reason the lock's own list is: the entity server refuses a direct write and the form
+ * renders the fields read-only, and both read this one set.
+ */
+const DEAL_CLOSE_STAMP_FIELDS: ReadonlySet<string> = new Set<string>(['ClosedAt', 'ActualCloseDate', 'ClosedByUserID']);
+
+/** Every close stamp, for a caller that has to walk them. */
+export function DealCloseStampFields(): readonly string[] {
+    return [...DEAL_CLOSE_STAMP_FIELDS];
+}
+
+/** Whether `fieldName` is a close stamp, which only the close and the reopen may write. */
+export function IsDealCloseStamp(fieldName: string): boolean {
+    return DEAL_CLOSE_STAMP_FIELDS.has(fieldName);
+}
+
+/**
  * What each editable-while-locked field is CALLED on screen.
  *
  * The lock notice used to interpolate the raw field names, so a user read "only Description and
@@ -113,6 +137,8 @@ const DEAL_FIELD_LABELS: Readonly<Record<string, string>> = {
     CampaignID: 'Campaign',
     LossNotes: 'Loss Notes',
     DealStatusTypeID: 'Deal Status',
+    // The close stamps, named in the refusal a direct write gets (#252).
+    ClosedByUserID: 'Closed By',
 };
 
 /**
