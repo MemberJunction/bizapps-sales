@@ -414,57 +414,57 @@
 .dw-close-bar {
   display: flex;
   align-items: center;
-  gap: var(--mj-spacing-3, 12px);
+  gap: var(--mj-space-3);
   flex-wrap: wrap;
-  margin: var(--mj-spacing-3, 12px) 0;
+  margin: var(--mj-space-3) 0;
 }
 
 .dw-lock-notice {
   flex: 1 1 20rem;
   margin: 0;
-  padding: var(--mj-spacing-2, 8px) var(--mj-spacing-3, 12px);
-  border-left: 3px solid var(--mj-color-warning, #b8860b);
-  background: var(--mj-color-surface-raised, rgba(255, 255, 255, 0.04));
-  color: var(--mj-color-text-secondary, inherit);
+  padding: var(--mj-space-2) var(--mj-space-3);
+  border-left: 3px solid var(--mj-status-warning);
+  background: var(--mj-bg-surface-sunken);
+  color: var(--mj-text-secondary);
   border-radius: var(--mj-radius-sm, 4px);
 }
 
 .dw-close-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--mj-spacing-3, 12px);
-  padding: var(--mj-spacing-4, 16px);
-  margin-bottom: var(--mj-spacing-3, 12px);
-  border: 1px solid var(--mj-color-border, rgba(255, 255, 255, 0.12));
+  gap: var(--mj-space-3);
+  padding: var(--mj-space-4);
+  margin-bottom: var(--mj-space-3);
+  border: 1px solid var(--mj-border-default);
   border-radius: var(--mj-radius-md, 6px);
-  background: var(--mj-color-surface-raised, rgba(255, 255, 255, 0.03));
+  background: var(--mj-bg-surface-sunken);
 }
 
 .dw-close-panel__outcome {
   display: flex;
-  gap: var(--mj-spacing-2, 8px);
+  gap: var(--mj-space-2);
 }
 
 /* Confirm LEFT, cancel RIGHT — the house rule. */
 .dw-close-panel__actions {
   display: flex;
-  gap: var(--mj-spacing-2, 8px);
+  gap: var(--mj-space-2);
 }
 
 .dw-routing {
-  margin-bottom: var(--mj-spacing-3, 12px);
-  padding: var(--mj-spacing-3, 12px);
+  margin-bottom: var(--mj-space-3);
+  padding: var(--mj-space-3);
   border-radius: var(--mj-radius-md, 6px);
-  background: var(--mj-color-surface-raised, rgba(255, 255, 255, 0.03));
+  background: var(--mj-bg-surface-sunken);
 }
 
 .dw-routing__row {
-  margin: 0 0 var(--mj-spacing-1, 4px);
-  color: var(--mj-color-text-primary, inherit);
+  margin: 0 0 var(--mj-space-1);
+  color: var(--mj-text-primary);
 }
 
 .dw-routing__row--failed {
-  color: var(--mj-color-text-secondary, inherit);
+  color: var(--mj-text-secondary);
 /* Related-record controls under a picker.
 
    A <button>, not an <a>: there is no href — NavigationService opens an Explorer tab and the form

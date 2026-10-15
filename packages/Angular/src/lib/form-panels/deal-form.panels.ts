@@ -350,7 +350,7 @@ const CLOSE_ACTION_STYLES = `
     .mjs-close-action__field > span { font-size: 0.78rem; color: var(--mj-text-muted); }
     .mjs-close-action__confirm {
         cursor: pointer; padding: 6px 14px; border-radius: var(--mj-radius-sm);
-        border: 1px solid var(--mj-brand-primary); background: var(--mj-brand-primary); color: var(--mj-text-on-brand);
+        border: 1px solid var(--mj-brand-primary); background: var(--mj-brand-primary); color: var(--mj-brand-on-primary);
         font-weight: 600;
     }
     .mjs-close-action__confirm:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -855,12 +855,12 @@ const FIELD_STYLES = `
     .mjs-reopen__row { display: flex; gap: var(--mj-space-2); }
     .mjs-reopen__confirm {
         border: 1px solid var(--mj-brand-primary); background: var(--mj-brand-primary);
-        color: var(--mj-text-on-brand); border-radius: var(--mj-radius-sm);
+        color: var(--mj-brand-on-primary); border-radius: var(--mj-radius-sm);
         padding: var(--mj-space-1) var(--mj-space-3); cursor: pointer; font: inherit;
     }
     .mjs-reopen__confirm:disabled { opacity: 0.55; cursor: not-allowed; }
     .mjs-reopen__cancel {
-        border: 1px solid var(--mj-border-default); background: transparent; color: var(--mj-text-default);
+        border: 1px solid var(--mj-border-default); background: transparent; color: var(--mj-text-primary);
         border-radius: var(--mj-radius-sm); padding: var(--mj-space-1) var(--mj-space-3); cursor: pointer; font: inherit;
     }
     .mjs-reopen__msg { font-size: 0.82rem; color: var(--mj-status-success); }
@@ -2486,7 +2486,7 @@ export const DEAL_LINE_COLUMNS: GridColumnConfig[] = [
             display: inline-flex; align-items: center; gap: 6px;
             padding: 6px 12px; border-radius: var(--mj-radius-md, 8px); cursor: pointer;
             border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface);
-            color: var(--mj-text-default); font: inherit; font-weight: 600;
+            color: var(--mj-text-primary); font: inherit; font-weight: 600;
         }
         .mjs-deal-lines__add:hover { background: var(--mj-bg-surface-hover); }
     `],
