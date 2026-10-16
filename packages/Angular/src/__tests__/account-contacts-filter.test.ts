@@ -8,22 +8,34 @@ import { AccountContactsWhere } from '../lib/form-panels/account-contacts';
  * other related panels in `unsaved-record-empty-states`.
  */
 const ACCOUNT = 'A0111111-0000-4000-A000-000000000001';
-const TABLE = { SchemaName: '__mj_BizAppsCommon', BaseTable: 'Relationship' };
+const VIEW = { SchemaName: '__mj_BizAppsCommon', BaseView: 'vwRelationships' };
 
 describe('#301 — the people an account lists', () => {
-    const where = AccountContactsWhere(ACCOUNT, TABLE);
+    const where = AccountContactsWhere(ACCOUNT, VIEW);
 
-    it('selects contacts by person ID, from the Relationship table metadata names', () => {
-        expect(where.startsWith('ID IN (')).toBe(true);
-        expect(where).toContain('[__mj_BizAppsCommon].[Relationship]');
+    it('selects contacts by person ID, from the Relationships base view metadata names', () => {
+        expect(where.startsWith('(ID IN (')).toBe(true);
+        expect(where.endsWith(')')).toBe(true);
+        expect(where).toContain('[__mj_BizAppsCommon].[vwRelationships]');
+    });
+
+    /** MJAPI refuses an ExtraFilter subquery over a base table, and the Contacts grid fails to load. */
+    it('reads the base view, never the base table', () => {
+        expect(where).not.toContain('[Relationship]');
+    });
+
+    /** MJ refuses UNION anywhere in a caller-supplied filter, so the two directions are ORed. */
+    it('joins the two directions with OR, not UNION', () => {
+        expect(where).not.toMatch(/\bUNION\b/i);
+        expect(where).toContain(') OR ID IN (');
     });
 
     it('takes a person linked TO the account ("is employee of")', () => {
-        expect(where).toContain(`SELECT FromPersonID FROM [__mj_BizAppsCommon].[Relationship] WHERE ToOrganizationID = '${ACCOUNT}'`);
+        expect(where).toContain(`SELECT FromPersonID FROM [__mj_BizAppsCommon].[vwRelationships] WHERE ToOrganizationID = '${ACCOUNT}'`);
     });
 
     it('takes a person the account is linked to ("employs"), the same fact stored the other way', () => {
-        expect(where).toContain(`SELECT ToPersonID FROM [__mj_BizAppsCommon].[Relationship] WHERE FromOrganizationID = '${ACCOUNT}'`);
+        expect(where).toContain(`SELECT ToPersonID FROM [__mj_BizAppsCommon].[vwRelationships] WHERE FromOrganizationID = '${ACCOUNT}'`);
     });
 
     /** An organization-to-organization row has no person on the far side and must not add a NULL. */
@@ -43,6 +55,6 @@ describe('#301 — the people an account lists', () => {
     });
 
     it('quotes the account ID, so a stray quote cannot end the literal', () => {
-        expect(AccountContactsWhere("x'; DROP TABLE y; --", TABLE)).toContain("'x''; DROP TABLE y; --'");
+        expect(AccountContactsWhere("x'; DROP TABLE y; --", VIEW)).toContain("'x''; DROP TABLE y; --'");
     });
 });

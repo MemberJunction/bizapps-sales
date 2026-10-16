@@ -1,5 +1,80 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.17.0
+
+### Patch Changes
+
+- Updated dependencies [2018641]
+- Updated dependencies [7b134f9]
+  - @mj-biz-apps/sales-entities@6.17.0
+
+## 6.16.0
+
+### Minor Changes
+
+- fc1f0aa: An open deal no longer reads "Closed" because someone typed a date into Actual Close Date (#252). Actual Close Date, Closed At and Closed By are now read-only on the deal form, and the deal save refuses a write to them except from `Sales.CloseDeal` and `Sales.ReopenDeal`. Expected Close Date moved from the Commercial panel to the Pipeline panel, next to stage and probability, and the header labels an open deal's date "Expected close". The close fields carry descriptions saying which date is which.
+- c8c11b3: Close-won tasks stop being routed to somebody who is not there.
+
+  The seeded `CloseWonPolicy` on both pipelines sent every Order Review and Contract Processing task to a People id created in exactly one place: `scripts/seed-demo-data.sh`, where it is the demo's partner rep. A host that ran the demo seed worked; every other host did not. On QA that row never existed, so the tasks read as assigned while no queue held them and the order review control never ran. `TaskAssignment.AssigneeRecordID` is polymorphic, so there is no foreign key and nothing refused the row.
+
+  `CloseWonTaskService` now reads the assignee record before writing the assignment. A record that is not there refuses to route and names the id, the entity and the policy key to fix — an unrouted task at least reads as unrouted. A check that cannot run routes anyway and records that it could not tell, so a transient database problem does not quietly stop routing a deployment that is configured correctly.
+
+  The policy ships with `AssigneeRecordID` null, which is the documented unconfigured state: there is no internal finance person seeded to point at, and per bc-aidp-next-golive#320 the people who hold each role are loaded per deployment. The migration clears the placeholder only where it is still the placeholder, so a deployment that already configured a real person keeps it.
+
+  `Order Review` is also flagged `IsApproval`, so the approvals inbox lists it — its own description calls it the control on money leaving the building. `Contract Processing` is deliberately not flagged: it is work to do rather than a decision to make, and reaches its owner through My Tasks. This raises the declared floor on bizapps-tasks to >=1.7.0, where `TaskType.IsApproval` arrives.
+
+- 5623093: Every company can have its own pipeline, and the pipeline pickers filter by company.
+
+  A deal sells as its pipeline's company, and the app seeds its pipelines on one placeholder company, so a deal for any other company had no pipeline with the current stages. The new `Sales.CopyDefaultPipelineToCompanies` Action copies the default pipeline (the one marked `IsDefault`) and all of its stages onto every company that has no pipeline with the same Code. Each company's copy saves in one transaction, the copies are not marked default, and a second run skips companies that already have the pipeline, so it can run again after a company is added.
+
+  The deal form, the deal workspace and the board gain a Company control that narrows the pipeline list to that company, with the default pipeline's company first. Choosing a company moves the deal to that company's first pipeline. Each pipeline option names its company, for example "B2B (Acme)". Within a company, its copy of the default pipeline comes first and legacy pipelines follow. The control is hidden when one company owns every pipeline.
+
+  The seeded stages now look up their pipeline by ID instead of by Code, because the copies share the Code and MetadataSync resolves a lookup to the first matching row.
+
+  `PipelineOption` (deal form) and `PipelineLookup` (workspace) now carry `Code`, `IsDefault` and `DisplayRank`.
+
+### Patch Changes
+
+- 17ff470: Picking a deal's Primary Contact fills an empty Billing Contact with the same person, and the deal's order bills the Billing Contact.
+
+  The primary contact is usually the person invoiced, but Billing Contact stayed blank, so a rep searched for the same person twice. `DealEntity.Set` now copies a newly chosen Primary Contact into an empty Billing Contact. It runs for the deal form and the deal workspace alike, never overwrites a Billing Contact that is filled in, and the rep can still change or clear it. Loading a deal fills nothing.
+
+  When the server creates a deal's order, `BillToPersonID` now takes the Billing Contact, falling back to the Primary Contact when it is empty. Before, it read only the Primary Contact, so a different Billing Contact never reached the order. Orders already created keep their bill-to person.
+
+- 966e18b: A close now sets the deal's probability and forecast category, and a reopen puts them back.
+
+  A close declares its transition, which switches the stage defaults off, and nothing else wrote the probability, so every won or lost deal kept the figure it had while open. `Sales.CloseDeal` now writes the closing stage's probability and forecast category when that stage's status declares the same outcome, and otherwise 100 for won and 0 for lost from the status flags. The close's stage event still stamps the pre-close value.
+
+  When the pipeline has no active stage for the outcome, the close still succeeds but returns a warning naming the pipeline and the stage the deal stayed in, instead of saying nothing.
+
+  `Sales.ReopenDeal` restores the probability the close event stamped, and the forecast category of the stage the deal returns to, so a reopened deal is not left at 100 in the closed category.
+
+  The D2C pipeline gains the Lost stage it was missing (probability 0, closed forecast category, Voided on entry), matching B2B.
+
+- e475d61: The refusal for a second holder of a single-holder deal role no longer reads "This deal already has a Owner / AE". It now says "This deal already has someone in the Owner / AE role (name)", so the sentence is correct whatever the role is called. The refusal itself is unchanged.
+- 3929ba8: A deal team row in the owner role must name an Employee. Saving one that names a Person is refused with a message pointing to the Employee field, instead of saving and leaving the deal with no owner.
+- 0b93b39: A pipeline can no longer lose its last active won stage or its last active lost stage.
+
+  A close moves a deal into the active stage on its pipeline whose status declares the outcome. A new server-side `PipelineStageEntityServer` refuses a stage save or delete that would take that stage away: deactivating it, giving it a status that does not declare the outcome, moving it to another pipeline, or deleting it, when no other active stage on the pipeline declares the same outcome. The refusal names the pipeline and the outcome.
+
+  Pipelines that never had such a stage are not blocked; a close on them still succeeds and warns that the deal stayed in its stage.
+
+- a43114c: Changing a deal team row's employee no longer fails with a raw SQL constraint error.
+
+  A team member is either an employee or a person, and the table enforces it. Nothing above the database did, so picking a new employee on a row whose Person was filled saved as both and came back as a CHECK constraint error, on the path the duplicate-role refusal tells a user to take.
+
+  A new shared `DealTeamMemberEntity` runs in the browser and on the server. Giving EmployeeID or PersonID a value clears the other, and `Validate()` refuses a row with both or neither with a message naming the fix. `DealTeamMemberEntityServer` now extends it, so its duplicate-role check and owner re-stamp are unchanged.
+
+- Updated dependencies [17ff470]
+- Updated dependencies [fc1f0aa]
+- Updated dependencies [3d02df4]
+- Updated dependencies [1738cb0]
+- Updated dependencies [2925963]
+- Updated dependencies [bcc41d7]
+- Updated dependencies [91e3f43]
+- Updated dependencies [a43114c]
+  - @mj-biz-apps/sales-entities@6.16.0
+
 ## 6.15.2
 
 ### Patch Changes
