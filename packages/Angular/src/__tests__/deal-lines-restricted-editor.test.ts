@@ -56,19 +56,15 @@ function linesPanelBlock(): string {
 }
 
 describe('the deal form never opens the generic Order Line form', () => {
-    it('turns the grid New button off', () => {
-        // Was `[ShowNewButton]="!IsLocked"` — on for every open deal, which is most of them.
-        expect(linesPanelBlock()).toMatch(/\[ShowNewButton\]="false"/);
+    it('lists lines as cards, not an Order Line grid whose New and double-click reach the generic form', () => {
+        // The grid's New and row double-click both routed to the generic form; the cards have neither.
+        expect(linesPanelBlock()).not.toMatch(/<mj-explorer-entity-data-grid/);
+        expect(linesPanelBlock()).toMatch(/<mjs-deal-line-cards/);
     });
 
-    it('turns double-click navigation off', () => {
-        // The other half. With this left on, a row double-click still routes to the generic form
-        // even though New no longer does — the tester reached it both ways.
-        expect(linesPanelBlock()).toMatch(/\[NavigateOnDoubleClick\]="false"/);
-    });
-
-    it('routes a row double-click into the restricted editor instead', () => {
-        expect(linesPanelBlock()).toMatch(/\(AfterRowDoubleClick\)="EditLine\(\$event\)"/);
+    it('routes Add and a line edit into the restricted editor', () => {
+        expect(linesPanelBlock()).toMatch(/\(Add\)="AddLine\(\)"/);
+        expect(linesPanelBlock()).toMatch(/\(Edit\)="EditLine\(\$event\)"/);
     });
 
     it('mounts the restricted editor, not a link to the entity form', () => {
