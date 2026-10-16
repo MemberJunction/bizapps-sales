@@ -47,6 +47,7 @@ const TODAY = new Date('2026-08-15T15:00:00Z');
 const SUMMARY: DealDashboardSummary = {
     OpenAmount: 1000,
     OpenCount: 2,
+    OpenOmittedCount: 0,
     TotalCount: 9,
     PastExpectedCloseCount: 0,
     WonCount: 4,

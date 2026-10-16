@@ -56,7 +56,7 @@ describe('a read that throws during load', () => {
         ['the fiscal year start', (s) => s.LoadFiscalYearStart.mockRejectedValue(new Error(GATEWAY_TIMEOUT))],
         ['the lookups', (s) => s.LoadLookups.mockRejectedValue(new Error(GATEWAY_TIMEOUT))],
         ['the dashboard summary', (s) => s.LoadDashboardSummary.mockRejectedValue(new Error(GATEWAY_TIMEOUT))],
-        ['the win rate', (s) => s.RunNamedQuery.mockRejectedValue(new Error(GATEWAY_TIMEOUT))],
+        ['the win rate', (s) => s.LoadWinRate.mockRejectedValue(new Error(GATEWAY_TIMEOUT))],
     ];
 
     it.each(reads)('clears the spinner and shows the failure when %s fails', async (_name, breakIt) => {

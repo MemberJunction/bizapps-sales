@@ -39,6 +39,7 @@ import {
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 import { E_ORDERS_PRODUCT, PRODUCT_LOOKUP_FIELDS, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
+    CALENDAR_YEAR_START,
     PeriodParameters,
     ResolveFiscalYearStart,
     type FiscalYearStart,
@@ -110,6 +111,8 @@ export function CurrencyCodeFor(currencyID: string | null, codes: ReadonlyMap<st
 export interface DealDashboardSummary {
     OpenAmount: number;
     OpenCount: number;
+    /** Open deals in a forecast category left out of the pipeline (Omitted); counted in `OpenCount` only. */
+    OpenOmittedCount: number;
     TotalCount: number;
     PastExpectedCloseCount: number;
     WonCount: number;
@@ -178,6 +181,11 @@ export interface DealRosterRow {
      */
     IncludeInCommit: boolean;
     IncludeInBestCase: boolean;
+    /**
+     * `ForecastCategoryType.IncludeInPipeline`; true when the deal has no category. False (Omitted)
+     * leaves an open deal out of the dashboard's pipeline money figures, as the forecast queries do.
+     */
+    IncludeInPipeline: boolean;
     /** Amount × Probability / 100, computed in the roster query. Display only — not a price. */
     WeightedAmount: number | null;
     /** PipelineStage.DisplayOrder, for the funnel. */
@@ -578,6 +586,7 @@ export class DealWorkspaceService {
             IsPastExpectedClose: bool(d['IsPastExpectedClose']),
             IncludeInCommit: bool(d['IncludeInCommit']),
             IncludeInBestCase: bool(d['IncludeInBestCase']),
+            IncludeInPipeline: bool(d['IncludeInPipeline']),
             WeightedAmount: num(d['WeightedAmount']),
             StageOrder: num(d['StageOrder']),
         }));
@@ -628,21 +637,22 @@ export class DealWorkspaceService {
     }
 
     /**
-     * Run a published Sales MJ Query by name. Empty array on failure — the dashboard degrades a
-     * missing chart rather than taking the page down, and says so via the caller's empty state.
+     * The win rate rows for a period, from `Sales: Win Rate by Count and Value`.
+     *
+     * NULL means the query did not run, as with {@link LoadDashboardSummary}. An empty list means it
+     * ran and nothing closed; the card renders those two differently, so a failure does not read as
+     * "0 won / 0 closed".
      */
-    public async RunNamedQuery(
-        name: string,
-        parameters?: Record<string, string>,
-    ): Promise<Record<string, unknown>[]> {
+    public async LoadWinRate(window?: PeriodWindow): Promise<Record<string, unknown>[] | null> {
+        const parameters = PeriodParameters(window);
         const result = await new RunQuery().RunQuery({
-            QueryName: name,
+            QueryName: 'Sales: Win Rate by Count and Value',
             CategoryPath: 'Sales',
             ...(parameters ? { Parameters: parameters } : {}),
         });
         if (!result?.Success) {
-            LogError(`Sales query '${name}' failed - ${result?.ErrorMessage ?? 'unknown error'}`);
-            return [];
+            LogError(`Sales: Win Rate by Count and Value failed - ${result?.ErrorMessage ?? 'unknown error'}`);
+            return null;
         }
         return (result.Results ?? []) as Record<string, unknown>[];
     }
@@ -929,7 +939,7 @@ export class DealWorkspaceService {
             });
         } catch (e) {
             LogStatus(`${E_ACCOUNTING_COMPANY_PROFILE} read threw, falling back to the calendar year - ${e instanceof Error ? e.message : String(e)}`);
-            return ResolveFiscalYearStart([]);
+            return { Start: CALENDAR_YEAR_START, Basis: 'unreadable' };
         }
         if (!result?.Success) {
             /**
@@ -942,12 +952,12 @@ export class DealWorkspaceService {
              * -- which `75-dashboard.spec.ts` fails on via `expectNoConsoleErrors`, and which is
              * exactly the breakage the guard was added to prevent (see {@link LoadProducts}).
              *
-             * A FAILED read is still not an absent app. Reporting it as 'no-profiles' would tell a
-             * reader to go and configure something that may already be configured, so it degrades the
-             * same way an unconfigured host does, and the line below is where it gets diagnosed.
+             * A FAILED read is still not an absent app, nor a host with no profiles. It falls back to
+             * the calendar year as 'unreadable', so the basis line says the start could not be read
+             * rather than telling the reader to configure something that may already be configured.
              */
             LogStatus(`${E_ACCOUNTING_COMPANY_PROFILE} read failed, falling back to the calendar year - ${result?.ErrorMessage ?? 'unknown error'}`);
-            return ResolveFiscalYearStart([]);
+            return { Start: CALENDAR_YEAR_START, Basis: 'unreadable' };
         }
 
         const rows = (result.Results ?? []) as unknown as Record<string, unknown>[];
@@ -988,6 +998,7 @@ export class DealWorkspaceService {
         return {
             OpenAmount: num(row['OpenAmount']),
             OpenCount: num(row['OpenCount']),
+            OpenOmittedCount: num(row['OpenOmittedCount']),
             TotalCount: num(row['TotalCount']),
             PastExpectedCloseCount: num(row['PastExpectedCloseCount']),
             WonCount: num(row['WonCount']),

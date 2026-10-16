@@ -51,6 +51,7 @@ import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import {
     DealInListWhere,
     DealPipelineViewWith,
+    DealStatusColourRules,
     DealWonInPeriodWhere,
     LoadDealPipelineViewTemplate,
     RelatedRecordTarget,
@@ -99,9 +100,11 @@ import {
     TileSummary,
     OwnerCoverage,
     StageFunnel,
+    FunnelPipelines,
     BusinessToday,
     WeightedOpen,
     type CloseBucket,
+    type FunnelPipeline,
     type FunnelStage,
     type InspectKey,
     type OwnerBar,
@@ -111,7 +114,6 @@ import {
     DescribeFiscalBasis,
     FormatWindow,
     PERIOD_OPTIONS,
-    PeriodParameters,
     ResolvePeriod,
     type FiscalYearStartResolution,
     type PeriodKey,
@@ -204,8 +206,10 @@ export class MJSSalesSectionComponent implements OnInit {
      * one means the load as a whole stopped, so nothing below it is known to be current.
      */
     public LoadError: string | null = null;
-    /** Identifies the newest `Refresh()`, so a slower superseded one cannot clear its spinner or error. */
+    /** Identifies the newest `Refresh()`, so a slower superseded one cannot apply its replies, clear its spinner or set its error. */
     private refreshToken = 0;
+    /** Identifies the newest inspect view request, so a slower superseded one cannot replace the grid. */
+    private inspectToken = 0;
     /** Which slice the inspect grid is showing. Default is closing-soonest (the DB-oracle spec). */
     public InspectFilter: InspectKey = 'closing';
     /**
@@ -247,6 +251,11 @@ export class MJSSalesSectionComponent implements OnInit {
     public WinRateByValue: number | null = null;
     public WinClosedCount = 0;
     public WinWonCount = 0;
+    /**
+     * The win rate query did not run. The card then shows "figures unavailable", as the tiles do,
+     * rather than "0 won / 0 closed", which reads as nothing having closed.
+     */
+    public WinRateUnavailable = false;
     public DealEntityInfo: EntityInfo | null = null;
     public InspectView: MJUserViewEntityExtended | null = null;
     public AllDealsView: MJUserViewEntityExtended | null = null;
@@ -402,7 +411,7 @@ export class MJSSalesSectionComponent implements OnInit {
             this.service.LoadLookups(SECTION_LOOKUP_KEYS),
             // The window reaches win rate through parameters the query ALREADY declared -- it filters
             // on ActualCloseDate, the same dimension the Won tile now uses, so the two cannot drift.
-            this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
+            this.service.LoadWinRate(window),
             // The grids' saved view, read once for both grids.
             this.DealEntityInfo ? LoadDealPipelineViewTemplate(this.DealEntityInfo) : Promise.resolve(null),
         ]);
@@ -413,27 +422,36 @@ export class MJSSalesSectionComponent implements OnInit {
             // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
             this.service.LoadDashboardSummary(window),
         ]);
+        // A newer Refresh() was started while these were out; its replies are the ones to show.
+        if (token !== this.refreshToken) {
+            return;
+        }
         this.Deals = roster ?? [];
         this.forecastDeals = InForecast(this.Deals);
-        this.summary = TileSummary(summary, this.RosterError);
+        // A period picked while this was out has already read its own summary; this one is stale.
+        if (period === this.Period) {
+            this.summary = TileSummary(summary, this.RosterError);
+        }
         if (roster && !roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
             this.Message = '';
         }
-        if (token === this.refreshToken) {
-            this.Loading = false;
-            this.cdr.detectChanges();
-        }
+        this.Loading = false;
+        this.cdr.detectChanges();
 
-        await this.loadDetail(detail, period);
+        await this.loadDetail(detail, period, token);
     }
 
     /** The second half of `load()`: what the board, the win rate and the grids read. */
     private async loadDetail(
-        detail: Promise<[DealWorkspaceLookups, Record<string, unknown>[], MJUserViewEntityExtended | null]>,
+        detail: Promise<[DealWorkspaceLookups, Record<string, unknown>[] | null, MJUserViewEntityExtended | null]>,
         period: PeriodKey,
+        token: number,
     ): Promise<void> {
         const [lookups, winRate, pipelineView] = await detail;
+        if (token !== this.refreshToken) {
+            return;
+        }
         this.Pipelines = lookups.Pipelines;
         this.Stages = lookups.Stages;
         this.DealStatusTypes = lookups.DealStatusTypes;
@@ -565,7 +583,7 @@ export class MJSSalesSectionComponent implements OnInit {
             const window = this.Window;
             const [summary, winRate] = await Promise.all([
                 this.service.LoadDashboardSummary(window),
-                this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
+                this.service.LoadWinRate(window),
             ]);
             if (token !== this.periodToken) {
                 return;
@@ -587,10 +605,7 @@ export class MJSSalesSectionComponent implements OnInit {
              */
             if (token === this.periodToken) {
                 this.summary = null;
-                this.WinRateByCount = null;
-                this.WinRateByValue = null;
-                this.WinClosedCount = 0;
-                this.WinWonCount = 0;
+                this.applyWinRate(null);
                 LogError(`Sales: reporting period '${key}' failed to load - ${e instanceof Error ? e.message : String(e)}`);
             }
         } finally {
@@ -665,8 +680,9 @@ export class MJSSalesSectionComponent implements OnInit {
             {
                 Label: 'Open deals',
                 Value: String(s.OpenCount),
-                Footnote: `of ${s.TotalCount} total`,
-                Filter: 'pipe',
+                // Every open deal, Omitted ones included; the money figures leave those out, so say how many.
+                Footnote: `of ${s.TotalCount} total${s.OpenOmittedCount ? ` · ${s.OpenOmittedCount} left out of the forecast` : ''}`,
+                Filter: 'open',
             },
             {
                 Label: 'Past expected close',
@@ -772,6 +788,10 @@ export class MJSSalesSectionComponent implements OnInit {
                 return 'Open best-case deals, including commit';
             case 'pipe':
                 return 'Open pipeline';
+            case 'open':
+                return 'Every open deal, including those left out of the forecast';
+            case 'remainder':
+                return 'Open deals outside Commit and Best Case';
             case 'slipped':
                 return 'Open deals past their expected close date';
             case 'noowner':
@@ -802,7 +822,14 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private async refreshInspectView(): Promise<void> {
-        this.InspectView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView, this.inspectWhere()) : null;
+        const token = ++this.inspectToken;
+        const view = this.pipelineView
+            ? await DealPipelineViewWith(this.pipelineView, this.inspectWhere(), DealStatusColourRules(this.DealStatusTypes))
+            : null;
+        // Two slice clicks in quick succession: only the latest one's view is shown.
+        if (token === this.inspectToken) {
+            this.InspectView = view;
+        }
     }
 
     /**
@@ -819,7 +846,9 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private async refreshAllDealsView(): Promise<void> {
-        this.AllDealsView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView) : null;
+        this.AllDealsView = this.pipelineView
+            ? await DealPipelineViewWith(this.pipelineView, undefined, DealStatusColourRules(this.DealStatusTypes))
+            : null;
     }
 
     public OnAllDealsOpened(event: RecordOpenedEvent): void {
@@ -865,8 +894,32 @@ export class MJSSalesSectionComponent implements OnInit {
         return `${Math.max(2, Math.round((part / t) * 100))}%`;
     }
 
+    /**
+     * The pipeline the Stage mix card shows. Null until a reader picks one, which means the first of
+     * {@link FunnelPipelineOptions}: the default pipeline when it has open deals.
+     */
+    public FunnelPipelineID: string | null = null;
+
+    /** The pipelines with open deals. The card shows tabs only when there is more than one. */
+    public get FunnelPipelineOptions(): FunnelPipeline[] {
+        return FunnelPipelines(this.forecastDeals, this.Pipelines);
+    }
+
+    /** The picked pipeline while it still has open deals, otherwise the first one that does. */
+    public get ActiveFunnelPipelineID(): string | null {
+        const options = this.FunnelPipelineOptions;
+        const picked = options.find((p) => p.ID.toLowerCase() === (this.FunnelPipelineID ?? '').toLowerCase());
+        return (picked ?? options[0])?.ID ?? null;
+    }
+
+    public SelectFunnelPipeline(id: string): void {
+        this.FunnelPipelineID = id;
+        this.cdr.detectChanges();
+    }
+
     public get Funnel(): FunnelStage[] {
-        return StageFunnel(this.forecastDeals);
+        const pipelineID = this.ActiveFunnelPipelineID;
+        return pipelineID ? StageFunnel(this.forecastDeals, pipelineID) : [];
     }
 
     public FunnelHeight(count: number): string {
@@ -915,7 +968,16 @@ export class MJSSalesSectionComponent implements OnInit {
         return row.ForecastCategoryType || 'Pipeline';
     }
 
-    private applyWinRate(rows: Record<string, unknown>[]): void {
+    /** Null means the query did not run: every figure is cleared and the card says so. */
+    private applyWinRate(rows: Record<string, unknown>[] | null): void {
+        this.WinRateUnavailable = rows === null;
+        if (rows === null) {
+            this.WinClosedCount = 0;
+            this.WinWonCount = 0;
+            this.WinRateByCount = null;
+            this.WinRateByValue = null;
+            return;
+        }
         const num = (v: unknown): number => {
             const n = Number(v);
             return Number.isFinite(n) ? n : 0;

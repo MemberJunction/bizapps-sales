@@ -70,6 +70,11 @@ export type FiscalBasis =
     | 'no-accounting'
     /** Accounting is installed, but no active company profile exists yet. */
     | 'no-profiles'
+    /**
+     * The profiles could not be read: most often a user whose roles carry no accounting permissions.
+     * Not 'no-profiles', which would tell the reader to configure something that may already be set.
+     */
+    | 'unreadable'
     /** Two or more active profiles name DIFFERENT fiscal starts, so there is no single answer. */
     | 'mixed';
 
@@ -156,6 +161,8 @@ export function DescribeFiscalBasis(resolution: FiscalYearStartResolution): stri
             return `calendar year (BizApps Accounting not installed)`;
         case 'no-profiles':
             return `calendar year (no company profile sets a fiscal year)`;
+        case 'unreadable':
+            return `calendar year (fiscal year start could not be read)`;
         case 'mixed':
             return `calendar year (companies use different fiscal years)`;
     }

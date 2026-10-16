@@ -50,6 +50,9 @@ SELECT
     d.ForecastCategoryType                      AS ForecastCategoryName,
     fc.IncludeInCommit,
     fc.IncludeInBestCase,
+    -- Whether the deal's forecast category counts toward the pipeline (Omitted does not). A deal with
+    -- no category counts, which is how the dashboard has always treated it.
+    ISNULL(fc.IncludeInPipeline, 1)             AS IncludeInPipeline,
     d.OwnerEmployeeID,
     d.OwnerEmployee                             AS OwnerName,
     d.Amount,
