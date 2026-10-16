@@ -15,7 +15,7 @@ function editor(saved: number | null, current: number | null) {
         DiscountReason: '',
         EngineDefault: undefined,
         Deal: { OrderID_Object: {} },
-        Working: { ProductID: 'p-1', DiscountPct: current, GetFieldByName: () => undefined },
+        Working: { ProductID: 'p-1', Quantity: 1, DiscountPct: current, GetFieldByName: () => undefined },
     });
     Object.defineProperty(e, 'savedDiscountPct', { value: saved, writable: true });
     return e;

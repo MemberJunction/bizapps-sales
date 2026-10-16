@@ -39,7 +39,7 @@ function editor(over: { locked: boolean; productID?: string | null; hasOrder?: b
     const e = Object.create(MJSDealLineEditorComponent.prototype) as MJSDealLineEditorComponent;
     e.IsLocked = over.locked;
     Object.defineProperty(e, 'Working', {
-        value: { ProductID: over.productID === undefined ? 'prod-1' : over.productID, GetFieldByName: () => undefined },
+        value: { ProductID: over.productID === undefined ? 'prod-1' : over.productID, Quantity: 1, GetFieldByName: () => undefined },
         configurable: true, writable: true,
     });
     Object.defineProperty(e, 'Deal', {
