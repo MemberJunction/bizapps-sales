@@ -92,6 +92,28 @@ async function LoadLossReasons(): Promise<LossReasonOption[]> {
     }));
 }
 
+/** One employee the owner picker offers. */
+export interface EmployeeOption {
+    ID: string;
+    Name: string;
+}
+
+/**
+ * Active employees for the Party panel's owner picker, ordered and labelled the way the deal workspace
+ * lists them. Null when the read fails, so the panel can say so rather than offer an empty list.
+ */
+async function LoadEmployees(): Promise<EmployeeOption[] | null> {
+    const result = await new RunView().RunView<{ ID: string; FirstLast: string | null }>({
+        EntityName: MJS_FOREIGN_ENTITIES.Employee,
+        ExtraFilter: 'Active = 1',
+        OrderBy: 'LastName ASC',
+        ResultType: 'simple',
+        Fields: ['ID', 'FirstLast'],
+    });
+    if (!result?.Success) return null;
+    return (result.Results ?? []).map((e) => ({ ID: String(e.ID), Name: e.FirstLast ?? '(unnamed employee)' }));
+}
+
 /** One pipeline the deal may sit in, with the company it sells as (#327). */
 export type PipelineOption = CompanyPipeline;
 
@@ -2334,7 +2356,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
     selector: 'mjs-deal-party-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, BaseFormsModule],
+    imports: [CommonModule, FormsModule, BaseFormsModule],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="party" SectionName="Account &amp; people" Icon="fa-solid fa-building"
@@ -2342,9 +2364,34 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
             <div class="mjs-fields">
                 @for (f of Fields; track FieldTrackKey(f)) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
-                        <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                            (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                        @if (ShowsOwnerPicker(f)) {
+                            <!-- THE OWNER IS CHANGED THROUGH THE DEAL TEAM, never typed. The column is a
+                                 server-maintained stamp; SetOwner swaps the owner-role team row and the
+                                 server derives the stamp from it on save. Saved deals only: a new deal
+                                 takes the account owner by default, and SetOwner reads the team first. -->
+                            <div class="mj-forms-field mj-forms-field--editing">
+                                <label class="mj-forms-field-label" for="mjs-deal-owner">{{ OwnerLabel }}</label>
+                                <select id="mjs-deal-owner" data-testid="deal-owner-picker"
+                                        [ngModel]="Record.OwnerEmployeeID" (ngModelChange)="OnOwnerChange($event)"
+                                        [compareWith]="CompareID">
+                                    <option [ngValue]="null">— choose —</option>
+                                    @for (e of OwnerOptions(); track e.ID) {
+                                        <option [ngValue]="e.ID">{{ e.Name }}</option>
+                                    }
+                                </select>
+                                <small class="mjs-field__hint">Recorded on the deal team as owner.</small>
+                                @if (OwnerError()) {
+                                    <small class="mjs-field__hint" data-testid="deal-owner-error">{{ OwnerError() }}</small>
+                                }
+                            </div>
+                        } @else {
+                            <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
+                                [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                                (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                            @if (EditMode && f.name === 'CompanyID') {
+                                <small class="mjs-field__hint" data-testid="deal-company-hint">Set by the pipeline. Change it with Company on the Pipeline panel.</small>
+                            }
+                        }
                     </div>
                 }
                 @if (AccountDefaultsError()) {
@@ -2380,6 +2427,57 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
         if (!this.Record || this.Record.IsSaved) return [...PARTY_FIELDS];
         return PARTY_FIELDS.filter((f) => !CREATION_PARTY_FIELDS.includes(f.name));
     }
+
+    /* ── Owner picker (#253) ───────────────────────────────────────────────── */
+
+    /** Active employees for the owner picker. A signal for the reason the Pipeline panel's lists are. */
+    public readonly OwnerOptions = signal<EmployeeOption[]>([]);
+    /** Why the last owner change did not apply, or null. */
+    public readonly OwnerError = signal<string | null>(null);
+
+    public async ngOnInit(): Promise<void> {
+        const loaded = await LoadEmployees();
+        if (loaded) {
+            this.OwnerOptions.set(loaded);
+        } else {
+            this.OwnerError.set('The employee list could not load. Reload the page to change the owner.');
+        }
+    }
+
+    /**
+     * Whether the owner field renders as the picker rather than as the read-only stamp.
+     *
+     * SAVED DEALS ONLY: a new deal takes the account owner by default when it is first saved, and
+     * `SetOwner` loads the deal team before changing it. NOT GATED ON THE LOCK: reassigning a rep after
+     * close is record-keeping (golive#206), and the server allows it when the team drives the save.
+     */
+    public ShowsOwnerPicker(f: DealFieldSpec): boolean {
+        return f.name === 'OwnerEmployeeID' && this.EditMode && this.Record?.IsSaved === true;
+    }
+
+    /** The owner field's label, read from metadata like every other label. */
+    public get OwnerLabel(): string {
+        const info = this.Record?.EntityInfo?.Fields?.find((x) => x.Name === 'OwnerEmployeeID');
+        return info?.DisplayNameOrName ?? 'Owner';
+    }
+
+    /**
+     * Records the new owner through the deal team, never by writing `OwnerEmployeeID`: `SetOwner` swaps
+     * the owner-role team row, and the server derives the stamp from it when the deal is saved.
+     */
+    public async OnOwnerChange(employeeID: string | null): Promise<void> {
+        if (!this.Record) return;
+        this.OwnerError.set(null);
+        try {
+            await this.Record.SetOwner(employeeID);
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            this.OwnerError.set(`The owner was not changed: ${reason}`);
+        }
+    }
+
+    public CompareID = (a: unknown, b: unknown): boolean =>
+        String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 }
 
 /**
