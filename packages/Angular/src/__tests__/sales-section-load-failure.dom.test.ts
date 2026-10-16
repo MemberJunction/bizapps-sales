@@ -87,6 +87,50 @@ describe('a read that throws during load', () => {
     });
 });
 
+describe('a deal list that fails while the rest loads', () => {
+    /**
+     * The roster's failure is soft on purpose: the dashboard keeps running with its tiles marked
+     * unavailable. The board has nothing to draw without the list, and drew every column empty at $0,
+     * which reads as "no deals" rather than "the deals could not be read".
+     */
+    const ROSTER_FAILURE = 'Sales: Deal Roster failed - timeout';
+
+    it('shows the load-failed panel with the reason on the board, not an empty board', async () => {
+        service.LoadRoster.mockRejectedValue(new Error(ROSTER_FAILURE));
+        const page = visiblePage(await mount('board'));
+
+        const alert = page.querySelector('[data-testid="sales-load-failed"]');
+        expect(alert, 'the failure must be on screen').not.toBeNull();
+        expect(alert?.textContent).toContain(ROSTER_FAILURE);
+        expect(page.querySelector('mjs-deal-board'), 'no board columns').toBeNull();
+        expect(page.querySelector('[data-testid="sales-load-retry"]')).not.toBeNull();
+    });
+
+    it('keeps the dashboard running, with the reason above its tiles', async () => {
+        service.LoadRoster.mockRejectedValue(new Error(ROSTER_FAILURE));
+        const page = visiblePage(await mount());
+
+        expect(page.querySelector('[data-testid="sales-load-failed"]')).toBeNull();
+        expect(page.querySelector('.kpis')).not.toBeNull();
+        expect(page.textContent).toContain(ROSTER_FAILURE);
+    });
+
+    it('reloads on Retry and shows the board once the list reads', async () => {
+        service.LoadRoster.mockRejectedValueOnce(new Error(ROSTER_FAILURE));
+        const fixture = await mount('board');
+
+        (visiblePage(fixture).querySelector('[data-testid="sales-load-retry"]') as HTMLButtonElement).click();
+        await vi.waitFor(() => {
+            expect(service.LoadRoster).toHaveBeenCalledTimes(2);
+            expect(fixture.componentInstance.DetailLoading).toBe(false);
+        });
+
+        const page = visiblePage(fixture);
+        expect(page.querySelector('[data-testid="sales-load-failed"]')).toBeNull();
+        expect(page.querySelector('mjs-deal-board')).not.toBeNull();
+    });
+});
+
 describe('Retry', () => {
     it('loads again and, when that succeeds, replaces the failure with the dashboard', async () => {
         service.LoadLookups.mockRejectedValueOnce(new Error(GATEWAY_TIMEOUT));
