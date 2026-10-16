@@ -104,7 +104,7 @@ async function openDeal(
     ctx: Ctx,
     f: SalesFixture,
     pipelineID: string,
-    stageID: string,
+    stageID: string | null,
     name: string,
     instalments: SeedInstalment[] = [],
 ): Promise<string> {
@@ -1500,16 +1500,17 @@ export const CloseDealChecks: NamedCheck[] = [
                     'setup: a plain move into a closing stage must NOT have closed the deal (SD35)',
                 );
 
-                const orderBefore = await TxOne<{ Status: string }>(
-                    ctx,
-                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
-                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
-                );
-
                 // No ClosingStageID: the derivation resolves to the stage the deal is already in.
                 Assert(
                     (await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID })).Success,
                     'the status-only close must succeed',
+                );
+                // Read AFTER the close: the close applies its stage's order status even without a move,
+                // because the plain move into that stage no longer does. The reopen is what must not move it.
+                const orderBefore = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
                 );
                 const closed = await TxOne<{ PipelineStageID: string }>(
                     ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
@@ -1540,7 +1541,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 AssertEqual(
                     String(orderAfter.Status),
                     String(orderBefore.Status),
-                    'and the order was never asked to move, because no stage was entered',
+                    'and the reopen never asked the order to move, because no stage was entered',
                 );
             }),
     },
@@ -2679,8 +2680,9 @@ export const CloseDealChecks: NamedCheck[] = [
                  * stage and the identical "nothing fires" becomes the D-OS1 violation:
                  *
                  *   1. `save-deal.SD35`: moving into a stage whose status locks does NOT close the
-                 *      deal, so it sits OPEN in the losing stage while `applyStageOrderStatus` voids
-                 *      the order on entry.
+                 *      deal, so it sits OPEN in the losing stage. `applyStageOrderStatus` used to void
+                 *      the order on entry; it no longer does, but deals parked that way remain, so the
+                 *      setup forces the voided order.
                  *   2. Closing Lost derives that same stage, so nothing moves and the close event
                  *      records `FromStageID === ToStageID`.
                  *   3. The reopen restores the stage the deal is already in.
@@ -2709,6 +2711,19 @@ export const CloseDealChecks: NamedCheck[] = [
                 const dealID = await openDeal(
                     ctx, f, f.ContractPolicyPipelineID, losing.ID, 'CD33 parked in the losing stage',
                 );
+                /**
+                 * A plain move no longer applies a closing stage's order status (SD35), so the voided
+                 * order a parked deal used to get is forced here. Deals parked before that rule still
+                 * carry one, and they are what the recovery is for.
+                 */
+                await TxExec(
+                    ctx,
+                    `UPDATE o SET o.Status = '${losing.OrderStatusOnEntry}'
+                       FROM ${ORDERS_SCHEMA}.OrderHeader o
+                       JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID
+                      WHERE d.ID = '${dealID}'`,
+                    'CD33: give the parked deal the order status its losing stage names',
+                );
 
                 const parked = await TxOne<{ IsOpen: boolean; Status: string }>(
                     ctx,
@@ -2725,7 +2740,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
                 Assert(
                     !IsEditable(String(parked.Status)),
-                    `setup: entering the losing stage must have voided the order — it is '${parked.Status}'`,
+                    `setup: the parked deal's order must be non-editable — it is '${parked.Status}'`,
                 );
 
                 // No ClosingStageID: the close derives the stage the deal is already in, so nothing moves.
@@ -3190,6 +3205,108 @@ export const CloseDealChecks: NamedCheck[] = [
                     await again.Save(),
                     `with another won stage active, deactivating this one is allowed — ${again.LatestResult?.CompleteMessage ?? ''}`,
                 );
+            }),
+    },
+    {
+        Id: 'close-deal.CD40',
+        Name: 'CD40: a deal closed with NO stage reopens with no stage, its own probability and no forecast category',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The close moves a stageless deal into the outcome's stage, and its event records
+                 * `FromStageID` NULL. The reopen used to read that NULL as "nothing recorded" and leave the
+                 * deal Open in the winning stage at 100% with a "Closed" forecast category. It now puts the
+                 * deal back as it was: no stage, the probability it had (NULL here), no category.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const winning = await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsWon = 1');
+                Assert(!!winning, 'setup: the pipeline needs a stage declaring a WON status');
+
+                const dealID = await openDeal(ctx, f, f.OrderOnlyPolicyPipelineID, null, 'CD40 stageless close');
+                const before = await TxOne<{ PipelineStageID: string | null; Probability: number | null }>(
+                    ctx, `SELECT PipelineStageID, Probability FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(before.PipelineStageID === null, 'setup: the deal must have no stage');
+                Assert(before.Probability === null, 'setup: the deal must have no probability');
+
+                const closed = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(closed.Success, `setup: the won close failed — ${JSON.stringify(closed.Issues)}`);
+                const atClose = await TxOne<{ PipelineStageID: string | null }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(atClose.PipelineStageID ?? '').toLowerCase(),
+                    String(winning!.ID).toLowerCase(),
+                    'setup: the close moved the stageless deal into the winning stage',
+                );
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD40: reopening a stageless close.' });
+                Assert(out.Success, `the reopen failed — ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{
+                    PipelineStageID: string | null;
+                    Probability: number | null;
+                    ForecastCategoryTypeID: string | null;
+                    IsOpen: boolean;
+                }>(
+                    ctx,
+                    `SELECT d.PipelineStageID, d.Probability, d.ForecastCategoryTypeID, t.IsOpen
+                       FROM ${SALES_SCHEMA}.Deal d
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = d.DealStatusTypeID
+                      WHERE d.ID = '${dealID}'`,
+                );
+                Assert(after.IsOpen === true, 'the reopened deal is open');
+                AssertEqual(after.PipelineStageID, null, 'the reopened deal has no stage, as before the close');
+                AssertEqual(after.Probability, null, 'and the probability it had before the close, not 100');
+                AssertEqual(after.ForecastCategoryTypeID, null, 'and no forecast category, not "Closed"');
+            }),
+    },
+    {
+        Id: 'close-deal.CD41',
+        Name: 'CD41: a status-driven close whose save FAILED still closes when the same object is saved again',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The save reverts the status before writing so the close can run against the committed
+                 * row. A save that then failed (here: a required field left empty) used to leave the
+                 * status clean, so fixing the field and saving the same object again skipped the close
+                 * and reported success on an open deal.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD41 retry after a failed save',
+                );
+
+                const md = new Metadata();
+                const deal = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await deal.Load(dealID), 'the open deal loads');
+                deal.DealStatusTypeID = f.WonStatusID;
+                deal.Set('Name', null);
+                Assert(!(await deal.Save()), 'setup: a deal with no name must not save');
+                AssertEqual(
+                    String(deal.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.WonStatusID).toLowerCase(),
+                    'the status the caller asked for is still on the object after the failed save',
+                );
+
+                deal.Name = 'CD41 retry after a failed save';
+                Assert(
+                    await deal.Save(),
+                    `the retry must save and close: ${deal.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const row = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.WonStatusID).toLowerCase(),
+                    'the retry landed the status',
+                );
+                Assert(row.ClosedAt !== null, 'and ran the close, rather than reporting success on an open deal');
             }),
     },
 ];

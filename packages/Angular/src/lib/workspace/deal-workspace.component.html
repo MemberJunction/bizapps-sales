@@ -237,7 +237,7 @@
                       (ngModelChange)="OnStageChange(deal, $event)"
                       [disabled]="!deal.PipelineID">
                 <option [ngValue]="null">— choose —</option>
-                @for (s of StagesFor(deal.PipelineID); track s.ID) {
+                @for (s of StagesFor(deal.PipelineID, deal.PipelineStageID); track s.ID) {
                   <option [ngValue]="s.ID">{{ s.Name }}</option>
                 }
               </select>
