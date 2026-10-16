@@ -97,6 +97,7 @@ import {
 import {
     ContinuationStartFrom,
     GetExistingHolding,
+    MJODatePipe,
     MJOLinePricePickerComponent,
     type MJOExistingHolding,
 } from '@mj-biz-apps/orders-ng';
@@ -119,7 +120,7 @@ import {
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
 
-/** `<input type="date">` wants `yyyy-MM-dd`, and nothing else renders. */
+/** `<input type="date">` wants `yyyy-MM-dd`, and nothing else renders; `mjoDate` reads the same day value. */
 function toDateInput(d: Date | string | null | undefined): string | null {
     if (!d) return null;
     const iso = d instanceof Date
@@ -176,7 +177,7 @@ interface RemoteOperationRouter {
 @Component({
     selector: 'mjs-deal-line-editor',
     standalone: true,
-    imports: [CommonModule, FormsModule, MJOLinePricePickerComponent],
+    imports: [CommonModule, FormsModule, MJOLinePricePickerComponent, MJODatePipe],
     template: `
         <div class="mjs-le__scrim" (click)="Cancel()"></div>
         <div class="mjs-le" role="dialog" aria-modal="true" data-testid="line-editor" [attr.aria-label]="Title">
@@ -321,14 +322,25 @@ interface RemoteOperationRouter {
                     }
 
                     @if (ShowTermStart) {
-                        <label class="mjs-le__field">
-                            <span class="mjs-le__label">Term start</span>
-                            <input type="date" data-testid="line-term-start" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
-                                   [disabled]="IsLocked" [title]="BlockedReason" />
-                            @if (!HasExplicitTermStart) {
-                                <small class="mjs-le__hint">order date</small>
-                            }
-                        </label>
+                        @if (TermStartFollowsHolding && Holding; as holding) {
+                            <!-- Orders starts an added term the day after the existing coverage ends,
+                                 whatever the line states, so the start it will use is shown, not offered.
+                                 The line's own start is kept for a switch back to a new subscription. -->
+                            <div class="mjs-le__field" data-testid="line-term-start-continuation">
+                                <span class="mjs-le__label">Term start</span>
+                                <span class="mjs-le__ro-val">{{ HoldingContinuationStart | mjoDate }}</span>
+                                <small class="mjs-le__hint">next term of {{ holding.SubscriptionNumber }}</small>
+                            </div>
+                        } @else {
+                            <label class="mjs-le__field">
+                                <span class="mjs-le__label">Term start</span>
+                                <input type="date" data-testid="line-term-start" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
+                                       [disabled]="IsLocked" [title]="BlockedReason" />
+                                @if (!HasExplicitTermStart) {
+                                    <small class="mjs-le__hint">order date</small>
+                                }
+                            </label>
+                        }
                     }
 
                     <!-- SERVICE PERIOD: the product's recognition type earns over a window and nothing
@@ -367,7 +379,7 @@ interface RemoteOperationRouter {
                             <span class="mjs-le__label">Existing subscription</span>
                             <span class="mjs-le__muted">
                                 The customer already holds {{ holding.SubscriptionNumber }} for this product
-                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd }}) }.
+                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd | mjoDate }}) }.
                             </span>
                             <div class="mjs-le__choices">
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-extend"
@@ -376,7 +388,7 @@ interface RemoteOperationRouter {
                                         [disabled]="IsLocked" [title]="BlockedReason"
                                         (click)="SetSubscriptionAction('ExtendExisting')">
                                     Add as next term
-                                    @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart }}) }
+                                    @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart | mjoDate }}) }
                                 </button>
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-new"
                                         [class.is-selected]="Working.SubscriptionAction === 'CreateNew'"
@@ -1067,14 +1079,23 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         this.cdr.detectChanges();
     }
 
-    /** Where the existing coverage ends, for the prompt. */
+    /** Where the existing coverage ends, for the prompt: a `yyyy-MM-dd` day, displayed with `mjoDate`. */
     public get HoldingCoverageEnd(): string | null {
         return toDateInput(this.Holding?.LatestTermEnd ?? null);
     }
 
-    /** The start an extension would get: the day after the existing coverage ends. */
+    /** The start an extension would get: the day after the existing coverage ends, as `yyyy-MM-dd`. */
     public get HoldingContinuationStart(): string | null {
         return toDateInput(ContinuationStartFrom(this.Holding));
+    }
+
+    /**
+     * Whether Term start shows the continuation start instead of an input: "Add as next term" is
+     * chosen and the start is known. Orders' `SubscriptionBehavior.Decide` starts an extension at the
+     * end of the existing coverage over any stated start, so an editable date here would be ignored.
+     */
+    public get TermStartFollowsHolding(): boolean {
+        return this.Working?.SubscriptionAction === 'ExtendExisting' && !!this.HoldingContinuationStart;
     }
 
     public SetSubscriptionAction(action: 'ExtendExisting' | 'CreateNew'): void {
