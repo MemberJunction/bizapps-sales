@@ -214,6 +214,12 @@ interface StageDefaultsPlan {
     DealStatusTypeID: string | null;
 }
 
+/** One row's dirty-tracking baseline, captured before `super.Save()`. See `captureSavedState`. */
+interface SavedStateSnapshot {
+    Row: BaseEntity;
+    OldValues: { Name: string; OldValue: unknown }[];
+}
+
 interface StageOrderPlan {
     StageID: string;
     Target: OrderStatus;
@@ -328,6 +334,19 @@ export class DealEntityServer extends DealEntity {
         try {
             return await this.saveDeclared(options);
         } finally {
+            /**
+             * A SAVE THAT DID NOT COMMIT GIVES THE CALLER THEIR STATUS BACK, on every exit.
+             *
+             * The status was reverted so the close lock and `super.Save()` would not write it. When the
+             * save then fails (`super.Save()` returning false, or a throw rolled back in
+             * `saveWithinScope`), nothing was written, and a clean status would make the retry skip the
+             * close and report success. Here rather than at each `return false`, like the clears below.
+             * A transition that fails AFTER the commit keeps today's behaviour: the row moved, so the
+             * object is resynced to it rather than re-dirtied.
+             */
+            if (!this._committed && this._revertedStatusTarget) {
+                this.Set('DealStatusTypeID', this._revertedStatusTarget);
+            }
             this._declaredTransition = null;
             this._revertedStatusTarget = null;
         }
@@ -341,6 +360,7 @@ export class DealEntityServer extends DealEntity {
         this._orderJustProvisioned = false;
         this._lockedAtSave = false;
         this._lastStageEventID = null;
+        this._committed = false;
 
         /**
          * THE STATUS FIELD DRIVES THE CLOSE AND THE REOPEN (bc-aidp-next-golive#205).
@@ -999,7 +1019,8 @@ export class DealEntityServer extends DealEntity {
             // the fast path and land NULL again -- the exact gap this closes, through the one door left open.
             !work.needsStatusDefault
         ) {
-            return super.Save(options);
+            this._committed = await super.Save(options);
+            return this._committed;
         }
 
         const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
@@ -1012,6 +1033,7 @@ export class DealEntityServer extends DealEntity {
         }
 
         const scope = await provider.BeginEntityTransaction();
+        let snapshot: SavedStateSnapshot[] = [];
         try {
             if (work.assignNumber) {
                 this.DealNumber = await getNextDealNumber(
@@ -1051,9 +1073,11 @@ export class DealEntityServer extends DealEntity {
             }
             await this.recoverOrderOnReopen(this.OrderStatusWarnings.length > warningsBeforePlan);
 
+            snapshot = this.captureSavedState();
             const saved = await super.Save(options);
             if (!saved) {
                 await scope.Rollback();
+                this.restoreSavedState(snapshot);
                 /**
                  * ── THE NUMBER GOES BACK TOO, OR THE DEAL BECOMES UNSAVEABLE ────────────────────────
                  *
@@ -1086,6 +1110,7 @@ export class DealEntityServer extends DealEntity {
             }
 
             await scope.Commit();
+            this._committed = true;
             return true;
         } catch (err) {
             LogError(`DealEntityServer.saveWithinScope failed for deal ${this.ID}: ${err}`);
@@ -1096,6 +1121,9 @@ export class DealEntityServer extends DealEntity {
                 rolledBack = false;
                 LogError(`Failed to roll back after a failed deal save: ${rollbackErr}`);
             }
+            // `super.Save()` may have marked the deal, its order and their rows clean before the step
+            // that threw. The database rolled back; this puts the dirty state back so a retry writes them.
+            this.restoreSavedState(snapshot);
             /**
              * ── THE SAME COMPENSATION AS THE `!saved` BRANCH, AND FOR THE SAME REASON ──────────────
              *
@@ -1136,6 +1164,39 @@ export class DealEntityServer extends DealEntity {
                     : `This deal could not be saved AND the rollback failed, so the row may be ` +
                       `partly written. Check it before retrying: ${err}`,
             );
+        }
+    }
+
+    /**
+     * The dirty-tracking baseline of every row this save may write that is ALREADY on disk: the deal,
+     * its team and payment schedule, its order and the order's lines.
+     *
+     * `super.Save()` leaves each of them clean. When a later step in the same transaction throws, the
+     * database rolls back but the objects stay clean, so a retry saves nothing and reports success.
+     * Restoring the captured `OldValue`s (`EntityField.RestoreOldValue`, the call MJ's own graph rollback
+     * uses) makes the retry see the same changes again.
+     *
+     * Rows that were NEW before this save are left out: MJ 6.1.5 has no public way to mark a record
+     * unsaved again, so a create rolled back here still reads as saved.
+     */
+    private captureSavedState(): SavedStateSnapshot[] {
+        const order = this.OrderID_Object;
+        const rows: BaseEntity[] = [
+            this,
+            ...(this.Team?.Items ?? []),
+            ...(this.PaymentSchedule?.Items ?? []),
+            ...(order ? [order, ...(order.Lines?.Items ?? [])] : []),
+        ];
+        return rows
+            .filter((row) => row.IsSaved)
+            .map((row) => ({ Row: row, OldValues: row.Fields.map((f) => ({ Name: f.Name, OldValue: f.OldValue })) }));
+    }
+
+    private restoreSavedState(snapshot: SavedStateSnapshot[]): void {
+        for (const { Row, OldValues } of snapshot) {
+            for (const { Name, OldValue } of OldValues) {
+                Row.GetFieldByName(Name)?.RestoreOldValue(OldValue);
+            }
         }
     }
 
@@ -2191,9 +2252,12 @@ export class DealEntityServer extends DealEntity {
     private _lockedAtSave = false;
     /**
      * The status the caller asked for, held while the field is reverted to its persisted value so the
-     * close lock can do its real job. `refuseSave` puts it back; see the note there for why.
+     * close lock can do its real job. `refuseSave` puts it back, and so does `Save()` for any save that
+     * did not commit; see the notes there for why.
      */
     private _revertedStatusTarget: string | null = null;
+    /** Whether this save reached its commit. `Save()` restores the reverted status when it did not. */
+    private _committed = false;
 
     /**
      * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.
@@ -2382,10 +2446,12 @@ export class DealEntityServer extends DealEntity {
      *
      * Two things differ from `refuseSave` and both matter:
      *
-     * 1. IT DOES NOT PUT THE STATUS BACK. `refuseSave` restores the caller's target because nothing
-     *    was written and a retry must still carry it. Here the row has already moved (or been rolled
-     *    back) and `Load()` has resynced this object to it -- re-dirtying a field to a value the
-     *    database just rejected would invite the same failure on the next save.
+     * 1. IT DOES NOT PUT THE STATUS BACK ITSELF. `refuseSave` restores the caller's target because
+     *    nothing was written and a retry must still carry it. After a failed transition the row has
+     *    already moved and `Load()` has resynced this object to it -- re-dirtying a field to a value
+     *    the database just rejected would invite the same failure on the next save. When the save was
+     *    rolled back instead, nothing reloads, and `Save()`'s `finally` restores the status because the
+     *    save never committed.
      * 2. IT CARRIES THE OPERATION'S ISSUES. `CloseDealOperation` returns a structured `Issues` array
      *    which was being joined into a `LogError` and dropped. Those sentences are the only thing
      *    that says WHY the close refused, and they are what the user needs.
