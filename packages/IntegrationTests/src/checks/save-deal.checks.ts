@@ -444,7 +444,7 @@ async function dealWithOrderIn(
     f: SalesFixture,
     name: string,
     billing: string,
-    order: { Status: 'Draft' | 'Confirmed'; Booked: boolean },
+    order: { Status: 'Draft' | 'Confirmed'; Booked: boolean; BillToPersonID?: string },
 ): Promise<{ deal: DealEntityServer; orderID: string }> {
     const created = await newDeal(ctx, f, (d) => {
         d.Name = name;
@@ -457,6 +457,7 @@ async function dealWithOrderIn(
         ctx,
         `UPDATE ${ORDERS_SCHEMA}.OrderHeader SET Status = '${order.Status}'` +
             (order.Booked ? ', ConfirmedAt = SYSDATETIMEOFFSET()' : '') +
+            (order.BillToPersonID ? `, BillToPersonID = '${order.BillToPersonID}'` : '') +
             ` WHERE ID = '${orderID}'`,
         `${name}: put the order in ${order.Status}`,
     );
@@ -2468,12 +2469,13 @@ export const SaveDealChecks: NamedCheck[] = [
                 // else was put there on purpose, by someone working the order.
                 const f = await ResolveSalesFixture(ctx);
                 const [first, second, financePick] = await salesContacts(ctx, 3);
-                const { deal, orderID } = await dealWithOrderIn(ctx, f, 'SD44 finance bill-to survives', first, { Status: 'Draft', Booked: false });
-                await execSql(
-                    ctx,
-                    `UPDATE ${ORDERS_SCHEMA}.OrderHeader SET BillToPersonID = '${financePick}' WHERE ID = '${orderID}'`,
-                    'SD44: finance re-points the bill-to',
-                );
+                // Finance re-points the bill-to BEFORE the deal is loaded, as it would be before a form
+                // save arrives: the save works from the order as the load read it.
+                const { deal } = await dealWithOrderIn(ctx, f, 'SD44 finance bill-to survives', first, {
+                    Status: 'Draft',
+                    Booked: false,
+                    BillToPersonID: financePick,
+                });
 
                 deal.BillingContactID = second;
                 await saveOk(deal, 'the billing contact change');
