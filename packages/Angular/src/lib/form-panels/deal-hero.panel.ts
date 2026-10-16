@@ -8,7 +8,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, ViewEncapsulation, inject } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, OnDestroy, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, Metadata, RunView } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
@@ -60,6 +60,11 @@ export function ShouldPlaceCursorInName(state: {
     return true;
 }
 const COLLAPSE_SETTING = 'mj.identityHeader.collapsed.deal';
+
+/** The part of the deal form the hero listens to; see `MJSDealHeroPanel.dealStateSource`. */
+interface DealStateSource {
+    DealStateRefreshed?: { subscribe(next: () => void): { unsubscribe(): void } };
+}
 
 function money(n: number | null | undefined): string {
     if (n == null || !Number.isFinite(Number(n))) return '—';
@@ -404,7 +409,7 @@ function money(n: number | null | undefined): string {
         }
     `],
 })
-export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit, DoCheck {
+export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit, DoCheck, OnDestroy {
     private readonly cdr = inject(ChangeDetectorRef);
     private readonly host = inject(ElementRef<HTMLElement>);
     /** The record the cursor has already been placed for, so it is never taken twice. */
@@ -450,6 +455,10 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         if (raw) {
             try { this.Collapsed = JSON.parse(raw) === true; } catch { this.Collapsed = false; }
         }
+        // Subscribed before the first await, so a panel destroyed while it loads leaves no listener.
+        this.dealStateSubscription = this.dealStateSource()?.DealStateRefreshed?.subscribe(() => {
+            void this.refreshNotices();
+        });
         await this.refreshNotices();
         /**
          * The business zone, for a legacy `ClosedAt`-only row's close day ({@link CloseStatValue},
@@ -469,6 +478,20 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
      */
     public override OnRecordRefreshed(_record: DealEntity): void {
         void this.refreshNotices();
+    }
+
+    /**
+     * The deal form's signal that a save it did not run changed the deal (#271): the products panel
+     * saves the deal to refresh its amount, which raises no refresh here. Read structurally, as the
+     * other panels read `IsLocked`, so this file does not import the form.
+     */
+    private dealStateSource(): DealStateSource | undefined {
+        return this.FormComponent as unknown as DealStateSource | undefined;
+    }
+    private dealStateSubscription?: { unsubscribe(): void };
+
+    public ngOnDestroy(): void {
+        this.dealStateSubscription?.unsubscribe();
     }
 
     /**

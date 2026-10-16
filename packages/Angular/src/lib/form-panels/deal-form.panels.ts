@@ -2690,6 +2690,13 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
                 <p class="mjs-deal-empty">This deal has no order, so there is nothing to add products to.</p>
             }
 
+            @if (AmountRefreshError()) {
+                <p class="mjs-deal-empty" data-testid="deal-amount-refresh-error">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    {{ AmountRefreshError() }}
+                </p>
+            }
+
             @if (EditorOpen) {
                 <mjs-deal-line-editor
                     [Deal]="Record"
@@ -2796,12 +2803,15 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
      * composing — they are adding products to a deal they are building — and it is the honest cost of
      * the figure appearing straight away rather than after some later unrelated save.
      *
-     * A FAILED SAVE IS NOT SWALLOWED, but it does not undo the line either: the order is already
-     * committed, so the product genuinely is on the deal. The form reports the failure through its own
-     * path, and the amount catches up on the next successful save.
+     * A FAILED SAVE IS REPORTED HERE, beside the products, and does not undo the line: the order is
+     * already committed, so the product genuinely is on the deal. Nothing else reports it -- this path
+     * bypasses `SaveRecord`, so the form raises no save event -- and the amount catches up on the next
+     * successful deal save, which clears the message. A successful save tells the form, so its lock and
+     * stale-amount notices (and the hero's) re-check against the new amount (#271).
      */
     public async OnLineSaved(): Promise<void> {
         this.CloseEditor();
+        this.AmountRefreshError.set(null);
         void this.lineCards?.Refresh();
 
         /**
@@ -2821,9 +2831,34 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
          * server, the same lock checks, the same stamps — which is what refreshes `Amount` from the
          * order and keeps that figure's single author.
          */
+        const record = this.Record;
+        if (!record) return;
         const options = new EntitySaveOptions();
         options.IgnoreDirtyState = true;
-        await this.Record?.Save(options);
+        if (!(await record.Save(options))) {
+            const reason = (record.LatestResult?.CompleteMessage || 'the save was refused').trim().replace(/\.$/, '');
+            this.AmountRefreshError.set(
+                `The product is saved, but the deal amount could not be updated: ${reason}. Fix the deal's fields and save it.`,
+            );
+            return;
+        }
+        await (this.FormComponent as unknown as { RefreshDealState?: () => Promise<void> } | undefined)?.RefreshDealState?.();
+    }
+
+    /**
+     * Why the deal's amount did not follow the last product save, or null. A signal so the OnPush host
+     * repaints when it is set after the save returns.
+     */
+    public readonly AmountRefreshError = signal<string | null>(null);
+
+    /** A deal save the form ran clears the message: that save refreshed the amount too. */
+    public ngOnInit(): void {
+        this.recordSavedSubscription = this.FormComponent?.RecordSaved?.subscribe(() => this.AmountRefreshError.set(null));
+    }
+    private recordSavedSubscription?: { unsubscribe(): void };
+
+    public ngOnDestroy(): void {
+        this.recordSavedSubscription?.unsubscribe();
     }
 }
 

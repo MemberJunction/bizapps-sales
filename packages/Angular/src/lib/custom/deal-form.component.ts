@@ -35,7 +35,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { Component } from '@angular/core';
+import { Component, EventEmitter } from '@angular/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import {
@@ -112,6 +112,21 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
          */
         this.RecordSaved.subscribe(() => { void this.resolveDealState(); });
         this.RecordRefreshed.subscribe(() => { void this.resolveDealState(); });
+    }
+
+    /** Emits after {@link RefreshDealState}, so mounted panels re-check their own notices. */
+    public readonly DealStateRefreshed = new EventEmitter<void>();
+
+    /**
+     * Re-resolves the lock and the stale-amount notice after a deal save this form did not run (#271).
+     *
+     * The products panel saves the deal through `Record.Save(options)` to pull the order's new total
+     * into `Amount`, because `SaveRecord` takes no save options. That path raises no `RecordSaved`, so
+     * without this the notices stayed as they were before the product was added.
+     */
+    public async RefreshDealState(): Promise<void> {
+        await this.resolveDealState();
+        this.DealStateRefreshed.emit();
     }
 
     /** The lock and the amount warning, resolved together — they are read together. */
