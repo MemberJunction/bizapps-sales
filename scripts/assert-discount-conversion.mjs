@@ -165,5 +165,22 @@ ok('12.345 is stored at the precision that exists, not the one typed',
 refused('0.996 is refused, NOT rounded up into an accepted 1%', 0.996);
 refused('0.999 stays refused now that rounding exists',        0.999);
 
+/**
+ * THE REFUSAL NAMES THE PERCENT A REP WOULD TYPE. `0.07 * 100` is `7.000000000000001`; the
+ * message rounds at `DISCOUNT_PERCENT_DECIMALS` so it reads "7%". Each case is one that drifts
+ * unrounded, so a message built from the raw product fails here.
+ */
+function refusedSaying(label, percent, expectedPercent) {
+    const r = DiscountPercentToFraction(percent);
+    const reason = r.Ok === false ? r.Reason : '';
+    const pass = reason.includes(` ${expectedPercent}%`) && !/\d\.\d{3,}/.test(reason);
+    if (!pass) failures++;
+    console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${label}${pass ? '' : `  — got ${r.Ok ? 'ACCEPTED' : JSON.stringify(reason)}`}`);
+}
+console.log('\n  the refusal message names a rounded percent\n');
+refusedSaying('0.07 is explained as 7%, not 7.000000000000001%',    0.07, 7);
+refusedSaying('0.14 is explained as 14%, not 14.000000000000002%',  0.14, 14);
+refusedSaying('0.29 is explained as 29%, not 28.999999999999996%',  0.29, 29);
+
 console.log(`\n  ${failures === 0 ? 'discount-conversion: clean' : `discount-conversion: ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);
