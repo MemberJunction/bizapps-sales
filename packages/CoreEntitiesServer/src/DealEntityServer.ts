@@ -52,6 +52,7 @@ import {
 import { createHash } from 'node:crypto';
 
 import { RegisterClass } from '@memberjunction/global';
+import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 // ORDERS' OWN RULE, imported rather than restated. `CanTransition` is the same function
 // `OrderEntityServer.passesStatusTransition()` consults, so a refusal here and a refusal there cannot
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
@@ -566,6 +567,14 @@ export class DealEntityServer extends DealEntity {
          */
         if (!this._lockedAtSave && !(await this.isBornClosedWithoutOrder())) {
             this.provisionEmbeddedOrder();
+        }
+
+        /**
+         * After provisioning, for the same reason as the currency default: it reads the order the deal
+         * now has, and it may not refuse a save.
+         */
+        if (!this._lockedAtSave) {
+            await this.moveDraftOrderDateToToday();
         }
 
         /**
@@ -1953,6 +1962,7 @@ export class DealEntityServer extends DealEntity {
 
         if (!order.IsSaved) {
             order.Status = plan.Target;
+            this.stampBookingDate(plan.Target);
             return;
         }
 
@@ -1977,8 +1987,10 @@ export class DealEntityServer extends DealEntity {
 
         const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
         const scope = await provider.BeginEntityTransaction();
+        const orderDate = order.OrderDate;
         try {
             order.Status = plan.Target;
+            this.stampBookingDate(plan.Target);
             if (await order.Save()) {
                 await scope.Commit();
                 return;
@@ -1993,6 +2005,7 @@ export class DealEntityServer extends DealEntity {
             // Put the in-memory value back, or the deal's save graph will try to write the status the
             // database has just refused and take the whole save down with it.
             order.Status = from;
+            order.OrderDate = orderDate;
             this._orderStatusWarnings.push(
                 `The deal moved stage, but its order stayed ${from}: the move to ${plan.Target} was legal ` +
                 `but did not complete (${err instanceof Error ? err.message : String(err)}). The stage change was kept.`,
@@ -2001,6 +2014,73 @@ export class DealEntityServer extends DealEntity {
         }
     }
 
+
+    /**
+     * A move that BOOKS the order takes the deal's close date as the order date.
+     *
+     * Orders reads `OrderDate` as the purchase day for every subscription line without its own start,
+     * and freezes the header once the order is booked. The date was the day the deal was created, so a
+     * deal won months later booked its subscriptions from that day. `ActualCloseDate` is the business
+     * day the close stamped; nothing is written when the deal carries none.
+     */
+    private stampBookingDate(target: OrderStatus): void {
+        const order = this.OrderID_Object;
+        if (order && IsBooked(target) && this.ActualCloseDate) {
+            order.OrderDate = this.ActualCloseDate;
+        }
+    }
+
+    /**
+     * A DRAFT order's date follows the business day, so new lines default their term start to today,
+     * are priced as of today, and a later booking does not start from the day the deal was created.
+     *
+     * Only Draft: a quoted order's prices are as of the quote day, and moving its date could change
+     * prices a customer was already shown. The order is read only when it is not already in memory, and
+     * loaded only when its date has to move. A failure leaves the date as it was; it never refuses the
+     * save.
+     */
+    private async moveDraftOrderDateToToday(): Promise<void> {
+        if (!this.OrderID || this._orderJustProvisioned) {
+            return;
+        }
+        try {
+            await BusinessTimeZoneEngine.Instance.Config(
+                false, this.ContextCurrentUser, this.ProviderToUse as unknown as IMetadataProvider,
+            );
+            const today = BusinessTimeZoneEngine.Instance.Today(this.CompanyID ?? undefined);
+            const order = this.OrderID_Object ?? (await this.staleDraftOrder(today));
+            // Orders' status is its fixed lifecycle (CK_OrderHeader_Status), not a sales type table.
+            if (!order || order.Status !== 'Draft') { // vocabulary-grep-allow: orders' fixed lifecycle
+                return;
+            }
+            const day = ToCalendarDay(order.OrderDate);
+            if (day && day < today) {
+                order.OrderDate = FromCalendarDay(today);
+            }
+        } catch (err) {
+            LogError(`DealEntityServer: the draft order's date could not be moved to today: ${err}`);
+        }
+    }
+
+    /** The deal's order, loaded only when the row on disk is a Draft dated before `today`. */
+    private async staleDraftOrder(today: string) {
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await view.RunView<{ Status: string; OrderDate: Date | string | null }>(
+            {
+                EntityName: ORDER_HEADER_ENTITY,
+                ExtraFilter: `ID = '${this.OrderID}'`,
+                ResultType: 'simple',
+                Fields: ['Status', 'OrderDate'],
+            },
+            this.ContextCurrentUser,
+        );
+        const row = result.Success ? (result.Results ?? [])[0] : undefined;
+        const day = row ? ToCalendarDay(row.OrderDate) : null;
+        if (!row || row.Status !== 'Draft' || !day || day >= today) { // vocabulary-grep-allow: orders' fixed lifecycle
+            return null;
+        }
+        return this.OrderID_LoadObject();
+    }
 
     /**
      * Re-establishes `Deal.Amount` from the order, as a CACHE with honest provenance.
