@@ -445,10 +445,14 @@ button.kpi.kpi--on {
 .swatch--best { background: var(--mj-brand-tertiary); }
 .swatch--pipe { background: var(--mj-text-muted); }
 
+/*
+ * Columns stretch to the full .funnel height so each .funnel__plot gets a definite height; a bar's
+ * percentage height resolves against it. Labels take a fixed two lines so a long stage name cannot
+ * shrink its plot and lift its bar off the shared baseline.
+ */
 .funnel {
     display: flex;
     gap: 0.5rem;
-    align-items: flex-end;
     height: 10rem;
 }
 .funnel__col {
@@ -456,21 +460,46 @@ button.kpi.kpi--on {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    align-items: center;
     gap: 0.35rem;
 }
+.funnel__plot {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding-top: 1.25rem; /* room for the count above the tallest bar */
+}
 .funnel__bar {
+    position: relative;
     width: 100%;
     border-radius: 8px 8px 2px 2px;
     background: var(--mj-brand-primary);
     min-height: 8px;
 }
-.funnel__n { font-weight: 700; font-size: 0.85rem; }
+.funnel__n {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    margin-bottom: 0.2rem;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+}
 .funnel__lab {
+    flex: none;
+    height: 2.4em;
+    line-height: 1.2;
     font-size: 0.7rem;
     color: var(--mj-text-muted);
     text-align: center;
     overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
 }
 
 .queue {
