@@ -105,6 +105,21 @@ describe('cancelling the line dialog', () => {
         expect(e.Emitted).toEqual(['closed']);
     });
 
+    /**
+     * After a save that holds the dialog open on a discount notice, the line is saved: X and the scrim
+     * must report it as Done does, or the cards and the deal's Amount stay stale.
+     */
+    it('reports a save, not a close, once the line is saved and a notice is shown', () => {
+        const working = line(3);
+        const e = editor({ working });
+        e.Notice = 'The line is saved. Its discount is waiting for approval.';
+
+        e.Cancel();
+
+        expect(e.Emitted).toEqual(['saved']);
+        expect(working.Reverts, 'a saved line is never reverted').toBe(0);
+    });
+
     it('clears the discount reason typed for the cancelled edit', () => {
         const e = editor({ working: line(1) });
         e.DiscountCategory = 'Competitive' as typeof e.DiscountCategory;
