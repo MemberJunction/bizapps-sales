@@ -1703,8 +1703,14 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                  second route to describe, only a second door.
 
                                  A CLOSING STATUS, never a list of names: a deployment can rename Won,
-                                 and this one already has TWO losing statuses. -->
-                            @if (CurrentStatusIsClosing && !PendingReopenStatusID) {
+                                 and this one already has TWO losing statuses.
+
+                                 AN UNSAVED DEAL GETS ITS OWN HINT: it has no status yet, the server
+                                 gives it an open one on save, and the Close panel offers Close only
+                                 after that first save. -->
+                            @if (!Record.IsSaved) {
+                                <small class="mjs-field__hint">No status yet. The deal saves as open; close it after saving.</small>
+                            } @else if (CurrentStatusIsClosing && !PendingReopenStatusID) {
                                 <small class="mjs-field__hint">Closed. Pick an open status to reopen it, or use Reopen on the Close panel.</small>
                             } @else if (!CurrentStatusIsClosing) {
                                 <small class="mjs-field__hint">Open. Pick a closing status to close the deal, or use Close on the Close panel.</small>
