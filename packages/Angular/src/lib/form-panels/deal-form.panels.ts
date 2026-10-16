@@ -2561,10 +2561,8 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
     }
 
     /** The owner field's label, read from metadata like every other label. */
-    public get OwnerLabel(): string {
-        const info = this.Record?.EntityInfo?.Fields?.find((x) => x.Name === 'OwnerEmployeeID');
-        return info?.DisplayNameOrName ?? 'Owner';
-    }
+    /** "Owner", as the deal hero says. The column's own display name is "Owner Employee ID". */
+    public readonly OwnerLabel = 'Owner';
 
     /**
      * Records the new owner through the deal team, never by writing `OwnerEmployeeID`: `SetOwner` swaps

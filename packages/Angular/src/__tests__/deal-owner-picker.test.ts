@@ -55,6 +55,10 @@ describe('deal form: the owner picker', () => {
         expect(panel(dealStub(true), true).ShowsOwnerPicker({ name: 'CompanyID', type: 'textbox' })).toBe(false);
     });
 
+    it('labels the picker Owner, not the column name', () => {
+        expect(panel(dealStub(true), true).OwnerLabel).toBe('Owner');
+    });
+
     it('never makes the owner or company column itself editable', () => {
         const p = panel(dealStub(true), true);
         expect(p.FieldEditable('OwnerEmployeeID')).toBe(false);
