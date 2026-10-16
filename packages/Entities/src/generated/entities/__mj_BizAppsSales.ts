@@ -1624,12 +1624,12 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * SQL Data Type: nvarchar(255)`),
     OrganizationTypeID: z.string().nullable().describe(`
         * * Field Name: OrganizationTypeID
-        * * Display Name: Organization Type ID
+        * * Display Name: Organization Type
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Common: Organization Types (vwOrganizationTypes.null)`),
     ParentID: z.string().nullable().describe(`
         * * Field Name: ParentID
-        * * Display Name: Parent ID
+        * * Display Name: Parent Organization
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Common: Organizations (vwOrganizations.null)`),
     Website: z.string().nullable().describe(`
@@ -1666,7 +1666,7 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * SQL Data Type: nvarchar(50)`),
     OwnerEmployee: z.string().nullable().describe(`
         * * Field Name: OwnerEmployee
-        * * Display Name: Owner Employee
+        * * Display Name: Owner
         * * SQL Data Type: nvarchar(81)`),
     AccountType: z.string().nullable().describe(`
         * * Field Name: AccountType
@@ -1674,11 +1674,11 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * SQL Data Type: nvarchar(200)`),
     LifecycleStageType: z.string().nullable().describe(`
         * * Field Name: LifecycleStageType
-        * * Display Name: Lifecycle Stage Type
+        * * Display Name: Lifecycle Stage
         * * SQL Data Type: nvarchar(200)`),
     LeadSourceType: z.string().nullable().describe(`
         * * Field Name: LeadSourceType
-        * * Display Name: Lead Source Type
+        * * Display Name: Lead Source
         * * SQL Data Type: nvarchar(200)`),
     DefaultPrimaryContact: z.string().nullable().describe(`
         * * Field Name: DefaultPrimaryContact
@@ -1804,7 +1804,7 @@ export const mjBizAppsSalesSalesContactSchema = z.object({
         * * SQL Data Type: nvarchar(MAX)`),
     LinkedUserID: z.string().nullable().describe(`
         * * Field Name: LinkedUserID
-        * * Display Name: Linked User ID
+        * * Display Name: Linked User
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ: Users (vwUsers.null)`),
     Status: z.string().describe(`
@@ -1813,23 +1813,23 @@ export const mjBizAppsSalesSalesContactSchema = z.object({
         * * SQL Data Type: nvarchar(50)`),
     SeniorityLevelID: z.string().nullable().describe(`
         * * Field Name: SeniorityLevelID
-        * * Display Name: Seniority Level ID
+        * * Display Name: Seniority Level
         * * SQL Data Type: uniqueidentifier`),
     OwnerEmployee: z.string().nullable().describe(`
         * * Field Name: OwnerEmployee
-        * * Display Name: Owner Employee
+        * * Display Name: Owner
         * * SQL Data Type: nvarchar(81)`),
     LifecycleStageType: z.string().nullable().describe(`
         * * Field Name: LifecycleStageType
-        * * Display Name: Lifecycle Stage Type
+        * * Display Name: Lifecycle Stage
         * * SQL Data Type: nvarchar(200)`),
     BuyingRoleType: z.string().nullable().describe(`
         * * Field Name: BuyingRoleType
-        * * Display Name: Buying Role Type
+        * * Display Name: Buying Role
         * * SQL Data Type: nvarchar(200)`),
     LeadSourceType: z.string().nullable().describe(`
         * * Field Name: LeadSourceType
-        * * Display Name: Lead Source Type
+        * * Display Name: Lead Source
         * * SQL Data Type: nvarchar(200)`),
     DisplayNameAndEmail: z.string().describe(`
         * * Field Name: DisplayNameAndEmail
@@ -6192,7 +6192,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: OrganizationTypeID
-    * * Display Name: Organization Type ID
+    * * Display Name: Organization Type
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Common: Organization Types (vwOrganizationTypes.null)
     * * IS-A Source: Inherited from MJ_BizApps_Common: Organizations
@@ -6206,7 +6206,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: ParentID
-    * * Display Name: Parent ID
+    * * Display Name: Parent Organization
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Common: Organizations (vwOrganizations.null)
     * * IS-A Source: Inherited from MJ_BizApps_Common: Organizations
@@ -6324,7 +6324,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: OwnerEmployee
-    * * Display Name: Owner Employee
+    * * Display Name: Owner
     * * SQL Data Type: nvarchar(81)
     */
     get OwnerEmployee(): string | null {
@@ -6342,7 +6342,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: LifecycleStageType
-    * * Display Name: Lifecycle Stage Type
+    * * Display Name: Lifecycle Stage
     * * SQL Data Type: nvarchar(200)
     */
     get LifecycleStageType(): string | null {
@@ -6351,7 +6351,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: LeadSourceType
-    * * Display Name: Lead Source Type
+    * * Display Name: Lead Source
     * * SQL Data Type: nvarchar(200)
     */
     get LeadSourceType(): string | null {
@@ -6715,7 +6715,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: LinkedUserID
-    * * Display Name: Linked User ID
+    * * Display Name: Linked User
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ: Users (vwUsers.null)
     * * IS-A Source: Inherited from MJ_BizApps_Common: People
@@ -6742,7 +6742,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: SeniorityLevelID
-    * * Display Name: Seniority Level ID
+    * * Display Name: Seniority Level
     * * SQL Data Type: uniqueidentifier
     * * IS-A Source: Inherited from MJ_BizApps_Common: People
     */
@@ -6755,7 +6755,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: OwnerEmployee
-    * * Display Name: Owner Employee
+    * * Display Name: Owner
     * * SQL Data Type: nvarchar(81)
     */
     get OwnerEmployee(): string | null {
@@ -6764,7 +6764,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: LifecycleStageType
-    * * Display Name: Lifecycle Stage Type
+    * * Display Name: Lifecycle Stage
     * * SQL Data Type: nvarchar(200)
     */
     get LifecycleStageType(): string | null {
@@ -6773,7 +6773,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: BuyingRoleType
-    * * Display Name: Buying Role Type
+    * * Display Name: Buying Role
     * * SQL Data Type: nvarchar(200)
     */
     get BuyingRoleType(): string | null {
@@ -6782,7 +6782,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: LeadSourceType
-    * * Display Name: Lead Source Type
+    * * Display Name: Lead Source
     * * SQL Data Type: nvarchar(200)
     */
     get LeadSourceType(): string | null {

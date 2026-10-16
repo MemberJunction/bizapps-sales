@@ -1,0 +1,62 @@
+[
+  {
+    "_comments": [
+      "The Sales Contact form labelled fields from their column names. Same split as",
+      ".sales-account-field-labels.json: the contact's own foreign keys are relabelled on their name-field",
+      "rows; the inherited Person foreign keys (LinkedUserID, SeniorityLevelID) render their own DisplayName",
+      "and are relabelled directly."
+    ],
+    "fields": {
+      "DisplayName": "Owner",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=OwnerEmployee"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Lifecycle Stage",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=LifecycleStageType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Buying Role",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=BuyingRoleType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Lead Source",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=LeadSourceType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Linked User",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=LinkedUserID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Seniority Level",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=SeniorityLevelID"
+    }
+  }
+]

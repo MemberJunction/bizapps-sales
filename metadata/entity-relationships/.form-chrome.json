@@ -44,9 +44,11 @@
   },
   {
     "_comments": [
-      "What this person actually does on the deals they touch -- the buying-role join. First-class."
+      "What this person actually does on the deals they touch -- the buying-role join. First-class.",
+      "DisplayName: the section read \"Deal Contact Roles\", the table name."
     ],
     "fields": {
+      "DisplayName": "Buying roles",
       "Configuration": {
         "UI": {
           "inclusion": "Primary"
@@ -59,6 +61,26 @@
     "sync": {
       "lastModified": "2026-08-26T00:25:24.704Z",
       "checksum": "ffcadf6a38dea7ba00c49040ba5c94475c9266e21b9bc382278ef1da715e8086"
+    }
+  },
+  {
+    "_comments": [
+      "The section read \"Sales Accounts (Default Primary Contact ID)\", the entity",
+      "name plus the foreign key's column label. Named by the role this person plays on those accounts."
+    ],
+    "fields": {
+      "DisplayName": "Accounts (default primary contact)"
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=DefaultPrimaryContactID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Accounts (default billing contact)"
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=DefaultBillingContactID"
     }
   },
   {

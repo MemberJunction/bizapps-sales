@@ -297,8 +297,10 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
     // IsA CHILDREN whose Name lives on the parent and CodeGen generates no lookup join through
     // that edge. So they are loaded here and resolved client-side. This is the reason the
     // customer-context header exists as a lookup rather than a field on the deal.
+    // Filtered on the inherited Organization Status, the one the account form shows; the form hides
+    // SalesAccount.IsActive.
     Accounts: lookupRead<NamedRow>(
-        { EntityName: E_ACCOUNT, ExtraFilter: 'IsActive = 1', OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+        { EntityName: E_ACCOUNT, ExtraFilter: "Status = 'Active'", OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
         (rows, into) => {
             into.Accounts = rows.map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
         },
