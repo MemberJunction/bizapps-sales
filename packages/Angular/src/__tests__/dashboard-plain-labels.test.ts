@@ -77,7 +77,7 @@ describe('the Sales dashboard names no columns', () => {
     });
 
     it('the fiscal-year note is plain English for every basis', () => {
-        const bases: FiscalBasis[] = ['pending', 'profile', 'no-accounting', 'no-profiles', 'mixed'];
+        const bases: FiscalBasis[] = ['pending', 'profile', 'no-accounting', 'no-profiles', 'unreadable', 'mixed'];
         for (const Basis of bases) {
             expect(fieldNamesIn(DescribeFiscalBasis({ Start: CALENDAR_YEAR_START, Basis })), Basis).toEqual([]);
         }

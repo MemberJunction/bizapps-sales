@@ -723,7 +723,10 @@ logged at STATUS, not error, because logging it at error level would put a `cons
 dashboard load for those users and fail the keystone in exactly the way the guard exists to prevent. A
 THROW is caught for a different reason: the fiscal start has to resolve before the window can be
 computed, so this read is awaited ahead of the roster, the lookups and the summary, and an escaping
-rejection would abort the whole section over a value that has a documented fallback.
+rejection would abort the whole section over a value that has a documented fallback. Both fall back to the
+calendar year with the basis `unreadable`, which the selector words as "fiscal year start could not be
+read". They used to report `no-profiles`, which told a user without accounting access that no company
+profile sets a fiscal year.
 
 Second, the setting is per-company while the dashboard is not company-scoped: `Sales: Dashboard
 Summary` accepts a `CompanyID` the UI does not pass. **When active company profiles disagree about the
