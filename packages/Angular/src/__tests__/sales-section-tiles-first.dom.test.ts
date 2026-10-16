@@ -130,7 +130,7 @@ describe('while the lookups, win rate and view are still out', () => {
 
     it("does not overwrite a period's win rate picked meanwhile with the load's own", async () => {
         const firstWinRate = held<Record<string, unknown>[]>();
-        service.RunNamedQuery.mockReturnValueOnce(firstWinRate.promise).mockResolvedValue([
+        service.LoadWinRate.mockReturnValueOnce(firstWinRate.promise).mockResolvedValue([
             { ClosedCount: 4, WonCount: 3, WonAmount: 300, LostAmount: 100 },
         ]);
         const fixture = await mountFiguresOnly();

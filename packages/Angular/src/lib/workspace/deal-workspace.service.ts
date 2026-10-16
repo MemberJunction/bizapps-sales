@@ -561,21 +561,22 @@ export class DealWorkspaceService {
     }
 
     /**
-     * Run a published Sales MJ Query by name. Empty array on failure — the dashboard degrades a
-     * missing chart rather than taking the page down, and says so via the caller's empty state.
+     * The win rate rows for a period, from `Sales: Win Rate by Count and Value`.
+     *
+     * NULL means the query did not run, as with {@link LoadDashboardSummary}. An empty list means it
+     * ran and nothing closed; the card renders those two differently, so a failure does not read as
+     * "0 won / 0 closed".
      */
-    public async RunNamedQuery(
-        name: string,
-        parameters?: Record<string, string>,
-    ): Promise<Record<string, unknown>[]> {
+    public async LoadWinRate(window?: PeriodWindow): Promise<Record<string, unknown>[] | null> {
+        const parameters = PeriodParameters(window);
         const result = await new RunQuery().RunQuery({
-            QueryName: name,
+            QueryName: 'Sales: Win Rate by Count and Value',
             CategoryPath: 'Sales',
             ...(parameters ? { Parameters: parameters } : {}),
         });
         if (!result?.Success) {
-            LogError(`Sales query '${name}' failed - ${result?.ErrorMessage ?? 'unknown error'}`);
-            return [];
+            LogError(`Sales: Win Rate by Count and Value failed - ${result?.ErrorMessage ?? 'unknown error'}`);
+            return null;
         }
         return (result.Results ?? []) as Record<string, unknown>[];
     }
