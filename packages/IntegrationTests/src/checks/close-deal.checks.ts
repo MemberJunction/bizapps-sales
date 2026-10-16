@@ -104,7 +104,7 @@ async function openDeal(
     ctx: Ctx,
     f: SalesFixture,
     pipelineID: string,
-    stageID: string,
+    stageID: string | null,
     name: string,
     instalments: SeedInstalment[] = [],
 ): Promise<string> {
@@ -3205,6 +3205,61 @@ export const CloseDealChecks: NamedCheck[] = [
                     await again.Save(),
                     `with another won stage active, deactivating this one is allowed — ${again.LatestResult?.CompleteMessage ?? ''}`,
                 );
+            }),
+    },
+    {
+        Id: 'close-deal.CD40',
+        Name: 'CD40: a deal closed with NO stage reopens with no stage, its own probability and no forecast category',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The close moves a stageless deal into the outcome's stage, and its event records
+                 * `FromStageID` NULL. The reopen used to read that NULL as "nothing recorded" and leave the
+                 * deal Open in the winning stage at 100% with a "Closed" forecast category. It now puts the
+                 * deal back as it was: no stage, the probability it had (NULL here), no category.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const winning = await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsWon = 1');
+                Assert(!!winning, 'setup: the pipeline needs a stage declaring a WON status');
+
+                const dealID = await openDeal(ctx, f, f.OrderOnlyPolicyPipelineID, null, 'CD40 stageless close');
+                const before = await TxOne<{ PipelineStageID: string | null; Probability: number | null }>(
+                    ctx, `SELECT PipelineStageID, Probability FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(before.PipelineStageID === null, 'setup: the deal must have no stage');
+                Assert(before.Probability === null, 'setup: the deal must have no probability');
+
+                const closed = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(closed.Success, `setup: the won close failed — ${JSON.stringify(closed.Issues)}`);
+                const atClose = await TxOne<{ PipelineStageID: string | null }>(
+                    ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(atClose.PipelineStageID ?? '').toLowerCase(),
+                    String(winning!.ID).toLowerCase(),
+                    'setup: the close moved the stageless deal into the winning stage',
+                );
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD40: reopening a stageless close.' });
+                Assert(out.Success, `the reopen failed — ${JSON.stringify(out.Issues)}`);
+
+                const after = await TxOne<{
+                    PipelineStageID: string | null;
+                    Probability: number | null;
+                    ForecastCategoryTypeID: string | null;
+                    IsOpen: boolean;
+                }>(
+                    ctx,
+                    `SELECT d.PipelineStageID, d.Probability, d.ForecastCategoryTypeID, t.IsOpen
+                       FROM ${SALES_SCHEMA}.Deal d
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = d.DealStatusTypeID
+                      WHERE d.ID = '${dealID}'`,
+                );
+                Assert(after.IsOpen === true, 'the reopened deal is open');
+                AssertEqual(after.PipelineStageID, null, 'the reopened deal has no stage, as before the close');
+                AssertEqual(after.Probability, null, 'and the probability it had before the close, not 100');
+                AssertEqual(after.ForecastCategoryTypeID, null, 'and no forecast category, not "Closed"');
             }),
     },
 ];
