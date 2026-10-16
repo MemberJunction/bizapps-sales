@@ -307,8 +307,10 @@
               [Pipelines]="Pipelines"
               [Stages]="Stages"
               [DealStatusTypes]="DealStatusTypes"
+              [(SelectedCompanyID)]="BoardCompanyID"
+              [(SelectedPipelineID)]="BoardPipelineID"
               (DealOpened)="OpenDeal($event)"
-              (StageMoved)="Refresh()"></mjs-deal-board>
+              (StageMoved)="Refresh(true)"></mjs-deal-board>
           }
         </div>
 
