@@ -217,12 +217,12 @@
                   <div class="kpi">
                     <div class="l">By count</div>
                     <div class="v" data-testid="sales-winrate-count">{{ PeriodLoading || DetailLoading ? '…' : Pct(WinRateByCount) }}</div>
-                    <div class="f">{{ PeriodLoading || DetailLoading ? 'counting…' : WinWonCount + ' won / ' + WinClosedCount + ' closed' }}</div>
+                    <div class="f">{{ PeriodLoading || DetailLoading ? 'counting…' : WinRateUnavailable ? 'figures unavailable' : WinWonCount + ' won / ' + WinClosedCount + ' closed' }}</div>
                   </div>
                   <div class="kpi">
                     <div class="l">By value</div>
                     <div class="v">{{ PeriodLoading || DetailLoading ? '…' : Pct(WinRateByValue) }}</div>
-                    <div class="f" title="Amount won divided by the amount of all deals closed in the period, won or lost">won amount ÷ closed amount</div>
+                    <div class="f" title="Amount won divided by the amount of all deals closed in the period, won or lost">{{ WinRateUnavailable && !(PeriodLoading || DetailLoading) ? 'figures unavailable' : 'won amount ÷ closed amount' }}</div>
                   </div>
                 </div>
               </div>

@@ -111,7 +111,6 @@ import {
     DescribeFiscalBasis,
     FormatWindow,
     PERIOD_OPTIONS,
-    PeriodParameters,
     ResolvePeriod,
     type FiscalYearStartResolution,
     type PeriodKey,
@@ -247,6 +246,11 @@ export class MJSSalesSectionComponent implements OnInit {
     public WinRateByValue: number | null = null;
     public WinClosedCount = 0;
     public WinWonCount = 0;
+    /**
+     * The win rate query did not run. The card then shows "figures unavailable", as the tiles do,
+     * rather than "0 won / 0 closed", which reads as nothing having closed.
+     */
+    public WinRateUnavailable = false;
     public DealEntityInfo: EntityInfo | null = null;
     public InspectView: MJUserViewEntityExtended | null = null;
     public AllDealsView: MJUserViewEntityExtended | null = null;
@@ -402,7 +406,7 @@ export class MJSSalesSectionComponent implements OnInit {
             this.service.LoadLookups(SECTION_LOOKUP_KEYS),
             // The window reaches win rate through parameters the query ALREADY declared -- it filters
             // on ActualCloseDate, the same dimension the Won tile now uses, so the two cannot drift.
-            this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
+            this.service.LoadWinRate(window),
             // The grids' saved view, read once for both grids.
             this.DealEntityInfo ? LoadDealPipelineViewTemplate(this.DealEntityInfo) : Promise.resolve(null),
         ]);
@@ -430,7 +434,7 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** The second half of `load()`: what the board, the win rate and the grids read. */
     private async loadDetail(
-        detail: Promise<[DealWorkspaceLookups, Record<string, unknown>[], MJUserViewEntityExtended | null]>,
+        detail: Promise<[DealWorkspaceLookups, Record<string, unknown>[] | null, MJUserViewEntityExtended | null]>,
         period: PeriodKey,
     ): Promise<void> {
         const [lookups, winRate, pipelineView] = await detail;
@@ -565,7 +569,7 @@ export class MJSSalesSectionComponent implements OnInit {
             const window = this.Window;
             const [summary, winRate] = await Promise.all([
                 this.service.LoadDashboardSummary(window),
-                this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
+                this.service.LoadWinRate(window),
             ]);
             if (token !== this.periodToken) {
                 return;
@@ -587,10 +591,7 @@ export class MJSSalesSectionComponent implements OnInit {
              */
             if (token === this.periodToken) {
                 this.summary = null;
-                this.WinRateByCount = null;
-                this.WinRateByValue = null;
-                this.WinClosedCount = 0;
-                this.WinWonCount = 0;
+                this.applyWinRate(null);
                 LogError(`Sales: reporting period '${key}' failed to load - ${e instanceof Error ? e.message : String(e)}`);
             }
         } finally {
@@ -920,7 +921,16 @@ export class MJSSalesSectionComponent implements OnInit {
         return row.ForecastCategoryType || 'Pipeline';
     }
 
-    private applyWinRate(rows: Record<string, unknown>[]): void {
+    /** Null means the query did not run: every figure is cleared and the card says so. */
+    private applyWinRate(rows: Record<string, unknown>[] | null): void {
+        this.WinRateUnavailable = rows === null;
+        if (rows === null) {
+            this.WinClosedCount = 0;
+            this.WinWonCount = 0;
+            this.WinRateByCount = null;
+            this.WinRateByValue = null;
+            return;
+        }
         const num = (v: unknown): number => {
             const n = Number(v);
             return Number.isFinite(n) ? n : 0;

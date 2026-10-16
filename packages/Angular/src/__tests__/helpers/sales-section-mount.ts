@@ -32,7 +32,7 @@ export function stubService() {
         LoadRoster: vi.fn().mockResolvedValue([]),
         LoadLookups: vi.fn().mockResolvedValue({ Pipelines: [], Stages: [], DealStatusTypes: [] }),
         LoadDashboardSummary: vi.fn().mockResolvedValue(null),
-        RunNamedQuery: vi.fn().mockResolvedValue([]),
+        LoadWinRate: vi.fn().mockResolvedValue([]),
     };
 }
 
