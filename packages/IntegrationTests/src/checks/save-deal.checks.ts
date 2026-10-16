@@ -1958,9 +1958,26 @@ export const SaveDealChecks: NamedCheck[] = [
 
                 const created = await newDeal(ctx, f, (d) => { d.Name = 'SD35 a stage cannot close a deal'; });
                 await saveOk(created, 'create');
-                const before = await TxOne<{ DealStatusTypeID: string }>(
-                    ctx, `SELECT DealStatusTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
-                );
+                /**
+                 * The deal's own figures, read so the move can be shown to leave them alone. A closing
+                 * stage's probability, forecast category and order status describe a DECIDED deal; an
+                 * open deal that took them was counted as closed by the forecast, and the losing stage
+                 * voided its order.
+                 */
+                const figures = (id: string) =>
+                    TxOne<{
+                        DealStatusTypeID: string;
+                        Probability: number | null;
+                        ForecastCategoryTypeID: string | null;
+                        OrderStatus: string | null;
+                    }>(
+                        ctx,
+                        `SELECT d.DealStatusTypeID, d.Probability, d.ForecastCategoryTypeID, o.Status AS OrderStatus
+                           FROM ${SALES_SCHEMA}.Deal d
+                           LEFT JOIN __mj_BizAppsOrders.OrderHeader o ON o.ID = d.OrderID
+                          WHERE d.ID = '${id}'`,
+                    );
+                const before = await figures(created.ID);
 
                 // A PLAIN SAVE into the closing stage. Not a close — nobody called Sales.CloseDeal.
                 const moved = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
@@ -1982,6 +1999,15 @@ export const SaveDealChecks: NamedCheck[] = [
                     String(before.DealStatusTypeID).toLowerCase(),
                     'the STATUS is untouched — a stage may name the status a deal sits in, never close it',
                 );
+
+                const kept = await figures(created.ID);
+                AssertEqual(kept.Probability, before.Probability, 'the probability is the deal\'s own, not the closing stage\'s');
+                AssertEqual(
+                    String(kept.ForecastCategoryTypeID ?? '').toLowerCase(),
+                    String(before.ForecastCategoryTypeID ?? '').toLowerCase(),
+                    'the forecast category is the deal\'s own, not the closing stage\'s',
+                );
+                AssertEqual(kept.OrderStatus, before.OrderStatus, 'and the order was not moved by a stage the deal never closed into');
 
                 // And the deal is still editable, which is the observable consequence of not being closed.
                 const edit = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);

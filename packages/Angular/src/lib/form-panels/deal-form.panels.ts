@@ -52,6 +52,7 @@ import { MJSDealLineEditorComponent } from './deal-line-editor.component';
 import { MJSDealLineCardsComponent } from './deal-line-cards.component';
 import { BusinessDayOf, DealCloseDay } from './deal-close-day';
 import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
+import { SelectableStages } from '../data/selectable-stages';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -100,6 +101,8 @@ export type PipelineOption = CompanyPipeline;
  */
 export interface PipelineStageOption extends StageDefaults {
     PipelineID: string;
+    /** The status the stage points at, so the Stage list can leave out the stages a close puts a deal in. */
+    DealStatusTypeID?: string | null;
 }
 
 /**
@@ -169,12 +172,16 @@ async function LoadPipelineStages(): Promise<PipelineStageOption[]> {
     const result = await new RunView().RunView<{
         ID: string; Name: string; PipelineID: string;
         Probability: number | null; ForecastCategoryTypeID: string | null; ForecastCategoryType: string | null;
+        DealStatusTypeID: string | null;
     }>({
         EntityName: E_PIPELINE_STAGE,
         ExtraFilter: 'IsActive = 1',
         OrderBy: 'DisplayOrder ASC, Name ASC',
         ResultType: 'simple',
-        Fields: ['ID', 'Name', 'PipelineID', 'Probability', 'ForecastCategoryTypeID', 'ForecastCategoryType'],
+        Fields: [
+            'ID', 'Name', 'PipelineID', 'Probability', 'ForecastCategoryTypeID', 'ForecastCategoryType',
+            'DealStatusTypeID',
+        ],
     });
     if (!result?.Success) return [];
     return (result.Results ?? []).map((r) => ({
@@ -184,6 +191,7 @@ async function LoadPipelineStages(): Promise<PipelineStageOption[]> {
         Probability: r.Probability == null ? null : Number(r.Probability),
         ForecastCategoryTypeID: r.ForecastCategoryTypeID ?? null,
         ForecastCategoryType: r.ForecastCategoryType ?? null,
+        DealStatusTypeID: r.DealStatusTypeID ?? null,
     }));
 }
 
@@ -1909,12 +1917,16 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
      *
      * Empty until a pipeline is chosen, which is what keeps the control disabled on a new deal — the
      * workspace behaves the same way and it is the reason testers were told to use it instead.
+     *
+     * Stages whose status locks the deal are left out, as on the board: picking one left the deal open
+     * at a closing stage. Closing goes through the Close action. See `SelectableStages`.
      */
     public get StagesForCurrentPipeline(): PipelineStageOption[] {
         const pipelineID = this.Record?.PipelineID;
         if (!pipelineID) return [];
         const key = String(pipelineID).toLowerCase();
-        return this.stages().filter((s) => s.PipelineID.toLowerCase() === key);
+        const inPipeline = this.stages().filter((s) => s.PipelineID.toLowerCase() === key);
+        return SelectableStages(inPipeline, this.statuses(), this.Record?.PipelineStageID);
     }
 
     /** No pipeline, or a pipeline whose stages have not loaded, leaves nothing to pick from. */

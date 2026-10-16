@@ -126,6 +126,7 @@ import {
     PipelinesForCompany,
     type PipelineCompany,
 } from '../data/company-pipelines';
+import { SelectableStages } from '../data/selectable-stages';
 
 /**
  * The provider's remote-operation entry point, typed for the two calls this surface makes.
@@ -508,7 +509,7 @@ export class DealWorkspaceComponent implements OnInit {
         }
 
         // A stage from the previous pipeline is meaningless now.
-        const stages = this.StagesFor(pipelineID);
+        const stages = this.StagesFor(pipelineID, deal.PipelineStageID);
         if (!stages.some((s) => s.ID === deal.PipelineStageID)) {
             // The stage moves because the pipeline did; its probability and forecast category are the
             // server's to fill on save. See OnStageChange for why this no longer writes them.
@@ -520,11 +521,17 @@ export class DealWorkspaceComponent implements OnInit {
         void this.RefreshProducts();
     }
 
-    public StagesFor(pipelineID: string | null): StageLookup[] {
+    /**
+     * The pipeline's stages a rep may pick. Stages whose status locks the deal are left out, as on the
+     * board, except the deal's current stage; closing goes through the Close action. See
+     * `SelectableStages`.
+     */
+    public StagesFor(pipelineID: string | null, currentStageID: string | null = null): StageLookup[] {
         if (!pipelineID) {
             return [];
         }
-        return this.Lookups.Stages.filter((s) => s.PipelineID === pipelineID);
+        const inPipeline = this.Lookups.Stages.filter((s) => s.PipelineID === pipelineID);
+        return SelectableStages(inPipeline, this.Lookups.DealStatusTypes, currentStageID);
     }
 
     /**
