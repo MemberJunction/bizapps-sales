@@ -229,7 +229,7 @@
       "category, the LOST status, and Voided on entry so a lost deal's order stops being actionable."
     ],
     "fields": {
-      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.Code=D2C",
+      "PipelineID": "@lookup:MJ_BizApps_Sales: Pipelines.ID=90111111-0000-4000-A000-000000000002",
       "Name": "Lost",
       "Code": "LOST",
       "DisplayOrder": 40,

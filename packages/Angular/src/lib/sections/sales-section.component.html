@@ -140,9 +140,12 @@
                     <div class="funnel">
                       @for (col of Funnel; track col.Label) {
                         <div class="funnel__col">
-                          <div class="funnel__n">{{ col.Count }}</div>
-                          <div class="funnel__bar" [style.height]="FunnelHeight(col.Count)"></div>
-                          <div class="funnel__lab">{{ col.Label }}</div>
+                          <div class="funnel__plot">
+                            <div class="funnel__bar" [style.height]="FunnelHeight(col.Count)">
+                              <span class="funnel__n">{{ col.Count }}</span>
+                            </div>
+                          </div>
+                          <div class="funnel__lab" [title]="col.Label">{{ col.Label }}</div>
                         </div>
                       }
                     </div>
@@ -243,7 +246,8 @@
                   <mj-entity-viewer
                     [Entity]="DealEntityInfo"
                     [ViewEntity]="InspectView"
-                    (RecordOpened)="OnInspectOpened($event)">
+                    (RecordOpened)="OnInspectOpened($event)"
+                    (CreateRecordRequested)="StartPrimary()">
                   </mj-entity-viewer>
                 } @else {
                   <div class="empty">Deal entity metadata is not loaded.</div>
@@ -269,7 +273,8 @@
               <mj-entity-viewer
                 [Entity]="DealEntityInfo"
                 [ViewEntity]="AllDealsView"
-                (RecordOpened)="OnAllDealsOpened($event)">
+                (RecordOpened)="OnAllDealsOpened($event)"
+                (CreateRecordRequested)="StartPrimary()">
               </mj-entity-viewer>
             </div>
           } @else {
