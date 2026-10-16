@@ -1,5 +1,5 @@
 /**
- * @fileoverview `close-won-contract` — CT1 and CT4–CT9, against contracts' v2 schema.
+ * @fileoverview `close-won-contract` — CT1 and CT4–CT10, against contracts' v2 schema.
  *
  * ── HOW THIS BUNDLE GOT HERE, BECAUSE THE HISTORY IS THE ARGUMENT ───────────────────────────────
  *
@@ -40,7 +40,7 @@ import {
     type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 
-import { E_DEAL, InRolledBackTransaction, ProviderOf, ResolveSalesFixture, TxOne } from '../fixture.js';
+import { E_DEAL, InRolledBackTransaction, ProviderOf, ResolveSalesFixture, TxOne, type SalesCheck } from '../fixture.js';
 import { SeedDealOnPipeline } from './close-won-order.fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
@@ -162,7 +162,59 @@ function requireOrdersToo(): void {
     );
 }
 
-export const CloseWonContractChecks: NamedCheck[] = [
+/**
+ * Closes a seeded deal Won, reopens it and closes it Won again, asserting the second close reused the
+ * first close's contract (#278). Returns the contract and the deal's order, for the link half.
+ */
+async function closeReopenClose(ctx: Ctx): Promise<{ ContractID: string; OrderID: string }> {
+    const f = await ResolveSalesFixture(ctx);
+    const seeded = await SeedDealOnPipeline(ctx, f, {
+        PipelineID: f.ContractPolicyPipelineID,
+        StageID: f.ContractPolicyStageID,
+        CompanyID: f.PipelineCompanyID,
+        LineCount: 1,
+    });
+
+    const first = await closeDeal(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+    Assert(first.Success, `the first close failed: ${JSON.stringify(first.Issues)}`);
+    const firstRoute = first.Routing?.find((r) => r.Target === 'Contract');
+    Assert(firstRoute?.Executed === true, `the first close created no contract — reason: ${firstRoute?.Reason ?? '(no Contract route)'}`);
+    const before = await TxOne<{ ContractID: string | null; OrderID: string | null }>(
+        ctx, `SELECT ContractID, OrderID FROM __mj_BizAppsSales.Deal WHERE ID = '${seeded.DealID}'`,
+    );
+    Assert(!!before.ContractID, 'the first close stamped a contract on the deal');
+    Assert(!!before.OrderID, 'the deal carries its order');
+
+    const reopened = await reopenDeal(ctx, seeded.DealID);
+    Assert(reopened.Success, `the reopen failed: ${JSON.stringify(reopened.Issues)}`);
+
+    const second = await closeDeal(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+    Assert(second.Success, `the second close failed: ${JSON.stringify(second.Issues)}`);
+    const secondRoute = second.Routing?.find((r) => r.Target === 'Contract');
+    Assert(
+        secondRoute?.Executed === true,
+        `the second close did not reuse the contract — reason: ${secondRoute?.Reason ?? '(no Contract route)'}`,
+    );
+    AssertEqual(
+        String(secondRoute?.RecordID ?? '').toLowerCase(),
+        String(before.ContractID).toLowerCase(),
+        'the second close reports the contract the deal already named',
+    );
+
+    const after = await TxOne<{ ContractID: string | null }>(
+        ctx, `SELECT ContractID FROM __mj_BizAppsSales.Deal WHERE ID = '${seeded.DealID}'`,
+    );
+    AssertEqual(
+        String(after.ContractID ?? '').toLowerCase(),
+        String(before.ContractID).toLowerCase(),
+        'Deal.ContractID is unchanged by the second close',
+    );
+    const contracts = await rows(ctx, E_CONTRACT, `CreatingRecordID = '${seeded.DealID}'`);
+    AssertEqual(contracts.length, 1, 'the deal has exactly one contract after closing Won twice');
+    return { ContractID: String(before.ContractID), OrderID: String(before.OrderID) };
+}
+
+export const CloseWonContractChecks: SalesCheck[] = [
     {
         Id: 'close-won-contract.CT1',
         Name: 'CT1: the seam creates a contract, and CONTRACTS mints its number',
@@ -442,7 +494,7 @@ export const CloseWonContractChecks: NamedCheck[] = [
     },
     {
         Id: 'close-won-contract.CT9',
-        Name: 'CT9: close Won, reopen, close Won again — one contract, the same ContractID, one order link',
+        Name: 'CT9: close Won, reopen, close Won again — one contract, the same ContractID',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -452,69 +504,36 @@ export const CloseWonContractChecks: NamedCheck[] = [
                  * deal names.
                  *
                  * Contracts are counted by `CreatingRecordID` = this deal, never across the table, so the
-                 * check is about this deal's fixture alone. The order link is found by contract AND order,
-                 * which is the pair a duplicate would repeat.
+                 * check is about this deal's fixture alone. The order link is CT10's: it needs a contracts
+                 * build with order links, and this half does not.
+                 */
+                requireContracts();
+                requireOrdersToo();
+                await closeReopenClose(ctx);
+            }),
+    },
+    {
+        Id: 'close-won-contract.CT10',
+        Name: 'CT10: close Won, reopen, close Won again — the order is linked to the contract once',
+        RequiresMutation: true,
+        // Order links (Contract Orders) arrive in a contracts release newer than any installed today.
+        RequiresApp: 'contract-order-links',
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * #278's other half. The link is found by contract AND order, which is the pair a
+                 * duplicate would repeat. The runner leaves this check out where contracts has no order
+                 * links; the assertion below is for any other driver of the registry, which ignores
+                 * `RequiresApp` and must not pass here vacuously.
                  */
                 requireContracts();
                 requireOrdersToo();
                 Assert(
                     new Metadata().Entities.some((e) => e.Name === E_CONTRACT_ORDER),
-                    'this contracts build has no order links (Contract Orders), so the link half cannot be asserted',
+                    'this contracts build has no order links (Contract Orders), so the link cannot be asserted',
                 );
-                const f = await ResolveSalesFixture(ctx);
-                const seeded = await SeedDealOnPipeline(ctx, f, {
-                    PipelineID: f.ContractPolicyPipelineID,
-                    StageID: f.ContractPolicyStageID,
-                    CompanyID: f.PipelineCompanyID,
-                    LineCount: 1,
-                });
-
-                const first = await closeDeal(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
-                Assert(first.Success, `the first close failed: ${JSON.stringify(first.Issues)}`);
-                const firstRoute = first.Routing?.find((r) => r.Target === 'Contract');
-                Assert(
-                    firstRoute?.Executed === true,
-                    `the first close created no contract — reason: ${firstRoute?.Reason ?? '(no Contract route)'}`,
-                );
-                const before = await TxOne<{ ContractID: string | null; OrderID: string | null }>(
-                    ctx, `SELECT ContractID, OrderID FROM __mj_BizAppsSales.Deal WHERE ID = '${seeded.DealID}'`,
-                );
-                Assert(!!before.ContractID, 'the first close stamped a contract on the deal');
-                Assert(!!before.OrderID, 'the deal carries its order, so there is a link to count');
-
-                const reopened = await reopenDeal(ctx, seeded.DealID);
-                Assert(reopened.Success, `the reopen failed: ${JSON.stringify(reopened.Issues)}`);
-
-                const second = await closeDeal(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
-                Assert(second.Success, `the second close failed: ${JSON.stringify(second.Issues)}`);
-                const secondRoute = second.Routing?.find((r) => r.Target === 'Contract');
-                Assert(
-                    secondRoute?.Executed === true,
-                    `the second close did not reuse the contract — reason: ${secondRoute?.Reason ?? '(no Contract route)'}`,
-                );
-                AssertEqual(
-                    String(secondRoute?.RecordID ?? '').toLowerCase(),
-                    String(before.ContractID).toLowerCase(),
-                    'the second close reports the contract the deal already named',
-                );
-
-                const after = await TxOne<{ ContractID: string | null }>(
-                    ctx, `SELECT ContractID FROM __mj_BizAppsSales.Deal WHERE ID = '${seeded.DealID}'`,
-                );
-                AssertEqual(
-                    String(after.ContractID ?? '').toLowerCase(),
-                    String(before.ContractID).toLowerCase(),
-                    'Deal.ContractID is unchanged by the second close',
-                );
-
-                const contracts = await rows(ctx, E_CONTRACT, `CreatingRecordID = '${seeded.DealID}'`);
-                AssertEqual(contracts.length, 1, 'the deal has exactly one contract after closing Won twice');
-
-                const links = await rows(
-                    ctx,
-                    E_CONTRACT_ORDER,
-                    `ContractID = '${before.ContractID}' AND OrderID = '${before.OrderID}'`,
-                );
+                const { ContractID, OrderID } = await closeReopenClose(ctx);
+                const links = await rows(ctx, E_CONTRACT_ORDER, `ContractID = '${ContractID}' AND OrderID = '${OrderID}'`);
                 AssertEqual(links.length, 1, 'the order is linked to the contract once, not once per close');
             }),
     },

@@ -43,7 +43,7 @@
     "close-deal": { "count": 40, "requires": "orders", "ids": "CD1-CD40" },
     "product-picker": { "count": 5, "requires": "orders", "ids": "PP1-PP5" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
-    "close-won-contract": { "count": 7, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6, CT7, CT8, CT9 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild" },
+    "close-won-contract": { "count": 8, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6, CT7, CT8, CT9, CT10 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild; CT10 needs contract-order-links and is left out where contracts has none" },
     "board-move": { "count": 7, "requires": "orders", "ids": "BD1-BD7" },
     "pipeline-copy": { "count": 2, "requires": null, "ids": "PC1-PC2" },
     "$comment_close_won_tasks": [
@@ -75,6 +75,15 @@
     "orders": "@mj-biz-apps/orders-entities",
     "contracts": "@mj-biz-apps/contracts-entities",
     "tasks": "@mj-biz-apps/tasks-entities",
-    "common": "@mj-biz-apps/common-entities"
+    "common": "@mj-biz-apps/common-entities",
+    "contract-order-links": "@mj-biz-apps/contracts-entities"
+  },
+  "$comment_entities": [
+    "A FEATURE that arrives in a newer release of a sibling, judged by one entity rather than a schema",
+    "(scripts/app-presence.mjs). No bundle requires one; a single check names it in RequiresApp and is",
+    "left out, listed with the reason, on a host whose sibling predates it."
+  ],
+  "entities": {
+    "contract-order-links": "MJ_BizApps_Contracts: Contract Orders"
   }
 }

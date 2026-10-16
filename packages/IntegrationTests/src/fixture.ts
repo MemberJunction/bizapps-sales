@@ -38,8 +38,12 @@ import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-en
 
 export const SALES_SCHEMA = '__mj_BizAppsSales';
 
-/** A sibling app named in `scripts/expected-check-counts.json` (`probes` and `schemas`). */
-export type SiblingApp = 'orders' | 'contracts' | 'tasks' | 'common';
+/**
+ * A sibling app named in `scripts/expected-check-counts.json` (`probes` and `schemas`), or a feature of
+ * one that arrives in a newer release of it (`probes` and `entities`): `contract-order-links` is
+ * contracts' `Contract Orders` entity.
+ */
+export type SiblingApp = 'orders' | 'contracts' | 'tasks' | 'common' | 'contract-order-links';
 
 /**
  * A check that may need an app its bundle does not require.
