@@ -1,5 +1,63 @@
 # @mj-biz-apps/sales-ng
 
+## 6.16.0
+
+### Minor Changes
+
+- fc1f0aa: An open deal no longer reads "Closed" because someone typed a date into Actual Close Date (#252). Actual Close Date, Closed At and Closed By are now read-only on the deal form, and the deal save refuses a write to them except from `Sales.CloseDeal` and `Sales.ReopenDeal`. Expected Close Date moved from the Commercial panel to the Pipeline panel, next to stage and probability, and the header labels an open deal's date "Expected close". The close fields carry descriptions saying which date is which.
+- 5623093: Every company can have its own pipeline, and the pipeline pickers filter by company.
+
+  A deal sells as its pipeline's company, and the app seeds its pipelines on one placeholder company, so a deal for any other company had no pipeline with the current stages. The new `Sales.CopyDefaultPipelineToCompanies` Action copies the default pipeline (the one marked `IsDefault`) and all of its stages onto every company that has no pipeline with the same Code. Each company's copy saves in one transaction, the copies are not marked default, and a second run skips companies that already have the pipeline, so it can run again after a company is added.
+
+  The deal form, the deal workspace and the board gain a Company control that narrows the pipeline list to that company, with the default pipeline's company first. Choosing a company moves the deal to that company's first pipeline. Each pipeline option names its company, for example "B2B (Acme)". Within a company, its copy of the default pipeline comes first and legacy pipelines follow. The control is hidden when one company owns every pipeline.
+
+  The seeded stages now look up their pipeline by ID instead of by Code, because the copies share the Code and MetadataSync resolves a lookup to the first matching row.
+
+  `PipelineOption` (deal form) and `PipelineLookup` (workspace) now carry `Code`, `IsDefault` and `DisplayRank`.
+
+### Patch Changes
+
+- 93f25f4: A Sales Account now lists its contacts.
+
+  Sales Contacts carry no account column, and Common's Relationships panel is registered on Organizations only, so the Sales Account form showed Details and Deals and nobody who works there. A new Contacts panel on Sales Accounts lists the Sales Contacts on the other end of an active Common Relationship with the account, in either direction and of any relationship type. Rows open the contact. The panel has no New button: a contact created there would get no Relationship row and would not appear in the list it was added to.
+
+  The demo seed now links each demo contact to the account its deals are on (the partner rep is left unlinked), and its teardown removes those rows first.
+
+- 1738cb0: Choosing a deal's account fills its empty Primary and Billing Contact from the account's default contacts.
+
+  `DealEntity.FillContactsFromAccount()` reads the account's `DefaultPrimaryContactID` and `DefaultBillingContactID` and writes each into the deal only when the deal's own field is empty. The rep can still change or clear either. The account's billing default is written first, so it wins over the rule that copies a new Primary Contact into an empty Billing Contact; an account with no billing default leaves that rule to fill billing from the primary. If the account changes while the read is in flight, nothing is written.
+
+  The deal form (the Pipeline panel on a new deal, "Account & people" on a saved one) and the deal workspace both call it after the account changes. A failed read leaves the contacts as they were and says so.
+
+  The deal workspace's contact lists now label each person "Name (email)", the text the deal form's contact picker already shows, so two people with the same name can be told apart.
+
+- 6aabbcb: Deal "What's being sold" grid names its own columns, product first: Product, Quantity, Unit Price, Line Total. It no longer inherits Order Line's default view or a user's saved Order Line columns.
+- 8b881f2: A won deal's header now shows a Reversal chip for each return, cancellation or credit memo of its order, and a reversal order's header shows the deal of the order it reverses. Before, a returned order dropped off the deal and the reversal named no deal (MemberJunction/bizapps-orders#740).
+- 75976c4: The deal activity form's inputs and "Log it" button are visible again in both themes. The activity timeline, deal form, line editor and deal workspace styles used `--mj-*` names MemberJunction does not define, so those rules were dropped; they now use MJ's tokens, and a CI gate rejects any undefined `--mj-*` name.
+- 5ed3389: The deal form's Payment schedule grid lists instalments by payment date.
+
+  The grid asked for no sort, so instalments came back in storage order. It now sorts by payment date, then by Display Order within a date. Undated instalments ("on execution") list first on SQL Server and PostgreSQL alike, which put NULL dates at opposite ends when left to themselves. A rep can still re-sort by clicking a column header. The deal workspace's schedule tab keeps entry order.
+
+  The grid's default columns are now Payment Date, Amount and Description. With none set, it showed the first ten fields, including Deal ID and Display Order. Display Order stays available from the column chooser.
+
+- a5f7d31: The Sales dashboard labels its queues, cards and Inspect grid in plain English instead of column names, with the exact rule in a tooltip. "Commit this period" is now "Commit (open)", since it counts every open Commit deal whatever period is selected.
+- d1c125f: The Sales dashboard's tiles show as soon as the roster and summary land; the win rate, the inspect grid, All Deals and the board each show their own loading state until the rest of the section's reads arrive.
+- fc7de31: The Sales section reads the grids' saved view once per load, alongside its other reads, instead of twice in a row after them; inspect slice clicks no longer read it again.
+- a5da9d8: The deal form's Stage history grid shows names instead of IDs.
+
+  With no default columns set, the grid showed the first ten fields: the deal, stage, status and user IDs. Its default columns are now Changed At, From Stage, To Stage, From Deal Status Type, To Deal Status Type, Changed By User, Days In Previous Stage and Amount At Transition. The ID columns stay available from the column chooser.
+
+- e7ec35c: Deal form: after a saved deal moves to another stage, Probability and Forecast category show what the save will write from the stage, until the rep edits them. Display only; the server still applies the stage's defaults.
+- Updated dependencies [17ff470]
+- Updated dependencies [fc1f0aa]
+- Updated dependencies [3d02df4]
+- Updated dependencies [1738cb0]
+- Updated dependencies [2925963]
+- Updated dependencies [bcc41d7]
+- Updated dependencies [91e3f43]
+- Updated dependencies [a43114c]
+  - @mj-biz-apps/sales-entities@6.16.0
+
 ## 6.15.2
 
 ### Patch Changes
