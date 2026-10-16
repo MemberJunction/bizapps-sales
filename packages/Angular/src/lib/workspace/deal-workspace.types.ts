@@ -117,14 +117,3 @@ export const DEAL_WORKSPACE_PANES: readonly DealWorkspacePane[] = [
     { Key: 'terms', Label: 'Terms', Icon: 'fa-solid fa-file-contract' },
     { Key: 'variances', Label: 'Variances', Icon: 'fa-solid fa-pen-nib' },
 ] as const;
-
-/**
- * The standard terms, shown as PLACEHOLDER text and never written into a draft.
- *
- * These live on the contracts `ContractType`, not on a deal. A deal stores an OVERRIDE, and null means
- * "use the standard" — a different fact from "we agreed a number that happens to equal today's
- * standard", and the only one of the two that survives a later policy change. So the form displays
- * them to tell the AD what they are departing from, and sends null unless something was typed.
- */
-export const STANDARD_ANNUAL_INCREASE_PCT = 5;
-export const STANDARD_CANCELLATION_NOTICE_DAYS = 90;

@@ -109,8 +109,6 @@ import {
 import {
     DEAL_WORKSPACE_PANES,
     EmptyLookups,
-    STANDARD_ANNUAL_INCREASE_PCT,
-    STANDARD_CANCELLATION_NOTICE_DAYS,
     type DealStatusLookup,
     type DealLookup,
     type DealWorkspaceLookups,
@@ -239,8 +237,6 @@ export class DealWorkspaceComponent implements OnInit {
     public readonly ContactEntity = E_SALES_CONTACT;
 
     public readonly Panes: readonly DealWorkspacePane[] = DEAL_WORKSPACE_PANES;
-    public readonly StandardAnnualIncreasePct = STANDARD_ANNUAL_INCREASE_PCT;
-    public readonly StandardCancellationNoticeDays = STANDARD_CANCELLATION_NOTICE_DAYS;
 
     public Lookups: DealWorkspaceLookups = EmptyLookups();
 

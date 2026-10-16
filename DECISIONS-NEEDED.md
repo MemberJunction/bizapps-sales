@@ -733,10 +733,6 @@ those fields (always including `AutoRenew`, since the deal's checkbox is an answ
 default value itself, and a null override still means "use the standard". `close-won-contract.CT8`
 asserts both halves.
 
-The unmounted deal workspace still hardcodes placeholders for the same standards
-(`STANDARD_ANNUAL_INCREASE_PCT = 5` and `STANDARD_CANCELLATION_NOTICE_DAYS = 90` in
-`deal-workspace.types.ts`).
-
 ---
 
 ## D-10 · RESOLVED: contracts chooses the current template

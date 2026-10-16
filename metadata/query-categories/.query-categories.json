@@ -8,12 +8,14 @@
       "fails, and the ENTIRE push halts there rather than skipping the queries.",
       "",
       "Fixed UUID so a re-push against a rebuilt database updates this row rather than creating a",
-      "second 'Sales' category that half the queries point at."
+      "second 'Sales' category that half the queries point at.",
+      "",
+      "Former description, kept as the design note: BizApps Sales read models — the master plan §9 measures as parameterized MJ Queries. §9.5 requires these to be Queries rather than hand-rolled Angular aggregation, so Skip, the query builder and report snapshots can all reach them. Every query branches on behaviour FLAGS (IsWon, IsOpen, IncludeInCommit, IsOwnerRole) and never on a status, stage or role NAME."
     ],
     "fields": {
       "Name": "Sales",
       "ParentID": null,
-      "Description": "BizApps Sales read models — the master plan §9 measures as parameterized MJ Queries. §9.5 requires these to be Queries rather than hand-rolled Angular aggregation, so Skip, the query builder and report snapshots can all reach them. Every query branches on behaviour FLAGS (IsWon, IsOpen, IncludeInCommit, IsOwnerRole) and never on a status, stage or role NAME.",
+      "Description": "Queries behind the Sales dashboard, forecasts and reports.",
       "UserID": "@lookup:MJ: Users.Name=System"
     },
     "primaryKey": {

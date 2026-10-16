@@ -196,7 +196,7 @@ export interface SalesReopenDealOutput {
 // ============================================================
 /**
  * Close Deal
- * Close a deal into a target status, in ONE transaction: validate it is closeable, resolve the effective CloseWonPolicy (pipeline default + caller overrides), route lines to a contract and/or an order per that policy, append the DealStageEvent, stamp ActualCloseDate/ClosedAt/ClosedByUserID, and apply the close lock when the status carries LocksDeal. Routing is decided by the policy and by DealStatusType FLAGS — never by a pipeline or status NAME. Sales passes intent only; every figure is computed downstream by orders.
+ * Closes a deal into the chosen status in one step. It checks the deal can close, records the stage change and close details, follows the pipeline's close-won policy (contract and follow-up tasks), and locks the deal when the status locks.
  * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
  * under 'Sales.CloseDeal'. This generated base provides the typed contract only (client-safe).
  */
@@ -212,7 +212,7 @@ export class SalesCloseDealOperation extends BaseRemotableOperation<SalesCloseDe
 // ============================================================
 /**
  * Reopen Deal
- * Reopen a locked deal into a non-locking status, recording a mandatory reason. Appends a DealStageEvent, clears the close stamps, and releases the immutability enforced by DealEntityServer.Save(). The only sanctioned exit from the close lock (§7.3).
+ * Reopens a locked deal into a status that does not lock, with a required reason. It records the stage change, clears the close details and unlocks the deal.
  * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
  * under 'Sales.ReopenDeal'. This generated base provides the typed contract only (client-safe).
  */
