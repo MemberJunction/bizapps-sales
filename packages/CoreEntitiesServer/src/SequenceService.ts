@@ -57,7 +57,7 @@ export async function getNextDealNumber(contextUser: UserInfo, provider: IMetada
     );
     const value = rows?.[0]?.DealNumber;
     if (!value || typeof value !== 'string') {
-        throw new Error('SequenceService.getNextDealNumber: spAssignNextDealNumber returned no value');
+        throw new Error('A deal number could not be assigned: the deal number sequence returned nothing. Ask an administrator to check the deal number sequence (spAssignNextDealNumber).');
     }
     return value;
 }

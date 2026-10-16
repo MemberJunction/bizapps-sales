@@ -306,15 +306,15 @@ export class DealActivityTimelineComponent {
             const provider = Metadata.Provider;
             const client = this.actionClient(provider);
             if (!client) {
-                this.Error = 'Logging an activity needs a GraphQL connection, which this session does not have.';
+                this.Error = 'Activities cannot be logged from this page, because it is not connected to the server. Reload the page and try again.';
                 return;
             }
 
             const actionID = await this.logActivityActionID(provider);
             if (!actionID) {
                 this.Error =
-                    'The Log Activity action is not installed in this deployment. It is seeded from '
-                    + 'metadata/actions/; run `mj sync push --dir metadata`.';
+                    'The Log Activity action is not installed in this deployment. Ask an administrator to '
+                    + 'load the Sales app\'s metadata (run `mj sync push --dir metadata`).';
                 return;
             }
 

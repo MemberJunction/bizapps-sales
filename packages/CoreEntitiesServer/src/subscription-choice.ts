@@ -94,7 +94,7 @@ export async function AnswerAsNextTerm(entries: readonly UnansweredSubscriptionL
         Line.SubscriptionAction = 'ExtendExisting';
         if (!(await Line.Save())) {
             throw new Error(
-                `order line ${Line.LineNumber} could not be set to extend the existing subscription: ` +
+                `Order line ${Line.LineNumber} could not be set to extend the existing subscription: ` +
                     (Line.LatestResult?.CompleteMessage ?? 'unknown error'),
             );
         }
