@@ -39,7 +39,7 @@
     "both, because the interesting failure is a bundle that registers 4 and runs 0."
   ],
   "bundles": {
-    "save-deal": { "count": 37, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD41" },
+    "save-deal": { "count": 40, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD44" },
     "close-deal": { "count": 40, "requires": "orders", "ids": "CD1-CD40" },
     "product-picker": { "count": 5, "requires": "orders", "ids": "PP1-PP5" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },

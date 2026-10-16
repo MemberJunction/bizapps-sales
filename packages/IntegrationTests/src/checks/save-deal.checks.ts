@@ -55,7 +55,7 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
-import { OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
+import { DealEntityServer, OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
 import {
     E_ORDERS_PRODUCT,
     ProductFilterFor,
@@ -394,6 +394,76 @@ const idsOf = (rows: Record<string, unknown>[]): string =>
     rows.map((r) => String(r.ID).toLowerCase()).sort().join(',');
 
 const seqOf = (dealNumber: string): number => Number(dealNumber.replace(/^DEAL-/, ''));
+
+/* ── #319: a party changed after the order exists ──────────────────────────────────────────── */
+
+const ORDERS_SCHEMA = '__mj_BizAppsOrders';
+
+/** The deal's order bill-to and status, read inside the check's transaction. */
+interface OrderBillToRow extends Record<string, unknown> {
+    Status: string;
+    BillToPersonID: string | null;
+    BillToOrganizationID: string | null;
+}
+
+/**
+ * `count` distinct sales contacts. Any `SalesContact` id is a `Person` id (IsA), so each one is a value
+ * `OrderHeader.BillToPersonID` accepts. Discovered, never hardcoded, like every other fixture here.
+ */
+async function salesContacts(ctx: Parameters<NamedCheck['Fn']>[0], count: number): Promise<string[]> {
+    const r = await new RunView().RunView<{ ID: string }>(
+        { EntityName: 'MJ_BizApps_Sales: Sales Contacts', OrderBy: 'ID', MaxRows: count, ResultType: 'simple', Fields: ['ID'] },
+        ctx.User,
+    );
+    Assert(r.Success, `setup: reading sales contacts failed — ${r.ErrorMessage}`);
+    const ids = (r.Results ?? []).map((row) => row.ID);
+    Assert(ids.length >= count, `setup: this check needs ${count} SalesContact rows, found ${ids.length}. Re-seed.`);
+    return ids;
+}
+
+/** The deal's order, by the deal's own FK. */
+async function billToOf(ctx: Parameters<NamedCheck['Fn']>[0], dealID: string): Promise<OrderBillToRow & { ID: string }> {
+    return QueryOneRow<OrderBillToRow & { ID: string }>(
+        ctx,
+        `SELECT o.ID, o.Status, o.BillToPersonID, o.BillToOrganizationID
+           FROM ${ORDERS_SCHEMA}.OrderHeader o JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID
+          WHERE d.ID = '${dealID}'`,
+    );
+}
+
+/**
+ * A deal billed to `billing`, saved, with its order put in `status` — then the deal LOADED FRESH, the
+ * way a form save arrives: `OrderID_Object` is null, so the server has to reach the order by `OrderID`.
+ */
+async function dealWithOrderIn(
+    ctx: Parameters<NamedCheck['Fn']>[0],
+    f: SalesFixture,
+    name: string,
+    billing: string,
+    order: { Status: 'Draft' | 'Confirmed'; Booked: boolean },
+): Promise<{ deal: DealEntityServer; orderID: string }> {
+    const created = await newDeal(ctx, f, (d) => {
+        d.Name = name;
+        d.BillingContactID = billing;
+    });
+    await saveOk(created, 'create');
+    const orderID = (await billToOf(ctx, created.ID)).ID;
+    // Set outright rather than relying on the fixture stage's OrderStatusOnEntry, which a host may change.
+    await execSql(
+        ctx,
+        `UPDATE ${ORDERS_SCHEMA}.OrderHeader SET Status = '${order.Status}'` +
+            (order.Booked ? ', ConfirmedAt = SYSDATETIMEOFFSET()' : '') +
+            ` WHERE ID = '${orderID}'`,
+        `${name}: put the order in ${order.Status}`,
+    );
+    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+    Assert(await deal.Load(created.ID), 'the deal reloads');
+    if (!(deal instanceof DealEntityServer)) {
+        throw new Error('setup: the deal must resolve to DealEntityServer, or no server rule runs');
+    }
+    Assert(deal.OrderID_Object === null, 'setup: a freshly loaded deal must hold no order object, as on a form save');
+    return { deal, orderID };
+}
 
 export const SaveDealChecks: NamedCheck[] = [
     {
@@ -2317,6 +2387,96 @@ export const SaveDealChecks: NamedCheck[] = [
                     'the note from a REFUSED save must not land on a later, unrelated event — a '
                         + 'declaration governs ONE save',
                 );
+            }),
+    },
+    {
+        Id: 'save-deal.SD42',
+        Name: 'SD42: a Draft order\'s bill-to follows a changed billing contact, and keeps the account (#319)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * Provisioning stamps the bill-to once. Before #319, changing the billing contact after
+                 * the order existed left the order billing the old person. The organization must stay
+                 * the deal's account: newer orders builds clear an organization that is the replaced
+                 * person's employer unless the writer keeps it.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const [first, second] = await salesContacts(ctx, 2);
+                const { deal } = await dealWithOrderIn(ctx, f, 'SD42 bill-to follows', first, { Status: 'Draft', Booked: false });
+
+                deal.BillingContactID = second;
+                await saveOk(deal, 'the billing contact change');
+
+                const after = await billToOf(ctx, deal.ID);
+                AssertEqual(
+                    String(after.BillToPersonID).toLowerCase(),
+                    second.toLowerCase(),
+                    'the Draft order must bill the new billing contact',
+                );
+                AssertEqual(
+                    String(after.BillToOrganizationID).toLowerCase(),
+                    String(f.AccountID).toLowerCase(),
+                    'the bill-to organization must stay the deal\'s account',
+                );
+                AssertEqual(deal.OrderStatusWarnings.length, 0, `no warning expected — got ${deal.OrderStatusWarnings.join(' | ')}`);
+            }),
+    },
+    {
+        Id: 'save-deal.SD43',
+        Name: 'SD43: a Confirmed order\'s bill-to is left alone, and the deal save warns (#319)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                // Orders' IsEditable is false once booked, and its trigger refuses a bill-to change.
+                // The deal save must still succeed; the order not following is a warning.
+                const f = await ResolveSalesFixture(ctx);
+                const [first, second] = await salesContacts(ctx, 2);
+                const { deal } = await dealWithOrderIn(ctx, f, 'SD43 booked bill-to stays', first, { Status: 'Confirmed', Booked: true });
+
+                deal.BillingContactID = second;
+                await saveOk(deal, 'the billing contact change on a deal whose order is booked');
+
+                const after = await billToOf(ctx, deal.ID);
+                AssertEqual(after.Status, 'Confirmed', 'setup: the order must still be Confirmed');
+                AssertEqual(
+                    String(after.BillToPersonID).toLowerCase(),
+                    first.toLowerCase(),
+                    'a booked order must keep billing the previous contact',
+                );
+                Assert(
+                    deal.OrderStatusWarnings.some((w) => w.includes('Confirmed')),
+                    `the deal save must warn that the order did not follow — got ${JSON.stringify(deal.OrderStatusWarnings)}`,
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD44',
+        Name: 'SD44: a bill-to finance changed by hand survives a contact change on the deal (#319)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                // The order follows only a side that still bills the deal's PREVIOUS party. Anything
+                // else was put there on purpose, by someone working the order.
+                const f = await ResolveSalesFixture(ctx);
+                const [first, second, financePick] = await salesContacts(ctx, 3);
+                const { deal, orderID } = await dealWithOrderIn(ctx, f, 'SD44 finance bill-to survives', first, { Status: 'Draft', Booked: false });
+                await execSql(
+                    ctx,
+                    `UPDATE ${ORDERS_SCHEMA}.OrderHeader SET BillToPersonID = '${financePick}' WHERE ID = '${orderID}'`,
+                    'SD44: finance re-points the bill-to',
+                );
+
+                deal.BillingContactID = second;
+                await saveOk(deal, 'the billing contact change');
+
+                const after = await billToOf(ctx, deal.ID);
+                AssertEqual(
+                    String(after.BillToPersonID).toLowerCase(),
+                    financePick.toLowerCase(),
+                    'the bill-to finance chose must survive the deal\'s contact change',
+                );
+                AssertEqual(deal.OrderStatusWarnings.length, 0, `no warning expected — got ${deal.OrderStatusWarnings.join(' | ')}`);
             }),
     },
 ];
