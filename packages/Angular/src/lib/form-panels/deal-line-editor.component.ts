@@ -1325,12 +1325,24 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
      * attached to the order — and the next save of that order would try to write it. `Remove()` is the
      * collection's own withdrawal (never a splice), which is what the workspace uses for the same
      * reason.
+     *
+     * Cancelling an EXISTING line must undo its edit. `Working` is the live line in the order's
+     * collection, not a copy, and MJ rolls a dirty embedded line up into the deal's `Dirty`; left as
+     * it was, the deal's next save would write the cancelled values to the order. `Revert()` puts
+     * every field back to its last-saved value, which also covers a refused save followed by Cancel.
      */
     public Cancel(): void {
-        if (this.IsNewLine && this.Working) {
-            this.Deal?.OrderID_Object?.Lines.Remove(this.Working);
-            this.IsNewLine = false;
+        if (this.Working) {
+            if (this.IsNewLine) {
+                this.Deal?.OrderID_Object?.Lines.Remove(this.Working);
+                this.IsNewLine = false;
+            } else {
+                this.Working.Revert();
+            }
         }
+        this.DiscountCategory = null;
+        this.DiscountReason = '';
+        this.DiscountRefusal = null;
         this.Closed.emit();
     }
 }
