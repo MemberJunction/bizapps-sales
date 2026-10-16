@@ -1505,16 +1505,17 @@ export const CloseDealChecks: NamedCheck[] = [
                     'setup: a plain move into a closing stage must NOT have closed the deal (SD35)',
                 );
 
-                const orderBefore = await TxOne<{ Status: string }>(
-                    ctx,
-                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
-                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
-                );
-
                 // No ClosingStageID: the derivation resolves to the stage the deal is already in.
                 Assert(
                     (await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID })).Success,
                     'the status-only close must succeed',
+                );
+                // Read AFTER the close: the close applies its stage's order status even without a move,
+                // because the plain move into that stage no longer does. The reopen is what must not move it.
+                const orderBefore = await TxOne<{ Status: string }>(
+                    ctx,
+                    `SELECT o.Status FROM ${ORDERS_SCHEMA}.OrderHeader o
+                      JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID WHERE d.ID = '${dealID}'`,
                 );
                 const closed = await TxOne<{ PipelineStageID: string }>(
                     ctx, `SELECT PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
@@ -1545,7 +1546,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 AssertEqual(
                     String(orderAfter.Status),
                     String(orderBefore.Status),
-                    'and the order was never asked to move, because no stage was entered',
+                    'and the reopen never asked the order to move, because no stage was entered',
                 );
             }),
     },
@@ -2684,8 +2685,9 @@ export const CloseDealChecks: NamedCheck[] = [
                  * stage and the identical "nothing fires" becomes the D-OS1 violation:
                  *
                  *   1. `save-deal.SD35`: moving into a stage whose status locks does NOT close the
-                 *      deal, so it sits OPEN in the losing stage while `applyStageOrderStatus` voids
-                 *      the order on entry.
+                 *      deal, so it sits OPEN in the losing stage. `applyStageOrderStatus` used to void
+                 *      the order on entry; it no longer does, but deals parked that way remain, so the
+                 *      setup forces the voided order.
                  *   2. Closing Lost derives that same stage, so nothing moves and the close event
                  *      records `FromStageID === ToStageID`.
                  *   3. The reopen restores the stage the deal is already in.
@@ -2714,6 +2716,19 @@ export const CloseDealChecks: NamedCheck[] = [
                 const dealID = await openDeal(
                     ctx, f, f.ContractPolicyPipelineID, losing.ID, 'CD33 parked in the losing stage',
                 );
+                /**
+                 * A plain move no longer applies a closing stage's order status (SD35), so the voided
+                 * order a parked deal used to get is forced here. Deals parked before that rule still
+                 * carry one, and they are what the recovery is for.
+                 */
+                await TxExec(
+                    ctx,
+                    `UPDATE o SET o.Status = '${losing.OrderStatusOnEntry}'
+                       FROM ${ORDERS_SCHEMA}.OrderHeader o
+                       JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID
+                      WHERE d.ID = '${dealID}'`,
+                    'CD33: give the parked deal the order status its losing stage names',
+                );
 
                 const parked = await TxOne<{ IsOpen: boolean; Status: string }>(
                     ctx,
@@ -2730,7 +2745,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
                 Assert(
                     !IsEditable(String(parked.Status)),
-                    `setup: entering the losing stage must have voided the order — it is '${parked.Status}'`,
+                    `setup: the parked deal's order must be non-editable — it is '${parked.Status}'`,
                 );
 
                 // No ClosingStageID: the close derives the stage the deal is already in, so nothing moves.

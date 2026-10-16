@@ -177,9 +177,10 @@ interface OrderTotalRow {
     TotalGross: number | null;
 }
 
-/** The one column the stage lookup selects for the order rule. */
+/** What the stage lookup selects for the order rule: the status it names, and the stage's own status. */
 interface StageOrderStatusRow {
     OrderStatusOnEntry: string | null;
+    DealStatusTypeID: string | null;
 }
 
 /**
@@ -1552,6 +1553,16 @@ export class DealEntityServer extends DealEntity {
             // other direction closes deals nobody asked to close.
             if (status.Success && flags && flags.LocksDeal !== true) {
                 derivableStatusID = stageStatusID;
+            } else if (!(await this.closesIntoLockingStage())) {
+                /**
+                 * ── AND AN OPEN DEAL TAKES NONE OF A CLOSING STAGE'S FIGURES ───────────────────────
+                 *
+                 * Withholding only the status still left the deal Open at the stage's 0% or 100% and in
+                 * its "Closed" forecast category, so the forecast counted it as decided. A closing
+                 * stage's probability and category describe a decided deal; they belong to the close,
+                 * which sets its own. The deal keeps the figures it had.
+                 */
+                return null;
             }
         }
 
@@ -1746,7 +1757,13 @@ export class DealEntityServer extends DealEntity {
         if (!stageID) {
             return null;
         }
-        if (this.IsSaved && !this._orderJustProvisioned) {
+        /**
+         * A declared close asks even when the stage did not move. A deal already sitting in its closing
+         * stage no longer had that stage's order status applied on entry (see below), so the close is the
+         * one save left to apply it.
+         */
+        const closing = this._declaredTransition?.Kind === 'Close';
+        if (this.IsSaved && !this._orderJustProvisioned && !closing) {
             const previous = this.GetFieldByName('PipelineStageID')?.OldValue as string | null | undefined;
             if (previous && String(previous).toLowerCase() === String(stageID).toLowerCase()) {
                 return null;   // the stage did not move; the order is not this save's business
@@ -1771,7 +1788,7 @@ export class DealEntityServer extends DealEntity {
                 EntityName: STAGE_ENTITY,
                 ExtraFilter: `ID = '${stageID}'`,
                 ResultType: 'simple',
-                Fields: ['OrderStatusOnEntry'],
+                Fields: ['OrderStatusOnEntry', 'DealStatusTypeID'],
             },
             this.ContextCurrentUser,
         );
@@ -1785,11 +1802,43 @@ export class DealEntityServer extends DealEntity {
             return null;
         }
 
-        const target = (result.Results ?? [])[0]?.OrderStatusOnEntry;
+        const row = (result.Results ?? [])[0];
+        const target = row?.OrderStatusOnEntry;
         if (!target) {
             return null;   // this stage says nothing about the order. The common case.
         }
+
+        /**
+         * ── A CLOSING STAGE'S ORDER STATUS IS THE CLOSE'S TO APPLY ────────────────────────────────
+         *
+         * The losing stage names `Voided` and the winning one `Quoted`. Applied on a plain move, an
+         * open deal parked in the losing stage had its order voided while nothing closed it. Only a
+         * save that closes the deal into the stage applies it; an unreadable status counts as locking.
+         */
+        if (row.DealStatusTypeID) {
+            const flags = await this.readStatusLockFlags(row.DealStatusTypeID);
+            if (flags.LocksDeal && !(await this.closesIntoLockingStage())) {
+                return null;
+            }
+        }
         return { StageID: stageID, Target: target as OrderStatus };
+    }
+
+    /**
+     * Does this save close the deal into the stage it is entering? A declared close does, and so does a
+     * create whose own status locks (an importer bringing a deal that is already closed). Every other
+     * save that enters a stage whose status locks leaves the deal open, so it takes none of that stage's
+     * figures.
+     */
+    private async closesIntoLockingStage(): Promise<boolean> {
+        if (this._declaredTransition?.Kind === 'Close') {
+            return true;
+        }
+        if (this.IsSaved || !this.DealStatusTypeID) {
+            return false;
+        }
+        const flags = await this.readStatusLockFlags(this.DealStatusTypeID);
+        return flags.Read && flags.LocksDeal;
     }
 
 
@@ -1803,9 +1852,10 @@ export class DealEntityServer extends DealEntity {
      * declares, so a reopen that lands on the stage the deal is ALREADY in never consulted the
      * recovery at all.
      *
-     * That is not a hypothetical corner. `save-deal.SD35` makes it ordinary: a plain save or a board
-     * drag into the losing stage leaves the deal OPEN -- `planStageDefaults` refuses to derive a
-     * locking status -- while `applyStageOrderStatus` voids the order on entry. Closing Lost then
+     * That is not a hypothetical corner. A plain save or a board drag into the losing
+     * stage used to leave the deal OPEN -- `planStageDefaults` refuses to derive a locking status -- while
+     * `applyStageOrderStatus` voided the order on entry, and deals parked that way still exist. A plain
+     * move no longer voids the order (`planStageOrderStatus`), but closing Lost from there
      * derives that same stage, so nothing moves and the close event records
      * `FromStageID === ToStageID`. The reopen restores the stage the deal is already in, the gate
      * returns null, and the deal comes back OPEN pointing at a `Voided` order with `Issues` empty.
