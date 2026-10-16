@@ -39,6 +39,7 @@ import {
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 import { E_ORDERS_PRODUCT, PRODUCT_LOOKUP_FIELDS, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
+    CALENDAR_YEAR_START,
     PeriodParameters,
     ResolveFiscalYearStart,
     type FiscalYearStart,
@@ -863,7 +864,7 @@ export class DealWorkspaceService {
             });
         } catch (e) {
             LogStatus(`${E_ACCOUNTING_COMPANY_PROFILE} read threw, falling back to the calendar year - ${e instanceof Error ? e.message : String(e)}`);
-            return ResolveFiscalYearStart([]);
+            return { Start: CALENDAR_YEAR_START, Basis: 'unreadable' };
         }
         if (!result?.Success) {
             /**
@@ -876,12 +877,12 @@ export class DealWorkspaceService {
              * -- which `75-dashboard.spec.ts` fails on via `expectNoConsoleErrors`, and which is
              * exactly the breakage the guard was added to prevent (see {@link LoadProducts}).
              *
-             * A FAILED read is still not an absent app. Reporting it as 'no-profiles' would tell a
-             * reader to go and configure something that may already be configured, so it degrades the
-             * same way an unconfigured host does, and the line below is where it gets diagnosed.
+             * A FAILED read is still not an absent app, nor a host with no profiles. It falls back to
+             * the calendar year as 'unreadable', so the basis line says the start could not be read
+             * rather than telling the reader to configure something that may already be configured.
              */
             LogStatus(`${E_ACCOUNTING_COMPANY_PROFILE} read failed, falling back to the calendar year - ${result?.ErrorMessage ?? 'unknown error'}`);
-            return ResolveFiscalYearStart([]);
+            return { Start: CALENDAR_YEAR_START, Basis: 'unreadable' };
         }
 
         const rows = (result.Results ?? []) as unknown as Record<string, unknown>[];
