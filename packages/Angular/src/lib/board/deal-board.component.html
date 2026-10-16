@@ -178,7 +178,7 @@
                 </div>
 
                 <div class="db-card__foot">
-                  <span class="db-card__owner">{{ deal.OwnerEmployee ?? 'Unassigned' }}</span>
+                  <span class="db-card__owner">{{ deal.OwnerEmployee?.trim() || 'No owner' }}</span>
                   <span class="db-card__close">{{ DisplayDay(deal.ExpectedCloseDate) ? (DisplayDay(deal.ExpectedCloseDate) | date:'MMM d, y':'UTC') : 'No date' }}</span>
                 </div>
 
