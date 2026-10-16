@@ -1,0 +1,48 @@
+[
+  {
+    "_comments": [
+      "Pipeline Stages flagged only Name (in the baseline migration), so the grid showed",
+      "a single column. These add the order, probability, forecast category, deal status and whether the",
+      "stage is active. ForecastCategoryType and DealStatusType are the view's name fields, not the foreign",
+      "keys. The criteria and guidance text fields stay off: long text does not fit a grid column."
+    ],
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Pipeline Stages&Name=DisplayOrder"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Pipeline Stages&Name=Probability"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Pipeline Stages&Name=ForecastCategoryType"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Pipeline Stages&Name=DealStatusType"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Pipeline Stages&Name=IsActive"
+    }
+  }
+]
