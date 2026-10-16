@@ -96,11 +96,6 @@ function monthEnd(iso: string): string {
     return UtcDatePart(new Date(Date.UTC(y, m, 0)));
 }
 
-function nextMonthEnd(iso: string): string {
-    const [y, m] = iso.split('-').map(Number);
-    return UtcDatePart(new Date(Date.UTC(y, m + 1, 0)));
-}
-
 function amount(d: DealRosterRow): number {
     const n = Number(d.Amount);
     return Number.isFinite(n) ? n : 0;
@@ -131,7 +126,9 @@ export function FilterInspect(
 ): DealRosterRow[] {
     const weekEnd = addDays(today, 7);
     const restMonth = monthEnd(today);
-    const octEnd = nextMonthEnd(today);
+    // Later starts where the earlier buckets stop, so the buckets cover every open deal. Near month
+    // end the week runs past the month, and Later starts after the week instead.
+    const laterFrom = weekEnd > restMonth ? weekEnd : restMonth;
     switch (key) {
         case 'closing':
             return ClosingSoon(deals, 8);
@@ -163,7 +160,7 @@ export function FilterInspect(
             return deals.filter((d) => {
                 if (!d.IsOpen) return false;
                 if (!d.ExpectedCloseDate) return true;
-                return UtcDatePart(d.ExpectedCloseDate) > octEnd;
+                return UtcDatePart(d.ExpectedCloseDate) > laterFrom;
             });
         default:
             return ClosingSoon(deals, 8);
