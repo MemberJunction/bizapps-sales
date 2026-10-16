@@ -68,6 +68,31 @@ const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
 const E_ACCOUNTING_COMPANY_PROFILE = 'MJ_BizApps_Accounting: Accounting Company Profiles';
 
 /**
+ * Accounting's currencies, read for their three-letter codes. `Deal.CurrencyID` is a soft reference to
+ * this entity, so the roster carries an ID that only accounting can turn into "USD". Read, never
+ * written, and guarded on metadata like the profile above.
+ */
+const E_ACCOUNTING_CURRENCY = 'MJ_BizApps_Accounting: Currencies';
+
+/**
+ * What a figure is LABELLED as when no deal states a currency, or names one this host cannot resolve.
+ *
+ * A display default, not a fact about the money. It is here as one named constant rather than three
+ * hardcoded 'USD' literals so that the assumption is stated once, in a place a reader meets it.
+ */
+export const DEFAULT_DISPLAY_CURRENCY = 'USD';
+
+/**
+ * The currency code a roster row is shown in: the code `currencyID` names in `codes`, or the display
+ * default when the deal has none or names one this host cannot resolve (accounting not installed, or
+ * not readable by this user). `codes` is keyed by upper-cased ID, since SQL Server returns GUIDs upper
+ * case and the browser may hold either.
+ */
+export function CurrencyCodeFor(currencyID: string | null, codes: ReadonlyMap<string, string>): string {
+    return (currencyID && codes.get(currencyID.toUpperCase())) || DEFAULT_DISPLAY_CURRENCY;
+}
+
+/**
  * One row of the deal roster.
  *
  * `CustomerName` is resolved by this service, not read off the deal: `AccountID` points at an IsA child
@@ -157,12 +182,14 @@ export interface DealRosterRow {
     WeightedAmount: number | null;
     /** PipelineStage.DisplayOrder, for the funnel. */
     StageOrder: number | null;
-    /**
-     * The currency `Amount` is denominated in. NULL means UNKNOWN, not "the display default" -- it is
-     * unpopulated on every deal today. A consumer must not total a set containing more than one
-     * distinct value; the board refuses to.
-     */
+    /** The currency record `Amount` is denominated in; a soft reference to accounting's Currency. */
     CurrencyID: string | null;
+    /**
+     * `CurrencyID` as a three-letter code ("USD"), for display. Deals created before currencies were
+     * stamped carry no ID and read as the display default. A consumer must not total a set containing
+     * more than one distinct code; the board refuses to.
+     */
+    CurrencyCode: string;
 }
 
 /** Raw roster shape before the account name is joined in. */
@@ -478,11 +505,14 @@ export class DealWorkspaceService {
      * reason instead of an empty dashboard.
      */
     public async LoadRoster(closedSince?: string | null): Promise<DealRosterRow[]> {
-        const result = await new RunQuery().RunQuery({
-            QueryName: 'Sales: Deal Roster',
-            CategoryPath: 'Sales',
-            ...(closedSince ? { Parameters: { ClosedSince: closedSince } } : {}),
-        });
+        const [result, codes] = await Promise.all([
+            new RunQuery().RunQuery({
+                QueryName: 'Sales: Deal Roster',
+                CategoryPath: 'Sales',
+                ...(closedSince ? { Parameters: { ClosedSince: closedSince } } : {}),
+            }),
+            this.LoadCurrencyCodes(),
+        ]);
         if (!result?.Success) {
             throw new Error(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
         }
@@ -540,6 +570,7 @@ export class DealWorkspaceService {
             PipelineStageID: (d['PipelineStageID'] as string | null) ?? null,
             PipelineIncludeInForecast: bool(d['PipelineIncludeInForecast']),
             CurrencyID: (d['CurrencyID'] as string | null) ?? null,
+            CurrencyCode: CurrencyCodeFor((d['CurrencyID'] as string | null) ?? null, codes),
             IsOpen: bool(d['IsOpen']),
             IsWon: bool(d['IsWon']),
             IsLost: bool(d['IsLost']),
@@ -550,6 +581,50 @@ export class DealWorkspaceService {
             WeightedAmount: num(d['WeightedAmount']),
             StageOrder: num(d['StageOrder']),
         }));
+    }
+
+    /** Accounting's currency codes by upper-cased ID, read once per session. See `LoadCurrencyCodes`. */
+    private currencyCodes: Promise<Map<string, string>> | null = null;
+
+    /**
+     * Accounting's currency codes, keyed by upper-cased ID. Read once and cached: currencies are a
+     * short reference list that changes rarely.
+     *
+     * Read here rather than joined in `deal-roster.sql`, because sales must load on a host without
+     * accounting, and a join to accounting's table would make the roster query fail there. Empty when
+     * accounting is not installed or the read fails, so every deal reads as the display default; a
+     * failed read is not cached, so the next roster load tries again.
+     */
+    public LoadCurrencyCodes(): Promise<Map<string, string>> {
+        if (!this.currencyCodes) {
+            this.currencyCodes = this.readCurrencyCodes();
+        }
+        return this.currencyCodes;
+    }
+
+    private async readCurrencyCodes(): Promise<Map<string, string>> {
+        // Everything inside the try, the metadata check included: a label lookup must never take the
+        // roster down with it.
+        try {
+            if (!new Metadata().Entities.some((e) => e.Name === E_ACCOUNTING_CURRENCY)) {
+                return new Map();
+            }
+            const result = await new RunView().RunView<{ ID: string; Code: string }>({
+                EntityName: E_ACCOUNTING_CURRENCY,
+                ResultType: 'simple',
+                Fields: ['ID', 'Code'],
+            });
+            if (result?.Success) {
+                return new Map((result.Results ?? []).map((c) => [String(c.ID).toUpperCase(), String(c.Code).trim()]));
+            }
+            // At status, not error: a rep without accounting permissions is an ordinary deployment.
+            // See LoadFiscalYearStart.
+            LogStatus(`${E_ACCOUNTING_CURRENCY} read failed, showing ${DEFAULT_DISPLAY_CURRENCY} - ${result?.ErrorMessage ?? 'unknown error'}`);
+        } catch (e) {
+            LogStatus(`${E_ACCOUNTING_CURRENCY} read threw, showing ${DEFAULT_DISPLAY_CURRENCY} - ${e instanceof Error ? e.message : String(e)}`);
+        }
+        this.currencyCodes = null;
+        return new Map();
     }
 
     /**
