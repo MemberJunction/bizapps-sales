@@ -95,7 +95,7 @@
             <div class="card">
               <div class="ch">
                 Forecast stack
-                <span class="r" title="Each open deal is counted once, in its highest forecast category: Commit, then Best Case, then the rest of the pipeline.">{{ StackClosedNote }}</span>
+                <span class="r" title="Each open deal is counted once, in its highest forecast category: Commit, then Best Case, then the rest of the pipeline. Deals in a category left out of the pipeline (Omitted) are not shown.">{{ StackClosedNote }}</span>
               </div>
               <div class="stack-pad">
                 @if (Stack.Total <= 0) {
@@ -116,7 +116,7 @@
                     }
                     @if (Stack.PipeOnly > 0) {
                       <span class="stack__seg stack__seg--pipe" [style.width]="StackPct(Stack.PipeOnly)"
-                            (click)="SetInspect('pipe')" title="Pipeline remainder">{{ Money(Stack.PipeOnly) }}</span>
+                            (click)="SetInspect('remainder')" title="Pipeline remainder">{{ Money(Stack.PipeOnly) }}</span>
                     }
                   </div>
                   <div class="legend">

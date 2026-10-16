@@ -60,6 +60,7 @@ const rv = await new RunView().RunViews(
                 'ID', 'DealNumber', 'Name', 'AccountID', 'Amount', 'AmountIsComputed', 'Probability',
                 'ExpectedCloseDate', 'Pipeline', 'PipelineStage', 'DealType', 'DealStatusType',
                 'OwnerEmployee', 'ForecastCategoryType', 'DealStatusTypeID', 'PipelineID', 'PipelineStageID',
+                'ForecastCategoryTypeID',
             ],
         },
         {
@@ -67,11 +68,25 @@ const rv = await new RunView().RunViews(
             ResultType: 'simple',
             Fields: ['ID', 'IsOpen', 'IsWon', 'IsLost', 'IsClosed'],
         },
+        {
+            EntityName: 'MJ_BizApps_Sales: Forecast Category Types',
+            ResultType: 'simple',
+            Fields: ['ID', 'IncludeInPipeline'],
+        },
     ],
     user,
 );
 const deals = rv?.[0]?.Results ?? [];
 const statuses = rv?.[1]?.Results ?? [];
+const categories = rv?.[2]?.Results ?? [];
+
+// An open deal counts toward the pipeline money unless its forecast category leaves it out (Omitted).
+// No category counts, as the dashboard's `InPipeline` and the summary query treat it.
+const inPipeline = (row) => {
+    if (!row.ForecastCategoryTypeID) return true;
+    const c = categories.find((x) => String(x.ID).toLowerCase() === String(row.ForecastCategoryTypeID).toLowerCase());
+    return c ? c.IncludeInPipeline !== false : true;
+};
 
 // `hasFlag`, verbatim in behaviour: resolve the status row by ID, read the flag, default false.
 const hasFlag = (row, flag) => {
@@ -93,6 +108,7 @@ const todayBusiness = (
 const utcDatePart = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
 
 const open = deals.filter((d) => hasFlag(d, 'IsOpen'));
+const openPipeline = open.filter(inPipeline);
 const won = deals.filter((d) => hasFlag(d, 'IsWon'));
 /**
  * ── PAST DUE, NOT "SLIPPED" — the naming matters and it used to collide ─────────────────────────
@@ -111,7 +127,7 @@ const pastDue = deals.filter(
     (d) => hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate && utcDatePart(d.ExpectedCloseDate) < todayBusiness,
 );
 const client = {
-    OpenAmount: open.reduce((sum, d) => sum + (d.Amount ?? 0), 0),
+    OpenAmount: openPipeline.reduce((sum, d) => sum + (d.Amount ?? 0), 0),
     /**
      * THE PRICED/STATED SPLIT, WHICH ONLY BECAME TESTABLE ONCE THE DATA CHANGED.
      *
@@ -123,9 +139,10 @@ const client = {
      * That is the same lesson Slipped Deals taught -- a check is only as good as the data it was
      * given -- applied before it costs anything rather than after.
      */
-    OpenPricedAmount: open.filter((d) => d.AmountIsComputed === true).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
-    OpenStatedAmount: open.filter((d) => d.AmountIsComputed !== true).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
+    OpenPricedAmount: openPipeline.filter((d) => d.AmountIsComputed === true).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
+    OpenStatedAmount: openPipeline.filter((d) => d.AmountIsComputed !== true).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
     OpenCount: open.length,
+    OpenOmittedCount: open.length - openPipeline.length,
     TotalCount: deals.length,
     PastExpectedCloseCount: pastDue.length,
     WonCount: won.length,
@@ -142,6 +159,7 @@ const server = q.Results?.[0] ?? {};
 
 record('Open pipeline amount', client.OpenAmount, Number(server.OpenAmount ?? 0));
 record('Open deal count', client.OpenCount, Number(server.OpenCount ?? 0));
+record('Open deals left out of the pipeline', client.OpenOmittedCount, Number(server.OpenOmittedCount ?? 0));
 record('Total deal count', client.TotalCount, Number(server.TotalCount ?? 0));
 record('Past expected close', client.PastExpectedCloseCount, Number(server.PastExpectedCloseCount ?? 0));
 record('Won count', client.WonCount, Number(server.WonCount ?? 0));

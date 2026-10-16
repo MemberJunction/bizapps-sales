@@ -30,6 +30,7 @@ export function RosterRow(overrides: Partial<DealRosterRow>): DealRosterRow {
         IsPastExpectedClose: false,
         IncludeInCommit: false,
         IncludeInBestCase: false,
+        IncludeInPipeline: true,
         WeightedAmount: null,
         StageOrder: null,
         CurrencyID: null,

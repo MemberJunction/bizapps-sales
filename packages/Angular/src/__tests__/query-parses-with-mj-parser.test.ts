@@ -49,10 +49,10 @@ beforeAll(async () => {
 const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
     'deal-cycle-time.sql': { tables: ['vwDeals', 'DealStatusType', 'DealStageEvent', 'closed', 'ranked'], columns: 10 },
     'won-deals-order-not-confirmed.sql': { tables: ['vwDeals', 'DealStatusType', 'won', 'vwOrderHeaders'], columns: 18 },
-    'dashboard-summary.sql': { tables: ['Deal', 'DealStatusType', 'Pipeline'], columns: 10 },
+    'dashboard-summary.sql': { tables: ['Deal', 'DealStatusType', 'Pipeline', 'ForecastCategoryType'], columns: 11 },
     'deal-roster.sql': {
         tables: ['vwDeals', 'DealStatusType', 'Pipeline', 'PipelineStage', 'ForecastCategoryType'],
-        columns: 39,
+        columns: 40,
     },
     'slippage.sql': { tables: ['RecordChange', 'Entity', 'slips', 'vwDeals', 'DealStatusType'], columns: 17 },
     'stage-conversion-and-dwell.sql': { tables: ['DealStageEvent', 'Deal', 'Pipeline', 'PipelineStage'], columns: 16 },

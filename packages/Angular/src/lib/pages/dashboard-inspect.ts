@@ -74,11 +74,33 @@ export function WonInPeriod(d: DealRosterRow, window?: PeriodWindow): boolean {
     return WithinWindow(UtcDatePart(d.ActualCloseDate), window);
 }
 
+/**
+ * Whether an open deal counts toward the pipeline: its forecast category does not leave it out
+ * (`ForecastCategoryType.IncludeInPipeline`). Omitted deals stay open and stay in the open count, but
+ * the pipeline money figures leave them out, as the forecast queries and the snapshot do.
+ * `dashboard-summary.sql` applies the same rule to the Open pipeline tile.
+ */
+export function InPipeline(d: DealRosterRow): boolean {
+    return d.IsOpen && d.IncludeInPipeline;
+}
+
+/**
+ * The forecast stack's Remainder: pipeline deals in neither Commit nor Best Case.
+ *
+ * {@link ForecastSlices} totals the segment with it and {@link FilterInspect}'s `remainder` case
+ * lists the deals behind it, so the segment and its drill-down count the same deals.
+ */
+export function InRemainder(d: DealRosterRow): boolean {
+    return InPipeline(d) && !d.IncludeInCommit && !d.IncludeInBestCase;
+}
+
 export type InspectKey =
     | 'closing'
     | 'commit'
     | 'best'
     | 'pipe'
+    | 'open'
+    | 'remainder'
     | 'slipped'
     | 'noowner'
     | 'won'
@@ -137,7 +159,11 @@ export function FilterInspect(
         case 'best':
             return deals.filter((d) => d.IsOpen && d.IncludeInBestCase);
         case 'pipe':
+            return deals.filter(InPipeline);
+        case 'open':
             return deals.filter((d) => d.IsOpen);
+        case 'remainder':
+            return deals.filter(InRemainder);
         case 'slipped':
             return deals.filter((d) => d.IsPastExpectedClose);
         case 'noowner':
@@ -175,7 +201,7 @@ export interface ForecastSlice {
 }
 
 /**
- * Incremental slices of the CUMULATIVE forecast flags.
+ * Incremental slices of the CUMULATIVE forecast flags, over the deals {@link InPipeline} keeps.
  *
  * Commit ⊂ Best Case ⊂ Pipeline, so adding the three query columns is meaningless. The bar is
  * Closed (won) + Commit + (BestCase − Commit) + (open remainder).
@@ -212,10 +238,10 @@ export function ForecastSlices(deals: readonly DealRosterRow[], window?: PeriodW
             if (WonInPeriod(d, window)) {
                 Closed += amt;
             }
-        } else if (d.IsOpen) {
+        } else if (InPipeline(d)) {
             if (d.IncludeInCommit) Commit += amt;
             else if (d.IncludeInBestCase) BestOnly += amt;
-            else PipeOnly += amt;
+            else if (InRemainder(d)) PipeOnly += amt;
         }
     }
     return { Closed, Commit, BestOnly, PipeOnly };
@@ -285,5 +311,5 @@ export function OwnerCoverage(deals: readonly DealRosterRow[]): OwnerBar[] {
 }
 
 export function WeightedOpen(deals: readonly DealRosterRow[]): number {
-    return deals.filter((d) => d.IsOpen).reduce((n, d) => n + (Number(d.WeightedAmount) || 0), 0);
+    return deals.filter(InPipeline).reduce((n, d) => n + (Number(d.WeightedAmount) || 0), 0);
 }
