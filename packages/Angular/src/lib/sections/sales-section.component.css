@@ -292,11 +292,6 @@
     white-space: nowrap;
 }
 
-/* A deal past its expected close: marked on the row, so it is findable by scanning. */
-.wl tbody tr.slipped td:first-child {
-    box-shadow: inset 3px 0 0 0 var(--mj-status-warning);
-}
-
 /* ── Pills, chips, flags ───────────────────────────────────────────────────── */
 
 .pill {
