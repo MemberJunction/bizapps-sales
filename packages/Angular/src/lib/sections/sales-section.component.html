@@ -140,9 +140,12 @@
                     <div class="funnel">
                       @for (col of Funnel; track col.Label) {
                         <div class="funnel__col">
-                          <div class="funnel__n">{{ col.Count }}</div>
-                          <div class="funnel__bar" [style.height]="FunnelHeight(col.Count)"></div>
-                          <div class="funnel__lab">{{ col.Label }}</div>
+                          <div class="funnel__plot">
+                            <div class="funnel__bar" [style.height]="FunnelHeight(col.Count)">
+                              <span class="funnel__n">{{ col.Count }}</span>
+                            </div>
+                          </div>
+                          <div class="funnel__lab" [title]="col.Label">{{ col.Label }}</div>
                         </div>
                       }
                     </div>
