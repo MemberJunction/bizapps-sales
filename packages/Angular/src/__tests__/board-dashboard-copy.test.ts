@@ -105,3 +105,22 @@ describe('the dashboard labels an ownerless deal the way the deal form does', ()
         ]);
     });
 });
+
+describe('the board card labels an ownerless deal the way the deal form does', () => {
+    /** The card footer's owner interpolation, so a word in a comment cannot satisfy the test. */
+    const owner = BOARD.match(/class="db-card__owner">\{\{([\s\S]*?)\}\}<\/span>/);
+
+    it('says "No owner", not "Unassigned"', () => {
+        expect(owner, 'the card must still render an owner span').not.toBeNull();
+        expect(owner![1]).toContain("'No owner'");
+        expect(BOARD).not.toContain('Unassigned');
+    });
+
+    it('treats a blank owner as no owner, matching the dashboard', () => {
+        // The template expression is plain JS here: an optional call and a fallback.
+        const render = new Function('deal', `return (${owner![1]});`) as (deal: Partial<DealRosterRow>) => string;
+        expect(render({ OwnerEmployee: null })).toBe('No owner');
+        expect(render({ OwnerEmployee: '   ' })).toBe('No owner');
+        expect(render({ OwnerEmployee: 'Dana Reyes' })).toBe('Dana Reyes');
+    });
+});
