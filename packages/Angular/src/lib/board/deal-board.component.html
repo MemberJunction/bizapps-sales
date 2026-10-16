@@ -52,6 +52,7 @@
         <section
           class="db-col"
           [class.db-col--closing]="column.IsClosing"
+          [attr.data-closing]="column.IsClosing ? column.Label : null"
           [attr.aria-label]="column.Label">
 
           <header class="db-col__head">

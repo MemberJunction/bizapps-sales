@@ -40,7 +40,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop';
-import { CommonModule } from '@angular/common';
+import { CommonModule, DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
     ChangeDetectorRef,
@@ -96,6 +96,31 @@ export function CardClosed(deal: CardDates): boolean {
 /** The day a card shows: the close day once the deal has closed, otherwise the expected close day. */
 export function CardCloseDay(deal: CardDates): Date | null {
     return DisplayDay(CardClosed(deal) ? deal.ActualCloseDate : deal.ExpectedCloseDate);
+}
+
+/**
+ * The closing column a drag was released over, or null (#305).
+ *
+ * `CanDropInto` keeps a card out of a closing column, so CDK reports the drop on the last column that
+ * accepted the card — usually its own, which looks like "nothing changed". The pointer position is the
+ * only trace of where the rep let go, so the column under it is read from the DOM: closing columns
+ * carry their label in `data-closing`. A release inside the reporting column is an ordinary drop.
+ */
+export function ClosingColumnUnder(
+    event: Pick<CdkDragDrop<unknown>, 'isPointerOverContainer' | 'dropPoint'>,
+    doc: Pick<Document, 'elementFromPoint'>,
+): string | null {
+    if (event.isPointerOverContainer) {
+        return null;
+    }
+    const under = doc.elementFromPoint(event.dropPoint.x, event.dropPoint.y);
+    return under?.closest('[data-closing]')?.getAttribute('data-closing') ?? null;
+}
+
+/** What the board says when a card is let go over a closing column. */
+export function ClosingRefusal(columnLabel: string): string {
+    return `"${columnLabel}" closes and locks a deal, so a card cannot be moved there. Close it from the `
+        + 'deal form, so the win or loss is recorded deliberately.';
 }
 
 /**
@@ -174,6 +199,7 @@ export interface BoardColumn {
 export class DealBoardComponent {
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
+    private readonly document = inject(DOCUMENT);
 
     /** The roster, owned by the section so the board and the list cannot disagree about what exists. */
     @Input() public Deals: DealRosterRow[] = [];
@@ -394,14 +420,20 @@ export class DealBoardComponent {
         if (!deal) {
             return;
         }
+        // Checked before the same-stage return: a refused drag comes back to the card's own column (or to
+        // a column it crossed on the way), and without this it snapped back with no word said.
+        const closing = ClosingColumnUnder(event, this.document);
+        if (closing !== null) {
+            this.Message = ClosingRefusal(closing);
+            this.cdr.detectChanges();
+            return;
+        }
         if (deal.PipelineStageID === target.StageID) {
             return;
         }
         if (target.IsClosing) {
             // Belt and braces: `CanDropInto` already refuses this, but a lock is worth two guards.
-            this.Message =
-                `"${target.Label}" closes and locks a deal. Open it in the workspace and close it there, ` +
-                'so the win or loss is recorded deliberately.';
+            this.Message = ClosingRefusal(target.Label);
             this.cdr.detectChanges();
             return;
         }
