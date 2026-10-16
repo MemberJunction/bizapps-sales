@@ -147,7 +147,7 @@ describe('the header is part of item 3, not just the panels', () => {
     });
 });
 
-describe("item 1's form half: the lines grid stops offering New on a locked deal", () => {
+describe("item 1's form half: the lines stop offering Add on a locked deal", () => {
     const PANELS = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
     /**
      * COMMENTS STRIPPED. The first version of the last assertion below read the getter's own doc
@@ -166,27 +166,21 @@ describe("item 1's form half: the lines grid stops offering New on a locked deal
     );
 
     /**
-     * SUPERSEDED BY golive#229, AND THE REQUIREMENT UNDERNEATH IT IS UNCHANGED.
-     *
-     * #206 asked that a locked deal stop offering New, and the binding was `[ShowNewButton]="!IsLocked"`.
-     * #229 turned the grid's New off for EVERY deal, because it opened the generic Order Line form where
-     * a rep could type a unit price -- so the old assertion now describes a binding that is deliberately
-     * gone, and asserting it would demand the defect back.
-     *
-     * What #206 actually protects is that A LOCKED DEAL OFFERS NO WAY TO ADD A LINE. That is now carried
-     * by the panel's own Add button, so the check moves there rather than being dropped: the grid's New
-     * is off unconditionally, and the one remaining affordance is gated on the lock.
+     * What #206 protects is that A LOCKED DEAL OFFERS NO WAY TO ADD A LINE. The lines are cards now,
+     * not a grid with a New button (golive#229), and the cards' own Add control is the one route in:
+     * the panel hands them the lock, and they render Add only when it is off.
      */
     it('offers no way to add a line to a locked deal', () => {
-        expect(linesPanel).toMatch(/\[ShowNewButton\]="false"/);
-        // The panel's own Add button is the only remaining route in, and it is hidden when locked.
-        expect(linesPanel).toMatch(/@if \(!IsLocked\)/);
-        expect(linesPanel).toMatch(/\(click\)="AddLine\(\)"/);
+        expect(linesPanel).not.toMatch(/<mj-explorer-entity-data-grid/);
+        expect(linesPanel).toMatch(/\[Locked\]="IsLocked"/);
+        expect(linesPanel).toMatch(/\(Add\)="AddLine\(\)"/);
+        const cards = readFileSync(new URL('../lib/form-panels/deal-line-cards.component.ts', import.meta.url), 'utf8');
+        const add = cards.indexOf('data-testid="lines-add"');
+        expect(cards.lastIndexOf('@if (!Locked) {', add), 'Add must sit under a not-locked gate').toBeGreaterThan(-1);
     });
 
-    it('does NOT bind delete, which would start showing it on open deals', () => {
-        // ShowDeleteButton defaults to false, so the toolbar never offers delete on any deal. Binding
-        // it to !IsLocked would turn it ON for every open deal -- the opposite of what #206 asks.
+    it('offers no delete on the lines, open deal or closed', () => {
+        // Removing a line goes through the restricted editor, never a list-level delete.
         expect(linesPanel).not.toMatch(/\[ShowDeleteButton\]/);
     });
 
