@@ -58,3 +58,36 @@ describe('a won deal with only ClosedAt falls back to its business day', () => {
         expect(sql).not.toMatch(/CAST\(d\.ClosedAt AS DATE\)/i);
     });
 });
+
+/**
+ * #289: a DATETIMEOFFSET column compared to a date-only period parameter put each bound at UTC
+ * midnight, so an evening (Central) event on the last day of the window fell out and one from the
+ * evening before it fell in. Each bound is now judged on the column's business day, beside a padded
+ * UTC range that is there only so an index can narrow the scan.
+ */
+const PERIOD_BOUNDS: { file: string; column: string; bounds: string[] }[] = [
+    { file: 'slippage.sql', column: 'rc.ChangedAt', bounds: ['PeriodStart', 'PeriodEnd'] },
+    { file: 'stage-conversion-and-dwell.sql', column: 'e.ChangedAt', bounds: ['PeriodStart', 'PeriodEnd'] },
+    { file: 'forecast-history.sql', column: 'fs.CapturedAt', bounds: ['CapturedOnOrBefore'] },
+];
+
+const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+describe('timestamp period filters are judged on the business day', () => {
+    for (const { file, column, bounds } of PERIOD_BOUNDS) {
+        it(`${file} filters ${column} by fnBusinessDayOf(), never against a bare date`, () => {
+            const sql = sqlOf(file);
+            const col = escape(column);
+            for (const bound of bounds) {
+                const op = bound === 'PeriodStart' ? '>=' : '<=';
+                expect(sql).toMatch(
+                    new RegExp(`\\[__mj_BizAppsCommon\\]\\.\\[fnBusinessDayOf\\]\\(${col}\\) ${op} \\{\\{ ${bound} \\| sqlString \\}\\}`),
+                );
+            }
+            // The UTC column compared straight to a date parameter is the bug itself.
+            expect(sql).not.toMatch(new RegExp(`${col}\\s*<=\\s*\\{\\{`));
+            expect(sql).not.toMatch(new RegExp(`${col}\\s*>=\\s*\\{\\{`));
+            expect(sql).not.toMatch(/AT TIME ZONE/i);
+        });
+    }
+});
