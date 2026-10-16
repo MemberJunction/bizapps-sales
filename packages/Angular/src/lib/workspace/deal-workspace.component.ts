@@ -103,6 +103,7 @@ import {
     ProjectValidation,
     type DealWorkspaceIssue,
     type DealWorkspaceSection,
+    type DealWorkspaceSeverity,
     type DealWorkspaceValidation,
 } from './deal-workspace.validation';
 import {
@@ -114,8 +115,17 @@ import {
     type DealLookup,
     type DealWorkspaceLookups,
     type DealWorkspacePane,
+    type PipelineLookup,
     type StageLookup,
 } from './deal-workspace.types';
+import {
+    CompanyLabel,
+    InitialCompanyID,
+    PipelineCompanies,
+    PipelineLabel,
+    PipelinesForCompany,
+    type PipelineCompany,
+} from '../data/company-pipelines';
 
 /**
  * The provider's remote-operation entry point, typed for the two calls this surface makes.
@@ -171,6 +181,11 @@ type DealDateField = 'ExecutionDate' | 'StartDate' | 'ExpectedCloseDate' | 'Next
  * what lets `IsFieldEditable` gate the create button with the same rule that gates the picker itself.
  */
 export type DealRelatedTarget = 'AccountID' | 'PrimaryContactID';
+
+/** The server's severity, kept as-is; anything unrecognised is treated as an error so it cannot pass unseen. */
+function toWorkspaceSeverity(severity: string): DealWorkspaceSeverity {
+    return severity === 'warning' || severity === 'info' ? severity : 'error';
+}
 
 @Component({
     standalone: true,
@@ -557,6 +572,25 @@ export class DealWorkspaceComponent implements OnInit {
             return;
         }
         this.Touch();
+    }
+
+    /**
+     * Records the chosen account, then fills the deal's empty contacts from the account's defaults
+     * (#254). The rule and the read are `DealEntity.FillContactsFromAccount`, which the deal form calls
+     * too. A failed read leaves the contacts as they were and says so; the account stays chosen.
+     */
+    public async OnAccountChange(deal: DealEntity): Promise<void> {
+        this.Touch();
+        try {
+            const filled = await deal.FillContactsFromAccount();
+            if (filled.length > 0) {
+                this.Touch();
+                this.cdr.detectChanges();
+            }
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            this.Fail(`The account's default contacts were not filled in: ${reason}`);
+        }
     }
 
     // ── Related records: the account and the contacts ──────────────────────────
@@ -1271,6 +1305,37 @@ export class DealWorkspaceComponent implements OnInit {
         return this.Lookups.Accounts.find((a) => a.ID === id)?.Name ?? '(unknown account)';
     }
 
+    /* ── Company filter over the pipeline list (#327) ───────────────────────── */
+
+    /** Every company that owns a pipeline, default company first. */
+    public get PipelineCompanyOptions(): PipelineCompany[] {
+        return PipelineCompanies(this.Lookups.Pipelines);
+    }
+
+    /** The deal's pipeline's company, else the default company. Derived: the pipeline says it. */
+    public SelectedCompanyIDFor(deal: DealEntity): string | null {
+        return InitialCompanyID(this.Lookups.Pipelines, deal.PipelineID ?? null);
+    }
+
+    /** The selected company's pipelines, in picker order. */
+    public PipelinesFor(deal: DealEntity): PipelineLookup[] {
+        return PipelinesForCompany(this.Lookups.Pipelines, this.SelectedCompanyIDFor(deal));
+    }
+
+    /** Moves the deal to the company's first pipeline, through the same path a pipeline pick takes. */
+    public SelectCompany(deal: DealEntity, companyID: string | null): void {
+        const first = PipelinesForCompany(this.Lookups.Pipelines, companyID)[0];
+        if (first) this.SelectPipeline(deal, first.ID);
+    }
+
+    public PipelineText(pipeline: PipelineLookup): string {
+        return PipelineLabel(pipeline);
+    }
+
+    public CompanyText(company: PipelineCompany): string {
+        return CompanyLabel(company);
+    }
+
     public get CompanyName(): string | null {
         const id = this.Deal?.PipelineID;
         return this.Lookups.Pipelines.find((p) => p.ID === id)?.CompanyName ?? null;
@@ -1620,7 +1685,7 @@ export class DealWorkspaceComponent implements OnInit {
         const advisories = issues.map<DealWorkspaceIssue>((i) => ({
             Section: this.toPaneSection(i.Section),
             Field: i.Field ?? null,
-            Severity: i.Severity === 'warning' ? 'warning' : 'error',
+            Severity: toWorkspaceSeverity(i.Severity),
             Message: i.Message,
             RowIndex: null,
         }));
@@ -1634,7 +1699,7 @@ export class DealWorkspaceComponent implements OnInit {
         const mapped = issues.map<DealWorkspaceIssue>((i) => ({
             Section: this.toPaneSection(i.Section),
             Field: i.Field ?? null,
-            Severity: i.Severity === 'warning' ? 'warning' : 'error',
+            Severity: toWorkspaceSeverity(i.Severity),
             Message: i.Message,
             RowIndex: null,
         }));

@@ -169,23 +169,23 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
                 font-size: 0.9375rem; color: var(--mj-text-primary);
             }
             .dat__add, .dat__save, .dat__cancel {
-                border: 1px solid var(--mj-border-color); border-radius: 4px;
-                background: var(--mj-surface-raised); color: var(--mj-text-primary);
+                border: 1px solid var(--mj-border-default); border-radius: 4px;
+                background: var(--mj-bg-surface); color: var(--mj-text-primary);
                 padding: 5px 11px; font-size: 0.8125rem; cursor: pointer;
             }
-            .dat__save { background: var(--mj-accent-primary); color: var(--mj-text-inverse); border-color: transparent; }
+            .dat__save { background: var(--mj-brand-primary); color: var(--mj-brand-on-primary); border-color: var(--mj-brand-primary); }
             .dat__add:disabled, .dat__save:disabled, .dat__cancel:disabled { opacity: 0.55; cursor: default; }
             .dat__form {
                 display: flex; flex-wrap: wrap; gap: 10px;
-                border: 1px solid var(--mj-border-color); border-radius: 4px;
-                padding: 12px; background: var(--mj-surface-sunken);
+                border: 1px solid var(--mj-border-default); border-radius: 4px;
+                padding: 12px; background: var(--mj-bg-surface-sunken);
             }
             .dat__field { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; flex: 1 1 160px; }
             .dat__field--wide { flex: 1 1 100%; }
             .dat__field span { color: var(--mj-text-secondary); }
             .dat__field input, .dat__field select, .dat__field textarea {
-                border: 1px solid var(--mj-border-color); border-radius: 3px;
-                background: var(--mj-surface-raised); color: var(--mj-text-primary);
+                border: 1px solid var(--mj-border-default); border-radius: 3px;
+                background: var(--mj-bg-surface); color: var(--mj-text-primary);
                 padding: 5px 7px; font: inherit; font-size: 0.8125rem;
             }
             .dat__actions { display: flex; gap: 8px; flex: 1 1 100%; }
@@ -194,7 +194,7 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
             .dat__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
             .dat__item {
                 display: flex; gap: 12px;
-                border-left: 2px solid var(--mj-border-color); padding-left: 12px;
+                border-left: 2px solid var(--mj-border-default); padding-left: 12px;
             }
             .dat__when {
                 flex: 0 0 auto; font-size: 0.75rem; color: var(--mj-text-muted);
@@ -204,7 +204,7 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
             .dat__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
             .dat__type { font-size: 0.75rem; color: var(--mj-text-secondary); text-transform: uppercase; letter-spacing: 0.06em; }
             .dat__badge { font-size: 0.6875rem; color: var(--mj-text-muted); display: inline-flex; align-items: center; gap: 4px; }
-            .dat__badge--sync { color: var(--mj-accent-primary); }
+            .dat__badge--sync { color: var(--mj-brand-primary); }
             .dat__subject { font-size: 0.875rem; color: var(--mj-text-primary); }
             .dat__notes { margin: 0; font-size: 0.8125rem; color: var(--mj-text-secondary); white-space: pre-wrap; }
         `,

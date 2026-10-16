@@ -24,6 +24,8 @@ import {
 import { LoadCaptureForecastSnapshotAction } from './custom/forecast-snapshot.action.js';
 import { LoadLogActivityAction } from './custom/log-activity.action.js';
 import { LoadDetectWonDealsWithUnconfirmedOrdersAction } from './custom/won-deal-order-detector.action.js';
+import { LoadRelinkWonDealOrdersToContractsAction } from './custom/contract-order-relink.action.js';
+import { LoadCopyDefaultPipelineToCompaniesAction } from './custom/copy-default-pipeline.action.js';
 
 // Import generated GraphQL resolvers
 import './generated/generated.js';
@@ -90,6 +92,8 @@ export function LoadBizAppsSalesServer(): void {
     LoadCaptureForecastSnapshotAction();
     LoadLogActivityAction();
     LoadDetectWonDealsWithUnconfirmedOrdersAction();
+    LoadRelinkWonDealOrdersToContractsAction();
+    LoadCopyDefaultPipelineToCompaniesAction();
 
     // Referenced so the manifest import is not elided; MJ reads it during registration.
     void CLASS_REGISTRATIONS;
@@ -104,3 +108,11 @@ export {
     DetectWonDealsWithUnconfirmedOrdersAction,
     LoadDetectWonDealsWithUnconfirmedOrdersAction,
 } from './custom/won-deal-order-detector.action.js';
+export {
+    RelinkWonDealOrdersToContractsAction,
+    LoadRelinkWonDealOrdersToContractsAction,
+} from './custom/contract-order-relink.action.js';
+export {
+    CopyDefaultPipelineToCompaniesAction,
+    LoadCopyDefaultPipelineToCompaniesAction,
+} from './custom/copy-default-pipeline.action.js';

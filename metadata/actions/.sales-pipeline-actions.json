@@ -1,0 +1,27 @@
+[
+  {
+    "_comments": [
+      "PER-COMPANY PIPELINES (#327). Its own file for the same coordination reason as",
+      "`.sales-forecast-actions.json`: MetadataSync reads every dot-json here, so separate files do not",
+      "conflict.",
+      "",
+      "Companies are the deployment's data, so the copies cannot ship as metadata. An admin runs this once",
+      "after install, and again after adding a company: a company that already has a pipeline with the",
+      "default pipeline's Code is skipped."
+    ],
+    "fields": {
+      "Name": "Copy Default Pipeline To Companies",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Sales",
+      "Description": "Copy the default pipeline (IsDefault = 1) and all of its stages onto every company that has no pipeline with the same Code. Each company's copy saves in one transaction; a failure is reported per company and does not undo the others. Re-runnable: companies that already have the pipeline are skipped.",
+      "Type": "Custom",
+      "DriverClass": "Sales.CopyDefaultPipelineToCompanies",
+      "IconClass": "fa-solid fa-code-branch",
+      "UserPrompt": "Give every company its own copy of the default sales pipeline.",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "097952C6-0D37-4395-87FD-998AEDD8ECA4"
+    }
+  }
+]

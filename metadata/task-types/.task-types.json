@@ -42,7 +42,8 @@
       "Code": "ORDER_REVIEW",
       "Description": "Review the order behind a won deal, correct it if needed, then advance it. Advancing is the confirm that locks the order, books the journal entries and triggers invoicing — so this task is the control on money leaving the building, not a reminder.",
       "IconClass": "fa-solid fa-file-invoice-dollar",
-      "DefaultPriority": "High"
+      "DefaultPriority": "High",
+      "IsApproval": true
     },
     "primaryKey": {
       "ID": "87ACA0BD-2FF6-493D-99B0-469D41825D1C"

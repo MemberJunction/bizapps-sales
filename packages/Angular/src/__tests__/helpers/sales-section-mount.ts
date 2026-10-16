@@ -81,7 +81,8 @@ export function configureSection(service: StubService): void {
 }
 
 /**
- * Mounts the section, waits for its first load to settle, then moves to `page` through the rail.
+ * Mounts the section, waits for its first load to settle (both stages: the dashboard's figures, then
+ * everything else), then moves to `page` through the rail.
  *
  * The first `detectChanges` is what runs `ngOnInit`, as in the app. The page is changed through
  * `OnNav` rather than by setting `Page`: the component is OnPush, and `OnNav` is how a reader gets
@@ -91,6 +92,7 @@ export async function mountSection(page = 'dashboard'): Promise<ComponentFixture
     const fixture = TestBed.createComponent(MJSSalesSectionComponent);
     fixture.detectChanges();
     await vi.waitFor(() => expect(fixture.componentInstance.Loading).toBe(false));
+    await vi.waitFor(() => expect(fixture.componentInstance.DetailLoading).toBe(false));
     fixture.componentInstance.OnNav({ id: page } as MJLeftNavItem);
     return fixture;
 }

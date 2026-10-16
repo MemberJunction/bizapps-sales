@@ -27,13 +27,14 @@ import {
  *  - the Won list is a server-side filter with the Won tile's predicate, not a list of roster IDs.
  */
 
-/** `LoadDealPipelineView` reads MJ views; recorded here so the Won list's filter can be read back. */
+/** The pipeline view is read from MJ; each grid's filter is recorded here so the Won list's can be read back. */
 const pipelineView = vi.hoisted(() => ({ wheres: [] as Array<string | undefined> }));
 vi.mock('../lib/pages/deal-views', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../lib/pages/deal-views')>();
     return {
         ...actual,
-        LoadDealPipelineView: vi.fn(async (_entity: EntityInfo, where?: string) => {
+        LoadDealPipelineViewTemplate: vi.fn(async (_entity: EntityInfo) => ({ WhereClause: '' })),
+        DealPipelineViewWith: vi.fn(async (_template: unknown, where?: string) => {
             pipelineView.wheres.push(where);
             return { WhereClause: where ?? '' };
         }),

@@ -149,6 +149,11 @@ export interface ContractsSeamResult {
     /** The contract's status on creation — `Draft`, the status that fires nothing. See above. */
     Status?: string | null;
     Message?: string | null;
+    /**
+     * Set with `Success: false` when the call could not run YET and will be retried on its own, so the
+     * caller reports it as a note rather than a problem. Absent means a refusal.
+     */
+    Pending?: boolean;
 }
 
 /** What the orders call returns. */

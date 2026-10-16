@@ -23,7 +23,7 @@ import { BaseFormPanel } from '@memberjunction/ng-base-forms';
 import { RelatedChipsComponent, type BizAppsRelatedLink } from '@mj-biz-apps/common-ng';
 import type { mjBizAppsOrdersOrderHeaderEntity } from '@mj-biz-apps/orders-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
-import { OrderRelatedLinks, OrderRelatedLinksKey, type OrderRelatedLinkState } from './order-related-links';
+import { DealLookupOrderID, OrderRelatedLinks, OrderRelatedLinksKey, type OrderRelatedLinkState } from './order-related-links';
 
 /** The one row this panel reads: the deal that names this order, and the contract it points at. */
 interface DealProvenanceRow {
@@ -147,12 +147,14 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
             return;
         }
 
+        // A reversal is looked up by the order it reverses: see `DealLookupOrderID`.
+        const dealOrderID = DealLookupOrderID(this.Record) ?? orderID;
         let state: OrderRelatedLinkState = {};
         try {
             const result = await RunView.FromMetadataProvider(this.Provider).RunView<DealProvenanceRow>({
                 EntityName: MJS_ENTITIES.Deal,
                 Fields: ['ID', 'ContractID'],
-                ExtraFilter: `OrderID = '${quote(String(orderID))}'`,
+                ExtraFilter: `OrderID = '${quote(String(dealOrderID))}'`,
                 // `Deal.OrderID` is documented as a 1:1 peer, but this is a REVERSE read and nothing in
                 // the schema enforces the one. Ordering makes the row that wins the same row on every
                 // render rather than whichever the server happened to return first.

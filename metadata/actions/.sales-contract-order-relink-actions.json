@@ -1,0 +1,27 @@
+[
+  {
+    "_comments": [
+      "DAILY CONTRACT ORDER RELINK (contracts#77). Its own file for the same coordination reason as",
+      "`.sales-forecast-actions.json`: MetadataSync reads every dot-json here, so separate files do not",
+      "conflict.",
+      "",
+      "Links each won deal's order to its contract where the link is missing: deals closed while the",
+      "installed contracts had no order links, and links refused at close time. Skips, successfully,",
+      "while contracts has no Contract Orders entity, which is what makes it safe to ship Active."
+    ],
+    "fields": {
+      "Name": "Relink Won Deal Orders To Contracts",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Sales",
+      "Description": "Link every won deal's order to its contract where the deal has both and no link exists, so contracts can copy the contract's renewal terms to the order's subscriptions. Idempotent: an existing link is left alone. Skips while the installed bizapps-contracts has no order links.",
+      "Type": "Custom",
+      "DriverClass": "Sales.RelinkWonDealOrdersToContracts",
+      "IconClass": "fa-solid fa-link",
+      "UserPrompt": "Link won deals' orders to their contracts where the link is missing.",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "DD7CEF7B-C75B-42F8-8D7A-45B9503A6D19"
+    }
+  }
+]

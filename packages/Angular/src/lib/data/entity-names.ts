@@ -34,4 +34,6 @@ export const MJS_FOREIGN_ENTITIES = {
     Contract: 'MJ_BizApps_Contracts: Contracts',
     Activity: 'MJ_BizApps_Common: Activities',
     ActivityLink: 'MJ_BizApps_Common: Activity Links',
+    /** Common's person/organization link. The only record of who works at an account (#301). */
+    Relationship: 'MJ_BizApps_Common: Relationships',
 } as const;

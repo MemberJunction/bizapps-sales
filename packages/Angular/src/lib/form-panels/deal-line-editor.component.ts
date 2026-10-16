@@ -441,7 +441,7 @@ interface RemoteOperationRouter {
             position: fixed; z-index: 1001; top: 50%; left: 50%; transform: translate(-50%, -50%);
             width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto;
             display: flex; flex-direction: column;
-            background: var(--mj-bg-surface-card); color: var(--mj-text-default);
+            background: var(--mj-bg-surface-card); color: var(--mj-text-primary);
             border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-xl, 16px);
             box-shadow: var(--mj-shadow-lg, 0 12px 32px rgba(0, 0, 0, .22));
         }
@@ -454,7 +454,7 @@ interface RemoteOperationRouter {
             border: 0; background: transparent; cursor: pointer; color: var(--mj-text-muted);
             font-size: var(--mj-text-lg); padding: 4px 8px; border-radius: var(--mj-radius-md, 8px);
         }
-        .mjs-le__x:hover { background: var(--mj-bg-surface-hover); color: var(--mj-text-default); }
+        .mjs-le__x:hover { background: var(--mj-bg-surface-hover); color: var(--mj-text-primary); }
         .mjs-le__body {
             padding: var(--mj-space-5); display: flex; flex-direction: column; gap: var(--mj-space-4);
         }
@@ -473,19 +473,19 @@ interface RemoteOperationRouter {
         .mjs-le__field input, .mjs-le__field select, .mjs-le__field textarea {
             padding: 8px 10px; border: 1px solid var(--mj-border-default);
             border-radius: var(--mj-radius-md, 8px); background: var(--mj-bg-surface);
-            color: var(--mj-text-default); font: inherit; width: 100%;
+            color: var(--mj-text-primary); font: inherit; width: 100%;
         }
         .mjs-le__readonly {
             display: flex; gap: var(--mj-space-5); flex-wrap: wrap; align-items: flex-start;
             padding: var(--mj-space-4); border-radius: var(--mj-radius-md, 8px);
-            background: var(--mj-bg-surface-subtle, var(--mj-bg-surface-hover));
+            background: var(--mj-bg-surface-hover);
         }
         .mjs-le__readonly > div { display: flex; flex-direction: column; gap: 4px; }
         .mjs-le__ro-val { font-weight: 650; font-variant-numeric: tabular-nums; }
         .mjs-le__readonly .mjs-le__muted { flex: 1 1 100%; margin: 0; }
         .mjs-le__muted { color: var(--mj-text-muted); font-size: var(--mj-text-sm); }
         .mjs-le__hint { color: var(--mj-text-muted); font-size: var(--mj-text-xs); }
-        .mjs-le__error { color: var(--mj-text-danger, #b3261e); font-size: var(--mj-text-sm); }
+        .mjs-le__error { color: var(--mj-status-error-text); font-size: var(--mj-text-sm); }
         .mjs-le__foot {
             display: flex; align-items: center; gap: var(--mj-space-3);
             padding: var(--mj-space-4) var(--mj-space-5); border-top: 1px solid var(--mj-border-subtle);
@@ -494,10 +494,10 @@ interface RemoteOperationRouter {
         .mjs-le__btn {
             padding: 8px 16px; border-radius: var(--mj-radius-md, 8px); cursor: pointer; font: inherit;
             font-weight: 600; border: 1px solid var(--mj-border-default);
-            background: var(--mj-bg-surface); color: var(--mj-text-default);
+            background: var(--mj-bg-surface); color: var(--mj-text-primary);
         }
         .mjs-le__btn--primary {
-            background: var(--mj-color-primary, #1268cf); border-color: var(--mj-color-primary, #1268cf);
+            background: var(--mj-brand-primary); border-color: var(--mj-brand-primary);
             color: #fff;
         }
         .mjs-le__btn[disabled] { opacity: .55; cursor: not-allowed; }
@@ -508,7 +508,7 @@ interface RemoteOperationRouter {
         .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
         .mjs-le__choices { display: flex; gap: var(--mj-space-2, 8px); flex-wrap: wrap; }
         .mjs-le__choice.is-selected {
-            border-color: var(--mj-color-primary, #1268cf); color: var(--mj-color-primary, #1268cf);
+            border-color: var(--mj-brand-primary); color: var(--mj-brand-primary);
         }
         @media (max-width: 480px) {
             .mjs-le__row { flex-direction: column; }
