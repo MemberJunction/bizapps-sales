@@ -19,10 +19,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: We could not do something the customer required. RequiresNotes is 1 because the reason is worthless to product without the specific gap named."
+    ],
     "fields": {
       "Code": "PRODUCTGAP",
       "Name": "Product Gap",
-      "Description": "We could not do something the customer required. RequiresNotes is 1 because the reason is worthless to product without the specific gap named.",
+      "Description": "We could not do something the customer required. Notes must name the gap.",
       "Category": "Product",
       "RequiresNotes": true,
       "IsCompetitive": false,
@@ -38,10 +41,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Lost to a named competitor. RequiresNotes is 1 so the competitor is actually recorded — 'lost to a competitor' without the name is the single most common piece of useless CRM data."
+    ],
     "fields": {
       "Code": "COMPETITOR",
       "Name": "Competitor",
-      "Description": "Lost to a named competitor. RequiresNotes is 1 so the competitor is actually recorded — 'lost to a competitor' without the name is the single most common piece of useless CRM data.",
+      "Description": "Lost to a competitor. Notes must name the competitor.",
       "Category": "Competitive",
       "RequiresNotes": true,
       "IsCompetitive": true,
@@ -57,10 +63,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Right fit, wrong quarter. Distinct from No Decision because this one is worth re-engaging on a date."
+    ],
     "fields": {
       "Code": "TIMING",
       "Name": "Timing",
-      "Description": "Right fit, wrong quarter. Distinct from No Decision because this one is worth re-engaging on a date.",
+      "Description": "Right fit, wrong time. Worth re-engaging later.",
       "Category": "Timing",
       "RequiresNotes": false,
       "IsCompetitive": false,
@@ -76,10 +85,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: The customer never chose anything. Tracking this separately from a competitive loss is what reveals a qualification problem rather than a product one."
+    ],
     "fields": {
       "Code": "NODECISION",
       "Name": "No Decision",
-      "Description": "The customer never chose anything. Tracking this separately from a competitive loss is what reveals a qualification problem rather than a product one.",
+      "Description": "The customer never chose anything.",
       "Category": "Process",
       "RequiresNotes": false,
       "IsCompetitive": false,
@@ -95,10 +107,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: We lost it to ourselves — no capacity, credit refused, deal desk declined, wrong fit accepted too late. RequiresNotes is 1 because this category only earns its keep if it is specific."
+    ],
     "fields": {
       "Code": "INTERNAL",
       "Name": "Internal",
-      "Description": "We lost it to ourselves — no capacity, credit refused, deal desk declined, wrong fit accepted too late. RequiresNotes is 1 because this category only earns its keep if it is specific.",
+      "Description": "We lost it to ourselves: no capacity, credit refused, deal desk declined, or a poor fit found too late. Notes must say which.",
       "Category": "Internal",
       "RequiresNotes": true,
       "IsCompetitive": false,

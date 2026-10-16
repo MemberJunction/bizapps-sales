@@ -1,9 +1,12 @@
 [
   {
+    "_comments": [
+      "Former description, kept as the design note: The account executive who owns the deal. THE OWNER ROLE: exactly one member per deal may hold it, and Deal.OwnerEmployeeID is the server-maintained stamp of whoever does. DefaultAttributionPct is 100 because owner-role attribution is the only default that reconciles to total bookings."
+    ],
     "fields": {
       "Code": "OWNER",
       "Name": "Owner / AE",
-      "Description": "The account executive who owns the deal. THE OWNER ROLE: exactly one member per deal may hold it, and Deal.OwnerEmployeeID is the server-maintained stamp of whoever does. DefaultAttributionPct is 100 because owner-role attribution is the only default that reconciles to total bookings.",
+      "Description": "The account executive who owns the deal. Each deal has exactly one, and by default they get full credit for it.",
       "IsOwnerRole": true,
       "AllowsMultiplePerDeal": false,
       "DefaultAttributionPct": 100,
@@ -20,10 +23,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Technical validation and solution design. AllowsMultiplePerDeal is 1 — two SEs on one deal is normal, which is exactly the case that makes this a flag rather than a hardcoded rule."
+    ],
     "fields": {
       "Code": "SE",
       "Name": "Sales Engineer",
-      "Description": "Technical validation and solution design. AllowsMultiplePerDeal is 1 — two SEs on one deal is normal, which is exactly the case that makes this a flag rather than a hardcoded rule.",
+      "Description": "Technical validation and solution design. A deal can have more than one.",
       "IsOwnerRole": false,
       "AllowsMultiplePerDeal": true,
       "IsQuotaCarrying": false,
@@ -39,10 +45,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Sourced or qualified the opportunity. Present on the team for attribution and coverage reporting even after handoff."
+    ],
     "fields": {
       "Code": "SDR",
       "Name": "SDR",
-      "Description": "Sourced or qualified the opportunity. Present on the team for attribution and coverage reporting even after handoff.",
+      "Description": "Sourced or qualified the opportunity, and stays on the team after handing it over.",
       "IsOwnerRole": false,
       "AllowsMultiplePerDeal": true,
       "IsQuotaCarrying": false,
@@ -77,10 +86,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Manages the partner relationship on a partner-sourced deal. THIS IS THE ROLE THAT FORCED D-6: the holder is routinely a partner rep or contractor rather than an Employee, which is why DealTeamMember carries a nullable PersonID beside EmployeeID with an exactly-one-of CHECK."
+    ],
     "fields": {
       "Code": "PARTNERMGR",
       "Name": "Partner Manager",
-      "Description": "Manages the partner relationship on a partner-sourced deal. THIS IS THE ROLE THAT FORCED D-6: the holder is routinely a partner rep or contractor rather than an Employee, which is why DealTeamMember carries a nullable PersonID beside EmployeeID with an exactly-one-of CHECK.",
+      "Description": "Manages the partner relationship on a partner-sourced deal. Often a partner rep or contractor rather than an employee.",
       "IsOwnerRole": false,
       "AllowsMultiplePerDeal": true,
       "IsQuotaCarrying": false,
