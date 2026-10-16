@@ -262,6 +262,10 @@
     white-space: nowrap;
 }
 
+.db-card__closed {
+    margin-right: 0.25em;
+}
+
 .db-card__ghost {
     padding: 0.375rem 0.625rem;
     background: var(--mj-bg-surface-card);
