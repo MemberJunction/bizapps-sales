@@ -123,14 +123,21 @@ const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const SALES_ACCOUNT_ENTITY = 'MJ_BizApps_Sales: Sales Accounts';
 const SALES_CONTACT_ENTITY = 'MJ_BizApps_Sales: Sales Contacts';
+const ORGANIZATION_ENTITY = 'MJ_BizApps_Common: Organizations';
+const PERSON_ENTITY = 'MJ_BizApps_Common: People';
 const GUID_SHAPE = /^[0-9a-fA-F-]{36}$/;
 
 /** A party this save writes onto the deal, checked for existence before anything is written. */
 interface PartyCheck {
     EntityName: string;
+    /** The Common entity the sales row extends (IsA): its ID is the party's ID. */
+    ParentEntityName: string;
     ID: string;
     Label: 'customer' | 'primary contact';
 }
+
+/** Why a supplied party was refused: the sales row is missing but its parent exists, or neither does. */
+type MissingParty = PartyCheck & { NotSetUp: boolean };
 
 /**
  * Accounting's two currency entities — READ, never written, and never assumed present.
@@ -2998,7 +3005,7 @@ export class DealEntityServer extends DealEntity {
 
         const malformed = checks.filter((c) => !GUID_SHAPE.test(c.ID));
         if (malformed.length) {
-            return this.missingPartyMessage(malformed);
+            return this.missingPartyMessage(malformed.map((c) => ({ ...c, NotSetUp: false })));
         }
 
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
@@ -3024,22 +3031,70 @@ export class DealEntityServer extends DealEntity {
             return null;
         }
 
-        return this.missingPartyMessage(missing);
+        return this.missingPartyMessage(await this.classifyMissingParties(missing));
     }
 
-    private missingPartyMessage(missing: PartyCheck[]): string {
-        const named = missing.map((c) => `${c.Label} (${c.ID})`).join(' and ');
-        const verb = missing.length > 1 ? 'do' : 'does';
-        return `The selected ${named} ${verb} not exist, so nothing was saved. Select it again from the list, then save.`;
+    /**
+     * Tells the two cases apart, because they need different actions from the rep. A Sales Account or
+     * Sales Contact shares its Organization's or Person's ID (IsA), so the deal panels on those forms
+     * pre-fill the record's own ID; when that record was never set up for sales, there is nothing to
+     * pick again. A party whose parent is gone too was a stale pick. Only runs on the refusal path, and
+     * a failed read falls back to the stale-pick wording.
+     */
+    private async classifyMissingParties(missing: PartyCheck[]): Promise<MissingParty[]> {
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const parents = await provider.RunViews(
+            missing.map((c) => ({
+                EntityName: c.ParentEntityName,
+                ExtraFilter: `ID = '${c.ID}'`,
+                ResultType: 'simple' as const,
+                Fields: ['ID'],
+            })),
+            this.ContextCurrentUser,
+        );
+        return missing.map((c, i) => {
+            const parent = parents[i];
+            return { ...c, NotSetUp: !!parent?.Success && (parent.Results ?? []).length > 0 };
+        });
+    }
+
+    /** The rep-facing refusal. The IDs go to the log only: they mean nothing to a rep. */
+    private missingPartyMessage(missing: MissingParty[]): string {
+        LogError(
+            `DealEntityServer.missingPartyRefusal: ${missing
+                .map((c) => `${c.Label} ${c.ID} ${c.NotSetUp ? 'has no sales row' : 'does not exist'}`)
+                .join('; ')}`,
+        );
+        const sentences = missing.map((c) => {
+            if (!c.NotSetUp) {
+                return `The selected ${c.Label} no longer exists. Pick it again from the list.`;
+            }
+            return c.Label === 'customer'
+                ? 'The selected customer is not set up as a sales customer. Add the organization as a ' +
+                      'sales account first, or pick another customer.'
+                : 'The selected primary contact is not set up as a sales contact. Add the person as a ' +
+                      'sales contact first, or pick another contact.';
+        });
+        return `Nothing was saved. ${sentences.join(' ')}`;
     }
 
     private suppliedParties(): PartyCheck[] {
         const checks: PartyCheck[] = [];
         if (this.AccountID && this.callerSuppliedValue('AccountID', this.AccountID)) {
-            checks.push({ EntityName: SALES_ACCOUNT_ENTITY, ID: this.AccountID, Label: 'customer' });
+            checks.push({
+                EntityName: SALES_ACCOUNT_ENTITY,
+                ParentEntityName: ORGANIZATION_ENTITY,
+                ID: this.AccountID,
+                Label: 'customer',
+            });
         }
         if (this.PrimaryContactID && this.callerSuppliedValue('PrimaryContactID', this.PrimaryContactID)) {
-            checks.push({ EntityName: SALES_CONTACT_ENTITY, ID: this.PrimaryContactID, Label: 'primary contact' });
+            checks.push({
+                EntityName: SALES_CONTACT_ENTITY,
+                ParentEntityName: PERSON_ENTITY,
+                ID: this.PrimaryContactID,
+                Label: 'primary contact',
+            });
         }
         return checks;
     }
