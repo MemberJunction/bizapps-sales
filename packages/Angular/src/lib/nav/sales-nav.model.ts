@@ -95,9 +95,11 @@ export function DefaultPageFor(sectionId: string): string {
 /** Which badge, if any, belongs on a page. */
 function badgeFor(pageId: string, badges: SalesNavBadges): number | undefined {
     switch (pageId) {
-        case 'list':
+        case 'dashboard':
             // Slipped deals, not the total count. A deal count is the pipeline existing; a slipped one
-            // is a person's problem, and a badge should mean the second thing.
+            // is a person's problem, and a badge should mean the second thing. On Dashboard because
+            // its "Past expected close" tile and "Close date slipped" queue show the same count; All
+            // deals lists every deal with no marker, so a badge there matched nothing on the page.
             return badges.Slipped;
         default:
             return undefined;

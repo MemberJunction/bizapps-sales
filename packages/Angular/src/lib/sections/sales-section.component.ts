@@ -980,11 +980,6 @@ export class MJSSalesSectionComponent implements OnInit {
         return 'muted';
     }
 
-    /** True when this deal's expected close has passed and it is still open. */
-    public IsSlipped(row: DealRosterRow): boolean {
-        return this.SlippedDeals.some((d) => d.ID === row.ID);
-    }
-
     public Pct(value: number | null): string {
         if (value === null || !Number.isFinite(value)) return '—';
         return `${Math.round(value * 100)}%`;
