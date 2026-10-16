@@ -651,8 +651,9 @@ export class MJSSalesSectionComponent implements OnInit {
             {
                 Label: 'Open deals',
                 Value: String(s.OpenCount),
-                Footnote: `of ${s.TotalCount} total`,
-                Filter: 'pipe',
+                // Every open deal, Omitted ones included; the money figures leave those out, so say how many.
+                Footnote: `of ${s.TotalCount} total${s.OpenOmittedCount ? ` · ${s.OpenOmittedCount} left out of the forecast` : ''}`,
+                Filter: 'open',
             },
             {
                 Label: 'Past expected close',
@@ -758,6 +759,10 @@ export class MJSSalesSectionComponent implements OnInit {
                 return 'Open best-case deals, including commit';
             case 'pipe':
                 return 'Open pipeline';
+            case 'open':
+                return 'Every open deal, including those left out of the forecast';
+            case 'remainder':
+                return 'Open deals outside Commit and Best Case';
             case 'slipped':
                 return 'Open deals past their expected close date';
             case 'noowner':

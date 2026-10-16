@@ -36,6 +36,7 @@ vi.mock('../lib/pages/deal-views', async (importOriginal) => {
 const SUMMARY: DealDashboardSummary = {
     OpenAmount: 1000,
     OpenCount: 2,
+    OpenOmittedCount: 0,
     TotalCount: 2,
     PastExpectedCloseCount: 0,
     WonCount: 0,

@@ -85,6 +85,8 @@ const E_ACCOUNTING_COMPANY_PROFILE = 'MJ_BizApps_Accounting: Accounting Company 
 export interface DealDashboardSummary {
     OpenAmount: number;
     OpenCount: number;
+    /** Open deals in a forecast category left out of the pipeline (Omitted); counted in `OpenCount` only. */
+    OpenOmittedCount: number;
     TotalCount: number;
     PastExpectedCloseCount: number;
     WonCount: number;
@@ -153,6 +155,11 @@ export interface DealRosterRow {
      */
     IncludeInCommit: boolean;
     IncludeInBestCase: boolean;
+    /**
+     * `ForecastCategoryType.IncludeInPipeline`; true when the deal has no category. False (Omitted)
+     * leaves an open deal out of the dashboard's pipeline money figures, as the forecast queries do.
+     */
+    IncludeInPipeline: boolean;
     /** Amount × Probability / 100, computed in the roster query. Display only — not a price. */
     WeightedAmount: number | null;
     /** PipelineStage.DisplayOrder, for the funnel. */
@@ -547,6 +554,7 @@ export class DealWorkspaceService {
             IsPastExpectedClose: bool(d['IsPastExpectedClose']),
             IncludeInCommit: bool(d['IncludeInCommit']),
             IncludeInBestCase: bool(d['IncludeInBestCase']),
+            IncludeInPipeline: bool(d['IncludeInPipeline']),
             WeightedAmount: num(d['WeightedAmount']),
             StageOrder: num(d['StageOrder']),
         }));
@@ -913,6 +921,7 @@ export class DealWorkspaceService {
         return {
             OpenAmount: num(row['OpenAmount']),
             OpenCount: num(row['OpenCount']),
+            OpenOmittedCount: num(row['OpenOmittedCount']),
             TotalCount: num(row['TotalCount']),
             PastExpectedCloseCount: num(row['PastExpectedCloseCount']),
             WonCount: num(row['WonCount']),
