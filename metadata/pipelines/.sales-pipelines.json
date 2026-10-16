@@ -21,12 +21,14 @@
       "ContractTypeCode is 'Order Form', which is a type contracts actually ships. It said 'Standard'",
       "first and nothing on any host is called that -- v2's ContractType carries no Code column, so the",
       "seam resolves on NAME, and an unresolvable name means close-won plans a contract it can never",
-      "create. Found by close-won-contract.CT1 the moment contracts became readable."
+      "create. Found by close-won-contract.CT1 the moment contracts became readable.",
+      "",
+      "Former description, kept as the design note: The main motion: catalogue products, a proposal, a negotiation and a signed agreement. The winning stage is called Signed — the app reads the status type's IsWon flag, never the stage name."
     ],
     "fields": {
       "Name": "B2B",
       "Code": "B2B",
-      "Description": "The main motion: catalogue products, a proposal, a negotiation and a signed agreement. The winning stage is called Signed — the app reads the status type's IsWon flag, never the stage name.",
+      "Description": "The main motion: catalogue products, a proposal, a negotiation and a signed agreement. The winning stage is called Signed.",
       "CompanyID": "@lookup:MJ: Companies.Name=Default Company",
       "DealTypeID": "@lookup:MJ_BizApps_Sales: Deal Types.Code=NEW",
       "DefaultForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",

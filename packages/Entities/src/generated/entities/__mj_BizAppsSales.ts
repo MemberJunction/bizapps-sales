@@ -203,7 +203,7 @@ export const mjBizAppsSalesDealPaymentScheduleSchema = z.object({
         * * Field Name: Amount
         * * Display Name: Amount
         * * SQL Data Type: decimal(19, 4)
-        * * Description: The instalment amount as agreed. Unconstrained in sign: a refund or credit instalment is legitimately negative, and this table records what was agreed rather than asserting a shape for it.`),
+        * * Description: The instalment amount as agreed. Can be negative for a refund or credit.`),
     Description: z.string().nullable().describe(`
         * * Field Name: Description
         * * Display Name: Description
@@ -213,7 +213,7 @@ export const mjBizAppsSalesDealPaymentScheduleSchema = z.object({
         * * Display Name: Display Order
         * * SQL Data Type: int
         * * Default Value: 0
-        * * Description: Explicit ordering, because instalment order is not always date order — "on execution" and "on signature of SOW 2" can share a date or have none yet. Server-maintained and re-sequenced on every save, mirroring how accounting re-sequences JournalEntryLine.LineNumber.`),
+        * * Description: Position of the instalment in the schedule, for instalments that share a date or have none yet.`),
     __mj_CreatedAt: z.date().describe(`
         * * Field Name: __mj_CreatedAt
         * * Display Name: Created At
@@ -258,13 +258,13 @@ export const mjBizAppsSalesDealRoleSchema = z.object({
         * * Display Name: Is Owner Role
         * * SQL Data Type: bit
         * * Default Value: 0
-        * * Description: Identifies the role that DEFINES ownership. Exactly one team member per deal may hold a role with this flag, enforced server-side, and Deal.OwnerEmployeeID is the denormalized stamp of whoever does.`),
+        * * Description: Marks the role that owns the deal. Only one team member per deal can hold it, and that person is shown as the deal's owner.`),
     AllowsMultiplePerDeal: z.boolean().describe(`
         * * Field Name: AllowsMultiplePerDeal
         * * Display Name: Allows Multiple Per Deal
         * * SQL Data Type: bit
         * * Default Value: 1
-        * * Description: Whether two people may hold this role on one deal. Two sales engineers, yes; two owners, no. Enforced server-side FROM THIS FLAG, never hardcoded against a role name.`),
+        * * Description: Whether more than one person can hold this role on the same deal, for example two sales engineers.`),
     DefaultAttributionPct: z.number().nullable().describe(`
         * * Field Name: DefaultAttributionPct
         * * Display Name: Default Attribution Pct
@@ -370,7 +370,7 @@ export const mjBizAppsSalesDealStageEventSchema = z.object({
         * * Display Name: Changed At
         * * SQL Data Type: datetimeoffset
         * * Default Value: sysutcdatetime()
-        * * Description: The ORIGINAL time of the transition, not the row's insert time. A distinct column rather than a reliance on __mj_CreatedAt because the HubSpot import must preserve historical timestamps — a 2023 transition has to land as 2023.`),
+        * * Description: When the stage change happened. For imported deals this is the original date, not the import date.`),
     DaysInPreviousStage: z.number().nullable().describe(`
         * * Field Name: DaysInPreviousStage
         * * Display Name: Days In Previous Stage
@@ -379,12 +379,12 @@ export const mjBizAppsSalesDealStageEventSchema = z.object({
         * * Field Name: AmountAtTransition
         * * Display Name: Amount At Transition
         * * SQL Data Type: decimal(19, 4)
-        * * Description: Deal.Amount as it stood at this transition. Point-in-time truth: "what did we think the forecast was on the 1st" is unanswerable from Deal alone once amounts change.`),
+        * * Description: The deal amount at the time of this stage change.`),
     AmountAtTransitionIsComputed: z.boolean().nullable().describe(`
         * * Field Name: AmountAtTransitionIsComputed
         * * Display Name: Amount At Transition Is Computed
         * * SQL Data Type: bit
-        * * Description: Whether AmountAtTransition came from the orders engine (1) or was stated by a person (0). NULL means the transition was recorded before this was tracked — it is not backfillable, because Deal.AmountIsComputed describes the deal as it is now, not as it was at the close.`),
+        * * Description: On when the amount at this stage change was the order total, off when it was entered by hand. Empty for changes recorded before this was tracked.`),
     ProbabilityAtTransition: z.number().nullable().describe(`
         * * Field Name: ProbabilityAtTransition
         * * Display Name: Probability At Transition
@@ -444,7 +444,7 @@ export const mjBizAppsSalesDealStatusTypeSchema = z.object({
         * * Field Name: Code
         * * Display Name: Code
         * * SQL Data Type: nvarchar(40)
-        * * Description: Stable identifier the engine and metadata seeds key on. Renaming Name is cosmetic; renaming Code changes an identifier.`),
+        * * Description: Short fixed identifier for the status. Renaming the status is safe; changing its code is not.`),
     Name: z.string().describe(`
         * * Field Name: Name
         * * Display Name: Name
@@ -478,7 +478,7 @@ export const mjBizAppsSalesDealStatusTypeSchema = z.object({
         * * Display Name: Locks Deal
         * * SQL Data Type: bit
         * * Default Value: 0
-        * * Description: When 1, a deal in this status FREEZES: the header (except Description and NextStep), its lines and its team members become immutable, enforced in DealEntityServer.Save() — not in the UI, so an Action, an agent or a raw BaseEntity.Save() hits the same wall. Mirrors journal-entry immutability in accounting, and for the same reason: the deal is now the provenance of a contract and an order.`),
+        * * Description: When on, a deal in this status is locked until it is reopened: its lines, payment schedule, team and every field except Description and Next Step become read-only.`),
     DisplayRank: z.number().describe(`
         * * Field Name: DisplayRank
         * * Display Name: Display Rank
@@ -522,13 +522,13 @@ export const mjBizAppsSalesDealTeamMemberSchema = z.object({
         * * Display Name: Employee ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
-        * * Description: The internal rep, as an MJ Employee. Exactly one of EmployeeID / PersonID is set. Employee is the common case.`),
+        * * Description: The team member, when they are an employee. Set this or Person, not both.`),
     PersonID: z.string().nullable().describe(`
         * * Field Name: PersonID
         * * Display Name: Person ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
-        * * Description: A NON-EMPLOYEE team member — a partner rep or contractor — as a common.Person. Exactly one of EmployeeID / PersonID is set (D-6). Needed because Partner Manager is a seeded DealRole and an Employee row cannot express someone outside the company.`),
+        * * Description: The team member, when they are not an employee, such as a partner rep. Set this or Employee, not both.`),
     DealRoleID: z.string().describe(`
         * * Field Name: DealRoleID
         * * Display Name: Deal Role ID
@@ -702,30 +702,30 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Billing Contact
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
-        * * Description: The contact who receives the invoice, which is routinely NOT the person negotiating. NULL means the billing contact IS the primary contact — a real default, not "unknown" — so an AD never types the same name twice and changing the primary contact leaves no stale billing copy.`),
+        * * Description: The contact who receives the invoice. Leave empty to use the primary contact.`),
     CompanyID: z.string().describe(`
         * * Field Name: CompanyID
         * * Display Name: Company ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
-        * * Description: The SELLING company. Must match Pipeline.CompanyID; enforced by the entity server, since a CHECK cannot reach across the FK to compare them. FK to __mj.Company.`),
+        * * Description: The company selling the deal. It must match the pipeline's company.`),
     OwnerEmployeeID: z.string().nullable().describe(`
         * * Field Name: OwnerEmployeeID
         * * Display Name: Owner Employee ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
-        * * Description: DENORMALIZED, SERVER-MAINTAINED. The Employee holding the role where DealRole.IsOwnerRole = 1, written by DealEntityServer.Save() whenever team membership changes. DealTeamMember is the source of truth; this exists so "my deals" and per-rep boards need no join. NEVER SET THIS DIRECTLY — it will diverge.`),
+        * * Description: The deal owner: the team member in the owner role. Updated automatically from the deal team.`),
     Amount: z.number().nullable().describe(`
         * * Field Name: Amount
         * * Display Name: Amount
         * * SQL Data Type: decimal(19, 4)
-        * * Description: The deal value. A CACHED ANSWER returned by Orders.PreviewOrder for this deal's line set — NOT computed here. For a simple (header-only) deal it is hand-entered and AmountIsComputed is 0. Never sum the order's lines into this column; sales does no arithmetic.`),
+        * * Description: The deal value. For a deal with product lines it is the order total calculated by Orders; for a deal without lines it is entered by hand.`),
     AmountIsComputed: z.boolean().describe(`
         * * Field Name: AmountIsComputed
         * * Display Name: Amount Is Computed
         * * SQL Data Type: bit
         * * Default Value: 0
-        * * Description: 1 when Amount came from Orders.PreviewOrder; 0 when a human typed it (a simple, header-only deal). Distinguishes a traceable figure from a stated one.`),
+        * * Description: On when Amount is the order total calculated by Orders; off when it was entered by hand.`),
     AmountComputedAt: z.date().nullable().describe(`
         * * Field Name: AmountComputedAt
         * * Display Name: Amount Computed At
@@ -734,7 +734,7 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: AmountSourceHash
         * * Display Name: Amount Source Hash
         * * SQL Data Type: nvarchar(128)
-        * * Description: Fingerprint of the embedded order's line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say the products changed after the amount was calculated, instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.`),
+        * * Description: Fingerprint of the order lines the amount was calculated from, used to tell when the amount is out of date.`),
     CurrencyID: z.string().nullable().describe(`
         * * Field Name: CurrencyID
         * * Display Name: Currency
@@ -756,17 +756,17 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: EstimatedProjectWeeks
         * * Display Name: Estimated Project Weeks
         * * SQL Data Type: int
-        * * Description: Estimated project timeline in WEEKS, from the SOW template. A separate column from TermMonths on purpose: a subscription term is a COMMITMENT that drives renewal dates and escalation, a project estimate is a FORECAST that drives neither. One column plus a unit flag would force every consumer to branch on the unit before using the number.`),
+        * * Description: Estimated project length in weeks, from the statement of work. It does not affect the term or renewal dates.`),
     ExecutionDate: z.date().nullable().describe(`
         * * Field Name: ExecutionDate
         * * Display Name: Execution Date
         * * SQL Data Type: date
-        * * Description: The date the agreement was signed. Deliberately NOT constrained against StartDate: work that begins before signature is common and legitimate, so ordering the two would reject real deals.`),
+        * * Description: The date the agreement was signed. It can be after the start date when work begins before signature.`),
     StartDate: z.date().nullable().describe(`
         * * Field Name: StartDate
         * * Display Name: Start Date
         * * SQL Data Type: date
-        * * Description: The date service or the subscription actually begins (order-form / SOW start). May precede ExecutionDate for backdated work — see that column.`),
+        * * Description: The date the service or subscription begins. It can be before the execution date.`),
     ExpectedCloseDate: z.date().nullable().describe(`
         * * Field Name: ExpectedCloseDate
         * * Display Name: Expected Close Date
@@ -809,13 +809,13 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Contract
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Contracts: Contracts (vwContracts.ID)
-        * * Description: SOFT reference (no FK) to a bizapps-contracts Contract. The link points DOWN the dependency graph; there is deliberately no Contract.DealID, because it is ONE contract to MANY deals — the original sale, every renewal, every expansion.`),
+        * * Description: The contract this deal belongs to, in BizApps Contracts.`),
     RenewsContractID: z.string().nullable().describe(`
         * * Field Name: RenewsContractID
         * * Display Name: Renews Contract
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Contracts: Contracts (vwContracts.ID)
-        * * Description: SOFT reference (no FK) to the contract this deal RENEWS. What makes the renewal chain navigable from the sales side without contracts knowing anything about it. Required when DealType.RequiresRenewalSource is set.`),
+        * * Description: The contract this deal renews. Required for deal types that are renewals.`),
     AutoRenew: z.boolean().describe(`
         * * Field Name: AutoRenew
         * * Display Name: Auto Renew
@@ -826,29 +826,29 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: AnnualIncreasePctOverride
         * * Display Name: Annual Increase Pct Override
         * * SQL Data Type: decimal(5, 2)
-        * * Description: An OVERRIDE, and NULL is meaningful: it means "use the standard annual increase", whose default (5%) lives on the contracts ContractType, not here. That is a different fact from "we negotiated a number that happens to equal today's standard", and only the NULL survives a later change to policy. Copying the default in at write time would freeze this year's terms into next year's renewals silently.`),
+        * * Description: Annual price increase agreed for this deal, as a percent. Leave empty to use the contract type's standard increase.`),
     CancellationNoticeDaysOverride: z.number().nullable().describe(`
         * * Field Name: CancellationNoticeDaysOverride
         * * Display Name: Cancellation Notice Days Override
         * * SQL Data Type: int
-        * * Description: An OVERRIDE of the standard cancellation-notice period (default 90 days, owned by the contracts ContractType). NULL means "use the standard" — see AnnualIncreasePctOverride for why that distinction is load-bearing.`),
+        * * Description: Cancellation notice period agreed for this deal, in days. Leave empty to use the contract type's standard notice period.`),
     PaymentMethod: z.string().nullable().describe(`
         * * Field Name: PaymentMethod
         * * Display Name: Payment Method
         * * SQL Data Type: nvarchar(50)
         * * Default Value: ACH
-        * * Description: PLACEHOLDER LABEL (default ACH), and a string only for as long as nothing branches on it. Payment method becomes vocabulary the moment code cares — ACH and card differ in settlement timing and fees — but ORDERS owns that concept and will expose PaymentType. Pointing at orders' vocabulary later beats standing up a competing copy here and reconciling two. No code may branch on this value.`),
+        * * Description: How the customer expects to pay, for example ACH. For reference only.`),
     StandardAgreementModified: z.boolean().describe(`
         * * Field Name: StandardAgreementModified
         * * Display Name: Standard Agreement Modified
         * * SQL Data Type: bit
         * * Default Value: 0
-        * * Description: Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance's review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.`),
+        * * Description: Whether the deal moved off the standard agreement. Copied to the contract when the deal is won, where it tells finance to review the changes.`),
     ContractVariances: z.string().nullable().describe(`
         * * Field Name: ContractVariances
         * * Display Name: Contract Variances
         * * SQL Data Type: nvarchar(MAX)
-        * * Description: Free-text summary of what this deal negotiated AWAY from standard terms — the red-line list, in the AD's own words. The input to a human legal review; nothing should attempt to parse it.`),
+        * * Description: Summary of the terms negotiated away from the standard agreement, for legal review.`),
     Description: z.string().nullable().describe(`
         * * Field Name: Description
         * * Display Name: Description
@@ -1101,7 +1101,7 @@ export const mjBizAppsSalesForecastSnapshotSchema = z.object({
         * * Field Name: CommitAmount
         * * Display Name: Commit Amount
         * * SQL Data Type: decimal(19, 4)
-        * * Description: Total of deals in forecast categories flagged IncludeInCommit as at CapturedAt. Named CommitAmount rather than the plan's Commit because COMMIT is a reserved word in both T-SQL and PostgreSQL, and production is PostgreSQL.`),
+        * * Description: Total of deals in commit forecast categories when the snapshot was taken.`),
     BestCaseAmount: z.number().nullable().describe(`
         * * Field Name: BestCaseAmount
         * * Display Name: Best Case Amount
@@ -1118,7 +1118,7 @@ export const mjBizAppsSalesForecastSnapshotSchema = z.object({
         * * Field Name: SnapshotJSON
         * * Display Name: Snapshot JSON
         * * SQL Data Type: nvarchar(MAX)
-        * * Description: The full breakdown behind the four bucket totals, so a snapshot can be interrogated rather than merely displayed.`),
+        * * Description: The detail behind the snapshot's totals, stored as JSON.`),
     __mj_CreatedAt: z.date().describe(`
         * * Field Name: __mj_CreatedAt
         * * Display Name: Created At
@@ -1294,7 +1294,7 @@ export const mjBizAppsSalesLossReasonSchema = z.object({
         * * Display Name: Requires Notes
         * * SQL Data Type: bit
         * * Default Value: 0
-        * * Description: When 1, Sales.CloseDeal refuses a close against this reason unless Deal.LossNotes is supplied.`),
+        * * Description: When on, a deal closed as lost with this reason must also have loss notes.`),
     IsCompetitive: z.boolean().describe(`
         * * Field Name: IsCompetitive
         * * Display Name: Is Competitive
@@ -1365,7 +1365,7 @@ export const mjBizAppsSalesPipelineStageSchema = z.object({
         * * Display Name: Deal Status Type ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Status Types (vwDealStatusTypes.ID)
-        * * Description: The status a deal takes on when it ENTERS this stage. The stage names the vocabulary; the status carries the behaviour flags.`),
+        * * Description: The status a deal takes on when it enters this stage.`),
     OrderStatusOnEntry: z.union([z.literal('Confirmed'), z.literal('Draft'), z.literal('Quoted'), z.literal('Voided')]).nullable().describe(`
         * * Field Name: OrderStatusOnEntry
         * * Display Name: Order Status On Entry
@@ -1389,7 +1389,7 @@ export const mjBizAppsSalesPipelineStageSchema = z.object({
         * * Field Name: ExitCriteria
         * * Display Name: Exit Criteria
         * * SQL Data Type: nvarchar(MAX)
-        * * Description: Declarative JSON predicate evaluated SERVER-SIDE before a deal may leave this stage. A stage that cannot be exited without a signed mutual action plan is a config row, not a code branch.`),
+        * * Description: Conditions for leaving this stage, stored as JSON for reference. The app does not check them.`),
     RequiredFields: z.string().nullable().describe(`
         * * Field Name: RequiredFields
         * * Display Name: Required Fields
@@ -1398,7 +1398,7 @@ export const mjBizAppsSalesPipelineStageSchema = z.object({
         * * Field Name: GuidanceMarkdown
         * * Display Name: Guidance Markdown
         * * SQL Data Type: nvarchar(MAX)
-        * * Description: "What good looks like at this stage", shown in the deal workspace. Sales enablement as a config field.`),
+        * * Description: Guidance for reps on what a deal should have at this stage, in Markdown.`),
     IsActive: z.boolean().describe(`
         * * Field Name: IsActive
         * * Display Name: Is Active
@@ -1444,7 +1444,7 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * Display Name: Company ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
-        * * Description: The owning company. NOT NULL by design — this is what makes every forecast and bookings rollup sliceable by company for free, and every deal inherits it. FK to __mj.Company.`),
+        * * Description: The company that owns this pipeline. Every deal in the pipeline belongs to this company.`),
     Name: z.string().describe(`
         * * Field Name: Name
         * * Display Name: Name
@@ -1453,7 +1453,7 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * Field Name: Code
         * * Display Name: Code
         * * SQL Data Type: nvarchar(40)
-        * * Description: Stable identifier, unique PER COMPANY rather than globally: two operating companies may each run a pipeline they both call NEWBIZ.`),
+        * * Description: Short identifier for the pipeline, unique within its company.`),
     Description: z.string().nullable().describe(`
         * * Field Name: Description
         * * Display Name: Description
@@ -1473,12 +1473,12 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * Display Name: Requires Deal Lines
         * * SQL Data Type: bit
         * * Default Value: 1
-        * * Description: Pipeline-level default for whether deals carry catalog lines (priced mode) or are header-only with a hand-entered Amount (simple mode). Overridable per deal. Partner-referral and sponsorship pipelines may never carry lines.`),
+        * * Description: Whether deals in this pipeline carry product lines priced by Orders, or a single amount entered by hand.`),
     CloseWonPolicy: z.string().nullable().describe(`
         * * Field Name: CloseWonPolicy
         * * Display Name: Close Won Policy
         * * SQL Data Type: nvarchar(MAX)
-        * * Description: JSON declaring the DEFAULT outcome of winning a deal in this pipeline: whether to create a contract, which contract type, where subscription lines go, where one-time lines go, and what state the resulting order lands in. A deal may override it; one remote operation (Sales.CloseDeal) reads and executes it. JSON rather than columns because the policy shape is still being learned.`),
+        * * Description: What happens when a deal in this pipeline is won, stored as JSON: whether a contract is created and of which type, and which follow-up tasks are raised.`),
     IsDefault: z.boolean().describe(`
         * * Field Name: IsDefault
         * * Display Name: Is Default
@@ -1535,7 +1535,7 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Display Name: ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Common: Organizations (vwOrganizations.ID)
-        * * Description: Same value as the parent __mj_BizAppsCommon.Organization.ID. The primary key IS the foreign key; this is not a separate surrogate identity.`),
+        * * Description: The account's ID, the same as its organization's ID.`),
     OwnerEmployeeID: z.string().nullable().describe(`
         * * Field Name: OwnerEmployeeID
         * * Display Name: Owner Employee ID
@@ -1560,7 +1560,7 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Field Name: Territory
         * * Display Name: Territory
         * * SQL Data Type: nvarchar(100)
-        * * Description: A LABEL, not a routing engine. Territory assignment as a rules engine is a product in its own right and is on the not-doing list.`),
+        * * Description: Sales territory label for the account. It is not used to route or assign accounts.`),
     Tier: z.string().nullable().describe(`
         * * Field Name: Tier
         * * Display Name: Tier
@@ -1577,12 +1577,12 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Field Name: EmployeeCountBand
         * * Display Name: Employee Count Band
         * * SQL Data Type: nvarchar(50)
-        * * Description: A BAND, not a number, for the same reason as AnnualRevenueBand.`),
+        * * Description: Approximate number of employees as a range, for example 50-200.`),
     AnnualRevenueBand: z.string().nullable().describe(`
         * * Field Name: AnnualRevenueBand
         * * Display Name: Annual Revenue Band
         * * SQL Data Type: nvarchar(50)
-        * * Description: A BAND, not a number ("$1M-$5M"), on purpose. A rep's guess stored as an exact figure is false precision that later gets treated as fact.`),
+        * * Description: Approximate annual revenue as a range, for example $1M-$5M.`),
     HealthStatus: z.string().nullable().describe(`
         * * Field Name: HealthStatus
         * * Display Name: Health Status
@@ -1705,7 +1705,7 @@ export const mjBizAppsSalesSalesContactSchema = z.object({
         * * Display Name: ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
-        * * Description: Same value as the parent __mj_BizAppsCommon.Person.ID. The primary key IS the foreign key.`),
+        * * Description: The contact's ID, the same as its person's ID.`),
     OwnerEmployeeID: z.string().nullable().describe(`
         * * Field Name: OwnerEmployeeID
         * * Display Name: Owner Employee ID
@@ -1721,7 +1721,7 @@ export const mjBizAppsSalesSalesContactSchema = z.object({
         * * Display Name: Buying Role Type ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Buying Role Types (vwBuyingRoleTypes.ID)
-        * * Description: The contact's DEFAULT buying role. The role that matters per-deal lives on DealContactRole, because one contact holds different roles on different deals.`),
+        * * Description: The contact's usual buying role. The role on a particular deal is set in that deal's buying team.`),
     LeadSourceTypeID: z.string().nullable().describe(`
         * * Field Name: LeadSourceTypeID
         * * Display Name: Lead Source Type ID
@@ -2180,7 +2180,7 @@ export class mjBizAppsSalesBuyingRoleTypeEntity extends BaseEntity<mjBizAppsSale
  * * Schema: __mj_BizAppsSales
  * * Base Table: DealContactRole
  * * Base View: vwDealContactRoles
- * * @description The buying committee on the CUSTOMER side: which contact plays which role on this deal. A junction rather than a field on SalesContact because one contact holds different roles on different deals.
+ * * @description The customer's buying team: which contact plays which role on a deal.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -2335,7 +2335,7 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
  * * Schema: __mj_BizAppsSales
  * * Base Table: DealPaymentSchedule
  * * Base View: vwDealPaymentSchedules
- * * @description The EXCEPTION payment schedule for a deal. THE ABSENCE OF ROWS IS THE COMMON CASE and that is the design: the standard term is 100% payable on execution, so a deal on standard terms carries no rows here and rows exist only where something else was negotiated. Storing the default on every deal would let a later change to "default" silently rewrite history, and would turn "did this deal negotiate payment terms?" into arithmetic instead of a row count. This app does NOT check that the schedule sums to the deal amount — that is computing money, and the authoritative total lives in orders.
+ * * @description Payment instalments agreed for a deal when they differ from the standard terms. A deal on standard terms has no rows here.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -2402,7 +2402,7 @@ export class mjBizAppsSalesDealPaymentScheduleEntity extends BaseEntity<mjBizApp
     * * Field Name: Amount
     * * Display Name: Amount
     * * SQL Data Type: decimal(19, 4)
-    * * Description: The instalment amount as agreed. Unconstrained in sign: a refund or credit instalment is legitimately negative, and this table records what was agreed rather than asserting a shape for it.
+    * * Description: The instalment amount as agreed. Can be negative for a refund or credit.
     */
     get Amount(): number | null {
         return this.Get('Amount');
@@ -2428,7 +2428,7 @@ export class mjBizAppsSalesDealPaymentScheduleEntity extends BaseEntity<mjBizApp
     * * Display Name: Display Order
     * * SQL Data Type: int
     * * Default Value: 0
-    * * Description: Explicit ordering, because instalment order is not always date order — "on execution" and "on signature of SOW 2" can share a date or have none yet. Server-maintained and re-sequenced on every save, mirroring how accounting re-sequences JournalEntryLine.LineNumber.
+    * * Description: Position of the instalment in the schedule, for instalments that share a date or have none yet.
     */
     get DisplayOrder(): number {
         return this.Get('DisplayOrder');
@@ -2552,7 +2552,7 @@ export class mjBizAppsSalesDealRoleEntity extends BaseEntity<mjBizAppsSalesDealR
     * * Display Name: Is Owner Role
     * * SQL Data Type: bit
     * * Default Value: 0
-    * * Description: Identifies the role that DEFINES ownership. Exactly one team member per deal may hold a role with this flag, enforced server-side, and Deal.OwnerEmployeeID is the denormalized stamp of whoever does.
+    * * Description: Marks the role that owns the deal. Only one team member per deal can hold it, and that person is shown as the deal's owner.
     */
     get IsOwnerRole(): boolean {
         return this.Get('IsOwnerRole');
@@ -2566,7 +2566,7 @@ export class mjBizAppsSalesDealRoleEntity extends BaseEntity<mjBizAppsSalesDealR
     * * Display Name: Allows Multiple Per Deal
     * * SQL Data Type: bit
     * * Default Value: 1
-    * * Description: Whether two people may hold this role on one deal. Two sales engineers, yes; two owners, no. Enforced server-side FROM THIS FLAG, never hardcoded against a role name.
+    * * Description: Whether more than one person can hold this role on the same deal, for example two sales engineers.
     */
     get AllowsMultiplePerDeal(): boolean {
         return this.Get('AllowsMultiplePerDeal');
@@ -2730,7 +2730,7 @@ export class mjBizAppsSalesDealSequenceEntity extends BaseEntity<mjBizAppsSalesD
  * * Schema: __mj_BizAppsSales
  * * Base Table: DealStageEvent
  * * Base View: vwDealStageEvents
- * * @description APPEND-ONLY transition log, never edited. The source for stage conversion, velocity, dwell time, slippage and skipped-stage analysis. Stamping the amount and probability AT each transition is what lets historical roll-ups reconstruct correctly after a deal's amount changes.
+ * * @description A record of a deal moving from one stage to another, with the amount and probability at that moment. These rows are never edited.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -2863,7 +2863,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
     * * Display Name: Changed At
     * * SQL Data Type: datetimeoffset
     * * Default Value: sysutcdatetime()
-    * * Description: The ORIGINAL time of the transition, not the row's insert time. A distinct column rather than a reliance on __mj_CreatedAt because the HubSpot import must preserve historical timestamps — a 2023 transition has to land as 2023.
+    * * Description: When the stage change happened. For imported deals this is the original date, not the import date.
     */
     get ChangedAt(): Date {
         return this.Get('ChangedAt');
@@ -2888,7 +2888,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
     * * Field Name: AmountAtTransition
     * * Display Name: Amount At Transition
     * * SQL Data Type: decimal(19, 4)
-    * * Description: Deal.Amount as it stood at this transition. Point-in-time truth: "what did we think the forecast was on the 1st" is unanswerable from Deal alone once amounts change.
+    * * Description: The deal amount at the time of this stage change.
     */
     get AmountAtTransition(): number | null {
         return this.Get('AmountAtTransition');
@@ -2901,7 +2901,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
     * * Field Name: AmountAtTransitionIsComputed
     * * Display Name: Amount At Transition Is Computed
     * * SQL Data Type: bit
-    * * Description: Whether AmountAtTransition came from the orders engine (1) or was stated by a person (0). NULL means the transition was recorded before this was tracked — it is not backfillable, because Deal.AmountIsComputed describes the deal as it is now, not as it was at the close.
+    * * Description: On when the amount at this stage change was the order total, off when it was entered by hand. Empty for changes recorded before this was tracked.
     */
     get AmountAtTransitionIsComputed(): boolean | null {
         return this.Get('AmountAtTransitionIsComputed');
@@ -3015,7 +3015,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
  * * Schema: __mj_BizAppsSales
  * * Base Table: DealStatusType
  * * Base View: vwDealStatusTypes
- * * @description The OUTCOME vocabulary for deals (Open, Won, Lost, Abandoned, On Hold ...). Behaviour comes from the flags on this row, NEVER from the Name — Sales.CloseDeal is named for the outcome type rather than a hardcoded "won" precisely so it can resolve everything from IsWon/IsLost/LocksDeal. Renaming a status is a metadata change with no code impact.
+ * * @description The outcomes a deal can be in, such as Open, Won, Lost or On Hold. The flags on each status decide how a deal in it behaves.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -3057,7 +3057,7 @@ export class mjBizAppsSalesDealStatusTypeEntity extends BaseEntity<mjBizAppsSale
     * * Field Name: Code
     * * Display Name: Code
     * * SQL Data Type: nvarchar(40)
-    * * Description: Stable identifier the engine and metadata seeds key on. Renaming Name is cosmetic; renaming Code changes an identifier.
+    * * Description: Short fixed identifier for the status. Renaming the status is safe; changing its code is not.
     */
     get Code(): string {
         return this.Get('Code');
@@ -3147,7 +3147,7 @@ export class mjBizAppsSalesDealStatusTypeEntity extends BaseEntity<mjBizAppsSale
     * * Display Name: Locks Deal
     * * SQL Data Type: bit
     * * Default Value: 0
-    * * Description: When 1, a deal in this status FREEZES: the header (except Description and NextStep), its lines and its team members become immutable, enforced in DealEntityServer.Save() — not in the UI, so an Action, an agent or a raw BaseEntity.Save() hits the same wall. Mirrors journal-entry immutability in accounting, and for the same reason: the deal is now the provenance of a contract and an order.
+    * * Description: When on, a deal in this status is locked until it is reopened: its lines, payment schedule, team and every field except Description and Next Step become read-only.
     */
     get LocksDeal(): boolean {
         return this.Get('LocksDeal');
@@ -3209,7 +3209,7 @@ export class mjBizAppsSalesDealStatusTypeEntity extends BaseEntity<mjBizAppsSale
  * * Schema: __mj_BizAppsSales
  * * Base Table: DealTeamMember
  * * Base View: vwDealTeamMembers
- * * @description The internal people on a deal and the role each holds — the SINGLE SOURCE OF TRUTH for deal membership, INCLUDING the owner (the member whose DealRole has IsOwnerRole = 1). WATCH THE ATTRIBUTION DOUBLE-COUNT: a deal with an AE, an SE and an SDR has three rows, so summing Deal.Amount across this table triple-counts the deal. Every by-rep rollup must either filter to the owner role or weight by AttributionPct.
+ * * @description The internal people on a deal and the role each holds, including the owner. Totals by rep must count only the owner role or weight by attribution, or a deal is counted once per member.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -3265,7 +3265,7 @@ export class mjBizAppsSalesDealTeamMemberEntity extends BaseEntity<mjBizAppsSale
     * * Display Name: Employee ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
-    * * Description: The internal rep, as an MJ Employee. Exactly one of EmployeeID / PersonID is set. Employee is the common case.
+    * * Description: The team member, when they are an employee. Set this or Person, not both.
     */
     get EmployeeID(): string | null {
         return this.Get('EmployeeID');
@@ -3279,7 +3279,7 @@ export class mjBizAppsSalesDealTeamMemberEntity extends BaseEntity<mjBizAppsSale
     * * Display Name: Person ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
-    * * Description: A NON-EMPLOYEE team member — a partner rep or contractor — as a common.Person. Exactly one of EmployeeID / PersonID is set (D-6). Needed because Partner Manager is a seeded DealRole and an Employee row cannot express someone outside the company.
+    * * Description: The team member, when they are not an employee, such as a partner rep. Set this or Employee, not both.
     */
     get PersonID(): string | null {
         return this.Get('PersonID');
@@ -3600,7 +3600,7 @@ export class mjBizAppsSalesDealTypeEntity extends BaseEntity<mjBizAppsSalesDealT
  * * Schema: __mj_BizAppsSales
  * * Base Table: Deal
  * * Base View: vwDeals
- * * @description A deal (opportunity). Amount is a CACHED answer from Orders.PreviewOrder carrying its own provenance, never a locally computed total — this app performs no pricing arithmetic of any kind. Closing a deal is a transaction that CREATES a contract and/or orders, not a notification that someone should.
+ * * @description A sales opportunity with an account. Its amount comes from the deal's order, and winning it follows the pipeline's close-won policy.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -3784,7 +3784,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Display Name: Billing Contact
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
-    * * Description: The contact who receives the invoice, which is routinely NOT the person negotiating. NULL means the billing contact IS the primary contact — a real default, not "unknown" — so an AD never types the same name twice and changing the primary contact leaves no stale billing copy.
+    * * Description: The contact who receives the invoice. Leave empty to use the primary contact.
     */
     get BillingContactID(): string | null {
         return this.Get('BillingContactID');
@@ -3798,7 +3798,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Display Name: Company ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
-    * * Description: The SELLING company. Must match Pipeline.CompanyID; enforced by the entity server, since a CHECK cannot reach across the FK to compare them. FK to __mj.Company.
+    * * Description: The company selling the deal. It must match the pipeline's company.
     */
     get CompanyID(): string {
         return this.Get('CompanyID');
@@ -3812,7 +3812,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Display Name: Owner Employee ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
-    * * Description: DENORMALIZED, SERVER-MAINTAINED. The Employee holding the role where DealRole.IsOwnerRole = 1, written by DealEntityServer.Save() whenever team membership changes. DealTeamMember is the source of truth; this exists so "my deals" and per-rep boards need no join. NEVER SET THIS DIRECTLY — it will diverge.
+    * * Description: The deal owner: the team member in the owner role. Updated automatically from the deal team.
     */
     get OwnerEmployeeID(): string | null {
         return this.Get('OwnerEmployeeID');
@@ -3825,7 +3825,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: Amount
     * * Display Name: Amount
     * * SQL Data Type: decimal(19, 4)
-    * * Description: The deal value. A CACHED ANSWER returned by Orders.PreviewOrder for this deal's line set — NOT computed here. For a simple (header-only) deal it is hand-entered and AmountIsComputed is 0. Never sum the order's lines into this column; sales does no arithmetic.
+    * * Description: The deal value. For a deal with product lines it is the order total calculated by Orders; for a deal without lines it is entered by hand.
     */
     get Amount(): number | null {
         return this.Get('Amount');
@@ -3839,7 +3839,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Display Name: Amount Is Computed
     * * SQL Data Type: bit
     * * Default Value: 0
-    * * Description: 1 when Amount came from Orders.PreviewOrder; 0 when a human typed it (a simple, header-only deal). Distinguishes a traceable figure from a stated one.
+    * * Description: On when Amount is the order total calculated by Orders; off when it was entered by hand.
     */
     get AmountIsComputed(): boolean {
         return this.Get('AmountIsComputed');
@@ -3864,7 +3864,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: AmountSourceHash
     * * Display Name: Amount Source Hash
     * * SQL Data Type: nvarchar(128)
-    * * Description: Fingerprint of the embedded order's line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say the products changed after the amount was calculated, instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.
+    * * Description: Fingerprint of the order lines the amount was calculated from, used to tell when the amount is out of date.
     */
     get AmountSourceHash(): string | null {
         return this.Get('AmountSourceHash');
@@ -3926,7 +3926,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: EstimatedProjectWeeks
     * * Display Name: Estimated Project Weeks
     * * SQL Data Type: int
-    * * Description: Estimated project timeline in WEEKS, from the SOW template. A separate column from TermMonths on purpose: a subscription term is a COMMITMENT that drives renewal dates and escalation, a project estimate is a FORECAST that drives neither. One column plus a unit flag would force every consumer to branch on the unit before using the number.
+    * * Description: Estimated project length in weeks, from the statement of work. It does not affect the term or renewal dates.
     */
     get EstimatedProjectWeeks(): number | null {
         return this.Get('EstimatedProjectWeeks');
@@ -3939,7 +3939,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: ExecutionDate
     * * Display Name: Execution Date
     * * SQL Data Type: date
-    * * Description: The date the agreement was signed. Deliberately NOT constrained against StartDate: work that begins before signature is common and legitimate, so ordering the two would reject real deals.
+    * * Description: The date the agreement was signed. It can be after the start date when work begins before signature.
     */
     get ExecutionDate(): Date | null {
         return this.Get('ExecutionDate');
@@ -3952,7 +3952,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: StartDate
     * * Display Name: Start Date
     * * SQL Data Type: date
-    * * Description: The date service or the subscription actually begins (order-form / SOW start). May precede ExecutionDate for backdated work — see that column.
+    * * Description: The date the service or subscription begins. It can be before the execution date.
     */
     get StartDate(): Date | null {
         return this.Get('StartDate');
@@ -4067,7 +4067,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Display Name: Contract
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Contracts: Contracts (vwContracts.ID)
-    * * Description: SOFT reference (no FK) to a bizapps-contracts Contract. The link points DOWN the dependency graph; there is deliberately no Contract.DealID, because it is ONE contract to MANY deals — the original sale, every renewal, every expansion.
+    * * Description: The contract this deal belongs to, in BizApps Contracts.
     */
     get ContractID(): string | null {
         return this.Get('ContractID');
@@ -4081,7 +4081,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Display Name: Renews Contract
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Contracts: Contracts (vwContracts.ID)
-    * * Description: SOFT reference (no FK) to the contract this deal RENEWS. What makes the renewal chain navigable from the sales side without contracts knowing anything about it. Required when DealType.RequiresRenewalSource is set.
+    * * Description: The contract this deal renews. Required for deal types that are renewals.
     */
     get RenewsContractID(): string | null {
         return this.Get('RenewsContractID');
@@ -4108,7 +4108,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: AnnualIncreasePctOverride
     * * Display Name: Annual Increase Pct Override
     * * SQL Data Type: decimal(5, 2)
-    * * Description: An OVERRIDE, and NULL is meaningful: it means "use the standard annual increase", whose default (5%) lives on the contracts ContractType, not here. That is a different fact from "we negotiated a number that happens to equal today's standard", and only the NULL survives a later change to policy. Copying the default in at write time would freeze this year's terms into next year's renewals silently.
+    * * Description: Annual price increase agreed for this deal, as a percent. Leave empty to use the contract type's standard increase.
     */
     get AnnualIncreasePctOverride(): number | null {
         return this.Get('AnnualIncreasePctOverride');
@@ -4121,7 +4121,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: CancellationNoticeDaysOverride
     * * Display Name: Cancellation Notice Days Override
     * * SQL Data Type: int
-    * * Description: An OVERRIDE of the standard cancellation-notice period (default 90 days, owned by the contracts ContractType). NULL means "use the standard" — see AnnualIncreasePctOverride for why that distinction is load-bearing.
+    * * Description: Cancellation notice period agreed for this deal, in days. Leave empty to use the contract type's standard notice period.
     */
     get CancellationNoticeDaysOverride(): number | null {
         return this.Get('CancellationNoticeDaysOverride');
@@ -4135,7 +4135,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Display Name: Payment Method
     * * SQL Data Type: nvarchar(50)
     * * Default Value: ACH
-    * * Description: PLACEHOLDER LABEL (default ACH), and a string only for as long as nothing branches on it. Payment method becomes vocabulary the moment code cares — ACH and card differ in settlement timing and fees — but ORDERS owns that concept and will expose PaymentType. Pointing at orders' vocabulary later beats standing up a competing copy here and reconciling two. No code may branch on this value.
+    * * Description: How the customer expects to pay, for example ACH. For reference only.
     */
     get PaymentMethod(): string | null {
         return this.Get('PaymentMethod');
@@ -4149,7 +4149,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Display Name: Standard Agreement Modified
     * * SQL Data Type: bit
     * * Default Value: 0
-    * * Description: Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance's review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.
+    * * Description: Whether the deal moved off the standard agreement. Copied to the contract when the deal is won, where it tells finance to review the changes.
     */
     get StandardAgreementModified(): boolean {
         return this.Get('StandardAgreementModified');
@@ -4162,7 +4162,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: ContractVariances
     * * Display Name: Contract Variances
     * * SQL Data Type: nvarchar(MAX)
-    * * Description: Free-text summary of what this deal negotiated AWAY from standard terms — the red-line list, in the AD's own words. The input to a human legal review; nothing should attempt to parse it.
+    * * Description: Summary of the terms negotiated away from the standard agreement, for legal review.
     */
     get ContractVariances(): string | null {
         return this.Get('ContractVariances');
@@ -4517,7 +4517,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
  * * Schema: __mj_BizAppsSales
  * * Base Table: ForecastCategoryType
  * * Base View: vwForecastCategoryTypes
- * * @description How a deal rolls into the forecast (Omitted, Pipeline, Best Case, Commit, Closed). The Include* flags are read directly by the forecast measures; a query that compared a category NAME would be exactly the violation the CI grep exists to catch.
+ * * @description How a deal counts in the forecast: Omitted, Pipeline, Best Case, Commit or Closed. The Include flags on each category decide which forecast totals it adds to.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -4683,7 +4683,7 @@ export class mjBizAppsSalesForecastCategoryTypeEntity extends BaseEntity<mjBizAp
  * * Schema: __mj_BizAppsSales
  * * Base Table: ForecastSnapshot
  * * Base View: vwForecastSnapshots
- * * @description A point-in-time capture of the forecast, written by a Scheduled Job. Snapshots matter more than the live number: "what did we think on the first of the month" is the question a forecast review actually asks, and it is unanswerable after the fact without them. The live figure reads Deal; the historical one reads this table.
+ * * @description The forecast for a pipeline and owner as captured on a given day, so past forecasts can be compared with today's.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -4801,7 +4801,7 @@ export class mjBizAppsSalesForecastSnapshotEntity extends BaseEntity<mjBizAppsSa
     * * Field Name: CommitAmount
     * * Display Name: Commit Amount
     * * SQL Data Type: decimal(19, 4)
-    * * Description: Total of deals in forecast categories flagged IncludeInCommit as at CapturedAt. Named CommitAmount rather than the plan's Commit because COMMIT is a reserved word in both T-SQL and PostgreSQL, and production is PostgreSQL.
+    * * Description: Total of deals in commit forecast categories when the snapshot was taken.
     */
     get CommitAmount(): number | null {
         return this.Get('CommitAmount');
@@ -4850,7 +4850,7 @@ export class mjBizAppsSalesForecastSnapshotEntity extends BaseEntity<mjBizAppsSa
     * * Field Name: SnapshotJSON
     * * Display Name: Snapshot JSON
     * * SQL Data Type: nvarchar(MAX)
-    * * Description: The full breakdown behind the four bucket totals, so a snapshot can be interrogated rather than merely displayed.
+    * * Description: The detail behind the snapshot's totals, stored as JSON.
     */
     get SnapshotJSON(): string | null {
         return this.Get('SnapshotJSON');
@@ -5077,7 +5077,7 @@ export class mjBizAppsSalesLeadSourceTypeEntity extends BaseEntity<mjBizAppsSale
  * * Schema: __mj_BizAppsSales
  * * Base Table: LifecycleStageType
  * * Base View: vwLifecycleStageTypes
- * * @description Where a Person or Organization sits on the journey from stranger to evangelist. This table is what makes "Lead" a STAGE rather than an entity: a lead is a common.Person carrying a LifecycleStageTypeID, not a second identity table for humans.
+ * * @description Where a person or organization is in the customer journey, from Subscriber to Customer. A lead is a contact at the Lead stage, not a separate record.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -5243,7 +5243,7 @@ export class mjBizAppsSalesLifecycleStageTypeEntity extends BaseEntity<mjBizApps
  * * Schema: __mj_BizAppsSales
  * * Base Table: LossReason
  * * Base View: vwLossReasons
- * * @description Why a deal was lost. Loss reason is this app's ONLY mandatory field and the friction is deliberate: loss reasons are the highest-value and most consistently-skipped data in any CRM.
+ * * @description Why a deal was lost. Closing a deal as lost requires one.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -5334,7 +5334,7 @@ export class mjBizAppsSalesLossReasonEntity extends BaseEntity<mjBizAppsSalesLos
     * * Display Name: Requires Notes
     * * SQL Data Type: bit
     * * Default Value: 0
-    * * Description: When 1, Sales.CloseDeal refuses a close against this reason unless Deal.LossNotes is supplied.
+    * * Description: When on, a deal closed as lost with this reason must also have loss notes.
     */
     get RequiresNotes(): boolean {
         return this.Get('RequiresNotes');
@@ -5409,7 +5409,7 @@ export class mjBizAppsSalesLossReasonEntity extends BaseEntity<mjBizAppsSalesLos
  * * Schema: __mj_BizAppsSales
  * * Base Table: PipelineStage
  * * Base View: vwPipelineStages
- * * @description An ordered stage within a pipeline. Stages carry NO IsWon/IsClosed of their own — they point at a DealStatusType that does. That indirection is what makes "Closed Won" a label rather than a behaviour, and lets a pipeline call its winning stage Signed, Booked or Enrolled with no code aware of the difference.
+ * * @description An ordered stage within a pipeline. Each stage sets the status a deal takes on when it enters the stage.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -5527,7 +5527,7 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
     * * Display Name: Deal Status Type ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Status Types (vwDealStatusTypes.ID)
-    * * Description: The status a deal takes on when it ENTERS this stage. The stage names the vocabulary; the status carries the behaviour flags.
+    * * Description: The status a deal takes on when it enters this stage.
     */
     get DealStatusTypeID(): string | null {
         return this.Get('DealStatusTypeID');
@@ -5583,7 +5583,7 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
     * * Field Name: ExitCriteria
     * * Display Name: Exit Criteria
     * * SQL Data Type: nvarchar(MAX)
-    * * Description: Declarative JSON predicate evaluated SERVER-SIDE before a deal may leave this stage. A stage that cannot be exited without a signed mutual action plan is a config row, not a code branch.
+    * * Description: Conditions for leaving this stage, stored as JSON for reference. The app does not check them.
     */
     get ExitCriteria(): string | null {
         return this.Get('ExitCriteria');
@@ -5608,7 +5608,7 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
     * * Field Name: GuidanceMarkdown
     * * Display Name: Guidance Markdown
     * * SQL Data Type: nvarchar(MAX)
-    * * Description: "What good looks like at this stage", shown in the deal workspace. Sales enablement as a config field.
+    * * Description: Guidance for reps on what a deal should have at this stage, in Markdown.
     */
     get GuidanceMarkdown(): string | null {
         return this.Get('GuidanceMarkdown');
@@ -5727,7 +5727,7 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     * * Display Name: Company ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
-    * * Description: The owning company. NOT NULL by design — this is what makes every forecast and bookings rollup sliceable by company for free, and every deal inherits it. FK to __mj.Company.
+    * * Description: The company that owns this pipeline. Every deal in the pipeline belongs to this company.
     */
     get CompanyID(): string {
         return this.Get('CompanyID');
@@ -5752,7 +5752,7 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     * * Field Name: Code
     * * Display Name: Code
     * * SQL Data Type: nvarchar(40)
-    * * Description: Stable identifier, unique PER COMPANY rather than globally: two operating companies may each run a pipeline they both call NEWBIZ.
+    * * Description: Short identifier for the pipeline, unique within its company.
     */
     get Code(): string {
         return this.Get('Code');
@@ -5804,7 +5804,7 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     * * Display Name: Requires Deal Lines
     * * SQL Data Type: bit
     * * Default Value: 1
-    * * Description: Pipeline-level default for whether deals carry catalog lines (priced mode) or are header-only with a hand-entered Amount (simple mode). Overridable per deal. Partner-referral and sponsorship pipelines may never carry lines.
+    * * Description: Whether deals in this pipeline carry product lines priced by Orders, or a single amount entered by hand.
     */
     get RequiresDealLines(): boolean {
         return this.Get('RequiresDealLines');
@@ -5817,7 +5817,7 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     * * Field Name: CloseWonPolicy
     * * Display Name: Close Won Policy
     * * SQL Data Type: nvarchar(MAX)
-    * * Description: JSON declaring the DEFAULT outcome of winning a deal in this pipeline: whether to create a contract, which contract type, where subscription lines go, where one-time lines go, and what state the resulting order lands in. A deal may override it; one remote operation (Sales.CloseDeal) reads and executes it. JSON rather than columns because the policy shape is still being learned.
+    * * Description: What happens when a deal in this pipeline is won, stored as JSON: whether a contract is created and of which type, and which follow-up tasks are raised.
     */
     get CloseWonPolicy(): string | null {
         return this.Get('CloseWonPolicy');
@@ -5933,7 +5933,7 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
  * * Schema: __mj_BizAppsSales
  * * Base Table: SalesAccount
  * * Base View: vwSalesAccounts
- * * @description CRM attributes for an organization we sell to. An IsA extension of __mj_BizAppsCommon.Organization sharing its UUID — the account and the organization ARE one record, so a customer that is also a vendor and a member stays one row in the Organization graph.
+ * * @description Sales details for an organization you sell to. The account and its organization are one record.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -5963,7 +5963,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     * * Display Name: ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Common: Organizations (vwOrganizations.ID)
-    * * Description: Same value as the parent __mj_BizAppsCommon.Organization.ID. The primary key IS the foreign key; this is not a separate surrogate identity.
+    * * Description: The account's ID, the same as its organization's ID.
     */
     get ID(): string {
         return this.Get('ID');
@@ -6028,7 +6028,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     * * Field Name: Territory
     * * Display Name: Territory
     * * SQL Data Type: nvarchar(100)
-    * * Description: A LABEL, not a routing engine. Territory assignment as a rules engine is a product in its own right and is on the not-doing list.
+    * * Description: Sales territory label for the account. It is not used to route or assign accounts.
     */
     get Territory(): string | null {
         return this.Get('Territory');
@@ -6077,7 +6077,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     * * Field Name: EmployeeCountBand
     * * Display Name: Employee Count Band
     * * SQL Data Type: nvarchar(50)
-    * * Description: A BAND, not a number, for the same reason as AnnualRevenueBand.
+    * * Description: Approximate number of employees as a range, for example 50-200.
     */
     get EmployeeCountBand(): string | null {
         return this.Get('EmployeeCountBand');
@@ -6090,7 +6090,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     * * Field Name: AnnualRevenueBand
     * * Display Name: Annual Revenue Band
     * * SQL Data Type: nvarchar(50)
-    * * Description: A BAND, not a number ("$1M-$5M"), on purpose. A rep's guess stored as an exact figure is false precision that later gets treated as fact.
+    * * Description: Approximate annual revenue as a range, for example $1M-$5M.
     */
     get AnnualRevenueBand(): string | null {
         return this.Get('AnnualRevenueBand');
@@ -6403,7 +6403,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
  * * Schema: __mj_BizAppsSales
  * * Base Table: SalesContact
  * * Base View: vwSalesContacts
- * * @description CRM attributes for a person we sell to. An IsA extension of __mj_BizAppsCommon.Person sharing its UUID. There is deliberately no Lead entity — a lead is a Person at a lifecycle stage.
+ * * @description Sales details for a person you sell to. The contact and its person are one record.
  * * Primary Key: ID
  * @extends {BaseEntity}
  * @class
@@ -6433,7 +6433,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
     * * Display Name: ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
-    * * Description: Same value as the parent __mj_BizAppsCommon.Person.ID. The primary key IS the foreign key.
+    * * Description: The contact's ID, the same as its person's ID.
     */
     get ID(): string {
         return this.Get('ID');
@@ -6473,7 +6473,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
     * * Display Name: Buying Role Type ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Sales: Buying Role Types (vwBuyingRoleTypes.ID)
-    * * Description: The contact's DEFAULT buying role. The role that matters per-deal lives on DealContactRole, because one contact holds different roles on different deals.
+    * * Description: The contact's usual buying role. The role on a particular deal is set in that deal's buying team.
     */
     get BuyingRoleTypeID(): string | null {
         return this.Get('BuyingRoleTypeID');
