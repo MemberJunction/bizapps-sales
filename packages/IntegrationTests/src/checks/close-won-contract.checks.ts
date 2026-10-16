@@ -1,5 +1,5 @@
 /**
- * @fileoverview `close-won-contract` — CT1 and CT4–CT8, against contracts' v2 schema.
+ * @fileoverview `close-won-contract` — CT1 and CT4–CT9, against contracts' v2 schema.
  *
  * ── HOW THIS BUNDLE GOT HERE, BECAUSE THE HISTORY IS THE ARGUMENT ───────────────────────────────
  *
@@ -34,8 +34,10 @@ import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '
 import { ContractsIsInstalled, LiveContractsSeam, OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
 import {
     SalesCloseDealOperation,
+    SalesReopenDealOperation,
     type SalesCloseDealInput,
     type SalesCloseDealOutput,
+    type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 
 import { E_DEAL, InRolledBackTransaction, ProviderOf, ResolveSalesFixture, TxOne } from '../fixture.js';
@@ -45,6 +47,7 @@ type Ctx = Parameters<NamedCheck['Fn']>[0];
 
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_CONTRACT_TYPE = 'MJ_BizApps_Contracts: Contract Types';
+const E_CONTRACT_ORDER = 'MJ_BizApps_Contracts: Contract Orders';
 
 /** Refuses the run when contracts is absent, instead of quietly passing. */
 function requireContracts(): void {
@@ -141,6 +144,14 @@ async function closeDeal(ctx: Ctx, input: SalesCloseDealInput): Promise<SalesClo
     const output = (result as { Output?: SalesCloseDealOutput })?.Output;
     Assert(!!output, `Sales.CloseDeal returned no Output envelope: ${JSON.stringify(result).slice(0, 300)}`);
     return output as SalesCloseDealOutput;
+}
+
+async function reopenDeal(ctx: Ctx, dealID: string): Promise<SalesReopenDealOutput> {
+    const op = new SalesReopenDealOperation();
+    const result = await op.Execute({ DealID: dealID, Reason: 'CT9: reopen and close again' }, { provider: ProviderOf(ctx), user: ctx.User });
+    const output = (result as { Output?: SalesReopenDealOutput })?.Output;
+    Assert(!!output, `Sales.ReopenDeal returned no Output envelope: ${JSON.stringify(result).slice(0, 300)}`);
+    return output as SalesReopenDealOutput;
 }
 
 function requireOrdersToo(): void {
@@ -427,6 +438,84 @@ export const CloseWonContractChecks: NamedCheck[] = [
                 AssertEqual(contract?.CancellationWindowDays, 10, 'the negotiated cancellation window stands');
                 AssertEqual(contract?.RenewalNoticeDays, 45, 'the notice period the deal left unset comes from the type');
                 AssertEqual(Number(contract?.AnnualIncreasePercent), 3, 'the uplift the deal left unset comes from the type');
+            }),
+    },
+    {
+        Id: 'close-won-contract.CT9',
+        Name: 'CT9: close Won, reopen, close Won again — one contract, the same ContractID, one order link',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * #278. The second close used to create a second contract and overwrite `Deal.ContractID`,
+                 * leaving the first with nothing pointing at it. The close now reuses the contract the
+                 * deal names.
+                 *
+                 * Contracts are counted by `CreatingRecordID` = this deal, never across the table, so the
+                 * check is about this deal's fixture alone. The order link is found by contract AND order,
+                 * which is the pair a duplicate would repeat.
+                 */
+                requireContracts();
+                requireOrdersToo();
+                Assert(
+                    new Metadata().Entities.some((e) => e.Name === E_CONTRACT_ORDER),
+                    'this contracts build has no order links (Contract Orders), so the link half cannot be asserted',
+                );
+                const f = await ResolveSalesFixture(ctx);
+                const seeded = await SeedDealOnPipeline(ctx, f, {
+                    PipelineID: f.ContractPolicyPipelineID,
+                    StageID: f.ContractPolicyStageID,
+                    CompanyID: f.PipelineCompanyID,
+                    LineCount: 1,
+                });
+
+                const first = await closeDeal(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+                Assert(first.Success, `the first close failed: ${JSON.stringify(first.Issues)}`);
+                const firstRoute = first.Routing?.find((r) => r.Target === 'Contract');
+                Assert(
+                    firstRoute?.Executed === true,
+                    `the first close created no contract — reason: ${firstRoute?.Reason ?? '(no Contract route)'}`,
+                );
+                const before = await TxOne<{ ContractID: string | null; OrderID: string | null }>(
+                    ctx, `SELECT ContractID, OrderID FROM __mj_BizAppsSales.Deal WHERE ID = '${seeded.DealID}'`,
+                );
+                Assert(!!before.ContractID, 'the first close stamped a contract on the deal');
+                Assert(!!before.OrderID, 'the deal carries its order, so there is a link to count');
+
+                const reopened = await reopenDeal(ctx, seeded.DealID);
+                Assert(reopened.Success, `the reopen failed: ${JSON.stringify(reopened.Issues)}`);
+
+                const second = await closeDeal(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+                Assert(second.Success, `the second close failed: ${JSON.stringify(second.Issues)}`);
+                const secondRoute = second.Routing?.find((r) => r.Target === 'Contract');
+                Assert(
+                    secondRoute?.Executed === true,
+                    `the second close did not reuse the contract — reason: ${secondRoute?.Reason ?? '(no Contract route)'}`,
+                );
+                AssertEqual(
+                    String(secondRoute?.RecordID ?? '').toLowerCase(),
+                    String(before.ContractID).toLowerCase(),
+                    'the second close reports the contract the deal already named',
+                );
+
+                const after = await TxOne<{ ContractID: string | null }>(
+                    ctx, `SELECT ContractID FROM __mj_BizAppsSales.Deal WHERE ID = '${seeded.DealID}'`,
+                );
+                AssertEqual(
+                    String(after.ContractID ?? '').toLowerCase(),
+                    String(before.ContractID).toLowerCase(),
+                    'Deal.ContractID is unchanged by the second close',
+                );
+
+                const contracts = await rows(ctx, E_CONTRACT, `CreatingRecordID = '${seeded.DealID}'`);
+                AssertEqual(contracts.length, 1, 'the deal has exactly one contract after closing Won twice');
+
+                const links = await rows(
+                    ctx,
+                    E_CONTRACT_ORDER,
+                    `ContractID = '${before.ContractID}' AND OrderID = '${before.OrderID}'`,
+                );
+                AssertEqual(links.length, 1, 'the order is linked to the contract once, not once per close');
             }),
     },
 ];

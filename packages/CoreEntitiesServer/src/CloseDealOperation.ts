@@ -206,6 +206,17 @@ function issue(Section: SalesCloseIssue['Section'], Message: string, Field: stri
 }
 
 /**
+ * A refusal raised inside the close's transaction. Thrown so the transaction rolls back, and reported
+ * as a plain error issue rather than as "the deal could not be closed: Error: ...".
+ */
+class CloseRefusal extends Error {
+    public constructor(message: string, public readonly Field: string | null = null) {
+        super(message);
+        this.name = 'CloseRefusal';
+    }
+}
+
+/**
  * The deal's order-status warnings, as Issues — the channel D-OS1's rule 3 needs.
  *
  * A stage change that asks the order for a status orders refuses must not fail the operation, so the
@@ -544,8 +555,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             // Before the deal's save, which is what confirms the order and applies the answer.
             await AnswerAsNextTerm(validation.RenewalNextTerm);
 
+            const routeIssues: SalesCloseIssue[] = [];
             for (const plan of routing) {
-                await this.execute(plan, deal, policy, provider, user);
+                routeIssues.push(...(await this.execute(plan, deal, policy, provider, user)));
             }
 
             /**
@@ -719,6 +731,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  */
                 Issues: [
                     ...closing.Issues,
+                    ...routeIssues,
                     ...taskIssues,
                     ...linkIssues,
                     ...orderStatusIssues(deal),
@@ -740,6 +753,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 } catch (rollbackErr) {
                     LogError(`Sales.CloseDeal: rollback failed: ${rollbackErr}`);
                 }
+            }
+            if (err instanceof CloseRefusal) {
+                return { ...empty, Issues: [issue('deal', err.message, err.Field)] };
             }
             LogError(`Sales.CloseDeal failed: ${err}`);
             return { ...empty, Issues: [issue('deal', `The deal could not be closed: ${err}`)] };
@@ -917,17 +933,25 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         return plans;
     }
 
-    /** Attempt one planned route through the seam, recording honestly whether it executed. */
+    /**
+     * Attempt one planned route through the seam, recording honestly whether it executed.
+     *
+     * @returns notes and warnings the route raised beyond its own `Routing` entry.
+     */
     private async execute(
         plan: SalesCloseRoutingResult,
         deal: DealEntityServer,
         policy: SalesCloseWonPolicy,
         provider: IMetadataProvider,
         user: UserInfo,
-    ): Promise<void> {
+    ): Promise<SalesCloseIssue[]> {
         const seam = resolveSeam(user, provider);
 
         if (plan.Target === 'Contract') {
+            // A deal that already names a contract reuses it, before either door below (#278).
+            if (deal.ContractID) {
+                return this.reuseContract(plan, deal, policy, provider, user, seam);
+            }
             // A renewal takes a different door: RenewTerm against the contract being renewed, not a
             // new agreement. Decided by DealType.RequiresRenewalSource — a flag, not a type name.
             const isRenewal = await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user);
@@ -946,12 +970,67 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 // §7.2 step 4: stamp the agreement onto the deal.
                 deal.ContractID = result.ContractID;
             }
-            return;
+            return [];
         }
 
 
         // Subscription materialization has no seam at all yet; the plan already carries its reason.
         plan.Executed = false;
+        return [];
+    }
+
+    /**
+     * The contract route for a deal that already names a contract: closed Won, reopened, closed Won
+     * again (#278).
+     *
+     * Creating a second contract here is what orphaned the first: the deal's `ContractID` was
+     * overwritten and nothing pointed back at the original. So the deal's own contract is reused, and
+     * `ContractID` never changes. The seam refreshes it from the deal while it is unsigned and leaves it
+     * alone once signed; a signed contract comes back as a warning that the deal and the paper may
+     * differ.
+     *
+     * A contract the deal names but nobody can read REFUSES the close, the same way an unreadable
+     * current status does above: creating a new one would orphan it, and stamping it as reused would
+     * claim a record nobody has seen. The refusal is thrown so the transaction rolls back; the catch in
+     * `InternalExecute` turns it into an ordinary error issue.
+     */
+    private async reuseContract(
+        plan: SalesCloseRoutingResult,
+        deal: DealEntityServer,
+        policy: SalesCloseWonPolicy,
+        provider: IMetadataProvider,
+        user: UserInfo,
+        seam: IDownstreamSeam,
+    ): Promise<SalesCloseIssue[]> {
+        const contractID = String(deal.ContractID);
+        const result = await seam.UpdateContractFromDeal({
+            ...(await this.buildContractInput(deal, policy, provider, user)),
+            ContractID: contractID,
+        });
+        if (result.Unreadable) {
+            throw new CloseRefusal(result.Message ?? `Contract ${contractID} could not be read.`, 'ContractID');
+        }
+
+        plan.Executed = result.Success === true;
+        plan.RecordID = result.Success ? contractID : null;
+        plan.Reason = result.Success ? null : result.Message ?? 'not executed';
+        if (!result.Success) {
+            return [];   // reported through `routingIssues`, like any route that did not execute
+        }
+
+        const number = result.ContractNumber || contractID;
+        const issues: SalesCloseIssue[] = [
+            { Section: 'deal', Field: 'ContractID', Severity: 'info', Message: `Reused contract ${number}.` },
+        ];
+        if (result.Signed) {
+            issues.push({
+                Section: 'deal',
+                Field: 'ContractID',
+                Severity: 'warning',
+                Message: result.Message ?? `Contract ${number} is signed and was not changed; the deal may differ from it.`,
+            });
+        }
+        return issues;
     }
 
     /**
@@ -1566,6 +1645,8 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             deal.ClosedAt = null;
             deal.ClosedByUserID = null;
             deal.ActualCloseDate = null;
+            // `ContractID` stays on the deal on purpose: the next close reuses that contract and decides
+            // whether to refresh it (#278).
 
             /**
              * THE LOSS REASON IS A CLOSE STAMP TOO, and leaving it behind was not harmless
