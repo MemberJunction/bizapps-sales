@@ -220,6 +220,9 @@ interface RemoteOperationRouter {
                             <input type="number" data-testid="line-quantity" min="1" step="1" [ngModel]="Working.Quantity"
                                    (ngModelChange)="SetQuantity($event)"
                                    [disabled]="IsLocked" [title]="BlockedReason" />
+                            @if (QuantityInvalid) {
+                                <span class="mjs-le__error" data-testid="line-quantity-error">{{ QuantityInvalidMessage }}</span>
+                            }
                         </label>
 
                         <label class="mjs-le__field">
@@ -791,6 +794,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             this.Applicable = [];
             return;
         }
+        // Not asked for a quantity the rep has not entered; Save is blocked until they do.
+        if (this.QuantityInvalid) return;
         const productID = String(line.ProductID);
         try {
             await LoadOrdersEngine(Metadata.Provider, user);
@@ -1007,10 +1012,12 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
 
     /** Orders' answer when there is one, otherwise whatever the saved line already carries. */
     public get DisplayUnitPrice(): number | null {
+        if (this.QuantityInvalid) return null;
         return this.pricedUnit ?? (this.Working?.UnitPrice as number | null | undefined) ?? null;
     }
 
     public get DisplayLineTotal(): number | null {
+        if (this.QuantityInvalid) return null;
         return this.pricedTotal ?? (this.Working?.LineTotalNet as number | null | undefined) ?? null;
     }
 
@@ -1030,6 +1037,19 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             clearTimeout(this.priceTimer);
             this.priceTimer = null;
         }
+    }
+
+    public get QuantityInvalidMessage(): string { return 'Enter a quantity greater than 0.'; }
+
+    /**
+     * Blank, zero, negative or not a number. Fractions are legal: orders stores `DECIMAL(18,4)` and
+     * forbids only zero, and a deal line expresses no reversal. The input's `min` limits only the
+     * spinner, so a cleared or typed value reaches here as 0 or a negative.
+     */
+    public get QuantityInvalid(): boolean {
+        if (!this.Working) return false;
+        const q = this.Working.Quantity as number | null | undefined;
+        return q == null || !Number.isFinite(Number(q)) || Number(q) <= 0;
     }
 
     /** Quantity is a priced input, so it cannot be a plain two-way binding. */
@@ -1073,6 +1093,15 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             this.cdr.detectChanges();
             return;
         }
+        // No price for a quantity the rep did not enter: never a one-unit figure in its place.
+        if (this.QuantityInvalid) {
+            this.pricedUnit = null;
+            this.pricedTotal = null;
+            this.EngineDefault = undefined;
+            this.PricingNote = this.QuantityInvalidMessage;
+            this.cdr.detectChanges();
+            return;
+        }
 
         this.Pricing = true;
         this.PricingNote = null;
@@ -1090,7 +1119,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                     OrderDate: this.IsoOrNull(order?.OrderDate),
                     Lines: [{
                         ProductID: String(line.ProductID),
-                        Quantity: Number(line.Quantity) || 1,
+                        Quantity: Number(line.Quantity),
                         // A picked price PINS the line, as it will on the order's save; otherwise orders
                         // resolves it.
                         UnitPrice: IsLinePriceOverridden(line, this.EngineDefault) ? Number(line.UnitPrice) : null,
@@ -1140,6 +1169,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (this.IsLocked) return false;
         return (
             !!this.Working?.ProductID &&
+            !this.QuantityInvalid &&
             !this.DiscountRefusal &&
             !!this.Deal?.OrderID_Object &&
             !LineNeedsOverrideReason(this.Working, this.EngineDefault) &&
@@ -1179,6 +1209,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (this.IsLocked) return 'This deal is closed. Set the status back to Open before changing what was sold.';
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
+        if (this.QuantityInvalid) return this.QuantityInvalidMessage;
         if (LineNeedsOverrideReason(this.Working, this.EngineDefault)) return 'Enter a reason for the price override.';
         if (this.MissingDiscountReason) return 'Choose a category and enter a reason for the discount.';
         if (this.ServicePeriodBackwards) return 'Set a service end on or after the service start.';
