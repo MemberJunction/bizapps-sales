@@ -3353,6 +3353,53 @@ export const CloseDealChecks: NamedCheck[] = [
                 AssertEqual(after.ForecastCategoryTypeID, null, 'and no forecast category, not "Closed"');
             }),
     },
+    {
+        Id: 'close-deal.CD42',
+        Name: 'CD42: a status-driven close whose save FAILED still closes when the same object is saved again',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The save reverts the status before writing so the close can run against the committed
+                 * row. A save that then failed (here: a required field left empty) used to leave the
+                 * status clean, so fixing the field and saving the same object again skipped the close
+                 * and reported success on an open deal.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD42 retry after a failed save',
+                );
+
+                const md = new Metadata();
+                const deal = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await deal.Load(dealID), 'the open deal loads');
+                deal.DealStatusTypeID = f.WonStatusID;
+                deal.Set('Name', null);
+                Assert(!(await deal.Save()), 'setup: a deal with no name must not save');
+                AssertEqual(
+                    String(deal.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.WonStatusID).toLowerCase(),
+                    'the status the caller asked for is still on the object after the failed save',
+                );
+
+                deal.Name = 'CD42 retry after a failed save';
+                Assert(
+                    await deal.Save(),
+                    `the retry must save and close: ${deal.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const row = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    String(row.DealStatusTypeID ?? '').toLowerCase(),
+                    String(f.WonStatusID).toLowerCase(),
+                    'the retry landed the status',
+                );
+                Assert(row.ClosedAt !== null, 'and ran the close, rather than reporting success on an open deal');
+            }),
+    },
 ];
 
 /** Orders' line entity, named here for the same reason as `ORDERS_SCHEMA`. */
