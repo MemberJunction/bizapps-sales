@@ -414,7 +414,7 @@ in this order — it is the dependency order, and it is not negotiable:
 | 4 | accounting 0.22.0 | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 23 |
 | 5 | orders 5.30.0 | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 73 |
 | 6 | **contracts** 0.7.3 | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 9 |
-| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 19 |
+| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 20 |
 
 The counts are for the versions named, which are the ones this repo's lockfile resolves (contracts,
 accounting and `orders-core-entities-server` through `packages/IntegrationTests`' devDependencies). Another version of a sibling applies a different number;
