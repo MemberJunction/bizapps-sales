@@ -37,6 +37,13 @@
 -- cannot read (see deal-cycle-time.sql). The padded UTC range beside it (a day before the start, two
 -- after the end) is wider than any zone offset and only lets an index on ChangedAt narrow the scan.
 --
+-- EVERY JSON_VALUE SITS INSIDE `CASE WHEN ISJSON(...) = 1`. SQL Server does not evaluate a WHERE
+-- clause left to right: the plan may run JSON_VALUE before the ISJSON test or the join to Deals has
+-- removed a row. RecordChange holds ChangesJSON that is not JSON — MJ core's own migrations leave
+-- entries cut off at 4,000 characters, and orders writes some too — and one such row anywhere in the
+-- table failed the whole query with Msg 13609. A CASE is evaluated in order, so the guard holds
+-- whatever plan is chosen.
+--
 -- POSITIVE DAYS = SLIPPED LATER, which is the case people mean. A negative figure is a deal PULLED
 -- FORWARD and is kept rather than filtered, because a report that only ever shows bad news is one
 -- people learn to discount.
@@ -59,15 +66,18 @@ WITH slips AS (
          */
         TRY_CONVERT(UNIQUEIDENTIFIER, SUBSTRING(rc.RecordID, CHARINDEX('|', rc.RecordID) + 1, 36)) AS DealID,
         rc.ChangedAt,
-        TRY_CONVERT(DATE, JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.oldValue')) AS FromDate,
-        TRY_CONVERT(DATE, JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.newValue')) AS ToDate
+        TRY_CONVERT(DATE, CASE WHEN ISJSON(rc.ChangesJSON) = 1
+                               THEN JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.oldValue') END) AS FromDate,
+        TRY_CONVERT(DATE, CASE WHEN ISJSON(rc.ChangesJSON) = 1
+                               THEN JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.newValue') END) AS ToDate
     FROM [__mj].RecordChange rc
     INNER JOIN [__mj].Entity e
             ON e.ID = rc.EntityID
            AND e.Name = 'MJ_BizApps_Sales: Deals'
     WHERE rc.Type = 'Update'
       AND ISJSON(rc.ChangesJSON) = 1
-      AND JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.field') IS NOT NULL
+      AND CASE WHEN ISJSON(rc.ChangesJSON) = 1
+               THEN JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.field') END IS NOT NULL
       {% if PeriodStart %}
       AND rc.ChangedAt >= DATEADD(day, -1, {{ PeriodStart | sqlString }})
       AND [__mj_BizAppsCommon].[fnBusinessDayOf](rc.ChangedAt) >= {{ PeriodStart | sqlString }}
