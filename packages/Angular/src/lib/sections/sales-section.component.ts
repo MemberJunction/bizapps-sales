@@ -46,13 +46,14 @@ import { CompositeKey, LogError, Metadata, type EntityInfo } from '@memberjuncti
 import { RegisterClass } from '@memberjunction/global';
 import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
-import { EntityViewerModule, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
+import { EntityViewerModule, type RecordOpenedEvent, type ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-viewer';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import {
     DealInListWhere,
     DealPipelineViewWith,
     DealWonInPeriodWhere,
     LoadDealPipelineViewTemplate,
+    RelatedRecordTarget,
 } from '../pages/deal-views';
 import type { ResourceData } from '@memberjunction/core-entities';
 import {
@@ -823,6 +824,14 @@ export class MJSSalesSectionComponent implements OnInit {
 
     public OnAllDealsOpened(event: RecordOpenedEvent): void {
         this.OnInspectOpened(event);
+    }
+
+    /** A linked cell (Customer, Stage, Owner...) in either grid: opens that record as an Explorer tab. */
+    public OpenRelatedRecord(nav: ViewRelatedRecordNavigation): void {
+        const target = RelatedRecordTarget(nav);
+        if (target) {
+            this.nav.OpenEntityRecord(target.EntityName, target.Key);
+        }
     }
 
     /**

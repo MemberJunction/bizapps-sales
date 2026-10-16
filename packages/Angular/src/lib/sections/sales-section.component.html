@@ -247,6 +247,7 @@
                     [Entity]="DealEntityInfo"
                     [ViewEntity]="InspectView"
                     (RecordOpened)="OnInspectOpened($event)"
+                    (OpenRelatedRecordRequested)="OpenRelatedRecord($event)"
                     (CreateRecordRequested)="StartPrimary()">
                   </mj-entity-viewer>
                 } @else {
@@ -274,6 +275,7 @@
                 [Entity]="DealEntityInfo"
                 [ViewEntity]="AllDealsView"
                 (RecordOpened)="OnAllDealsOpened($event)"
+                (OpenRelatedRecordRequested)="OpenRelatedRecord($event)"
                 (CreateRecordRequested)="StartPrimary()">
               </mj-entity-viewer>
             </div>

@@ -24,7 +24,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, Output, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Metadata, RunView, type IMetadataProvider } from '@memberjunction/core';
 import { GraphQLActionClient, type GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
@@ -212,6 +212,7 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
 })
 export class DealActivityTimelineComponent {
     private readonly cdr = inject(ChangeDetectorRef);
+    private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
     /**
      * When true, only the compose form is shown — the list is owned by `mj-entity-viewer`
@@ -259,6 +260,20 @@ export class DealActivityTimelineComponent {
          */
         this.DraftWhen = localInputValue(new Date());
         this.cdr.detectChanges();
+    }
+
+    /**
+     * Opens the compose form if it is closed, scrolls it into view and puts the cursor in its title. For
+     * a host whose own New button should log an activity here, such as the deal form's Activity grid.
+     * A draft already in progress is kept.
+     */
+    public FocusCompose(): void {
+        if (!this.Adding) {
+            this.StartAdd();
+        }
+        const form = this.host.nativeElement.querySelector('.dat__form');
+        form?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        form?.querySelector<HTMLInputElement>('input[name="title"]')?.focus();
     }
 
     public CancelAdd(): void {
