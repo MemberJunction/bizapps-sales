@@ -51,6 +51,7 @@ import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import {
     DealInListWhere,
     DealPipelineViewWith,
+    DealStatusColourRules,
     DealWonInPeriodWhere,
     LoadDealPipelineViewTemplate,
     RelatedRecordTarget,
@@ -810,7 +811,9 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private async refreshInspectView(): Promise<void> {
-        this.InspectView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView, this.inspectWhere()) : null;
+        this.InspectView = this.pipelineView
+            ? await DealPipelineViewWith(this.pipelineView, this.inspectWhere(), DealStatusColourRules(this.DealStatusTypes))
+            : null;
     }
 
     /**
@@ -827,7 +830,9 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private async refreshAllDealsView(): Promise<void> {
-        this.AllDealsView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView) : null;
+        this.AllDealsView = this.pipelineView
+            ? await DealPipelineViewWith(this.pipelineView, undefined, DealStatusColourRules(this.DealStatusTypes))
+            : null;
     }
 
     public OnAllDealsOpened(event: RecordOpenedEvent): void {

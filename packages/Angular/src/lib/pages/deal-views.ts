@@ -13,6 +13,7 @@ import type { EntityInfo } from '@memberjunction/core';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import type { ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-viewer';
 import { MJS_ENTITIES } from '../data/entity-names';
+import type { DealStatusLookup } from '../workspace/deal-workspace.types';
 import type { PeriodWindow } from './dashboard-period';
 
 export const SALES_PIPELINE_VIEW_NAME = 'Sales: Pipeline';
@@ -35,17 +36,8 @@ export function DealPipelineGridState(): { sortSettings: { field: string; dir: '
             { Name: 'Account', DisplayName: 'Customer', orderIndex: 2, width: 180 },
             { Name: 'Pipeline', DisplayName: 'Pipeline', orderIndex: 3, width: 140 },
             { Name: 'PipelineStage', DisplayName: 'Stage', orderIndex: 4, width: 130 },
-            {
-                Name: 'DealStatusType', DisplayName: 'Status', orderIndex: 5, width: 110,
-                format: {
-                    type: 'text',
-                    conditionalRules: [
-                        { condition: 'contains', value: 'Won', style: { color: '#047857', backgroundColor: '#d1fae5', bold: true } },
-                        { condition: 'contains', value: 'Lost', style: { color: '#b45309', backgroundColor: '#fef3c7' } },
-                        { condition: 'equals', value: 'Open', style: { color: '#1d4ed8', backgroundColor: '#dbeafe' } },
-                    ],
-                },
-            },
+            // Status colours come from the status FLAGS at load: see DealStatusColourRules.
+            { Name: 'DealStatusType', DisplayName: 'Status', orderIndex: 5, width: 110 },
             { Name: 'Amount', DisplayName: 'Amount', orderIndex: 6, width: 120, format: { type: 'currency', currencyCode: 'USD', decimals: 0, align: 'right' } },
             { Name: 'Probability', DisplayName: 'Prob', orderIndex: 7, width: 80, format: { type: 'number', decimals: 0, align: 'right' } },
             { Name: 'ExpectedCloseDate', DisplayName: 'Close', orderIndex: 8, width: 120, format: { type: 'date', dateFormat: 'medium' } },
@@ -98,9 +90,39 @@ export async function LoadDealPipelineViewTemplate(entity: EntityInfo): Promise<
     } as unknown as MJUserViewEntityExtended;
 }
 
+/** One `mj-entity-viewer` conditional format rule, as the grid reads it from GridState. */
+export interface GridConditionalRule {
+    condition: 'equals';
+    value: string;
+    style: { color: string; backgroundColor: string; bold?: boolean };
+}
+
+const STATUS_STYLE = {
+    won: { color: '#047857', backgroundColor: '#d1fae5', bold: true },
+    lost: { color: '#b45309', backgroundColor: '#fef3c7' },
+    open: { color: '#1d4ed8', backgroundColor: '#dbeafe' },
+    other: { color: '#4b5563', backgroundColor: '#f3f4f6' },
+} as const;
+
+/**
+ * The Status column's colour rules, one per status, styled by its FLAGS: won green, lost amber, open
+ * blue, anything else grey.
+ *
+ * The grid's rules can only test the cell's own text, so each rule matches one status name; which
+ * style that name gets is decided here from `IsWon` / `IsLost` / `IsOpen`. A status that is added or
+ * renamed is therefore coloured by what it means, with no change to the view or this code.
+ */
+export function DealStatusColourRules(statuses: readonly DealStatusLookup[]): GridConditionalRule[] {
+    return statuses.map((s) => ({
+        condition: 'equals',
+        value: s.Name,
+        style: { ...(s.IsWon ? STATUS_STYLE.won : s.IsLost ? STATUS_STYLE.lost : s.IsOpen ? STATUS_STYLE.open : STATUS_STYLE.other) },
+    }));
+}
+
 /**
  * A copy of `template` with `whereClause` overlaid, never saved. With no clause the copy keeps the
- * template's own.
+ * template's own. With `statusRules`, they replace the Status column's format in the copy's GridState.
  *
  * A COPY, not the template itself: each grid re-runs when its `ViewEntity` changes identity, and two
  * grids holding one object would share one WhereClause. The saved view is copied through
@@ -109,15 +131,40 @@ export async function LoadDealPipelineViewTemplate(entity: EntityInfo): Promise<
 export async function DealPipelineViewWith(
     template: MJUserViewEntityExtended,
     whereClause?: string,
+    statusRules?: readonly GridConditionalRule[],
 ): Promise<MJUserViewEntityExtended> {
     // The fallback view is a plain object typed as the entity, so the type system cannot see this branch.
-    const copy = template instanceof BaseEntity
+    const isEntity = template instanceof BaseEntity;
+    const copy = isEntity
         ? await copyEntity(template)
         : ({ ...(template as object) } as MJUserViewEntityExtended);
     if (whereClause != null) {
         copy.WhereClause = whereClause;
     }
+    if (statusRules?.length) {
+        overlayStatusRules(copy, statusRules, isEntity);
+    }
     return copy;
+}
+
+/** Sets the Status column's conditional rules in `view`'s GridState. A view without the column is left alone. */
+function overlayStatusRules(view: MJUserViewEntityExtended, rules: readonly GridConditionalRule[], isEntity: boolean): void {
+    let state: { columnSettings?: GridCol[] };
+    try {
+        state = view.GridState ? JSON.parse(view.GridState) : {};
+    } catch {
+        return;
+    }
+    const column = state.columnSettings?.find((c) => c.Name === 'DealStatusType');
+    if (!column) {
+        return;
+    }
+    column.format = { ...(column.format ?? {}), type: 'text', conditionalRules: [...rules] };
+    view.GridState = JSON.stringify(state);
+    if (!isEntity) {
+        // The fallback's GridStateObject is a plain property, not the entity's getter over GridState.
+        (view as { GridStateObject: unknown }).GridStateObject = state;
+    }
 }
 
 async function copyEntity(template: MJUserViewEntityExtended): Promise<MJUserViewEntityExtended> {
