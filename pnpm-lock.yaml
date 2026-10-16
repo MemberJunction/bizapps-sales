@@ -149,7 +149,7 @@ importers:
   packages/Actions:
     dependencies:
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: ^6.16.0
+        specifier: ^6.17.0
         version: link:../CoreEntitiesServer
       zod:
         specifier: ^3.25.76
@@ -198,7 +198,7 @@ importers:
         specifier: 21.1.3
         version: 21.1.3(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(@angular/platform-browser@21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(rxjs@7.8.2)
       '@mj-biz-apps/sales-entities':
-        specifier: ^6.16.0
+        specifier: ^6.17.0
         version: link:../Entities
     devDependencies:
       '@angular/compiler':
@@ -262,7 +262,7 @@ importers:
   packages/CoreEntitiesServer:
     dependencies:
       '@mj-biz-apps/sales-entities':
-        specifier: ^6.16.0
+        specifier: ^6.17.0
         version: link:../Entities
     devDependencies:
       '@memberjunction/core':
@@ -345,13 +345,13 @@ importers:
         specifier: ^5.30.0
         version: 5.30.0(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.5)(@memberjunction/global@6.1.5))
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: ^6.16.0
+        specifier: ^6.17.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: ^6.16.0
+        specifier: ^6.17.0
         version: link:../Entities
       '@mj-biz-apps/sales-server':
-        specifier: ^6.16.0
+        specifier: ^6.17.0
         version: link:../Server
     devDependencies:
       '@mj-biz-apps/tasks-entities':
@@ -370,13 +370,13 @@ importers:
   packages/Server:
     dependencies:
       '@mj-biz-apps/sales-actions':
-        specifier: ^6.16.0
+        specifier: ^6.17.0
         version: link:../Actions
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: ^6.16.0
+        specifier: ^6.17.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: ^6.16.0
+        specifier: ^6.17.0
         version: link:../Entities
       class-validator:
         specifier: ^0.14.3
