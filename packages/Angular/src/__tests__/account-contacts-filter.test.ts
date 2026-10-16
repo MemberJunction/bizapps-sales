@@ -14,13 +14,20 @@ describe('#301 — the people an account lists', () => {
     const where = AccountContactsWhere(ACCOUNT, VIEW);
 
     it('selects contacts by person ID, from the Relationships base view metadata names', () => {
-        expect(where.startsWith('ID IN (')).toBe(true);
+        expect(where.startsWith('(ID IN (')).toBe(true);
+        expect(where.endsWith(')')).toBe(true);
         expect(where).toContain('[__mj_BizAppsCommon].[vwRelationships]');
     });
 
     /** MJAPI refuses an ExtraFilter subquery over a base table, and the Contacts grid fails to load. */
     it('reads the base view, never the base table', () => {
         expect(where).not.toContain('[Relationship]');
+    });
+
+    /** MJ refuses UNION anywhere in a caller-supplied filter, so the two directions are ORed. */
+    it('joins the two directions with OR, not UNION', () => {
+        expect(where).not.toMatch(/\bUNION\b/i);
+        expect(where).toContain(') OR ID IN (');
     });
 
     it('takes a person linked TO the account ("is employee of")', () => {
