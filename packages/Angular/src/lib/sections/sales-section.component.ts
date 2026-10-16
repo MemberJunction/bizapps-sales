@@ -206,8 +206,10 @@ export class MJSSalesSectionComponent implements OnInit {
      * one means the load as a whole stopped, so nothing below it is known to be current.
      */
     public LoadError: string | null = null;
-    /** Identifies the newest `Refresh()`, so a slower superseded one cannot clear its spinner or error. */
+    /** Identifies the newest `Refresh()`, so a slower superseded one cannot apply its replies, clear its spinner or set its error. */
     private refreshToken = 0;
+    /** Identifies the newest inspect view request, so a slower superseded one cannot replace the grid. */
+    private inspectToken = 0;
     /** Which slice the inspect grid is showing. Default is closing-soonest (the DB-oracle spec). */
     public InspectFilter: InspectKey = 'closing';
     /**
@@ -420,27 +422,36 @@ export class MJSSalesSectionComponent implements OnInit {
             // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
             this.service.LoadDashboardSummary(window),
         ]);
+        // A newer Refresh() was started while these were out; its replies are the ones to show.
+        if (token !== this.refreshToken) {
+            return;
+        }
         this.Deals = roster ?? [];
         this.forecastDeals = InForecast(this.Deals);
-        this.summary = TileSummary(summary, this.RosterError);
+        // A period picked while this was out has already read its own summary; this one is stale.
+        if (period === this.Period) {
+            this.summary = TileSummary(summary, this.RosterError);
+        }
         if (roster && !roster.length) {
             // Not an error — a first-run database has no deals. The template distinguishes the two.
             this.Message = '';
         }
-        if (token === this.refreshToken) {
-            this.Loading = false;
-            this.cdr.detectChanges();
-        }
+        this.Loading = false;
+        this.cdr.detectChanges();
 
-        await this.loadDetail(detail, period);
+        await this.loadDetail(detail, period, token);
     }
 
     /** The second half of `load()`: what the board, the win rate and the grids read. */
     private async loadDetail(
         detail: Promise<[DealWorkspaceLookups, Record<string, unknown>[] | null, MJUserViewEntityExtended | null]>,
         period: PeriodKey,
+        token: number,
     ): Promise<void> {
         const [lookups, winRate, pipelineView] = await detail;
+        if (token !== this.refreshToken) {
+            return;
+        }
         this.Pipelines = lookups.Pipelines;
         this.Stages = lookups.Stages;
         this.DealStatusTypes = lookups.DealStatusTypes;
@@ -811,9 +822,14 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private async refreshInspectView(): Promise<void> {
-        this.InspectView = this.pipelineView
+        const token = ++this.inspectToken;
+        const view = this.pipelineView
             ? await DealPipelineViewWith(this.pipelineView, this.inspectWhere(), DealStatusColourRules(this.DealStatusTypes))
             : null;
+        // Two slice clicks in quick succession: only the latest one's view is shown.
+        if (token === this.inspectToken) {
+            this.InspectView = view;
+        }
     }
 
     /**
