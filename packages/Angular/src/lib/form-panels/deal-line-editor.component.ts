@@ -1330,8 +1330,16 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
      * collection, not a copy, and MJ rolls a dirty embedded line up into the deal's `Dirty`; left as
      * it was, the deal's next save would write the cancelled values to the order. `Revert()` puts
      * every field back to its last-saved value, which also covers a refused save followed by Cancel.
+     *
+     * A `Notice` means the line IS saved and the dialog is only holding open on what happens next, so
+     * every close (X, scrim) reports the save as Done does: the panel refreshes its cards and the
+     * deal's Amount. Checked first, so a saved line is never reverted.
      */
     public Cancel(): void {
+        if (this.Notice) {
+            this.Saved.emit();
+            return;
+        }
         if (this.Working) {
             if (this.IsNewLine) {
                 this.Deal?.OrderID_Object?.Lines.Remove(this.Working);
