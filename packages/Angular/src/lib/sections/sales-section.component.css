@@ -450,6 +450,9 @@ button.kpi.kpi--on {
  * percentage height resolves against it. Labels take a fixed two lines so a long stage name cannot
  * shrink its plot and lift its bar off the shared baseline.
  */
+.funnel__tabs {
+    margin-bottom: 0.6rem;
+}
 .funnel {
     display: flex;
     gap: 0.5rem;

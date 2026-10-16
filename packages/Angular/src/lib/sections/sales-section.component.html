@@ -134,11 +134,27 @@
               <div class="card">
                 <div class="ch">Stage mix <span class="r">open deals · current stage</span></div>
                 <div class="funnel-pad">
+                  <!-- One pipeline at a time: each numbers its own stages, and two may share a stage name. -->
+                  @if (FunnelPipelineOptions.length > 1) {
+                    <div class="period__pills funnel__tabs" role="tablist" aria-label="Pipeline">
+                      @for (pipeline of FunnelPipelineOptions; track pipeline.ID) {
+                        <button
+                          type="button"
+                          role="tab"
+                          class="period__pill"
+                          [class.period__pill--on]="pipeline.ID === ActiveFunnelPipelineID"
+                          [attr.aria-selected]="pipeline.ID === ActiveFunnelPipelineID"
+                          (click)="SelectFunnelPipeline(pipeline.ID)">
+                          {{ pipeline.Name }}
+                        </button>
+                      }
+                    </div>
+                  }
                   @if (!Funnel.length) {
                     <div class="empty">No open deals in a stage.</div>
                   } @else {
                     <div class="funnel">
-                      @for (col of Funnel; track col.Label) {
+                      @for (col of Funnel; track col.Key) {
                         <div class="funnel__col">
                           <div class="funnel__plot">
                             <div class="funnel__bar" [style.height]="FunnelHeight(col.Count)">

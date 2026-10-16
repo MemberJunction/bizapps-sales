@@ -10,6 +10,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import type { DealRosterRow } from '../workspace/deal-workspace.service';
+import { OrderPipelinesByCompany, type CompanyPipeline } from '../data/company-pipelines';
 import { BusinessToday, UtcDatePart } from './dashboard-dates';
 import { WithinWindow, type PeriodWindow } from './dashboard-period';
 
@@ -248,23 +249,75 @@ export function ForecastSlices(deals: readonly DealRosterRow[], window?: PeriodW
 }
 
 export interface FunnelStage {
+    /** The stage's ID, or `unstaged`. Names are not unique across pipelines, so they do not key. */
+    Key: string;
     Label: string;
     Count: number;
     Amount: number;
 }
 
-export function StageFunnel(deals: readonly DealRosterRow[]): FunnelStage[] {
+/** A pipeline the Stage mix card can show: one that has open deals. */
+export interface FunnelPipeline {
+    ID: string;
+    Name: string;
+}
+
+/** Ids round-trip through JSON and SQL in different cases. */
+const idKey = (id: string | null | undefined): string => String(id ?? '').toLowerCase();
+
+/**
+ * The pipelines with open deals, in the board's picker order (default pipeline first) when the
+ * pipeline lookups have loaded. Before they have, or for a pipeline missing from them, in order of
+ * name, so the card still has a choice to offer.
+ */
+export function FunnelPipelines(
+    deals: readonly DealRosterRow[],
+    pipelines: readonly CompanyPipeline[] = [],
+): FunnelPipeline[] {
+    const open = new Map<string, FunnelPipeline>();
+    for (const d of deals) {
+        if (d.IsOpen && d.PipelineID && !open.has(idKey(d.PipelineID))) {
+            open.set(idKey(d.PipelineID), { ID: d.PipelineID, Name: d.Pipeline || 'Pipeline' });
+        }
+    }
+    const ordered: FunnelPipeline[] = [];
+    for (const p of OrderPipelinesByCompany(pipelines)) {
+        const hit = open.get(idKey(p.ID));
+        if (hit) {
+            ordered.push(hit);
+            open.delete(idKey(p.ID));
+        }
+    }
+    const rest = [...open.values()].sort((a, b) => a.Name.localeCompare(b.Name));
+    return [...ordered, ...rest];
+}
+
+/**
+ * One pipeline's open deals by stage, in that pipeline's stage order.
+ *
+ * Each pipeline numbers its own stages, so stages from two pipelines cannot share one sequence, and
+ * two pipelines may name a stage the same. The card therefore shows one pipeline at a time, keyed on
+ * the stage's ID. Omitting `pipelineID` takes every open deal, still keyed on stage ID.
+ */
+export function StageFunnel(deals: readonly DealRosterRow[], pipelineID?: string | null): FunnelStage[] {
     const map = new Map<string, FunnelStage & { Order: number }>();
-    for (const d of deals.filter((x) => x.IsOpen)) {
-        const label = d.PipelineStage || 'Unstaged';
-        const cur = map.get(label) ?? { Label: label, Count: 0, Amount: 0, Order: d.StageOrder ?? 999 };
+    const inPipeline = (d: DealRosterRow): boolean => pipelineID == null || idKey(d.PipelineID) === idKey(pipelineID);
+    for (const d of deals.filter((x) => x.IsOpen && inPipeline(x))) {
+        const key = d.PipelineStageID ? idKey(d.PipelineStageID) : 'unstaged';
+        const cur = map.get(key) ?? {
+            Key: key,
+            Label: d.PipelineStageID ? d.PipelineStage || 'Stage' : 'Unstaged',
+            Count: 0,
+            Amount: 0,
+            Order: d.PipelineStageID ? (d.StageOrder ?? 999) : 1000,
+        };
         cur.Count += 1;
         cur.Amount += amount(d);
-        map.set(label, cur);
+        map.set(key, cur);
     }
     return [...map.values()]
         .sort((a, b) => a.Order - b.Order)
-        .map(({ Label, Count, Amount }) => ({ Label, Count, Amount }));
+        .map(({ Key, Label, Count, Amount }) => ({ Key, Label, Count, Amount }));
 }
 
 export interface CloseBucket {
