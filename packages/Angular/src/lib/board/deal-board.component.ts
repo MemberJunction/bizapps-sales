@@ -167,13 +167,23 @@ export class DealBoardComponent {
     /** A move persisted; the section re-reads the roster so every page sees the new stage. */
     @Output() public readonly StageMoved = new EventEmitter<void>();
 
-    public SelectedPipelineID: string | null = null;
+    /**
+     * The pipeline tab's choice; null until a rep picks one. Owned by the section and bound two-way,
+     * because the section tears this board down on every reload, and a choice held only here reset to
+     * the first pipeline after each drag.
+     */
+    @Input() public SelectedPipelineID: string | null = null;
+    @Output() public readonly SelectedPipelineIDChange = new EventEmitter<string | null>();
     /** Shown verbatim. A refused or failed move must say why rather than silently snapping back. */
     public Message: string | null = null;
     public Moving = false;
 
-    /** The company filter's choice; null until a rep picks one, which means the default company. */
-    public SelectedCompanyID: string | null = null;
+    /**
+     * The company filter's choice; null until a rep picks one, which means the default company. Owned
+     * by the section for the same reason as `SelectedPipelineID`.
+     */
+    @Input() public SelectedCompanyID: string | null = null;
+    @Output() public readonly SelectedCompanyIDChange = new EventEmitter<string | null>();
 
     /** Every company that owns a pipeline, default company first (#327). */
     public get Companies(): PipelineCompany[] {
@@ -203,8 +213,10 @@ export class DealBoardComponent {
     /** A new company drops a pipeline that belongs to the old one; the company's first takes over. */
     public SelectCompany(companyID: string | null): void {
         this.SelectedCompanyID = companyID;
+        this.SelectedCompanyIDChange.emit(companyID);
         if (CompanyOfPipeline(this.Pipelines, this.SelectedPipelineID) !== companyID) {
             this.SelectedPipelineID = null;
+            this.SelectedPipelineIDChange.emit(null);
         }
         this.Message = null;
         this.cdr.detectChanges();
@@ -348,6 +360,7 @@ export class DealBoardComponent {
 
     public SelectPipeline(pipelineID: string): void {
         this.SelectedPipelineID = pipelineID;
+        this.SelectedPipelineIDChange.emit(pipelineID);
         this.Message = null;
         this.cdr.detectChanges();
     }

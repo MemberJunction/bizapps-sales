@@ -275,6 +275,13 @@ export class MJSSalesSectionComponent implements OnInit {
     public Pipelines: PipelineLookup[] = [];
     public Stages: StageLookup[] = [];
     public DealStatusTypes: DealStatusLookup[] = [];
+    /**
+     * The board's company and pipeline choice, null for the defaults. Held here rather than on the
+     * board, which is rebuilt on every reload and page switch: held there, a drag on any pipeline but
+     * the first reloaded the board onto the first one, with the moved card out of view.
+     */
+    public BoardCompanyID: string | null = null;
+    public BoardPipelineID: string | null = null;
 
     public async ngOnInit(): Promise<void> {
         this.Page = DefaultPageFor(this.Section);
@@ -323,11 +330,17 @@ export class MJSSalesSectionComponent implements OnInit {
      * its spinner for good, with the rejection unhandled because `ngOnInit` awaits this uncaught.
      * Clearing it in `finally` covers every exit, including ones added later; the failure is shown as
      * `LoadError` with a Retry instead. `DetailLoading` is cleared there for the same reason.
+     *
+     * `quiet` re-reads without the spinners, so the pages stay mounted and show their current data
+     * until the new data lands. The board uses it after a drag: the card is already where it was
+     * dropped, and tearing the board down to show a spinner made it flash on every move.
      */
-    public async Refresh(): Promise<void> {
+    public async Refresh(quiet = false): Promise<void> {
         const token = ++this.refreshToken;
-        this.Loading = true;
-        this.DetailLoading = true;
+        if (!quiet) {
+            this.Loading = true;
+            this.DetailLoading = true;
+        }
         this.LoadError = null;
         this.cdr.detectChanges();
         try {
