@@ -242,6 +242,20 @@ function splitIssues(issues: SalesCloseIssue[] | null | undefined): { issues: st
 }
 
 /**
+ * A REFUSED close or reopen, split for display: the first problem is the headline and the list holds
+ * the rest, so the headline is not repeated as the list's first line. Info notes never become the
+ * headline; when there is no problem to name, `fallback` is.
+ */
+function splitRefusal(
+    issues: SalesCloseIssue[] | null | undefined,
+    fallback: string,
+): { message: string; issues: string[]; notes: string[] } {
+    const split = splitIssues(issues);
+    const [first, ...rest] = split.issues;
+    return { message: first ?? fallback, issues: rest, notes: split.notes };
+}
+
+/**
  * `Sales.ReopenDeal`, called in ONE place.
  *
  * Two surfaces reach the reopen now -- the Status control (golive#205 D9: "Changing Deal Status from
@@ -311,8 +325,7 @@ async function RunClose(req: CloseRequest): Promise<ReopenOutcome> {
         }
         const out = envelope.Output;
         if (!out?.Success) {
-            const { issues, notes } = splitIssues(out?.Issues);
-            return { ok: false, message: issues[0] ?? 'The deal could not be closed.', issues, notes };
+            return { ok: false, ...splitRefusal(out?.Issues, 'The deal could not be closed.') };
         }
         // WARNINGS ON A SUCCESSFUL CLOSE are the interesting ones -- a stubbed downstream, a finance
         // task that could not be routed, an order status orders refused. Reporting only failures would
@@ -375,8 +388,7 @@ async function RunReopen(dealID: string, reason: string, targetStatusID: string 
         }
         const out = envelope.Output;
         if (!out?.Success) {
-            const { issues, notes } = splitIssues(out?.Issues);
-            return { ok: false, message: issues[0] ?? 'The deal could not be reopened.', issues, notes };
+            return { ok: false, ...splitRefusal(out?.Issues, 'The deal could not be reopened.') };
         }
         return {
             ok: true,
@@ -3202,8 +3214,9 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
             }
             const out = envelope.Output;
             if (!out?.Success) {
-                ({ issues: this.Issues, notes: this.InfoNotes } = splitIssues(out?.Issues));
-                this.Fail(out?.Issues?.[0]?.Message ?? 'The deal could not be closed.');
+                const refusal = splitRefusal(out?.Issues, 'The deal could not be closed.');
+                ({ issues: this.Issues, notes: this.InfoNotes } = refusal);
+                this.Fail(refusal.message);
                 return;
             }
 
