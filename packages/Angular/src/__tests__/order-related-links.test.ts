@@ -1,6 +1,6 @@
 import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
-import { OrderRelatedLinks, OrderRelatedLinksKey } from '../lib/form-panels/order-related-links';
+import { DealLookupOrderID, OrderRelatedLinks, OrderRelatedLinksKey } from '../lib/form-panels/order-related-links';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../lib/data/entity-names';
 
 /**
@@ -96,5 +96,24 @@ describe('#227 — the links key', () => {
         expect(OrderRelatedLinksKey('order-1', { DealID: DEAL })).not.toBe(
             OrderRelatedLinksKey('order-1', { DealID: DEAL, ContractID: CONTRACT }),
         );
+    });
+});
+
+describe('bizapps-orders#740 — a reversal finds the deal of the order it reverses', () => {
+    it('looks an ordinary order up by its own id', () => {
+        expect(DealLookupOrderID({ ID: 'order-1', ReversesOrderHeaderID: null })).toBe('order-1');
+    });
+
+    it('looks a reversal up by the order it reverses', () => {
+        expect(DealLookupOrderID({ ID: 'rev-1', ReversesOrderHeaderID: 'order-1' })).toBe('order-1');
+    });
+
+    it('treats a blank origin as no origin', () => {
+        expect(DealLookupOrderID({ ID: 'order-1', ReversesOrderHeaderID: '  ' })).toBe('order-1');
+    });
+
+    it('answers null for an order with no id yet', () => {
+        expect(DealLookupOrderID({ ID: null, ReversesOrderHeaderID: null })).toBeNull();
+        expect(DealLookupOrderID(null)).toBeNull();
     });
 });

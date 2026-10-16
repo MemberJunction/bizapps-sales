@@ -49,6 +49,7 @@ import {
     type SalesReopenDealOutput,
     type DealEntity,
     type mjBizAppsSalesDealEntity,
+    type mjBizAppsSalesPipelineStageEntity,
 } from '@mj-biz-apps/sales-entities';
 import {
     DEFAULT_DUE_IN_DAYS,
@@ -2950,6 +2951,245 @@ export const CloseDealChecks: NamedCheck[] = [
                       WHERE d.ID = '${dealID}' AND t.IsLost = 1`,
                 );
                 AssertEqual(Number(still.N), 1, 'setup: the deal must still be lost when this is asserted');
+            }),
+    },
+    {
+        Id: 'close-deal.CD36',
+        Name: 'CD36: a WON close writes the winning stage\'s probability and forecast category, and the event keeps the old one',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── bc-aidp-next-golive#345 ──────────────────────────────────────────────────────────
+                 *
+                 * A close declares its transition, which switches the stage defaults off, and nothing
+                 * else wrote the probability: a won deal kept the 42 it had while open. The expected
+                 * figures are read from the stage the outcome names rather than hardcoded, so this holds
+                 * on a pipeline whose winning stage carries 95.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const winning = await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsWon = 1');
+                Assert(!!winning, 'the pipeline needs a stage declaring a WON status');
+                const expected = await TxOne<{ Probability: number | null; ForecastCategoryTypeID: string | null }>(
+                    ctx,
+                    `SELECT Probability, ForecastCategoryTypeID FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE ID = '${winning!.ID}'`,
+                );
+                const PRE_CLOSE = 42;
+                Assert(
+                    Number(expected.Probability ?? 100) !== PRE_CLOSE,
+                    `setup: the winning stage's probability must differ from ${PRE_CLOSE}, or nothing is proven`,
+                );
+
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD36 won probability',
+                );
+                const priced = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await priced.Load(dealID), 'the open deal loads');
+                priced.Probability = PRE_CLOSE;
+                Assert(await priced.Save(), `an open deal accepts a probability — ${priced.LatestResult?.CompleteMessage ?? ''}`);
+                const before = await TxOne<{ ForecastCategoryTypeID: string | null }>(
+                    ctx, `SELECT ForecastCategoryTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+
+                const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+
+                const row = await TxOne<{ Probability: number | null; ForecastCategoryTypeID: string | null }>(
+                    ctx, `SELECT Probability, ForecastCategoryTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    Number(row.Probability),
+                    Number(expected.Probability ?? 100),
+                    'the won deal carries the winning stage\'s probability (100 by flag if the stage has none)',
+                );
+                if (expected.ForecastCategoryTypeID) {
+                    AssertEqual(
+                        String(row.ForecastCategoryTypeID).toLowerCase(),
+                        String(expected.ForecastCategoryTypeID).toLowerCase(),
+                        'and the winning stage\'s forecast category',
+                    );
+                    Assert(
+                        String(before.ForecastCategoryTypeID ?? '').toLowerCase() !==
+                            String(expected.ForecastCategoryTypeID).toLowerCase(),
+                        'setup: the open deal must not already carry the closing category, or nothing is proven',
+                    );
+                }
+
+                const ev = await TxOne<{ ProbabilityAtTransition: number | null }>(
+                    ctx,
+                    `SELECT ProbabilityAtTransition FROM ${SALES_SCHEMA}.DealStageEvent
+                      WHERE DealID = '${dealID}' AND ToDealStatusTypeID = '${f.WonStatusID}'`,
+                );
+                AssertEqual(
+                    Number(ev.ProbabilityAtTransition),
+                    PRE_CLOSE,
+                    'the close event still stamps the probability the deal carried BEFORE the close',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD37',
+        Name: 'CD37: a LOST close on a pipeline with no losing stage still lands at 0, stays put, and WARNS',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The pipeline's losing stages are switched off inside this check's transaction, which
+                 * is the shape a pipeline missing its stage has. Before bc-aidp-next-golive#345 this
+                 * close succeeded silently with the deal still in an open stage at its open probability.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                await TxExec(
+                    ctx,
+                    `UPDATE s SET s.IsActive = 0
+                       FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.OrderOnlyPolicyPipelineID}' AND t.IsLost = 1`,
+                    'CD37: retire the losing stages inside the rolled-back transaction',
+                );
+                // `stageDeclaring` reads through `TxOne`, which throws on no rows, so the absence is
+                // counted here instead.
+                const remaining = await TxAll<{ ID: string }>(
+                    ctx,
+                    `SELECT s.ID FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.OrderOnlyPolicyPipelineID}' AND s.IsActive = 1 AND t.IsLost = 1`,
+                );
+                AssertEqual(remaining.length, 0, 'setup: the pipeline must have no active losing stage');
+
+                const start = f.OrderOnlyPolicyStageID;
+                const dealID = await openDeal(ctx, f, f.OrderOnlyPolicyPipelineID, start, 'CD37 no losing stage');
+                const priced = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await priced.Load(dealID), 'the open deal loads');
+                priced.Probability = 35;
+                Assert(await priced.Save(), `an open deal accepts a probability — ${priced.LatestResult?.CompleteMessage ?? ''}`);
+
+                const out = await close(ctx, {
+                    DealID: dealID,
+                    DealStatusTypeID: f.LostStatusID,
+                    LossReasonID: f.LossReasonPlainID,
+                });
+                Assert(out.Success, `the close must still succeed: ${JSON.stringify(out.Issues)}`);
+                const warning = out.Issues.find(
+                    (i) => i.Severity === 'warning' && i.Field === 'PipelineStageID' && i.Message.includes('no active lost stage'),
+                );
+                Assert(!!warning, `the close must say the pipeline has no losing stage; Issues: ${JSON.stringify(out.Issues)}`);
+
+                const row = await TxOne<{ Probability: number | null; PipelineStageID: string }>(
+                    ctx, `SELECT Probability, PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(String(row.PipelineStageID).toLowerCase(), start.toLowerCase(), 'the deal stayed where it was');
+                AssertEqual(Number(row.Probability), 0, 'and a lost deal is at 0 from the status flag');
+            }),
+    },
+    {
+        Id: 'close-deal.CD38',
+        Name: 'CD38: a reopen puts back the probability and forecast category the close overwrote',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The close now writes 100 and the closing category, and the reopen's declared transition
+                 * keeps the stage defaults off, so without the restore a reopened deal sat at 100 in the
+                 * CLOSED category. The probability comes back from the close event's stamp; the category
+                 * from the stage the deal returns to.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const start = f.OrderOnlyPolicyStageID;
+                const startStage = await TxOne<{ ForecastCategoryTypeID: string | null }>(
+                    ctx, `SELECT ForecastCategoryTypeID FROM ${SALES_SCHEMA}.PipelineStage WHERE ID = '${start}'`,
+                );
+                const dealID = await openDeal(ctx, f, f.OrderOnlyPolicyPipelineID, start, 'CD38 reopen restores');
+                const HAND_SET = 37;
+                const priced = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await priced.Load(dealID), 'the open deal loads');
+                priced.Probability = HAND_SET;
+                Assert(await priced.Save(), `an open deal accepts a probability — ${priced.LatestResult?.CompleteMessage ?? ''}`);
+
+                Assert((await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID })).Success, 'closed');
+                const closed = await TxOne<{ Probability: number | null }>(
+                    ctx, `SELECT Probability FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(
+                    Number(closed.Probability) !== HAND_SET,
+                    'setup: the close must have changed the probability, or the restore proves nothing',
+                );
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'Customer withdrew the signature.' });
+                Assert(out.Success, `the reopen failed: ${JSON.stringify(out.Issues)}`);
+
+                const row = await TxOne<{ Probability: number | null; ForecastCategoryTypeID: string | null; PipelineStageID: string }>(
+                    ctx,
+                    `SELECT Probability, ForecastCategoryTypeID, PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(String(row.PipelineStageID).toLowerCase(), start.toLowerCase(), 'the deal is back in its stage');
+                AssertEqual(Number(row.Probability), HAND_SET, 'and back at the probability it had before the close');
+                AssertEqual(
+                    String(row.ForecastCategoryTypeID ?? '').toLowerCase(),
+                    String(startStage.ForecastCategoryTypeID ?? '').toLowerCase(),
+                    'and in the forecast category of the stage it returned to',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD39',
+        Name: 'CD39: a pipeline cannot lose its last active won stage through a stage save; a second one lets it',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * bc-aidp-next-golive#345. CD37 shows what a close does on a pipeline with no losing
+                 * stage: it stays put and warns. This is the other half: a stage edit cannot put a
+                 * pipeline into that state. Through the entity, so the server-side refusal is what is
+                 * tested, not a form.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const winning = await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsWon = 1');
+                Assert(!!winning, 'the pipeline needs a stage declaring a WON status');
+                const others = await TxOne<{ N: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.OrderOnlyPolicyPipelineID}' AND s.IsActive = 1 AND t.IsWon = 1
+                        AND s.ID <> '${winning!.ID}'`,
+                );
+                AssertEqual(Number(others.N), 0, 'setup: the won stage must be the pipeline\'s only one');
+
+                const stage = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesPipelineStageEntity>(
+                    'MJ_BizApps_Sales: Pipeline Stages', ctx.User,
+                );
+                Assert(await stage.Load(winning!.ID), 'the won stage loads');
+                stage.IsActive = false;
+                Assert(!(await stage.Save()), 'deactivating the only won stage must be refused');
+                Assert(
+                    (stage.LatestResult?.Message ?? '').includes('no active won stage'),
+                    `the refusal says why; it reads '${stage.LatestResult?.Message}'`,
+                );
+
+                // A second won stage on the same pipeline makes the first one free to go.
+                const spare = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesPipelineStageEntity>(
+                    'MJ_BizApps_Sales: Pipeline Stages', ctx.User,
+                );
+                spare.NewRecord();
+                spare.PipelineID = f.OrderOnlyPolicyPipelineID;
+                spare.Name = 'CD39 second won stage';
+                spare.Code = 'CD39WON';
+                spare.DisplayOrder = 999;
+                spare.Probability = 100;
+                spare.DealStatusTypeID = f.WonStatusID;
+                spare.IsActive = true;
+                Assert(await spare.Save(), `the second won stage saves — ${spare.LatestResult?.CompleteMessage ?? ''}`);
+
+                const again = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesPipelineStageEntity>(
+                    'MJ_BizApps_Sales: Pipeline Stages', ctx.User,
+                );
+                Assert(await again.Load(winning!.ID), 'the won stage loads again');
+                again.IsActive = false;
+                Assert(
+                    await again.Save(),
+                    `with another won stage active, deactivating this one is allowed — ${again.LatestResult?.CompleteMessage ?? ''}`,
+                );
             }),
     },
 ];

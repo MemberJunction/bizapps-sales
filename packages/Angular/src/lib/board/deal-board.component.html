@@ -9,9 +9,19 @@
 
   <!-- Pipeline switcher. A pipeline defines the stages, so this is the board's one real control. -->
   <div class="db-bar">
+    <!-- Company first, then its pipelines (#327). Hidden when one company owns every pipeline. -->
+    @if (Companies.length > 1) {
+      <label class="db-bar__label" for="db-company">Company</label>
+      <select id="db-company" class="db-company" data-testid="db-pipeline-company"
+              [ngModel]="ActiveCompanyID" (ngModelChange)="SelectCompany($event)">
+        @for (c of Companies; track c.CompanyID) {
+          <option [ngValue]="c.CompanyID">{{ CompanyText(c) }}</option>
+        }
+      </select>
+    }
     <span class="db-bar__label">Pipeline</span>
     <div class="db-bar__pipes" role="tablist" aria-label="Pipeline">
-      @for (pipeline of Pipelines; track pipeline.ID) {
+      @for (pipeline of CompanyPipelines; track pipeline.ID) {
         <button
           type="button"
           role="tab"

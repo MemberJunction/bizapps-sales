@@ -49,6 +49,9 @@ interface StampedDeal {
     DeclareTransition(kind: string, note: string): void;
 }
 
+/** A close with nowhere to land and no figures to write: the stamp under test touches only the dates. */
+const NO_CLOSING = { StageID: null, Probability: null, ForecastCategoryTypeID: null, Issues: [] as never[] };
+
 type Stamp = {
     stampClose(
         deal: StampedDeal,
@@ -56,7 +59,7 @@ type Stamp = {
         target: { ID: string },
         routing: never[],
         user: { ID: string },
-        derivedClosingStageID: string | null,
+        closing: { StageID: string | null; Probability: number | null; ForecastCategoryTypeID: string | null; Issues: never[] },
         lossReasonName: string | null,
     ): void;
 };
@@ -74,7 +77,7 @@ function close(): StampedDeal {
         DeclareTransition: () => undefined,
     };
     const op = Object.create(CloseDealOperation.prototype) as Stamp;
-    op.stampClose(deal, { DealID: 'd1', DealStatusTypeID: 'won' }, { ID: 'won' }, [], { ID: 'u1' }, null, null);
+    op.stampClose(deal, { DealID: 'd1', DealStatusTypeID: 'won' }, { ID: 'won' }, [], { ID: 'u1' }, NO_CLOSING, null);
     return deal;
 }
 
@@ -219,6 +222,8 @@ describe('Sales.CloseDeal configures the zone, then stamps and dates its tasks f
                 calls.push('Save');
                 return true;
             },
+            // The close saves through this, the one path that may write the stamps (#252).
+            BeginClose: async <T>(body: () => Promise<T>): Promise<T> => body(),
         };
         h.user = { ID: 'u1' };
         h.provider = {
@@ -242,7 +247,7 @@ describe('Sales.CloseDeal configures the zone, then stamps and dates its tasks f
         op.validate = async () => ({ Issues: [], LossReasonName: null, RenewalNextTerm: [] });
         op.resolvePolicy = async () => ({ CloseWonTasks: { DueInDays: DUE_IN_DAYS } });
         op.planRouting = async () => [];
-        op.closingStageForOutcome = async () => null;
+        op.resolveClosing = async () => ({ ...NO_CLOSING, Probability: 100 });
 
         h.result = await op.InternalExecute({ DealID: 'd1', DealStatusTypeID: WON.ID }, h.provider, h.user);
         return h;

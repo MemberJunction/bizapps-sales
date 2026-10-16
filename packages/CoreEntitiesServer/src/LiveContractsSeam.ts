@@ -492,8 +492,9 @@ export class LiveContractsSeam {
  * Record that the contract governs the order (contracts#77). Contracts' own save copies the contract's
  * renewal terms to the subscriptions the order creates, so this only writes the link.
  *
- * A contracts release older than the link has no such entity. That is reported, not treated as a
- * failure of the close: the contract and order both exist, they are just not tied together yet.
+ * A contracts release older than the link has no such entity. That comes back `Pending`, not as a
+ * failure of the close: the contract and order both exist, and the daily relink links them once
+ * contracts is upgraded.
  *
  * An existing link is left alone, so closing the same deal twice (reopen, close again) does not trip
  * the unique pair.
@@ -506,10 +507,11 @@ export async function LinkOrderToContract(
     if (!new Metadata().Entities.some((e) => e.Name === E_CONTRACT_ORDER)) {
         return {
             Success: false,
+            Pending: true,
             ContractID: input.ContractID,
             Message:
-                'The order was not linked to the contract: the installed bizapps-contracts has no order ' +
-                'links, so its renewal terms will not reach the subscriptions. Link them once contracts is upgraded.',
+                'Contract link pending: the installed bizapps-contracts has no order links yet. The order is ' +
+                'linked to its contract automatically once contracts is upgraded.',
         };
     }
     const existing = await new RunView().RunView<{ ID: string }>(

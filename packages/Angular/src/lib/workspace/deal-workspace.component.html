@@ -204,14 +204,29 @@
                      placeholder="e.g. Northwind Health — Platform Rollout" />
             </label>
 
+            <!-- Company first, then its pipelines (#327). Not a deal field: the company is the
+                 pipeline's, so choosing one moves the deal to that company's first pipeline. -->
+            @if (PipelineCompanyOptions.length > 1) {
+              <label class="dw-field">
+                <span class="dw-field__label">Company</span>
+                <select [ngModel]="SelectedCompanyIDFor(deal)" [disabled]="!IsFieldEditable('PipelineID')"
+                        data-testid="dw-pipeline-company"
+                        (ngModelChange)="SelectCompany(deal, $event); Touch()">
+                  @for (c of PipelineCompanyOptions; track c.CompanyID) {
+                    <option [ngValue]="c.CompanyID">{{ CompanyText(c) }}</option>
+                  }
+                </select>
+              </label>
+            }
+
             <label class="dw-field">
               <span class="dw-field__label">Pipeline <em>*</em></span>
               <!-- Pipeline is not a plain binding: it decides the selling company AND the stage list. -->
               <select [ngModel]="deal.PipelineID" [disabled]="!IsFieldEditable('PipelineID')"
                       (ngModelChange)="SelectPipeline(deal, $event); Touch()">
                 <option [ngValue]="null">— choose —</option>
-                @for (p of Lookups.Pipelines; track p.ID) {
-                  <option [ngValue]="p.ID">{{ p.Name }}</option>
+                @for (p of PipelinesFor(deal); track p.ID) {
+                  <option [ngValue]="p.ID">{{ PipelineText(p) }}</option>
                 }
               </select>
             </label>
@@ -261,7 +276,7 @@
 
             <label class="dw-field">
               <span class="dw-field__label">Customer</span>
-              <select [(ngModel)]="deal.AccountID" [disabled]="!IsFieldEditable('AccountID')" (ngModelChange)="Touch()">
+              <select [(ngModel)]="deal.AccountID" [disabled]="!IsFieldEditable('AccountID')" (ngModelChange)="OnAccountChange(deal)">
                 <option [ngValue]="null">— choose —</option>
                 @for (a of Lookups.Accounts; track a.ID) {
                   <option [ngValue]="a.ID">{{ a.Name }}</option>
@@ -677,8 +692,9 @@
   @if (IssuesForPane(key).length > 0) {
     <ul class="dw-issues">
       @for (issue of IssuesForPane(key); track issue.Message + issue.Field + issue.RowIndex) {
-        <li [class.dw-issues__warn]="issue.Severity === 'warning'">
-          <i [class]="issue.Severity === 'warning' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-exclamation'"
+        <li [class.dw-issues__warn]="issue.Severity === 'warning'" [class.dw-issues__info]="issue.Severity === 'info'">
+          <i [class]="issue.Severity === 'info' ? 'fa-solid fa-circle-info'
+                      : issue.Severity === 'warning' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-exclamation'"
              aria-hidden="true"></i>
           {{ issue.Message }}
         </li>
@@ -686,4 +702,4 @@
     </ul>
   }
 </ng-template>
-
+

@@ -28,7 +28,8 @@ import { ValidationErrorType, type ValidationResult } from '@memberjunction/core
  */
 export type DealWorkspaceSection = 'party' | 'lines' | 'schedule' | 'terms' | 'variances';
 
-export type DealWorkspaceSeverity = 'error' | 'warning';
+/** `info` is a note from the server (something pending that needs no action); it never blocks. */
+export type DealWorkspaceSeverity = 'error' | 'warning' | 'info';
 
 /** One problem with the deal, addressed to the part of the UI that can fix it. */
 export interface DealWorkspaceIssue {

@@ -1602,6 +1602,18 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    DefaultPrimaryContactID: z.string().nullable().describe(`
+        * * Field Name: DefaultPrimaryContactID
+        * * Display Name: Default Primary Contact ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+        * * Description: Contact a new deal for this account starts with as its Primary Contact. Copied onto a deal only when the deal's Primary Contact is empty; the deal's value stays editable.`),
+    DefaultBillingContactID: z.string().nullable().describe(`
+        * * Field Name: DefaultBillingContactID
+        * * Display Name: Default Billing Contact ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+        * * Description: Contact a new deal for this account starts with as its Billing Contact. Copied onto a deal only when the deal's Billing Contact is empty; the deal's value stays editable. Empty means the deal's billing contact follows its primary contact.`),
     Name: z.string().describe(`
         * * Field Name: Name
         * * Display Name: Name
@@ -1668,6 +1680,14 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Field Name: LeadSourceType
         * * Display Name: Lead Source Type
         * * SQL Data Type: nvarchar(200)`),
+    DefaultPrimaryContact: z.string().nullable().describe(`
+        * * Field Name: DefaultPrimaryContact
+        * * Display Name: Default Primary Contact
+        * * SQL Data Type: nvarchar(704)`),
+    DefaultBillingContact: z.string().nullable().describe(`
+        * * Field Name: DefaultBillingContact
+        * * Display Name: Default Billing Contact
+        * * SQL Data Type: nvarchar(704)`),
 });
 
 export type mjBizAppsSalesSalesAccountEntityType = z.infer<typeof mjBizAppsSalesSalesAccountSchema>;
@@ -6117,6 +6137,34 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     }
 
     /**
+    * * Field Name: DefaultPrimaryContactID
+    * * Display Name: Default Primary Contact ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+    * * Description: Contact a new deal for this account starts with as its Primary Contact. Copied onto a deal only when the deal's Primary Contact is empty; the deal's value stays editable.
+    */
+    get DefaultPrimaryContactID(): string | null {
+        return this.Get('DefaultPrimaryContactID');
+    }
+    set DefaultPrimaryContactID(value: string | null) {
+        this.Set('DefaultPrimaryContactID', value);
+    }
+
+    /**
+    * * Field Name: DefaultBillingContactID
+    * * Display Name: Default Billing Contact ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+    * * Description: Contact a new deal for this account starts with as its Billing Contact. Copied onto a deal only when the deal's Billing Contact is empty; the deal's value stays editable. Empty means the deal's billing contact follows its primary contact.
+    */
+    get DefaultBillingContactID(): string | null {
+        return this.Get('DefaultBillingContactID');
+    }
+    set DefaultBillingContactID(value: string | null) {
+        this.Set('DefaultBillingContactID', value);
+    }
+
+    /**
     * * Field Name: Name
     * * Display Name: Name
     * * SQL Data Type: nvarchar(255)
@@ -6308,6 +6356,24 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     */
     get LeadSourceType(): string | null {
         return this.Get('LeadSourceType');
+    }
+
+    /**
+    * * Field Name: DefaultPrimaryContact
+    * * Display Name: Default Primary Contact
+    * * SQL Data Type: nvarchar(704)
+    */
+    get DefaultPrimaryContact(): string | null {
+        return this.Get('DefaultPrimaryContact');
+    }
+
+    /**
+    * * Field Name: DefaultBillingContact
+    * * Display Name: Default Billing Contact
+    * * SQL Data Type: nvarchar(704)
+    */
+    get DefaultBillingContact(): string | null {
+        return this.Get('DefaultBillingContact');
     }
 }
 

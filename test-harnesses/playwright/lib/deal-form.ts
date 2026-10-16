@@ -402,7 +402,25 @@ export async function PipelineSelect(page: Page): Promise<Locator> {
  * stage is picked AFTER this, never before.
  */
 export async function SetPipelineByID(page: Page, pipelineID: string): Promise<void> {
+    await SetPipelineCompanyFor(page, pipelineID);
     await SelectOptionByID(await PipelineSelect(page), pipelineID, 'Pipeline');
+    await page.waitForTimeout(300);
+}
+
+/**
+ * Picks the pipeline's company first (#327): the Pipeline list offers only the selected company's
+ * pipelines, so a pipeline of another company has no option until its company is chosen. The control
+ * renders only when more than one company owns a pipeline; with one, there is nothing to pick.
+ */
+async function SetPipelineCompanyFor(page: Page, pipelineID: string): Promise<void> {
+    const company = ByTestId(page, 'deal-pipeline-company');
+    if ((await company.count()) === 0) return;
+    const row = await QueryOne<{ CompanyID: string }>(
+        `SELECT CAST(CompanyID AS nvarchar(50)) AS CompanyID FROM __mj_BizAppsSales.Pipeline
+          WHERE ID = '${pipelineID.replace(/'/g, "''")}'`,
+    );
+    expect(row?.CompanyID, `pipeline ${pipelineID} must exist to pick its company`).toBeTruthy();
+    await SelectOptionByID(company, String(row!.CompanyID), 'Company');
     await page.waitForTimeout(300);
 }
 
@@ -456,8 +474,8 @@ export async function FirstOpenStatus(): Promise<{ ID: string; Name: string }> {
 /**
  * The first active pipeline by name -- the one the Pipeline select offers first.
  *
- * `LoadPipelines` filters `IsActive = 1` and orders by `Name`, so this row is guaranteed to BE in the
- * dropdown. A spec needing "any pipeline" takes this rather than whichever option rendered first.
+ * `LoadPipelines` filters `IsActive = 1`, so this row is guaranteed to BE in the dropdown once its
+ * company is selected (`SetPipelineByID` does that). A spec needing "any pipeline" takes this rather than whichever option rendered first.
  */
 export async function PipelineByName(name?: string): Promise<{ ID: string; Name: string }> {
     if (!name) return FirstPipeline();

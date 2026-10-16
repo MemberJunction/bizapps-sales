@@ -157,7 +157,7 @@ export function DescribeFiscalBasis(resolution: FiscalYearStartResolution): stri
         case 'no-profiles':
             return `calendar year (no company profile sets a fiscal year)`;
         case 'mixed':
-            return `calendar year (companies disagree on the fiscal year start)`;
+            return `calendar year (companies use different fiscal years)`;
     }
 }
 

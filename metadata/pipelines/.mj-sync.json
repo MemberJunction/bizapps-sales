@@ -20,6 +20,10 @@
     "local development, so a dev host ends up with these pipelines on the dev companies rather than a",
     "second set of them.",
     "",
+    "OTHER COMPANIES GET COPIES, NOT ROWS HERE (#327). Run the Sales.CopyDefaultPipelineToCompanies Action",
+    "after install, and again after adding a company: it copies the IsDefault pipeline and its stages onto",
+    "every company without a pipeline of the same Code.",
+    "",
     "This is the ONLY place sales' metadata reaches into MJ core data. It is worth knowing that, which",
     "is why it is written here rather than assumed."
   ],
