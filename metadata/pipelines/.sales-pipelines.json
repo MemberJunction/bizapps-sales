@@ -59,7 +59,7 @@
     "fields": {
       "Name": "D2C",
       "Code": "D2C",
-      "Description": "A direct motion with no catalogue lines and no agreement: the amount is stated by a human, and closing it routes nothing downstream.",
+      "Description": "A direct motion with no catalogue lines and no contract: the amount is stated by a human. Winning the deal moves its order to Quoted and gives finance an Order Review task.",
       "CompanyID": "@lookup:MJ: Companies.Name=Default Company",
       "DealTypeID": "@lookup:MJ_BizApps_Sales: Deal Types.Code=NEW",
       "DefaultForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",
