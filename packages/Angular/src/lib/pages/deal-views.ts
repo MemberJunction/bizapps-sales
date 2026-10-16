@@ -8,9 +8,10 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { BaseEntity, Metadata, RunView } from '@memberjunction/core';
+import { BaseEntity, CompositeKey, Metadata, RunView } from '@memberjunction/core';
 import type { EntityInfo } from '@memberjunction/core';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
+import type { ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-viewer';
 import { MJS_ENTITIES } from '../data/entity-names';
 import type { PeriodWindow } from './dashboard-period';
 
@@ -179,6 +180,27 @@ export function DealWonInPeriodWhere(
     if (window?.Start) parts.push(`ActualCloseDate >= ${sqlString(window.Start)}`);
     if (window?.End) parts.push(`ActualCloseDate <= ${sqlString(window.End)}`);
     return parts.join(' AND ');
+}
+
+/**
+ * The record behind a grid's linked cell, or null when it cannot be opened.
+ *
+ * `mj-entity-viewer` does not open a linked cell's record itself: it emits `OpenRelatedRecordRequested`
+ * and leaves routing to the host. This is the resolution MJ's own Explorer hosts do: the related entity
+ * can be any entity, so the key is read against its metadata rather than assumed to be `ID`. An entity
+ * this host does not know, or a missing key, is not a click that can be honoured.
+ */
+export function RelatedRecordTarget(
+    nav: ViewRelatedRecordNavigation | null | undefined,
+): { EntityName: string; Key: CompositeKey } | null {
+    if (!nav?.entityName || nav.recordKey === null || nav.recordKey === undefined || nav.recordKey === '') {
+        return null;
+    }
+    const entity = new Metadata().Entities.find((e) => e.Name === nav.entityName);
+    if (!entity) {
+        return null;
+    }
+    return { EntityName: entity.Name, Key: CompositeKey.FromURLSegment(entity, String(nav.recordKey)) };
 }
 
 export { MJS_ENTITIES };

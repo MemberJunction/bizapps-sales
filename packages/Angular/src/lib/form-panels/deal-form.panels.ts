@@ -22,6 +22,7 @@ import {
     EntityViewerModule,
     type AfterDataLoadEventArgs,
     type RecordOpenedEvent,
+    type ViewRelatedRecordNavigation,
 } from '@memberjunction/ng-entity-viewer';
 import {
     DealEntity,
@@ -36,7 +37,7 @@ import {
     type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
-import { SyntheticActivityView } from '../pages/deal-views';
+import { RelatedRecordTarget, SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
     CompanyLabel,
@@ -3630,14 +3631,18 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
             Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="true">
             @if (Record.IsSaved) {
                 <div class="mjs-deal-activity">
-                    <mjs-deal-activity-timeline [DealID]="Record.ID" [ComposeOnly]="true"
+                    <mjs-deal-activity-timeline #compose [DealID]="Record.ID" [ComposeOnly]="true"
                         (Logged)="OnLogged()"></mjs-deal-activity-timeline>
                     @if (ActivityEntity) {
                         <div class="mjs-deal-activity__viewer">
+                            <!-- New goes to the compose form above: it is the only path that links the new
+                                 activity to this deal. -->
                             <mj-entity-viewer
                                 [Entity]="ActivityEntity"
                                 [ViewEntity]="ActivityView"
-                                (RecordOpened)="OnActivityOpened($event)">
+                                (RecordOpened)="OnActivityOpened($event)"
+                                (OpenRelatedRecordRequested)="OnActivityRelatedRecord($event)"
+                                (CreateRecordRequested)="compose.FocusCompose()">
                             </mj-entity-viewer>
                         </div>
                     }
@@ -3686,6 +3691,14 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
             EntityName: MJS_FOREIGN_ENTITIES.Activity,
             PrimaryKey: CompositeKey.FromID(id),
         });
+    }
+
+    /** A linked cell in the Activity grid, opened the way a row double-click is. */
+    public OnActivityRelatedRecord(nav: ViewRelatedRecordNavigation): void {
+        const target = RelatedRecordTarget(nav);
+        if (target) {
+            this.FormComponent.OnFormNavigate({ Kind: 'record', EntityName: target.EntityName, PrimaryKey: target.Key });
+        }
     }
 
     private async refreshView(): Promise<void> {

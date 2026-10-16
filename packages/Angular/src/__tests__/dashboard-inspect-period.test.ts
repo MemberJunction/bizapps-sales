@@ -52,6 +52,7 @@ function deal(overrides: Partial<DealRosterRow>): DealRosterRow {
         WeightedAmount: null,
         StageOrder: null,
         CurrencyID: null,
+        CurrencyCode: 'USD',
         ...overrides,
     };
 }

@@ -247,6 +247,7 @@
                     [Entity]="DealEntityInfo"
                     [ViewEntity]="InspectView"
                     (RecordOpened)="OnInspectOpened($event)"
+                    (OpenRelatedRecordRequested)="OpenRelatedRecord($event)"
                     (CreateRecordRequested)="StartPrimary()">
                   </mj-entity-viewer>
                 } @else {
@@ -274,6 +275,7 @@
                 [Entity]="DealEntityInfo"
                 [ViewEntity]="AllDealsView"
                 (RecordOpened)="OnAllDealsOpened($event)"
+                (OpenRelatedRecordRequested)="OpenRelatedRecord($event)"
                 (CreateRecordRequested)="StartPrimary()">
               </mj-entity-viewer>
             </div>
@@ -296,25 +298,33 @@
             <mj-loading></mj-loading>
           } @else if (LoadError) {
             <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
+          } @else if (RosterError) {
+            <!-- The columns are built from the deal list, so with no list nothing in them is true. The
+                 dashboard survives a roster failure; the board cannot, and must not draw empty $0
+                 columns that read as "no deals". -->
+            <ng-container *ngTemplateOutlet="loadFailed; context: { $implicit: RosterError }"></ng-container>
           } @else if (Page === 'board') {
             <mjs-deal-board
               [Deals]="Deals"
               [Pipelines]="Pipelines"
               [Stages]="Stages"
               [DealStatusTypes]="DealStatusTypes"
+              [(SelectedCompanyID)]="BoardCompanyID"
+              [(SelectedPipelineID)]="BoardPipelineID"
               (DealOpened)="OpenDeal($event)"
-              (StageMoved)="Refresh()"></mjs-deal-board>
+              (StageMoved)="Refresh(true)"></mjs-deal-board>
           }
         </div>
 
         <!-- A load that stopped part-way (bizapps-sales#195). Shown in place of each page's content rather
              than beside it, because nothing that page would draw is known to be current. -->
-        <ng-template #loadFailed>
+        <!-- The reason is `LoadError` unless the caller passes one (the board passes `RosterError`). -->
+        <ng-template #loadFailed let-reason>
           <div class="load-failed" role="alert" data-testid="sales-load-failed">
             <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             <div class="load-failed__body">
               <b>The deals could not be loaded.</b>
-              <span class="load-failed__reason">{{ LoadError }}</span>
+              <span class="load-failed__reason">{{ reason ?? LoadError }}</span>
             </div>
             <button type="button" mjButton variant="outline" data-testid="sales-load-retry" (click)="Refresh()">
               <i class="fa-solid fa-arrow-rotate-right" aria-hidden="true"></i> Retry
