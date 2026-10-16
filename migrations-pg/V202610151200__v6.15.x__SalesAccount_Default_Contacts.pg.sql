@@ -7,6 +7,8 @@
 --     hierarchy functions are NOT here: the converter cannot translate T-SQL procedures, triggers
 --     or table-valued functions. A PostgreSQL host runs `mj codegen` after installing, which
 --     generates them natively. The converter's notes for them remain, fully commented out.
+--   * 1 view-rebuild block(s): the target schema lowercased, so the dependent-view rebuild
+--     finds the view when its column list changes.
 --   * 8 string values restored verbatim from the T-SQL: the converter re-indents text
 --     inside string literals and rewrites T-SQL inside stored constraint text and display names.
 --   * 2 statements the converter drops (CodeGen's name-field map updates, column
@@ -103,7 +105,7 @@ CREATE INDEX IF NOT EXISTS "IDX_AUTO_MJ_FKEY_SalesAccount_DefaultBillingContactI
 
 DO $do$
 DECLARE
-  v_target_schema CONSTANT TEXT := '__mj_BizAppsSales';
+  v_target_schema CONSTANT TEXT := '__mj_bizappssales';
   v_target_name CONSTANT TEXT := 'vwSalesAccounts';
   vsql CONSTANT TEXT := $vsql$CREATE OR REPLACE VIEW __mj_BizAppsSales."vwSalesAccounts"
 AS SELECT
