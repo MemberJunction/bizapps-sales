@@ -152,7 +152,7 @@
                     @if (deal.Amount === null) {
                       <span class="db-card__noamount" title="No amount recorded yet">—</span>
                     } @else {
-                      {{ deal.Amount | currency:(deal.CurrencyID ?? DefaultCurrency):'symbol':'1.0-0' }}
+                      {{ deal.Amount | currency:deal.CurrencyCode:'symbol':'1.0-0' }}
                     }
                     <!--
                       BOTH CASES ARE MARKED, and marking only one was the defect. A calculator on the

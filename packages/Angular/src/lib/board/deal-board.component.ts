@@ -53,7 +53,7 @@ import {
 
 import { FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 
-import { DealWorkspaceService, type DealRosterRow } from '../workspace/deal-workspace.service';
+import { DealWorkspaceService, DEFAULT_DISPLAY_CURRENCY, type DealRosterRow } from '../workspace/deal-workspace.service';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
 import {
     CompanyLabel,
@@ -124,33 +124,20 @@ export function ClosingRefusal(columnLabel: string): string {
 }
 
 /**
- * The one currency a set of cards shares, or NULL when they do not share one.
+ * The one currency code a set of cards shares, or NULL when they do not share one.
  *
- * Uniformly-NULL counts as sharing: `Deal.CurrencyID` is unpopulated on every deal today, so treating
- * that as a disagreement would suppress every total on the board and help nobody. What it must not do
- * is treat NULL as the display default -- unknown and dollars are different claims, and conflating
- * them is how a EUR deal ends up rendered as $48,000.
+ * Compared on `CurrencyCode`, not `CurrencyID`: the ID is a record key the currency pipe would print
+ * verbatim, and a deal with no currency (read as the display default) shares a column with one stamped
+ * in that same currency. What it must not do is fold different codes together -- that is how a EUR deal
+ * ends up rendered as $48,000.
  */
 export function SingleCurrencyOf(cards: readonly DealRosterRow[]): string | null {
-    if (cards.length === 0) {
-        return null;
-    }
-    const distinct = new Set(cards.map((d) => d.CurrencyID ?? ''));
-    if (distinct.size > 1) {
-        return null;
-    }
-    const only = [...distinct][0];
-    return only === '' ? DEFAULT_DISPLAY_CURRENCY : only;
+    const distinct = new Set(cards.map((d) => d.CurrencyCode));
+    return distinct.size === 1 ? [...distinct][0] : null;
 }
 
-/**
- * What a figure is LABELLED as when no deal states a currency.
- *
- * A display default, not a fact about the money. It is here as one named constant rather than three
- * hardcoded 'USD' literals so that the assumption is stated once, in a place a reader meets it, and
- * so populating `Deal.CurrencyID` is a data change rather than a code hunt.
- */
-export const DEFAULT_DISPLAY_CURRENCY = 'USD';
+/** Defined beside the roster row it labels; exported here too for the section's figures. */
+export { DEFAULT_DISPLAY_CURRENCY };
 
 /** One column: a stage, the deals sitting in it, and the two figures its header shows. */
 export interface BoardColumn {
@@ -353,8 +340,7 @@ export class DealBoardComponent {
                      */
                     Total: cards.reduce((sum, d) => sum + (d.Amount ?? 0), 0),   // money-grep-allow: a rollup of stored answers for display -- never stored, never sent. The same SUM runs in dashboard-summary.sql:41; moving it into a query is blocked on pipeline-summary.sql:36 being open-deals-only. See the note above.
                     Currency: SingleCurrencyOf(cards),
-                    MixedCurrency: SingleCurrencyOf(cards) === null && cards.length > 0
-                        && new Set(cards.map((d) => d.CurrencyID ?? '')).size > 1,
+                    MixedCurrency: SingleCurrencyOf(cards) === null && cards.length > 0,
                     /**
                      * `AmountIsComputed` is the provenance flag, and reading it is the whole point: a
                      * null amount and a typed one are both un-priced, and the second is the one a reader
