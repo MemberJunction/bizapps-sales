@@ -668,13 +668,15 @@ export class MJSSalesSectionComponent implements OnInit {
                 ? ' · all stated, none priced'
                 : ` · ${this.money(s.OpenStatedAmount)} stated`;
 
+        // The dollar figure leaves Omitted deals out, so its deal count does too.
+        const pipelineCount = s.OpenCount - (s.OpenOmittedCount ?? 0);
         return [
             {
                 Label: 'Open pipeline',
                 Value: this.money(s.OpenAmount),
                 // Dashboard's summary figures, with the board branch's provenance suffix. Both halves
                 // are kept: the currency-correct total, and the caveat about who produced it.
-                Footnote: `across ${s.OpenCount} open ${s.OpenCount === 1 ? 'deal' : 'deals'}${statedNote}`,
+                Footnote: `across ${pipelineCount} open ${pipelineCount === 1 ? 'deal' : 'deals'}${statedNote}`,
                 Filter: 'pipe',
             },
             {
