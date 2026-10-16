@@ -47,6 +47,10 @@ export type SiblingApp = 'orders' | 'contracts' | 'tasks' | 'common';
  * `RequiresApp` is read by `test-harnesses/integration.mjs`: when that app is not present (linked AND its
  * entities registered), the check is left out and listed with the reason instead of failing as if the
  * product were broken. The registry stores the object as given, so the field survives registration.
+ *
+ * It controls the Sales runner only. Any other driver of the registry ignores it and reaches the check,
+ * so a check that sets it must also guard itself (`requireContracts` in `close-won-tasks.checks.ts`).
+ * `pnpm run test:integration` is the supported runner.
  */
 export type SalesCheck = NamedCheck & { RequiresApp?: SiblingApp };
 
