@@ -14,10 +14,9 @@
       "params as an `MJ: Action Params` collection with `@parent:ID`.",
       "",
       "WHAT IT DOES NOT DECIDE: where the numbers come from. That is the process-wide forecast source",
-      "factory, whose default is NULL — no source, nothing measured, and the Action reports NO_SOURCE. So",
-      "this is safe to ship Active before the queries exist. A forecast row is the case where an invented",
-      "number does the most damage: an activity nobody sent reads as obviously wrong, a plausible commit",
-      "figure does not, and it is indistinguishable from a real one the moment it lands."
+      "factory, whose default reads the `Sales: Forecast by Owner` query. A missing query fails the run",
+      "rather than writing an invented number: an activity nobody sent reads as obviously wrong, a",
+      "plausible commit figure does not, and it is indistinguishable from a real one the moment it lands."
     ],
     "fields": {
       "Name": "Capture Forecast Snapshot",

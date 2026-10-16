@@ -64,9 +64,8 @@ release, cut by `.github/workflows/publish.yml` when `next` is merged to `main`
 - **Deal team and buying committee** (`DealTeamMember`, `DealContactRole`), and the agreed payment
   schedule (`DealPaymentSchedule`).
 - **Dashboard and forecasting.** The dashboard reads the MJ Queries in `metadata/queries/`.
-  `ForecastSnapshot` holds point-in-time forecast figures; its daily scheduled job writes nothing until
-  a forecast source is registered, and this repo registers none yet
-  ([#216](https://github.com/MemberJunction/bizapps-sales/issues/216)).
+  `ForecastSnapshot` holds point-in-time forecast figures; its daily scheduled job captures each
+  pipeline's forecast by owner from the `Sales: Forecast by Owner` query.
 - **In MJExplorer**, the Sales application opens on a Deals section with Dashboard, All deals and Board
   views, beside the generated forms for every entity.
 
