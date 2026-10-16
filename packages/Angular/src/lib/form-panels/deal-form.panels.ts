@@ -51,6 +51,7 @@ import {
 import { MJSDealLineEditorComponent } from './deal-line-editor.component';
 import { MJSDealLineCardsComponent } from './deal-line-cards.component';
 import { BusinessDayOf, DealCloseDay } from './deal-close-day';
+import { WeightedAmount } from './deal-weighted-amount';
 import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
 
 const E = MJS_ENTITIES.Deal;
@@ -1226,12 +1227,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return v == null || v === '' ? '' : String(v);
     }
     public get Money(): string { return money(this.Record?.Amount); }
-    public get Weighted(): string {
-        const a = Number(this.Record?.Amount);
-        const p = Number(this.Record?.Probability);
-        if (!Number.isFinite(a) || !Number.isFinite(p)) return '—';
-        return money(a * p / 100);
-    }
+    public get Weighted(): string { return money(WeightedAmount(this.Record?.Amount, this.Record?.Probability)); }
     public get Prob(): string {
         const p = this.Record?.Probability;
         return p == null ? '—' : `${p}%`;
