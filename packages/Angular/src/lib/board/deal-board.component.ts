@@ -79,6 +79,25 @@ export function DisplayDay(value: string | Date | null | undefined): Date | null
     return day ? FromCalendarDay(day) : null;
 }
 
+/** The roster fields a card's close date is chosen from. */
+type CardDates = Pick<DealRosterRow, 'IsClosed' | 'ActualCloseDate' | 'ExpectedCloseDate'>;
+
+/**
+ * True when the card shows the day the deal closed rather than its forecast.
+ *
+ * Read off the roster's `IsClosed` flag, never a status name. A closed row with no `ActualCloseDate`
+ * (one closed before the day was stamped) is false, so its card shows the expected day unlabelled
+ * rather than calling a forecast the close.
+ */
+export function CardClosed(deal: CardDates): boolean {
+    return deal.IsClosed && !!deal.ActualCloseDate;
+}
+
+/** The day a card shows: the close day once the deal has closed, otherwise the expected close day. */
+export function CardCloseDay(deal: CardDates): Date | null {
+    return DisplayDay(CardClosed(deal) ? deal.ActualCloseDate : deal.ExpectedCloseDate);
+}
+
 /**
  * The one currency a set of cards shares, or NULL when they do not share one.
  *
@@ -441,8 +460,9 @@ export class DealBoardComponent {
         return this.Pipelines.find((p) => p.ID === pipelineID)?.Name ?? '—';
     }
 
-    /** Exposed for the card's close date. See {@link DisplayDay}. */
-    public readonly DisplayDay = DisplayDay;
+    /** Exposed for the card's close date. See {@link CardCloseDay} and {@link DisplayDay}. */
+    public readonly CardCloseDay = CardCloseDay;
+    public readonly CardClosed = CardClosed;
     /** Track by ID so a re-render does not tear down every card. */
     public TrackCard = (_: number, deal: DealRosterRow): string => deal.ID;
     /** Exposed for the template's per-card fallback. See DEFAULT_DISPLAY_CURRENCY. */
