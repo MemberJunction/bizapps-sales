@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@mj-biz-apps/sales-core-entities-server": "^6.17.0",
-    "zod": "~3.24.4"
+    "zod": "^3.24.4"
   },
   "peerDependencies": {
     "@memberjunction/actions": "^6.1.5",
