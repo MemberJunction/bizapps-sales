@@ -246,7 +246,8 @@
                   <mj-entity-viewer
                     [Entity]="DealEntityInfo"
                     [ViewEntity]="InspectView"
-                    (RecordOpened)="OnInspectOpened($event)">
+                    (RecordOpened)="OnInspectOpened($event)"
+                    (CreateRecordRequested)="StartPrimary()">
                   </mj-entity-viewer>
                 } @else {
                   <div class="empty">Deal entity metadata is not loaded.</div>
@@ -272,7 +273,8 @@
               <mj-entity-viewer
                 [Entity]="DealEntityInfo"
                 [ViewEntity]="AllDealsView"
-                (RecordOpened)="OnAllDealsOpened($event)">
+                (RecordOpened)="OnAllDealsOpened($event)"
+                (CreateRecordRequested)="StartPrimary()">
               </mj-entity-viewer>
             </div>
           } @else {
