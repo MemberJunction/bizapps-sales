@@ -25,6 +25,7 @@ import {
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
 import { DealCloseDay } from './deal-close-day';
+import { WeightedAmount } from './deal-weighted-amount';
 
 
 /**
@@ -621,12 +622,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     }
 
     public get AmountText(): string { return money(this.Record?.Amount); }
-    public get WeightedText(): string {
-        const a = Number(this.Record?.Amount);
-        const p = Number(this.Record?.Probability);
-        if (!Number.isFinite(a) || !Number.isFinite(p)) return '—';
-        return money(a * p / 100);
-    }
+    public get WeightedText(): string { return money(WeightedAmount(this.Record?.Amount, this.Record?.Probability)); }
     public get StatusTone(): 'success' | 'warning' | 'muted' {
         const s = this.StatusName.toLowerCase();
         if (!s) return 'muted';
