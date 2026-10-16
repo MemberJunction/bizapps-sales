@@ -266,9 +266,9 @@ function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
  *
  * ── WHY THIS EXISTS WHEN `Routing` ALREADY CARRIES THE REASON ───────────────────────────────────
  *
- * It carries it for anyone who reads `Routing`. The workspace does — `deal-workspace.component.html`
- * renders `— not created: {{ r.Reason }}` on a `--failed` row — so a REP closing a deal already sees
- * the refusal and why. That surface is fine and is not what this is for.
+ * It carries it for anyone who reads `Routing`. The deal workspace did (it rendered
+ * `— not created: {{ r.Reason }}` on a failed row; deleted in #291), so a REP closing a deal there saw
+ * the refusal and why. That is not what this is for.
  *
  * The gap is programmatic. An API client, an agent or an importer that checks `Success` and reads
  * `Issues` — the two fields every other failure mode in this operation reports through — sees
@@ -1039,7 +1039,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
      * ── THE MIRROR OF `closeEventBeingUndone`, AND THE OTHER HALF OF DN-18 ───────────────────────
      *
      * `CD18` proves a reopen restores the stage the deal came from. It could not help a deal closed
-     * through the browser, because `DealWorkspaceComponent.ConfirmClose()` sends no `ClosingStageID` — so
+     * through the browser, because the deal workspace's `ConfirmClose()` sent no `ClosingStageID` — so
      * no browser-driven close ever moved the stage, every close event recorded
      * `FromStageID === ToStageID`, and the reopen correctly derived the stage the deal was already in.
      * The mechanism was right and the UI could not reach it. `71-lost-and-reopen` is the spec that names
@@ -1545,10 +1545,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * when the peer is not. FK set + peer unresolved is not "no order" — it is "unknown
              * order", and an unknown ledger state cannot be certified safe to reopen.
              *
-             * THE SIBLING CALL SITE ALREADY DECIDED THIS. `DealWorkspaceService.LoadDeal` treats the same
-             * state as a hard failure and refuses to render, on the reasoning that a deal with an
-             * unreadable order must not be shown as a deal with no lines. Two files reading one state and
-             * returning opposite verdicts is the defect; this makes them agree.
+             * THE SAME VERDICT THE DEAL WORKSPACE'S LOADER REACHED (deleted in #291): it treated this
+             * state as a hard failure and refused to render, on the reasoning that a deal with an
+             * unreadable order must not be shown as a deal with no lines.
              */
             if (deal.OrderID && !deal.OrderID_Object) {
                 return {

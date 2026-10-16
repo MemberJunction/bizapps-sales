@@ -163,9 +163,9 @@ async function reopen(ctx: Parameters<NamedCheck['Fn']>[0], dealID: string): Pro
  * Loads the lines of the deal's EMBEDDED ORDER, which `deal.LoadRelatedRecords` does not reach.
  *
  * Two hops, and the second is easy to forget: `LoadRelatedRecords` populates the collections declared on
- * THIS entity, and `Lines` is declared on `OrderHeader`. This is the same sequence
- * `DealWorkspaceService.LoadDeal` performs, and for the same reason — which is why it is one named
- * helper rather than two lines copied into nine checks.
+ * THIS entity, and `Lines` is declared on `OrderHeader`. The deal workspace's loader (deleted in
+ * #291) ran the same sequence for the same reason — which is why it is one named helper rather than two
+ * lines copied into nine checks.
  *
  * Returns `readonly BaseEntity[]`, not orders' generated line class: these checks must not take a
  * compile-time dependency on another app's entity package, so fields are reached with `Get`/`Set`. The
@@ -1623,9 +1623,9 @@ export const SaveDealChecks: NamedCheck[] = [
                  * a deal that had MOVED, and one row went into an append-only log describing a transition
                  * out of a stage the deal was never in.
                  *
-                 * That is not a contrived sequence: it is what the workspace does. `NewDeal()` preselects
-                 * a pipeline and its first stage so the form opens with something valid, and then the rep
-                 * picks the stage they actually want. Every deal created through the UI that way carried a
+                 * That is not a contrived sequence: it is what the deal workspace did. Its `NewDeal()`
+                 * preselected a pipeline and its first stage so the form opened with something valid, and
+                 * then the rep picked the stage they actually wanted. Every deal created through the UI that way carried a
                  * fictional event.
                  *
                  * `BD1` asserts a new deal owes no event and stayed green throughout, because it assigns
@@ -1813,7 +1813,7 @@ export const SaveDealChecks: NamedCheck[] = [
                 /**
                  * ── A DEAL WITH NO STATUS IS INVISIBLE, AND NOTHING USED TO GIVE IT ONE ─────────────
                  *
-                 * `NewDeal()` seeds no status and the column is nullable with no default, so a rep who
+                 * The deal workspace's `NewDeal()` seeded no status and the column is nullable with no default, so a rep who
                  * never touched the Status select saved a deal that every `IsOpen`/`IsWon` rollup skipped
                  * — and while the roster and summary queries INNER JOINed that FK, invisible to every
                  * surface in the app. `PipelineStage.DealStatusTypeID` is seeded on every stage and the

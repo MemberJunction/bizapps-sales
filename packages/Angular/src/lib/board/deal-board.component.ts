@@ -381,7 +381,7 @@ export class DealBoardComponent {
         if (target.IsClosing) {
             // Belt and braces: `CanDropInto` already refuses this, but a lock is worth two guards.
             this.Message =
-                `"${target.Label}" closes and locks a deal. Open it in the workspace and close it there, ` +
+                `"${target.Label}" closes and locks a deal. Open the deal and close it there, ` +
                 'so the win or loss is recorded deliberately.';
             this.cdr.detectChanges();
             return;

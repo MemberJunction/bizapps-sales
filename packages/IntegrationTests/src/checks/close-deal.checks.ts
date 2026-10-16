@@ -730,9 +730,8 @@ export const CloseDealChecks: NamedCheck[] = [
                 /**
                  * THE GAP THIS CLOSES IS PROGRAMMATIC, NOT VISUAL.
                  *
-                 * `Routing[].Reason` already carried the refusal, and the workspace already renders it —
-                 * `deal-workspace.component.html` shows `not created: {{ r.Reason }}` on a failed row, so a
-                 * rep sees it. What did not carry it was `Issues`, the field every OTHER failure mode in
+                 * `Routing[].Reason` already carried the refusal, and the deal workspace (since deleted,
+                 * #291) rendered it as `not created: {{ r.Reason }}` on a failed row, so a rep saw it. What did not carry it was `Issues`, the field every OTHER failure mode in
                  * this operation reports through. An API client, an agent or an importer that checks
                  * `Success` and reads `Issues` saw `Success: true` and an empty array on a close whose
                  * contract had been declined.
@@ -2139,9 +2138,9 @@ export const CloseDealChecks: NamedCheck[] = [
                  *
                  * `SetOwner()` is a DIFFERENT path and it is refused here, measured: it assigns
                  * `this.OwnerEmployeeID` on the client before saving, so `checkCloseLock` sees a dirty
-                 * frozen field and returns false. The deal workspace's owner picker calls it
-                 * (`deal-workspace.component.ts`), so reassigning an owner there does not work on a
-                 * closed deal even though item 2 says it should. Deliberately NOT asserted here: a check
+                 * frozen field and returns false. The deal workspace's owner picker called it (the
+                 * workspace is deleted, #291), so reassigning an owner there did not work on a closed
+                 * deal even though item 2 says it should. Deliberately NOT asserted here: a check
                  * that pinned the refusal would enshrine the defect. Raised separately instead.
                  */
                 const f = await ResolveSalesFixture(ctx);

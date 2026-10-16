@@ -216,7 +216,7 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
      *
      * Not the round trip. Measured through Angular's dev hooks on a real create: afterwards
      * `deal.OrderID` holds `DA871180-…`, exactly matching the row on disk. The framework already keeps
-     * the promise `DealWorkspaceComponent.Save()` makes — "the same instance now carries the server's
+     * the promise the deal workspace's `Save()` made — "the same instance now carries the server's
      * IDs" — for the FIELD.
      *
      * What it does not carry is the COMPANION. `EmbeddedRecord` gates `Value` on a private `exposed`
@@ -236,7 +236,7 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
      *
      * ── WHY HERE, AND NOT IN THE WORKSPACE ─────────────────────────────────────────────────────────
      *
-     * Fixing `DealWorkspaceComponent.Save()` would fix the one surface that happened to find it. The
+     * Fixing the deal workspace's `Save()` would have fixed the one surface that happened to find it. The
      * board, an Action running client-side, an importer and the next surface nobody has written all reach
      * the same state through plain `entity.Save()`. The entity is where "my FK and my peer agree" belongs,
      * so it is fixed once, for every caller.

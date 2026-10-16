@@ -1923,14 +1923,11 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     }
 
     /**
-     * Choosing a pipeline also chooses which stages exist, so it cannot be a plain field binding —
-     * the same sentence `deal-workspace.component.ts` carries above `SelectPipeline`, and the reason
-     * the form had this bug while the workspace did not.
+     * Choosing a pipeline also chooses which stages exist, so it cannot be a plain field binding.
      *
-     * `CompanyID` is NOT set here, unlike the workspace's version. `DealEntityServer` forces it from
-     * the pipeline on every save, ignoring whatever a caller supplies, so writing it here would be
-     * stating something this form has no standing to know. The workspace sets it only so its own
-     * header can display it before the round trip.
+     * `CompanyID` is NOT set here. `DealEntityServer` forces it from the pipeline on every save,
+     * ignoring whatever a caller supplies, so writing it here would be stating something this form has
+     * no standing to know.
      */
     public SetPipeline(pipelineID: string | null): void {
         if (!this.Record) return;

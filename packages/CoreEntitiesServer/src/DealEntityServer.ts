@@ -900,10 +900,10 @@ export class DealEntityServer extends DealEntity {
         /**
          * A DEAL BEING CREATED OWES NO EVENT, and `OldValue === null` is not a reliable way to ask.
          *
-         * `NewDeal()` preselects a pipeline and its first stage; the rep then picks the stage they
-         * actually want. That is TWO assignments before the first save, so the first becomes `OldValue`
-         * and the guard below saw a "transition" from a stage the deal was never in — and wrote it into
-         * an append-only log, where it cannot be corrected afterwards.
+         * The deal workspace's `NewDeal()` preselected a pipeline and its first stage; the rep then
+         * picked the stage they actually wanted. That is TWO assignments before the first save, so the
+         * first becomes `OldValue` and the guard below saw a "transition" from a stage the deal was never
+         * in — and wrote it into an append-only log, where it cannot be corrected afterwards.
          *
          * `IsSaved` is the question that holds however many times the field was touched. `DealStageEvent`
          * is a log of MOVEMENT, and nothing has moved until there is a row to move from.
@@ -1548,8 +1548,8 @@ export class DealEntityServer extends DealEntity {
      * places did not, and both were wrong in the same direction:
      *
      *   · `planStageEvent` inferred a birth from `OldValue === null`. But a new deal whose stage is set
-     *     TWICE before the first save — `NewDeal()` preselects a pipeline and its first stage, the rep
-     *     then picks a different one — has a non-null `OldValue` holding a stage the deal was NEVER IN.
+     *     TWICE before the first save — the deal workspace's `NewDeal()` preselected a pipeline and its
+     *     first stage, the rep then picked a different one — has a non-null `OldValue` holding a stage the deal was NEVER IN.
      *     It appended a transition event for it, into an append-only log. `BD1` asserts against exactly
      *     that and passes only because it assigns the stage once.
      *   · `ownerStampEditRefusal` asked `Dirty`, so an importer doing `NewRecord()` ->
@@ -1594,7 +1594,7 @@ export class DealEntityServer extends DealEntity {
         /**
          * ── THE STATUS COMES FROM THE STAGE, AND A DEAL WITH NO STATUS IS INVISIBLE ──────────────────
          *
-         * `DealWorkspaceService.NewDeal()` is `NewRecord()` and nothing else, and `DealStatusTypeID` is
+         * The deal workspace's `NewDeal()` was `NewRecord()` and nothing else, and `DealStatusTypeID` is
          * nullable with no column default. So a rep who never touched the Status select saved a deal that
          * every `IsOpen`/`IsWon` rollup skipped — and while the roster and summary queries still INNER
          * JOINed that FK, such a deal was invisible to every surface in the app. It was also what made

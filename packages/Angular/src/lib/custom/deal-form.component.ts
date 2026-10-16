@@ -1,10 +1,9 @@
 /**
  * @fileoverview Deal form — the close lock, and whether the cached amount can still be trusted.
  *
- * THIS STAYS A FORM. Composing a deal — adding lines, picking products, editing the roster — is the deal
- * workspace's job, and duplicating it here would give us two surfaces that must agree forever. What this
- * adds is the two things a *form* is the right place for: refusing an edit the server will refuse, and
- * saying out loud when a number on screen is stale.
+ * This class adds the two things a *form* is the right place for: refusing an edit the server will
+ * refuse, and saying out loud when a number on screen is stale. Lines, products and the roster are
+ * edited by the panels contributed onto this form (`form-panels/`).
  *
  * ── THE CLOSE LOCK ──────────────────────────────────────────────────────────────────────────────
  *
@@ -130,7 +129,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      * Resolves the lock through the SHARED rule in `sales-entities`.
      *
      * The lookup itself — read `LocksDeal` off the status row, by flag, off the PERSISTED status — lives
-     * in `ResolveDealLockState` so this form and the deal workspace cannot answer it differently.
+     * in `ResolveDealLockState` so every surface that asks gets the same answer.
      */
     private async resolveCloseLock(): Promise<void> {
         const persisted = this.record?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;

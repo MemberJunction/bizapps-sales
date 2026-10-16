@@ -275,7 +275,7 @@ while trusting things it does not:
 2. **`pnpm run test:money-gate`** — sales records intent; orders computes the number.
 3. **`pnpm run build`** — all turbo tasks including the Angular Explorer.
 4. **`pnpm run test:discount-gate`** — percent vs fraction, both directions.
-5. **`pnpm run test:validation-gate`** — pane attribution, and what blocks a save.
+5. **`pnpm run test:validation-gate`** — pane attribution, and no component writing a stage's defaults.
 6. **`python3 scripts/assert-no-comment-drift.py`** — a documented column that is not returned.
 7. **`npm run test:spec-gate`** — Playwright specs typecheck (it does NOT run them).
 8. **Unit tests**, guarded on any existing.

@@ -30,7 +30,7 @@ import { MJSDealClosePanel, MJSDealPipelinePanel } from '../lib/form-panels/deal
  * finance task that could not be routed, an order status orders would not take. A handler that only
  * populated the list on `!Success` would look right, pass a failure-path test, and drop every warning
  * on the closes that actually happen. Both panels had exactly that bug once -- `ApplyCloseIssues` ran
- * only on the failure branch -- which is recorded in `deal-workspace.component.ts`.
+ * only on the failure branch -- first recorded in the deal workspace, since deleted (#291).
  *
  * So every check here drives a SUCCESSFUL operation carrying a warning, and the failure path is
  * covered alongside it rather than instead of it.
