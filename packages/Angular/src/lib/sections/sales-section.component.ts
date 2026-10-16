@@ -99,9 +99,11 @@ import {
     TileSummary,
     OwnerCoverage,
     StageFunnel,
+    FunnelPipelines,
     BusinessToday,
     WeightedOpen,
     type CloseBucket,
+    type FunnelPipeline,
     type FunnelStage,
     type InspectKey,
     type OwnerBar,
@@ -871,8 +873,32 @@ export class MJSSalesSectionComponent implements OnInit {
         return `${Math.max(2, Math.round((part / t) * 100))}%`;
     }
 
+    /**
+     * The pipeline the Stage mix card shows. Null until a reader picks one, which means the first of
+     * {@link FunnelPipelineOptions}: the default pipeline when it has open deals.
+     */
+    public FunnelPipelineID: string | null = null;
+
+    /** The pipelines with open deals. The card shows tabs only when there is more than one. */
+    public get FunnelPipelineOptions(): FunnelPipeline[] {
+        return FunnelPipelines(this.forecastDeals, this.Pipelines);
+    }
+
+    /** The picked pipeline while it still has open deals, otherwise the first one that does. */
+    public get ActiveFunnelPipelineID(): string | null {
+        const options = this.FunnelPipelineOptions;
+        const picked = options.find((p) => p.ID.toLowerCase() === (this.FunnelPipelineID ?? '').toLowerCase());
+        return (picked ?? options[0])?.ID ?? null;
+    }
+
+    public SelectFunnelPipeline(id: string): void {
+        this.FunnelPipelineID = id;
+        this.cdr.detectChanges();
+    }
+
     public get Funnel(): FunnelStage[] {
-        return StageFunnel(this.forecastDeals);
+        const pipelineID = this.ActiveFunnelPipelineID;
+        return pipelineID ? StageFunnel(this.forecastDeals, pipelineID) : [];
     }
 
     public FunnelHeight(count: number): string {
