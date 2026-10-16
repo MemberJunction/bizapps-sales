@@ -1,17 +1,14 @@
 /**
- * @fileoverview All data access for the deal workspace, so the component itself does none.
+ * @fileoverview Data access for the Sales section, the board and the deal line editor: the lookup
+ * lists, the roster, a deal load and save, the product catalogue, the fiscal year start and the
+ * dashboard figures.
  *
- * The workspace component stays presentational: it takes lookups and a `DealEntity`, and asks this
- * service to save it. That split is copied from bizapps-contracts, and the payoff is that the surface can
- * be rendered and reasoned about without a provider behind it.
+ * Named for the deal workspace, the surface it was written for. That component is deleted (#291); the
+ * section, the board and the line editor kept the reads and the save they share with it.
  *
- * WHAT CHANGED WITH RELATED RECORD COLLECTIONS. This service used to build a `DealDraft` — a UI-side
- * model with its own line and instalment arrays — and send it through the `Sales.SaveDeal` remote
- * operation, because the entity a browser held had no child collections to save. It does now, so the
- * service hands out the real entity and its children, and saving is `deal.Save()`. The two places that
- * needed care are both here rather than in the component: LOADING the collections exactly once
- * ({@link DealWorkspaceService.LoadDeal}) and forcing a full write-out on save
- * ({@link DealWorkspaceService.Save}).
+ * A deal's related-record collections save with it: saving is `deal.Save()`. The two places that need
+ * care are both here: LOADING the collections exactly once ({@link DealWorkspaceService.LoadDeal}) and
+ * forcing a full write-out on save ({@link DealWorkspaceService.Save}).
  *
  * @module @mj-biz-apps/sales-ng
  */
@@ -201,7 +198,7 @@ export interface ContactRow {
 }
 
 /**
- * A contact's label in the workspace's contact lists: "Name (email)", the same text the deal form's
+ * A contact's label in the `Contacts` lookup list: "Name (email)", the same text the deal form's
  * contact picker shows (#254). A native select can only jump to an option by its first letters, so
  * the email cannot be searched here, but it tells two people with the same name apart.
  *
@@ -332,101 +329,29 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
     ),
 };
 
-/** Every lookup list: what the deal workspace loads. */
+/** Every lookup list: what `LoadLookups` reads when no keys are passed. */
 export const ALL_LOOKUP_KEYS = Object.keys(LOOKUP_READS) as LookupKey[];
 
 /**
  * The lists the Sales section reads: the board's columns and the status pill. Accounts, contacts,
- * employees and loss reasons are the deal workspace's pickers, and accounts and contacts grow with the
+ * employees and loss reasons were the deal workspace's pickers, and accounts and contacts grow with the
  * customer base, so the section does not load them.
  */
 export const SECTION_LOOKUP_KEYS: readonly LookupKey[] = ['Pipelines', 'Stages', 'DealStatusTypes'];
 /**
- * The collections the workspace edits, named once.
+ * The collections a deal load reads, named once.
  *
  * Passed to `LoadRelatedRecords` so the load is EXPLICIT about what it wants rather than taking
  * "everything declared". A collection added to the entity later should not start being fetched by a
  * surface that does not render it.
  */
 // 'Lines' is NOT here: the deal holds none. Its order's lines arrive with the embedded order.
-const WORKSPACE_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
+const DEAL_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
 
 @Injectable({ providedIn: 'root' })
 export class DealWorkspaceService {
     /**
-     * Loads every picker's contents in ONE round trip.
-     *
-     * `RunViews` (plural) rather than nine awaited `RunView` calls — the house rule against querying in
-     * a loop applies just as much to a fixed list of nine as to an unbounded one.
-     */
-    /**
-     * The human-facing NUMBER of a record a close routed to.
-     *
-     * `SalesCloseRoutingResult.RecordID` is an ID; a user needs the number orders or contracts minted.
-     * Soft-resolved by target so the workspace degrades to showing nothing rather than erroring when the
-     * downstream app is not installed — the routing result already explains that case in its own words.
-     *
-     * This is a READ of the downstream record's own value. Nothing is computed here; see the money rule.
-     */
-    public async LookupRoutedRecordNumber(target: string, recordID: string): Promise<string | null> {
-        const map: Record<string, { Entity: string; Field: string }> = {
-            Order: { Entity: 'MJ_BizApps_Orders: Order Headers', Field: 'OrderNumber' },
-            Contract: { Entity: 'MJ_BizApps_Contracts: Contracts', Field: 'ContractNumber' },
-        };
-        const spec = map[target];
-        if (!spec) {
-            return null;
-        }
-        try {
-            const r = await new RunView().RunView<Record<string, unknown>>({
-                EntityName: spec.Entity,
-                ExtraFilter: `ID = '${recordID.replace(/'/g, "''")}'`,
-                ResultType: 'simple',
-                Fields: ['ID', spec.Field],
-            });
-            const row = r?.Success ? (r.Results ?? [])[0] : undefined;
-            const value = row?.[spec.Field];
-            return typeof value === 'string' && value.length ? value : null;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Whether a record with this id is in the database: `true`, `false`, or `null` when no read
-     * succeeded.
-     *
-     * Retried because a record just created can be missing from the first read after its save. The
-     * last attempt is trusted: `false` means the id was never written, not that the read was early.
-     * A malformed id is `false` without a read, so it never reaches the filter.
-     */
-    public async RecordExists(entityName: string, id: string, attempts = 3, delayMs = 400): Promise<boolean | null> {
-        if (!/^[0-9a-fA-F-]{36}$/.test(id)) {
-            return false;
-        }
-        let answered = false;
-        for (let attempt = 1; attempt <= attempts; attempt++) {
-            const r = await new RunView().RunView<{ ID: string }>({
-                EntityName: entityName,
-                ExtraFilter: `ID = '${id}'`,
-                ResultType: 'simple',
-                Fields: ['ID'],
-            });
-            if (r?.Success) {
-                if ((r.Results ?? []).length > 0) {
-                    return true;
-                }
-                answered = true;
-            }
-            if (attempt < attempts) {
-                await new Promise((resolve) => setTimeout(resolve, delayMs));
-            }
-        }
-        return answered ? false : null;
-    }
-
-    /**
-     * The named lookup lists, in one `RunViews` batch. Defaults to every list (the deal workspace);
+     * The named lookup lists, in one `RunViews` batch. Defaults to every list;
      * the Sales section passes {@link SECTION_LOOKUP_KEYS}. Lists not asked for stay empty.
      */
     public async LoadLookups(keys: readonly LookupKey[] = ALL_LOOKUP_KEYS): Promise<DealWorkspaceLookups> {
@@ -629,16 +554,8 @@ export class DealWorkspaceService {
         return result?.Success ? (result.Results ?? []) : [];
     }
 
-    /** A blank deal, ready to bind to. Its collections start empty and are never loaded — there is nothing to load. */
-    public async NewDeal(): Promise<DealEntity> {
-        const md = new Metadata();
-        const deal = await md.GetEntityObject<DealEntity>(E_DEAL);
-        deal.NewRecord();
-        return deal;
-    }
-
     /**
-     * Reads an existing deal and everything the workspace shows — header, schedule, roster, and the
+     * Reads an existing deal and its collections — header, schedule, roster, and the
      * lines, which belong to the deal's embedded order rather than to the deal.
      *
      * THIS IS THE ONLY PLACE THE COLLECTIONS ARE LOADED, and that is a data-loss guard rather than a
@@ -659,7 +576,7 @@ export class DealWorkspaceService {
             return null;
         }
 
-        await deal.LoadRelatedRecords(...WORKSPACE_COLLECTIONS);
+        await deal.LoadRelatedRecords(...DEAL_COLLECTIONS);
 
         // A collection only reports IsLoaded once its rows actually arrived, so this catches the silent
         // failure above. An empty deal and an unreadable one must never look the same.
@@ -670,7 +587,7 @@ export class DealWorkspaceService {
         /**
          * THE LINES LIVE ON THE ORDER, so they need a load of their own.
          *
-         * `WORKSPACE_COLLECTIONS` covers the deal's OWN collections; the embedded order is a separate
+         * `DEAL_COLLECTIONS` covers the deal's OWN collections; the embedded order is a separate
          * entity instance and its `Lines` is declared `Load: 'explicit'` just like the deal's are. Nothing
          * populates it lazily, so without this a saved deal with lines opens showing NONE -- and reads as
          * a deal nobody has quoted yet.
@@ -726,10 +643,10 @@ export class DealWorkspaceService {
      * nothing beneath it, which is exactly what the retired `Sales.SaveDeal` operation existed to
      * guarantee.
      *
-     * `IgnoreDirtyState` is deliberate and load-bearing: without it, a child that is loaded and unchanged
-     * contributes no work, which is normally right — but this surface re-sequences `DisplayOrder` from
-     * array position on every add and remove, so a row that merely MOVED is clean by field-comparison and
-     * would keep its old position in the database.
+     * `IgnoreDirtyState` was set for the deal workspace (deleted, #291), which re-sequenced
+     * `DisplayOrder` from array position on every add and remove, so a row that merely MOVED was clean
+     * by field-comparison and would have kept its old position. The board, the remaining caller, changes
+     * only the stage, so for it the flag rewrites unchanged children. Kept until that is measured.
      *
      * A record the server refuses for being invalid is an ORDINARY outcome, reported through `Validation`
      * rather than `ErrorMessage`. Only a transport or database failure produces the latter.
@@ -762,8 +679,8 @@ export class DealWorkspaceService {
                 };
             }
 
-            // The SAME instance now carries the server's IDs, so the surface keeps editing the record it
-            // just created rather than a rebuilt copy — the job `ApplySaveResult` used to do by hand.
+            // The SAME instance now carries the server's IDs, so a caller keeps the record it just
+            // saved rather than a rebuilt copy.
             return {
                 Success: true,
                 DealID: deal.ID,

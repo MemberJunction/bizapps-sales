@@ -47,6 +47,7 @@
 export * from './DealEntityServer.js';
 export * from './DealTeamMemberEntityServer.js';
 export * from './PipelineStageEntityServer.js';
+export * from './DealStageEventEntityServer.js';
 export * from './CloseDealOperation.js';
 
 /**
@@ -134,6 +135,7 @@ import { LoadActivitySyncEngine } from '@mj-biz-apps/common-activity-sync';
 import { DealEntityServer } from './DealEntityServer.js';
 import { DealTeamMemberEntityServer } from './DealTeamMemberEntityServer.js';
 import { PipelineStageEntityServer } from './PipelineStageEntityServer.js';
+import { DealStageEventEntityServer } from './DealStageEventEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 
@@ -149,7 +151,7 @@ import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 export function LoadSalesCoreEntitiesServer(): void {
     LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, PipelineStageEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
+    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, PipelineStageEntityServer, DealStageEventEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }

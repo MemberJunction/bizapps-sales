@@ -36,7 +36,12 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
-import { CanTransition, IsEditable } from '@mj-biz-apps/orders-entities';
+import {
+    CanTransition,
+    HostOrderLineEditVeto,
+    IsEditable,
+    type mjBizAppsOrdersOrderLineEntity,
+} from '@mj-biz-apps/orders-entities';
 import {
     DealFieldsEditableWhileLocked,
     StubDownstreamSeam,
@@ -52,6 +57,7 @@ import {
     type mjBizAppsSalesPipelineStageEntity,
 } from '@mj-biz-apps/sales-entities';
 import {
+    DealLockRefusal,
     DEFAULT_DUE_IN_DAYS,
     OrdersIsInstalled,
     ResetDownstreamSeam,
@@ -70,6 +76,7 @@ import {
     TxOne,
     type SalesFixture,
 } from '../fixture.js';
+import { SeedDealOnPipeline } from './close-won-order.fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -723,9 +730,8 @@ export const CloseDealChecks: NamedCheck[] = [
                 /**
                  * THE GAP THIS CLOSES IS PROGRAMMATIC, NOT VISUAL.
                  *
-                 * `Routing[].Reason` already carried the refusal, and the workspace already renders it —
-                 * `deal-workspace.component.html` shows `not created: {{ r.Reason }}` on a failed row, so a
-                 * rep sees it. What did not carry it was `Issues`, the field every OTHER failure mode in
+                 * `Routing[].Reason` already carried the refusal, and the deal workspace (since deleted,
+                 * #291) rendered it as `not created: {{ r.Reason }}` on a failed row, so a rep saw it. What did not carry it was `Issues`, the field every OTHER failure mode in
                  * this operation reports through. An API client, an agent or an importer that checks
                  * `Success` and reads `Issues` saw `Success: true` and an empty array on a close whose
                  * contract had been declined.
@@ -1110,10 +1116,9 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
 
                 /**
-                 * NOT COVERED HERE: that `Lines` is still refused. The fixture deal is provisioned with a
-                 * Draft order carrying no lines, so there is nothing to remove, and adding one needs the
-                 * product fixture this bundle does not build. The order-line guard is #206 item 1 and
-                 * lands with its own check — flagged rather than left to look covered.
+                 * NOT COVERED HERE: that the order's lines are still refused. This deal's order carries
+                 * no lines, so there is nothing to change or remove. CD40 seeds a deal WITH a line and
+                 * proves the order-line lock on its own (#328).
                  */
             }),
     },
@@ -2133,9 +2138,9 @@ export const CloseDealChecks: NamedCheck[] = [
                  *
                  * `SetOwner()` is a DIFFERENT path and it is refused here, measured: it assigns
                  * `this.OwnerEmployeeID` on the client before saving, so `checkCloseLock` sees a dirty
-                 * frozen field and returns false. The deal workspace's owner picker calls it
-                 * (`deal-workspace.component.ts`), so reassigning an owner there does not work on a
-                 * closed deal even though item 2 says it should. Deliberately NOT asserted here: a check
+                 * frozen field and returns false. The deal workspace's owner picker called it (the
+                 * workspace is deleted, #291), so reassigning an owner there did not work on a closed
+                 * deal even though item 2 says it should. Deliberately NOT asserted here: a check
                  * that pinned the refusal would enshrine the defect. Raised separately instead.
                  */
                 const f = await ResolveSalesFixture(ctx);
@@ -3192,7 +3197,100 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-deal.CD40',
+        Name: 'CD40: a closed deal\'s order lines refuse an edit and a delete, in Sales\' words',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * #328, and the half CD13 leaves open. The deal lock refuses a HEADER edit (CD5), but the
+                 * order's lines are what the contract and the order were derived from, and Orders saves
+                 * them without asking Sales. `DealLockOrderLineVeto` is Sales' answer to Orders' seam;
+                 * this proves the answer reaches a real line save and a real delete, through
+                 * `OrderLineEntityServer`, with nothing mocked.
+                 *
+                 * THE MESSAGE IS ASSERTED, NOT ONLY THE REFUSAL. Orders has refusals of its own, and a
+                 * line on a confirmed order could be refused for an Orders reason with the veto never
+                 * consulted. Sales' sentence in the result is what shows the veto answered.
+                 *
+                 * ORDER LINES ONLY. The order header is not frozen by the deal lock, by decision, so
+                 * nothing here asserts on a header edit.
+                 */
+                Assert(
+                    !!HostOrderLineEditVeto(),
+                    'setup: no order-line veto is registered in this process, so Orders refuses nothing on a ' +
+                        'closed deal. LoadBizAppsSalesServer() registers it; the harness must call it first.',
+                );
+                const f = await ResolveSalesFixture(ctx);
+                const seeded = await SeedDealOnPipeline(ctx, f, {
+                    PipelineID: f.OrderOnlyPolicyPipelineID,
+                    StageID: f.OrderOnlyPolicyStageID,
+                    CompanyID: f.OrderOnlyPolicyCompanyID,
+                    LineCount: 1,
+                });
+
+                const out = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+                Assert(out.Success, `the won close failed: ${JSON.stringify(out.Issues)}`);
+                Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
+
+                const lineRow = await TxOne<{ ID: string; ServicePeriodEnd: Date | string | null }>(
+                    ctx,
+                    `SELECT TOP 1 ID, ServicePeriodEnd FROM ${ORDERS_SCHEMA}.OrderLine
+                      WHERE OrderHeaderID = '${seeded.OrderID}'`,
+                );
+                const lineID = String(lineRow.ID);
+                const endBefore = lineRow.ServicePeriodEnd ? new Date(lineRow.ServicePeriodEnd).toISOString() : null;
+
+                // ── AN EDIT: the line's ServicePeriodEnd, through the line's own save ──────────────
+                const line = await ProviderOf(ctx).GetEntityObject<mjBizAppsOrdersOrderLineEntity>(
+                    E_ORDER_LINE, ctx.User,
+                );
+                Assert(await line.Load(lineID), `the closed deal's order line ${lineID} loads`);
+                const newEnd = endBefore === LOCKED_LINE_END.toISOString() ? LOCKED_LINE_END_ALT : LOCKED_LINE_END;
+                line.ServicePeriodEnd = newEnd;
+                Assert(line.Dirty, 'setup: the edit did not change the line, so a refusal would prove nothing');
+                AssertEqual(await line.Save(), false, 'changing a line on a closed deal must be refused');
+                const editMessage = line.LatestResult?.CompleteMessage ?? '';
+                Assert(
+                    editMessage.includes(DealLockRefusal('update')),
+                    `the edit was refused, but not with Sales' lock message, so the veto may never have been ` +
+                        `asked. The refusal reads: '${editMessage}'`,
+                );
+                const afterEdit = await TxOne<{ ServicePeriodEnd: Date | string | null }>(
+                    ctx, `SELECT ServicePeriodEnd FROM ${ORDERS_SCHEMA}.OrderLine WHERE ID = '${lineID}'`,
+                );
+                AssertEqual(
+                    afterEdit.ServicePeriodEnd ? new Date(afterEdit.ServicePeriodEnd).toISOString() : null,
+                    endBefore,
+                    'and the refused edit left the stored service period end as it was',
+                );
+
+                // ── A DELETE: validation does not run on this path, so it is checked on its own ────
+                const doomed = await ProviderOf(ctx).GetEntityObject<mjBizAppsOrdersOrderLineEntity>(
+                    E_ORDER_LINE, ctx.User,
+                );
+                Assert(await doomed.Load(lineID), `the closed deal's order line ${lineID} loads again`);
+                AssertEqual(await doomed.Delete(), false, 'deleting a line on a closed deal must be refused');
+                const deleteMessage = doomed.LatestResult?.CompleteMessage ?? doomed.LatestResult?.Message ?? '';
+                Assert(
+                    deleteMessage.includes(DealLockRefusal('delete')),
+                    `the delete was refused, but not with Sales' lock message. The refusal reads: '${deleteMessage}'`,
+                );
+                const still = await TxOne<{ N: number }>(
+                    ctx, `SELECT COUNT(*) AS N FROM ${ORDERS_SCHEMA}.OrderLine WHERE ID = '${lineID}'`,
+                );
+                AssertEqual(Number(still.N), 1, 'and the refused delete left the line in place');
+            }),
+    },
 ];
+
+/** Orders' line entity, named here for the same reason as `ORDERS_SCHEMA`. */
+const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
+
+/** A service period end CD40 tries to write on a locked line; the second is used if the line already has the first. */
+const LOCKED_LINE_END = new Date('2030-12-31T00:00:00Z');
+const LOCKED_LINE_END_ALT = new Date('2031-12-31T00:00:00Z');
 
 for (const check of CloseDealChecks) {
     IntegrationCheckRegistry.Instance.Register(check);

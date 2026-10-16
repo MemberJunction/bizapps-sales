@@ -5,21 +5,18 @@
  * generated form components and the hand-authored surfaces so `@RegisterClass` decorators fire and
  * everything is available to MJ's class factory.
  *
- * WHAT IS HERE, AND WHAT IS STILL GENERATED-ONLY.
+ * WHAT IS MOUNTED.
  *
- * S1 shipped the generated CRUD surface and nothing else: MJ Explorer renders a working
- * create/read/update/delete form for every Sales entity straight from metadata, with no hand-written
- * UI. That still exists and still works — it is how the entity browser is reached.
+ * - The **Deals section** (`SalesDealsSectionResource`, reached from the Sales application's nav by its
+ *   `DriverClass`): the dashboard, the deal roster and the board. A deal click calls Explorer's
+ *   `NavigationService.OpenEntityRecord`, so Explorer owns the record tab.
+ * - The **custom Deal form** that tab renders: the generated form with the close lock
+ *   (`DealFormComponentExtended`) and the hand-authored panels contributed onto it (hero, overview,
+ *   pipeline, parties, commercial terms, lines, motion, close, team, activity, history, schedule).
+ * - The **board** (`DealBoardComponent`), imported by the section as a standalone component.
  *
- * Phase 1 adds the first HAND-AUTHORED surface: the **deal workspace**, one tabbed screen for viewing,
- * editing and creating a deal together with its lines and its payment schedule. It is reached from the
- * Sales application's nav via `DriverClass: 'DealWorkspaceResource'`. It is deliberately BASIC —
- * standard chrome, semantic tokens, no polish — because the point of Phase 1 is that an account
- * director can complete a deal through it, not that it looks finished.
- *
- * Still to come from master plan §8: the kanban pipeline board, the live-reprice line editor once
- * `Orders.PreviewOrder` is wired in, the deal-team panel, the activity timeline, and the
- * account/contact 360. Those land at S3.
+ * Deal Stage Event also has a custom form class (`DealStageEventFormComponentExtended`, for its
+ * server-owned fields). Every other Sales entity renders MJ's generated form, straight from metadata.
  */
 
 // Import entity package to trigger @RegisterClass decorators for entity subclasses
@@ -84,14 +81,12 @@ export { GeneratedFormsModule } from './lib/generated/generated-forms.module';
 export { MJSSalesSectionComponent, SalesDealsSectionResource, LoadSalesSection } from './lib/sections/sales-section.component';
 export * from './lib/nav/sales-nav.model';
 
-// The deal workspace and the pieces a host might legitimately reuse. The workspace is a standalone
-// component the section mounts; it has no resource shim of its own any more — the section owns the tab.
+// The custom Deal form and the pieces a host might legitimately reuse. Explorer's record tab renders the
+// form; the section owns the nav tab.
 export { SalesCustomFormsModule } from './lib/custom/custom-forms.module';
 export { DealFormComponentExtended } from './lib/custom/deal-form.component';
 export { DealStageEventFormComponentExtended } from './lib/custom/deal-stage-event-form.component';
 export { DirtyServerOwnedFields, RefuseServerOwnedEdits } from './lib/custom/server-owned-fields';
-
-export { DealWorkspaceComponent } from './lib/workspace/deal-workspace.component';
 
 // The board. Exported for reuse and no more: it needs no resource shim and no anchor, because the section
 // imports it directly as a standalone component rather than resolving it through the ClassFactory.
@@ -149,7 +144,7 @@ export * from './lib/workspace/deal-workspace.dates';
  */
 export function LoadBizAppsSalesClient(): void {
     // The shared Deal / DealLine / DealPaymentSchedule subclasses. Without this the class factory hands
-    // the workspace a GENERATED entity, which still saves correctly — the child collections are on the
+    // the Deal form a GENERATED entity, which still saves correctly — the child collections are on the
     // generated class — but validates against nothing except the database's own constraints. The user
     // would then get a server rejection where the form should have marked the field.
     LoadSalesDealEntities();

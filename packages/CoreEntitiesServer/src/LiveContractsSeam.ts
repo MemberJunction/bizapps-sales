@@ -39,6 +39,7 @@
  */
 import {
     BaseEntity,
+    CompositeKey,
     LogError,
     LogStatus,
     Metadata,
@@ -52,6 +53,8 @@ import type {
     ContractsLinkOrderSeamInput,
     ContractsRenewTermSeamInput,
     ContractsSeamResult,
+    ContractsUpdateFromDealSeamInput,
+    ContractsUpdateSeamResult,
 } from '@mj-biz-apps/sales-entities';
 
 /** Contracts' entity names — these strings are the whole dependency. Sales imports no contracts code. */
@@ -189,37 +192,8 @@ export class LiveContractsSeam {
             contract.Set('CompanyID', input.CompanyID);
             contract.Set('CustomerOrganizationID', input.AccountID);
 
-            /**
-             * The contact is not a second customer; it is the person to talk to about this one.
-             * Nullable, and null is an ordinary answer for a deal that named nobody.
-             */
-            contract.Set('PrimaryContactPersonID', input.PrimaryContactID ?? null);
-
-            /** The AD's red-lines travel with the agreement — a human reviewer would otherwise go in blind. */
-            contract.Set('Description', input.ContractVariances ?? null);
-
-            /**
-             * THE REP'S ANSWER, carried through — S-US1 asks the question, S-US2 copies it here.
-             *
-             * It used to be hardcoded `false`, and the reasoning was sound as far as it went: sales
-             * creates no `ContractTemplateModification` rows, because it has no template to record a
-             * modification against, and `ContractEntityServer.ValidateAsync()` only refuses a false
-             * flag when such rows exist — which for a contract created this second they cannot.
-             *
-             * What that argument missed is that the flag is not a count of rows. It is the INSTRUCTION
-             * to go and create them: a true flag sends finance to the paper to capture each deviation,
-             * a false one sends them to confirm nothing was negotiated. Hardcoding false made every
-             * contract claim the standard agreement was untouched, including the negotiated ones, so
-             * the only signal distinguishing them was lost at the boundary.
-             *
-             * Absent (an older caller, or the stub) still means false — the column is NOT NULL in
-             * contracts and S-US1 defaults the deal's flag to no, so false is the honest default at
-             * both ends rather than a shrug.
-             */
-            contract.Set('HasModifications', input.StandardAgreementModified === true);
-
             this.setProvenance(contract, input.DealID);
-            const stated = this.setNegotiatedTerms(contract, input);
+            const stated = this.applyDealTerms(contract, input);
             await this.seedTypeDefaults(contract, stated);
 
             const template = this.templateID(input);
@@ -251,6 +225,123 @@ export class LiveContractsSeam {
             LogError(`LiveContractsSeam.CreateContractFromDeal failed for deal ${input.DealID}: ${err}`);
             return { Success: false, Message: `Could not create the contract: ${String(err)}` };
         }
+    }
+
+    /**
+     * Reuse the contract a re-closed deal already names, instead of creating a second one (#278).
+     *
+     * A deal that was closed Won, reopened and closed Won again used to get a fresh contract each time,
+     * and the first was left with nothing pointing at it. The deal's `ContractID` is now the answer to
+     * "which agreement is this deal's", and this keeps that agreement in step with the deal:
+     *
+     *   · UNSIGNED (`ExecutedDate` null): the deal-sourced fields are rewritten through
+     *     `applyDealTerms`, the same mapping a create uses. Type, company, customer and provenance are
+     *     left alone; they identify the agreement.
+     *   · SIGNED: nothing is written. Paper someone has signed is not sales' to edit, so the result
+     *     carries a warning that the deal and the signed contract may now differ.
+     *   · UNREADABLE or gone: `Unreadable`, so the close refuses rather than guessing.
+     *
+     * Type defaults are not re-seeded: contracts seeds unsaved records only, so a renewal field the deal
+     * no longer states keeps the value the contract already holds.
+     */
+    public async UpdateContractFromDeal(input: ContractsUpdateFromDealSeamInput): Promise<ContractsUpdateSeamResult> {
+        if (!ContractsIsInstalled()) {
+            return { Success: false, Message: 'bizapps-contracts is not installed in this deployment.' };
+        }
+        const contract = await this.loadContract(input.ContractID);
+        if (!contract) {
+            return {
+                Success: false,
+                Unreadable: true,
+                ContractID: input.ContractID,
+                Message:
+                    `This deal already names contract ${input.ContractID}, which could not be read or no longer ` +
+                    'exists, so whether to reuse it cannot be told. Correct or clear the deal\'s contract, then ' +
+                    'close the deal again.',
+            };
+        }
+
+        const number = String(contract.Get('ContractNumber') ?? '') || input.ContractID;
+        const executed = contract.Get('ExecutedDate');
+        if (executed != null) {
+            return {
+                Success: true,
+                Signed: true,
+                ContractID: input.ContractID,
+                ContractNumber: number,
+                Message:
+                    `Contract ${number} is signed, so the close reused it unchanged. The deal's terms may now ` +
+                    'differ from the signed contract; compare them and amend the contract in contracts if needed.',
+            };
+        }
+
+        try {
+            this.applyDealTerms(contract, input);
+            if (!(await contract.Save())) {
+                return {
+                    Success: false,
+                    ContractID: input.ContractID,
+                    Message: `Could not refresh contract ${number}: ${contract.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+                };
+            }
+            return { Success: true, ContractID: input.ContractID, ContractNumber: number, Status: null };
+        } catch (err) {
+            LogError(`LiveContractsSeam.UpdateContractFromDeal failed for deal ${input.DealID}: ${err}`);
+            return { Success: false, ContractID: input.ContractID, Message: `Could not refresh contract ${number}: ${String(err)}` };
+        }
+    }
+
+    /** The contract by ID, or null when it cannot be read or does not exist. */
+    private async loadContract(contractID: string): Promise<BaseEntity | null> {
+        try {
+            const contract = await this.provider.GetEntityObject<BaseEntity>(E_CONTRACT, this.user);
+            const key = new CompositeKey();
+            key.KeyValuePairs.push({ FieldName: 'ID', Value: contractID });
+            return (await contract.InnerLoad(key)) ? contract : null;
+        } catch (err) {
+            LogError(`LiveContractsSeam could not load contract ${contractID}: ${err}`);
+            return null;
+        }
+    }
+
+    /**
+     * Every field the DEAL supplies to its contract, in one place, so a create and a refresh after a
+     * re-close (#278) cannot drift apart. The contract's identity (type, company, customer, provenance,
+     * template) is set by the create alone: a refresh rewrites the deal's terms, not which agreement
+     * this is.
+     *
+     * @returns the renewal fields this deal stated, which seeding must not overwrite.
+     */
+    private applyDealTerms(contract: BaseEntity, input: ContractsCreateFromDealSeamInput): string[] {
+        /**
+         * The contact is not a second customer; it is the person to talk to about this one.
+         * Nullable, and null is an ordinary answer for a deal that named nobody.
+         */
+        contract.Set('PrimaryContactPersonID', input.PrimaryContactID ?? null);
+
+        /** The AD's red-lines travel with the agreement — a human reviewer would otherwise go in blind. */
+        contract.Set('Description', input.ContractVariances ?? null);
+
+        /**
+         * THE REP'S ANSWER, carried through — S-US1 asks the question, S-US2 copies it here.
+         *
+         * It used to be hardcoded `false`, and the reasoning was sound as far as it went: sales
+         * creates no `ContractTemplateModification` rows, because it has no template to record a
+         * modification against, and `ContractEntityServer.ValidateAsync()` only refuses a false
+         * flag when such rows exist — which for a contract created this second they cannot.
+         *
+         * What that argument missed is that the flag is not a count of rows. It is the INSTRUCTION
+         * to go and create them: a true flag sends finance to the paper to capture each deviation,
+         * a false one sends them to confirm nothing was negotiated. Hardcoding false made every
+         * contract claim the standard agreement was untouched, including the negotiated ones, so
+         * the only signal distinguishing them was lost at the boundary.
+         *
+         * Absent (an older caller, or the stub) still means false — the column is NOT NULL in
+         * contracts and S-US1 defaults the deal's flag to no, so false is the honest default at
+         * both ends rather than a shrug.
+         */
+        contract.Set('HasModifications', input.StandardAgreementModified === true);
+        return this.setNegotiatedTerms(contract, input);
     }
 
     /**

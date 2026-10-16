@@ -51,11 +51,17 @@ import {
 } from '@memberjunction/core';
 import { createHash } from 'node:crypto';
 
-import { RegisterClass } from '@memberjunction/global';
+import { RegisterClass, UUIDsEqual } from '@memberjunction/global';
 // ORDERS' OWN RULE, imported rather than restated. `CanTransition` is the same function
 // `OrderEntityServer.passesStatusTransition()` consults, so a refusal here and a refusal there cannot
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
-import { CanTransition, IsBooked, IsEditable, type OrderStatus } from '@mj-biz-apps/orders-entities';
+import {
+    CanTransition,
+    IsBooked,
+    IsEditable,
+    type mjBizAppsOrdersOrderHeaderEntity,
+    type OrderStatus,
+} from '@mj-biz-apps/orders-entities';
 import {
     DealCloseStampFields,
     DealFieldsEditableWhileLocked,
@@ -216,6 +222,51 @@ interface StageDefaultsPlan {
 interface StageOrderPlan {
     StageID: string;
     Target: OrderStatus;
+}
+
+/**
+ * What this save's party edits ask of an existing order's bill-to (#319) — resolved before the
+ * transaction from the deal's persisted values, applied inside it.
+ *
+ * `Previous` is what the deal billed before this save: the order is only moved when it still bills
+ * that, so a bill-to finance set by hand is left alone. A side whose value did not change is `null`
+ * and is never written.
+ */
+interface OrderBillToPlan {
+    Person: { Previous: string | null; Next: string | null } | null;
+    Organization: { Previous: string | null; Next: string | null } | null;
+}
+
+/**
+ * Orders' `KeepPartyOrganization`, which only newer orders-entities builds carry. Those builds clear an
+ * unchanged bill-to organization when the person is replaced and it is the previous person's employer;
+ * older ones never clear it, so the call is made when the method exists and skipped when it does not.
+ */
+type PartyOrganizationKeeper = {
+    KeepPartyOrganization?: (field: 'BillToOrganizationID' | 'ShipToOrganizationID') => void;
+};
+
+/**
+ * Keeps the order's bill-to organization through a replacement of its person. Without it, newer orders
+ * builds clear an organization that is the previous person's employer — usually the deal's account —
+ * and stamp the new person's employer in its place.
+ */
+function keepBillToOrganization(order: mjBizAppsOrdersOrderHeaderEntity): void {
+    const keeper = order as mjBizAppsOrdersOrderHeaderEntity & PartyOrganizationKeeper;
+    if (typeof keeper.KeepPartyOrganization === 'function') {
+        keeper.KeepPartyOrganization('BillToOrganizationID');
+    }
+}
+
+/** Names the parties a bill-to warning is about, in the deal's own terms. */
+function describeBillToSides(
+    person: OrderBillToPlan['Person'],
+    organization: OrderBillToPlan['Organization'],
+): string {
+    if (person && organization) {
+        return 'bill-to contact and account';
+    }
+    return person ? 'bill-to contact' : 'account';
 }
 
 /**
@@ -561,6 +612,15 @@ export class DealEntityServer extends DealEntity {
         const stageOrder = this._lockedAtSave ? null : await this.planStageOrderStatus();
 
         /**
+         * AND WHAT A CHANGED CONTACT OR ACCOUNT ASKS OF THE ORDER'S BILL-TO (#319).
+         *
+         * Provisioning stamps the bill-to once, so without this a deal whose billing contact changed
+         * after its order existed kept billing the old person. Not on a locked deal: a closed deal's
+         * order is the record of what was sold, and the close lock already refuses these fields there.
+         */
+        const orderBillTo = this._lockedAtSave ? null : this.planOrderBillTo();
+
+        /**
          * AND WHAT IT OWES THE APPEND-ONLY LOG — snapshotted here, for the same reason.
          *
          * Two features arrived at this hook within a day of each other: the stage-order writer (D-OS1)
@@ -678,11 +738,11 @@ export class DealEntityServer extends DealEntity {
 
         const saved = this.IsSaved || this.DealNumber
             ? await this.saveWithinScope(options, {
-                  stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
+                  stageOrder, orderBillTo, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
                   needsStatusDefault,
               })
             : await this.saveWithinScope(options, {
-                  stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
+                  stageOrder, orderBillTo, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
                   needsStatusDefault,
               });
 
@@ -900,10 +960,10 @@ export class DealEntityServer extends DealEntity {
         /**
          * A DEAL BEING CREATED OWES NO EVENT, and `OldValue === null` is not a reliable way to ask.
          *
-         * `NewDeal()` preselects a pipeline and its first stage; the rep then picks the stage they
-         * actually want. That is TWO assignments before the first save, so the first becomes `OldValue`
-         * and the guard below saw a "transition" from a stage the deal was never in — and wrote it into
-         * an append-only log, where it cannot be corrected afterwards.
+         * The deal workspace's `NewDeal()` preselected a pipeline and its first stage; the rep then
+         * picked the stage they actually wanted. That is TWO assignments before the first save, so the
+         * first becomes `OldValue` and the guard below saw a "transition" from a stage the deal was never
+         * in — and wrote it into an append-only log, where it cannot be corrected afterwards.
          *
          * `IsSaved` is the question that holds however many times the field was touched. `DealStageEvent`
          * is a log of MOVEMENT, and nothing has moved until there is a row to move from.
@@ -981,6 +1041,7 @@ export class DealEntityServer extends DealEntity {
         options: EntitySaveOptions | undefined,
         work: {
             stageOrder: StageOrderPlan | null;
+            orderBillTo: OrderBillToPlan | null;
             stageMove: StageMoveSnapshot | null;
             stageDefaults: StageDefaultsPlan | null;
             amountMayHaveMoved: boolean;
@@ -991,6 +1052,7 @@ export class DealEntityServer extends DealEntity {
         if (
             !work.assignNumber &&
             !work.stageOrder &&
+            !work.orderBillTo &&
             !work.stageMove &&
             !work.stageDefaults &&
             !work.amountMayHaveMoved &&
@@ -1044,6 +1106,14 @@ export class DealEntityServer extends DealEntity {
              * stand down. Comparing against zero would also catch a warning left by an earlier save on
              * the same entity instance.
              */
+            /**
+             * BEFORE the stage's order status: a stage that confirms the order books it, and a booked
+             * order refuses a bill-to change, so the party has to be in place first or the order books
+             * against the person the deal just stopped billing.
+             */
+            if (work.orderBillTo) {
+                await this.applyOrderBillTo(work.orderBillTo);
+            }
             const warningsBeforePlan = this.OrderStatusWarnings.length;
             if (work.stageOrder) {
                 await this.applyStageOrderStatus(work.stageOrder);
@@ -1548,8 +1618,8 @@ export class DealEntityServer extends DealEntity {
      * places did not, and both were wrong in the same direction:
      *
      *   · `planStageEvent` inferred a birth from `OldValue === null`. But a new deal whose stage is set
-     *     TWICE before the first save — `NewDeal()` preselects a pipeline and its first stage, the rep
-     *     then picks a different one — has a non-null `OldValue` holding a stage the deal was NEVER IN.
+     *     TWICE before the first save — the deal workspace's `NewDeal()` preselected a pipeline and its
+     *     first stage, the rep then picked a different one — has a non-null `OldValue` holding a stage the deal was NEVER IN.
      *     It appended a transition event for it, into an append-only log. `BD1` asserts against exactly
      *     that and passes only because it assigns the stage once.
      *   · `ownerStampEditRefusal` asked `Dirty`, so an importer doing `NewRecord()` ->
@@ -1594,7 +1664,7 @@ export class DealEntityServer extends DealEntity {
         /**
          * ── THE STATUS COMES FROM THE STAGE, AND A DEAL WITH NO STATUS IS INVISIBLE ──────────────────
          *
-         * `DealWorkspaceService.NewDeal()` is `NewRecord()` and nothing else, and `DealStatusTypeID` is
+         * The deal workspace's `NewDeal()` was `NewRecord()` and nothing else, and `DealStatusTypeID` is
          * nullable with no column default. So a rep who never touched the Status select saved a deal that
          * every `IsOpen`/`IsWon` rollup skipped — and while the roster and summary queries still INNER
          * JOINed that FK, such a deal was invisible to every surface in the app. It was also what made
@@ -1887,6 +1957,159 @@ export class DealEntityServer extends DealEntity {
                 `but did not complete (${err instanceof Error ? err.message : String(err)}). The stage change was kept.`,
             );
             LogError(`DealEntityServer: the order status update to '${plan.Target}' failed: ${err}`);
+        }
+    }
+
+    /* ── The deal's parties → the order's bill-to (#319) ────────────────────────────────── */
+
+    /**
+     * What this save's contact and account edits ask of the order's bill-to. Reads only; opens nothing.
+     *
+     * The bill-to PERSON is the billing contact, falling back to the primary contact, exactly as
+     * provisioning stamps it — so the previous value is worked out the same way from the persisted
+     * (`OldValue`) columns, and a primary-contact change on a deal with a billing contact moves nothing.
+     * The bill-to ORGANIZATION is the account. Null when neither effective value changed, which is
+     * every save that does not touch these three fields.
+     *
+     * Only an existing deal with an order: a new deal's order is provisioned from the current values.
+     */
+    private planOrderBillTo(): OrderBillToPlan | null {
+        if (!this.IsSaved || !this.OrderID) {
+            return null;
+        }
+        const previous = (field: string): string | null =>
+            (this.GetFieldByName(field)?.OldValue as string | null | undefined) || null;
+        const change = (before: string | null, after: string | null) =>
+            UUIDsEqual(before, after) ? null : { Previous: before, Next: after };
+
+        const person = change(
+            previous('BillingContactID') || previous('PrimaryContactID'),
+            this.BillingContactID || this.PrimaryContactID || null,
+        );
+        const organization = change(previous('AccountID'), this.AccountID || null);
+        return person || organization ? { Person: person, Organization: organization } : null;
+    }
+
+    /**
+     * Moves the order's bill-to with the deal, and NEVER lets that fail the deal's save.
+     *
+     * ── ONLY WHAT STILL BILLS THE DEAL'S PREVIOUS PARTY ──
+     *
+     * Each side is moved only when the order still holds what the deal held before this save. A
+     * different value there was put on the order by someone else — finance correcting who is billed —
+     * and the deal does not get to overwrite it. Person and organization are judged separately, so a
+     * corrected organization survives a contact change and the reverse.
+     *
+     * ── ONLY WHILE ORDERS SAYS THE ORDER IS EDITABLE ──
+     *
+     * `IsEditable` is orders' own predicate (Draft and Quoted today). A booked order refuses a bill-to
+     * change in its trigger, so asking first costs no write and leaves a warning that says why.
+     */
+    private async applyOrderBillTo(plan: OrderBillToPlan): Promise<void> {
+        try {
+            const order = await this.orderForBillTo();
+            if (!order) {
+                return;
+            }
+            const person = plan.Person && UUIDsEqual(order.BillToPersonID, plan.Person.Previous) ? plan.Person : null;
+            const organization =
+                plan.Organization && UUIDsEqual(order.BillToOrganizationID, plan.Organization.Previous)
+                    ? plan.Organization
+                    : null;
+            if (!person && !organization) {
+                return;   // the order's bill-to was set by someone else; it stays theirs
+            }
+            if (!IsEditable(order.Status)) {
+                this._orderStatusWarnings.push(
+                    `The deal's ${describeBillToSides(person, organization)} changed, but its order is ` +
+                    `${order.Status}, so the order still bills the previous one. Change the order's bill-to ` +
+                    'through orders if it should follow.',
+                );
+                return;
+            }
+            await this.writeOrderBillTo(order, person, organization);
+        } catch (err) {
+            this._orderStatusWarnings.push(
+                `The deal was saved, but its order's bill-to could not be updated ` +
+                `(${err instanceof Error ? err.message : String(err)}).`,
+            );
+            LogError(`DealEntityServer: syncing the order bill-to for deal ${this.ID} failed: ${err}`);
+        }
+    }
+
+    /**
+     * The deal's persisted order, or null when there is none to update.
+     *
+     * The in-memory embedded order when it is the persisted one, so a stage status written to that same
+     * object later in this save books it with the new bill-to. A deal that was loaded holds its order
+     * (`LoadEager` runs on load); one hydrated without a load (`LoadFromData`) does not, so the order is
+     * loaded by `OrderID`. An embedded order that is not saved yet was provisioned from the current
+     * values and needs nothing.
+     */
+    private async orderForBillTo(): Promise<mjBizAppsOrdersOrderHeaderEntity | null> {
+        const embedded = this.OrderID_Object;
+        if (embedded && UUIDsEqual(embedded.ID, this.OrderID)) {
+            return embedded.IsSaved ? embedded : null;
+        }
+        if (!this.OrderID) {
+            return null;
+        }
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        const order = await provider.GetEntityObject<mjBizAppsOrdersOrderHeaderEntity>(
+            ORDER_HEADER_ENTITY,
+            this.ContextCurrentUser,
+        );
+        if (await order.Load(this.OrderID)) {
+            return order;
+        }
+        throw new Error(`order ${this.OrderID} could not be read`);
+    }
+
+    /**
+     * Writes the bill-to in its own savepoint, as `applyStageOrderStatus` writes the status: a refusal
+     * rolls back the order write alone and becomes a warning, and the deal's save carries on.
+     *
+     * On a refusal every party field goes back to what it held, not only the two written here: orders'
+     * own save may have filled the ship-to or an employer on the way, and the embedded order is part
+     * of the deal's save graph, which would otherwise write those leftovers a moment later.
+     */
+    private async writeOrderBillTo(
+        order: mjBizAppsOrdersOrderHeaderEntity,
+        person: OrderBillToPlan['Person'],
+        organization: OrderBillToPlan['Organization'],
+    ): Promise<void> {
+        const partyFields = ['BillToPersonID', 'BillToOrganizationID', 'ShipToPersonID', 'ShipToOrganizationID'];
+        const before = partyFields.map((field) => [field, order.Get(field)] as const);
+        const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
+        const scope = await provider.BeginEntityTransaction();
+        try {
+            if (organization) {
+                order.BillToOrganizationID = organization.Next;
+            }
+            if (person) {
+                order.BillToPersonID = person.Next;
+                keepBillToOrganization(order);
+            }
+            if (await order.Save()) {
+                await scope.Commit();
+                return;
+            }
+            throw new Error(order.LatestResult?.CompleteMessage ?? 'the order save was refused with no message');
+        } catch (err) {
+            try {
+                await scope.Rollback();
+            } catch (rollbackErr) {
+                LogError(`DealEntityServer: rolling back the order bill-to update failed: ${rollbackErr}`);
+            }
+            for (const [field, value] of before) {
+                order.Set(field, value);
+            }
+            this._orderStatusWarnings.push(
+                `The deal was saved, but its order still bills the previous ` +
+                `${describeBillToSides(person, organization)}: orders refused the change ` +
+                `(${err instanceof Error ? err.message : String(err)}).`,
+            );
+            LogError(`DealEntityServer: the order bill-to update for order ${order.ID} failed: ${err}`);
         }
     }
 

@@ -8,6 +8,14 @@
 -- DATE DIMENSION: ChangedAt — the transition date. §9.2 lists it as its own dimension precisely
 -- because it answers questions neither close date can.
 --
+-- THE PERIOD IS IN BUSINESS DAYS (#289). ChangedAt is a DATETIMEOFFSET and PeriodStart/PeriodEnd are
+-- date-only, so comparing them directly put both bounds at UTC midnight: a move made on the last
+-- evening of the period (after 6 PM Central, 7 PM in daylight time) fell out, and one from the evening
+-- before the period fell in. Each bound is now judged on `[__mj_BizAppsCommon].[fnBusinessDayOf]()`,
+-- the business day of the instant — a function, not an inline `AT TIME ZONE`, which MJ's SQL parser
+-- cannot read (see deal-cycle-time.sql). The padded UTC range beside it (a day before the start, two
+-- after the end) is wider than any zone offset and only lets an index on ChangedAt narrow the scan.
+--
 -- DWELL COMES FROM THE STAMP, NOT FROM ARITHMETIC ACROSS ROWS. DealStageEvent.DaysInPreviousStage is
 -- recorded at transition time. Deriving it here by joining each event to its predecessor would give a
 -- different answer for any deal whose history was imported rather than lived — the HubSpot importer
@@ -58,10 +66,12 @@ WHERE 1 = 1
   AND d.PipelineID = {{ PipelineID | sqlString }}
   {% endif %}
   {% if PeriodStart %}
-  AND e.ChangedAt >= {{ PeriodStart | sqlString }}
+  AND e.ChangedAt >= DATEADD(day, -1, {{ PeriodStart | sqlString }})
+  AND [__mj_BizAppsCommon].[fnBusinessDayOf](e.ChangedAt) >= {{ PeriodStart | sqlString }}
   {% endif %}
   {% if PeriodEnd %}
-  AND e.ChangedAt <= {{ PeriodEnd | sqlString }}
+  AND e.ChangedAt < DATEADD(day, 2, {{ PeriodEnd | sqlString }})
+  AND [__mj_BizAppsCommon].[fnBusinessDayOf](e.ChangedAt) <= {{ PeriodEnd | sqlString }}
   {% endif %}
 GROUP BY
     p.ID, p.Name, e.FromStageID, fs.Name, fs.DisplayOrder,

@@ -139,8 +139,8 @@ console.log('\n  round trip: fraction -> percent -> fraction, over EVERY storabl
  * at the rep. Pinned here so the display path cannot regress into arithmetic nobody can read.
  *
  * The saving half of the fix is not in this module and cannot be reached from here: the
- * workspace stops feeding its own output back through the entry guard, so an untouched
- * sub-percent discount saves. See `SetDiscountPercent` in `deal-workspace.component.ts`.
+ * line editor stops feeding its own output back through the entry guard, so an untouched
+ * sub-percent discount saves. See `SetDiscountPercent` in `deal-line-editor.component.ts`.
  */
 console.log('\n  sub-one-percent: displayed exactly, still refused on re-entry\n');
 ok('0.005 displays as exactly 0.5',    DiscountFractionToPercent(0.005),  0.5);

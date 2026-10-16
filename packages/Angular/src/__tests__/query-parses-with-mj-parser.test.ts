@@ -13,7 +13,8 @@
  * dependencies rather than a copy this repo declares, so the version measured is the version that runs.
  *
  * SCOPED TO THE FILES #154 TOUCHED. `bookings-by-period.sql` already fails the same way on `next`
- * (zero select columns) for an unrelated reason; it is reported, not fixed, here.
+ * (zero select columns) for an unrelated reason; it is reported, not fixed, here. The three period
+ * filters #289 moved onto fnBusinessDayOf() are listed too, with the same counts they parsed to before.
  */
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -53,6 +54,9 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
         tables: ['vwDeals', 'DealStatusType', 'Pipeline', 'PipelineStage', 'ForecastCategoryType'],
         columns: 39,
     },
+    'slippage.sql': { tables: ['RecordChange', 'Entity', 'slips', 'vwDeals', 'DealStatusType'], columns: 17 },
+    'stage-conversion-and-dwell.sql': { tables: ['DealStageEvent', 'Deal', 'Pipeline', 'PipelineStage'], columns: 16 },
+    'forecast-history.sql': { tables: ['ForecastSnapshot', 'Company', 'Pipeline', 'Employee'], columns: 15 },
 };
 
 describe("MJ's SQL parser reads the business-day queries in full", () => {

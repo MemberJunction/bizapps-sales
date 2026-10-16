@@ -126,7 +126,7 @@ export function DiscountPercentToFraction(percent: number | null | undefined): D
  * cannot be relaxed here without reintroducing the hundred-fold error this module exists to stop.
  * The resolution is on the caller's side and is stated where it lives: a value this function
  * produced is not an entry, so it must not be fed back through the entry guard. See
- * `SetDiscountPercent` in `deal-workspace.component.ts`.
+ * `SetDiscountPercent` in `deal-line-editor.component.ts` (sales-ng).
  *
  * @param fraction The value as stored on `OrderLine.DiscountPct` (0–1).
  */
