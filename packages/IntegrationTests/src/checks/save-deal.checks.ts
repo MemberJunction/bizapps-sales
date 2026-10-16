@@ -49,6 +49,7 @@
  * @module @mj-biz-apps/sales-integration-tests
  */
 import { Metadata, RunView, ValidationErrorType, type BaseEntity } from '@memberjunction/core';
+import { UUIDsEqual } from '@memberjunction/global';
 import {
     Assert,
     AssertEqual,
@@ -433,7 +434,10 @@ async function billToOf(ctx: Parameters<NamedCheck['Fn']>[0], dealID: string): P
 
 /**
  * A deal billed to `billing`, saved, with its order put in `status` — then the deal LOADED FRESH, the
- * way a form save arrives: `OrderID_Object` is null, so the server has to reach the order by `OrderID`.
+ * way a form save arrives on the server. Deals track record changes, so MJAPI's update resolver loads
+ * the record from the database before applying the form's values, and a load hydrates the embedded
+ * order (`EmbeddedRecord.LoadEager`). The order the save sees is therefore the persisted one, read after
+ * the status change below, not an object left over from the create.
  */
 async function dealWithOrderIn(
     ctx: Parameters<NamedCheck['Fn']>[0],
@@ -461,7 +465,11 @@ async function dealWithOrderIn(
     if (!(deal instanceof DealEntityServer)) {
         throw new Error('setup: the deal must resolve to DealEntityServer, or no server rule runs');
     }
-    Assert(deal.OrderID_Object === null, 'setup: a freshly loaded deal must hold no order object, as on a form save');
+    const embedded = deal.OrderID_Object;
+    Assert(
+        !!embedded && UUIDsEqual(embedded.ID, orderID) && embedded.Status === order.Status,
+        `setup: the reloaded deal must embed its persisted ${order.Status} order, as a server-side load does`,
+    );
     return { deal, orderID };
 }
 

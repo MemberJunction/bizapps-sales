@@ -2041,9 +2041,10 @@ export class DealEntityServer extends DealEntity {
      * The deal's persisted order, or null when there is none to update.
      *
      * The in-memory embedded order when it is the persisted one, so a stage status written to that same
-     * object later in this save books it with the new bill-to. A plain form save has no embedded order,
-     * so the order is loaded by `OrderID`. An embedded order that is not saved yet was provisioned from
-     * the current values and needs nothing.
+     * object later in this save books it with the new bill-to. A deal that was loaded holds its order
+     * (`LoadEager` runs on load); one hydrated without a load (`LoadFromData`) does not, so the order is
+     * loaded by `OrderID`. An embedded order that is not saved yet was provisioned from the current
+     * values and needs nothing.
      */
     private async orderForBillTo(): Promise<mjBizAppsOrdersOrderHeaderEntity | null> {
         const embedded = this.OrderID_Object;
