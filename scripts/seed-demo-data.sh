@@ -790,7 +790,8 @@ UNION ALL SELECT '  closed w/ team   ' + CAST(COUNT(DISTINCT d.ID) AS varchar)
 UNION ALL SELECT '  past due open    ' + CAST(COUNT(*) AS varchar)
   FROM __mj_BizAppsSales.Deal d
   JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
- WHERE t.IsOpen = 1 AND d.ExpectedCloseDate < CAST(SYSUTCDATETIME() AS date)
+ CROSS JOIN __mj_BizAppsCommon.fnBusinessToday() AS bt
+ WHERE t.IsOpen = 1 AND d.ExpectedCloseDate < bt.Today
 UNION ALL SELECT '  close-date moves ' + CAST(COUNT(*) AS varchar)
   FROM __mj.RecordChange rc
   JOIN __mj.Entity e ON e.ID = rc.EntityID
