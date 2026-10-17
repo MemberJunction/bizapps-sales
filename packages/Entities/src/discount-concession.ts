@@ -11,18 +11,19 @@
  * ── WHAT SALES DOES AND DOES NOT DO HERE ────────────────────────────────────────────────────────
  *
  * Sales states the concession — the line, why, and the reason category — and orders values it and
- * decides it (rule 1: sales never computes money). Inside the rep's Sales Authority it is Approved on
- * save; outside it, Pending for the role orders' ConcessionLimit rule names. Nothing here multiplies
- * a price by a percentage: whether a discount went UP is a comparison of two stored fractions, which
- * is the only question sales asks.
+ * decides it on the server, through `Sales.RecordDiscountConcession` (rule 1: sales never computes
+ * money). Inside the rep's Sales Authority it is Approved on save; outside it, Pending for the role
+ * orders' ConcessionLimit rule names. Nothing here multiplies a price by a percentage: whether a
+ * discount went UP is a comparison of two stored fractions, which is the only question sales asks.
  *
  * A discount that went DOWN, or stayed, records nothing: an approval already given covers more than
  * the line now gives away.
  *
  * @module @mj-biz-apps/sales-entities
  */
-import { Metadata, type UserInfo } from '@memberjunction/core';
+import { Metadata } from '@memberjunction/core';
 import type { mjBizAppsOrdersOrderConcessionEntity } from '@mj-biz-apps/orders-entities';
+import type { SalesRecordDiscountConcessionInput, SalesRecordDiscountConcessionOutput } from './generated/remote_operations';
 
 export const ORDER_CONCESSION_ENTITY = 'MJ_BizApps_Orders: Order Concessions';
 
@@ -69,27 +70,49 @@ export type DiscountConcessionOutcome =
     | { Recorded: false; Message: string };
 
 /**
- * Records a Price concession for the line's discount. The line must already be saved: a concession
- * names a persisted line, and orders values it from what that line stores.
+ * `RouteOperation` lives on the client and server providers, not on the `IMetadataProvider` interface
+ * `Metadata.Provider` is declared as, so it is narrowed to this shape. Declared precisely so the
+ * operation's input and output stay type-checked.
  */
-export async function RecordDiscountConcession(
-    request: DiscountConcessionRequest,
-    contextUser?: UserInfo,
-): Promise<DiscountConcessionOutcome> {
+interface ConcessionOperationRouter {
+    RouteOperation<TInput, TOutput>(
+        operationKey: string,
+        input: TInput,
+    ): Promise<{ Success: boolean; Output?: TOutput; ErrorMessage?: string }>;
+}
+
+/** Shown only when neither the operation nor orders says why the concession was not recorded. */
+const NO_REASON_GIVEN = 'Orders refused the concession and gave no reason.';
+
+/**
+ * Records a Price concession for the line's discount through `Sales.RecordDiscountConcession`. The line
+ * must already be saved: a concession names a persisted line, and orders values it from what that line
+ * stores.
+ *
+ * ── WHY THROUGH THE SERVER (golive#340) ─────────────────────────────────────────────────────────
+ *
+ * Orders' server subclass of the concession entity is what fills the order, the value and the
+ * requester, and decides the concession. This used to create the entity in the browser, where that
+ * subclass does not run: required-field validation failed before any request was sent, nothing was
+ * recorded, and the empty `Message` surfaced as a refusal with no reason.
+ */
+export async function RecordDiscountConcession(request: DiscountConcessionRequest): Promise<DiscountConcessionOutcome> {
     const reason = request.Reason.trim();
     if (!reason) return { Recorded: false, Message: 'A discount needs a reason before it can be recorded.' };
 
-    const concession = await new Metadata().GetEntityObject<mjBizAppsOrdersOrderConcessionEntity>(ORDER_CONCESSION_ENTITY, contextUser);
-    concession.NewRecord();
-    concession.OrderLineID = request.OrderLineID;
-    concession.DeliveryForm = 'Price';
-    concession.ReasonCategory = request.ReasonCategory;
-    concession.Reason = reason;
-    if (!(await concession.Save())) {
-        return {
-            Recorded: false,
-            Message: concession.LatestResult?.Message || 'Orders refused the concession and gave no reason.',
-        };
+    try {
+        const router = Metadata.Provider as unknown as ConcessionOperationRouter;
+        const envelope = await router.RouteOperation<SalesRecordDiscountConcessionInput, SalesRecordDiscountConcessionOutput>(
+            'Sales.RecordDiscountConcession',
+            { OrderLineID: request.OrderLineID, ReasonCategory: request.ReasonCategory, Reason: reason },
+        );
+        const out = envelope.Output;
+        if (!envelope.Success || !out) {
+            return { Recorded: false, Message: envelope.ErrorMessage?.trim() || 'Sales.RecordDiscountConcession could not be reached.' };
+        }
+        if (!out.Success) return { Recorded: false, Message: out.Message?.trim() || NO_REASON_GIVEN };
+        return { Recorded: true, AwaitingApproval: out.AwaitingApproval };
+    } catch (err) {
+        return { Recorded: false, Message: err instanceof Error ? err.message : String(err) };
     }
-    return { Recorded: true, AwaitingApproval: !concession.DecidedByUserID };
 }
