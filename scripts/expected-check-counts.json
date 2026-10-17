@@ -43,6 +43,7 @@
     "close-deal": { "count": 39, "requires": "orders", "ids": "CD1-CD39" },
     "product-picker": { "count": 5, "requires": "orders", "ids": "PP1-PP5" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
+    "close-won-schedule": { "count": 5, "requires": "orders", "ids": "CS1-CS5 — a deal's payment schedule reaches its order at Close Won and after (golive #290)" },
     "close-won-contract": { "count": 6, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6, CT7, CT8 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild" },
     "board-move": { "count": 6, "requires": "orders", "ids": "BD1-BD6" },
     "pipeline-copy": { "count": 2, "requires": null, "ids": "PC1-PC2" },
