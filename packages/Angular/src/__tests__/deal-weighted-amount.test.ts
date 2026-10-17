@@ -64,8 +64,10 @@ describe('the Weighted figure on the hero and the Overview', () => {
         expect(hero(deal(1000, 0)).WeightedText).not.toBe('—');
     });
 
-    it('shows the same figure on both panels', () => {
+    /** Same figure, two precisions: whole units in the hero, cents below it (#371 item 5). */
+    it('shows the same figure on both panels, whole units in the hero and cents on the Overview', () => {
         const record = deal(1000, 25);
-        expect(hero(record).WeightedText).toBe(overview(record).Weighted);
+        expect(hero(record).WeightedText).toBe('$250');
+        expect(overview(record).Weighted).toBe('$250.00');
     });
 });
