@@ -72,5 +72,40 @@
       "lastModified": "2026-08-26T00:25:09.382Z",
       "checksum": "b0f39cf37b175094289f97017181dd45626cc1add244624df04ad5080932ec47"
     }
+  },
+  {
+    "_comments": [
+      "Sales.RecordDiscountConcession: records a deal line's raised discount as the Price concession orders'",
+      "confirm gate holds on.",
+      "",
+      "SERVER-SIDE BECAUSE ORDERS FILLS THE CONCESSION THERE. Orders' table requires the order, the computed",
+      "value and the requesting user, and only orders' server subclass of the Order Concession entity sets them",
+      "(and decides whether the requester's Sales Authority covers it). Created in the browser, the generated",
+      "class ran instead, failed its own required-field validation and never reached the API, so no concession",
+      "was ever recorded and the rep saw a refusal with no reason.",
+      "",
+      "GenerationType=Manual: CodeGen emits the typed shell, RecordDiscountConcessionOperation supplies the body."
+    ],
+    "fields": {
+      "Name": "Record Discount Concession",
+      "OperationKey": "Sales.RecordDiscountConcession",
+      "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Deal Lifecycle",
+      "Description": "Record a deal line's raised discount as a Price concession on its order line, as the calling user, with the rep's reason category and reason. Orders values the concession, approves it on save when the requester's Sales Authority covers it, and otherwise leaves it Pending for the approving role. Returns whether it was recorded, whether it awaits approval, and orders' own message when it refuses. Sales states intent only; orders computes every figure.",
+      "InputTypeName": "SalesRecordDiscountConcessionInput",
+      "InputTypeDefinition": "@file:types/sales-record-discount-concession.input.ts",
+      "InputTypeIsArray": false,
+      "OutputTypeName": "SalesRecordDiscountConcessionOutput",
+      "OutputTypeDefinition": "@file:types/sales-record-discount-concession.output.ts",
+      "OutputTypeIsArray": false,
+      "ExecutionMode": "Sync",
+      "RequiredScope": "sales:write",
+      "RequiresSystemUser": false,
+      "GenerationType": "Manual",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "59D32E09-65A4-4DC7-B515-5A129F1C5A1D"
+    }
   }
 ]
