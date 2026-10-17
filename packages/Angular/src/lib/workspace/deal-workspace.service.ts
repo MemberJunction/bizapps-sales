@@ -95,6 +95,38 @@ export function CurrencyCodeFor(currencyID: string | null, codes: ReadonlyMap<st
 }
 
 /**
+ * One read of accounting's currency codes, keyed by upper-cased ID: empty when accounting is not
+ * installed, null when the read failed (so a caller can decline to cache it). Never throws.
+ *
+ * A module function so the deal form, whose panels are built without an injection context, reads
+ * codes the same way the roster does. Callers cache; see `DealWorkspaceService.LoadCurrencyCodes`
+ * and `form-panels/deal-money.ts`.
+ */
+export async function ReadCurrencyCodes(): Promise<Map<string, string> | null> {
+    // Everything inside the try, the metadata check included: a label lookup must never take the
+    // roster down with it.
+    try {
+        if (!new Metadata().Entities.some((e) => e.Name === E_ACCOUNTING_CURRENCY)) {
+            return new Map();
+        }
+        const result = await new RunView().RunView<{ ID: string; Code: string }>({
+            EntityName: E_ACCOUNTING_CURRENCY,
+            ResultType: 'simple',
+            Fields: ['ID', 'Code'],
+        });
+        if (result?.Success) {
+            return new Map((result.Results ?? []).map((c) => [String(c.ID).toUpperCase(), String(c.Code).trim()]));
+        }
+        // At status, not error: a rep without accounting permissions is an ordinary deployment.
+        // See LoadFiscalYearStart.
+        LogStatus(`${E_ACCOUNTING_CURRENCY} read failed, showing ${DEFAULT_DISPLAY_CURRENCY} - ${result?.ErrorMessage ?? 'unknown error'}`);
+    } catch (e) {
+        LogStatus(`${E_ACCOUNTING_CURRENCY} read threw, showing ${DEFAULT_DISPLAY_CURRENCY} - ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return null;
+}
+
+/**
  * One row of the deal roster.
  *
  * `CustomerName` is resolved by this service, not read off the deal: `AccountID` points at an IsA child
@@ -690,28 +722,13 @@ export class DealWorkspaceService {
     }
 
     private async readCurrencyCodes(): Promise<Map<string, string>> {
-        // Everything inside the try, the metadata check included: a label lookup must never take the
-        // roster down with it.
-        try {
-            if (!new Metadata().Entities.some((e) => e.Name === E_ACCOUNTING_CURRENCY)) {
-                return new Map();
-            }
-            const result = await new RunView().RunView<{ ID: string; Code: string }>({
-                EntityName: E_ACCOUNTING_CURRENCY,
-                ResultType: 'simple',
-                Fields: ['ID', 'Code'],
-            });
-            if (result?.Success) {
-                return new Map((result.Results ?? []).map((c) => [String(c.ID).toUpperCase(), String(c.Code).trim()]));
-            }
-            // At status, not error: a rep without accounting permissions is an ordinary deployment.
-            // See LoadFiscalYearStart.
-            LogStatus(`${E_ACCOUNTING_CURRENCY} read failed, showing ${DEFAULT_DISPLAY_CURRENCY} - ${result?.ErrorMessage ?? 'unknown error'}`);
-        } catch (e) {
-            LogStatus(`${E_ACCOUNTING_CURRENCY} read threw, showing ${DEFAULT_DISPLAY_CURRENCY} - ${e instanceof Error ? e.message : String(e)}`);
+        const codes = await ReadCurrencyCodes();
+        if (codes === null) {
+            // A failed read is not cached, so the next roster load tries again.
+            this.currencyCodes = null;
+            return new Map();
         }
-        this.currencyCodes = null;
-        return new Map();
+        return codes;
     }
 
     /**
