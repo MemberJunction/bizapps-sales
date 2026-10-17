@@ -112,20 +112,22 @@ describe('while the lookups, win rate and view are still out', () => {
         expect(settled.querySelector('.mjs-viewer-host mj-loading')).toBeNull();
     });
 
-    it('replaces the tiles with the Retry state when one of them then fails', async () => {
+    it('keeps the tiles when one of them then fails, and shows that failure where it is used (bizapps-sales#371)', async () => {
         const lookups = held<DealWorkspaceLookups>();
         service.LoadLookups.mockReturnValue(lookups.promise.then(() => Promise.reject(new Error('Received status code 504'))));
         const fixture = await mountFiguresOnly();
         expect(visiblePage(fixture).querySelector('.kpis')).not.toBeNull();
 
         lookups.release(LOOKUPS);
-        await vi.waitFor(() => expect(fixture.componentInstance.LoadError).toContain('504'));
+        await vi.waitFor(() => expect(fixture.componentInstance.LookupsError).toContain('504'));
+        await vi.waitFor(() => expect(fixture.componentInstance.DetailLoading).toBe(false));
         fixture.detectChanges();
 
         const page = visiblePage(fixture);
-        expect(page.querySelector('[data-testid="sales-load-failed"]')).not.toBeNull();
-        expect(page.querySelector('.kpis')).toBeNull();
-        expect(page.querySelector('mj-loading')).toBeNull();
+        expect(fixture.componentInstance.LoadError).toBeNull();
+        expect(page.querySelector('[data-testid="sales-load-failed"]')).toBeNull();
+        expect(page.querySelector('.kpis')).not.toBeNull();
+        expect(showPage(fixture, 'board').querySelector('[data-testid="sales-part-failed"]')).not.toBeNull();
     });
 
     it("does not overwrite a period's win rate picked meanwhile with the load's own", async () => {

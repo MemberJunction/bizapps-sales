@@ -33,7 +33,7 @@ import {
     ProjectValidation,
     type DealWorkspaceValidation,
 } from './deal-workspace.validation';
-import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
+import { BusinessTimeZoneEngine, CalendarDayIn, type CalendarDay } from '@mj-biz-apps/common-entities';
 import { E_ORDERS_PRODUCT, PRODUCT_LOOKUP_FIELDS, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
     CALENDAR_YEAR_START,
@@ -54,6 +54,7 @@ const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 const E_EMPLOYEE = 'MJ: Employees';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
+const E_STAGE_EVENT = 'MJ_BizApps_Sales: Deal Stage Events';
 
 /**
  * Accounting's per-company profile — where the FISCAL YEAR START lives.
@@ -220,8 +221,48 @@ export interface DealSaveOutcome {
 
 /** Row shapes as they come back from RunView with `ResultType: 'simple'`. */
 interface PipelineRow { ID: string; Name: string; Code: string; CompanyID: string; Company: string | null; IsDefault: boolean; DisplayRank: number }
-interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null }
+interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null; RottingDays: number | null }
 interface NamedRow { ID: string; Name: string }
+/** A stage event, as {@link DealWorkspaceService.LoadStageEntries} reads it. */
+export interface StageEventRow { DealID: string; ToStageID: string | null; ChangedAt: string | Date }
+/** An open deal, as {@link DealWorkspaceService.LoadStageEntries} reads it. */
+export interface StageDealRow { ID: string; PipelineStageID: string | null; __mj_CreatedAt: string | Date }
+
+const sameID = (a: string | null | undefined, b: string | null | undefined): boolean =>
+    !!a && !!b && a.toLowerCase() === b.toLowerCase();
+
+/**
+ * The day each deal entered its current stage, keyed by lower-cased deal ID. `events` are newest
+ * first. See {@link DealWorkspaceService.LoadStageEntries} for the rule.
+ */
+export function StageEntryDays(events: readonly StageEventRow[], deals: readonly StageDealRow[]): Map<string, string> {
+    const newest = new Map<string, StageEventRow>();
+    for (const e of events) {
+        const key = e.DealID.toLowerCase();
+        if (!newest.has(key)) {
+            newest.set(key, e);
+        }
+    }
+    const days = new Map<string, string>();
+    for (const d of deals) {
+        const key = d.ID.toLowerCase();
+        const event = newest.get(key);
+        if (!event) {
+            days.set(key, instantDay(d.__mj_CreatedAt));
+        } else if (sameID(event.ToStageID, d.PipelineStageID)) {
+            days.set(key, instantDay(event.ChangedAt));
+        }
+    }
+    return days;
+}
+
+/**
+ * The business day an instant fell on, `YYYY-MM-DD`. A stage change is a moment, so a zone decides
+ * its day, the same one that decides what day it is now.
+ */
+function instantDay(value: string | Date): string {
+    return CalendarDayIn(value instanceof Date ? value : new Date(value), BusinessTimeZoneEngine.Instance.Zone);
+}
 interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean; LocksDeal: boolean }
 interface LossReasonRow extends NamedRow { RequiresNotes: boolean }
 export interface ContactRow {
@@ -287,12 +328,13 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
         },
     ),
     Stages: lookupRead<StageRow>(
-        { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'] },
+        { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID', 'RottingDays'] },
         (rows, into) => {
             into.Stages = rows.map<StageLookup>((s) => ({
                 ID: s.ID, Name: s.Name, PipelineID: s.PipelineID, DisplayOrder: s.DisplayOrder,
                 Probability: s.Probability, ForecastCategoryTypeID: s.ForecastCategoryTypeID,
                 DealStatusTypeID: s.DealStatusTypeID ?? null,
+                RottingDays: s.RottingDays == null ? null : Number(s.RottingDays),
             }));
         },
     ),
@@ -408,6 +450,40 @@ export class DealWorkspaceService {
             LOOKUP_READS[key].Apply(r?.Success ? (r.Results ?? []) : [], lookups);
         });
         return lookups;
+    }
+
+    /**
+     * The day each OPEN deal entered its current stage, by deal ID (bizapps-sales#450). The Board flags
+     * a card that has sat in its stage past the stage's `RottingDays`.
+     *
+     * One `RunViews` batch: the stage events of open deals, newest first, and the open deals' creation
+     * times. A deal's day is its newest event INTO its current stage; a deal with no event has been in
+     * its stage since it was created (a new deal's first stage records no event). A deal whose newest
+     * event names a different stage is left out rather than guessed.
+     *
+     * "Open" is the status's `IsOpen` FLAG. Throws when either read fails, so the caller can say the
+     * flags are unavailable instead of showing none.
+     */
+    public async LoadStageEntries(): Promise<Map<string, string>> {
+        const md = new Metadata();
+        const deal = md.Entities.find((e) => e.Name === E_DEAL);
+        const status = md.Entities.find((e) => e.Name === E_STATUS_TYPE);
+        if (!deal || !status) {
+            return new Map();
+        }
+        const openDeals = `SELECT ID FROM [${deal.SchemaName}].[${deal.BaseTable}] WHERE DealStatusTypeID IN `
+            + `(SELECT ID FROM [${status.SchemaName}].[${status.BaseTable}] WHERE IsOpen = 1)`;
+        const [events, deals] = await new RunView().RunViews([
+            { EntityName: E_STAGE_EVENT, ExtraFilter: `DealID IN (${openDeals})`, OrderBy: 'ChangedAt DESC', ResultType: 'simple', Fields: ['DealID', 'ToStageID', 'ChangedAt'] },
+            { EntityName: E_DEAL, ExtraFilter: `ID IN (${openDeals})`, ResultType: 'simple', Fields: ['ID', 'PipelineStageID', '__mj_CreatedAt'] },
+        ]);
+        if (!events?.Success || !deals?.Success) {
+            throw new Error(events?.ErrorMessage || deals?.ErrorMessage || 'The deals\' stage history could not be read.');
+        }
+        return StageEntryDays(
+            (events.Results ?? []) as StageEventRow[],
+            (deals.Results ?? []) as StageDealRow[],
+        );
     }
 
     /**

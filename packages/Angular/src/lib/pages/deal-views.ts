@@ -14,6 +14,8 @@ import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import type { ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-viewer';
 import { MJS_ENTITIES } from '../data/entity-names';
 import type { PeriodWindow } from './dashboard-period';
+import { GRID_DAY_FORMAT } from './dashboard-dates';
+import { InspectDateBounds, type InspectKey } from './dashboard-inspect';
 
 export const SALES_PIPELINE_VIEW_NAME = 'Sales: Pipeline';
 
@@ -47,11 +49,18 @@ export function DealPipelineGridState(): { sortSettings: { field: string; dir: '
                 },
             },
             { Name: 'Amount', DisplayName: 'Amount', orderIndex: 6, width: 120, format: { type: 'currency', currencyCode: 'USD', decimals: 0, align: 'right' } },
-            { Name: 'Probability', DisplayName: 'Prob', orderIndex: 7, width: 80, format: { type: 'number', decimals: 0, align: 'right' } },
-            { Name: 'ExpectedCloseDate', DisplayName: 'Close', orderIndex: 8, width: 120, format: { type: 'date', dateFormat: 'medium' } },
-            { Name: 'OwnerEmployee', DisplayName: 'Owner', orderIndex: 9, width: 140 },
-            { Name: 'ForecastCategoryType', DisplayName: 'Forecast', orderIndex: 10, width: 130 },
-            { Name: 'NextStep', DisplayName: 'Next step', orderIndex: 11, width: 200 },
+            // Stored as 0-100; the grid's percent format divides by 100, so 40 renders "40%" (bizapps-sales#371).
+            { Name: 'Probability', DisplayName: 'Prob', orderIndex: 7, width: 80, format: { type: 'percent', decimals: 0, align: 'right' } },
+            /**
+             * TWO DATE COLUMNS, because a grid column binds one field (bizapps-sales#371). A single "Close"
+             * column showed the forecast day even on a won or lost deal. "Expected close" is the forecast;
+             * "Closed on" is the day a closed deal closed and is empty on an open one.
+             */
+            { Name: 'ExpectedCloseDate', DisplayName: 'Expected close', orderIndex: 8, width: 130, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
+            { Name: 'ActualCloseDate', DisplayName: 'Closed on', orderIndex: 9, width: 120, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
+            { Name: 'OwnerEmployee', DisplayName: 'Owner', orderIndex: 10, width: 140 },
+            { Name: 'ForecastCategoryType', DisplayName: 'Forecast', orderIndex: 11, width: 130 },
+            { Name: 'NextStep', DisplayName: 'Next step', orderIndex: 12, width: 200 },
         ],
     };
 }
@@ -60,10 +69,10 @@ export function DealActivityGridState(): { sortSettings: { field: string; dir: '
     return {
         sortSettings: [{ field: 'StartedAt', dir: 'desc' }],
         columnSettings: [
-            { Name: 'StartedAt', DisplayName: 'When', orderIndex: 0, width: 160, format: { type: 'datetime', dateFormat: 'medium' } },
+            { Name: 'StartedAt', DisplayName: 'When', orderIndex: 0, width: 160, format: { type: 'datetime', dateFormat: GRID_DAY_FORMAT } },
             { Name: 'ActivityType', DisplayName: 'Type', orderIndex: 1, width: 110 },
             { Name: 'Title', DisplayName: 'Subject', orderIndex: 2, width: 280, pinned: 'left' },
-            { Name: 'Direction', DisplayName: 'Dir', orderIndex: 3, width: 90 },
+            { Name: 'Direction', DisplayName: 'Direction', orderIndex: 3, width: 90 },
             { Name: 'Status', DisplayName: 'Status', orderIndex: 4, width: 110 },
             { Name: 'SourceSystem', DisplayName: 'Source', orderIndex: 5, width: 120 },
         ],
@@ -94,7 +103,7 @@ export async function LoadDealPipelineViewTemplate(entity: EntityInfo): Promise<
         WhereClause: '',
         GridState: JSON.stringify(grid),
         GridStateObject: grid,
-        OrderByClause: 'ExpectedCloseDate ASC',
+        OrderByClause: `${ALL_DEALS_ORDER_BY} ASC`,
     } as unknown as MJUserViewEntityExtended;
 }
 
@@ -119,6 +128,40 @@ export async function DealPipelineViewWith(
     }
     return copy;
 }
+
+/**
+ * A copy of `view` ordered by `orderBy`, never saved.
+ *
+ * The entity viewer sorts on the view's FIRST sort entry, as `<field> <direction>`, so a multi-key
+ * order travels as that one entry's field. The clause passes MJ's ORDER BY screen (no statement
+ * keywords, comments or semicolons).
+ */
+export async function DealViewOrderedBy(view: MJUserViewEntityExtended, orderBy: string): Promise<MJUserViewEntityExtended> {
+    const copy = await DealPipelineViewWith(view);
+    const sort = [{ field: orderBy, direction: 'Asc' }];
+    copy.SortState = JSON.stringify(sort);
+    if (!(copy instanceof BaseEntity)) {
+        // The in-memory fallback has no getters: give it the values the viewer reads.
+        Object.assign(copy as object, { ViewSortInfo: sort, OrderByClause: `${orderBy} ASC` });
+    }
+    return copy;
+}
+
+/**
+ * All deals' order (bizapps-sales#371): open deals first, then by expected close, soonest first, with
+ * deals that have no expected close last.
+ *
+ * "Open" is `ClosedAt IS NULL`: closing stamps it and reopening clears it, and it is the first sort
+ * key of the saved view (`ClosedAt ASC, ExpectedCloseDate ASC`), so the code and the view agree. The
+ * saved view cannot say "no date last" (an ascending sort puts NULL first on SQL Server), which is why
+ * the code carries the CASE expressions. Plain CASE, no bracketed names, so it reads the same on
+ * SQL Server and PostgreSQL.
+ */
+export const ALL_DEALS_ORDER_BY = [
+    'CASE WHEN ClosedAt IS NULL THEN 0 ELSE 1 END',
+    'CASE WHEN ExpectedCloseDate IS NULL THEN 1 ELSE 0 END',
+    'ExpectedCloseDate',
+].join(', ');
 
 async function copyEntity(template: MJUserViewEntityExtended): Promise<MJUserViewEntityExtended> {
     const copy = await new Metadata().GetEntityObject<MJUserViewEntityExtended>('MJ: User Views');
@@ -159,6 +202,76 @@ export function DealInListWhere(ids: readonly string[]): string {
 
 const sqlString = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 
+/** An entity's schema and base table, read from metadata so no schema name is hardcoded here. */
+export interface SqlTable {
+    SchemaName: string;
+    BaseTable: string;
+}
+
+const tableRef = (t: SqlTable): string => `[${t.SchemaName}].[${t.BaseTable}]`;
+
+/** The type tables an Inspect filter reads flags from. */
+export interface InspectTables {
+    Status: SqlTable;
+    Pipeline: SqlTable;
+    Forecast: SqlTable;
+}
+
+/** The Inspect slices {@link InspectCriteriaWhere} expresses as criteria. */
+export type CriteriaInspectKey = Exclude<InspectKey, 'closing' | 'won'>;
+
+/**
+ * An Inspect slice as a filter on the Deals view, built from the slice's own criteria (bizapps-sales#449).
+ *
+ * It replaces a list of every matching deal ID, whose length grew with the book. Each case is the
+ * server-side form of the same case in `FilterInspect` over the roster, so the grid lists the deals the
+ * figure counted:
+ *
+ *  - every slice is OPEN deals (the status's `IsOpen` flag) in pipelines that count toward the forecast
+ *    (`Pipeline.IncludeInForecast`), which is what `InForecast` keeps of the open book;
+ *  - forecast slices read the category's `IncludeInCommit` / `IncludeInBestCase` / `IncludeInPipeline`
+ *    flags; a deal with no category counts toward the pipeline, as the roster's `ISNULL(…, 1)` does;
+ *  - date slices compare `ExpectedCloseDate` with the same business-day bounds the buckets use.
+ *
+ * `closing` (the eight soonest) and `won` are not here: a "first eight" is not a criterion, so
+ * `closing` keeps its ID list, which is never longer than eight; `won` has {@link DealWonInPeriodWhere}.
+ */
+export function InspectCriteriaWhere(key: CriteriaInspectKey, tables: InspectTables, today: string): string {
+    const open = [
+        `DealStatusTypeID IN (SELECT ID FROM ${tableRef(tables.Status)} WHERE IsOpen = 1)`,
+        `PipelineID IN (SELECT ID FROM ${tableRef(tables.Pipeline)} WHERE IncludeInForecast = 1)`,
+    ];
+    const category = (flags: string): string => `ForecastCategoryTypeID IN (SELECT ID FROM ${tableRef(tables.Forecast)} WHERE ${flags})`;
+    const notCategory = (flags: string): string =>
+        `(ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM ${tableRef(tables.Forecast)} WHERE ${flags}))`;
+    const bounds = InspectDateBounds(today);
+    const extra = ((): string[] => {
+        switch (key) {
+            case 'commit':
+                return [category('IncludeInCommit = 1')];
+            case 'best':
+                return [category('IncludeInBestCase = 1')];
+            case 'pipe':
+                return [notCategory('IncludeInPipeline = 0')];
+            case 'open':
+                return [];
+            case 'remainder':
+                return [notCategory('IncludeInPipeline = 0 OR IncludeInCommit = 1 OR IncludeInBestCase = 1')];
+            case 'slipped':
+                return ['ExpectedCloseDate IS NOT NULL', `ExpectedCloseDate < ${sqlString(today)}`];
+            case 'noowner':
+                return ["(OwnerEmployee IS NULL OR OwnerEmployee = '')"];
+            case 'week':
+                return [`ExpectedCloseDate >= ${sqlString(today)}`, `ExpectedCloseDate <= ${sqlString(bounds.WeekEnd)}`];
+            case 'month':
+                return [`ExpectedCloseDate > ${sqlString(bounds.WeekEnd)}`, `ExpectedCloseDate <= ${sqlString(bounds.MonthEnd)}`];
+            case 'later':
+                return [`(ExpectedCloseDate IS NULL OR ExpectedCloseDate > ${sqlString(bounds.LaterFrom)})`];
+        }
+    })();
+    return [...open, ...extra].join(' AND ');
+}
+
 /**
  * The deals the Won tile counts, as a filter on the Deals view (bizapps-sales#209).
  *
@@ -175,7 +288,7 @@ export function DealWonInPeriodWhere(
     window?: PeriodWindow,
 ): string {
     const parts = [
-        `DealStatusTypeID IN (SELECT ID FROM [${statusTable.SchemaName}].[${statusTable.BaseTable}] WHERE IsWon = 1)`,
+        `DealStatusTypeID IN (SELECT ID FROM ${tableRef(statusTable)} WHERE IsWon = 1)`,
     ];
     if (window?.Start) parts.push(`ActualCloseDate >= ${sqlString(window.Start)}`);
     if (window?.End) parts.push(`ActualCloseDate <= ${sqlString(window.End)}`);

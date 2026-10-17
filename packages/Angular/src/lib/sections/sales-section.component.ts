@@ -40,7 +40,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, inject } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, LogError, Metadata, type EntityInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
@@ -49,12 +49,23 @@ import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 import { EntityViewerModule, type RecordOpenedEvent, type ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-viewer';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import {
+    ALL_DEALS_ORDER_BY,
     DealInListWhere,
     DealPipelineViewWith,
+    DealViewOrderedBy,
     DealWonInPeriodWhere,
+    InspectCriteriaWhere,
     LoadDealPipelineViewTemplate,
     RelatedRecordTarget,
+    type InspectTables,
 } from '../pages/deal-views';
+import {
+    DEFAULT_SALES_URL_STATE,
+    ParseSalesUrlState,
+    SalesUrlParams,
+    SameSalesUrlState,
+    type SalesUrlState,
+} from './sales-url-state';
 import type { ResourceData } from '@memberjunction/core-entities';
 import {
     MJButtonDirective,
@@ -129,6 +140,22 @@ import {
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
+const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
+const E_FORECAST_CATEGORY_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
+
+/** The defaults a null URL field stands for. */
+const DEFAULT_PERIOD: PeriodKey = 'quarter';
+const DEFAULT_INSPECT: InspectKey = 'closing';
+
+/** An entity's schema and base table from metadata, or null when it is not loaded. */
+function tableOf(entityName: string): { SchemaName: string; BaseTable: string } | null {
+    return new Metadata().Entities.find((e) => e.Name === entityName) ?? null;
+}
+
+/** A thrown value as the sentence a reader is shown. */
+function reasonOf(e: unknown): string {
+    return e instanceof Error ? e.message : String(e);
+}
 
 /** One KPI tile. `Tone` drives colour only — no behaviour hangs off it. */
 interface SalesKpi {
@@ -162,6 +189,24 @@ interface SalesKpi {
 export class MJSSalesSectionComponent implements OnInit {
     /** Which top-level section this mount represents. One today; see the nav model. */
     @Input() Section = 'deals';
+
+    /**
+     * The state the tab's URL names (bizapps-sales#371). Set by the resource from the query params on
+     * mount and on back/forward. Each field that differs from what the section shows is applied; an
+     * echo of the section's own write therefore changes nothing.
+     */
+    @Input() public set UrlState(state: SalesUrlState | null) {
+        this.urlState = state ?? DEFAULT_SALES_URL_STATE;
+        if (this.initialized) {
+            this.applyUrlState(this.urlState);
+        }
+    }
+    /** The section's page, period, Inspect slice or Board choice changed; the resource writes the URL. */
+    @Output() public readonly UrlStateChange = new EventEmitter<SalesUrlState>();
+    private urlState: SalesUrlState = DEFAULT_SALES_URL_STATE;
+    private initialized = false;
+    /** One URL write per burst of changes (a company change also clears the pipeline). */
+    private urlEmitQueued = false;
 
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
@@ -197,6 +242,18 @@ export class MJSSalesSectionComponent implements OnInit {
      * the dashboard keeps its tiles unavailable for as long as this is set (see `TileSummary`).
      */
     public RosterError: string | null = null;
+    /**
+     * Why one of the reads the dashboard's figures do not need failed, or null (bizapps-sales#371). Each
+     * is shown only where it is used, so a failed win rate no longer replaces figures that loaded.
+     *
+     * `LookupsError` is the pipelines, stages and statuses: the Board and the Stage mix tabs.
+     * `WinRateError` is the win rate card. `ViewError` is the grids' saved view: Inspect and All deals.
+     */
+    public LookupsError: string | null = null;
+    public WinRateError: string | null = null;
+    public ViewError: string | null = null;
+    /** Why the last period change failed, or null. Shown under the period selector with a Retry. */
+    public PeriodError: string | null = null;
     /**
      * Why the last `Refresh()` could not finish, or null. While set, every page shows this with a
      * Retry button in place of its content (bizapps-sales#195).
@@ -289,12 +346,86 @@ export class MJSSalesSectionComponent implements OnInit {
      * board, which is rebuilt on every reload and page switch: held there, a drag on any pipeline but
      * the first reloaded the board onto the first one, with the moved card out of view.
      */
+    /** The day each open deal entered its stage, for the Board's idle flag (bizapps-sales#450). */
+    public StageEnteredOn: ReadonlyMap<string, string> = new Map();
     public BoardCompanyID: string | null = null;
     public BoardPipelineID: string | null = null;
 
     public async ngOnInit(): Promise<void> {
-        this.Page = DefaultPageFor(this.Section);
+        // The URL's state is in place BEFORE the first load, so the period it names is the one read.
+        const url = this.urlState;
+        this.Page = this.pageOrDefault(url.Page);
+        this.Period = url.Period ?? DEFAULT_PERIOD;
+        this.InspectFilter = url.Inspect ?? DEFAULT_INSPECT;
+        this.BoardCompanyID = url.Company;
+        this.BoardPipelineID = url.Pipeline;
+        this.initialized = true;
         await this.Refresh();
+    }
+
+    // ── URL state ──────────────────────────────────────────────────────────────
+
+    /** What the URL should say now. Defaults are null, so they stay out of the address. */
+    public get CurrentUrlState(): SalesUrlState {
+        return {
+            Page: this.Page === DefaultPageFor(this.Section) ? null : this.Page || null,
+            Period: this.Period === DEFAULT_PERIOD ? null : this.Period,
+            Inspect: this.InspectFilter === DEFAULT_INSPECT ? null : this.InspectFilter,
+            Company: this.BoardCompanyID,
+            Pipeline: this.BoardPipelineID,
+        };
+    }
+
+    private pageOrDefault(page: string | null): string {
+        return page && SubPagesFor(this.Section).some((p) => p.Id === page) ? page : DefaultPageFor(this.Section);
+    }
+
+    /** Applies a URL (back/forward, or a link opened into a mounted tab). Writes nothing back. */
+    private applyUrlState(url: SalesUrlState): void {
+        if (SameSalesUrlState(url, this.CurrentUrlState)) {
+            return;
+        }
+        this.Page = this.pageOrDefault(url.Page);
+        this.BoardCompanyID = url.Company;
+        this.BoardPipelineID = url.Pipeline;
+        const inspect = url.Inspect ?? DEFAULT_INSPECT;
+        if (inspect !== this.InspectFilter) {
+            this.InspectFilter = inspect;
+            void this.refreshInspectView().then(() => this.cdr.detectChanges());
+        }
+        const period = url.Period ?? DEFAULT_PERIOD;
+        if (period !== this.Period) {
+            void this.loadPeriod(period);
+        }
+        this.cdr.detectChanges();
+    }
+
+    /** Tells the resource the state changed, once per burst, and only when the URL would change. */
+    private emitUrlState(): void {
+        if (this.urlEmitQueued) {
+            return;
+        }
+        this.urlEmitQueued = true;
+        void Promise.resolve().then(() => {
+            this.urlEmitQueued = false;
+            const state = this.CurrentUrlState;
+            if (!SameSalesUrlState(state, this.urlState)) {
+                this.urlState = state;
+                this.UrlStateChange.emit(state);
+            }
+        });
+    }
+
+    /** The Board's company filter changed. */
+    public OnBoardCompany(companyID: string | null): void {
+        this.BoardCompanyID = companyID;
+        this.emitUrlState();
+    }
+
+    /** The Board's pipeline tab changed. */
+    public OnBoardPipeline(pipelineID: string | null): void {
+        this.BoardPipelineID = pipelineID;
+        this.emitUrlState();
     }
 
     // ── Chrome ─────────────────────────────────────────────────────────────────
@@ -319,6 +450,7 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Page = item.id;
         this.Message = '';
         this.cdr.detectChanges();
+        this.emitUrlState();
     }
 
     /** The header's primary verb. Opens a new Explorer record tab — never an in-rail workspace. */
@@ -356,7 +488,7 @@ export class MJSSalesSectionComponent implements OnInit {
             await this.load(token);
         } catch (e) {
             if (token === this.refreshToken) {
-                this.LoadError = e instanceof Error ? e.message : String(e);
+                this.LoadError = reasonOf(e);
                 LogError(`Sales: the section failed to load - ${this.LoadError}`);
             }
         } finally {
@@ -401,20 +533,24 @@ export class MJSSalesSectionComponent implements OnInit {
          *
          * The tiles, the stack and the current-book cards read the roster and the summary and nothing
          * else, so they show as soon as those two land. The rest is already in flight and fills in
-         * behind them. The no-op `catch` only stops a fast failure there from being reported as
-         * unhandled while the first two are still awaited; `loadDetail` still awaits it and throws.
+         * behind them.
+         *
+         * EACH ONE SETTLES TO A VALUE OR ITS OWN REASON (bizapps-sales#371). A failed win rate used to
+         * reject the whole load and replace the page, figures that had loaded included. Now each
+         * failure is kept beside its read and shown only on the surfaces that read it.
          */
-        const detail = Promise.all([
+        const detail: DetailReads = {
             // Only the lists the BOARD and the status pill read. Accounts and contacts are the deal
             // workspace's pickers and grow with the customer base, so they are not loaded here.
-            this.service.LoadLookups(SECTION_LOOKUP_KEYS),
+            Lookups: settle(this.service.LoadLookups(SECTION_LOOKUP_KEYS)),
             // The window reaches win rate through parameters the query ALREADY declared -- it filters
             // on ActualCloseDate, the same dimension the Won tile now uses, so the two cannot drift.
-            this.service.LoadWinRate(window),
+            WinRate: settle(this.service.LoadWinRate(window)),
             // The grids' saved view, read once for both grids.
-            this.DealEntityInfo ? LoadDealPipelineViewTemplate(this.DealEntityInfo) : Promise.resolve(null),
-        ]);
-        detail.catch(() => undefined);
+            View: settle(this.DealEntityInfo ? LoadDealPipelineViewTemplate(this.DealEntityInfo) : Promise.resolve(null)),
+            // When each open deal entered its stage, for the Board's idle flag.
+            StageEntries: settle(this.service.LoadStageEntries()),
+        };
 
         const [roster, summary] = await Promise.all([
             this.loadRoster(this.BoardClosedWindow.Start),
@@ -441,26 +577,36 @@ export class MJSSalesSectionComponent implements OnInit {
         await this.loadDetail(detail, period, token);
     }
 
-    /** The second half of `load()`: what the board, the win rate and the grids read. */
-    private async loadDetail(
-        detail: Promise<[DealWorkspaceLookups, Record<string, unknown>[] | null, MJUserViewEntityExtended | null]>,
-        period: PeriodKey,
-        token: number,
-    ): Promise<void> {
-        const [lookups, winRate, pipelineView] = await detail;
+    /** The second half of `load()`: what the board, the win rate and the grids read. Never throws. */
+    private async loadDetail(detail: DetailReads, period: PeriodKey, token: number): Promise<void> {
+        const [lookups, winRate, pipelineView, entries] = await Promise.all([
+            detail.Lookups, detail.WinRate, detail.View, detail.StageEntries,
+        ]);
         if (token !== this.refreshToken) {
             return;
         }
-        this.Pipelines = lookups.Pipelines;
-        this.Stages = lookups.Stages;
-        this.DealStatusTypes = lookups.DealStatusTypes;
+        this.LookupsError = lookups.Error;
+        const lists = lookups.Value ?? { Pipelines: [], Stages: [], DealStatusTypes: [] };
+        this.Pipelines = lists.Pipelines;
+        this.Stages = lists.Stages;
+        this.DealStatusTypes = lists.DealStatusTypes;
         // A period picked while this was out has already read its own win rate; this one is stale.
         if (period === this.Period) {
-            this.applyWinRate(winRate);
+            this.WinRateError = winRate.Error;
+            this.applyWinRate(winRate.Error ? null : winRate.Value);
         }
-        this.pipelineView = pipelineView;
+        this.ViewError = pipelineView.Error;
+        // Without the history no card is flagged; the failure is logged below rather than shown, since
+        // the flag is a hint and the board is complete without it.
+        this.StageEnteredOn = entries.Value ?? new Map();
+        this.pipelineView = pipelineView.Value;
         // Copies of the view already read; neither goes back to the server.
         await Promise.all([this.refreshInspectView(), this.refreshAllDealsView()]);
+        for (const failed of [lookups.Error, winRate.Error, pipelineView.Error, entries.Error]) {
+            if (failed) {
+                LogError(`Sales: part of the section failed to load - ${failed}`);
+            }
+        }
     }
 
     /**
@@ -476,7 +622,7 @@ export class MJSSalesSectionComponent implements OnInit {
             this.RosterError = null;
             return roster;
         } catch (e) {
-            this.RosterError = e instanceof Error ? e.message : String(e);
+            this.RosterError = reasonOf(e);
             LogError(this.RosterError);
             return null;
         }
@@ -529,12 +675,12 @@ export class MJSSalesSectionComponent implements OnInit {
         return ResolvePeriod('quarter', this.FiscalStart.Start, BusinessToday());
     }
 
-    /** "from 1 Jul 2026" — the board's closed-deal bound, for its header. */
+    /** "from Jul 1, 2026" — the board's closed-deal bound, for its header. */
     public get BoardClosedLabel(): string {
         return FormatWindow({ ...this.BoardClosedWindow, End: null });
     }
 
-    /** "1 Jul 2026 – 30 Sep 2026" — the bounds spelled out, for a footnote. */
+    /** "Jul 1, 2026 – Sep 30, 2026" — the bounds spelled out, for a footnote. */
     public get WindowLabel(): string {
         return FormatWindow(this.Window);
     }
@@ -561,9 +707,20 @@ export class MJSSalesSectionComponent implements OnInit {
      * (bizapps-sales#209).
      */
     public async SetPeriod(key: PeriodKey): Promise<void> {
-        if (key === this.Period) {
+        if (key === this.Period && !this.PeriodError) {
             return;
         }
+        await this.loadPeriod(key);
+        this.emitUrlState();
+    }
+
+    /** Reads the current period's figures again after a failure (bizapps-sales#371). */
+    public RetryPeriod(): Promise<void> {
+        return this.loadPeriod(this.Period);
+    }
+
+    /** Selects `key` and reads what it bounds. Writes no URL; `SetPeriod` does that for a reader's click. */
+    private async loadPeriod(key: PeriodKey): Promise<void> {
         this.Period = key;
         /**
          * EVERY RESPONSE IS CHECKED AGAINST THE SELECTION THAT IS CURRENT WHEN IT LANDS.
@@ -577,6 +734,7 @@ export class MJSSalesSectionComponent implements OnInit {
          */
         const token = ++this.periodToken;
         this.PeriodLoading = true;
+        this.PeriodError = null;
         this.cdr.detectChanges();
         try {
             const window = this.Window;
@@ -588,6 +746,7 @@ export class MJSSalesSectionComponent implements OnInit {
                 return;
             }
             this.summary = TileSummary(summary, this.RosterError);
+            this.WinRateError = null;
             this.applyWinRate(winRate);
             // The Won slice is period-bound, so a narrowing period changes which deals Inspect should
             // be listing. Refreshing the view keeps the grid showing the set the tile just counted.
@@ -597,15 +756,16 @@ export class MJSSalesSectionComponent implements OnInit {
         } catch (e) {
             /**
              * A THROW USED TO ESCAPE AS AN UNHANDLED REJECTION, with `Period` already flipped -- so
-             * the pills showed the new period, the figures were the old one's, and the early
-             * `key === this.Period` return above meant clicking the same pill again would not retry.
-             * Clearing the summary makes the failure visible (`Kpis` renders em-dashes and "figures
-             * unavailable") instead of presenting stale numbers under a new label.
+             * the pills showed the new period, the figures were the old one's. Clearing the summary
+             * makes the failure visible (`Kpis` renders em-dashes and "figures unavailable") instead
+             * of presenting stale numbers under a new label, and `PeriodError` says why, beside a
+             * Retry (bizapps-sales#371).
              */
             if (token === this.periodToken) {
                 this.summary = null;
                 this.applyWinRate(null);
-                LogError(`Sales: reporting period '${key}' failed to load - ${e instanceof Error ? e.message : String(e)}`);
+                this.PeriodError = reasonOf(e);
+                LogError(`Sales: reporting period '${key}' failed to load - ${this.PeriodError}`);
             }
         } finally {
             if (token === this.periodToken) {
@@ -613,6 +773,11 @@ export class MJSSalesSectionComponent implements OnInit {
                 this.cdr.detectChanges();
             }
         }
+    }
+
+    /** The selected period's label, for the failure line. */
+    public get PeriodLabel(): string {
+        return this.Window.Label;
     }
 
     // ── Dashboard ──────────────────────────────────────────────────────────────
@@ -813,6 +978,7 @@ export class MJSSalesSectionComponent implements OnInit {
     public SetInspect(key: InspectKey): void {
         this.InspectFilter = key;
         void this.refreshInspectView().then(() => this.cdr.detectChanges());
+        this.emitUrlState();
     }
 
     public OnInspectOpened(event: RecordOpenedEvent): void {
@@ -824,30 +990,56 @@ export class MJSSalesSectionComponent implements OnInit {
 
     private async refreshInspectView(): Promise<void> {
         const token = ++this.inspectToken;
-        const view = this.pipelineView
-            ? await DealPipelineViewWith(this.pipelineView, this.inspectWhere())
-            : null;
-        // Two slice clicks in quick succession: only the latest one's view is shown.
-        if (token === this.inspectToken) {
-            this.InspectView = view;
+        try {
+            const view = this.pipelineView
+                ? await DealPipelineViewWith(this.pipelineView, this.inspectWhere())
+                : null;
+            // Two slice clicks in quick succession: only the latest one's view is shown.
+            if (token === this.inspectToken) {
+                this.InspectView = view;
+            }
+        } catch (e) {
+            if (token === this.inspectToken) {
+                this.ViewError = reasonOf(e);
+            }
         }
     }
 
     /**
-     * The inspect grid's filter. `won` is the Won tile's own predicate on the Deals view, so the grid
-     * lists every won deal in the period, not only those in the roster (bizapps-sales#209). Every other
-     * slice is a list of roster IDs.
+     * The inspect grid's filter (bizapps-sales#449).
+     *
+     * `won` is the Won tile's own predicate on the Deals view, so the grid lists every won deal in the
+     * period, not only those in the roster (bizapps-sales#209). `closing` is "the eight soonest", which
+     * is not a criterion, so it stays a list of at most eight roster IDs. Every other slice is its own
+     * criteria, so the filter's length no longer grows with the book.
      */
     private inspectWhere(): string {
-        if (this.InspectFilter !== 'won') {
+        const key = this.InspectFilter;
+        if (key === 'closing') {
             return DealInListWhere(this.InspectRows.map((d) => d.ID));
         }
-        const statusEntity = new Metadata().Entities.find((e) => e.Name === E_DEAL_STATUS_TYPE);
-        return statusEntity ? DealWonInPeriodWhere(statusEntity, this.Window) : '1 = 0';
+        const status = tableOf(E_DEAL_STATUS_TYPE);
+        if (key === 'won') {
+            return status ? DealWonInPeriodWhere(status, this.Window) : '1 = 0';
+        }
+        const tables = this.inspectTables(status);
+        return tables ? InspectCriteriaWhere(key, tables, BusinessToday()) : DealInListWhere(this.InspectRows.map((d) => d.ID));
     }
 
+    /** The type tables the criteria read, or null when any is missing from metadata. */
+    private inspectTables(status: InspectTables['Status'] | null): InspectTables | null {
+        const pipeline = tableOf(E_PIPELINE);
+        const forecast = tableOf(E_FORECAST_CATEGORY_TYPE);
+        return status && pipeline && forecast ? { Status: status, Pipeline: pipeline, Forecast: forecast } : null;
+    }
+
+    /** All deals: open first, then soonest expected close, undated last (bizapps-sales#371). */
     private async refreshAllDealsView(): Promise<void> {
-        this.AllDealsView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView) : null;
+        try {
+            this.AllDealsView = this.pipelineView ? await DealViewOrderedBy(this.pipelineView, ALL_DEALS_ORDER_BY) : null;
+        } catch (e) {
+            this.ViewError = reasonOf(e);
+        }
     }
 
     public OnAllDealsOpened(event: RecordOpenedEvent): void {
@@ -1056,6 +1248,28 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 }
 
+/** A read that settled: its value, or why it failed. */
+interface Settled<T> {
+    Value: T | null;
+    Error: string | null;
+}
+
+/** Resolves to the value or the reason; never rejects. */
+function settle<T>(read: Promise<T>): Promise<Settled<T>> {
+    return read.then(
+        (Value) => ({ Value, Error: null }),
+        (e: unknown) => ({ Value: null, Error: reasonOf(e) }),
+    );
+}
+
+/** The reads `load()` starts for the board, the win rate and the grids. */
+interface DetailReads {
+    Lookups: Promise<Settled<DealWorkspaceLookups>>;
+    WinRate: Promise<Settled<Record<string, unknown>[] | null>>;
+    View: Promise<Settled<MJUserViewEntityExtended | null>>;
+    StageEntries: Promise<Settled<Map<string, string>>>;
+}
+
 /**
  * Deals — the Explorer nav target.
  *
@@ -1068,15 +1282,39 @@ export class MJSSalesSectionComponent implements OnInit {
     selector: 'mjs-deals-resource',
     standalone: true,
     imports: [MJSSalesSectionComponent],
-    template: `<mjs-sales-section Section="deals"></mjs-sales-section>`,
+    template: `<mjs-sales-section Section="deals" [UrlState]="UrlState" (UrlStateChange)="OnUrlStateChange($event)"></mjs-sales-section>`,
 })
 export class SalesDealsSectionResource extends BaseResourceComponent implements OnInit {
+    /**
+     * The tab's query params as section state (bizapps-sales#371): read on mount, replaced on
+     * back/forward or a link opened into this tab, and written when the section changes.
+     */
+    public UrlState: SalesUrlState | null = null;
+
     public ngOnInit(): void {
+        // Before the base class subscribes: its first delivery may arrive synchronously, and the
+        // section reads this on its own init.
+        this.UrlState = this.parseUrl(this.GetQueryParams());
         super.ngOnInit();
         // Required of every BaseResourceComponent: Explorer waits on this before it stops showing a
         // loading state, so omitting it leaves the tab spinning forever. The section loads its own data
         // asynchronously underneath — this reports that the RESOURCE mounted, not that data arrived.
         this.NotifyLoadComplete();
+    }
+
+    /** Back/forward, or a deep link into a mounted tab. The section applies only what differs. */
+    protected override OnQueryParamsChanged(params: Record<string, string>, _source: 'popstate' | 'deeplink'): void {
+        this.UrlState = this.parseUrl(params);
+        this.RefreshView();
+    }
+
+    /** The section moved; record it in the URL so a reload or a shared link comes back to it. */
+    public OnUrlStateChange(state: SalesUrlState): void {
+        this.UpdateQueryParams(SalesUrlParams(state));
+    }
+
+    private parseUrl(params: Record<string, string>): SalesUrlState {
+        return ParseSalesUrlState(params, SubPagesFor('deals').map((p) => p.Id));
     }
 
     public override async GetResourceDisplayName(_d: ResourceData): Promise<string> {

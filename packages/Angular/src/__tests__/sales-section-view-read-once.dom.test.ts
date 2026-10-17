@@ -95,13 +95,17 @@ describe('the pipeline view', () => {
         expect(section.InspectView?.WhereClause).toBe('1 = 0');
     });
 
-    it('fails the load like any other read when it throws', async () => {
+    it('shows its failure on the grids only, keeping the figures, when it throws (bizapps-sales#371)', async () => {
         vi.mocked(LoadDealPipelineViewTemplate).mockRejectedValue(new Error('Received status code 504'));
         const fixture = await mountSection();
         fixture.detectChanges();
 
-        expect(fixture.componentInstance.LoadError).toContain('504');
-        expect(visiblePage(fixture).querySelector('mj-loading')).toBeNull();
+        expect(fixture.componentInstance.LoadError).toBeNull();
+        expect(fixture.componentInstance.ViewError).toContain('504');
+        const page = visiblePage(fixture);
+        expect(page.querySelector('mj-loading')).toBeNull();
+        expect(page.querySelector('.kpis'), 'the tiles stay').not.toBeNull();
+        expect(page.querySelector('[data-testid="sales-part-failed"]')?.textContent).toContain('504');
     });
 });
 

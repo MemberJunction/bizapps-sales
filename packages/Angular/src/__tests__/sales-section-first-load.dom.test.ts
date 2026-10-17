@@ -103,7 +103,7 @@ describe('the roster read', () => {
 
         expect(service.LoadRoster).toHaveBeenCalledTimes(1);
         const scope = visiblePage(fixture).querySelector('[data-testid="sales-board-scope"]');
-        expect(scope?.textContent?.trim()).toBe('Open deals, and deals closed from 1 Jul 2026');
+        expect(scope?.textContent?.trim()).toBe('Open deals, and deals closed from Jul 1, 2026');
     });
 });
 
