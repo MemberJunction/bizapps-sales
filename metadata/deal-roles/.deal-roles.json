@@ -2,7 +2,7 @@
   {
     "fields": {
       "Code": "OWNER",
-      "Name": "Owner / AE",
+      "Name": "Owner",
       "Description": "The account executive who owns the deal. THE OWNER ROLE: exactly one member per deal may hold it, and Deal.OwnerEmployeeID is the server-maintained stamp of whoever does. DefaultAttributionPct is 100 because owner-role attribution is the only default that reconciles to total bookings.",
       "IsOwnerRole": true,
       "AllowsMultiplePerDeal": false,
@@ -41,8 +41,8 @@
   {
     "fields": {
       "Code": "SDR",
-      "Name": "SDR",
-      "Description": "Sourced or qualified the opportunity. Present on the team for attribution and coverage reporting even after handoff.",
+      "Name": "Sales Development Rep (SDR)",
+      "Description": "Sales development rep. Sourced or qualified the opportunity. Present on the team for attribution and coverage reporting even after handoff.",
       "IsOwnerRole": false,
       "AllowsMultiplePerDeal": true,
       "IsQuotaCarrying": false,

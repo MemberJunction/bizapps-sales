@@ -159,7 +159,7 @@ the door open — a routing engine can later read the same column rather than re
 ### D4 — Default attribution: the owner role
 
 **Decision:** when no `AttributionPct` is set, by-rep roll-ups attribute to the **owner role** (the
-`DealTeamMember` whose `DealRole.IsOwnerRole = 1`). Encoded in the seeds as `Owner / AE` carrying
+`DealTeamMember` whose `DealRole.IsOwnerRole = 1`). Encoded in the seeds as `Owner` (code `OWNER`) carrying
 `DefaultAttributionPct = 100`. No server logic yet — that lands with S3/S4.
 
 **Why:** it is the **only** default where the sum of by-rep attribution equals total bookings. An equal
