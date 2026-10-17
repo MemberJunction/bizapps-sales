@@ -191,6 +191,41 @@ export interface SalesReopenDealOutput {
     DealStageEventID?: string | null;
 }
 
+/**
+ * What the deal-line editor sends when a line's discount went up. NO `import` statements in this file:
+ * CodeGen emits it verbatim into `remote_operations.ts` and resolves none (see
+ * `sales-close-deal.input.ts`).
+ */
+export interface SalesRecordDiscountConcessionInput {
+    /** The saved order line the discount is on. Orders values the concession from what it stores. */
+    OrderLineID: string;
+    /**
+     * One of orders' concession reason categories. Typed as a string because orders owns the list
+     * (its `CK_OrderConcession_ReasonCategory`), so a category it adds needs no sales release.
+     */
+    ReasonCategory: string;
+    /** The rep's reason. Required: an approver decides on it. */
+    Reason: string;
+}
+
+/**
+ * What orders decided about a discount concession, or why it refused to record one. NO `import`
+ * statements in this file (see `sales-close-deal.input.ts`).
+ */
+export interface SalesRecordDiscountConcessionOutput {
+    /** The concession was recorded. False when sales or orders refused it; `Message` says why. */
+    Success: boolean;
+    /** The recorded concession, when there is one. */
+    ConcessionID?: string | null;
+    /**
+     * Recorded but not decided: the discount is outside the requester's Sales Authority and waits for
+     * the approving role. Read from whether orders stamped a decider, never from the status's name.
+     */
+    AwaitingApproval: boolean;
+    /** Orders' or sales' refusal, verbatim, when `Success` is false. */
+    Message?: string | null;
+}
+
 // ============================================================
 // Sales.CloseDeal — Close Deal
 // ============================================================
@@ -202,6 +237,22 @@ export interface SalesReopenDealOutput {
  */
 export class SalesCloseDealOperation extends BaseRemotableOperation<SalesCloseDealInput, SalesCloseDealOutput> {
     public readonly OperationKey = "Sales.CloseDeal";
+    public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "sales:write";
+    public readonly RequiresSystemUser = false;
+}
+
+// ============================================================
+// Sales.RecordDiscountConcession — Record Discount Concession
+// ============================================================
+/**
+ * Record Discount Concession
+ * Record a deal line's raised discount as a Price concession on its order line, as the calling user, with the rep's reason category and reason. Orders values the concession, approves it on save when the requester's Sales Authority covers it, and otherwise leaves it Pending for the approving role. Returns whether it was recorded, whether it awaits approval, and orders' own message when it refuses. Sales states intent only; orders computes every figure.
+ * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
+ * under 'Sales.RecordDiscountConcession'. This generated base provides the typed contract only (client-safe).
+ */
+export class SalesRecordDiscountConcessionOperation extends BaseRemotableOperation<SalesRecordDiscountConcessionInput, SalesRecordDiscountConcessionOutput> {
+    public readonly OperationKey = "Sales.RecordDiscountConcession";
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "sales:write";
     public readonly RequiresSystemUser = false;
