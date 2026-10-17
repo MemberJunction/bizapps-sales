@@ -2,7 +2,7 @@
   "entity": "MJ: Remote Operations",
   "filePattern": "**/.*.json",
   "_comment": [
-    "Two operations live here: `Sales.CloseDeal` and `Sales.ReopenDeal`.",
+    "Three operations live here: `Sales.CloseDeal`, `Sales.ReopenDeal` and `Sales.RecordDiscountConcession`.",
     "",
     "A third, `Sales.SaveDeal`, was RETIRED and is deliberately absent. Its entire job was to let a browser",
     "save a deal together with its lines and payment schedule atomically -- something a client could not do",
@@ -18,7 +18,10 @@
     "audited path, all of which must succeed or fail together. That is why these two survive and SaveDeal",
     "did not.",
     "",
-    "Both resolve their CategoryID with @lookup against remote-operation-categories, which is why that",
+    "`Sales.RecordDiscountConcession` fits the same test: a concession the browser creates never saves, and creating",
+    "it on the server is what lets orders' server subclass fill and decide it.",
+    "",
+    "All three resolve their CategoryID with @lookup against remote-operation-categories, which is why that",
     "directory precedes this one in directoryOrder."
   ],
   "pull": {

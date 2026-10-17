@@ -49,6 +49,9 @@ export * from './DealTeamMemberEntityServer.js';
 export * from './PipelineStageEntityServer.js';
 export * from './CloseDealOperation.js';
 
+/** `Sales.RecordDiscountConcession`: a deal line's raised discount, recorded where orders' rules run (golive#340). */
+export * from './RecordDiscountConcessionOperation.js';
+
 /**
  * The REAL orders handoff. Selected automatically when orders' entities are registered; see
  * `resolveSeam` in CloseDealOperation. Exported so a test can install it deliberately.
@@ -135,6 +138,7 @@ import { DealEntityServer } from './DealEntityServer.js';
 import { DealTeamMemberEntityServer } from './DealTeamMemberEntityServer.js';
 import { PipelineStageEntityServer } from './PipelineStageEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
+import { RecordDiscountConcessionOperation } from './RecordDiscountConcessionOperation.js';
 import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 
 /**
@@ -149,7 +153,7 @@ import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 export function LoadSalesCoreEntitiesServer(): void {
     LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, PipelineStageEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
+    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, PipelineStageEntityServer, CloseDealOperation, ReopenDealOperation, RecordDiscountConcessionOperation, DealLinkerExtension];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }
