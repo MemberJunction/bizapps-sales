@@ -25,6 +25,7 @@ type GridCol = {
     orderIndex: number;
     width: number;
     pinned?: 'left' | 'right' | null;
+    hidden?: boolean;
     format?: Record<string, unknown>;
 };
 
@@ -62,6 +63,13 @@ export function DealPipelineGridState(): { sortSettings: { field: string; dir: '
             { Name: 'OwnerEmployee', DisplayName: 'Owner', orderIndex: 10, width: 140 },
             { Name: 'ForecastCategoryType', DisplayName: 'Forecast', orderIndex: 11, width: 130 },
             { Name: 'NextStep', DisplayName: 'Next step', orderIndex: 12, width: 200 },
+            /**
+             * Hidden, and here only because it is the first sort key (bizapps-sales#371). The grid can
+             * show a sort only on one of its columns; with ClosedAt missing, its sort never matched
+             * the saved one, it reported the difference as a user's sort, and the viewer then re-sorted
+             * by Expected close and rebuilt the columns with the entity's own headers.
+             */
+            { Name: 'ClosedAt', DisplayName: 'Closed at', orderIndex: 13, width: 120, hidden: true },
         ],
     };
 }

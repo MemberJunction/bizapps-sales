@@ -84,6 +84,14 @@ describe('a move', () => {
         const board = mount(row);
         expect(board.MoveTargets(board.Columns, row).map((c) => c.StageID)).toEqual(['S2']);
     });
+
+    it('offers nothing on a card in a closing column', () => {
+        const row = { ...deal(), PipelineStageID: 'S3', PipelineStage: 'Signed', IsOpen: false } as DealRosterRow;
+        const board = mount(row);
+        board.Stages = [...STAGES, { ID: 'S3', Name: 'Signed', PipelineID: 'P', DisplayOrder: 3, Probability: 100, ForecastCategoryTypeID: null, DealStatusTypeID: 'WON', RottingDays: null }];
+        board.DealStatusTypes = [{ ID: 'WON', LocksDeal: true } as (typeof board.DealStatusTypes)[number]];
+        expect(board.MoveTargets(board.Columns, row)).toEqual([]);
+    });
 });
 
 describe('the idle flag', () => {
