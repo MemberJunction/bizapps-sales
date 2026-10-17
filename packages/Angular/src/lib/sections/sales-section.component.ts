@@ -49,10 +49,8 @@ import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 import { EntityViewerModule, type RecordOpenedEvent, type ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-viewer';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import {
-    ALL_DEALS_ORDER_BY,
     DealInListWhere,
     DealPipelineViewWith,
-    DealViewOrderedBy,
     DealWonInPeriodWhere,
     InspectCriteriaWhere,
     LoadDealPipelineViewTemplate,
@@ -1035,10 +1033,14 @@ export class MJSSalesSectionComponent implements OnInit {
         return status && pipeline && forecast ? { Status: status, Pipeline: pipeline, Forecast: forecast } : null;
     }
 
-    /** All deals: open first, then soonest expected close, undated last (bizapps-sales#371). */
+    /**
+     * All deals takes the saved view's sort: open deals first (no ClosedAt), then soonest expected close
+     * (bizapps-sales#371). MJ's grid sorts only by a column it shows, so a sort expression is read back
+     * as a user's sort and resets the layout; undated open deals therefore lead the open block.
+     */
     private async refreshAllDealsView(): Promise<void> {
         try {
-            this.AllDealsView = this.pipelineView ? await DealViewOrderedBy(this.pipelineView, ALL_DEALS_ORDER_BY) : null;
+            this.AllDealsView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView) : null;
         } catch (e) {
             this.ViewError = reasonOf(e);
         }

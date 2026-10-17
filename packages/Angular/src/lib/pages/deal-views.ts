@@ -112,7 +112,7 @@ export async function LoadDealPipelineViewTemplate(entity: EntityInfo): Promise<
         WhereClause: '',
         GridState: JSON.stringify(grid),
         GridStateObject: grid,
-        OrderByClause: `${ALL_DEALS_ORDER_BY} ASC`,
+        OrderByClause: 'ClosedAt ASC, ExpectedCloseDate ASC',
     } as unknown as MJUserViewEntityExtended;
 }
 
@@ -137,40 +137,6 @@ export async function DealPipelineViewWith(
     }
     return copy;
 }
-
-/**
- * A copy of `view` ordered by `orderBy`, never saved.
- *
- * The entity viewer sorts on the view's FIRST sort entry, as `<field> <direction>`, so a multi-key
- * order travels as that one entry's field. The clause passes MJ's ORDER BY screen (no statement
- * keywords, comments or semicolons).
- */
-export async function DealViewOrderedBy(view: MJUserViewEntityExtended, orderBy: string): Promise<MJUserViewEntityExtended> {
-    const copy = await DealPipelineViewWith(view);
-    const sort = [{ field: orderBy, direction: 'Asc' }];
-    copy.SortState = JSON.stringify(sort);
-    if (!(copy instanceof BaseEntity)) {
-        // The in-memory fallback has no getters: give it the values the viewer reads.
-        Object.assign(copy as object, { ViewSortInfo: sort, OrderByClause: `${orderBy} ASC` });
-    }
-    return copy;
-}
-
-/**
- * All deals' order (bizapps-sales#371): open deals first, then by expected close, soonest first, with
- * deals that have no expected close last.
- *
- * "Open" is `ClosedAt IS NULL`: closing stamps it and reopening clears it, and it is the first sort
- * key of the saved view (`ClosedAt ASC, ExpectedCloseDate ASC`), so the code and the view agree. The
- * saved view cannot say "no date last" (an ascending sort puts NULL first on SQL Server), which is why
- * the code carries the CASE expressions. Plain CASE, no bracketed names, so it reads the same on
- * SQL Server and PostgreSQL.
- */
-export const ALL_DEALS_ORDER_BY = [
-    'CASE WHEN ClosedAt IS NULL THEN 0 ELSE 1 END',
-    'CASE WHEN ExpectedCloseDate IS NULL THEN 1 ELSE 0 END',
-    'ExpectedCloseDate',
-].join(', ');
 
 async function copyEntity(template: MJUserViewEntityExtended): Promise<MJUserViewEntityExtended> {
     const copy = await new Metadata().GetEntityObject<MJUserViewEntityExtended>('MJ: User Views');
