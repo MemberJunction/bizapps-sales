@@ -41,6 +41,11 @@ export interface StageLookup extends DealLookup {
      * Needed by any surface that must know whether arriving here would LOCK the deal.
      */
     DealStatusTypeID: string | null;
+    /**
+     * Days a deal may sit in this stage before the Board flags it, or null for no limit
+     * (bizapps-sales#450).
+     */
+    RottingDays: number | null;
 }
 
 

@@ -65,3 +65,34 @@ export function UtcDatePart(value: string | Date): string {
 export function BusinessToday(): string {
     return BusinessTimeZoneEngine.Instance.Today();
 }
+
+const MONTH_ABBREVIATIONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * The one way the Sales views write a calendar day: "Jul 1, 2026" (bizapps-sales#371).
+ *
+ * The dashboard, the board cards and the grids used three shapes. This one is chosen because the grids
+ * cannot follow anything else: MJ's entity grid renders a `date` column with `Intl` `dateStyle`
+ * presets in `en-US` only, and {@link GRID_DAY_FORMAT} is the preset that prints this same shape.
+ *
+ * Reads the stored day from its UTC parts (see {@link UtcDatePart}), so no zone moves it. Accepts the
+ * `YYYY-MM-DD` string or the `Date` a query can hand back; anything else is an empty string.
+ */
+export function DayLabel(value: string | Date | null | undefined): string {
+    if (value === null || value === undefined || value === '') {
+        return '';
+    }
+    const [y, m, d] = UtcDatePart(value).split('-').map(Number);
+    if (!y || !m || !d) {
+        return '';
+    }
+    return `${MONTH_ABBREVIATIONS[m - 1]} ${d}, ${y}`;
+}
+
+/** "Jul 1" — a day without its year, in the same shape as {@link DayLabel}. */
+export function MonthDayText(month: number, day: number): string {
+    return `${MONTH_ABBREVIATIONS[Math.min(Math.max(month, 1), 12) - 1]} ${day}`;
+}
+
+/** The grid preset that renders {@link DayLabel}'s shape ("Jul 1, 2026"). Used for every grid date column. */
+export const GRID_DAY_FORMAT = 'medium';

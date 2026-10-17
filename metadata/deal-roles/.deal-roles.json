@@ -5,7 +5,7 @@
     ],
     "fields": {
       "Code": "OWNER",
-      "Name": "Owner / AE",
+      "Name": "Owner",
       "Description": "The account executive who owns the deal. Each deal has exactly one, and by default they get full credit for it.",
       "IsOwnerRole": true,
       "AllowsMultiplePerDeal": false,
@@ -50,8 +50,8 @@
     ],
     "fields": {
       "Code": "SDR",
-      "Name": "SDR",
-      "Description": "Sourced or qualified the opportunity, and stays on the team after handing it over.",
+      "Name": "Sales Development Rep (SDR)",
+      "Description": "Sales development rep. Sourced or qualified the opportunity, and stays on the team after handing it over.",
       "IsOwnerRole": false,
       "AllowsMultiplePerDeal": true,
       "IsQuotaCarrying": false,

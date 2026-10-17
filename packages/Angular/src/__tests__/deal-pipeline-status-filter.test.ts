@@ -471,7 +471,7 @@ describe('the reopen actually reaches the screen', () => {
 describe('what an operation reported outlives the mode it was started in', () => {
     const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
     const statusField = (() => {
-        const start = source.indexOf('<label class="mj-forms-field-label">Status</label>');
+        const start = source.indexOf('<label class="mj-forms-field-label" [attr.for]="EditMode ? FieldIdPrefix + \'-status\' : null">Status</label>');
         return source.slice(start, source.indexOf('</mj-collapsible-panel>', start));
     })();
 
@@ -496,7 +496,7 @@ describe('what an operation reported outlives the mode it was started in', () =>
 describe('the status hints point at this control, not away from it', () => {
     const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
     const statusField = (() => {
-        const start = source.indexOf('<label class="mj-forms-field-label">Status</label>');
+        const start = source.indexOf('<label class="mj-forms-field-label" [attr.for]="EditMode ? FieldIdPrefix + \'-status\' : null">Status</label>');
         return source.slice(start, source.indexOf('</mj-collapsible-panel>', start));
     })();
     const hints = [...statusField.matchAll(/class="mjs-field__hint">([^<]+)</g)].map((m) => m[1].trim());

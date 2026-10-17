@@ -26,6 +26,7 @@ import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
 import { DealCloseDay } from './deal-close-day';
 import { WeightedAmount } from './deal-weighted-amount';
+import { FormatDealMoney, RefreshDealCurrencyCodes } from './deal-money';
 
 
 /**
@@ -66,9 +67,9 @@ interface DealStateSource {
     DealStateRefreshed?: { subscribe(next: () => void): { unsubscribe(): void } };
 }
 
-function money(n: number | null | undefined): string {
-    if (n == null || !Number.isFinite(Number(n))) return '—';
-    return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+/** Whole units in the deal's currency: the header is the one place on the form without cents. See deal-money.ts. */
+function money(n: number | null | undefined, currencyID: string | null | undefined): string {
+    return FormatDealMoney(n, currencyID, 'whole') || '—';
 }
 
 @RegisterClassEx(BaseFormPanel, {
@@ -117,7 +118,7 @@ function money(n: number | null | undefined): string {
                         }
                         @if (IsLocked) {
                             <span class="mjs-deal-hero__chip" data-tone="warning">
-                                <i class="fa-solid fa-lock"></i> Locked
+                                <i class="fa-solid fa-lock"></i> Closed
                             </span>
                         }
                     </div>
@@ -243,9 +244,13 @@ function money(n: number | null | undefined): string {
                         }
                     </div>
                 }
-                @if (LockNotice) { <div class="mjs-flag">{{ LockNotice }}</div> }
-                @if (StaleAmountNotice) { <div class="mjs-flag">{{ StaleAmountNotice }}</div> }
             }
+            <!-- OUTSIDE the collapsed region (#371 item 2). Collapsed is a persisted per-user
+                 setting, and these say why the form will refuse an edit or why the amount is out of
+                 date; hiding them with the briefing left a rep who had collapsed the header once
+                 with no warning at all. -->
+            @if (Record.IsSaved && LockNotice) { <div class="mjs-flag">{{ LockNotice }}</div> }
+            @if (Record.IsSaved && StaleAmountNotice) { <div class="mjs-flag">{{ StaleAmountNotice }}</div> }
         </div>
     `,
     styles: [`
@@ -401,6 +406,7 @@ function money(n: number | null | undefined): string {
             margin-top: var(--mj-space-2);
         }
         .mjs-deal-hero--collapsed { padding: 12px 20px; gap: 0; margin-bottom: var(--mj-space-3); }
+        .mjs-deal-hero--collapsed > .mjs-flag { margin-top: var(--mj-space-3); }
         .mjs-deal-hero--collapsed .mjs-deal-hero__avatar { width: 42px; height: 42px; border-radius: var(--mj-radius-md, 10px); font-size: 1.05rem; }
         .mjs-deal-hero--collapsed .mjs-deal-hero__name { font-size: 1.15rem; }
         @media (max-width: 720px) {
@@ -644,8 +650,10 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         });
     }
 
-    public get AmountText(): string { return money(this.Record?.Amount); }
-    public get WeightedText(): string { return money(WeightedAmount(this.Record?.Amount, this.Record?.Probability)); }
+    public get AmountText(): string { return money(this.Record?.Amount, this.Record?.CurrencyID); }
+    public get WeightedText(): string {
+        return money(WeightedAmount(this.Record?.Amount, this.Record?.Probability), this.Record?.CurrencyID);
+    }
     public get StatusTone(): 'success' | 'warning' | 'muted' {
         const s = this.StatusName.toLowerCase();
         if (!s) return 'muted';
@@ -698,6 +706,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     }
 
     private async refreshNotices(): Promise<void> {
+        await RefreshDealCurrencyCodes();
         await this.resolveLock();
         await this.resolveReversals();
         await this.resolveStale();

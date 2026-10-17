@@ -54,6 +54,7 @@ import {
 import { FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 
 import { DealWorkspaceService, DEFAULT_DISPLAY_CURRENCY, type DealRosterRow } from '../workspace/deal-workspace.service';
+import { BusinessToday, DayLabel, UtcDatePart } from '../pages/dashboard-dates';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
 import {
     CompanyLabel,
@@ -96,6 +97,53 @@ export function CardClosed(deal: CardDates): boolean {
 /** The day a card shows: the close day once the deal has closed, otherwise the expected close day. */
 export function CardCloseDay(deal: CardDates): Date | null {
     return DisplayDay(CardClosed(deal) ? deal.ActualCloseDate : deal.ExpectedCloseDate);
+}
+
+/** A card's close day as text, in the shape every Sales date uses ("Jul 1, 2026"), or '' for none. */
+export function CardDayLabel(deal: CardDates): string {
+    return DayLabel(CardCloseDay(deal));
+}
+
+/** Whole days from `fromDay` to `today`, both `YYYY-MM-DD`. Never negative. */
+export function DaysBetween(fromDay: string, today: string): number {
+    const at = (iso: string): number => {
+        const [y, m, d] = UtcDatePart(iso).split('-').map(Number);
+        return Date.UTC(y, m - 1, d);
+    };
+    return Math.max(0, Math.round((at(today) - at(fromDay)) / 86_400_000));
+}
+
+/** What a card says when its deal has sat in its stage too long, or null when it has not. */
+export interface StageIdle {
+    Days: number;
+    Limit: number;
+    Label: string;
+}
+
+/**
+ * Whether an open deal has sat in its stage longer than the stage's `RottingDays` (bizapps-sales#450).
+ *
+ * Null when the deal is closed, the stage sets no limit, or the day it entered the stage is unknown.
+ * "Longer than": a deal on its limit's last day is not yet flagged.
+ */
+export function StageIdleFor(
+    deal: Pick<DealRosterRow, 'IsOpen'>,
+    rottingDays: number | null | undefined,
+    enteredDay: string | null | undefined,
+    today: string,
+): StageIdle | null {
+    if (!deal.IsOpen || rottingDays == null || !enteredDay) {
+        return null;
+    }
+    const days = DaysBetween(enteredDay, today);
+    if (days <= rottingDays) {
+        return null;
+    }
+    return {
+        Days: days,
+        Limit: rottingDays,
+        Label: `In this stage ${days} days, past its ${rottingDays}-day limit`,
+    };
 }
 
 /**
@@ -193,6 +241,11 @@ export class DealBoardComponent {
     @Input() public Pipelines: PipelineLookup[] = [];
     @Input() public Stages: StageLookup[] = [];
     @Input() public DealStatusTypes: DealStatusLookup[] = [];
+    /**
+     * The day each open deal entered its current stage, keyed by lower-cased deal ID, for the idle
+     * flag (bizapps-sales#450). Empty means unknown, and no card is flagged.
+     */
+    @Input() public StageEnteredOn: ReadonlyMap<string, string> = new Map();
 
     /** A card was clicked — the section opens it as an Explorer record tab. */
     @Output() public readonly DealOpened = new EventEmitter<DealRosterRow>();
@@ -403,15 +456,7 @@ export class DealBoardComponent {
     /** CDK asks per drop list whether a given drag may land. This is where the lock is refused. */
     public CanDropInto = (column: BoardColumn) => (): boolean => !column.IsClosing && !this.Moving;
 
-    /**
-     * A card was dropped on a column.
-     *
-     * The move goes through `Sales.SaveDeal` — the same operation the workspace saves with — rather than a
-     * bespoke write. That is what earns the stage event, the validation and the company resolution without
-     * this component knowing they exist; the operation appends the append-only `DealStageEvent` itself when
-     * it sees the stage change. Reusing `LoadDraft` also means the deal's lines and instalments round-trip
-     * intact, which matters because the operation treats a present array as the complete desired set.
-     */
+    /** A card was dropped on a column. The save is {@link moveDeal}'s, shared with "Move to stage". */
     public async OnDrop(event: CdkDragDrop<BoardColumn>, target: BoardColumn): Promise<void> {
         this.Message = null;
 
@@ -437,38 +482,93 @@ export class DealBoardComponent {
             return;
         }
 
+        await this.moveDeal(deal, target);
+    }
+
+    /**
+     * The stages a card's "Move to stage" control offers: every column of its pipeline but its own and
+     * the closing ones, which a move must not reach (see the class header). A card already in a closing
+     * column offers none: a closed deal is locked, and it reopens from the deal form.
+     */
+    public MoveTargets(columns: readonly BoardColumn[], deal: DealRosterRow): BoardColumn[] {
+        if (columns.some((c) => c.IsClosing && c.StageID === deal.PipelineStageID)) {
+            return [];
+        }
+        return columns.filter((c) => !c.IsClosing && c.StageID !== deal.PipelineStageID);
+    }
+
+    /** The stage picked in each card's "Move to stage" control, by deal ID, until it is applied. */
+    public readonly PendingMove = new Map<string, string>();
+
+    /** The keyboard path to a stage change (bizapps-sales#371): the same save as a drop. */
+    public async MoveToPicked(deal: DealRosterRow): Promise<void> {
+        const target = this.Columns.find((c) => c.StageID === this.PendingMove.get(deal.ID));
+        if (!target || target.IsClosing) {
+            return;
+        }
+        this.Message = null;
+        this.PendingMove.delete(deal.ID);
+        await this.moveDeal(deal, target);
+    }
+
+    /**
+     * Moves the card at once, then saves (bizapps-sales#371).
+     *
+     * Columns are built from the deals' `PipelineStageID`, so setting it moves the card before the save
+     * goes out; it used to stay in its old column for the whole save and then jump, which read as a
+     * refused move. A failed save puts the card back and says why. On success the section re-reads the
+     * roster as the authority.
+     */
+    private async moveDeal(deal: DealRosterRow, target: BoardColumn): Promise<void> {
+        const from = { StageID: deal.PipelineStageID, Stage: deal.PipelineStage };
+        deal.PipelineStageID = target.StageID;
+        deal.PipelineStage = target.Label;
         this.Moving = true;
         this.cdr.detectChanges();
 
+        const failure = await this.saveStage(deal, target);
+        if (failure) {
+            deal.PipelineStageID = from.StageID;
+            deal.PipelineStage = from.Stage;
+            this.Message = failure;
+        } else {
+            this.StageMoved.emit();
+        }
+        this.Moving = false;
+        this.cdr.detectChanges();
+    }
+
+    /**
+     * Saves the stage through `Sales.SaveDeal` — the same operation the workspace saves with — rather
+     * than a bespoke write. That is what earns the stage event, the validation and the company
+     * resolution without this component knowing they exist; the operation appends the append-only
+     * `DealStageEvent` itself when it sees the stage change. Reusing `LoadDeal` also means the deal's
+     * lines and instalments round-trip intact, which matters because the operation treats a present
+     * array as the complete desired set.
+     *
+     * @returns why the move failed, or null when it saved.
+     */
+    private async saveStage(deal: DealRosterRow, target: BoardColumn): Promise<string | null> {
         try {
             const draft = await this.service.LoadDeal(deal.ID);
             if (!draft) {
-                this.Message = `"${deal.Name}" could not be read, so it was not moved.`;
-                return;
+                return `"${deal.Name}" could not be read, so it was not moved.`;
             }
-
             draft.PipelineStageID = target.StageID;
-
             const outcome = await this.service.Save(draft);
             if (!outcome.Success) {
-                this.Message =
-                    outcome.Validation?.Issues[0]?.Message ??
-                    outcome.ErrorMessage ??
-                    `"${deal.Name}" could not be moved.`;
-                return;
+                return outcome.Validation?.Issues[0]?.Message ?? outcome.ErrorMessage ?? `"${deal.Name}" could not be moved.`;
             }
-
-            // Optimistic local update so the card stays where it was dropped, then the section re-reads
-            // the roster as the authority.
-            deal.PipelineStageID = target.StageID;
-            deal.PipelineStage = target.Label;
-            this.StageMoved.emit();
+            return null;
         } catch (err) {
-            this.Message = `"${deal.Name}" could not be moved: ${err}`;
-        } finally {
-            this.Moving = false;
-            this.cdr.detectChanges();
+            return `"${deal.Name}" could not be moved: ${err instanceof Error ? err.message : String(err)}`;
         }
+    }
+
+    /** The idle flag for a card, or null. See {@link StageIdleFor}. */
+    public IdleFor(deal: DealRosterRow): StageIdle | null {
+        const stage = this.Stages.find((s) => s.ID === deal.PipelineStageID);
+        return StageIdleFor(deal, stage?.RottingDays, this.StageEnteredOn.get(deal.ID.toLowerCase()), BusinessToday());
     }
 
     /**
@@ -494,6 +594,7 @@ export class DealBoardComponent {
     /** Exposed for the card's close date. See {@link CardCloseDay} and {@link DisplayDay}. */
     public readonly CardCloseDay = CardCloseDay;
     public readonly CardClosed = CardClosed;
+    public readonly CardDayLabel = CardDayLabel;
     /** Track by ID so a re-render does not tear down every card. */
     public TrackCard = (_: number, deal: DealRosterRow): string => deal.ID;
     /** Exposed for the template's per-card fallback. See DEFAULT_DISPLAY_CURRENCY. */

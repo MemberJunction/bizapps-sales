@@ -32,7 +32,7 @@
  */
 // From the leaf date module, NOT from `dashboard-inspect` -- importing it here would close an
 // ES-module cycle, because inspect imports `WithinWindow` from this file. See `dashboard-dates.ts`.
-import { BusinessToday, UtcDatePart } from './dashboard-dates';
+import { BusinessToday, DayLabel, MonthDayText, UtcDatePart } from './dashboard-dates';
 
 /** The four windows the dashboard offers. `alltime` is unbounded, not a very wide bound. */
 export type PeriodKey = 'quarter' | 'lastquarter' | 'year' | 'alltime';
@@ -158,7 +158,8 @@ export function DescribeFiscalBasis(resolution: FiscalYearStartResolution): stri
         case 'profile':
             return `fiscal year starts ${start}`;
         case 'no-accounting':
-            return `calendar year (BizApps Accounting not installed)`;
+            // A rep cannot act on which apps the host installed, so the line names only the boundary.
+            return `calendar year`;
         case 'no-profiles':
             return `calendar year (no company profile sets a fiscal year)`;
         case 'unreadable':
@@ -168,15 +169,9 @@ export function DescribeFiscalBasis(resolution: FiscalYearStartResolution): stri
     }
 }
 
-const MONTH_NAMES = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
-
-/** "6 Apr" — the fiscal start as a reader states it. */
+/** "Apr 6" — the fiscal start as a reader states it, in the shape every Sales date uses (`DayLabel`). */
 export function MonthDayLabel(start: FiscalYearStart): string {
-    const month = MONTH_NAMES[Math.min(Math.max(start.Month, 1), 12) - 1];
-    return `${start.Day} ${month}`;
+    return MonthDayText(start.Month, start.Day);
 }
 
 /** Days in a UTC month. `day 0` of the NEXT month is the last day of this one. */
@@ -342,15 +337,12 @@ export function WithinWindow(date: string, window: PeriodWindow): boolean {
     return !(window.End !== null && date > window.End);
 }
 
-/** "1 Jul 2026 – 30 Sep 2026", or "all time" when unbounded. For a footnote, never for a filter. */
+/** "Jul 1, 2026 – Sep 30, 2026", or "all time" when unbounded. For a footnote, never for a filter. */
 export function FormatWindow(window: PeriodWindow): string {
     if (window.Start === null && window.End === null) {
         return 'all time';
     }
-    const pretty = (iso: string): string => {
-        const [y, m, d] = iso.split('-').map(Number);
-        return `${d} ${MONTH_NAMES[m - 1]} ${y}`;
-    };
+    const pretty = DayLabel;
     if (window.Start === null) {
         return `up to ${pretty(window.End!)}`;
     }

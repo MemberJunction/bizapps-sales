@@ -124,6 +124,26 @@ function amount(d: DealRosterRow): number {
     return Number.isFinite(n) ? n : 0;
 }
 
+/** The business-day bounds the close-date buckets split on. */
+export interface InspectDayBounds {
+    /** Seven days on from today: the end of "next 7 days". */
+    WeekEnd: string;
+    /** The last day of today's month: the end of "later this month". */
+    MonthEnd: string;
+    /**
+     * Where "later" starts: after the month, or after the week when the week runs past month end, so
+     * the buckets cover every open deal.
+     */
+    LaterFrom: string;
+}
+
+/** {@link InspectDayBounds} for `today`. Shared by the roster filter and the grid's server-side filter. */
+export function InspectDateBounds(today: string): InspectDayBounds {
+    const WeekEnd = addDays(today, 7);
+    const MonthEnd = monthEnd(today);
+    return { WeekEnd, MonthEnd, LaterFrom: WeekEnd > MonthEnd ? WeekEnd : MonthEnd };
+}
+
 /**
  * Soonest expected close first, open deals only. The dashboard's default inspect — and the order
  * `75-dashboard.spec.ts` asserts against the database.
@@ -147,11 +167,9 @@ export function FilterInspect(
     today: string = BusinessToday(),
     window?: PeriodWindow,
 ): DealRosterRow[] {
-    const weekEnd = addDays(today, 7);
-    const restMonth = monthEnd(today);
     // Later starts where the earlier buckets stop, so the buckets cover every open deal. Near month
     // end the week runs past the month, and Later starts after the week instead.
-    const laterFrom = weekEnd > restMonth ? weekEnd : restMonth;
+    const { WeekEnd: weekEnd, MonthEnd: restMonth, LaterFrom: laterFrom } = InspectDateBounds(today);
     switch (key) {
         case 'closing':
             return ClosingSoon(deals, 8);
