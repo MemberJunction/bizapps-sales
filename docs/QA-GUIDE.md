@@ -277,9 +277,9 @@ the screen disagree, the spec is the reference.
 4. On a closed deal the Activity panel still renders, and logging works as on an open one.
 
 ### 5.11 Deal team and owner — `76-team-roster-owner-stamp`
-1. A deal's owner comes from its **Internal team** row with the Owner / AE role. With none, the Overview
+1. A deal's owner comes from its **Internal team** row with the Owner role. With none, the Overview
    says "No owner assigned".
-2. Save the Owner / AE team row (from the Internal team grid or its own record): the deal's owner is
+2. Save the Owner team row (from the Internal team grid or its own record): the deal's owner is
    stamped from it.
 3. With the deal already open while the owner changes elsewhere, open its Internal team section: the
    Overview stops saying "No owner assigned".
