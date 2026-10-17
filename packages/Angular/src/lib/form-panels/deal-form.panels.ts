@@ -53,6 +53,7 @@ import { MJSDealLineEditorComponent } from './deal-line-editor.component';
 import { MJSDealLineCardsComponent } from './deal-line-cards.component';
 import { BusinessDayOf, DealCloseDay } from './deal-close-day';
 import { WeightedAmount } from './deal-weighted-amount';
+import { FormatDealMoney } from './deal-money';
 import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
 import { SelectableStages } from '../data/selectable-stages';
 
@@ -277,6 +278,9 @@ function splitRefusal(
  * an order the deal cannot be worked from, and that list is the only thing between the rep and a live deal
  * pointing at a dead order.
  */
+/** Counts field panel instances, for {@link MJSDealFieldPanel.FieldIdPrefix}. */
+let dealFieldPanelInstances = 0;
+
 /**
  * Whether a close has everything `Sales.CloseDeal` will demand of it.
  *
@@ -293,11 +297,26 @@ function CloseDetailComplete(
     lossNotes: string,
     reasons: LossReasonOption[],
 ): boolean {
-    if (!target) return false;
-    if (!target.IsLost) return true;
-    if (!lossReasonID) return false;
+    return CloseDetailMissing(target, lossReasonID, lossNotes, reasons) === null;
+}
+
+/**
+ * What a close still needs, as the sentence shown under the disabled confirm button, or null when it
+ * is complete (#371 item 6). The same checks as {@link CloseDetailComplete}, which is defined by it,
+ * so the button and its explanation cannot disagree.
+ */
+function CloseDetailMissing(
+    target: DealStatusOption | null,
+    lossReasonID: string | null,
+    lossNotes: string,
+    reasons: LossReasonOption[],
+): string | null {
+    if (!target) return 'Choose an outcome to close the deal.';
+    if (!target.IsLost) return null;
+    if (!lossReasonID) return `Choose a loss reason to close as ${target.Name}.`;
     const needsNotes = reasons.find((r) => r.ID === lossReasonID)?.RequiresNotes === true;
-    return !needsNotes || lossNotes.trim().length > 0;
+    if (needsNotes && lossNotes.trim().length === 0) return 'Add loss notes; the chosen reason requires them.';
+    return null;
 }
 
 /** What a close needs from whichever surface collected it. */
@@ -430,6 +449,8 @@ const CLOSE_ACTION_STYLES = `
     .mjs-close-action__hint { color: var(--mj-text-muted); font-size: 0.78rem; }
     .mjs-close-action__form { display: flex; flex-direction: column; gap: var(--mj-space-3); max-width: 520px; }
     .mjs-close-action__row { display: flex; gap: var(--mj-space-4); align-items: center; }
+    .mjs-close-action__outcome { border: 0; margin: 0; padding: 0; min-width: 0; }
+    .mjs-close-action__legend { padding: 0; margin-bottom: 4px; font-size: 0.78rem; color: var(--mj-text-muted); }
     .mjs-close-action__field { display: flex; flex-direction: column; gap: 4px; }
     .mjs-close-action__field > span { font-size: 0.78rem; color: var(--mj-text-muted); }
     .mjs-close-action__confirm {
@@ -448,31 +469,25 @@ const CLOSE_ACTION_STYLES = `
     .mjs-close-action__note { font-size: 0.78rem; color: var(--mj-text-muted); }
 `;
 
-function money(n: number | null | undefined): string {
-    if (n == null || !Number.isFinite(Number(n))) return '—';
-    return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+/**
+ * A deal's money on this form: cents, in the deal's own currency, '—' when there is none.
+ *
+ * ONE PRECISION BELOW THE HEADER (#371 item 5). The Overview used to round to whole units while the
+ * Commercial section, the line cards and the line editor showed cents, so the same amount read two
+ * ways a click apart. Only the hero, which is a glance-at briefing, shows whole units now; every
+ * figure here keeps its cents.
+ *
+ * THE DEAL'S CURRENCY, NOT USD (#371 item 4). `CurrencyID` resolves to a code through accounting's
+ * currencies, read once per session; with accounting absent, or no currency on the deal, the code is
+ * the display default. See deal-money.ts.
+ */
+function money(n: number | null | undefined, currencyID: string | null | undefined): string {
+    return FormatDealMoney(n, currencyID, 'cents') || '—';
 }
 
-/**
- * Money as a FIELD rather than as a headline — cents kept.
- *
- * A sibling of {@link money} rather than a parameter on it, because the two answer different
- * questions. `money()` rounds to whole units on purpose: it feeds the Overview's summary figures,
- * where four more characters of precision buy nothing. A rep reading MRR on the Commercial section is
- * reading the number that goes on an invoice.
- *
- * USD IS THIS APP'S STANDING ASSUMPTION, not a new one introduced here — every money string the deal
- * form renders already hardcodes it. It is worth naming now because the currency field beside these
- * ones became real in the same change (bc-aidp-next-golive#259 item 3), so the assumption is visibly
- * an assumption for the first time: a deal denominated in GBP will show its MRR with a dollar sign.
- * Fixing that means resolving `CurrencyID` to a code before formatting, which is a lookup this panel
- * does not do today; it is deliberately left rather than half-done.
- */
-function moneyExact(n: number | null | undefined): string {
-    if (n == null || !Number.isFinite(Number(n))) return '';
-    return Number(n).toLocaleString(undefined, {
-        style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
-    });
+/** As {@link money}, but '' when there is nothing to show, so a self-drawn field row can hide. */
+function moneyExact(n: number | null | undefined, currencyID: string | null | undefined): string {
+    return FormatDealMoney(n, currencyID, 'cents');
 }
 
 /**
@@ -592,6 +607,13 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     public abstract readonly Fields: DealFieldSpec[];
 
     /**
+     * A prefix unique to this panel instance, for the ids that tie a label to its control and a
+     * button to the text explaining it (#371 items 6 and 8). Two deal forms can be open at once, and a
+     * fixed id would point both labels at whichever control came first.
+     */
+    public readonly FieldIdPrefix = `mjs-deal-panel-${++dealFieldPanelInstances}`;
+
+    /**
      * Whether a `currency` field should be drawn by the panel rather than by `mj-form-field`.
      *
      * Only ever true while READING. The moment the field is editable the shared control takes it back,
@@ -690,7 +712,7 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
 
     /** The formatted value, or '' when there is nothing to show. */
     public MoneyValue(f: DealFieldSpec): string {
-        return moneyExact(this.Record?.Get(f.name) as number | null | undefined);
+        return moneyExact(this.Record?.Get(f.name) as number | null | undefined, this.Record?.CurrencyID);
     }
 
     /** The field's label, read from metadata so it tracks the same rows every other label does. */
@@ -1129,19 +1151,20 @@ const FIELD_STYLES = `
                             }
                         </div>
                     </article>
+                    <!-- Only when there is a next step (#371). A missing one is already reported in
+                         the attention list above, under the same conditions, so an empty card here
+                         said "No next step recorded." a second time. -->
+                    @if (Record.NextStep) {
                     <article class="mjs-ov-card mjs-ov-card--wide">
                         <header><i class="fa-solid fa-person-walking"></i> Next move</header>
-                        @if (Record.NextStep) {
-                            <p class="mjs-ov-next">{{ Record.NextStep }}</p>
-                            @if (Record.NextStepDate) {
-                                <div class="muted">Due {{ Record.NextStepDate | date: 'd MMM y' : 'UTC' }}
-                                    @if (NextStepOverdue) { · overdue }
-                                </div>
-                            }
-                        } @else if (!IsClosed) {
-                            <p class="mjs-ov-empty">No next step recorded.</p>
+                        <p class="mjs-ov-next">{{ Record.NextStep }}</p>
+                        @if (Record.NextStepDate) {
+                            <div class="muted">Due {{ Record.NextStepDate | date: 'd MMM y' : 'UTC' }}
+                                @if (NextStepOverdue) { · overdue }
+                            </div>
                         }
                     </article>
+                    }
                 </div>
                 }
             </div>
@@ -1269,8 +1292,10 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         const v = this.Record?.Get?.(field);
         return v == null || v === '' ? '' : String(v);
     }
-    public get Money(): string { return money(this.Record?.Amount); }
-    public get Weighted(): string { return money(WeightedAmount(this.Record?.Amount, this.Record?.Probability)); }
+    public get Money(): string { return money(this.Record?.Amount, this.Record?.CurrencyID); }
+    public get Weighted(): string {
+        return money(WeightedAmount(this.Record?.Amount, this.Record?.Probability), this.Record?.CurrencyID);
+    }
     public get Prob(): string {
         const p = this.Record?.Probability;
         return p == null ? '—' : `${p}%`;
@@ -1570,8 +1595,8 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 @if (EditMode && FieldEditable('PipelineID') && CompanyOptions.length > 1) {
                     <div class="mjs-field" data-field="PipelineCompany">
                         <div class="mj-forms-field mj-forms-field--editing">
-                            <label class="mj-forms-field-label">Company</label>
-                            <select [ngModel]="SelectedCompanyID" data-testid="deal-pipeline-company"
+                            <label class="mj-forms-field-label" [attr.for]="FieldIdPrefix + '-company'">Company</label>
+                            <select [id]="FieldIdPrefix + '-company'" [ngModel]="SelectedCompanyID" data-testid="deal-pipeline-company"
                                     (ngModelChange)="SetCompany($event)"
                                     [compareWith]="CompareID">
                                 @for (c of CompanyOptions; track c.CompanyID) {
@@ -1596,9 +1621,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                     <div class="mj-forms-field"
                          [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineID')"
                          [class.mj-forms-field--required-empty]="EditMode && FieldEditable('PipelineID') && !Record.PipelineID">
-                        <label class="mj-forms-field-label">Pipeline</label>
+                        <label class="mj-forms-field-label" [attr.for]="EditMode && FieldEditable('PipelineID') ? FieldIdPrefix + '-pipeline' : null">Pipeline</label>
                         @if (EditMode && FieldEditable('PipelineID')) {
-                            <select [ngModel]="Record.PipelineID" data-testid="deal-pipeline"
+                            <select [id]="FieldIdPrefix + '-pipeline'" [ngModel]="Record.PipelineID" data-testid="deal-pipeline"
                                     (ngModelChange)="SetPipeline($event)"
                                     [compareWith]="CompareID">
                                 <option [ngValue]="null" [disabled]="Record.IsSaved">— choose —</option>
@@ -1619,9 +1644,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                          editable, which turns a lock assertion into one that cannot fail. -->
                     <div class="mj-forms-field"
                          [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineStageID')">
-                        <label class="mj-forms-field-label">Pipeline Stage</label>
+                        <label class="mj-forms-field-label" [attr.for]="EditMode && FieldEditable('PipelineStageID') ? FieldIdPrefix + '-stage' : null">Pipeline Stage</label>
                         @if (EditMode && FieldEditable('PipelineStageID')) {
-                            <select [ngModel]="Record.PipelineStageID" data-testid="deal-stage"
+                            <select [id]="FieldIdPrefix + '-stage'" [ngModel]="Record.PipelineStageID" data-testid="deal-stage"
                                     (ngModelChange)="SetStage($event)"
                                     [compareWith]="CompareID"
                                     [disabled]="!StageIsEditable">
@@ -1651,9 +1676,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      one. -->
                 <div class="mjs-field" data-field="DealStatusTypeID">
                     <div class="mj-forms-field">
-                        <label class="mj-forms-field-label">Status</label>
+                        <label class="mj-forms-field-label" [attr.for]="EditMode ? FieldIdPrefix + '-status' : null">Status</label>
                         @if (EditMode) {
-                            <select [ngModel]="Record.DealStatusTypeID" data-testid="deal-status"
+                            <select [ngModel]="Record.DealStatusTypeID" [id]="FieldIdPrefix + '-status'" data-testid="deal-status"
                                     (ngModelChange)="SetStatus($event)"
                                     [compareWith]="CompareStatus"
                                     [disabled]="!StatusIsEditable">
@@ -1676,9 +1701,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                 <div class="mjs-reopen" data-testid="status-close-panel">
                                     @if (PendingCloseStatus?.IsLost) {
                                         <label class="mjs-reopen__field">
-                                            <span>Loss reason</span>
+                                            <span>Loss reason <em>(required)</em></span>
                                             <select data-testid="status-close-loss-reason" [(ngModel)]="LossReasonID" (ngModelChange)="OnLossReasonChange()"
-                                                    [disabled]="Busy">
+                                                    required aria-required="true" [disabled]="Busy">
                                                 <option [ngValue]="null">— choose —</option>
                                                 @for (r of LossReasons(); track r.ID) {
                                                     <option [ngValue]="r.ID">{{ r.Name }}</option>
@@ -1698,12 +1723,16 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                     </label>
                                     <div class="mjs-reopen__row">
                                         <button type="button" class="mjs-reopen__confirm" data-testid="status-close-confirm"
-                                                [disabled]="!CanConfirmClose" (click)="ConfirmClose()">
+                                                [disabled]="!CanConfirmClose" (click)="ConfirmClose()"
+                                                [attr.aria-describedby]="CloseBlockedReason ? FieldIdPrefix + '-close-blocked' : null">
                                             {{ Busy ? 'Closing\u2026' : 'Close as ' + PendingCloseStatusName }}
                                         </button>
                                         <button type="button" class="mjs-reopen__cancel"
                                                 [disabled]="Busy" (click)="CancelClose()">Cancel</button>
                                     </div>
+                                    @if (CloseBlockedReason; as why) {
+                                        <div class="mjs-reopen__note" data-testid="status-close-blocked" [id]="FieldIdPrefix + '-close-blocked'">{{ why }}</div>
+                                    }
                                 </div>
                             }
                             @if (PendingReopenStatusID) {
@@ -2133,6 +2162,12 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public get CanConfirmClose(): boolean {
         if (this.Busy) return false;
         return CloseDetailComplete(this.PendingCloseStatus, this.LossReasonID, this.LossNotes, this.LossReasons());
+    }
+
+    /** Why the close button is disabled, shown under it; null while it is enabled or busy (#371 item 6). */
+    public get CloseBlockedReason(): string | null {
+        if (this.Busy) return null;
+        return CloseDetailMissing(this.PendingCloseStatus, this.LossReasonID, this.LossNotes, this.LossReasons());
     }
 
     /** A reason that no longer needs notes must not carry the old ones into the close. */
@@ -2847,12 +2882,15 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
      * `LinkType='Record'` resolve the contract number here AND gives the field an FK search in edit
      * mode instead of asking a rep to paste a UUID. The chips cannot serve this: `RenewsContractID`
      * has to be SET on a renewal deal, and a chip is a link.
+     *
+     * **`CampaignID` IS NOT SHOWN** (#371 item 1). No campaign entity exists for it to point at, so it
+     * rendered as a text box asking for a raw GUID. The column and its metadata stay; the field
+     * returns here once there is a campaign to pick.
      */
     public readonly Fields: DealFieldSpec[] = [
         { name: 'NextStep', type: 'textbox', span: true },
         { name: 'NextStepDate', type: 'datepicker' },
         { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
-        { name: 'CampaignID', type: 'textbox' },
         { name: 'OrderID', type: 'textbox', noLink: true, serverMaintained: true },
         { name: 'ContractID', type: 'textbox', link: 'Record' },
         { name: 'RenewsContractID', type: 'textbox', link: 'Record' },
@@ -2897,6 +2935,10 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                                  this one has two: Lost and Abandoned both carry IsLost, so resolving
                                  the target with find(IsLost) picked whichever sorted first and left
                                  Abandoned unreachable from the form entirely. -->
+                            <!-- A fieldset, so a screen reader announces the group's name with each
+                                 radio (#371 item 8). -->
+                            <fieldset class="mjs-close-action__outcome">
+                            <legend class="mjs-close-action__legend">Outcome</legend>
                             <div class="mjs-close-action__row">
                                 @for (s of ClosingStatuses; track s.ID) {
                                     <label>
@@ -2912,12 +2954,13 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                                     </label>
                                 }
                             </div>
+                            </fieldset>
 
                             @if (SelectedStatus?.IsLost) {
                                 <label class="mjs-close-action__field">
-                                    <span>Loss reason</span>
+                                    <span>Loss reason <em>(required)</em></span>
                                     <select data-testid="close-loss-reason" [(ngModel)]="LossReasonID" (ngModelChange)="OnLossReasonChange()"
-                                            [disabled]="Closing">
+                                            required aria-required="true" [disabled]="Closing">
                                         <option [ngValue]="null">— choose —</option>
                                         @for (r of LossReasons(); track r.ID) {
                                             <option [ngValue]="r.ID">{{ r.Name }}</option>
@@ -2939,12 +2982,16 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
 
                             <div class="mjs-close-action__row">
                                 <button type="button" class="mjs-close-action__confirm" data-testid="close-confirm"
-                                        [disabled]="!CanConfirm" (click)="ConfirmClose()">
+                                        [disabled]="!CanConfirm" (click)="ConfirmClose()"
+                                        [attr.aria-describedby]="CloseBlockedReason ? FieldIdPrefix + '-close-blocked' : null">
                                     {{ Closing ? 'Closing…' : 'Close deal' }}
                                 </button>
                                 <button type="button" class="mjs-close-action__cancel"
                                         [disabled]="Closing" (click)="CancelClose()">Cancel</button>
                             </div>
+                            @if (CloseBlockedReason; as why) {
+                                <div class="mjs-close-action__note" data-testid="close-blocked" [id]="FieldIdPrefix + '-close-blocked'">{{ why }}</div>
+                            }
                         </div>
                     }
 
@@ -3170,13 +3217,13 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
      */
     public get CanConfirm(): boolean {
         if (this.Closing) return false;
-        const target = this.SelectedStatus;
-        if (!target) return false;
-        if (target.IsLost) {
-            if (!this.LossReasonID) return false;
-            if (this.LossReasonRequiresNotes && !this.LossNotes.trim()) return false;
-        }
-        return true;
+        return CloseDetailComplete(this.SelectedStatus, this.LossReasonID, this.LossNotes, this.LossReasons());
+    }
+
+    /** Why "Close deal" is disabled, shown under it; null while it is enabled or closing (#371 item 6). */
+    public get CloseBlockedReason(): string | null {
+        if (this.Closing) return null;
+        return CloseDetailMissing(this.SelectedStatus, this.LossReasonID, this.LossNotes, this.LossReasons());
     }
 
     public OpenPanel(): void {

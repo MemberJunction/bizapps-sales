@@ -73,8 +73,9 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { A11yModule } from '@angular/cdk/a11y';
 import { Metadata } from '@memberjunction/core';
 import { FormsModule } from '@angular/forms';
 import {
@@ -119,6 +120,7 @@ import {
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
+import { FormatDealMoney } from './deal-money';
 
 /** `<input type="date">` wants `yyyy-MM-dd`, and nothing else renders; `mjoDate` reads the same day value. */
 function toDateInput(d: Date | string | null | undefined): string | null {
@@ -177,10 +179,14 @@ interface RemoteOperationRouter {
 @Component({
     selector: 'mjs-deal-line-editor',
     standalone: true,
-    imports: [CommonModule, FormsModule, MJOLinePricePickerComponent, MJODatePipe],
+    imports: [CommonModule, FormsModule, A11yModule, MJOLinePricePickerComponent, MJODatePipe],
     template: `
         <div class="mjs-le__scrim" (click)="Cancel()"></div>
-        <div class="mjs-le" role="dialog" aria-modal="true" data-testid="line-editor" [attr.aria-label]="Title">
+        <!-- Keyboard (#371 item 3): focus is trapped inside while open, Escape cancels, the first
+             field takes focus once the line has loaded, and focus returns to the opener on close
+             (ngOnDestroy). -->
+        <div class="mjs-le" role="dialog" aria-modal="true" data-testid="line-editor" [attr.aria-label]="Title"
+             tabindex="-1" cdkTrapFocus (keydown.escape)="OnEscape($event)">
             <header class="mjs-le__head">
                 <h2>{{ Title }}</h2>
                 <button type="button" class="mjs-le__x" (click)="Cancel()" aria-label="Close">
@@ -486,6 +492,7 @@ interface RemoteOperationRouter {
         .mjs-le__scrim {
             position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 1000;
         }
+        .mjs-le:focus { outline: none; }
         .mjs-le {
             position: fixed; z-index: 1001; top: 50%; left: 50%; transform: translate(-50%, -50%);
             width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto;
@@ -576,7 +583,7 @@ interface RemoteOperationRouter {
         }
     `],
 })
-export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
+export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     /**
      * The DEAL whose order this line belongs to.
      *
@@ -610,6 +617,10 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
 
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
+    private readonly host = inject(ElementRef<HTMLElement>);
+    /** What had focus when the dialog opened, so closing it can hand focus back. */
+    private readonly opener: HTMLElement | null =
+        typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     public Products: ProductLookup[] = [];
     /** Each product's catalog price, for the picker label — read from orders, keyed by product id. */
@@ -743,7 +754,39 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         } finally {
             this.Loading = false;
             this.cdr.detectChanges();
+            this.focusFirstField();
         }
+    }
+
+    /** Focus the dialog itself while it loads, so the trap and Escape work from the first frame. */
+    public ngAfterViewInit(): void {
+        this.dialogElement()?.focus();
+    }
+
+    /** Escape cancels, unless a save is in flight; the X and Cancel buttons are disabled then too. */
+    public OnEscape(event: Event): void {
+        event.stopPropagation();
+        if (!this.Saving) {
+            this.Cancel();
+        }
+    }
+
+    private dialogElement(): HTMLElement | null {
+        const root = this.host?.nativeElement as HTMLElement | undefined;
+        return root?.querySelector<HTMLElement>('.mjs-le') ?? null;
+    }
+
+    /**
+     * The first enabled control in the body, or the dialog when there is none (a locked line, a
+     * failed load). Run after the loaded body has rendered.
+     */
+    private focusFirstField(): void {
+        const dialog = this.dialogElement();
+        if (!dialog) return;
+        const first = dialog.querySelector<HTMLElement>(
+            '.mjs-le__body select:not([disabled]), .mjs-le__body input:not([disabled]), .mjs-le__body textarea:not([disabled])',
+        );
+        (first ?? dialog).focus();
     }
 
     public ProductOptionLabel(p: ProductLookup): string {
@@ -1103,9 +1146,9 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         this.Working.SubscriptionAction = action;
     }
 
+    /** A figure in the deal's currency, with cents (#371 items 4 and 5). */
     public Money(n: number | null | undefined): string {
-        if (n == null || !Number.isFinite(Number(n))) return '—';
-        return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+        return FormatDealMoney(n, this.Deal?.CurrencyID, 'cents') || '—';
     }
 
     /* ── What the line comes to, answered by Orders (S2) ─────────────────────────── */
@@ -1161,6 +1204,10 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (this.priceTimer) {
             clearTimeout(this.priceTimer);
             this.priceTimer = null;
+        }
+        // Back to whatever opened the dialog, if it is still on the page (#371 item 3).
+        if (this.opener?.isConnected) {
+            this.opener.focus();
         }
     }
 
