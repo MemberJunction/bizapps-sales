@@ -628,6 +628,28 @@ What keeps it controlled is what controls the same amount on the order line:
 
 The discount stays percent-only: the `DiscountAmount` reasoning above is unchanged.
 
+### Typing a discount in dollars (revision)
+
+**Revision: the line editor's discount accepts a dollar amount as well as a percent.** This removes the
+cost stated above ("less $500" on a signed form had to be converted by hand). It does not reopen the
+`DiscountAmount` column: the dollars are an entry, never stored.
+
+- **Stored as a percent.** `DiscountAmountToPercent` (`discount-conversion.ts`, the one place a discount
+  is converted) turns the dollars into a percent of the line's list amount, held to 0.01% and to 0–100%,
+  and the editor writes it to `DiscountPct`. From there it is a percent like any other: the same
+  concession reason on a raise, the same approval, the same pricing.
+- **The list amount is orders' figure.** It is read back from orders' `Orders.PriceOrder` answer as net
+  plus discount (`PricedLineListAmount`), the inverse of orders' own list − net derivation. Sales does not
+  multiply quantity by price for it, and a tier's stored extended amount is included.
+- **Precision is shown, not hidden.** A hundredth of a percent can move the booked discount a few cents off
+  the typed amount ($500 off $3,333 records 15.00%, which orders prices as $499.95). The editor shows the
+  derived percent and, when they differ, the figure orders will book.
+- **No ambiguity refusal on a derived percent.** The `(0, 1)` refusal (D-DL1) guards a typed percent that
+  might already be a fraction. A percent computed from dollars has one reading, so $1 off $240 records
+  0.42%.
+- **The dollars hold through a reprice.** A new quantity or product changes the list amount; the editor
+  re-derives the percent from the typed dollars, since the dollars are what the rep stated.
+
 ---
 
 ## D-FY1 — The fiscal year start is READ from accounting, never stored in sales

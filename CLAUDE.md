@@ -77,8 +77,9 @@ watches for this; it is a heuristic, not a proof.
   take the order total (sales never sums lines). A typed figure survives only on a header-only deal.
 - An override price on a line is an **input** to orders' pricing, never a replacement for the totals
   orders computes on top of it.
-- A rep enters a discount as a **percent**; `OrderLine.DiscountPct` stores a **fraction**. Convert only
-  in `packages/Entities/src/discount-conversion.ts` (`pnpm run test:discount-gate`), never at a call
+- A rep enters a discount as a **percent** or a **dollar amount**; `OrderLine.DiscountPct` stores a
+  **fraction** either way (dollars become a percent of orders' list amount). Convert only in
+  `packages/Entities/src/discount-conversion.ts` (`pnpm run test:discount-gate`), never at a call
   site (D-DL2).
 - Closing does not create or price a second order. The deal's own order changes status when the deal
   enters a stage that names one (`PipelineStage.OrderStatusOnEntry`).
