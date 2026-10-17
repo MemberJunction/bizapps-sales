@@ -72,5 +72,18 @@
       "lastModified": "2026-09-28T21:43:53.922Z",
       "checksum": "3980a054b5d6fcb2805ae6a0b030e114ef8da0fb49036cc2ea1cd1b3823228cd"
     }
+  },
+  {
+    "_comments": [
+      "The Sales Contacts grid had no name column, because the three flags above were",
+      "chosen for the picker. The picker leaves out the name field when it builds its columns, so",
+      "flagging DisplayNameAndEmail adds the name to the grid without showing it twice in the picker."
+    ],
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=DisplayNameAndEmail"
+    }
   }
 ]

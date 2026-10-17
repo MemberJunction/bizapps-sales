@@ -95,7 +95,7 @@
             <div class="card">
               <div class="ch">
                 Forecast stack
-                <span class="r" title="Each open deal is counted once, in its highest forecast category: Commit, then Best Case, then the rest of the pipeline.">{{ StackClosedNote }}</span>
+                <span class="r" title="Each open deal is counted once, in its highest forecast category: Commit, then Best Case, then the rest of the pipeline. Deals in a category left out of the pipeline (Omitted) are not shown.">{{ StackClosedNote }}</span>
               </div>
               <div class="stack-pad">
                 @if (Stack.Total <= 0) {
@@ -116,7 +116,7 @@
                     }
                     @if (Stack.PipeOnly > 0) {
                       <span class="stack__seg stack__seg--pipe" [style.width]="StackPct(Stack.PipeOnly)"
-                            (click)="SetInspect('pipe')" title="Pipeline remainder">{{ Money(Stack.PipeOnly) }}</span>
+                            (click)="SetInspect('remainder')" title="Pipeline remainder">{{ Money(Stack.PipeOnly) }}</span>
                     }
                   </div>
                   <div class="legend">
@@ -134,11 +134,27 @@
               <div class="card">
                 <div class="ch">Stage mix <span class="r">open deals · current stage</span></div>
                 <div class="funnel-pad">
+                  <!-- One pipeline at a time: each numbers its own stages, and two may share a stage name. -->
+                  @if (FunnelPipelineOptions.length > 1) {
+                    <div class="period__pills funnel__tabs" role="tablist" aria-label="Pipeline">
+                      @for (pipeline of FunnelPipelineOptions; track pipeline.ID) {
+                        <button
+                          type="button"
+                          role="tab"
+                          class="period__pill"
+                          [class.period__pill--on]="pipeline.ID === ActiveFunnelPipelineID"
+                          [attr.aria-selected]="pipeline.ID === ActiveFunnelPipelineID"
+                          (click)="SelectFunnelPipeline(pipeline.ID)">
+                          {{ pipeline.Name }}
+                        </button>
+                      }
+                    </div>
+                  }
                   @if (!Funnel.length) {
                     <div class="empty">No open deals in a stage.</div>
                   } @else {
                     <div class="funnel">
-                      @for (col of Funnel; track col.Label) {
+                      @for (col of Funnel; track col.Key) {
                         <div class="funnel__col">
                           <div class="funnel__plot">
                             <div class="funnel__bar" [style.height]="FunnelHeight(col.Count)">
@@ -217,12 +233,12 @@
                   <div class="kpi">
                     <div class="l">By count</div>
                     <div class="v" data-testid="sales-winrate-count">{{ PeriodLoading || DetailLoading ? '…' : Pct(WinRateByCount) }}</div>
-                    <div class="f">{{ PeriodLoading || DetailLoading ? 'counting…' : WinWonCount + ' won / ' + WinClosedCount + ' closed' }}</div>
+                    <div class="f">{{ PeriodLoading || DetailLoading ? 'counting…' : WinRateUnavailable ? 'figures unavailable' : WinWonCount + ' won / ' + WinClosedCount + ' closed' }}</div>
                   </div>
                   <div class="kpi">
                     <div class="l">By value</div>
                     <div class="v">{{ PeriodLoading || DetailLoading ? '…' : Pct(WinRateByValue) }}</div>
-                    <div class="f" title="Amount won divided by the amount of all deals closed in the period, won or lost">won amount ÷ closed amount</div>
+                    <div class="f" title="Amount won divided by the amount of all deals closed in the period, won or lost">{{ WinRateUnavailable && !(PeriodLoading || DetailLoading) ? 'figures unavailable' : 'won amount ÷ closed amount' }}</div>
                   </div>
                 </div>
               </div>
@@ -247,6 +263,7 @@
                     [Entity]="DealEntityInfo"
                     [ViewEntity]="InspectView"
                     (RecordOpened)="OnInspectOpened($event)"
+                    (OpenRelatedRecordRequested)="OpenRelatedRecord($event)"
                     (CreateRecordRequested)="StartPrimary()">
                   </mj-entity-viewer>
                 } @else {
@@ -274,6 +291,7 @@
                 [Entity]="DealEntityInfo"
                 [ViewEntity]="AllDealsView"
                 (RecordOpened)="OnAllDealsOpened($event)"
+                (OpenRelatedRecordRequested)="OpenRelatedRecord($event)"
                 (CreateRecordRequested)="StartPrimary()">
               </mj-entity-viewer>
             </div>
@@ -296,25 +314,33 @@
             <mj-loading></mj-loading>
           } @else if (LoadError) {
             <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
+          } @else if (RosterError) {
+            <!-- The columns are built from the deal list, so with no list nothing in them is true. The
+                 dashboard survives a roster failure; the board cannot, and must not draw empty $0
+                 columns that read as "no deals". -->
+            <ng-container *ngTemplateOutlet="loadFailed; context: { $implicit: RosterError }"></ng-container>
           } @else if (Page === 'board') {
             <mjs-deal-board
               [Deals]="Deals"
               [Pipelines]="Pipelines"
               [Stages]="Stages"
               [DealStatusTypes]="DealStatusTypes"
+              [(SelectedCompanyID)]="BoardCompanyID"
+              [(SelectedPipelineID)]="BoardPipelineID"
               (DealOpened)="OpenDeal($event)"
-              (StageMoved)="Refresh()"></mjs-deal-board>
+              (StageMoved)="Refresh(true)"></mjs-deal-board>
           }
         </div>
 
         <!-- A load that stopped part-way (bizapps-sales#195). Shown in place of each page's content rather
              than beside it, because nothing that page would draw is known to be current. -->
-        <ng-template #loadFailed>
+        <!-- The reason is `LoadError` unless the caller passes one (the board passes `RosterError`). -->
+        <ng-template #loadFailed let-reason>
           <div class="load-failed" role="alert" data-testid="sales-load-failed">
             <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             <div class="load-failed__body">
               <b>The deals could not be loaded.</b>
-              <span class="load-failed__reason">{{ LoadError }}</span>
+              <span class="load-failed__reason">{{ reason ?? LoadError }}</span>
             </div>
             <button type="button" mjButton variant="outline" data-testid="sales-load-retry" (click)="Refresh()">
               <i class="fa-solid fa-arrow-rotate-right" aria-hidden="true"></i> Retry

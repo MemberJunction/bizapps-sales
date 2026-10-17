@@ -1,0 +1,39 @@
+import type { DealRosterRow } from '../../lib/workspace/deal-workspace.service';
+
+/** A roster row with only the fields a test names; the rest are inert defaults. */
+export function RosterRow(overrides: Partial<DealRosterRow>): DealRosterRow {
+    return {
+        ID: 'deal',
+        DealNumber: null,
+        Name: 'Deal',
+        AccountID: null,
+        CustomerName: '—',
+        Amount: 0,
+        AmountIsComputed: false,
+        Probability: null,
+        ExpectedCloseDate: null,
+        ActualCloseDate: null,
+        Pipeline: null,
+        PipelineStage: null,
+        DealType: null,
+        DealStatusType: null,
+        OwnerEmployee: null,
+        ForecastCategoryType: null,
+        DealStatusTypeID: null,
+        PipelineID: null,
+        PipelineStageID: null,
+        PipelineIncludeInForecast: true,
+        IsOpen: false,
+        IsWon: false,
+        IsLost: false,
+        IsClosed: false,
+        IsPastExpectedClose: false,
+        IncludeInCommit: false,
+        IncludeInBestCase: false,
+        IncludeInPipeline: true,
+        WeightedAmount: null,
+        StageOrder: null,
+        CurrencyID: null,
+        ...overrides,
+    };
+}

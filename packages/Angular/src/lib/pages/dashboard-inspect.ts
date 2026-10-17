@@ -10,6 +10,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import type { DealRosterRow } from '../workspace/deal-workspace.service';
+import { OrderPipelinesByCompany, type CompanyPipeline } from '../data/company-pipelines';
 import { BusinessToday, UtcDatePart } from './dashboard-dates';
 import { WithinWindow, type PeriodWindow } from './dashboard-period';
 
@@ -74,11 +75,33 @@ export function WonInPeriod(d: DealRosterRow, window?: PeriodWindow): boolean {
     return WithinWindow(UtcDatePart(d.ActualCloseDate), window);
 }
 
+/**
+ * Whether an open deal counts toward the pipeline: its forecast category does not leave it out
+ * (`ForecastCategoryType.IncludeInPipeline`). Omitted deals stay open and stay in the open count, but
+ * the pipeline money figures leave them out, as the forecast queries and the snapshot do.
+ * `dashboard-summary.sql` applies the same rule to the Open pipeline tile.
+ */
+export function InPipeline(d: DealRosterRow): boolean {
+    return d.IsOpen && d.IncludeInPipeline;
+}
+
+/**
+ * The forecast stack's Remainder: pipeline deals in neither Commit nor Best Case.
+ *
+ * {@link ForecastSlices} totals the segment with it and {@link FilterInspect}'s `remainder` case
+ * lists the deals behind it, so the segment and its drill-down count the same deals.
+ */
+export function InRemainder(d: DealRosterRow): boolean {
+    return InPipeline(d) && !d.IncludeInCommit && !d.IncludeInBestCase;
+}
+
 export type InspectKey =
     | 'closing'
     | 'commit'
     | 'best'
     | 'pipe'
+    | 'open'
+    | 'remainder'
     | 'slipped'
     | 'noowner'
     | 'won'
@@ -94,11 +117,6 @@ function addDays(iso: string, days: number): string {
 function monthEnd(iso: string): string {
     const [y, m] = iso.split('-').map(Number);
     return UtcDatePart(new Date(Date.UTC(y, m, 0)));
-}
-
-function nextMonthEnd(iso: string): string {
-    const [y, m] = iso.split('-').map(Number);
-    return UtcDatePart(new Date(Date.UTC(y, m + 1, 0)));
 }
 
 function amount(d: DealRosterRow): number {
@@ -131,7 +149,9 @@ export function FilterInspect(
 ): DealRosterRow[] {
     const weekEnd = addDays(today, 7);
     const restMonth = monthEnd(today);
-    const octEnd = nextMonthEnd(today);
+    // Later starts where the earlier buckets stop, so the buckets cover every open deal. Near month
+    // end the week runs past the month, and Later starts after the week instead.
+    const laterFrom = weekEnd > restMonth ? weekEnd : restMonth;
     switch (key) {
         case 'closing':
             return ClosingSoon(deals, 8);
@@ -140,7 +160,11 @@ export function FilterInspect(
         case 'best':
             return deals.filter((d) => d.IsOpen && d.IncludeInBestCase);
         case 'pipe':
+            return deals.filter(InPipeline);
+        case 'open':
             return deals.filter((d) => d.IsOpen);
+        case 'remainder':
+            return deals.filter(InRemainder);
         case 'slipped':
             return deals.filter((d) => d.IsPastExpectedClose);
         case 'noowner':
@@ -163,7 +187,7 @@ export function FilterInspect(
             return deals.filter((d) => {
                 if (!d.IsOpen) return false;
                 if (!d.ExpectedCloseDate) return true;
-                return UtcDatePart(d.ExpectedCloseDate) > octEnd;
+                return UtcDatePart(d.ExpectedCloseDate) > laterFrom;
             });
         default:
             return ClosingSoon(deals, 8);
@@ -178,7 +202,7 @@ export interface ForecastSlice {
 }
 
 /**
- * Incremental slices of the CUMULATIVE forecast flags.
+ * Incremental slices of the CUMULATIVE forecast flags, over the deals {@link InPipeline} keeps.
  *
  * Commit ⊂ Best Case ⊂ Pipeline, so adding the three query columns is meaningless. The bar is
  * Closed (won) + Commit + (BestCase − Commit) + (open remainder).
@@ -215,33 +239,85 @@ export function ForecastSlices(deals: readonly DealRosterRow[], window?: PeriodW
             if (WonInPeriod(d, window)) {
                 Closed += amt;
             }
-        } else if (d.IsOpen) {
+        } else if (InPipeline(d)) {
             if (d.IncludeInCommit) Commit += amt;
             else if (d.IncludeInBestCase) BestOnly += amt;
-            else PipeOnly += amt;
+            else if (InRemainder(d)) PipeOnly += amt;
         }
     }
     return { Closed, Commit, BestOnly, PipeOnly };
 }
 
 export interface FunnelStage {
+    /** The stage's ID, or `unstaged`. Names are not unique across pipelines, so they do not key. */
+    Key: string;
     Label: string;
     Count: number;
     Amount: number;
 }
 
-export function StageFunnel(deals: readonly DealRosterRow[]): FunnelStage[] {
+/** A pipeline the Stage mix card can show: one that has open deals. */
+export interface FunnelPipeline {
+    ID: string;
+    Name: string;
+}
+
+/** Ids round-trip through JSON and SQL in different cases. */
+const idKey = (id: string | null | undefined): string => String(id ?? '').toLowerCase();
+
+/**
+ * The pipelines with open deals, in the board's picker order (default pipeline first) when the
+ * pipeline lookups have loaded. Before they have, or for a pipeline missing from them, in order of
+ * name, so the card still has a choice to offer.
+ */
+export function FunnelPipelines(
+    deals: readonly DealRosterRow[],
+    pipelines: readonly CompanyPipeline[] = [],
+): FunnelPipeline[] {
+    const open = new Map<string, FunnelPipeline>();
+    for (const d of deals) {
+        if (d.IsOpen && d.PipelineID && !open.has(idKey(d.PipelineID))) {
+            open.set(idKey(d.PipelineID), { ID: d.PipelineID, Name: d.Pipeline || 'Pipeline' });
+        }
+    }
+    const ordered: FunnelPipeline[] = [];
+    for (const p of OrderPipelinesByCompany(pipelines)) {
+        const hit = open.get(idKey(p.ID));
+        if (hit) {
+            ordered.push(hit);
+            open.delete(idKey(p.ID));
+        }
+    }
+    const rest = [...open.values()].sort((a, b) => a.Name.localeCompare(b.Name));
+    return [...ordered, ...rest];
+}
+
+/**
+ * One pipeline's open deals by stage, in that pipeline's stage order.
+ *
+ * Each pipeline numbers its own stages, so stages from two pipelines cannot share one sequence, and
+ * two pipelines may name a stage the same. The card therefore shows one pipeline at a time, keyed on
+ * the stage's ID. Omitting `pipelineID` takes every open deal, still keyed on stage ID.
+ */
+export function StageFunnel(deals: readonly DealRosterRow[], pipelineID?: string | null): FunnelStage[] {
     const map = new Map<string, FunnelStage & { Order: number }>();
-    for (const d of deals.filter((x) => x.IsOpen)) {
-        const label = d.PipelineStage || 'Unstaged';
-        const cur = map.get(label) ?? { Label: label, Count: 0, Amount: 0, Order: d.StageOrder ?? 999 };
+    const inPipeline = (d: DealRosterRow): boolean => pipelineID == null || idKey(d.PipelineID) === idKey(pipelineID);
+    for (const d of deals.filter((x) => x.IsOpen && inPipeline(x))) {
+        const key = d.PipelineStageID ? idKey(d.PipelineStageID) : 'unstaged';
+        const cur = map.get(key) ?? {
+            Key: key,
+            Label: d.PipelineStageID ? d.PipelineStage || 'Stage' : 'Unstaged',
+            Count: 0,
+            Amount: 0,
+            Order: d.PipelineStageID ? (d.StageOrder ?? 999) : 1000,
+        };
         cur.Count += 1;
         cur.Amount += amount(d);
-        map.set(label, cur);
+        map.set(key, cur);
     }
     return [...map.values()]
         .sort((a, b) => a.Order - b.Order)
-        .map(({ Label, Count, Amount }) => ({ Label, Count, Amount }));
+        .map(({ Key, Label, Count, Amount }) => ({ Key, Label, Count, Amount }));
 }
 
 export interface CloseBucket {
@@ -288,5 +364,5 @@ export function OwnerCoverage(deals: readonly DealRosterRow[]): OwnerBar[] {
 }
 
 export function WeightedOpen(deals: readonly DealRosterRow[]): number {
-    return deals.filter((d) => d.IsOpen).reduce((n, d) => n + (Number(d.WeightedAmount) || 0), 0);
+    return deals.filter(InPipeline).reduce((n, d) => n + (Number(d.WeightedAmount) || 0), 0);
 }

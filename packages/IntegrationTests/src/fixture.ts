@@ -194,7 +194,7 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
     const openStatus = await one<{ ID: string }>(
         ctx, E_STATUS_TYPE, 'IsOpen = 1 AND IsActive = 1', ['ID'], 'OPEN deal status (by IsOpen flag)',
     );
-    const account = await one<{ ID: string }>(ctx, E_ACCOUNT, 'IsActive = 1', ['ID'], 'sales account');
+    const account = await one<{ ID: string }>(ctx, E_ACCOUNT, "Status = 'Active'", ['ID'], 'sales account');
     const employee = await one<{ ID: string }>(ctx, E_EMPLOYEE, 'Active = 1', ['ID'], 'active employee');
 
     const wonStatus = await one<{ ID: string }>(

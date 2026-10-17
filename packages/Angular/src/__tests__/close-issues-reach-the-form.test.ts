@@ -148,7 +148,9 @@ describe('the Pipeline status field surfaces what the close could not do', () =>
         await panel.ConfirmClose();
 
         expect(panel.ActionFailed).toBe(true);
-        expect(panel.ActionIssues).toContain(CONTRACT_REFUSED);
+        // The one reason is the headline, and only there: the list holds the rest (#268).
+        expect(panel.ActionMessage).toBe(CONTRACT_REFUSED);
+        expect(panel.ActionIssues).not.toContain(CONTRACT_REFUSED);
     });
 
     it('starts each attempt from a clean list', async () => {
@@ -192,7 +194,8 @@ describe('the Close panel surfaces them too', () => {
         await panel.ConfirmClose();
 
         expect(panel.MessageIsError).toBe(true);
-        expect(panel.Issues).toContain(CONTRACT_REFUSED);
+        expect(panel.Message).toBe(CONTRACT_REFUSED);
+        expect(panel.Issues).not.toContain(CONTRACT_REFUSED);
     });
 
     it('shows an info note apart from the warnings', async () => {

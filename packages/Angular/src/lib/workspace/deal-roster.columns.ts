@@ -48,6 +48,7 @@ export const DEAL_ROSTER_COLUMNS = [
     'IsPastExpectedClose',
     'IncludeInCommit',
     'IncludeInBestCase',
+    'IncludeInPipeline',
     'WeightedAmount',
     'StageOrder',
 ] as const;

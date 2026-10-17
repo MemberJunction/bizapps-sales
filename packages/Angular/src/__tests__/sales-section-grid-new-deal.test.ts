@@ -26,3 +26,36 @@ describe('the deal grids route their New button', () => {
         }
     });
 });
+
+/**
+ * A linked cell (Customer, Pipeline, Stage, Owner, Forecast) opens its record. The viewer does not open
+ * it itself: it emits `OpenRelatedRecordRequested` and leaves routing to the host, which the section did
+ * not listen for, so the click was dropped.
+ */
+describe('the deal grids route their linked cells', () => {
+    it('binds OpenRelatedRecordRequested on every grid', () => {
+        for (const tag of viewers) {
+            expect(tag, tag).toContain('(OpenRelatedRecordRequested)="OpenRelatedRecord($event)"');
+        }
+    });
+});
+
+/** The deal form's Activity grid: linked cells open through the form, New goes to the compose form. */
+const PANELS = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
+const activityPanel = PANELS.slice(PANELS.indexOf("selector: 'mjs-deal-activity-panel'"));
+const activityViewer = activityPanel.match(/<mj-entity-viewer\b[^>]*>/)?.[0] ?? '';
+
+describe('the deal form Activity grid', () => {
+    it('is found', () => {
+        expect(activityViewer).toContain('[ViewEntity]="ActivityView"');
+    });
+
+    it('routes its linked cells through the form', () => {
+        expect(activityViewer).toContain('(OpenRelatedRecordRequested)="OnActivityRelatedRecord($event)"');
+    });
+
+    it('sends New to the compose form above the grid', () => {
+        expect(activityPanel).toMatch(/<mjs-deal-activity-timeline #compose\b/);
+        expect(activityViewer).toContain('(CreateRecordRequested)="compose.FocusCompose()"');
+    });
+});

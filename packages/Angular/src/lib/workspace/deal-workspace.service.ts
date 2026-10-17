@@ -39,6 +39,7 @@ import {
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 import { E_ORDERS_PRODUCT, PRODUCT_LOOKUP_FIELDS, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
+    CALENDAR_YEAR_START,
     PeriodParameters,
     ResolveFiscalYearStart,
     type FiscalYearStart,
@@ -68,6 +69,31 @@ const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
 const E_ACCOUNTING_COMPANY_PROFILE = 'MJ_BizApps_Accounting: Accounting Company Profiles';
 
 /**
+ * Accounting's currencies, read for their three-letter codes. `Deal.CurrencyID` is a soft reference to
+ * this entity, so the roster carries an ID that only accounting can turn into "USD". Read, never
+ * written, and guarded on metadata like the profile above.
+ */
+const E_ACCOUNTING_CURRENCY = 'MJ_BizApps_Accounting: Currencies';
+
+/**
+ * What a figure is LABELLED as when no deal states a currency, or names one this host cannot resolve.
+ *
+ * A display default, not a fact about the money. It is here as one named constant rather than three
+ * hardcoded 'USD' literals so that the assumption is stated once, in a place a reader meets it.
+ */
+export const DEFAULT_DISPLAY_CURRENCY = 'USD';
+
+/**
+ * The currency code a roster row is shown in: the code `currencyID` names in `codes`, or the display
+ * default when the deal has none or names one this host cannot resolve (accounting not installed, or
+ * not readable by this user). `codes` is keyed by upper-cased ID, since SQL Server returns GUIDs upper
+ * case and the browser may hold either.
+ */
+export function CurrencyCodeFor(currencyID: string | null, codes: ReadonlyMap<string, string>): string {
+    return (currencyID && codes.get(currencyID.toUpperCase())) || DEFAULT_DISPLAY_CURRENCY;
+}
+
+/**
  * One row of the deal roster.
  *
  * `CustomerName` is resolved by this service, not read off the deal: `AccountID` points at an IsA child
@@ -85,6 +111,8 @@ const E_ACCOUNTING_COMPANY_PROFILE = 'MJ_BizApps_Accounting: Accounting Company 
 export interface DealDashboardSummary {
     OpenAmount: number;
     OpenCount: number;
+    /** Open deals in a forecast category left out of the pipeline (Omitted); counted in `OpenCount` only. */
+    OpenOmittedCount: number;
     TotalCount: number;
     PastExpectedCloseCount: number;
     WonCount: number;
@@ -153,16 +181,23 @@ export interface DealRosterRow {
      */
     IncludeInCommit: boolean;
     IncludeInBestCase: boolean;
+    /**
+     * `ForecastCategoryType.IncludeInPipeline`; true when the deal has no category. False (Omitted)
+     * leaves an open deal out of the dashboard's pipeline money figures, as the forecast queries do.
+     */
+    IncludeInPipeline: boolean;
     /** Amount × Probability / 100, computed in the roster query. Display only — not a price. */
     WeightedAmount: number | null;
     /** PipelineStage.DisplayOrder, for the funnel. */
     StageOrder: number | null;
-    /**
-     * The currency `Amount` is denominated in. NULL means UNKNOWN, not "the display default" -- it is
-     * unpopulated on every deal today. A consumer must not total a set containing more than one
-     * distinct value; the board refuses to.
-     */
+    /** The currency record `Amount` is denominated in; a soft reference to accounting's Currency. */
     CurrencyID: string | null;
+    /**
+     * `CurrencyID` as a three-letter code ("USD"), for display. Deals created before currencies were
+     * stamped carry no ID and read as the display default. A consumer must not total a set containing
+     * more than one distinct code; the board refuses to.
+     */
+    CurrencyCode: string;
 }
 
 /** Raw roster shape before the account name is joined in. */
@@ -297,8 +332,10 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
     // IsA CHILDREN whose Name lives on the parent and CodeGen generates no lookup join through
     // that edge. So they are loaded here and resolved client-side. This is the reason the
     // customer-context header exists as a lookup rather than a field on the deal.
+    // Filtered on the inherited Organization Status, the one the account form shows; the form hides
+    // SalesAccount.IsActive.
     Accounts: lookupRead<NamedRow>(
-        { EntityName: E_ACCOUNT, ExtraFilter: 'IsActive = 1', OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+        { EntityName: E_ACCOUNT, ExtraFilter: "Status = 'Active'", OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
         (rows, into) => {
             into.Accounts = rows.map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
         },
@@ -478,11 +515,14 @@ export class DealWorkspaceService {
      * reason instead of an empty dashboard.
      */
     public async LoadRoster(closedSince?: string | null): Promise<DealRosterRow[]> {
-        const result = await new RunQuery().RunQuery({
-            QueryName: 'Sales: Deal Roster',
-            CategoryPath: 'Sales',
-            ...(closedSince ? { Parameters: { ClosedSince: closedSince } } : {}),
-        });
+        const [result, codes] = await Promise.all([
+            new RunQuery().RunQuery({
+                QueryName: 'Sales: Deal Roster',
+                CategoryPath: 'Sales',
+                ...(closedSince ? { Parameters: { ClosedSince: closedSince } } : {}),
+            }),
+            this.LoadCurrencyCodes(),
+        ]);
         if (!result?.Success) {
             throw new Error(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
         }
@@ -540,6 +580,7 @@ export class DealWorkspaceService {
             PipelineStageID: (d['PipelineStageID'] as string | null) ?? null,
             PipelineIncludeInForecast: bool(d['PipelineIncludeInForecast']),
             CurrencyID: (d['CurrencyID'] as string | null) ?? null,
+            CurrencyCode: CurrencyCodeFor((d['CurrencyID'] as string | null) ?? null, codes),
             IsOpen: bool(d['IsOpen']),
             IsWon: bool(d['IsWon']),
             IsLost: bool(d['IsLost']),
@@ -547,27 +588,73 @@ export class DealWorkspaceService {
             IsPastExpectedClose: bool(d['IsPastExpectedClose']),
             IncludeInCommit: bool(d['IncludeInCommit']),
             IncludeInBestCase: bool(d['IncludeInBestCase']),
+            IncludeInPipeline: bool(d['IncludeInPipeline']),
             WeightedAmount: num(d['WeightedAmount']),
             StageOrder: num(d['StageOrder']),
         }));
     }
 
+    /** Accounting's currency codes by upper-cased ID, read once per session. See `LoadCurrencyCodes`. */
+    private currencyCodes: Promise<Map<string, string>> | null = null;
+
     /**
-     * Run a published Sales MJ Query by name. Empty array on failure — the dashboard degrades a
-     * missing chart rather than taking the page down, and says so via the caller's empty state.
+     * Accounting's currency codes, keyed by upper-cased ID. Read once and cached: currencies are a
+     * short reference list that changes rarely.
+     *
+     * Read here rather than joined in `deal-roster.sql`, because sales must load on a host without
+     * accounting, and a join to accounting's table would make the roster query fail there. Empty when
+     * accounting is not installed or the read fails, so every deal reads as the display default; a
+     * failed read is not cached, so the next roster load tries again.
      */
-    public async RunNamedQuery(
-        name: string,
-        parameters?: Record<string, string>,
-    ): Promise<Record<string, unknown>[]> {
+    public LoadCurrencyCodes(): Promise<Map<string, string>> {
+        if (!this.currencyCodes) {
+            this.currencyCodes = this.readCurrencyCodes();
+        }
+        return this.currencyCodes;
+    }
+
+    private async readCurrencyCodes(): Promise<Map<string, string>> {
+        // Everything inside the try, the metadata check included: a label lookup must never take the
+        // roster down with it.
+        try {
+            if (!new Metadata().Entities.some((e) => e.Name === E_ACCOUNTING_CURRENCY)) {
+                return new Map();
+            }
+            const result = await new RunView().RunView<{ ID: string; Code: string }>({
+                EntityName: E_ACCOUNTING_CURRENCY,
+                ResultType: 'simple',
+                Fields: ['ID', 'Code'],
+            });
+            if (result?.Success) {
+                return new Map((result.Results ?? []).map((c) => [String(c.ID).toUpperCase(), String(c.Code).trim()]));
+            }
+            // At status, not error: a rep without accounting permissions is an ordinary deployment.
+            // See LoadFiscalYearStart.
+            LogStatus(`${E_ACCOUNTING_CURRENCY} read failed, showing ${DEFAULT_DISPLAY_CURRENCY} - ${result?.ErrorMessage ?? 'unknown error'}`);
+        } catch (e) {
+            LogStatus(`${E_ACCOUNTING_CURRENCY} read threw, showing ${DEFAULT_DISPLAY_CURRENCY} - ${e instanceof Error ? e.message : String(e)}`);
+        }
+        this.currencyCodes = null;
+        return new Map();
+    }
+
+    /**
+     * The win rate rows for a period, from `Sales: Win Rate by Count and Value`.
+     *
+     * NULL means the query did not run, as with {@link LoadDashboardSummary}. An empty list means it
+     * ran and nothing closed; the card renders those two differently, so a failure does not read as
+     * "0 won / 0 closed".
+     */
+    public async LoadWinRate(window?: PeriodWindow): Promise<Record<string, unknown>[] | null> {
+        const parameters = PeriodParameters(window);
         const result = await new RunQuery().RunQuery({
-            QueryName: name,
+            QueryName: 'Sales: Win Rate by Count and Value',
             CategoryPath: 'Sales',
             ...(parameters ? { Parameters: parameters } : {}),
         });
         if (!result?.Success) {
-            LogError(`Sales query '${name}' failed - ${result?.ErrorMessage ?? 'unknown error'}`);
-            return [];
+            LogError(`Sales: Win Rate by Count and Value failed - ${result?.ErrorMessage ?? 'unknown error'}`);
+            return null;
         }
         return (result.Results ?? []) as Record<string, unknown>[];
     }
@@ -854,7 +941,7 @@ export class DealWorkspaceService {
             });
         } catch (e) {
             LogStatus(`${E_ACCOUNTING_COMPANY_PROFILE} read threw, falling back to the calendar year - ${e instanceof Error ? e.message : String(e)}`);
-            return ResolveFiscalYearStart([]);
+            return { Start: CALENDAR_YEAR_START, Basis: 'unreadable' };
         }
         if (!result?.Success) {
             /**
@@ -867,12 +954,12 @@ export class DealWorkspaceService {
              * -- which `75-dashboard.spec.ts` fails on via `expectNoConsoleErrors`, and which is
              * exactly the breakage the guard was added to prevent (see {@link LoadProducts}).
              *
-             * A FAILED read is still not an absent app. Reporting it as 'no-profiles' would tell a
-             * reader to go and configure something that may already be configured, so it degrades the
-             * same way an unconfigured host does, and the line below is where it gets diagnosed.
+             * A FAILED read is still not an absent app, nor a host with no profiles. It falls back to
+             * the calendar year as 'unreadable', so the basis line says the start could not be read
+             * rather than telling the reader to configure something that may already be configured.
              */
             LogStatus(`${E_ACCOUNTING_COMPANY_PROFILE} read failed, falling back to the calendar year - ${result?.ErrorMessage ?? 'unknown error'}`);
-            return ResolveFiscalYearStart([]);
+            return { Start: CALENDAR_YEAR_START, Basis: 'unreadable' };
         }
 
         const rows = (result.Results ?? []) as unknown as Record<string, unknown>[];
@@ -913,6 +1000,7 @@ export class DealWorkspaceService {
         return {
             OpenAmount: num(row['OpenAmount']),
             OpenCount: num(row['OpenCount']),
+            OpenOmittedCount: num(row['OpenOmittedCount']),
             TotalCount: num(row['TotalCount']),
             PastExpectedCloseCount: num(row['PastExpectedCloseCount']),
             WonCount: num(row['WonCount']),

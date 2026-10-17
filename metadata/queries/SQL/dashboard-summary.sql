@@ -64,10 +64,20 @@
 -- Pipeline.IncludeInForecast = 0 marks a pipeline that holds historical deals. Its OPEN deals are
 -- left out of every tile, TotalCount included, so "of N total" stays the denominator of the figures
 -- beside it. Its won and lost deals stay. Naming the pipeline in PipelineID includes it.
+--
+-- ── FORECAST CATEGORIES LEFT OUT OF THE PIPELINE ────────────────────────────────────────────────
+--
+-- A deal whose ForecastCategoryType has IncludeInPipeline = 0 (Omitted) is left out of the open
+-- MONEY figures, the same flag `forecast-by-category.sql` and the forecast snapshot gate on, so the
+-- tile and the snapshot leave out the same deals. OpenCount still counts every open deal;
+-- OpenOmittedCount says how many of them the money figures leave out. A deal with no category
+-- counts as pipeline, as the roster treats it.
 SELECT
     -- TILE 1 — open pipeline. A SUM of stored answers, not pricing arithmetic.
-    SUM(CASE WHEN st.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END)              AS OpenAmount,
+    SUM(CASE WHEN st.IsOpen = 1 AND ISNULL(fc.IncludeInPipeline, 1) = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END)
+                                                                                  AS OpenAmount,
     SUM(CASE WHEN st.IsOpen = 1 THEN 1 ELSE 0 END)                                AS OpenCount,
+    SUM(CASE WHEN st.IsOpen = 1 AND fc.IncludeInPipeline = 0 THEN 1 ELSE 0 END)   AS OpenOmittedCount,
 
     -- TILE 2 — the denominator: every deal, whatever its status. COUNT(*) over the OUTER join, so a
     -- status-less deal is counted here even though it lands in none of the flag-driven figures.
@@ -117,11 +127,12 @@ SELECT
     -- Provenance for the open figure, so a tile can say how much of it nobody priced. Not currently
     -- rendered on the dashboard; it is here because the figure and its provenance should travel
     -- together, and because the board already makes this distinction visible.
-    SUM(CASE WHEN st.IsOpen = 1 AND d.AmountIsComputed = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END)
-                                                                                  AS OpenPricedAmount,
-    SUM(CASE WHEN st.IsOpen = 1 AND d.AmountIsComputed = 0 THEN ISNULL(d.Amount, 0) ELSE 0 END)
-                                                                                  AS OpenStatedAmount,
-    SUM(CASE WHEN st.IsOpen = 1 AND d.Amount IS NULL THEN 1 ELSE 0 END)           AS OpenNoAmountCount
+    SUM(CASE WHEN st.IsOpen = 1 AND ISNULL(fc.IncludeInPipeline, 1) = 1 AND d.AmountIsComputed = 1
+             THEN ISNULL(d.Amount, 0) ELSE 0 END)                                 AS OpenPricedAmount,
+    SUM(CASE WHEN st.IsOpen = 1 AND ISNULL(fc.IncludeInPipeline, 1) = 1 AND d.AmountIsComputed = 0
+             THEN ISNULL(d.Amount, 0) ELSE 0 END)                                 AS OpenStatedAmount,
+    SUM(CASE WHEN st.IsOpen = 1 AND ISNULL(fc.IncludeInPipeline, 1) = 1 AND d.Amount IS NULL
+             THEN 1 ELSE 0 END)                                                   AS OpenNoAmountCount
 FROM [__mj_BizAppsSales].Deal d
 /**
  * LEFT JOIN, NOT INNER -- `Deal.DealStatusTypeID` is NULLABLE.
@@ -140,6 +151,8 @@ LEFT OUTER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
 INNER JOIN [__mj_BizAppsSales].Pipeline p
         ON p.ID = d.PipelineID
+LEFT OUTER JOIN [__mj_BizAppsSales].ForecastCategoryType fc
+        ON fc.ID = d.ForecastCategoryTypeID
 -- One row: the business day and its SQL zone. See the header.
 CROSS JOIN [__mj_BizAppsCommon].[fnBusinessToday]() AS bt
 WHERE 1 = 1

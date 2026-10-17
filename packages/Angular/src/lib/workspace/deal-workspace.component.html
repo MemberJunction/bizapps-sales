@@ -237,7 +237,7 @@
                       (ngModelChange)="OnStageChange(deal, $event)"
                       [disabled]="!deal.PipelineID">
                 <option [ngValue]="null">— choose —</option>
-                @for (s of StagesFor(deal.PipelineID); track s.ID) {
+                @for (s of StagesFor(deal.PipelineID, deal.PipelineStageID); track s.ID) {
                   <option [ngValue]="s.ID">{{ s.Name }}</option>
                 }
               </select>
@@ -605,14 +605,14 @@
               <span class="dw-field__label">Annual increase % (override)</span>
               <input type="number" min="0" max="100" step="0.01"
                      [(ngModel)]="deal.AnnualIncreasePctOverride" (ngModelChange)="Touch()"
-                     [attr.placeholder]="'standard — ' + StandardAnnualIncreasePct + '%'" />
+                     placeholder="blank = contract type default" />
             </label>
 
             <label class="dw-field">
               <span class="dw-field__label">Cancellation notice, days (override)</span>
               <input type="number" min="0" step="1"
                      [(ngModel)]="deal.CancellationNoticeDaysOverride" (ngModelChange)="Touch()"
-                     [attr.placeholder]="'standard — ' + StandardCancellationNoticeDays + ' days'" />
+                     placeholder="blank = contract type default" />
             </label>
 
             <label class="dw-field">

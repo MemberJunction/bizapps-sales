@@ -40,7 +40,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop';
-import { CommonModule } from '@angular/common';
+import { CommonModule, DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
     ChangeDetectorRef,
@@ -53,7 +53,7 @@ import {
 
 import { FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 
-import { DealWorkspaceService, type DealRosterRow } from '../workspace/deal-workspace.service';
+import { DealWorkspaceService, DEFAULT_DISPLAY_CURRENCY, type DealRosterRow } from '../workspace/deal-workspace.service';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
 import {
     CompanyLabel,
@@ -79,34 +79,65 @@ export function DisplayDay(value: string | Date | null | undefined): Date | null
     return day ? FromCalendarDay(day) : null;
 }
 
+/** The roster fields a card's close date is chosen from. */
+type CardDates = Pick<DealRosterRow, 'IsClosed' | 'ActualCloseDate' | 'ExpectedCloseDate'>;
+
 /**
- * The one currency a set of cards shares, or NULL when they do not share one.
+ * True when the card shows the day the deal closed rather than its forecast.
  *
- * Uniformly-NULL counts as sharing: `Deal.CurrencyID` is unpopulated on every deal today, so treating
- * that as a disagreement would suppress every total on the board and help nobody. What it must not do
- * is treat NULL as the display default -- unknown and dollars are different claims, and conflating
- * them is how a EUR deal ends up rendered as $48,000.
+ * Read off the roster's `IsClosed` flag, never a status name. A closed row with no `ActualCloseDate`
+ * (one closed before the day was stamped) is false, so its card shows the expected day unlabelled
+ * rather than calling a forecast the close.
  */
-export function SingleCurrencyOf(cards: readonly DealRosterRow[]): string | null {
-    if (cards.length === 0) {
-        return null;
-    }
-    const distinct = new Set(cards.map((d) => d.CurrencyID ?? ''));
-    if (distinct.size > 1) {
-        return null;
-    }
-    const only = [...distinct][0];
-    return only === '' ? DEFAULT_DISPLAY_CURRENCY : only;
+export function CardClosed(deal: CardDates): boolean {
+    return deal.IsClosed && !!deal.ActualCloseDate;
+}
+
+/** The day a card shows: the close day once the deal has closed, otherwise the expected close day. */
+export function CardCloseDay(deal: CardDates): Date | null {
+    return DisplayDay(CardClosed(deal) ? deal.ActualCloseDate : deal.ExpectedCloseDate);
 }
 
 /**
- * What a figure is LABELLED as when no deal states a currency.
+ * The closing column a drag was released over, or null (#305).
  *
- * A display default, not a fact about the money. It is here as one named constant rather than three
- * hardcoded 'USD' literals so that the assumption is stated once, in a place a reader meets it, and
- * so populating `Deal.CurrencyID` is a data change rather than a code hunt.
+ * `CanDropInto` keeps a card out of a closing column, so CDK reports the drop on the last column that
+ * accepted the card — usually its own, which looks like "nothing changed". The pointer position is the
+ * only trace of where the rep let go, so the column under it is read from the DOM: closing columns
+ * carry their label in `data-closing`. A release inside the reporting column is an ordinary drop.
  */
-export const DEFAULT_DISPLAY_CURRENCY = 'USD';
+export function ClosingColumnUnder(
+    event: Pick<CdkDragDrop<unknown>, 'isPointerOverContainer' | 'dropPoint'>,
+    doc: Pick<Document, 'elementFromPoint'>,
+): string | null {
+    if (event.isPointerOverContainer) {
+        return null;
+    }
+    const under = doc.elementFromPoint(event.dropPoint.x, event.dropPoint.y);
+    return under?.closest('[data-closing]')?.getAttribute('data-closing') ?? null;
+}
+
+/** What the board says when a card is let go over a closing column. */
+export function ClosingRefusal(columnLabel: string): string {
+    return `"${columnLabel}" closes and locks a deal, so a card cannot be moved there. Close it from the `
+        + 'deal form, so the win or loss is recorded deliberately.';
+}
+
+/**
+ * The one currency code a set of cards shares, or NULL when they do not share one.
+ *
+ * Compared on `CurrencyCode`, not `CurrencyID`: the ID is a record key the currency pipe would print
+ * verbatim, and a deal with no currency (read as the display default) shares a column with one stamped
+ * in that same currency. What it must not do is fold different codes together -- that is how a EUR deal
+ * ends up rendered as $48,000.
+ */
+export function SingleCurrencyOf(cards: readonly DealRosterRow[]): string | null {
+    const distinct = new Set(cards.map((d) => d.CurrencyCode));
+    return distinct.size === 1 ? [...distinct][0] : null;
+}
+
+/** Defined beside the roster row it labels; exported here too for the section's figures. */
+export { DEFAULT_DISPLAY_CURRENCY };
 
 /** One column: a stage, the deals sitting in it, and the two figures its header shows. */
 export interface BoardColumn {
@@ -155,6 +186,7 @@ export interface BoardColumn {
 export class DealBoardComponent {
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
+    private readonly document = inject(DOCUMENT);
 
     /** The roster, owned by the section so the board and the list cannot disagree about what exists. */
     @Input() public Deals: DealRosterRow[] = [];
@@ -167,13 +199,23 @@ export class DealBoardComponent {
     /** A move persisted; the section re-reads the roster so every page sees the new stage. */
     @Output() public readonly StageMoved = new EventEmitter<void>();
 
-    public SelectedPipelineID: string | null = null;
+    /**
+     * The pipeline tab's choice; null until a rep picks one. Owned by the section and bound two-way,
+     * because the section tears this board down on every reload, and a choice held only here reset to
+     * the first pipeline after each drag.
+     */
+    @Input() public SelectedPipelineID: string | null = null;
+    @Output() public readonly SelectedPipelineIDChange = new EventEmitter<string | null>();
     /** Shown verbatim. A refused or failed move must say why rather than silently snapping back. */
     public Message: string | null = null;
     public Moving = false;
 
-    /** The company filter's choice; null until a rep picks one, which means the default company. */
-    public SelectedCompanyID: string | null = null;
+    /**
+     * The company filter's choice; null until a rep picks one, which means the default company. Owned
+     * by the section for the same reason as `SelectedPipelineID`.
+     */
+    @Input() public SelectedCompanyID: string | null = null;
+    @Output() public readonly SelectedCompanyIDChange = new EventEmitter<string | null>();
 
     /** Every company that owns a pipeline, default company first (#327). */
     public get Companies(): PipelineCompany[] {
@@ -203,8 +245,10 @@ export class DealBoardComponent {
     /** A new company drops a pipeline that belongs to the old one; the company's first takes over. */
     public SelectCompany(companyID: string | null): void {
         this.SelectedCompanyID = companyID;
+        this.SelectedCompanyIDChange.emit(companyID);
         if (CompanyOfPipeline(this.Pipelines, this.SelectedPipelineID) !== companyID) {
             this.SelectedPipelineID = null;
+            this.SelectedPipelineIDChange.emit(null);
         }
         this.Message = null;
         this.cdr.detectChanges();
@@ -296,8 +340,7 @@ export class DealBoardComponent {
                      */
                     Total: cards.reduce((sum, d) => sum + (d.Amount ?? 0), 0),   // money-grep-allow: a rollup of stored answers for display -- never stored, never sent. The same SUM runs in dashboard-summary.sql:41; moving it into a query is blocked on pipeline-summary.sql:36 being open-deals-only. See the note above.
                     Currency: SingleCurrencyOf(cards),
-                    MixedCurrency: SingleCurrencyOf(cards) === null && cards.length > 0
-                        && new Set(cards.map((d) => d.CurrencyID ?? '')).size > 1,
+                    MixedCurrency: SingleCurrencyOf(cards) === null && cards.length > 0,
                     /**
                      * `AmountIsComputed` is the provenance flag, and reading it is the whole point: a
                      * null amount and a typed one are both un-priced, and the second is the one a reader
@@ -348,6 +391,7 @@ export class DealBoardComponent {
 
     public SelectPipeline(pipelineID: string): void {
         this.SelectedPipelineID = pipelineID;
+        this.SelectedPipelineIDChange.emit(pipelineID);
         this.Message = null;
         this.cdr.detectChanges();
     }
@@ -375,14 +419,20 @@ export class DealBoardComponent {
         if (!deal) {
             return;
         }
+        // Checked before the same-stage return: a refused drag comes back to the card's own column (or to
+        // a column it crossed on the way), and without this it snapped back with no word said.
+        const closing = ClosingColumnUnder(event, this.document);
+        if (closing !== null) {
+            this.Message = ClosingRefusal(closing);
+            this.cdr.detectChanges();
+            return;
+        }
         if (deal.PipelineStageID === target.StageID) {
             return;
         }
         if (target.IsClosing) {
             // Belt and braces: `CanDropInto` already refuses this, but a lock is worth two guards.
-            this.Message =
-                `"${target.Label}" closes and locks a deal. Open it in the workspace and close it there, ` +
-                'so the win or loss is recorded deliberately.';
+            this.Message = ClosingRefusal(target.Label);
             this.cdr.detectChanges();
             return;
         }
@@ -441,8 +491,9 @@ export class DealBoardComponent {
         return this.Pipelines.find((p) => p.ID === pipelineID)?.Name ?? '—';
     }
 
-    /** Exposed for the card's close date. See {@link DisplayDay}. */
-    public readonly DisplayDay = DisplayDay;
+    /** Exposed for the card's close date. See {@link CardCloseDay} and {@link DisplayDay}. */
+    public readonly CardCloseDay = CardCloseDay;
+    public readonly CardClosed = CardClosed;
     /** Track by ID so a re-render does not tear down every card. */
     public TrackCard = (_: number, deal: DealRosterRow): string => deal.ID;
     /** Exposed for the template's per-card fallback. See DEFAULT_DISPLAY_CURRENCY. */

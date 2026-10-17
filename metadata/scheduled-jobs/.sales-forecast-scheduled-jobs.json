@@ -21,15 +21,15 @@
       "    times and label them as seven days. That is worse than the gap it is trying to fill: a gap is",
       "    visibly missing, whereas seven identical rows look like a week of flat forecast.",
       "  · RunImmediatelyIfNeverRun `false` — a first deployment should not capture a period nobody has",
-      "    looked at yet, and there is no source registered to capture from anyway.",
+      "    looked at yet.",
       "",
-      "WHY IT IS SAFE TO SHIP `Active`: the forecast source factory defaults to NULL, so the run reports",
-      "NO_SOURCE and writes nothing until somebody registers a query-backed source. See the note in",
-      "`.sales-forecast-actions.json` for why an invented forecast number is the worst thing this could do."
+      "WHAT IT CAPTURES: the forecast source factory defaults to the `Sales: Forecast by Owner` query",
+      "(ForecastSnapshotJob.ts), so every run writes one row per pipeline and owner for the current month.",
+      "A missing or renamed query fails the run rather than writing nothing."
     ],
     "fields": {
       "Name": "Sales — Forecast Snapshot (daily)",
-      "Description": "Captures ForecastSnapshot rows for the current period from the sales forecast queries. Writes nothing until a forecast source is registered; skips any grain already captured today.",
+      "Description": "Captures the current month's forecast for each pipeline and owner every night, skipping any already captured that day. The rows appear under Pipeline > Forecast Snapshots.",
       "JobTypeID": "3B94DD43-E961-4D85-B7F4-B6783D748766",
       "CronExpression": "0 0 2 * * *",
       "Timezone": "UTC",
