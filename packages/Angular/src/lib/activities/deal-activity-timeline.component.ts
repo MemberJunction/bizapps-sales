@@ -313,8 +313,7 @@ export class DealActivityTimelineComponent {
             const actionID = await this.logActivityActionID(provider);
             if (!actionID) {
                 this.Error =
-                    'The Log Activity action is not installed in this deployment. Ask an administrator to '
-                    + 'load the Sales app\'s metadata (run `mj sync push --dir metadata`).';
+                    'Activity logging is not set up in this deployment yet. Ask an administrator to set it up.';
                 return;
             }
 
@@ -349,7 +348,8 @@ export class DealActivityTimelineComponent {
             this.Logged.emit(this.dealID);
             await this.Load();
         } catch (err) {
-            this.Error = `The activity could not be logged: ${String(err)}`;
+            console.error('Logging the activity failed:', err);
+            this.Error = 'The activity could not be logged. Check your connection and try again.';
         } finally {
             this.Saving = false;
             this.cdr.detectChanges();
@@ -489,14 +489,28 @@ function localInputValue(when: Date): string {
 }
 
 /**
+ * Plain sentences for the result codes the Log Activity action returns, used only when the result
+ * carries no message of its own. A code is never shown to the rep.
+ */
+const RESULT_CODE_MESSAGES: Readonly<Record<string, string>> = {
+    BAD_INPUT: 'Some of the activity details are missing or not valid. Check them and try again.',
+    REFUSED: 'The activity was not saved because the server did not accept it. Check the details and try again.',
+    ERROR: 'Something went wrong on the server, so the activity was not logged. Try again, and if it keeps happening, ask an administrator.',
+};
+
+/**
  * The message off an action result, whatever shape it came back in.
  *
  * `ActionResult` does not expose `Message` or `ResultCode` at the top level — MJ's own caller reaches
  * through `Result` for the code — so this reads defensively rather than asserting a shape that is not
- * guaranteed. Returning null lets the caller supply its own fallback rather than showing "undefined".
+ * guaranteed. With no message, a known result code maps to a sentence; an unknown one returns null so
+ * the caller supplies its own fallback rather than showing the code or "undefined".
  */
 function actionMessage(result: unknown): string | null {
     const r = result as { Message?: string; Result?: { Message?: string; ResultCode?: string } } | null;
-    return r?.Message ?? r?.Result?.Message ?? r?.Result?.ResultCode ?? null;
+    const message = r?.Message ?? r?.Result?.Message;
+    if (message) return message;
+    const code = r?.Result?.ResultCode;
+    return code ? RESULT_CODE_MESSAGES[code] ?? null : null;
 }
 
