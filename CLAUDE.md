@@ -41,7 +41,9 @@ bizapps-sales/
   .env.example         - every environment variable the repo reads, with placeholders
   .mj-links.json       - local sibling links (empty: every dependency is published to npm)
   migrations/          - B... schema, V... changes; the baseline carries its CodeGen half below a banner
+  migrations-pg/       - the PostgreSQL counterpart of each migration, one `.pg.sql` per T-SQL file
   migrations-teardown/ - retires this app's rows from __mj on `mj app remove`
+  migrations-teardown-pg/ - the PostgreSQL counterpart of the teardown
   metadata/            - type-table seeds and app metadata, pushed with `mj sync push`
   packages/
     Entities/          - @mj-biz-apps/sales-entities (generated entities, remote-operation contracts, shared rules)
@@ -208,7 +210,8 @@ the thing it names is broken?"** The incidents behind rules 5–8: `docs/history
 - Never add `__mj_CreatedAt`/`__mj_UpdatedAt` columns or FK indexes — CodeGen does both.
 - **Author for PostgreSQL from day one.** Production is PG; keep the T-SQL converter-friendly and
   avoid reserved words as column names (this is why `ForecastSnapshot` has `CommitAmount`, not
-  `Commit`). No migration has a PostgreSQL counterpart yet (#197).
+  `Commit`). Every migration has a PostgreSQL counterpart in `migrations-pg/`, and the teardown one in
+  `migrations-teardown-pg/`.
 - `CONFIRM_DROP=<database> scripts/rebuild-db.sh` drops and rebuilds a local database from migrations:
   MJ core, then common, tasks, accounting, orders and contracts from sibling checkouts, then sales.
   It names the database to DESTROY; there is no default. It applies every migration as shipped and
