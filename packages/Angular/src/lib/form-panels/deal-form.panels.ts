@@ -284,7 +284,7 @@ async function RunClose(req: CloseRequest): Promise<ReopenOutcome> {
             },
         );
         if (!envelope.Success) {
-            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.CloseDeal could not be reached.', issues: [], notes: [] };
+            return { ok: false, message: envelope.ErrorMessage ?? 'The server did not respond, so the deal was not closed. Check your connection and try again.', issues: [], notes: [] };
         }
         const out = envelope.Output;
         if (!out?.Success) {
@@ -348,7 +348,7 @@ async function RunReopen(dealID: string, reason: string, targetStatusID: string 
             { DealID: dealID, Reason: reason.trim(), DealStatusTypeID: targetStatusID },
         );
         if (!envelope.Success) {
-            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.ReopenDeal could not be reached.', issues: [], notes: [] };
+            return { ok: false, message: envelope.ErrorMessage ?? 'The server did not respond, so the deal was not reopened. Check your connection and try again.', issues: [], notes: [] };
         }
         const out = envelope.Output;
         if (!out?.Success) {
@@ -3184,7 +3184,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
                 },
             );
             if (!envelope.Success) {
-                this.Fail(envelope.ErrorMessage ?? 'Sales.CloseDeal could not be reached.');
+                this.Fail(envelope.ErrorMessage ?? 'The server did not respond, so the deal was not closed. Check your connection and try again.');
                 return;
             }
             const out = envelope.Output;

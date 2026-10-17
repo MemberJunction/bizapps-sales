@@ -121,6 +121,6 @@ describe('AnswerAsNextTerm', () => {
     it('throws when the save is refused, so the close rolls back', async () => {
         const l = line({ Save: vi.fn().mockResolvedValue(false), LatestResult: { CompleteMessage: 'locked' } });
         const found = await FindUnansweredSubscriptionLines(deal([l]), provider(), user);
-        await expect(AnswerAsNextTerm(found)).rejects.toThrow(/order line 2 .*locked/);
+        await expect(AnswerAsNextTerm(found)).rejects.toThrow(/Order line 2 .*locked/);
     });
 });

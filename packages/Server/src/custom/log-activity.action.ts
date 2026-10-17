@@ -126,7 +126,7 @@ export class LogActivityAction extends BaseAction {
                 return {
                     Success: false,
                     ResultCode: 'BAD_INPUT',
-                    Message: `'${rawStarted}' is not a date/time this can read.`,
+                    Message: `'${rawStarted}' is not a date and time that can be read. Use a format such as 2026-10-16T14:30:00Z.`,
                 };
             }
             startedAt = parsed;

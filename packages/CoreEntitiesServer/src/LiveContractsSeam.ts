@@ -165,19 +165,19 @@ export class LiveContractsSeam {
             return {
                 Success: false,
                 Message:
-                    'A contract needs the buying organisation (Deal.AccountID). Contracts stores it as ' +
-                    'CustomerOrganizationID, which is required — v2 has no person-customer alternative.',
+                    'A contract cannot be created because the deal has no customer organization. Pick the ' +
+                    'customer on the deal, then close it again.',
             };
         }
         if (!input.CompanyID) {
-            return { Success: false, Message: 'A contract needs the selling company (Deal.CompanyID).' };
+            return { Success: false, Message: 'A contract cannot be created because the deal has no selling company. Pick the deal\'s pipeline, which sets the company, then close it again.' };
         }
 
         const resolved = await this.resolveContractType(input.ContractTypeCode);
         if (!resolved.ID) {
             return {
                 Success: false,
-                Message: `No contract type matches '${input.ContractTypeCode ?? '(none)'}' in contracts${resolved.By}.`,
+                Message: `No contract type matches '${input.ContractTypeCode ?? '(none)'}' in the Contracts app${resolved.By}. Ask an administrator to check the contract type in the pipeline's close-won policy.`,
             };
         }
 
@@ -467,16 +467,14 @@ export class LiveContractsSeam {
             return { Success: false, Message: 'bizapps-contracts is not installed in this deployment.' };
         }
         if (!input.ContractID) {
-            return { Success: false, Message: 'A renewal needs the contract being renewed (Deal.RenewsContractID).' };
+            return { Success: false, Message: 'A renewal cannot be created because the deal does not say which contract it renews. Set the contract being renewed on the deal.' };
         }
         return {
             Success: false,
             ContractID: input.ContractID,
             Message:
-                'Renewal was planned but not executed: the contracts rebuild removed ContractTerm and ' +
-                'Contracts.RenewTerm, so a term cannot be added to an existing contract. Whether a renewal ' +
-                'becomes a child contract (ParentContractID) or supersedes the original ' +
-                '(SupersededByContractID) is a contracts modelling decision that has not been made.',
+                'The Contracts app cannot yet add a new term to an ' +
+                'existing contract, so renewals from a won deal are not supported yet.',
         };
     }
 
@@ -510,8 +508,8 @@ export async function LinkOrderToContract(
             Pending: true,
             ContractID: input.ContractID,
             Message:
-                'Contract link pending: the installed bizapps-contracts has no order links yet. The order is ' +
-                'linked to its contract automatically once contracts is upgraded.',
+                'Contract link pending: the installed Contracts app cannot link orders to contracts yet. The ' +
+                'order will be linked to its contract automatically once the Contracts app is upgraded.',
         };
     }
     const existing = await new RunView().RunView<{ ID: string }>(

@@ -484,7 +484,7 @@ export class DealWorkspaceService {
             ...(closedSince ? { Parameters: { ClosedSince: closedSince } } : {}),
         });
         if (!result?.Success) {
-            throw new Error(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
+            throw new Error(`The deal list could not be loaded: ${result?.ErrorMessage ?? 'unknown error'}`);
         }
         const rows = (result.Results ?? []) as Record<string, unknown>[];
         // Throws on a query definition older than this mapper, rather than letting bool() read the

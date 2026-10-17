@@ -154,7 +154,7 @@ export class ActivityWriterService {
         }
         if (!this.commonIsInstalled(provider)) {
             result.Issues.push(
-                'bizapps-common is not installed on this host, so there is no Activity entity to write to.',
+                'The Common app (bizapps-common) is not installed, so activities cannot be saved.',
             );
             return result;
         }
@@ -162,8 +162,8 @@ export class ActivityWriterService {
         const typeID = await this.resolveTypeByCode(input.TypeCode, contextUser);
         if (!typeID) {
             result.Issues.push(
-                `No ActivityType with Code '${input.TypeCode}' exists. The six codes are seeded by `
-                    + 'bizapps-common; this host is missing them.',
+                `No activity type with code '${input.TypeCode}' exists. Activity types come with the Common `
+                    + 'app (bizapps-common); ask an administrator to load its seed data.',
             );
             return result;
         }
@@ -182,8 +182,8 @@ export class ActivityWriterService {
         const db = provider as unknown as DatabaseProviderBase;
         if (!db?.BeginEntityTransaction) {
             result.Issues.push(
-                'This provider cannot open a transaction, so an activity and its links cannot be written '
-                    + 'atomically. ActivityWriterService is server-only.',
+                'Activities can only be logged on the server, where an activity and its links are saved '
+                    + 'together in one transaction, and this connection cannot open one.',
             );
             return result;
         }
@@ -233,8 +233,8 @@ export class ActivityWriterService {
                 if (!written) {
                     await scope.Rollback();
                     result.Issues.push(
-                        `The activity was rolled back because a link could not be written (role ${link.Role}). `
-                            + 'An activity with no links is unreachable, so a partial write is not an option.',
+                        `The activity was not saved, because its ${link.Role} link could not be written. `
+                            + 'An activity without its links cannot be found, so nothing was kept.',
                     );
                     return result;
                 }

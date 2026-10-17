@@ -642,8 +642,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             if (this.Deal?.OrderID && !this.Deal.OrderID_Object) {
                 this.Error =
                     'This deal\'s order could not be loaded, so a product cannot be added to it. ' +
-                    'Reload the page and try again; if it persists, the order exists but this app ' +
-                    'cannot read it, and that needs an administrator rather than a retry.';
+                    'Reload the page and try again. If it keeps happening, ask an administrator to check ' +
+                    'that you have access to the order.';
                 return;
             }
 

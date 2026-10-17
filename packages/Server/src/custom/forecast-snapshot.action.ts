@@ -66,9 +66,8 @@ export class CaptureForecastSnapshotAction extends BaseAction {
                 Success: false,
                 ResultCode: 'BAD_PERIOD',
                 Message:
-                    `Supply both ${P_PERIOD_START} and ${P_PERIOD_END}, or neither. One alone would have to be `
-                    + 'paired with an invented boundary, and the snapshot would be filed against a period '
-                    + 'nobody chose.',
+                    `Give both ${P_PERIOD_START} and ${P_PERIOD_END}, or neither. With only one, the snapshot `
+                    + 'would be filed against a period nobody chose.',
             };
         }
 
@@ -94,8 +93,8 @@ export class CaptureForecastSnapshotAction extends BaseAction {
                 Success: true,
                 ResultCode: 'NO_SOURCE',
                 Message:
-                    'No forecast source is registered, so nothing was captured. The default source was '
-                    + 'replaced with one that returns none.',
+                    'No forecast source is set up, so nothing was captured. The default source was '
+                    + 'replaced with one that returns nothing. Ask a developer to check the forecast source setup.',
             };
         }
 
