@@ -203,13 +203,13 @@ export function DealInListWhere(ids: readonly string[]): string {
 
 const sqlString = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 
-/** An entity's schema and base table, read from metadata so no schema name is hardcoded here. */
+/** An entity's schema and base view, read from metadata so no schema name is hardcoded here. MJAPI accepts a subquery only on a base view. */
 export interface SqlTable {
     SchemaName: string;
-    BaseTable: string;
+    BaseView: string;
 }
 
-const tableRef = (t: SqlTable): string => `[${t.SchemaName}].[${t.BaseTable}]`;
+const tableRef = (t: SqlTable): string => `[${t.SchemaName}].[${t.BaseView}]`;
 
 /** The type tables an Inspect filter reads flags from. */
 export interface InspectTables {
@@ -281,11 +281,11 @@ export function InspectCriteriaWhere(key: CriteriaInspectKey, tables: InspectTab
  * matches, including one with no close date; with bounds such a deal does not. Applied on the server,
  * so the list no longer depends on the browser holding every won deal.
  *
- * `statusTable` is the Deal Status Types entity's schema and base table, read from metadata so the
+ * `statusTable` is the Deal Status Types entity's schema and base view, read from metadata so the
  * schema name is not hardcoded here.
  */
 export function DealWonInPeriodWhere(
-    statusTable: { SchemaName: string; BaseTable: string },
+    statusTable: SqlTable,
     window?: PeriodWindow,
 ): string {
     const parts = [

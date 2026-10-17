@@ -503,8 +503,8 @@ export class DealWorkspaceService {
         if (!deal || !status) {
             return new Map();
         }
-        const openDeals = `SELECT ID FROM [${deal.SchemaName}].[${deal.BaseTable}] WHERE DealStatusTypeID IN `
-            + `(SELECT ID FROM [${status.SchemaName}].[${status.BaseTable}] WHERE IsOpen = 1)`;
+        const openDeals = `SELECT ID FROM [${deal.SchemaName}].[${deal.BaseView}] WHERE DealStatusTypeID IN `
+            + `(SELECT ID FROM [${status.SchemaName}].[${status.BaseView}] WHERE IsOpen = 1)`;
         const [events, deals] = await new RunView().RunViews([
             { EntityName: E_STAGE_EVENT, ExtraFilter: `DealID IN (${openDeals})`, OrderBy: 'ChangedAt DESC', ResultType: 'simple', Fields: ['DealID', 'ToStageID', 'ChangedAt'] },
             { EntityName: E_DEAL, ExtraFilter: `ID IN (${openDeals})`, ResultType: 'simple', Fields: ['ID', 'PipelineStageID', '__mj_CreatedAt'] },

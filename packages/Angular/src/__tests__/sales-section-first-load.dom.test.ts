@@ -59,12 +59,13 @@ const SUMMARY: DealDashboardSummary = {
 
 /** The two entities the section looks up: Deals (for the grids) and Deal Status Types (for Won). */
 const ENTITIES = [
-    { ID: 'deal-entity', Name: 'MJ_BizApps_Sales: Deals', SchemaName: '__mj_BizAppsSales', BaseTable: 'Deal' },
+    { ID: 'deal-entity', Name: 'MJ_BizApps_Sales: Deals', SchemaName: '__mj_BizAppsSales', BaseTable: 'Deal', BaseView: 'vwDeals' },
     {
         ID: 'status-entity',
         Name: 'MJ_BizApps_Sales: Deal Status Types',
         SchemaName: '__mj_BizAppsSales',
         BaseTable: 'DealStatusType',
+        BaseView: 'vwDealStatusTypes',
     },
 ] as unknown as EntityInfo[];
 
@@ -120,7 +121,7 @@ describe('the won figures', () => {
         await vi.waitFor(() => expect(pipelineView.wheres.at(-1)).toContain('IsWon = 1'));
 
         expect(pipelineView.wheres.at(-1)).toBe(
-            'DealStatusTypeID IN (SELECT ID FROM [__mj_BizAppsSales].[DealStatusType] WHERE IsWon = 1)' +
+            'DealStatusTypeID IN (SELECT ID FROM [__mj_BizAppsSales].[vwDealStatusTypes] WHERE IsWon = 1)' +
                 " AND ActualCloseDate >= '2026-07-01' AND ActualCloseDate <= '2026-09-30'",
         );
         expect(fixture.componentInstance.InspectCount).toBe(SUMMARY.WonCount);

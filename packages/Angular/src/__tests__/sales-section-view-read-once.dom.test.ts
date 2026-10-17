@@ -36,7 +36,7 @@ vi.mock('../lib/pages/deal-views', async (importOriginal) => {
 const TEMPLATE = { Name: 'Sales: Pipeline', WhereClause: '' } as unknown as MJUserViewEntityExtended;
 
 const ENTITIES = [
-    { ID: 'deal-entity', Name: 'MJ_BizApps_Sales: Deals', SchemaName: '__mj_BizAppsSales', BaseTable: 'Deal' },
+    { ID: 'deal-entity', Name: 'MJ_BizApps_Sales: Deals', SchemaName: '__mj_BizAppsSales', BaseTable: 'Deal', BaseView: 'vwDeals' },
 ] as unknown as EntityInfo[];
 
 let service: StubService;

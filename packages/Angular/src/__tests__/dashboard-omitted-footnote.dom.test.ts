@@ -38,7 +38,7 @@ beforeEach(() => {
     service = stubService();
     service.LoadDashboardSummary.mockResolvedValue(summary);
     vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue([
-        { ID: 'deal-entity', Name: 'MJ_BizApps_Sales: Deals', SchemaName: '__mj_BizAppsSales', BaseTable: 'Deal' },
+        { ID: 'deal-entity', Name: 'MJ_BizApps_Sales: Deals', SchemaName: '__mj_BizAppsSales', BaseTable: 'Deal', BaseView: 'vwDeals' },
     ] as unknown as EntityInfo[]);
     configureSection(service);
 });

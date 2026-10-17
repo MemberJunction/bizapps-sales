@@ -8,13 +8,13 @@ import { ParseSalesUrlState, SalesUrlParams, SameSalesUrlState, DEFAULT_SALES_UR
 import { StageEntryDays } from '../lib/workspace/deal-workspace.service';
 
 const TABLES = {
-    Status: { SchemaName: 's', BaseTable: 'DealStatusType' },
-    Pipeline: { SchemaName: 's', BaseTable: 'Pipeline' },
-    Forecast: { SchemaName: 's', BaseTable: 'ForecastCategoryType' },
+    Status: { SchemaName: 's', BaseView: 'vwDealStatusTypes' },
+    Pipeline: { SchemaName: 's', BaseView: 'vwPipelines' },
+    Forecast: { SchemaName: 's', BaseView: 'vwForecastCategoryTypes' },
 };
 const OPEN_IN_FORECAST =
-    'DealStatusTypeID IN (SELECT ID FROM [s].[DealStatusType] WHERE IsOpen = 1)'
-    + ' AND PipelineID IN (SELECT ID FROM [s].[Pipeline] WHERE IncludeInForecast = 1)';
+    'DealStatusTypeID IN (SELECT ID FROM [s].[vwDealStatusTypes] WHERE IsOpen = 1)'
+    + ' AND PipelineID IN (SELECT ID FROM [s].[vwPipelines] WHERE IncludeInForecast = 1)';
 
 /**
  * INSPECT FILTERS BY CRITERIA, NOT BY A LIST OF IDS (bizapps-sales#449).
@@ -30,10 +30,10 @@ describe('InspectCriteriaWhere', () => {
     });
 
     it.each<[CriteriaInspectKey, string]>([
-        ['commit', 'ForecastCategoryTypeID IN (SELECT ID FROM [s].[ForecastCategoryType] WHERE IncludeInCommit = 1)'],
-        ['best', 'ForecastCategoryTypeID IN (SELECT ID FROM [s].[ForecastCategoryType] WHERE IncludeInBestCase = 1)'],
-        ['pipe', '(ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM [s].[ForecastCategoryType] WHERE IncludeInPipeline = 0))'],
-        ['remainder', '(ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM [s].[ForecastCategoryType] WHERE IncludeInPipeline = 0 OR IncludeInCommit = 1 OR IncludeInBestCase = 1))'],
+        ['commit', 'ForecastCategoryTypeID IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInCommit = 1)'],
+        ['best', 'ForecastCategoryTypeID IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInBestCase = 1)'],
+        ['pipe', '(ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInPipeline = 0))'],
+        ['remainder', '(ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInPipeline = 0 OR IncludeInCommit = 1 OR IncludeInBestCase = 1))'],
         ['slipped', "ExpectedCloseDate IS NOT NULL AND ExpectedCloseDate < '2026-08-15'"],
         ['noowner', "(OwnerEmployee IS NULL OR OwnerEmployee = '')"],
         ['week', "ExpectedCloseDate >= '2026-08-15' AND ExpectedCloseDate <= '2026-08-22'"],
