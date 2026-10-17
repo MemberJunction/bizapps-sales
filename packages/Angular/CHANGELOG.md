@@ -1,5 +1,19 @@
 # @mj-biz-apps/sales-ng
 
+## 6.17.0
+
+### Minor Changes
+
+- edc7c8a: The deal form's "What's being sold" panel lists each order line as a card laid out like the order form's line cards: product with SKU and type, quantity, unit price with its named price, an overridden or discount pill, line total, untaxable and other-company chips, and a subscription's term start. Add a product and each line's edit control open the restricted line editor as before; a closed deal shows the cards with neither. `MJSDealLinesPanel.EditLine` now takes the line ID instead of a grid double-click event, and the panel no longer exposes `Params` or `OnDataLoad`.
+
+### Patch Changes
+
+- 6e391fd: The New button on the All deals and Inspect grids now opens a new deal. The section did not handle the grid's create request, so the button did nothing.
+- 4c46f78: The dashboard's Stage mix card draws its bars at their real height again. A bar's percentage height had nothing definite to resolve against, so every bar fell back to its 8px minimum. Stage names now take a fixed two lines (full name on hover), so a long name no longer lifts its bar off the shared baseline.
+- Updated dependencies [2018641]
+- Updated dependencies [7b134f9]
+  - @mj-biz-apps/sales-entities@6.17.0
+
 ## 6.16.0
 
 ### Minor Changes
