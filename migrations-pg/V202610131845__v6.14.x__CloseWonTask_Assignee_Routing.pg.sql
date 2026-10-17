@@ -14,13 +14,14 @@
 --   * `IsApproval` is BIT in T-SQL and BOOLEAN here, so the values are TRUE/FALSE.
 --
 -- Both statements are filtered on the state they change, so re-running this file is a no-op.
+-- Corrected in place (lowercase schema names): no PostgreSQL host applied the original, as the install failed before reaching it.
 -- =============================================================================================
 
 SET standard_conforming_strings = on;
 
 -- 1. Stop pointing the close-won tasks at a People row only the demo seed creates.
 --    Filtered on the placeholder, so a deployment that already configured a real person keeps it.
-UPDATE "__mj_BizAppsSales"."Pipeline"
+UPDATE __mj_bizappssales."Pipeline"
    SET "CloseWonPolicy" = REPLACE(
            "CloseWonPolicy",
            '"AssigneeRecordID": "C0111111-0000-4000-A000-000000000004"',
@@ -35,11 +36,11 @@ BEGIN
   IF EXISTS (
       SELECT 1
         FROM information_schema.columns
-       WHERE table_schema = '__mj_BizAppsTasks'
+       WHERE table_schema = '__mj_bizappstasks'
          AND table_name   = 'TaskType'
          AND column_name  = 'IsApproval'
   ) THEN
-    EXECUTE 'UPDATE "__mj_BizAppsTasks"."TaskType"
+    EXECUTE 'UPDATE __mj_bizappstasks."TaskType"
                 SET "IsApproval" = TRUE
               WHERE "Code" = ''ORDER_REVIEW''
                 AND "IsApproval" = FALSE';
