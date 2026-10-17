@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { DayLabel } from '../lib/pages/dashboard-dates';
 import { FilterInspect, InspectDateBounds } from '../lib/pages/dashboard-inspect';
-import { ALL_DEALS_ORDER_BY, DealPipelineGridState, InspectCriteriaWhere, type CriteriaInspectKey } from '../lib/pages/deal-views';
+import { DealPipelineGridState, InspectCriteriaWhere, type CriteriaInspectKey } from '../lib/pages/deal-views';
 import { DescribeFiscalBasis, CALENDAR_YEAR_START } from '../lib/pages/dashboard-period';
 import { ParseSalesUrlState, SalesUrlParams, SameSalesUrlState, DEFAULT_SALES_URL_STATE } from '../lib/sections/sales-url-state';
 import { StageEntryDays } from '../lib/workspace/deal-workspace.service';
@@ -53,10 +53,11 @@ describe('InspectCriteriaWhere', () => {
 });
 
 describe('All deals order (bizapps-sales#371)', () => {
-    it('puts open deals first, then the soonest expected close, with no date last', () => {
-        expect(ALL_DEALS_ORDER_BY).toBe(
-            'CASE WHEN ClosedAt IS NULL THEN 0 ELSE 1 END, CASE WHEN ExpectedCloseDate IS NULL THEN 1 ELSE 0 END, ExpectedCloseDate',
-        );
+    it('sorts open deals first, then by expected close, on columns the grid holds', () => {
+        const grid = DealPipelineGridState();
+        expect(grid.sortSettings).toEqual([{ field: 'ClosedAt', dir: 'asc' }, { field: 'ExpectedCloseDate', dir: 'asc' }]);
+        const names = grid.columnSettings.map((c) => c.Name);
+        for (const s of grid.sortSettings) expect(names).toContain(s.field);
     });
 });
 
