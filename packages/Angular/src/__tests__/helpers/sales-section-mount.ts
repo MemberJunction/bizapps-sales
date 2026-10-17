@@ -33,6 +33,7 @@ export function stubService() {
         LoadLookups: vi.fn().mockResolvedValue({ Pipelines: [], Stages: [], DealStatusTypes: [] }),
         LoadDashboardSummary: vi.fn().mockResolvedValue(null),
         LoadWinRate: vi.fn().mockResolvedValue([]),
+        LoadStageEntries: vi.fn().mockResolvedValue(new Map<string, string>()),
     };
 }
 

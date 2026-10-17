@@ -44,11 +44,12 @@
     </p>
   }
 
-  @if (Columns.length === 0) {
+  @let columns = Columns;
+  @if (columns.length === 0) {
     <p class="db-empty">This pipeline has no stages yet.</p>
   } @else {
     <div class="db-cols">
-      @for (column of Columns; track TrackColumn($index, column)) {
+      @for (column of columns; track TrackColumn($index, column)) {
         <section
           class="db-col"
           [class.db-col--closing]="column.IsClosing"
@@ -131,18 +132,20 @@
             (cdkDropListDropped)="OnDrop($event, column)">
 
             @for (deal of column.Cards; track TrackCard($index, deal)) {
+              <!--
+                The card opens on a click anywhere; for the keyboard its name is a real button, so Enter
+                and Space both open it (bizapps-sales#371). The card is not itself a button, because it
+                also holds the "Move to stage" control and a button may not contain other controls.
+              -->
               <article
                 class="db-card"
                 cdkDrag
                 [cdkDragData]="deal"
                 [cdkDragDisabled]="Moving"
-                (click)="OpenCard(deal)"
-                (keydown.enter)="OpenCard(deal)"
-                tabindex="0"
-                role="button"
-                [attr.aria-label]="'Open ' + deal.Name">
+                (click)="OpenCard(deal)">
 
-                <div class="db-card__name">{{ deal.Name }}</div>
+                <button type="button" class="db-card__name" [attr.aria-label]="'Open ' + deal.Name"
+                        (click)="$event.stopPropagation(); OpenCard(deal)">{{ deal.Name }}</button>
                 <div class="db-card__customer">
                   <i class="fa-solid fa-building" aria-hidden="true"></i> {{ deal.CustomerName }}
                 </div>
@@ -184,9 +187,40 @@
                     @if (CardClosed(deal)) {
                       <span class="db-card__closed">Closed</span>
                     }
-                    <span class="db-card__day">{{ CardCloseDay(deal) ? (CardCloseDay(deal) | date:'MMM d, y':'UTC') : 'No date' }}</span>
+                    <span class="db-card__day">{{ CardDayLabel(deal) || 'No date' }}</span>
                   </span>
                 </div>
+
+                @if (IdleFor(deal); as idle) {
+                  <!-- Past the stage's Rotting Days (bizapps-sales#450). Icon AND words, so colour is not
+                       the only signal, and the words are what a screen reader reads. -->
+                  <div class="db-card__idle" [title]="idle.Label">
+                    <i class="fa-solid fa-hourglass-end" aria-hidden="true"></i>
+                    <span>Idle {{ idle.Days }} days (limit {{ idle.Limit }})</span>
+                  </div>
+                }
+
+                @if (MoveTargets(columns, deal); as targets) {
+                  @if (targets.length) {
+                    <!-- The keyboard path to a stage change (bizapps-sales#371). Pick, then Move: a select
+                         that saved on change would move the deal on a stray arrow key. Clicks and keys stay
+                         here, so they neither open the deal nor start a drag. -->
+                    <div class="db-card__move" (click)="$event.stopPropagation()" (mousedown)="$event.stopPropagation()"
+                         (keydown)="$event.stopPropagation()">
+                      <select class="db-card__move-select" [attr.aria-label]="'Stage to move ' + deal.Name + ' to'"
+                              [disabled]="Moving"
+                              [ngModel]="PendingMove.get(deal.ID) ?? ''"
+                              (ngModelChange)="PendingMove.set(deal.ID, $event)">
+                        <option value="">Move to stage…</option>
+                        @for (t of targets; track t.StageID) {
+                          <option [value]="t.StageID">{{ t.Label }}</option>
+                        }
+                      </select>
+                      <button type="button" class="db-card__move-go" [disabled]="Moving || !PendingMove.get(deal.ID)"
+                              [attr.aria-label]="'Move ' + deal.Name" (click)="MoveToPicked(deal)">Move</button>
+                    </div>
+                  }
+                }
 
                 <div class="db-card__ghost" *cdkDragPreview>{{ deal.Name }}</div>
               </article>

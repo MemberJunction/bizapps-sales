@@ -35,6 +35,9 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
+    /* At narrow width the heading and the period selector stack rather than overflow. */
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
     margin-bottom: 0.9rem;
 }
 
@@ -134,6 +137,20 @@
     gap: 0.15rem;
     flex: 1 1 auto;
     min-width: 0;
+}
+
+/* One part that did not load: the same shape, inside the card or page that part belongs to. */
+.load-failed--part {
+    margin: 0.5rem 0;
+    padding: 0.6rem 0.85rem;
+    font-size: 0.82rem;
+}
+
+/* A note on a card whose figures loaded but whose labels did not. */
+.part-note {
+    margin: 0 0 0.5rem;
+    font-size: 0.78rem;
+    color: var(--mj-text-secondary);
 }
 
 .load-failed__reason {
@@ -413,6 +430,18 @@ button.kpi.kpi--on {
     overflow: hidden;
     cursor: pointer;
     white-space: nowrap;
+    /* Buttons, for the keyboard (bizapps-sales#371); the bar keeps its look. */
+    border: 0;
+    padding: 0;
+    font-family: inherit;
+}
+.stack__seg:focus-visible {
+    outline: 2px solid var(--mj-border-focus);
+    outline-offset: -2px;
+}
+/* The segment Inspect is showing. An inset ring, so colour is not the only signal. */
+.stack__seg[aria-pressed='true'] {
+    box-shadow: inset 0 0 0 2px var(--mj-text-primary);
 }
 .stack__seg--closed { background: var(--mj-status-success); }
 .stack__seg--commit { background: var(--mj-brand-primary); }

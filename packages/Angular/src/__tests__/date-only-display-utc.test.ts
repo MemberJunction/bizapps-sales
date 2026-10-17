@@ -19,7 +19,7 @@ import { formatDate } from '@angular/common';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { CardCloseDay, CardClosed, DisplayDay } from '../lib/board/deal-board.component';
+import { CardCloseDay, CardClosed, CardDayLabel, DisplayDay } from '../lib/board/deal-board.component';
 
 /**
  * Put the process zone back. Assigning `undefined` to `process.env.TZ` stores the STRING "undefined",
@@ -44,10 +44,10 @@ function pipesOn(source: string, field: string): string[] {
 }
 
 describe('the templates pass a zone for DATE columns and none for instants', () => {
-    it('formats the board card close date in UTC', () => {
-        const pipes = pipesOn(BOARD, 'CardCloseDay\\(deal\\)');
-        expect(pipes.length, 'the card must still render a close date').toBeGreaterThan(0);
-        for (const p of pipes) expect(p).toMatch(/'UTC'$/);
+    it('formats the board card close date through CardDayLabel, which reads the stored day\'s UTC parts', () => {
+        // The shared day format (bizapps-sales#371) replaced the card's date pipe; no zone can reach it.
+        expect(pipesOn(BOARD, 'CardCloseDay\\(deal\\)')).toEqual([]);
+        expect(BOARD).toMatch(/class="db-card__day">\{\{\s*CardDayLabel\(deal\)/);
     });
 
     it('formats NextStepDate in UTC on the overview and on the hero', () => {
@@ -133,9 +133,8 @@ describe('DisplayDay gives the board one shape to format', () => {
  * (and under CI's `TZ=UTC`) the card still reads correctly. It breaks only EAST of Greenwich for a bare
  * `YYYY-MM-DD`, which Angular parses as LOCAL midnight — in Tokyo that is 15:00 UTC the day before.
  *
- * So the card's interpolation is lifted out of the template and run: its pipe input is evaluated as
- * the expression it is (with the component's `CardCloseDay` and a roster row in scope), and formatted
- * with the format and zone the template passes.
+ * The card now renders `CardDayLabel(deal)` (bizapps-sales#371), which formats the stored day from its
+ * UTC parts with no pipe and no zone, so these run that function under each zone.
  */
 describe('the board card renders a bare day correctly east of Greenwich', () => {
     const original = process.env.TZ;
@@ -143,26 +142,11 @@ describe('the board card renders a bare day correctly east of Greenwich', () => 
         restoreTZ(original);
     });
 
-    /** `COND ? (VALUE | date:'FMT':'ZONE') : 'FALLBACK'` inside the card's close-date span. */
-    function cardCloseBinding(): { value: string; format: string; zone: string | undefined } {
-        const span = BOARD.match(/class="db-card__day">\{\{([\s\S]*?)\}\}<\/span>/);
-        expect(span, 'the card must still render a close-date span').not.toBeNull();
-        const m = span![1].match(/\?\s*\((.+?)\|\s*date\s*:\s*'([^']+)'(?:\s*:\s*'([^']+)')?\s*\)\s*:/);
-        expect(m, 'the close date must still be a conditional date pipe').not.toBeNull();
-        return { value: m![1].trim(), format: m![2], zone: m![3] };
-    }
+    type CardRow = Parameters<typeof CardDayLabel>[0];
 
-    type CardRow = Parameters<typeof CardCloseDay>[0];
-
+    /** The card renders `CardDayLabel(deal)` (checked above), so this is what a reader sees. */
     function renderCard(deal: CardRow): string {
-        const { value, format, zone } = cardCloseBinding();
-        // The template expression is plain JS here: a call with the roster row.
-        const evaluate = new Function('CardCloseDay', 'deal', `return (${value});`) as (
-            cardCloseDay: typeof CardCloseDay,
-            deal: CardRow,
-        ) => string | Date | null;
-        const input = evaluate(CardCloseDay, deal);
-        return formatDate(input!, format, 'en-US', zone);
+        return CardDayLabel(deal);
     }
 
     function renderCardClose(expectedCloseDate: string | Date): string {

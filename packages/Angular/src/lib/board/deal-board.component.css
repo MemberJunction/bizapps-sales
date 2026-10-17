@@ -37,6 +37,7 @@
 
 .db-bar__pipes {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.25rem;
 }
 
@@ -103,10 +104,13 @@
     min-height: 8rem;
 }
 
-/* A closing column is visibly inert — it accepts no drops, and should not invite one. */
+/*
+  A closing column is visibly inert — it accepts no drops, and should not invite one. Dashed border and
+  a sunken background, not opacity: fading the column lowered its text contrast (bizapps-sales#371).
+*/
 .db-col--closing {
     border-style: dashed;
-    opacity: 0.75;
+    background: var(--mj-bg-surface-sunken);
 }
 
 .db-col__head {
@@ -202,6 +206,59 @@
     font-weight: 600;
     color: var(--mj-text-primary);
     line-height: 1.25;
+    /* A button for the keyboard; it reads as the card's title. */
+    background: none;
+    border: 0;
+    padding: 0;
+    text-align: left;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.db-card__name:focus-visible {
+    outline: 2px solid var(--mj-border-focus);
+    outline-offset: 1px;
+}
+
+/* Past the stage's Rotting Days. Icon and words carry it; the colour only reinforces. */
+.db-card__idle {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.6875rem;
+    color: var(--mj-status-warning);
+}
+
+.db-card__move {
+    display: flex;
+    gap: 0.25rem;
+    margin-top: 0.125rem;
+}
+
+.db-card__move-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.125rem 0.25rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 4px;
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-secondary);
+    font-size: 0.6875rem;
+}
+
+.db-card__move-go {
+    padding: 0.125rem 0.5rem;
+    border: 1px solid var(--mj-border-default);
+    border-radius: 4px;
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-primary);
+    font-size: 0.6875rem;
+    cursor: pointer;
+}
+
+.db-card__move-go:disabled {
+    cursor: default;
+    color: var(--mj-text-muted);
 }
 
 .db-card__customer {

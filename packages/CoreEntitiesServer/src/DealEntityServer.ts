@@ -3090,7 +3090,7 @@ export class DealEntityServer extends DealEntity {
 
         this._ownerStampWarnings.push(
             'The owner is set from the deal team, so the value supplied with this save was replaced by '
-            + 'the deal\'s Owner / AE. Change the Owner role on the Internal team panel to change it.',
+            + 'the person in the deal\'s Owner role. Change the Owner role on the Internal team panel to change it.',
         );
     }
 

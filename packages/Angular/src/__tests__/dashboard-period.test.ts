@@ -292,7 +292,7 @@ describe('presentation', () => {
     });
 
     it('states the bounds a reader would otherwise have to guess at', () => {
-        expect(FormatWindow(ResolvePeriod('quarter', JULY, '2026-08-15'))).toBe('1 Jul 2026 – 30 Sep 2026');
+        expect(FormatWindow(ResolvePeriod('quarter', JULY, '2026-08-15'))).toBe('Jul 1, 2026 – Sep 30, 2026');
         expect(FormatWindow(ResolvePeriod('alltime', JULY, '2026-08-15'))).toBe('all time');
     });
 });
