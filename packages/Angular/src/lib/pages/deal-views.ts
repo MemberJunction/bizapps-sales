@@ -30,7 +30,8 @@ type GridCol = {
 
 export function DealPipelineGridState(): { sortSettings: { field: string; dir: 'asc' | 'desc' }[]; columnSettings: GridCol[] } {
     return {
-        sortSettings: [{ field: 'ExpectedCloseDate', dir: 'asc' }],
+        // Matches the saved view: open deals (no ClosedAt) first, then Expected Close (bizapps-sales#371).
+        sortSettings: [{ field: 'ClosedAt', dir: 'asc' }, { field: 'ExpectedCloseDate', dir: 'asc' }],
         columnSettings: [
             { Name: 'Name', DisplayName: 'Deal', orderIndex: 0, width: 260, pinned: 'left' },
             { Name: 'DealNumber', DisplayName: 'Number', orderIndex: 1, width: 120 },
