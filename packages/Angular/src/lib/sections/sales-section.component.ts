@@ -147,8 +147,8 @@ const E_FORECAST_CATEGORY_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
 const DEFAULT_PERIOD: PeriodKey = 'quarter';
 const DEFAULT_INSPECT: InspectKey = 'closing';
 
-/** An entity's schema and base table from metadata, or null when it is not loaded. */
-function tableOf(entityName: string): { SchemaName: string; BaseTable: string } | null {
+/** An entity's schema and base view from metadata, or null when it is not loaded. */
+function tableOf(entityName: string): { SchemaName: string; BaseView: string } | null {
     return new Metadata().Entities.find((e) => e.Name === entityName) ?? null;
 }
 
@@ -600,6 +600,8 @@ export class MJSSalesSectionComponent implements OnInit {
         // the flag is a hint and the board is complete without it.
         this.StageEnteredOn = entries.Value ?? new Map();
         this.pipelineView = pipelineView.Value;
+        // Draw the Board and tiles now: a grid view that fails below must not leave them unrendered.
+        this.cdr.detectChanges();
         // Copies of the view already read; neither goes back to the server.
         await Promise.all([this.refreshInspectView(), this.refreshAllDealsView()]);
         for (const failed of [lookups.Error, winRate.Error, pipelineView.Error, entries.Error]) {

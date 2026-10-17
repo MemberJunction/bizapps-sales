@@ -42,8 +42,8 @@ describe('LoadRoster', () => {
 });
 
 describe('DealWonInPeriodWhere', () => {
-    const STATUS = { SchemaName: '__mj_BizAppsSales', BaseTable: 'DealStatusType' };
-    const WON = 'DealStatusTypeID IN (SELECT ID FROM [__mj_BizAppsSales].[DealStatusType] WHERE IsWon = 1)';
+    const STATUS = { SchemaName: '__mj_BizAppsSales', BaseView: 'vwDealStatusTypes' };
+    const WON = 'DealStatusTypeID IN (SELECT ID FROM [__mj_BizAppsSales].[vwDealStatusTypes] WHERE IsWon = 1)';
 
     it('bounds ActualCloseDate by the window, as WonCount does', () => {
         expect(DealWonInPeriodWhere(STATUS, { Key: 'quarter', Label: 'This quarter', Start: '2026-07-01', End: '2026-09-30' })).toBe(
