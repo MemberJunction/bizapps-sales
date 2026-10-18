@@ -25,6 +25,7 @@ import {
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
 import { DealCloseDay } from './deal-close-day';
+import { IsFieldReadable } from './field-readable';
 
 
 /**
@@ -204,14 +205,17 @@ function money(n: number | null | undefined): string {
                         <span class="mjs-deal-hero__stat-label">Stage</span>
                         <span class="mjs-deal-hero__stat-val">{{ StageName || '—' }}</span>
                     </div>
-                    <div class="mjs-deal-hero__stat">
-                        <span class="mjs-deal-hero__stat-label">Amount</span>
-                        <span class="mjs-deal-hero__stat-val">{{ AmountText }}</span>
-                    </div>
-                    <div class="mjs-deal-hero__stat">
-                        <span class="mjs-deal-hero__stat-label">Weighted</span>
-                        <span class="mjs-deal-hero__stat-val">{{ WeightedText }}</span>
-                    </div>
+                    <!-- Both read Amount, which field-level security may deny (#403). -->
+                    @if (AmountReadable) {
+                        <div class="mjs-deal-hero__stat">
+                            <span class="mjs-deal-hero__stat-label">Amount</span>
+                            <span class="mjs-deal-hero__stat-val">{{ AmountText }}</span>
+                        </div>
+                        <div class="mjs-deal-hero__stat">
+                            <span class="mjs-deal-hero__stat-label">Weighted</span>
+                            <span class="mjs-deal-hero__stat-val">{{ WeightedText }}</span>
+                        </div>
+                    }
                     <!-- A CLOSED DEAL REPORTS, IT DOES NOT FORECAST (golive#231 item 4). This stat
                          showed ExpectedCloseDate whatever had happened, so a deal that closed in March
                          still announced a February expectation under a label that reads as fact. -->
@@ -637,6 +641,15 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         });
     }
 
+    /**
+     * Whether the viewer may read `Amount`. The header draws it itself, so it asks what
+     * `mj-form-field` asks, and asks first: `BaseEntity.Get()` throws for a denied field (#403).
+     */
+    public get AmountReadable(): boolean {
+        const provider = this.FormComponent?.ProviderToUse ?? Metadata.Provider;
+        return IsFieldReadable(this.Record?.EntityInfo, 'Amount', provider?.CurrentUser);
+    }
+
     public get AmountText(): string { return money(this.Record?.Amount); }
     public get WeightedText(): string {
         const a = Number(this.Record?.Amount);
@@ -750,7 +763,8 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
      */
     private async resolveStale(): Promise<void> {
         this.StaleAmountNotice = null;
-        if (!this.Record) return;
+        // A viewer who may not read the amount gets no notice about it either.
+        if (!this.Record || !this.AmountReadable) return;
         const freshness = await ResolveDealAmountFreshness({
             IsLocked: this.IsLocked,
             AmountIsComputed: this.Record.AmountIsComputed,

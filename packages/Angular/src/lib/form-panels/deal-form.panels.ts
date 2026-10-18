@@ -52,6 +52,7 @@ import { MJSDealLineEditorComponent } from './deal-line-editor.component';
 import { MJSDealLineCardsComponent } from './deal-line-cards.component';
 import { BusinessDayOf, DealCloseDay } from './deal-close-day';
 import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
+import { IsFieldReadable } from './field-readable';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -624,28 +625,26 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
 
     /**
      * Whether a self-drawn money row appears at all: it hides while empty, exactly as every other
-     * empty field hides in read mode (`HideWhenEmptyInReadOnlyMode`, which defaults to true).
+     * empty field hides in read mode (`HideWhenEmptyInReadOnlyMode`, which defaults to true), and it
+     * hides for a viewer field-level security will not let read it, exactly as `mj-form-field` does.
      *
-     * ── WHY THERE IS NO FIELD-SECURITY CHECK HERE, WHICH IS WORTH STATING ──────────────────────
-     *
-     * Drawing a field ourselves means inheriting the shared control's responsibilities, not just its
-     * markup — so the first version of this asked `EntityInfo.IsFieldReadableByUser` before printing
-     * a value. THAT METHOD DOES NOT EXIST IN THE MJ VERSION THIS APP PINS. It was read from a local
-     * MJ checkout sitting on a much newer branch; `@memberjunction/core@6.1.0-edge.5` has only
-     * entity-level `GetUserPermisions`, and the published `mj-form-field` of the same version carries
-     * no per-field read check either — verified by unpacking both tarballs, not inferred.
-     *
-     * So its absence here is not a gap against the shared control: at this version the two agree, and
-     * a check against an API that is not there would only have failed to compile. Per-field read
-     * security arrived in `6.1.0-edge.7`. WHEN THE PIN MOVES PAST IT, PUT THE CHECK BACK — this row
-     * prints a value, and a field somebody may not read is the one thing it must not print.
+     * `MoneyValue` answers '' for a field the viewer may not read, before it reads anything, because
+     * `BaseEntity.Get()` throws for a denied field (#403). The check was left out when the pinned MJ
+     * had no per-field read security; that version is long gone.
      */
     public ShowsMoney(f: DealFieldSpec): boolean {
         return this.MoneyValue(f) !== '';
     }
 
+    /** Field-level read security for the rows this panel draws itself. See `field-readable.ts`. */
+    public FieldReadable(fieldName: string): boolean {
+        const provider = this.FormComponent?.ProviderToUse ?? Metadata.Provider;
+        return IsFieldReadable(this.Record?.EntityInfo, fieldName, provider?.CurrentUser);
+    }
+
     /** The formatted value, or '' when there is nothing to show. */
     public MoneyValue(f: DealFieldSpec): string {
+        if (!this.FieldReadable(f.name)) return '';
         return moneyExact(this.Record?.Get(f.name) as number | null | undefined);
     }
 
