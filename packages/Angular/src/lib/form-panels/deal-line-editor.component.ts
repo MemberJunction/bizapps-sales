@@ -205,7 +205,7 @@ interface RemoteOperationRouter {
                              rules, and carrying it onto another product would pin a price nobody chose. -->
                         <select data-testid="line-product" [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
                                 [disabled]="IsLocked || ProductLockedByPrice"
-                                [title]="ProductLockedByPrice ? 'Put the price back on Default before changing the product.' : BlockedReason">
+                                [title]="ProductSelectTitle">
                             <option [ngValue]="null">— choose a product —</option>
                             @for (p of Products; track p.ID) {
                                 <option [ngValue]="p.ID">{{ ProductOptionLabel(p) }}</option>
@@ -841,6 +841,19 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     /** True while the line's price is off its default — see the product select. */
     public get ProductLockedByPrice(): boolean {
         return !!this.Working && IsLinePriceOverridden(this.Working, this.EngineDefault);
+    }
+
+    /**
+     * Why the product select is disabled. A line off its default price names the remedy only to a rep
+     * who has the price picker; a rep without an override grant has no Default to put it back on, so
+     * they are told the line carries a special price and who can change it (#408). The lock outranks
+     * both, as it does in `BlockedReason`.
+     */
+    public get ProductSelectTitle(): string {
+        if (this.IsLocked || !this.ProductLockedByPrice) return this.BlockedReason;
+        if (this.ShowPricePicker) return 'Put the price back on Default before changing the product.';
+        return 'This line has a special price set on the order. Someone who can override prices has to put it ' +
+            'back on Default before the product can be changed.';
     }
 
     /** The default unit price: orders' answer when it has given one, else the unpinned priced figure. */
