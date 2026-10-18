@@ -66,12 +66,32 @@ const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
  * refusal and the workspace's Add hint word for word, so a rep meets one voice across three screens.
  */
 export function DealLockRefusal(kind: OrderLineEditKind): string {
-    const action =
-        kind === 'create' ? 'adding a product'
+    return `This deal is closed. Set the status back to Open before ${lockedAction(kind)}.`;
+}
+
+/**
+ * The refusal when the deal's status row no longer exists (#401).
+ *
+ * The header lock treats that deal as closed (`DealEntityServer.checkCloseLock`), so its lines are
+ * frozen too; the two rules must agree, or the products change through Orders while everything else
+ * on the deal is refused. The wording follows the header's own refusal for the same state: the repair
+ * is to set an open status, not to "set it back to Open", since nothing says it was ever closed.
+ */
+export function DealAbsentStatusLockRefusal(kind: OrderLineEditKind): string {
+    return (
+        "This deal's status could not be found, so it is treated as closed. Set the status to an open " +
+        `one before ${lockedAction(kind)}.`
+    );
+}
+
+function lockedAction(kind: OrderLineEditKind): string {
+    return kind === 'create' ? 'adding a product'
         : kind === 'delete' ? 'removing a product'
         : 'changing what was sold';
-    return `This deal is closed. Set the status back to Open before ${action}.`;
 }
+
+/** What the deal's status row says about the lock. `Absent`: the row does not exist. */
+type StatusLock = 'Locks' | 'Open' | 'Absent';
 
 /** What one lookup of the owning deal found. `null` means no deal owns this order. */
 type OwningDeal = { DealID: string; DealStatusTypeID: string | null } | null;
@@ -84,9 +104,11 @@ export class DealLockOrderLineVeto implements OrderLineEditVeto {
             // no claim on it, and saying so is not the same as approving anything.
             return null;
         }
-        return (await this.statusLocks(owner.DealStatusTypeID, context.ContextUser))
-            ? DealLockRefusal(context.Kind)
-            : null;
+        const lock = await this.statusLock(owner.DealStatusTypeID, context.ContextUser);
+        if (lock === 'Absent') {
+            return DealAbsentStatusLockRefusal(context.Kind);
+        }
+        return lock === 'Locks' ? DealLockRefusal(context.Kind) : null;
     }
 
     /** Which deal owns this order, and what status it is in right now. */
@@ -119,7 +141,7 @@ export class DealLockOrderLineVeto implements OrderLineEditVeto {
      * already holds. Here the caller turns a throw into that same refusal AND names the fault, which
      * is strictly more useful than silently refusing with the ordinary lock message.
      */
-    private async statusLocks(statusID: string, user: UserInfo | null): Promise<boolean> {
+    private async statusLock(statusID: string, user: UserInfo | null): Promise<StatusLock> {
         const result = await new RunView().RunView<{ LocksDeal: boolean }>(
             {
                 EntityName: DEAL_STATUS_ENTITY,
@@ -135,9 +157,12 @@ export class DealLockOrderLineVeto implements OrderLineEditVeto {
             throw new Error(`the deal's status could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
         }
         const row = (result.Results ?? [])[0];
-        // A status row that is absent is not a lock. The deal points at a status that does not exist,
-        // which is a data fault for the close lock to report, not a reason to freeze someone's order.
-        return row?.LocksDeal === true;
+        // A status row that is absent LOCKS, as it does for the deal header (#401): nothing proves the
+        // deal is open, and the header and its lines must not disagree about whether it is frozen.
+        if (!row) {
+            return 'Absent';
+        }
+        return row.LocksDeal === true ? 'Locks' : 'Open';
     }
 }
 

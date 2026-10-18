@@ -17,7 +17,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     return { ...actual, LogError: () => undefined, RunView: class { public RunView = runView; } };
 });
 
-const { DealLockOrderLineVeto, DealLockRefusal } = await import('../DealLockOrderLineVeto.js');
+const { DealLockOrderLineVeto, DealLockRefusal, DealAbsentStatusLockRefusal } = await import('../DealLockOrderLineVeto.js');
 
 const ORDER = 'b1c2d3e4-0000-4000-8000-000000000001';
 const DEAL = 'b1c2d3e4-0000-4000-8000-000000000002';
@@ -88,11 +88,21 @@ describe('an open deal, and orders Sales has no claim on', () => {
         expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBeNull();
     });
 
-    it('does not lock on a status row that is missing', async () => {
-        // The deal points at a status that does not exist. That is a data fault for the close lock to
-        // report, not a reason to freeze somebody's order.
+});
+
+describe('a deal whose status row is missing (#401)', () => {
+    it('refuses, because the header lock treats that deal as closed', async () => {
+        // The deal points at a status that does not exist. The header is frozen in that state, so its
+        // lines must be too, or the products change through Orders while the rest of the deal cannot.
         answers({ locks: undefined });
-        expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBeNull();
+        expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBe(DealAbsentStatusLockRefusal('update'));
+    });
+
+    it('names the repair the header names: an open status, not "back to Open"', async () => {
+        answers({ locks: undefined });
+        const v = new DealLockOrderLineVeto();
+        expect(await v.MayEdit(ctx('create'))).toMatch(/could not be found.*open one before adding a product/);
+        expect(await v.MayEdit(ctx('delete'))).toMatch(/open one before removing a product/);
     });
 });
 
