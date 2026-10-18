@@ -8,7 +8,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, ViewEncapsulation, inject } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, DestroyRef, DoCheck, ElementRef, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, Metadata, RunView } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
@@ -406,6 +406,7 @@ function money(n: number | null | undefined): string {
 export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit, DoCheck {
     private readonly cdr = inject(ChangeDetectorRef);
     private readonly host = inject(ElementRef<HTMLElement>);
+    private readonly destroyRef = inject(DestroyRef);
     /** The record the cursor has already been placed for, so it is never taken twice. */
     private focusedFor: string | null = null;
     public Collapsed = false;
@@ -450,6 +451,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
             try { this.Collapsed = JSON.parse(raw) === true; } catch { this.Collapsed = false; }
         }
         await this.refreshNotices();
+        this.refreshNoticesAfterEverySave();
         /**
          * The business zone, for a legacy `ClosedAt`-only row's close day ({@link CloseStatValue},
          * golive#168). Idempotent and a no-op once loaded; unconfigured, the engine answers UTC, and
@@ -468,6 +470,21 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
      */
     public override OnRecordRefreshed(_record: DealEntity): void {
         void this.refreshNotices();
+    }
+
+    /**
+     * A SAVE CAN CLEAR A NOTICE TOO, not only a refresh (#399).
+     *
+     * `OnRecordRefreshed` fires when the form reloads the record, and a plain save does not reload it.
+     * So a save that brought the amount back in line with the order left "The products on this deal
+     * changed…" on screen until the next reload, which reads as a save that did nothing. The form's
+     * emitter outlives this panel (the slot remounts panels), so the subscription ends with the panel.
+     */
+    private refreshNoticesAfterEverySave(): void {
+        const saved = this.FormComponent?.RecordSaved;
+        if (!saved) return;
+        const subscription = saved.subscribe(() => { void this.refreshNotices(); });
+        this.destroyRef.onDestroy(() => subscription.unsubscribe());
     }
 
     /**

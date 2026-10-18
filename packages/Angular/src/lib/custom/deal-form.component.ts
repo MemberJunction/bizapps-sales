@@ -30,9 +30,13 @@
 import { Component } from '@angular/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
-import { DealFieldsEditableWhileLocked, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
+import {
+    DealFieldsEditableWhileLocked,
+    ResolveDealAmountFreshness,
+    ResolveDealLockState,
+} from '@mj-biz-apps/sales-entities';
 import type { ValidationResult } from '@memberjunction/core';
-import { RunView } from '@memberjunction/core';
+import { EntitySaveOptions, RunView } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
 import { MJS_ENTITIES } from '../data/entity-names';
@@ -139,6 +143,45 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     public override async SaveRecord(StopEditModeAfterSave: boolean): Promise<boolean> {
         await this.stampCompanyFromPipeline();
         return super.SaveRecord(StopEditModeAfterSave);
+    }
+
+    /**
+     * A SAVE OF A CLEAN DEAL STILL REACHES THE SERVER WHEN ITS AMOUNT IS STALE (#399).
+     *
+     * The header tells the rep to save the deal when its cached amount no longer matches the order
+     * (`DEAL_AMOUNT_STALE_NOTICE`). When the order changed somewhere else, the deal's own columns are
+     * untouched, so the record is clean and `BaseEntity.Save()` returns without sending anything: the
+     * notice stayed and the amount with it. The add-product path met the same wall and answers it the
+     * same way, with `IgnoreDirtyState`.
+     *
+     * Forced only when the amount is actually stale, by the same rule the header uses, so an ordinary
+     * clean save stays the no-op it always was. The freshness read runs only here, on a clean save
+     * with nothing pending, never on open (#386). A dirty deal needs nothing: its save reaches the
+     * entity server, which refreshes the amount from the order on every save of a computed amount.
+     */
+    protected override async InternalSaveRecord(): Promise<boolean> {
+        const record = this.record;
+        if (record && !record.Dirty && this.PendingRecords.length === 0 && (await this.amountIsStale())) {
+            const options = new EntitySaveOptions();
+            options.IgnoreDirtyState = true;
+            return record.Save(options);
+        }
+        return super.InternalSaveRecord();
+    }
+
+    /** Whether the saved deal's cached amount disagrees with its order, through the shared rule. */
+    private async amountIsStale(): Promise<boolean> {
+        const record = this.record;
+        if (!record?.IsSaved) {
+            return false;
+        }
+        const freshness = await ResolveDealAmountFreshness({
+            IsLocked: this.IsLocked,
+            AmountIsComputed: record.Get('AmountIsComputed') as boolean | null | undefined,
+            Amount: record.Get('Amount') as number | string | null | undefined,
+            OrderID: record.Get('OrderID') as string | null | undefined,
+        });
+        return freshness.IsStale;
     }
 
     /** Reads the chosen pipeline's company and writes it to the deal. See `SaveRecord` for why. */
