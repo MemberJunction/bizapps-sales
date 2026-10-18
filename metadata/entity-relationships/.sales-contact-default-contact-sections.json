@@ -1,0 +1,25 @@
+[
+  {
+    "_comments": [
+      "#435: the Sales Contact form titles these two sections 'Sales Accounts (Default Primary Contact ID)'",
+      "and 'Sales Accounts (Default Billing Contact ID)'. CodeGen titles a related section with the",
+      "relationship's DisplayName when it has one, and otherwise with the related entity's name plus the",
+      "join field's label, which is where the 'ID' came from. Naming the relationship sets the title",
+      "directly. The generated form picks it up on the next CodeGen run."
+    ],
+    "fields": {
+      "DisplayName": "Accounts With This Default Primary Contact"
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=DefaultPrimaryContactID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Accounts With This Default Billing Contact"
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=DefaultBillingContactID"
+    }
+  }
+]
