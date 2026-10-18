@@ -32,4 +32,11 @@ describe('the deal header and a viewer who may not read Amount', () => {
         expect(hero([]).AmountReadable).toBe(true);
         expect(hero(['MRR']).AmountReadable).toBe(true);
     });
+
+    it('hides Weighted when either Amount or Probability is denied', () => {
+        expect(hero(['Amount']).WeightedReadable).toBe(false);
+        expect(hero(['Probability']).WeightedReadable).toBe(false);
+        expect(hero(['Probability']).AmountReadable).toBe(true);
+        expect(hero([]).WeightedReadable).toBe(true);
+    });
 });

@@ -86,6 +86,26 @@ describe('a stage move that would confirm the order', () => {
     });
 });
 
+describe("a new deal's unsaved order", () => {
+    it('is inserted Draft, with a warning, while a held-product line has no answer', async () => {
+        unanswered.mockResolvedValue([HELD]);
+        const { deal, order } = harness('Draft');
+        order.IsSaved = false;
+        await deal.applyStageOrderStatus({ StageID: 'stage-1', Target: 'Confirmed' });
+        expect(order.Status).toBe('Draft');
+        expect(deal.OrderStatusWarnings[0]).toContain('line 2 (Analytics License)');
+    });
+
+    it('takes the booking status when every line is answered', async () => {
+        unanswered.mockResolvedValue([]);
+        const { deal, order } = harness('Draft');
+        order.IsSaved = false;
+        await deal.applyStageOrderStatus({ StageID: 'stage-1', Target: 'Confirmed' });
+        expect(order.Status).toBe('Confirmed');
+        expect(order.Save).not.toHaveBeenCalled();
+    });
+});
+
 describe('a stage move that does not book the order', () => {
     it('does not ask about held-product lines', async () => {
         unanswered.mockResolvedValue([HELD]);

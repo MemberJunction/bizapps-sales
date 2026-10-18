@@ -13,7 +13,7 @@
  * @module @mj-biz-apps/sales-core-entities-server
  */
 import { Metadata, type UserInfo } from '@memberjunction/core';
-import { UserCache } from '@memberjunction/sqlserver-dataprovider';
+import { UserCache } from '@memberjunction/generic-database-provider';
 
 /** The system user when the cache has one, else the caller. */
 export function VetoReader(contextUser: UserInfo | null | undefined): UserInfo | undefined {

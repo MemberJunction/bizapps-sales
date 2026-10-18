@@ -211,6 +211,9 @@ function money(n: number | null | undefined): string {
                             <span class="mjs-deal-hero__stat-label">Amount</span>
                             <span class="mjs-deal-hero__stat-val">{{ AmountText }}</span>
                         </div>
+                    }
+                    <!-- Weighted also reads Probability, which can be denied on its own. -->
+                    @if (WeightedReadable) {
                         <div class="mjs-deal-hero__stat">
                             <span class="mjs-deal-hero__stat-label">Weighted</span>
                             <span class="mjs-deal-hero__stat-val">{{ WeightedText }}</span>
@@ -454,8 +457,10 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         if (raw) {
             try { this.Collapsed = JSON.parse(raw) === true; } catch { this.Collapsed = false; }
         }
-        await this.refreshNotices();
+        // Subscribed before the first await, while the panel is certainly alive: registering the
+        // teardown on a panel destroyed during that await would throw and leave the subscription open.
         this.refreshNoticesAfterEverySave();
+        await this.refreshNotices();
         /**
          * The business zone, for a legacy `ClosedAt`-only row's close day ({@link CloseStatValue},
          * golive#168). Idempotent and a no-op once loaded; unconfigured, the engine answers UTC, and
@@ -646,8 +651,17 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
      * `mj-form-field` asks, and asks first: `BaseEntity.Get()` throws for a denied field (#403).
      */
     public get AmountReadable(): boolean {
+        return this.fieldReadable('Amount');
+    }
+
+    /** Weighted reads Probability too, which field-level security can deny on its own. */
+    public get WeightedReadable(): boolean {
+        return this.AmountReadable && this.fieldReadable('Probability');
+    }
+
+    private fieldReadable(fieldName: string): boolean {
         const provider = this.FormComponent?.ProviderToUse ?? Metadata.Provider;
-        return IsFieldReadable(this.Record?.EntityInfo, 'Amount', provider?.CurrentUser);
+        return IsFieldReadable(this.Record?.EntityInfo, fieldName, provider?.CurrentUser);
     }
 
     public get AmountText(): string { return money(this.Record?.Amount); }

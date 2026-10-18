@@ -16,7 +16,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 });
 
 const { RunView } = await import('@memberjunction/core');
-const { UserCache } = await import('@memberjunction/sqlserver-dataprovider');
+const { UserCache } = await import('@memberjunction/generic-database-provider');
 const { Metadata } = await import('@memberjunction/core');
 const { DealNotWonConfirmVeto } = await import('../DealNotWonConfirmVeto.js');
 

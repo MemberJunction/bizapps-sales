@@ -25,7 +25,7 @@ let callerCanRead = true;
 const entityByName = vi.spyOn(Metadata.prototype, 'EntityByName').mockImplementation(
     () => ({ GetUserPermisions: () => ({ CanRead: callerCanRead }) }) as never,
 );
-const { UserCache } = await import('@memberjunction/sqlserver-dataprovider');
+const { UserCache } = await import('@memberjunction/generic-database-provider');
 
 const ORDER = 'b1c2d3e4-0000-4000-8000-000000000001';
 const DEAL = 'b1c2d3e4-0000-4000-8000-000000000002';

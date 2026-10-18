@@ -1916,8 +1916,27 @@ export class DealEntityServer extends DealEntity {
      * ── THE UNSAVED ORDER ──
      *
      * A new deal's order has not been written yet, so there is nothing to transition and nothing to
-     * roll back: setting `Status` means it is INSERTED in that state by the graph a moment later.
+     * roll back: setting `Status` means it is INSERTED in that state by the graph a moment later. A
+     * booking status still waits on {@link holdsConfirmForUnansweredLines} first, as on a saved order.
      */
+    private async applyStageOrderStatus(plan: StageOrderPlan): Promise<void> {
+        const order = this.OrderID_Object;
+        if (!order) {
+            // No order to update. Not a refusal and not worth a warning: a deal without one predates
+            // the embedded order, and provisioning is what fixes that, not this.
+            return;
+        }
+
+        if (!order.IsSaved) {
+            if (IsBooked(plan.Target) && (await this.holdsConfirmForUnansweredLines(order.Status))) {
+                return;
+            }
+            order.Status = plan.Target;
+            return;
+        }
+        await this.applyStageOrderStatusToSavedOrder(order, plan);
+    }
+
     /**
      * A stage that books the order asks the question Close Won asks (#426).
      *
@@ -1960,19 +1979,11 @@ export class DealEntityServer extends DealEntity {
         return true;
     }
 
-    private async applyStageOrderStatus(plan: StageOrderPlan): Promise<void> {
-        const order = this.OrderID_Object;
-        if (!order) {
-            // No order to update. Not a refusal and not worth a warning: a deal without one predates
-            // the embedded order, and provisioning is what fixes that, not this.
-            return;
-        }
-
-        if (!order.IsSaved) {
-            order.Status = plan.Target;
-            return;
-        }
-
+    /** The stage's order status on an order already in the database: a transition, in its own scope. */
+    private async applyStageOrderStatusToSavedOrder(
+        order: NonNullable<DealEntityServer['OrderID_Object']>,
+        plan: StageOrderPlan,
+    ): Promise<void> {
         const from = order.Status;
         if (from === plan.Target) {
             return;   // already there; a no-op write would only dirty the row
