@@ -17,7 +17,14 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     return { ...actual, LogError: () => undefined, RunView: class { public RunView = runView; } };
 });
 
-const { DealLockOrderLineVeto, DealLockRefusal, DealAbsentStatusLockRefusal } = await import('../DealLockOrderLineVeto.js');
+const { DealLockOrderLineVeto, DealLockRefusal, DealLockRefusalUnreadable, DealAbsentStatusLockRefusal } = await import('../DealLockOrderLineVeto.js');
+const { Metadata } = await import('@memberjunction/core');
+
+/** Whether the caller may read Deals, as `EntityInfo.GetUserPermisions` would answer. */
+let callerCanRead = true;
+const entityByName = vi.spyOn(Metadata.prototype, 'EntityByName').mockImplementation(
+    () => ({ GetUserPermisions: () => ({ CanRead: callerCanRead }) }) as never,
+);
 const { UserCache } = await import('@memberjunction/sqlserver-dataprovider');
 
 const ORDER = 'b1c2d3e4-0000-4000-8000-000000000001';
@@ -27,6 +34,7 @@ const USER = { ID: 'user-1' } as never;
 
 afterEach(() => {
     runView.mockReset();
+    callerCanRead = true;
 });
 
 /** Queue the two reads the veto makes: the deal behind the order, then that status' flag. */
@@ -192,5 +200,29 @@ describe('the user the deal is read as', () => {
         answers({ locks: false });
         await new DealLockOrderLineVeto().MayEdit(ctx());
         for (const call of runView.mock.calls) expect(call[1]).toBe(USER);
+    });
+});
+
+/** #423: the read runs as the system user, so a caller who cannot read Deals is told no deal field. */
+describe('the refusal for a caller who cannot read Deals', () => {
+    it('keeps the ordinary wording for a caller who can', async () => {
+        answers({ locks: true });
+        expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBe(DealLockRefusal('update'));
+        expect(entityByName).toHaveBeenCalledWith('MJ_BizApps_Sales: Deals');
+    });
+
+    it('omits the deal and the status control for a caller who cannot', async () => {
+        callerCanRead = false;
+        answers({ deal: { ID: DEAL, DealStatusTypeID: STATUS }, locks: true });
+        const refusal = await new DealLockOrderLineVeto().MayEdit(ctx());
+        expect(refusal).toBe(DealLockRefusalUnreadable());
+        expect(refusal).not.toContain(DEAL);
+        expect(refusal).not.toContain('Set the status');
+    });
+
+    it('omits the status repair too when the status row is missing (#401)', async () => {
+        callerCanRead = false;
+        answers({ deal: { ID: DEAL, DealStatusTypeID: STATUS }, locks: undefined });
+        expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBe(DealLockRefusalUnreadable());
     });
 });

@@ -46,7 +46,7 @@ import {
     type OrderConfirmVeto,
 } from '@mj-biz-apps/orders-entities';
 
-import { VetoReader } from './veto-reader.js';
+import { CallerCanReadDeals, VetoReader } from './veto-reader.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
@@ -84,7 +84,10 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
         if (open.length === 0) {
             return null;
         }
-        const named = open.length === 1 ? `Deal ${open[0]} is` : `Deals ${open.join(', ')} are`;
+        // A caller who cannot read Deals is not told which deal: the read ran as the system user (#423).
+        const named = !CallerCanReadDeals(context.ContextUser)
+            ? (open.length === 1 ? 'The deal behind this order is' : 'The deals behind this order are')
+            : open.length === 1 ? `Deal ${open[0]} is` : `Deals ${open.join(', ')} are`;
         return (
             `${named} not Won, so this order cannot be confirmed yet. Close the deal as Won ` +
             'first — confirming now would book an order against a deal that is still open.'

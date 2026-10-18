@@ -54,7 +54,7 @@ import {
     type OrderLineEditVeto,
 } from '@mj-biz-apps/orders-entities';
 
-import { VetoReader } from './veto-reader.js';
+import { CallerCanReadDeals, VetoReader } from './veto-reader.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
@@ -96,6 +96,11 @@ function lockedAction(kind: OrderLineEditKind): string {
 /** What the deal's status row says about the lock. `Absent`: the row does not exist. */
 type StatusLock = 'Locks' | 'Open' | 'Absent';
 
+/** The refusal for a caller who cannot read Deals: no deal field, and a remedy they can act on. */
+export function DealLockRefusalUnreadable(): string {
+    return 'This order belongs to a closed sales deal, so its lines cannot be changed. Ask someone who works the deal to reopen it.';
+}
+
 /** What one lookup of the owning deal found. `null` means no deal owns this order. */
 type OwningDeal = { DealID: string; DealStatusTypeID: string | null } | null;
 
@@ -108,10 +113,11 @@ export class DealLockOrderLineVeto implements OrderLineEditVeto {
             return null;
         }
         const lock = await this.statusLock(owner.DealStatusTypeID, context.ContextUser);
-        if (lock === 'Absent') {
-            return DealAbsentStatusLockRefusal(context.Kind);
-        }
-        return lock === 'Locks' ? DealLockRefusal(context.Kind) : null;
+        if (lock === 'Open') return null;
+        // The read ran as the system user (#423): a caller who cannot read Deals is told no more than
+        // that a closed deal holds the lines, and is not sent to a status control they cannot open.
+        if (!CallerCanReadDeals(context.ContextUser)) return DealLockRefusalUnreadable();
+        return lock === 'Absent' ? DealAbsentStatusLockRefusal(context.Kind) : DealLockRefusal(context.Kind);
     }
 
     /** Which deal owns this order, and what status it is in right now. */
