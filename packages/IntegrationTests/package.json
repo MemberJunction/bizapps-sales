@@ -32,7 +32,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@mj-biz-apps/common-entities": "^5.44.0",
+    "@mj-biz-apps/common-entities": "^5.51.0",
     "@mj-biz-apps/orders-entities": "^5.30.0",
     "@mj-biz-apps/sales-core-entities-server": "^6.18.0",
     "@mj-biz-apps/sales-entities": "^6.18.0",
