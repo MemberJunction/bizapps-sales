@@ -584,11 +584,22 @@ cd C:\ws\bizapps-sales && bash scripts/seed-dev-data.sh
 #    pipeline (the script's own comment explains it).
 ```
 
-> ### e. THEN the demo data — last, because it embeds what the catalogue provides
+> ### e. Build, then the demo data — last, because it embeds what the catalogue provides
 >
 > ```bash
+> cd C:\ws
+> pnpm exec turbo run build --filter "@mj-biz-apps/sales-integration-tests..." --continue
+> pnpm exec turbo run build --filter "@mj-biz-apps/orders-server..." \
+>                           --filter "@mj-biz-apps/orders-core-entities-server..." \
+>                           --filter "@mj-biz-apps/accounting-core-entities-server..." --continue
+>
 > cd C:\ws\bizapps-sales && bash scripts/seed-demo-data.sh
 > ```
+>
+> **Build first.** The seed's last step, `scripts/seed-demo-lines.mjs`, prices five deals through
+> `@mj-biz-apps/sales-server` and orders-server, which load from their `dist/`. Seeded before the build,
+> it stops with "build them first" and every deal stays hand-typed (`deals w/ order 0`). If that
+> happened, build and run `node scripts/seed-demo-lines.mjs` on its own (sales#457).
 >
 > This used to sit in step (b), ahead of the catalogue. Run in that order it still "succeeds" — it
 > reports seven deals — but every one of them is provisioned with **no order**, because there was no
@@ -640,12 +651,10 @@ without each, is in `docs/KNOWN-ISSUES.md` KI-11.
 
 ## 6. Build and verify
 
-```bash
-cd C:\ws
-pnpm exec turbo run build --filter "@mj-biz-apps/sales-integration-tests..." --continue
-pnpm exec turbo run build --filter "@mj-biz-apps/orders-core-entities-server..." \
-                          --filter "@mj-biz-apps/accounting-core-entities-server..." --continue
+The build is in §5(e), before the demo seed that needs it. After a code change, re-run those two
+`turbo` lines before the suite.
 
+```bash
 cd C:\ws\bizapps-sales
 RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs                     # every bundle whose app is installed
 RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs product-picker      # one bundle: 5
