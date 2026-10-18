@@ -46,6 +46,8 @@ import {
     type OrderConfirmVeto,
 } from '@mj-biz-apps/orders-entities';
 
+import { VetoReader } from './veto-reader.js';
+
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
@@ -104,7 +106,7 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
                 OrderBy: 'ID',
                 ResultType: 'simple',
             },
-            user ?? undefined,
+            VetoReader(user),
         );
         if (!result.Success) {
             // The throw is the seam's "could not tell", which the caller turns into a refusal naming the
@@ -149,7 +151,7 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
                 Fields: ['ID', 'IsWon'],
                 ResultType: 'simple',
             },
-            user ?? undefined,
+            VetoReader(user),
         );
         if (!result.Success) {
             LogError(`DealNotWonConfirmVeto: could not read status ids ${list}: ${result.ErrorMessage}`);

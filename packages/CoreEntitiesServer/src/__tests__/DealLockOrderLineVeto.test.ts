@@ -18,6 +18,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 });
 
 const { DealLockOrderLineVeto, DealLockRefusal, DealAbsentStatusLockRefusal } = await import('../DealLockOrderLineVeto.js');
+const { UserCache } = await import('@memberjunction/sqlserver-dataprovider');
 
 const ORDER = 'b1c2d3e4-0000-4000-8000-000000000001';
 const DEAL = 'b1c2d3e4-0000-4000-8000-000000000002';
@@ -166,5 +167,30 @@ describe('the refusal wording', () => {
         for (const kind of ['create', 'update', 'delete'] as const) {
             expect(DealLockRefusal(kind)).toMatch(/^This deal is closed\. Set the status back to Open before /);
         }
+    });
+});
+
+/**
+ * #423: the edit check read Deals as the caller, so a role that may edit order lines but cannot read
+ * Deals had every edit refused. It reads as the system user when the cache holds one.
+ */
+describe('the user the deal is read as', () => {
+    it('is the system user when the cache holds one', async () => {
+        const system = { ID: 'system' } as never;
+        const spy = vi.spyOn(UserCache.Instance, 'GetSystemUser').mockReturnValue(system);
+        try {
+            answers({ locks: false });
+            expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBeNull();
+            expect(runView.mock.calls.length).toBe(2);
+            for (const call of runView.mock.calls) expect(call[1]).toBe(system);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('is the caller when no system user is cached', async () => {
+        answers({ locks: false });
+        await new DealLockOrderLineVeto().MayEdit(ctx());
+        for (const call of runView.mock.calls) expect(call[1]).toBe(USER);
     });
 });

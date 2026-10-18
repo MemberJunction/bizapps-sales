@@ -16,6 +16,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 });
 
 const { RunView } = await import('@memberjunction/core');
+const { UserCache } = await import('@memberjunction/sqlserver-dataprovider');
 const { DealNotWonConfirmVeto } = await import('../DealNotWonConfirmVeto.js');
 
 /**
@@ -248,7 +249,27 @@ describe('the reads the veto makes', () => {
         expect(dealRead!.args.OrderBy, 'without an ORDER BY a view promises nothing twice running').toBe('ID');
     });
 
-    it('forwards the signed-in user to every read, so the rows are the ones that user may see', async () => {
+    /**
+     * #423: a role that may confirm orders but cannot read Deals had every confirm refused, because the
+     * read ran as that role and failed. The rule is the server's, so it reads as the system user.
+     */
+    it('reads as the system user when the cache holds one, whatever the caller may read', async () => {
+        const system = { ID: 'system', Name: 'System' } as never;
+        const spy = vi.spyOn(UserCache.Instance, 'GetSystemUser').mockReturnValue(system);
+        try {
+            const user = { ID: 'finance-1', Name: 'Orders-only finance' } as never;
+            const { calls } = withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: WON }, { [WON]: true });
+            expect(await veto().MayConfirm({ OrderHeaderID: ORDER, FromStatus: 'Quoted', ContextUser: user })).toBeNull();
+            expect(calls.length, 'both reads happen').toBe(2);
+            for (const c of calls) {
+                expect(c.user, 'the veto is not the caller\'s to answer').toBe(system);
+            }
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('falls back to the signed-in user when no system user is cached', async () => {
         const user = { ID: 'user-1', Name: 'A Rep' } as never;
         const { calls } = withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: OPEN }, { [OPEN]: false });
         await veto().MayConfirm({ OrderHeaderID: ORDER, FromStatus: 'Quoted', ContextUser: user });

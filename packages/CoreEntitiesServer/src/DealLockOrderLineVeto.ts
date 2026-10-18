@@ -54,6 +54,8 @@ import {
     type OrderLineEditVeto,
 } from '@mj-biz-apps/orders-entities';
 
+import { VetoReader } from './veto-reader.js';
+
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 
@@ -122,7 +124,7 @@ export class DealLockOrderLineVeto implements OrderLineEditVeto {
                 MaxRows: 1,
                 ResultType: 'simple',
             },
-            user ?? undefined,
+            VetoReader(user),
         );
         if (!result.Success) {
             // Throwing is the seam's way of saying "could not tell"; the caller turns it into a
@@ -151,7 +153,7 @@ export class DealLockOrderLineVeto implements OrderLineEditVeto {
                 MaxRows: 1,
                 ResultType: 'simple',
             },
-            user ?? undefined,
+            VetoReader(user),
         );
         if (!result.Success) {
             LogError(`DealLockOrderLineVeto: could not read status ${statusID}: ${result.ErrorMessage}`);
