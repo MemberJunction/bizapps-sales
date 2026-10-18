@@ -34,8 +34,11 @@
 // ES-module cycle, because inspect imports `WithinWindow` from this file. See `dashboard-dates.ts`.
 import { BusinessToday, DayLabel, MonthDayText, UtcDatePart } from './dashboard-dates';
 
-/** The four windows the dashboard offers. `alltime` is unbounded, not a very wide bound. */
-export type PeriodKey = 'quarter' | 'lastquarter' | 'year' | 'alltime';
+/**
+ * The windows the dashboard offers. `alltime` is unbounded, not a very wide bound. `custom` takes its
+ * bounds from the two date pickers (see {@link ResolvePeriod}).
+ */
+export type PeriodKey = 'quarter' | 'lastquarter' | 'nextquarter' | 'year' | 'lastyear' | 'alltime' | 'custom';
 
 /** A fiscal year start, as `AccountingCompanyProfile` stores it. Month is 1-12, day 1-31. */
 export interface FiscalYearStart {
@@ -104,9 +107,28 @@ export interface PeriodWindow {
 export const PERIOD_OPTIONS: readonly { Key: PeriodKey; Label: string }[] = [
     { Key: 'quarter', Label: 'This quarter' },
     { Key: 'lastquarter', Label: 'Last quarter' },
+    { Key: 'nextquarter', Label: 'Next quarter' },
     { Key: 'year', Label: 'This year' },
+    { Key: 'lastyear', Label: 'Last year' },
     { Key: 'alltime', Label: 'All time' },
+    { Key: 'custom', Label: 'Custom range' },
 ];
+
+/** The two dates a custom range is picked with, `YYYY-MM-DD`; either may be left empty. */
+export interface CustomRange {
+    Start: string | null;
+    End: string | null;
+}
+
+/** A `YYYY-MM-DD` day that exists, or null. The URL and the date pickers hand back strings. */
+export function IsoDay(value: string | null | undefined): string | null {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return null;
+    }
+    const [y, m, d] = value.split('-').map(Number);
+    const date = new Date(Date.UTC(y, m - 1, d));
+    return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d ? value : null;
+}
 
 function labelFor(key: PeriodKey): string {
     return PERIOD_OPTIONS.find((o) => o.Key === key)?.Label ?? 'This quarter';
@@ -117,9 +139,9 @@ function labelFor(key: PeriodKey): string {
  *
  * ── WHY DISAGREEMENT FALLS BACK RATHER THAN PICKING ─────────────────────────────────────────────
  *
- * The fiscal start is per-COMPANY and this dashboard is not company-scoped — `Sales: Dashboard
- * Summary` accepts a `CompanyID` the UI does not pass, so every figure spans every company. If two
- * companies start their year in different months, "this quarter" has no single correct answer, and
+ * The fiscal start is per-COMPANY, and the dashboard's figures span every company until a reader picks
+ * selling companies in the filter bar; even then the window is read once for the page, not per row. If
+ * two companies start their year in different months, "this quarter" has no single correct answer, and
  * picking one silently would produce a window that is right for one company's numbers and wrong for
  * the other's with nothing on screen saying so.
  *
@@ -273,28 +295,41 @@ export function ResolvePeriod(
     key: PeriodKey,
     start: FiscalYearStart = CALENDAR_YEAR_START,
     today: string = BusinessToday(),
+    custom: CustomRange | null = null,
 ): PeriodWindow {
     const Label = labelFor(key);
     if (key === 'alltime') {
         return { Key: key, Label, Start: null, End: null };
     }
+    if (key === 'custom') {
+        // An empty picker is no bound on that side. Two dates picked the wrong way round are read as
+        // the range they describe rather than as a window that matches nothing.
+        let from = IsoDay(custom?.Start);
+        let to = IsoDay(custom?.End);
+        if (from && to && from > to) {
+            [from, to] = [to, from];
+        }
+        return { Key: key, Label, Start: from, End: to };
+    }
 
     const fiscalYear = FiscalYearOf(today, start);
-    if (key === 'year') {
+    if (key === 'year' || key === 'lastyear') {
+        const year = key === 'year' ? fiscalYear : fiscalYear - 1;
         return {
             Key: key,
             Label,
-            Start: quarterStart(fiscalYear, 0, start),
+            Start: quarterStart(year, 0, start),
             // Index 4 is the NEXT fiscal year's Q1 — the arithmetic normalises past December, so the
             // year boundary needs no case of its own.
-            End: dayBefore(quarterStart(fiscalYear, 4, start)),
+            End: dayBefore(quarterStart(year, 4, start)),
         };
     }
 
     const current = FiscalQuarterOf(today, fiscalYear, start);
-    // Q0's predecessor is the PREVIOUS fiscal year's Q4. Expressed as index -1 against the same year
-    // so the rollback is the same arithmetic as every other step rather than a branch that can drift.
-    const index = key === 'lastquarter' ? current - 1 : current;
+    // Q0's predecessor is the PREVIOUS fiscal year's Q4, and Q3's successor the NEXT year's Q0.
+    // Expressed as index -1 or 4 against the same year so the rollover is the same arithmetic as every
+    // other step rather than a branch that can drift.
+    const index = key === 'lastquarter' ? current - 1 : key === 'nextquarter' ? current + 1 : current;
     return {
         Key: key,
         Label,

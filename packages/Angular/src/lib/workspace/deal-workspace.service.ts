@@ -43,6 +43,20 @@ import {
     type FiscalYearStartResolution,
     type PeriodWindow,
 } from '../pages/dashboard-period';
+import { CleanIDs, FilterParameters, NO_FILTERS, type DashboardFilters } from '../pages/dashboard-filters';
+
+/**
+ * A query's parameters: the period's bounds, the filter bar's lists and anything the caller adds, or
+ * undefined when there are none. An unbounded edge and an "All" list are left out, never sent empty.
+ */
+function queryParameters(
+    window: PeriodWindow | undefined,
+    filters: DashboardFilters,
+    extra: Record<string, string> = {},
+): Record<string, string | string[]> | undefined {
+    const parameters: Record<string, string | string[]> = { ...(PeriodParameters(window) ?? {}), ...FilterParameters(filters), ...extra };
+    return Object.keys(parameters).length ? parameters : undefined;
+}
 
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
@@ -52,6 +66,7 @@ const E_FORECAST_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 const E_EMPLOYEE = 'MJ: Employees';
+const E_COMPANY = 'MJ: Companies';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
 const E_STAGE_EVENT = 'MJ_BizApps_Sales: Deal Stage Events';
@@ -139,15 +154,29 @@ export async function ReadCurrencyCodes(): Promise<Map<string, string> | null> {
  * reach them; a measure that only exists inside a component getter is reachable by nothing else.
  */
 export interface DealDashboardSummary {
+    /** Open pipeline deals expected to close in the period, summed. The Open pipeline tile. */
     OpenAmount: number;
+    /** Open deals expected to close in the period, Omitted ones included. */
     OpenCount: number;
     /** Open deals in a forecast category left out of the pipeline (Omitted); counted in `OpenCount` only. */
     OpenOmittedCount: number;
+    /** The forecast's open segments: each open pipeline deal in the period once, in its highest category. */
+    CommitAmount: number;
+    CommitCount: number;
+    BestCaseOnlyAmount: number;
+    PipelineOnlyAmount: number;
+    /** Amount × Probability over the Open pipeline deals. The Weighted pipeline tile. */
+    WeightedAmount: number;
     TotalCount: number;
+    /** Needs attention: about the open book today, not bounded by the period. */
     PastExpectedCloseCount: number;
+    NoOwnerCount: number;
+    NoCloseDateCount: number;
     WonCount: number;
-    /** The amounts of the deals `WonCount` counts: the forecast stack's Closed segment. */
+    /** The amounts of the deals `WonCount` counts: the forecast's Won segment. */
     WonAmount: number;
+    /** Deals in scope whose order carries no line: what a Product company filter leaves out. */
+    NoLinesDealCount: number;
     /** How much of the open figure the orders engine priced, and how much a person typed. */
     OpenPricedAmount: number;
     OpenStatedAmount: number;
@@ -168,10 +197,8 @@ export interface DealRosterRow {
      * When the deal actually closed. NULL on every open deal, and on a closed one that never recorded
      * it.
      *
-     * Carried so the forecast stack's Closed segment can be bounded by the dashboard's selected period
-     * (golive#232) without re-querying. The roster query has always returned this column; nothing
-     * consumed it until the period selector needed a date that says when a win LANDED rather than when
-     * it was expected to.
+     * Carried so the client-side Won predicate (`WonInPeriod`) can bound a win by the day it LANDED
+     * rather than the day it was expected to. The Won figures themselves come from the summary query.
      */
     ActualCloseDate: string | Date | null;
     /** Virtual name columns that DO resolve on the Deal view. */
@@ -180,6 +207,12 @@ export interface DealRosterRow {
     DealType: string | null;
     DealStatusType: string | null;
     OwnerEmployee: string | null;
+    /** The owner's employee ID: what the Deal owner filter and the Commit by deal owner rows key on. */
+    OwnerEmployeeID: string | null;
+    /** The selling company, `Deal.CompanyID`. */
+    CompanyID: string | null;
+    /** The distinct companies on the deal's order lines; empty for a deal with no lines. */
+    ProductCompanyIDs: string[];
     ForecastCategoryType: string | null;
     /** Kept so anything downstream can branch on the STATUS FLAGS rather than the status name. */
     DealStatusTypeID: string | null;
@@ -436,6 +469,12 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
             into.Employees = rows.map<DealLookup>((e) => ({ ID: e.ID, Name: e.FirstLast ?? '(unnamed employee)' }));
         },
     ),
+    Companies: lookupRead<NamedRow>(
+        { EntityName: E_COMPANY, OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+        (rows, into) => {
+            into.Companies = rows.map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        },
+    ),
     // Loss reasons, for the close panel. `RequiresNotes` travels with them because the panel decides
     // whether LossNotes is mandatory from the FLAG on the chosen row. The close panel cannot demand a
     // reason it has no list to offer, and an empty dropdown fails as a TIMEOUT rather than as a
@@ -448,15 +487,19 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
     ),
 };
 
-/** Every lookup list: what `LoadLookups` reads when no keys are passed. */
-export const ALL_LOOKUP_KEYS = Object.keys(LOOKUP_READS) as LookupKey[];
+/**
+ * Every lookup list: what `LoadLookups` reads when no keys are passed. Companies is the dashboard
+ * filter bar's alone: a deal takes its company from its pipeline, so a deal load does not read it.
+ */
+export const ALL_LOOKUP_KEYS = (Object.keys(LOOKUP_READS) as LookupKey[]).filter((key) => key !== 'Companies');
 
 /**
- * The lists the Sales section reads: the board's columns and the status pill. Accounts, contacts,
- * employees and loss reasons were the deal workspace's pickers, and accounts and contacts grow with the
- * customer base, so the section does not load them.
+ * The lists the Sales section reads: the board's columns, the status pill, and the company names the
+ * dashboard's filter bar labels its choices with. Accounts, contacts, employees and loss reasons were the
+ * deal workspace's pickers, and accounts and contacts grow with the customer base, so the section does
+ * not load them.
  */
-export const SECTION_LOOKUP_KEYS: readonly LookupKey[] = ['Pipelines', 'Stages', 'DealStatusTypes'];
+export const SECTION_LOOKUP_KEYS: readonly LookupKey[] = ['Pipelines', 'Stages', 'DealStatusTypes', 'Companies'];
 /**
  * The collections a deal load reads, named once.
  *
@@ -554,19 +597,29 @@ export class DealWorkspaceService {
      * column on either side is a one-file change.
      *
      * `closedSince` drops closed deals that closed before it; open deals always come back
-     * (bizapps-sales#209). Omitted, every deal comes back.
+     * (bizapps-sales#209). Omitted, every deal comes back. `filters` narrows the rows by the
+     * dashboard's filter bar in the query itself (bc-aidp-next-golive#350), and `openOnly` returns
+     * open deals only, which is all the dashboard's grouped cards read.
      *
      * THROWS WHEN THE QUERY FAILS, rather than returning an empty roster. An empty roster reads as a
      * database with no deals. The likeliest failure once `closedSince` is passed is a host whose query
      * definition predates the parameter, which MJ refuses as an unknown parameter; the section shows the
      * reason instead of an empty dashboard.
      */
-    public async LoadRoster(closedSince?: string | null): Promise<DealRosterRow[]> {
+    public async LoadRoster(
+        closedSince?: string | null,
+        filters: DashboardFilters = NO_FILTERS,
+        openOnly = false,
+    ): Promise<DealRosterRow[]> {
+        const extra: Record<string, string> = {};
+        if (closedSince) extra['ClosedSince'] = closedSince;
+        if (openOnly) extra['OpenOnly'] = 'true';
+        const parameters = queryParameters(undefined, filters, extra);
         const [result, codes] = await Promise.all([
             new RunQuery().RunQuery({
                 QueryName: 'Sales: Deal Roster',
                 CategoryPath: 'Sales',
-                ...(closedSince ? { Parameters: { ClosedSince: closedSince } } : {}),
+                ...(parameters ? { Parameters: parameters } : {}),
             }),
             this.LoadCurrencyCodes(),
         ]);
@@ -621,6 +674,9 @@ export class DealWorkspaceService {
             DealType: (d['DealTypeName'] as string | null) ?? null,
             DealStatusType: (d['StatusName'] as string | null) ?? null,
             OwnerEmployee: (d['OwnerName'] as string | null) ?? null,
+            OwnerEmployeeID: (d['OwnerEmployeeID'] as string | null) ?? null,
+            CompanyID: (d['CompanyID'] as string | null) ?? null,
+            ProductCompanyIDs: CleanIDs(String(d['ProductCompanyIDs'] ?? '').split(',')),
             ForecastCategoryType: (d['ForecastCategoryName'] as string | null) ?? null,
             DealStatusTypeID: (d['DealStatusTypeID'] as string | null) ?? null,
             PipelineID: (d['PipelineID'] as string | null) ?? null,
@@ -677,8 +733,8 @@ export class DealWorkspaceService {
      * ran and nothing closed; the card renders those two differently, so a failure does not read as
      * "0 won / 0 closed".
      */
-    public async LoadWinRate(window?: PeriodWindow): Promise<Record<string, unknown>[] | null> {
-        const parameters = PeriodParameters(window);
+    public async LoadWinRate(window?: PeriodWindow, filters: DashboardFilters = NO_FILTERS): Promise<Record<string, unknown>[] | null> {
+        const parameters = queryParameters(window, filters);
         const result = await new RunQuery().RunQuery({
             QueryName: 'Sales: Win Rate by Count and Value',
             CategoryPath: 'Sales',
@@ -997,13 +1053,13 @@ export class DealWorkspaceService {
     }
 
     /**
-     * @param window Bounds the WON tile only. The query applies these inside its `WonCount` CASE
-     * rather than in its `WHERE`, so every other figure it returns still describes the whole book —
-     * see `dashboard-summary.sql`. A null bound is passed as no parameter at all, which is how the
-     * Nunjucks `{% if %}` blocks drop the clause.
+     * @param window Bounds Won on `ActualCloseDate` and the open figures on `ExpectedCloseDate`; the
+     * attention counts are never bounded (see `dashboard-summary.sql`). A null bound is passed as no
+     * parameter at all, which is how the Nunjucks `{% if %}` blocks drop the clause.
+     * @param filters The filter bar's lists, applied by the query to every figure.
      */
-    public async LoadDashboardSummary(window?: PeriodWindow): Promise<DealDashboardSummary | null> {
-        const parameters = PeriodParameters(window);
+    public async LoadDashboardSummary(window?: PeriodWindow, filters: DashboardFilters = NO_FILTERS): Promise<DealDashboardSummary | null> {
+        const parameters = queryParameters(window, filters);
         const result = await new RunQuery().RunQuery({
             QueryName: 'Sales: Dashboard Summary',
             CategoryPath: 'Sales',
@@ -1025,10 +1081,18 @@ export class DealWorkspaceService {
             OpenAmount: num(row['OpenAmount']),
             OpenCount: num(row['OpenCount']),
             OpenOmittedCount: num(row['OpenOmittedCount']),
+            CommitAmount: num(row['CommitAmount']),
+            CommitCount: num(row['CommitCount']),
+            BestCaseOnlyAmount: num(row['BestCaseOnlyAmount']),
+            PipelineOnlyAmount: num(row['PipelineOnlyAmount']),
+            WeightedAmount: num(row['WeightedAmount']),
             TotalCount: num(row['TotalCount']),
             PastExpectedCloseCount: num(row['PastExpectedCloseCount']),
+            NoOwnerCount: num(row['NoOwnerCount']),
+            NoCloseDateCount: num(row['NoCloseDateCount']),
             WonCount: num(row['WonCount']),
             WonAmount: num(row['WonAmount']),
+            NoLinesDealCount: num(row['NoLinesDealCount']),
             OpenPricedAmount: num(row['OpenPricedAmount']),
             OpenStatedAmount: num(row['OpenStatedAmount']),
             OpenNoAmountCount: num(row['OpenNoAmountCount']),

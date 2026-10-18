@@ -728,16 +728,16 @@ calendar year with the basis `unreadable`, which the selector words as "fiscal y
 read". They used to report `no-profiles`, which told a user without accounting access that no company
 profile sets a fiscal year.
 
-Second, the setting is per-company while the dashboard is not company-scoped: `Sales: Dashboard
-Summary` accepts a `CompanyID` the UI does not pass. **When active company profiles disagree about the
-fiscal start, the dashboard falls back to the calendar year rather than picking one.** Choosing
+Second, the setting is per-company while the dashboard's period is read once for the page, whatever
+selling companies the filter bar picks. **When active company profiles disagree about the fiscal start,
+the dashboard falls back to the calendar year rather than picking one.** Choosing
 silently would produce a window correct for one company's figures and wrong for another's, with
 nothing on screen saying which. This is the rule `deal-board` already applies to mixed currency: refuse
 to present a total over a set holding more than one distinct value.
 
-All four cases — configured, accounting absent, no profile, companies disagreeing — are named on the
-dashboard beside the selector. A period control whose boundaries are invisible is the same defect
-golive#232 was filed about.
+All four cases — configured, accounting absent, no profile, companies disagreeing — are named in the
+Period dropdown's tooltip, and the window's dates are printed beside it. A period control whose
+boundaries are invisible is the same defect golive#232 was filed about.
 
 ### What this does NOT do
 
@@ -816,5 +816,35 @@ rule should not depend on a metadata row a host may not have pushed or may turn 
 message is `DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE` in `sales-entities` so the form can share it.
 
 Pinned by `DealStageEventEntityServer.test.ts` and integration check `board-move.BD7`.
+
+---
+
+## D-DASH2 — Every dashboard figure is bounded by the period, each on its own date
+
+**Ruling (bc-aidp-next-golive#350):** the Deals dashboard's period bounds every figure that answers
+"how are we doing" or "what is coming". Won counts wins whose `ActualCloseDate` is in the period. The
+open figures — Commit, Open pipeline, Weighted pipeline, the forecast's open segments, Open deals by
+stage, Commit by deal owner and the dated Expected to close buckets — count open deals whose
+`ExpectedCloseDate` is in the period. All time is the whole book.
+
+It reverses the earlier rule that open figures describe the current book whatever the period. That
+rule was internally consistent, but a forecast labelled "this quarter" that counts deals expected to
+close years out reads as wrong to everyone who looks at it, and the tester report said so.
+
+Three consequences, each deliberate:
+
+- **An open deal with no expected close date belongs to no bounded period.** It is not counted in a
+  bounded forecast; the forecast card says how many there are, and they are listed under Needs
+  attention's "No close date" and the "No date" bucket, which ignore the period.
+- **Needs attention is about today, not the period.** Past close date, No owner, No close date and Idle
+  past stage limit follow the filter bar but not the period: a deal that needs a person needs one
+  whatever quarter is being read.
+- **The dated buckets intersect with the period.** Under a past period, Next 7 days and Rest of month
+  read empty, because nothing expected to close in a past quarter is still ahead.
+
+The filters (selling company, product company, deal owner, pipeline) and the period are applied by the
+queries (`Sales: Dashboard Summary`, `Sales: Win Rate by Count and Value`, `Sales: Deal Roster`), and the
+deal list under the tiles is filtered with the same predicate on the server, so a tile and its list
+agree. The forecast snapshot and `Sales: Forecast by Category` are unchanged.
 
 ---

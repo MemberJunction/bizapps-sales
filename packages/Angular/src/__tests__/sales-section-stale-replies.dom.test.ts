@@ -12,6 +12,7 @@ import {
     initSectionTestEnvironment,
     mountSection as mount,
     stubService,
+    Summary,
     type StubService,
 } from './helpers/sales-section-mount';
 
@@ -29,10 +30,8 @@ vi.mock('../lib/pages/deal-views', async (importOriginal) => {
     };
 });
 
-const summary = (OpenCount: number): DealDashboardSummary => ({
-    OpenAmount: 0, OpenCount, OpenOmittedCount: 0, TotalCount: OpenCount, PastExpectedCloseCount: 0,
-    WonCount: 0, WonAmount: 0, OpenPricedAmount: 0, OpenStatedAmount: 0, OpenNoAmountCount: 0,
-});
+/** A summary whose Commit tile reads `CommitCount` deals, so which reply landed can be read off the tile. */
+const summary = (CommitCount: number): DealDashboardSummary => Summary({ CommitCount });
 
 /** A promise the test settles by hand. */
 function held<T>(): { promise: Promise<T>; release: (value: T) => void } {
@@ -41,7 +40,8 @@ function held<T>(): { promise: Promise<T>; release: (value: T) => void } {
     return { promise, release };
 }
 
-const openDealsTile = (c: MJSSalesSectionComponent): string | undefined => c.Kpis.find((k) => k.Label === 'Open deals')?.Value;
+const commitDealCount = (c: MJSSalesSectionComponent): string | undefined =>
+    c.Kpis.find((k) => k.Label === 'Commit')?.Footnote.split(' ')[0];
 
 let service: StubService;
 
@@ -78,7 +78,7 @@ describe('the dashboard summary', () => {
         first.release(summary(9));
         await a;
 
-        expect(openDealsTile(c)).toBe('2');
+        expect(commitDealCount(c)).toBe('2');
     });
 
     it("keeps a period change made mid-load, rather than the load's figures for the old period", async () => {
@@ -93,7 +93,7 @@ describe('the dashboard summary', () => {
         load.release(summary(9));
         await refresh;
 
-        expect(openDealsTile(c)).toBe('5');
+        expect(commitDealCount(c)).toBe('5');
     });
 });
 

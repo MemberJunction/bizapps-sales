@@ -33,8 +33,9 @@ describe('Omitted deals', () => {
         expect(WeightedOpen(ROSTER)).toBe(8);
     });
 
-    it("stay in the 'open' list, which backs the Open deals count", () => {
-        expect(ids(FilterInspect(ROSTER, 'open'))).toEqual(['commit', 'best', 'remainder', 'omitted']);
+    it("stay open, so Needs attention still finds them, while 'weighted' lists the pipe deals", () => {
+        expect(ids(FilterInspect(ROSTER, 'nodate'))).toEqual(['commit', 'best', 'remainder', 'omitted']);
+        expect(ids(FilterInspect(ROSTER, 'weighted'))).toEqual(ids(FilterInspect(ROSTER, 'pipe')));
     });
 });
 

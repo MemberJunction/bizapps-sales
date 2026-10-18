@@ -31,7 +31,8 @@ describe('"past expected close" is judged on the business day', () => {
         it(`${file} compares ExpectedCloseDate to fnBusinessToday(), not the UTC day`, () => {
             const sql = sqlOf(file);
             expect(sql).toMatch(BUSINESS_TODAY);
-            expect(sql).toMatch(/d\.ExpectedCloseDate < bt\.Today/);
+            // The summary compares its scoped rows (`s.`), the roster the deal view (`d.`).
+            expect(sql).toMatch(/[ds]\.ExpectedCloseDate < bt\.Today/);
             expect(sql).not.toMatch(/SYSUTCDATETIME|GETUTCDATE|GETDATE|SYSDATETIME/i);
         });
     }

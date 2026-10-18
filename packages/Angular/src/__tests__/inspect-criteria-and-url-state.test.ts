@@ -24,31 +24,91 @@ const OPEN_IN_FORECAST =
  */
 describe('InspectCriteriaWhere', () => {
     const today = '2026-08-15';
+    const PIPE = '(ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInPipeline = 0))';
 
-    it('limits every slice to open deals in forecast pipelines, by flag', () => {
-        expect(InspectCriteriaWhere('open', TABLES, today)).toBe(OPEN_IN_FORECAST);
+    it('limits every open slice to open deals in forecast pipelines, by flag', () => {
+        expect(InspectCriteriaWhere('pipe', TABLES, today)).toBe(`${OPEN_IN_FORECAST} AND ${PIPE}`);
     });
 
     it.each<[CriteriaInspectKey, string]>([
-        ['commit', 'ForecastCategoryTypeID IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInCommit = 1)'],
-        ['best', 'ForecastCategoryTypeID IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInBestCase = 1)'],
-        ['pipe', '(ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInPipeline = 0))'],
+        ['closing', "ExpectedCloseDate >= '2026-08-15' AND ExpectedCloseDate <= '2026-09-14'"],
+        ['commit', `${PIPE} AND ForecastCategoryTypeID IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInCommit = 1)`],
+        ['best', `${PIPE} AND (ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInCommit = 1)) AND ForecastCategoryTypeID IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInBestCase = 1)`],
+        ['weighted', PIPE],
         ['remainder', '(ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInPipeline = 0 OR IncludeInCommit = 1 OR IncludeInBestCase = 1))'],
         ['slipped', "ExpectedCloseDate IS NOT NULL AND ExpectedCloseDate < '2026-08-15'"],
-        ['noowner', "(OwnerEmployee IS NULL OR OwnerEmployee = '')"],
+        ['noowner', 'OwnerEmployeeID IS NULL'],
+        ['nodate', 'ExpectedCloseDate IS NULL'],
         ['week', "ExpectedCloseDate >= '2026-08-15' AND ExpectedCloseDate <= '2026-08-22'"],
         ['month', "ExpectedCloseDate > '2026-08-22' AND ExpectedCloseDate <= '2026-08-31'"],
-        ['later', "(ExpectedCloseDate IS NULL OR ExpectedCloseDate > '2026-08-31')"],
+        ['later', "ExpectedCloseDate > '2026-08-31'"],
     ])('%s', (key, extra) => {
         expect(InspectCriteriaWhere(key, TABLES, today)).toBe(`${OPEN_IN_FORECAST} AND ${extra}`);
     });
 
     it('splits the date buckets where the roster filter does, near month end too', () => {
-        expect(InspectDateBounds('2026-08-28')).toEqual({ WeekEnd: '2026-09-04', MonthEnd: '2026-08-31', LaterFrom: '2026-09-04' });
+        expect(InspectDateBounds('2026-08-28')).toEqual({ WeekEnd: '2026-09-04', MonthEnd: '2026-08-31', LaterFrom: '2026-09-04', ClosingEnd: '2026-09-27' });
         // FilterInspect reads the same bounds: a deal on the week's last day is in "week", not "later".
         const deal = { IsOpen: true, ExpectedCloseDate: '2026-09-04' } as Parameters<typeof FilterInspect>[0][number];
         expect(FilterInspect([deal], 'week', '2026-08-28')).toHaveLength(1);
         expect(FilterInspect([deal], 'later', '2026-08-28')).toHaveLength(0);
+    });
+});
+
+/**
+ * THE PERIOD AND THE FILTER BAR REACH THE GRID (bc-aidp-next-golive#350). Each tile's list is narrowed
+ * by the same rule its query applied, so the list holds the deals the tile counted.
+ */
+describe('InspectCriteriaWhere with a period and filters', () => {
+    const today = '2026-08-15';
+    const Q3 = { Key: 'quarter' as const, Label: 'This quarter', Start: '2026-07-01', End: '2026-09-30' };
+    const TABLES_WITH_LINES = { ...TABLES, OrderLine: { SchemaName: 'o', BaseView: 'vwOrderLines' } };
+
+    it('bounds an open slice on the expected close date', () => {
+        expect(InspectCriteriaWhere('pipe', TABLES, today, { Window: Q3 }))
+            .toContain("ExpectedCloseDate >= '2026-07-01' AND ExpectedCloseDate <= '2026-09-30'");
+    });
+
+    it('bounds Won and the win rate on the day the deal closed, inclusive of the last day', () => {
+        expect(InspectCriteriaWhere('won', TABLES, today, { Window: Q3 })).toBe(
+            "DealStatusTypeID IN (SELECT ID FROM [s].[vwDealStatusTypes] WHERE IsWon = 1) AND ActualCloseDate >= '2026-07-01' AND ActualCloseDate <= '2026-09-30'",
+        );
+        expect(InspectCriteriaWhere('closed', TABLES, today, { Window: Q3 }))
+            .toMatch(/^DealStatusTypeID IN \(SELECT ID FROM \[s\]\.\[vwDealStatusTypes\] WHERE IsClosed = 1\) AND ActualCloseDate >= /);
+    });
+
+    it('leaves the attention slices and the default list unbounded by the period', () => {
+        for (const key of ['slipped', 'noowner', 'nodate', 'closing'] as const) {
+            expect(InspectCriteriaWhere(key, TABLES, today, { Window: Q3 })).toBe(InspectCriteriaWhere(key, TABLES, today));
+        }
+    });
+
+    it('narrows every slice by the filter bar, and a named pipeline replaces the forecast rule', () => {
+        const where = InspectCriteriaWhere('commit', TABLES_WITH_LINES, today, {
+            Filters: { CompanyIDs: ['C1', 'C2'], OwnerEmployeeIDs: ['E1'], PipelineIDs: ['P1'], ProductCompanyIDs: ['PC1'] },
+        });
+        expect(where).toContain("CompanyID IN ('C1', 'C2')");
+        expect(where).toContain("OwnerEmployeeID IN ('E1')");
+        expect(where).toContain("PipelineID IN ('P1')");
+        expect(where).toContain("OrderID IN (SELECT OrderHeaderID FROM [o].[vwOrderLines] WHERE CompanyID IN ('PC1'))");
+        expect(where).not.toContain('IncludeInForecast');
+    });
+
+    it('matches nothing for a product company when the order-line table is unknown, rather than ignoring it', () => {
+        expect(InspectCriteriaWhere('pipe', TABLES, today, { Filters: { CompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: [], ProductCompanyIDs: ['PC1'] } }))
+            .toContain('1 = 0');
+    });
+
+    it('lists a stage column, an unstaged column and an owner row by their argument', () => {
+        expect(InspectCriteriaWhere('stage', TABLES, today, { Arg: 's1' })).toContain("PipelineStageID = 's1'");
+        expect(InspectCriteriaWhere('stage', TABLES, today, { Arg: 'unstaged:P1' })).toContain("PipelineStageID IS NULL AND PipelineID = 'P1'");
+        expect(InspectCriteriaWhere('owner', TABLES, today, { Arg: 'E1' })).toContain("OwnerEmployeeID = 'E1'");
+        expect(InspectCriteriaWhere('owner', TABLES, today, { Arg: 'none' })).toContain('OwnerEmployeeID IS NULL');
+    });
+
+    it('escapes a quote in an ID', () => {
+        expect(InspectCriteriaWhere('pipe', TABLES, today, { Filters: { CompanyIDs: ["x'y"], OwnerEmployeeIDs: [], PipelineIDs: [], ProductCompanyIDs: [] } }))
+            .toContain("CompanyID IN ('x''y')");
     });
 });
 
@@ -92,19 +152,40 @@ describe('the section URL state (bizapps-sales#371)', () => {
 
     it('reads known values and drops unknown ones', () => {
         expect(ParseSalesUrlState({ page: 'board', period: 'year', inspect: 'slipped', company: 'c1', pipeline: 'p1' }, pages))
-            .toEqual({ Page: 'board', Period: 'year', Inspect: 'slipped', Company: 'c1', Pipeline: 'p1' });
+            .toEqual({ ...DEFAULT_SALES_URL_STATE, Page: 'board', Period: 'year', Inspect: 'slipped', Company: 'c1', Pipeline: 'p1' });
         expect(ParseSalesUrlState({ page: 'nope', period: 'decade', inspect: 'x', company: ' ' }, pages)).toEqual(DEFAULT_SALES_URL_STATE);
     });
 
     it('writes every key, null for a default, so a default leaves the URL', () => {
-        expect(SalesUrlParams({ ...DEFAULT_SALES_URL_STATE, Period: 'alltime' }))
-            .toEqual({ page: null, period: 'alltime', inspect: null, company: null, pipeline: null });
+        expect(SalesUrlParams({ ...DEFAULT_SALES_URL_STATE, Period: 'alltime' })).toEqual({
+            page: null, period: 'alltime', from: null, to: null, companies: null, productCompanies: null, owners: null, pipelines: null,
+            inspect: null, inspectArg: null, company: null, pipeline: null,
+        });
     });
 
     it('round-trips', () => {
-        const state = { Page: 'list', Period: 'lastquarter' as const, Inspect: 'won' as const, Company: null, Pipeline: 'p' };
+        const state = { ...DEFAULT_SALES_URL_STATE, Page: 'list', Period: 'lastquarter' as const, Inspect: 'won' as const, Pipeline: 'p' };
         const params = Object.fromEntries(Object.entries(SalesUrlParams(state)).filter(([, v]) => v !== null)) as Record<string, string>;
         expect(SameSalesUrlState(ParseSalesUrlState(params, pages), state)).toBe(true);
+    });
+
+    it('keeps the filter bar, a custom range and a stage argument (bc-aidp-next-golive#350)', () => {
+        const state = {
+            ...DEFAULT_SALES_URL_STATE,
+            Period: 'custom' as const, PeriodStart: '2026-01-01', PeriodEnd: '2026-03-31',
+            Companies: ['c1', 'c2'], ProductCompanies: ['pc1'], Owners: ['e1'], Pipelines: ['p1'],
+            Inspect: 'stage' as const, InspectArg: 's1',
+        };
+        const params = Object.fromEntries(Object.entries(SalesUrlParams(state)).filter(([, v]) => v !== null)) as Record<string, string>;
+        expect(params).toMatchObject({ companies: 'c1,c2', from: '2026-01-01', inspectArg: 's1' });
+        expect(ParseSalesUrlState(params, pages)).toEqual(state);
+    });
+
+    it('drops dates that belong to no custom range, and an argument on a slice that takes none', () => {
+        const parsed = ParseSalesUrlState({ period: 'year', from: '2026-01-01', inspect: 'won', inspectArg: 's1', companies: ',c1,,C1' }, pages);
+        expect(parsed.PeriodStart).toBeNull();
+        expect(parsed.InspectArg).toBeNull();
+        expect(parsed.Companies).toEqual(['c1']);
     });
 });
 

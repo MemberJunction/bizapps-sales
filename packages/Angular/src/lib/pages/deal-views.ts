@@ -15,7 +15,8 @@ import type { ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-view
 import { MJS_ENTITIES } from '../data/entity-names';
 import type { PeriodWindow } from './dashboard-period';
 import { GRID_DAY_FORMAT } from './dashboard-dates';
-import { InspectDateBounds, type InspectKey } from './dashboard-inspect';
+import { InspectDateBounds, NO_OWNER_ARG, PERIOD_BOUND_KEYS, type InspectKey } from './dashboard-inspect';
+import { NO_FILTERS, type DashboardFilters } from './dashboard-filters';
 
 export const SALES_PIPELINE_VIEW_NAME = 'Sales: Pipeline';
 
@@ -176,6 +177,7 @@ export function DealInListWhere(ids: readonly string[]): string {
 }
 
 const sqlString = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+const sqlList = (values: readonly string[]): string => `(${values.map(sqlString).join(', ')})`;
 
 /** An entity's schema and base view, read from metadata so no schema name is hardcoded here. MJAPI accepts a subquery only on a base view. */
 export interface SqlTable {
@@ -185,89 +187,158 @@ export interface SqlTable {
 
 const tableRef = (t: SqlTable): string => `[${t.SchemaName}].[${t.BaseView}]`;
 
-/** The type tables an Inspect filter reads flags from. */
+/** The tables an Inspect filter reads flags and product companies from. */
 export interface InspectTables {
     Status: SqlTable;
     Pipeline: SqlTable;
     Forecast: SqlTable;
+    /** Orders' order lines, for the Product company filter. Needed only while that filter is set. */
+    OrderLine?: SqlTable | null;
 }
 
-/** The Inspect slices {@link InspectCriteriaWhere} expresses as criteria. */
-export type CriteriaInspectKey = Exclude<InspectKey, 'closing' | 'won'>;
+/** What narrows an Inspect list beside its own slice: the period, the filter bar, and an argument. */
+export interface InspectScope {
+    /** The selected period. Applied only to the keys in `PERIOD_BOUND_KEYS`. */
+    Window?: PeriodWindow;
+    Filters?: DashboardFilters;
+    /** The stage ID for `stage`; the owner's employee ID, or `NO_OWNER_ARG`, for `owner`. */
+    Arg?: string | null;
+}
+
+/** The Inspect slices {@link InspectCriteriaWhere} expresses as criteria. `idle` is a list of IDs. */
+export type CriteriaInspectKey = Exclude<InspectKey, 'idle'>;
+
+/**
+ * The filter bar's lists as criteria on the Deals view, the same rule each dashboard query applies.
+ * Product company keeps a deal when one line of its order belongs to a selected company.
+ */
+function filterParts(filters: DashboardFilters, tables: InspectTables): string[] {
+    const parts: string[] = [];
+    if (filters.CompanyIDs.length) parts.push(`CompanyID IN ${sqlList(filters.CompanyIDs)}`);
+    if (filters.OwnerEmployeeIDs.length) parts.push(`OwnerEmployeeID IN ${sqlList(filters.OwnerEmployeeIDs)}`);
+    if (filters.PipelineIDs.length) parts.push(`PipelineID IN ${sqlList(filters.PipelineIDs)}`);
+    if (filters.ProductCompanyIDs.length) {
+        // Without the order-line table no deal can be shown to match, so the list says so by matching
+        // none rather than ignoring the filter and listing deals the figure did not count.
+        parts.push(tables.OrderLine
+            ? `OrderID IN (SELECT OrderHeaderID FROM ${tableRef(tables.OrderLine)} WHERE CompanyID IN ${sqlList(filters.ProductCompanyIDs)})`
+            : '1 = 0');
+    }
+    return parts;
+}
+
+/** `column` inside the window. A null bound is no bound; a NULL date fails a bounded window. */
+function windowParts(column: string, window: PeriodWindow | undefined): string[] {
+    const parts: string[] = [];
+    if (window?.Start) parts.push(`${column} >= ${sqlString(window.Start)}`);
+    if (window?.End) parts.push(`${column} <= ${sqlString(window.End)}`);
+    return parts;
+}
 
 /**
  * An Inspect slice as a filter on the Deals view, built from the slice's own criteria (bizapps-sales#449).
  *
- * It replaces a list of every matching deal ID, whose length grew with the book. Each case is the
- * server-side form of the same case in `FilterInspect` over the roster, so the grid lists the deals the
- * figure counted:
+ * Each case is the server-side form of the same case in `FilterInspect` and of the matching column in
+ * `dashboard-summary.sql` / `win-rate.sql`, so the grid lists the deals the figure counted:
  *
- *  - every slice is OPEN deals (the status's `IsOpen` flag) in pipelines that count toward the forecast
- *    (`Pipeline.IncludeInForecast`), which is what `InForecast` keeps of the open book;
+ *  - open slices are OPEN deals (the status's `IsOpen` flag) in pipelines that count toward the forecast
+ *    (`Pipeline.IncludeInForecast`), unless the Pipeline filter names pipelines, which includes them;
  *  - forecast slices read the category's `IncludeInCommit` / `IncludeInBestCase` / `IncludeInPipeline`
  *    flags; a deal with no category counts toward the pipeline, as the roster's `ISNULL(…, 1)` does;
- *  - date slices compare `ExpectedCloseDate` with the same business-day bounds the buckets use.
- *
- * `closing` (the eight soonest) and `won` are not here: a "first eight" is not a criterion, so
- * `closing` keeps its ID list, which is never longer than eight; `won` has {@link DealWonInPeriodWhere}.
+ *  - the period bounds open slices on `ExpectedCloseDate` and `won` / `closed` on `ActualCloseDate`
+ *    (bc-aidp-next-golive#350). The attention slices and `closing` ignore it;
+ *  - date buckets compare `ExpectedCloseDate` with the same business-day bounds the buckets use;
+ *  - the filter bar's lists narrow every slice.
  */
-export function InspectCriteriaWhere(key: CriteriaInspectKey, tables: InspectTables, today: string): string {
+export function InspectCriteriaWhere(
+    key: CriteriaInspectKey,
+    tables: InspectTables,
+    today: string,
+    scope: InspectScope = {},
+): string {
+    const filters = scope.Filters ?? NO_FILTERS;
+    const bounded = PERIOD_BOUND_KEYS.includes(key) ? scope.Window : undefined;
+    const status = (flag: string): string => `DealStatusTypeID IN (SELECT ID FROM ${tableRef(tables.Status)} WHERE ${flag} = 1)`;
+    if (key === 'won' || key === 'closed') {
+        return [status(key === 'won' ? 'IsWon' : 'IsClosed'), ...windowParts('ActualCloseDate', bounded), ...filterParts(filters, tables)].join(' AND ');
+    }
     const open = [
-        `DealStatusTypeID IN (SELECT ID FROM ${tableRef(tables.Status)} WHERE IsOpen = 1)`,
-        `PipelineID IN (SELECT ID FROM ${tableRef(tables.Pipeline)} WHERE IncludeInForecast = 1)`,
+        status('IsOpen'),
+        // Naming pipelines in the filter includes them, as the summary query's PipelineIDs does.
+        ...(filters.PipelineIDs.length ? [] : [`PipelineID IN (SELECT ID FROM ${tableRef(tables.Pipeline)} WHERE IncludeInForecast = 1)`]),
     ];
+    return [...open, ...sliceParts(key, tables, today, scope.Arg ?? null), ...windowParts('ExpectedCloseDate', bounded), ...filterParts(filters, tables)]
+        .join(' AND ');
+}
+
+/** The criteria one open slice adds to "open, in the forecast". */
+function sliceParts(key: Exclude<CriteriaInspectKey, 'won' | 'closed'>, tables: InspectTables, today: string, arg: string | null): string[] {
     const category = (flags: string): string => `ForecastCategoryTypeID IN (SELECT ID FROM ${tableRef(tables.Forecast)} WHERE ${flags})`;
     const notCategory = (flags: string): string =>
         `(ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM ${tableRef(tables.Forecast)} WHERE ${flags}))`;
+    const inPipeline = notCategory('IncludeInPipeline = 0');
     const bounds = InspectDateBounds(today);
-    const extra = ((): string[] => {
-        switch (key) {
-            case 'commit':
-                return [category('IncludeInCommit = 1')];
-            case 'best':
-                return [category('IncludeInBestCase = 1')];
-            case 'pipe':
-                return [notCategory('IncludeInPipeline = 0')];
-            case 'open':
-                return [];
-            case 'remainder':
-                return [notCategory('IncludeInPipeline = 0 OR IncludeInCommit = 1 OR IncludeInBestCase = 1')];
-            case 'slipped':
-                return ['ExpectedCloseDate IS NOT NULL', `ExpectedCloseDate < ${sqlString(today)}`];
-            case 'noowner':
-                return ["(OwnerEmployee IS NULL OR OwnerEmployee = '')"];
-            case 'week':
-                return [`ExpectedCloseDate >= ${sqlString(today)}`, `ExpectedCloseDate <= ${sqlString(bounds.WeekEnd)}`];
-            case 'month':
-                return [`ExpectedCloseDate > ${sqlString(bounds.WeekEnd)}`, `ExpectedCloseDate <= ${sqlString(bounds.MonthEnd)}`];
-            case 'later':
-                return [`(ExpectedCloseDate IS NULL OR ExpectedCloseDate > ${sqlString(bounds.LaterFrom)})`];
-        }
-    })();
-    return [...open, ...extra].join(' AND ');
+    switch (key) {
+        case 'closing':
+            return [`ExpectedCloseDate >= ${sqlString(today)}`, `ExpectedCloseDate <= ${sqlString(bounds.ClosingEnd)}`];
+        case 'commit':
+            return [inPipeline, category('IncludeInCommit = 1')];
+        case 'best':
+            return [inPipeline, notCategory('IncludeInCommit = 1'), category('IncludeInBestCase = 1')];
+        case 'pipe':
+        case 'weighted':
+            return [inPipeline];
+        case 'remainder':
+            return [notCategory('IncludeInPipeline = 0 OR IncludeInCommit = 1 OR IncludeInBestCase = 1')];
+        case 'slipped':
+            return ['ExpectedCloseDate IS NOT NULL', `ExpectedCloseDate < ${sqlString(today)}`];
+        case 'noowner':
+            return ['OwnerEmployeeID IS NULL'];
+        case 'nodate':
+            return ['ExpectedCloseDate IS NULL'];
+        case 'week':
+            return [`ExpectedCloseDate >= ${sqlString(today)}`, `ExpectedCloseDate <= ${sqlString(bounds.WeekEnd)}`];
+        case 'month':
+            return [`ExpectedCloseDate > ${sqlString(bounds.WeekEnd)}`, `ExpectedCloseDate <= ${sqlString(bounds.MonthEnd)}`];
+        case 'later':
+            return [`ExpectedCloseDate > ${sqlString(bounds.LaterFrom)}`];
+        case 'stage':
+            return stageParts(arg);
+        case 'owner':
+            return [
+                inPipeline,
+                category('IncludeInCommit = 1'),
+                !arg || arg === NO_OWNER_ARG ? 'OwnerEmployeeID IS NULL' : `OwnerEmployeeID = ${sqlString(arg)}`,
+            ];
+    }
+}
+
+/** A `stage` argument as criteria: a stage ID, or `unstaged:<pipeline ID>` for that pipeline's unstaged deals. */
+function stageParts(arg: string | null): string[] {
+    if (!arg || arg.toLowerCase().startsWith('unstaged')) {
+        const pipeline = (arg ?? '').slice('unstaged:'.length);
+        return ['PipelineStageID IS NULL', ...(pipeline ? [`PipelineID = ${sqlString(pipeline)}`] : [])];
+    }
+    return [`PipelineStageID = ${sqlString(arg)}`];
 }
 
 /**
  * The deals the Won tile counts, as a filter on the Deals view (bizapps-sales#209).
  *
  * The same predicate as `WonCount` in `dashboard-summary.sql`: the status's `IsWon` FLAG, and
- * `ActualCloseDate` inside the window when it has bounds. With no bounds ("All time") every won deal
- * matches, including one with no close date; with bounds such a deal does not. Applied on the server,
- * so the list no longer depends on the browser holding every won deal.
- *
- * `statusTable` is the Deal Status Types entity's schema and base view, read from metadata so the
- * schema name is not hardcoded here.
+ * `ActualCloseDate` inside the window when it has bounds. `ActualCloseDate` is a DATE column, so
+ * `<= End` includes every deal won on the last day. With no bounds ("All time") every won deal matches,
+ * including one with no close date; with bounds such a deal does not. A thin wrapper over
+ * {@link InspectCriteriaWhere}'s `won` case, kept for its callers.
  */
 export function DealWonInPeriodWhere(
     statusTable: SqlTable,
     window?: PeriodWindow,
+    filters: DashboardFilters = NO_FILTERS,
+    orderLineTable: SqlTable | null = null,
 ): string {
-    const parts = [
-        `DealStatusTypeID IN (SELECT ID FROM ${tableRef(statusTable)} WHERE IsWon = 1)`,
-    ];
-    if (window?.Start) parts.push(`ActualCloseDate >= ${sqlString(window.Start)}`);
-    if (window?.End) parts.push(`ActualCloseDate <= ${sqlString(window.End)}`);
-    return parts.join(' AND ');
+    const tables: InspectTables = { Status: statusTable, Pipeline: statusTable, Forecast: statusTable, OrderLine: orderLineTable };
+    return InspectCriteriaWhere('won', tables, '', { Window: window, Filters: filters });
 }
 
 /**

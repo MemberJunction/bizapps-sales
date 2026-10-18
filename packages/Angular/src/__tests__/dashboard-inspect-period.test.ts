@@ -8,10 +8,10 @@
  *    is not a crash — it is a tile reading 3 above a list showing 5, with nothing saying which is
  *    right. Both sides go through `WonInPeriod`, and the tests below pin that they cannot diverge.
  *
- * 2. **Narrowing the period moves NOTHING except Closed.** golive#232 requires the open-deal figures
- *    to stay as they are, and the quiet way to break that is a won deal falling out of `Closed` and
- *    landing in the pipeline remainder — a fall-through that would make the stack total look stable
- *    while silently reclassifying closed business as open. Asserted directly.
+ * 2. **Each segment uses its own date, and a win never becomes pipeline.** Won is bounded on
+ *    `ActualCloseDate`, the open segments on `ExpectedCloseDate` (bc-aidp-next-golive#350). The quiet
+ *    way to break that is a won deal falling out of `Closed` and landing in the pipeline — a
+ *    fall-through that would reclassify closed business as open. Asserted directly.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -37,6 +37,9 @@ function deal(overrides: Partial<DealRosterRow>): DealRosterRow {
         DealType: null,
         DealStatusType: null,
         OwnerEmployee: null,
+        OwnerEmployeeID: null,
+        CompanyID: null,
+        ProductCompanyIDs: [],
         ForecastCategoryType: null,
         DealStatusTypeID: null,
         PipelineID: null,
@@ -65,9 +68,12 @@ const ALL_TIME: PeriodWindow = ResolvePeriod('alltime', { Month: 1, Day: 1 }, '2
 const wonInside = deal({ ID: 'in', IsWon: true, IsClosed: true, Amount: 100, ActualCloseDate: '2026-07-14' });
 const wonOutside = deal({ ID: 'out', IsWon: true, IsClosed: true, Amount: 400, ActualCloseDate: '2026-04-30' });
 const wonUndated = deal({ ID: 'undated', IsWon: true, IsClosed: true, Amount: 700, ActualCloseDate: null });
-const openCommit = deal({ ID: 'commit', IsOpen: true, Amount: 50, IncludeInCommit: true, IncludeInBestCase: true });
-const openBest = deal({ ID: 'best', IsOpen: true, Amount: 20, IncludeInBestCase: true });
-const openPipe = deal({ ID: 'pipe', IsOpen: true, Amount: 10 });
+const openCommit = deal({ ID: 'commit', IsOpen: true, Amount: 50, IncludeInCommit: true, IncludeInBestCase: true, ExpectedCloseDate: '2026-08-20' });
+const openBest = deal({ ID: 'best', IsOpen: true, Amount: 20, IncludeInBestCase: true, ExpectedCloseDate: '2026-09-30' });
+/** Expected to close after Q3: in the book, not in the quarter. */
+const openPipe = deal({ ID: 'pipe', IsOpen: true, Amount: 10, ExpectedCloseDate: '2026-12-01' });
+/** No expected close date: in no bounded period, and in All time. */
+const openUndated = deal({ ID: 'undated-open', IsOpen: true, Amount: 5 });
 
 /**
  * A win whose status ALSO carries IsOpen.
@@ -88,9 +94,10 @@ const wonAndOpen = deal({
     IncludeInCommit: true,
     Amount: 900,
     ActualCloseDate: '2026-04-30',
+    ExpectedCloseDate: '2026-04-15',
 });
 
-const ROSTER = [wonInside, wonOutside, wonUndated, openCommit, openBest, openPipe, wonAndOpen];
+const ROSTER = [wonInside, wonOutside, wonUndated, openCommit, openBest, openPipe, openUndated, wonAndOpen];
 
 describe('WonInPeriod', () => {
     it('is false for anything that is not won, whatever its dates', () => {
@@ -145,23 +152,24 @@ describe('ForecastSlices under a period', () => {
 
     it('does NOT move an excluded win into the open segments', () => {
         // THE FALL-THROUGH BUG, and the reason `wonAndOpen` exists. A won deal that fails the window
-        // check and drops into the `IsOpen` branch reclassifies closed business as pipeline: the open
-        // segments grow as the period narrows, which is requirement 3 broken in the least visible way
-        // available. Narrowing must SHRINK the stack, never redistribute it.
-        const wide = ForecastSlices(ROSTER, ALL_TIME);
-        const narrow = ForecastSlices(ROSTER, Q3);
-        expect(narrow.Commit).toBe(wide.Commit);
-        expect(narrow.BestOnly).toBe(wide.BestOnly);
-        expect(narrow.PipeOnly).toBe(wide.PipeOnly);
-        expect(narrow.Closed).toBeLessThan(wide.Closed);
+        // check and drops into the `IsOpen` branch reclassifies closed business as pipeline. Its 900
+        // must appear in no open segment under any period.
+        for (const window of [Q3, ALL_TIME]) {
+            const s = ForecastSlices(ROSTER, window);
+            expect(s.Commit).toBe(50);
+        }
+        expect(ForecastSlices(ROSTER, Q3).Closed).toBeLessThan(ForecastSlices(ROSTER, ALL_TIME).Closed);
     });
 
-    it('leaves the open segments exactly as the issue requires', () => {
+    it('bounds the open segments on the expected close date (bc-aidp-next-golive#350)', () => {
         const s = ForecastSlices(ROSTER, Q3);
         expect(s.Commit).toBe(50);
-        // Best Case is INCREMENTAL — the commit deal carries both flags and must not be counted twice.
+        // Best case is INCREMENTAL — the commit deal carries both flags and must not be counted twice.
         expect(s.BestOnly).toBe(20);
-        expect(s.PipeOnly).toBe(10);
+        // Expected after the quarter, or never dated: not this quarter's pipeline.
+        expect(s.PipeOnly).toBe(0);
+        // All time is the whole book, undated deals included.
+        expect(ForecastSlices(ROSTER, ALL_TIME).PipeOnly).toBe(10 + 5);
     });
 });
 
@@ -179,13 +187,20 @@ describe('FilterInspect', () => {
             .toEqual(['in', 'out', 'undated', 'both']);
     });
 
-    it('every OTHER slice ignores the window — they describe the open book', () => {
-        // Requirement 3, at the slice level. If a period ever reached these, the stage mix and the
-        // close buckets built on them would start disagreeing with the tiles above them.
-        for (const key of ['pipe', 'commit', 'best', 'noowner'] as const) {
+    it('the open slices follow the window on the expected close date', () => {
+        expect(FilterInspect(ROSTER, 'pipe', '2026-08-15', Q3).map((d) => d.ID)).toEqual(['commit', 'best']);
+        expect(FilterInspect(ROSTER, 'pipe', '2026-08-15', ALL_TIME).map((d) => d.ID))
+            .toEqual(['commit', 'best', 'pipe', 'undated-open']);
+        // Best case lists what its segment totals: not the Commit deal.
+        expect(FilterInspect(ROSTER, 'best', '2026-08-15', Q3).map((d) => d.ID)).toEqual(['best']);
+    });
+
+    it('the attention slices ignore the window — they are about the open book today', () => {
+        for (const key of ['noowner', 'nodate', 'slipped'] as const) {
             expect(FilterInspect(ROSTER, key, '2026-08-15', Q3).map((d) => d.ID)).toEqual(
                 FilterInspect(ROSTER, key, '2026-08-15', ALL_TIME).map((d) => d.ID),
             );
         }
+        expect(FilterInspect(ROSTER, 'nodate', '2026-08-15', Q3).map((d) => d.ID)).toEqual(['undated-open']);
     });
 });

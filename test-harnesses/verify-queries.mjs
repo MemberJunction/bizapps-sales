@@ -86,11 +86,21 @@ const QUERIES = [
     ['Sales: Forecast History', { ...SLICED, CapturedOnOrBefore: '2099-12-31' }],
     ['Sales: Forecast by Owner', { ...SLICED, OwnerEmployeeID: owner?.OwnerEmployeeID }],
     ['Sales: Deal Roster', { ...SLICED, OwnerEmployeeID: owner?.OwnerEmployeeID, OpenOnly: 'true' }],
-    // WIDE included since golive#232: WonCount now takes an optional period window. Without the
-    // period parameters the parameterised run would never reach the new predicate, and a filter that
+    // WIDE included since the period selector: Won and the open figures take an optional window. Without
+    // the period parameters the parameterised run would never reach those predicates, and a filter that
     // is never exercised reports clean — which is the exact failure shape this harness exists for.
     // The window is deliberately wide so the run still produces qualifying rows and EVIDENCE holds.
     ['Sales: Dashboard Summary', { CompanyID: company?.CompanyID, PipelineID: pipeline?.PipelineID, ...WIDE }],
+    /**
+     * THE FILTER BAR'S LISTS (bc-aidp-next-golive#350), each a `sqlIn` array. Run as a second entry per
+     * query because MJ types these parameters `array` from the template: a run that passed only the
+     * single-value parameters would never render an `IN (...)` and would report clean over a list path
+     * nobody exercised. Product company is left out here because the slice's company need not own a
+     * product on a line; `compare-dashboard-measures.mjs` exercises it with one taken from the lines.
+     */
+    ['Sales: Dashboard Summary', { CompanyIDs: [company?.CompanyID], PipelineIDs: [pipeline?.PipelineID], ...WIDE }],
+    ['Sales: Win Rate by Count and Value', { CompanyIDs: [company?.CompanyID], PipelineIDs: [pipeline?.PipelineID], ...WIDE }],
+    ['Sales: Deal Roster', { CompanyIDs: [company?.CompanyID], PipelineIDs: [pipeline?.PipelineID], OwnerEmployeeIDs: [owner?.OwnerEmployeeID] }],
 ];
 
 // Aggregates return a row over an empty set, so "rows came back" does not prove the joins were

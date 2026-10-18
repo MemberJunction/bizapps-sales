@@ -9,12 +9,13 @@ import {
     initSectionTestEnvironment,
     mountSection as mount,
     stubService,
+    Summary,
     type StubService,
 } from './helpers/sales-section-mount';
 
 /**
  * OMITTED DEALS ARE LEFT OUT OF THE OPEN PIPELINE AMOUNT, so the deal count under that amount leaves
- * them out too. The Open deals tile still counts every open deal and says how many are left out.
+ * them out too. The tile's second line still counts every open deal and says how many are excluded.
  */
 vi.mock('../lib/pages/deal-views', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../lib/pages/deal-views')>();
@@ -25,10 +26,9 @@ vi.mock('../lib/pages/deal-views', async (importOriginal) => {
     };
 });
 
-const summary: DealDashboardSummary = {
-    OpenAmount: 1475, OpenCount: 5, OpenOmittedCount: 1, TotalCount: 8, PastExpectedCloseCount: 0,
-    WonCount: 0, WonAmount: 0, OpenPricedAmount: 1475, OpenStatedAmount: 0, OpenNoAmountCount: 0,
-};
+const summary: DealDashboardSummary = Summary({
+    OpenAmount: 1475, OpenCount: 5, OpenOmittedCount: 1, TotalCount: 8, OpenPricedAmount: 1475,
+});
 
 let service: StubService;
 
@@ -52,7 +52,8 @@ describe('the dashboard with an Omitted deal', () => {
     it('counts only the deals behind the Open pipeline amount', async () => {
         const c = (await mount()).componentInstance;
         await vi.waitFor(() => expect(c.Kpis.length).toBeGreaterThan(0));
-        expect(c.Kpis.find((k) => k.Label === 'Open pipeline')?.Footnote).toBe('across 4 open deals');
-        expect(c.Kpis.find((k) => k.Label === 'Open deals')?.Footnote).toBe('of 8 total · 1 left out of the forecast');
+        const tile = c.Kpis.find((k) => k.Label === 'Open pipeline');
+        expect(tile?.Footnote).toBe('4 open deals');
+        expect(tile?.Footnote2).toBe('5 total · 1 excluded from the forecast');
     });
 });

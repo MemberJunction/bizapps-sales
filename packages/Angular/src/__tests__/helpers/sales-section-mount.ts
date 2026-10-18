@@ -11,7 +11,19 @@ import type { MJLeftNavItem } from '@memberjunction/ng-ui-components';
 import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 
 import { MJSSalesSectionComponent } from '../../lib/sections/sales-section.component';
-import { DealWorkspaceService } from '../../lib/workspace/deal-workspace.service';
+import { DealWorkspaceService, type DealDashboardSummary } from '../../lib/workspace/deal-workspace.service';
+
+/** A `Sales: Dashboard Summary` row: zeroes, with the figures a test names. */
+export function Summary(overrides: Partial<DealDashboardSummary> = {}): DealDashboardSummary {
+    return {
+        OpenAmount: 0, OpenCount: 0, OpenOmittedCount: 0,
+        CommitAmount: 0, CommitCount: 0, BestCaseOnlyAmount: 0, PipelineOnlyAmount: 0, WeightedAmount: 0,
+        TotalCount: 0, PastExpectedCloseCount: 0, NoOwnerCount: 0, NoCloseDateCount: 0,
+        WonCount: 0, WonAmount: 0, NoLinesDealCount: 0,
+        OpenPricedAmount: 0, OpenStatedAmount: 0, OpenNoAmountCount: 0,
+        ...overrides,
+    };
+}
 
 /**
  * Mounts the Sales section's REAL template in jsdom with a stubbed service, for suites that assert on

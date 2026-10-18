@@ -63,16 +63,18 @@ describe('the closing column says what the lock icon actually means', () => {
 });
 
 /**
- * Only the four fields `OwnerCoverage` reads. `IsOpen` and `IncludeInCommit` are both true because
- * the function filters on them: a row missing either is dropped before the label is ever chosen, and
- * the test would then pass for the wrong reason.
+ * Only the fields `OwnerCoverage` reads. `IsOpen`, `IncludeInPipeline` and `IncludeInCommit` are true
+ * because the function filters on them: a row missing one is dropped before the label is ever chosen,
+ * and the test would then pass for the wrong reason. The owner is keyed on `OwnerEmployeeID`.
  */
 function row(over: Partial<DealRosterRow>): DealRosterRow {
     return {
         IsOpen: true,
+        IncludeInPipeline: true,
         IncludeInCommit: true,
         Amount: 1000,
         OwnerEmployee: 'Dana Reyes',
+        OwnerEmployeeID: 'E-DANA',
         ...over,
     } as DealRosterRow;
 }
@@ -81,22 +83,22 @@ describe('the dashboard labels an ownerless deal the way the deal form does', ()
     // Behavioural, not source-level: `OwnerCoverage` is a pure function, so the label can be read off
     // the value it returns rather than off the file that produces it.
     it('buckets a deal with no owner under "No owner"', () => {
-        const bars = OwnerCoverage([row({ OwnerEmployee: null, Amount: 5000 })]);
+        const bars = OwnerCoverage([row({ OwnerEmployee: null, OwnerEmployeeID: null, Amount: 5000 })]);
         expect(bars).toHaveLength(1);
         expect(bars[0].Name).toBe('No owner');
         expect(bars[0].Amount).toBe(5000);
     });
 
-    it('treats a blank owner as no owner, not as an owner named ""', () => {
+    it('treats a blank owner name as no owner, not as an owner named ""', () => {
         // `?.trim() || fallback` is what makes this true; a `?? fallback` would produce an empty label.
-        const bars = OwnerCoverage([row({ OwnerEmployee: '   ', Amount: 250 })]);
+        const bars = OwnerCoverage([row({ OwnerEmployee: '   ', OwnerEmployeeID: null, Amount: 250 })]);
         expect(bars[0].Name).toBe('No owner');
     });
 
     it('still groups real owners by name, and sorts by amount', () => {
         const bars = OwnerCoverage([
             row({ OwnerEmployee: 'Dana Reyes', Amount: 100 }),
-            row({ OwnerEmployee: null, Amount: 900 }),
+            row({ OwnerEmployee: null, OwnerEmployeeID: null, Amount: 900 }),
             row({ OwnerEmployee: 'Dana Reyes', Amount: 300 }),
         ]);
         expect(bars.map((b) => [b.Name, b.Amount])).toEqual([

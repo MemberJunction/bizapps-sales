@@ -88,6 +88,11 @@ export interface DealWorkspaceLookups {
     Accounts: DealLookup[];
     Contacts: DealLookup[];
     Employees: DealLookup[];
+    /**
+     * Every company, by name. The dashboard's Product company filter labels its choices from this:
+     * a product's company need not own a pipeline, so the pipeline list cannot name it.
+     */
+    Companies: DealLookup[];
 }
 
 export function EmptyLookups(): DealWorkspaceLookups {
@@ -101,6 +106,7 @@ export function EmptyLookups(): DealWorkspaceLookups {
         Accounts: [],
         Contacts: [],
         Employees: [],
+        Companies: [],
     };
 }
 

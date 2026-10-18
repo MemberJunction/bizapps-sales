@@ -10,6 +10,7 @@ import {
     initSectionTestEnvironment,
     mountSection as mount,
     stubService,
+    Summary,
     visiblePage,
     type StubService,
 } from './helpers/sales-section-mount';
@@ -17,8 +18,8 @@ import {
 /**
  * A WIN RATE THAT DID NOT RUN READ AS "0 won / 0 closed".
  *
- * A failed query and a period with nothing closed rendered the same text. The card now says
- * "figures unavailable" when the query did not run, as the tiles do.
+ * A failed query and a period with nothing closed rendered the same text. The Win rate tile now says
+ * "figures unavailable" when the query did not run, as the other tiles do.
  */
 
 let service: StubService;
@@ -27,6 +28,7 @@ beforeAll(initSectionTestEnvironment);
 
 beforeEach(() => {
     service = stubService();
+    service.LoadDashboardSummary.mockResolvedValue(Summary());
     vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue([]);
     configureSection(service);
 });
@@ -38,11 +40,11 @@ afterEach(() => {
 
 function winRateCard(fixture: ComponentFixture<MJSSalesSectionComponent>): string {
     fixture.detectChanges();
-    const card = visiblePage(fixture).querySelector('.winrate');
+    const card = visiblePage(fixture).querySelector('[data-testid="sales-kpi-closed"]')?.closest('.kpi');
     return card?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
-describe('the win rate card', () => {
+describe('the Win rate tile', () => {
     it('says the figures are unavailable when the query fails on load', async () => {
         service.LoadWinRate.mockResolvedValue(null);
         const fixture = await mount();

@@ -48,24 +48,9 @@
     color: var(--mj-text-primary);
 }
 
-/* ── Reporting-period selector ─────────────────────────────────────────────── */
+/* ── Pill tabs: the stage card's pipeline tabs ──────────────────────────────── */
 
-/*
-  Sits on the right of `.sechead`, which is already `justify-content: space-between`.
-  Pills mirror the board's `.db-pipe` so a reader meets one switcher idiom in this app, not two.
-  Colour is entirely semantic tokens, so the selected state is legible in dark mode unchanged.
-*/
-.period {
-    display: flex;
-    align-items: center;
-    gap: var(--mj-space-3);
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    /* `.sechead` aligns its children on the baseline, which is right for the `<h2>` and its caption
-       but would hang a two-part control off the text baseline of its first pill. */
-    align-self: center;
-}
-
+/* Pills mirror the board's `.db-pipe`, so a reader meets one switcher idiom in this app, not two. */
 .period__pills {
     display: flex;
     gap: var(--mj-space-1);
@@ -97,10 +82,91 @@
     font-weight: 600;
 }
 
-/* The fiscal basis in force. Muted, but never hidden — see the template comment. */
-.period__basis {
+/* ── Filter bar (bc-aidp-next-golive#350) ───────────────────────────────────── */
+.filterbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--mj-space-2);
+    margin-bottom: 1rem;
+}
+.filterbar__period {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--mj-space-2);
+}
+.filterbar__label {
+    font-size: 0.8125rem;
+    color: var(--mj-text-secondary);
+}
+.filterbar__select,
+.filterbar__date {
+    padding: var(--mj-space-1) var(--mj-space-2);
+    border: 1px solid var(--mj-border-default);
+    border-radius: var(--mj-radius-md);
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-primary);
+    font: inherit;
+    font-size: 0.8125rem;
+}
+.filterbar__window {
     font-size: 0.75rem;
-    color: var(--mj-text-muted);
+}
+.filterbar__range {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--mj-space-1);
+    font-size: 0.8125rem;
+}
+.filterbar__mine {
+    padding: var(--mj-space-1) var(--mj-space-3);
+    border: 1px solid var(--mj-border-default);
+    border-radius: var(--mj-radius-full);
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-secondary);
+    font: inherit;
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+.filterbar__chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.6rem;
+    border-radius: var(--mj-radius-full);
+    background: var(--mj-bg-surface-sunken);
+    color: var(--mj-text-secondary);
+    font-size: 0.75rem;
+}
+.filterbar__chip--active {
+    color: var(--mj-text-primary);
+    font-weight: 600;
+}
+.filterlist {
+    display: flex;
+    flex-direction: column;
+    gap: var(--mj-space-1);
+    max-height: 18rem;
+    overflow-y: auto;
+    min-width: 14rem;
+}
+.filterlist__item {
+    display: flex;
+    align-items: center;
+    gap: var(--mj-space-2);
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+/*
+ * ONE SELECTED STYLE for every figure that lists its deals: tiles, forecast segments, stage columns,
+ * attention rows, buckets and owner rows (bc-aidp-next-golive#350). A ring outside the element, so it
+ * shows on a coloured segment as well as on a card; `aria-pressed` carries the same state for a screen
+ * reader, so colour is never the only signal.
+ */
+.is-selected {
+    outline: 2px solid var(--mj-brand-primary);
+    outline-offset: 2px;
+    border-radius: 8px;
 }
 
 .msg {
@@ -383,7 +449,7 @@
   text-decoration: underline;
 }
 
-/* KPI tiles are buttons so a click can filter Inspect. */
+/* KPI tiles are buttons so a click can list their deals. */
 button.kpi {
     font: inherit;
     text-align: left;
@@ -391,14 +457,10 @@ button.kpi {
     cursor: pointer;
     color: inherit;
 }
-button.kpi.kpi--on {
-    outline: 2px solid var(--mj-brand-primary);
-    outline-offset: -1px;
-}
 
 .dash-split {
     display: grid;
-    grid-template-columns: 1.2fr 0.8fr;
+    grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
     margin-bottom: 1rem;
 }
@@ -407,7 +469,6 @@ button.kpi.kpi--on {
 .funnel-pad,
 .queues,
 .barlist,
-.winrate,
 .buckets {
     padding: 0.75rem 0.85rem;
 }
@@ -439,9 +500,18 @@ button.kpi.kpi--on {
     outline: 2px solid var(--mj-border-focus);
     outline-offset: -2px;
 }
-/* The segment Inspect is showing. An inset ring, so colour is not the only signal. */
-.stack__seg[aria-pressed='true'] {
-    box-shadow: inset 0 0 0 2px var(--mj-text-primary);
+/* A selected segment is ringed like every other selected figure; it sits above its neighbours. */
+.stack {
+    overflow: visible;
+}
+.stack__seg.is-selected {
+    position: relative;
+    z-index: 1;
+    border-radius: 2px;
+}
+.stack__undated {
+    margin-top: 0.5rem;
+    font-size: 0.78rem;
 }
 .stack__seg--closed { background: var(--mj-status-success); }
 .stack__seg--commit { background: var(--mj-brand-primary); }
@@ -488,6 +558,13 @@ button.kpi.kpi--on {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+    /* A button, so a column lists its deals; it keeps the chart's look. */
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
 }
 .funnel__plot {
     flex: 1;
@@ -561,7 +638,7 @@ button.kpi.kpi--on {
 
 .buckets {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 0.5rem;
 }
 .bucket {
@@ -574,8 +651,7 @@ button.kpi.kpi--on {
     padding: 0.65rem 0.75rem;
     cursor: pointer;
 }
-.bucket:hover, .bucket--on { border-color: var(--mj-brand-primary); }
-.bucket--warn .v { color: var(--mj-status-warning); }
+.bucket:hover { border-color: var(--mj-brand-primary); }
 .bucket .l {
     font-size: 0.68rem;
     font-weight: 700;
@@ -593,7 +669,18 @@ button.kpi.kpi--on {
     gap: 0.5rem;
     align-items: center;
     font-size: 0.8rem;
+    /* A button, so an owner's row lists their Commit deals. */
+    width: 100%;
+    padding: 0.2rem 0;
+    border: 0;
+    background: transparent;
+    font-family: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
 }
+.barrow .track { display: block; }
+.barrow .fill { display: block; }
 .barrow .track {
     height: 0.5rem;
     background: var(--mj-bg-surface-sunken);
@@ -604,12 +691,6 @@ button.kpi.kpi--on {
     height: 100%;
     background: var(--mj-brand-primary);
     border-radius: 99px;
-}
-
-.winrate {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.75rem;
 }
 
 .filter-bar {
@@ -648,5 +729,5 @@ button.kpi.kpi--on {
 }
 
 @media (max-width: 900px) {
-    .dash-split, .buckets, .winrate { grid-template-columns: 1fr; }
+    .dash-split, .buckets { grid-template-columns: 1fr; }
 }

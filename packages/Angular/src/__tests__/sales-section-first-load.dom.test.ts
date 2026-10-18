@@ -10,6 +10,7 @@ import {
     initSectionTestEnvironment,
     mountSection,
     stubService,
+    Summary,
     visiblePage,
     type StubService,
 } from './helpers/sales-section-mount';
@@ -44,18 +45,14 @@ vi.mock('../lib/pages/deal-views', async (importOriginal) => {
 /** A business day in the third calendar quarter; the fiscal year starts 1 January in the stub. */
 const TODAY = new Date('2026-08-15T15:00:00Z');
 
-const SUMMARY: DealDashboardSummary = {
+const SUMMARY: DealDashboardSummary = Summary({
     OpenAmount: 1000,
     OpenCount: 2,
-    OpenOmittedCount: 0,
     TotalCount: 9,
-    PastExpectedCloseCount: 0,
     WonCount: 4,
     WonAmount: 750,
-    OpenPricedAmount: 0,
     OpenStatedAmount: 1000,
-    OpenNoAmountCount: 0,
-};
+});
 
 /** The two entities the section looks up: Deals (for the grids) and Deal Status Types (for Won). */
 const ENTITIES = [
@@ -93,6 +90,7 @@ describe('the roster read', () => {
     it("asks only for closed deals from the current fiscal quarter's start", async () => {
         await mountSection();
 
+        // One read: with no filter set, the dashboard's grouped cards read the board's roster.
         expect(service.LoadRoster).toHaveBeenCalledTimes(1);
         expect(service.LoadRoster).toHaveBeenCalledWith('2026-07-01');
     });
@@ -105,6 +103,28 @@ describe('the roster read', () => {
         expect(service.LoadRoster).toHaveBeenCalledTimes(1);
         const scope = visiblePage(fixture).querySelector('[data-testid="sales-board-scope"]');
         expect(scope?.textContent?.trim()).toBe('Open deals, and deals closed from Jul 1, 2026');
+    });
+});
+
+describe('a filter bar choice (bc-aidp-next-golive#350)', () => {
+    it('reads the filtered deals, figures and win rate with the lists as parameters, and leaves the board alone', async () => {
+        const fixture = await mountSection();
+        fixture.componentInstance.ToggleFilter('CompanyIDs', 'C1');
+        await vi.waitFor(() => expect(service.LoadRoster).toHaveBeenCalledTimes(2));
+
+        const filters = { CompanyIDs: ['C1'], ProductCompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: [] };
+        expect(service.LoadRoster).toHaveBeenLastCalledWith(null, filters, true);
+        expect(service.LoadDashboardSummary).toHaveBeenLastCalledWith(expect.anything(), filters);
+        expect(service.LoadWinRate).toHaveBeenLastCalledWith(expect.anything(), filters);
+        // The board's own read is untouched: its first call is still the only unfiltered one.
+        expect(service.LoadRoster.mock.calls.filter((c) => c.length === 1)).toHaveLength(1);
+    });
+
+    it("puts the filter's lists in the deal list's criteria", async () => {
+        const fixture = await mountSection();
+        fixture.componentInstance.ToggleFilter('OwnerEmployeeIDs', 'E1');
+        fixture.componentInstance.SetInspect('won');
+        await vi.waitFor(() => expect(pipelineView.wheres.at(-1)).toContain("OwnerEmployeeID IN ('E1')"));
     });
 });
 

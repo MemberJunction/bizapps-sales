@@ -61,9 +61,9 @@ function getterLiterals(name: string): string[] {
 describe('the Sales dashboard names no columns', () => {
     it('finds the copy it is checking', () => {
         // Without this, a parser that matched nothing would pass every test below.
-        const copy = dashboardCopy();
-        expect(copy).toContain('Open deals with no owner on the deal team');
-        expect(getterLiterals('InspectLabel')).toContain('Open deals marked for commit');
+        expect(dashboardCopy()).toContain('Open deals by stage');
+        expect(getterLiterals('Attention')).toContain('Open deals with no owner on the deal team');
+        expect(getterLiterals('InspectLabel')).toContain('Closing in the next 30 days');
     });
 
     it('page text and tooltips are plain English', () => {
@@ -71,8 +71,8 @@ describe('the Sales dashboard names no columns', () => {
         expect(offenders).toEqual([]);
     });
 
-    it('the Inspect grid title is plain English for every filter', () => {
-        const offenders = getterLiterals('InspectLabel').filter((s) => fieldNamesIn(s).length > 0);
+    it('the deal list title and the Needs attention rows are plain English', () => {
+        const offenders = [...getterLiterals('InspectLabel'), ...getterLiterals('Attention')].filter((s) => fieldNamesIn(s).length > 0);
         expect(offenders).toEqual([]);
     });
 
@@ -84,11 +84,45 @@ describe('the Sales dashboard names no columns', () => {
     });
 });
 
-describe('the Commit queue says what it counts', () => {
-    it('does not promise a period it ignores', () => {
-        // `CommitCount` counts every open Commit deal; Commit is deliberately not tied to the period.
-        const copy = dashboardCopy();
-        expect(copy).toContain('Commit (open)');
-        expect(copy.filter((s) => /commit this period/i.test(s))).toEqual([]);
+/**
+ * THE COPY TABLE OF bc-aidp-next-golive#350, part 5. Each pair is (today, proposed); the old string
+ * must be gone from what a reader sees and the new one present.
+ */
+describe('the dashboard says it in the words the forecast is read in (bc-aidp-next-golive#350)', () => {
+    const shown = (): string => [...dashboardCopy(), ...getterLiterals('InspectLabel'), ...getterLiterals('Attention')].join('\n');
+
+    it.each([
+        ['Forecast stack', 'Forecast'],
+        ['Commit (open)', 'Commit deals'],
+        ['Commit by owner', 'Commit by deal owner'],
+        ['Best Case only', 'Best case'],
+        ['Remainder', 'Pipeline'],
+        ['Weighted open', 'Weighted pipeline'],
+        ['Needs a person', 'Needs attention'],
+        ['Close date slipped', 'Past close date'],
+        ['Close-date buckets', 'Expected to close'],
+        ['Stage mix', 'Open deals by stage'],
+        ['won amount ÷ closed amount', 'Share of closed deal value that was won'],
+        ['Inspect', 'Deals'],
+        ['Open deals closing soonest', 'Closing in the next 30 days'],
+    ])('"%s" reads "%s"', (before, after) => {
+        const text = shown() + '\n' + TS;
+        expect(shown()).not.toContain(before);
+        expect(text).toContain(after);
+    });
+
+    it('gives every forecast category a one-sentence tooltip', () => {
+        const titles = [...HTML.matchAll(/class="stack__seg[^"]*"[\s\S]*?title="([^"]*)"/g)].map((m) => m[1]);
+        expect(titles).toEqual([
+            'Won: deals won in the period, by the day they closed.',
+            'Commit: open deals in a Commit forecast category, expected to close in the period.',
+            'Best case: not counting deals already in Commit.',
+            'Pipeline: open deals not in Commit or Best case.',
+        ]);
+    });
+
+    it('moves the fiscal year line into the Period tooltip', () => {
+        expect(HTML).not.toContain('period__basis');
+        expect(HTML).toContain('[title]="PeriodTooltip"');
     });
 });

@@ -12,6 +12,7 @@ import {
     configureSection,
     initSectionTestEnvironment,
     stubService,
+    Summary,
     visiblePage,
     type StubService,
 } from './helpers/sales-section-mount';
@@ -33,18 +34,12 @@ vi.mock('../lib/pages/deal-views', async (importOriginal) => {
     };
 });
 
-const SUMMARY: DealDashboardSummary = {
+const SUMMARY: DealDashboardSummary = Summary({
     OpenAmount: 1000,
     OpenCount: 2,
-    OpenOmittedCount: 0,
     TotalCount: 2,
-    PastExpectedCloseCount: 0,
-    WonCount: 0,
-    WonAmount: 0,
-    OpenPricedAmount: 0,
     OpenStatedAmount: 1000,
-    OpenNoAmountCount: 0,
-};
+});
 
 const ENTITIES = [
     { ID: 'deal-entity', Name: 'MJ_BizApps_Sales: Deals', SchemaName: '__mj_BizAppsSales', BaseTable: 'Deal', BaseView: 'vwDeals' },
@@ -99,7 +94,7 @@ describe('while the lookups, win rate and view are still out', () => {
 
         const dashboard = visiblePage(fixture);
         expect(dashboard.querySelector('.kpis')?.textContent).toContain('Open pipeline');
-        expect(dashboard.querySelector('[data-testid="sales-winrate-count"]')?.textContent?.trim()).toBe('…');
+        expect(dashboard.querySelector('[data-testid="sales-kpi-closed"]')?.textContent?.trim()).toBe('…');
         expect(dashboard.querySelector('.mjs-viewer-host mj-loading'), 'inspect grid').not.toBeNull();
         expect(showPage(fixture, 'list').querySelector('mj-loading'), 'All Deals').not.toBeNull();
         expect(showPage(fixture, 'board').querySelector('mj-loading'), 'board').not.toBeNull();
@@ -108,7 +103,7 @@ describe('while the lookups, win rate and view are still out', () => {
         await vi.waitFor(() => expect(fixture.componentInstance.DetailLoading).toBe(false));
         expect(showPage(fixture, 'board').querySelector('mj-loading')).toBeNull();
         const settled = showPage(fixture, 'dashboard');
-        expect(settled.querySelector('[data-testid="sales-winrate-count"]')?.textContent?.trim()).not.toBe('…');
+        expect(settled.querySelector('[data-testid="sales-kpi-closed"]')?.textContent?.trim()).not.toBe('…');
         expect(settled.querySelector('.mjs-viewer-host mj-loading')).toBeNull();
     });
 
