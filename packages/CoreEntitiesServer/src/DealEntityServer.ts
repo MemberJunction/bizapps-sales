@@ -72,6 +72,7 @@ import {
 } from '@mj-biz-apps/sales-entities';
 
 import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
+import { FindUnansweredSubscriptionLines } from './subscription-choice.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 
@@ -1917,6 +1918,48 @@ export class DealEntityServer extends DealEntity {
      * A new deal's order has not been written yet, so there is nothing to transition and nothing to
      * roll back: setting `Status` means it is INSERTED in that state by the graph a moment later.
      */
+    /**
+     * A stage that books the order asks the question Close Won asks (#426).
+     *
+     * Confirm turns a subscription line whose customer already holds the product into the next term
+     * of that subscription unless the line says otherwise, and Close Won refuses a deal with such a
+     * line unanswered (`subscription-choice.ts`). A stage whose `OrderStatusOnEntry` books the order
+     * reached the same confirm without that check, so it extended subscriptions nobody was asked
+     * about. Same rule, same lines: orders' `FindUnansweredHeldLines`.
+     *
+     * The order is held back with a warning rather than the save refused, as for any other order-side
+     * reason (D-OS1). Close Won has already refused or answered these lines by the time it gets here,
+     * so on a close this finds none. A read that fails holds the confirm too: an unanswered line cannot
+     * be ruled out, and confirming would decide it.
+     *
+     * @returns true when the confirm was held back and a warning recorded.
+     */
+    private async holdsConfirmForUnansweredLines(from: string): Promise<boolean> {
+        let labels: string[];
+        try {
+            const user = this.ContextCurrentUser;
+            if (!user) throw new Error('no user to read the lines as');
+            const view = this.ProviderToUse as unknown as IRunViewProvider;
+            const unanswered = await FindUnansweredSubscriptionLines(this, view, user);
+            labels = unanswered.map(({ Line }) => `${Line.LineNumber} (${Line.Product?.trim() || 'this product'})`);
+        } catch (err) {
+            this._orderStatusWarnings.push(
+                `The deal moved stage, but its order stayed ${from}: whether any line extends a subscription the ` +
+                `customer already holds could not be read (${err instanceof Error ? err.message : String(err)}). ` +
+                'The stage change was kept.',
+            );
+            return true;
+        }
+        if (labels.length === 0) return false;
+        this._orderStatusWarnings.push(
+            `The deal moved stage, but its order stayed ${from}: ${labels.length === 1 ? 'line' : 'lines'} ` +
+            `${labels.join(', ')} ${labels.length === 1 ? 'is' : 'are'} for a product the customer already holds. ` +
+            'Open each one and choose whether it is the next term of that subscription or a new subscription, ' +
+            'then confirm the order. The stage change was kept.',
+        );
+        return true;
+    }
+
     private async applyStageOrderStatus(plan: StageOrderPlan): Promise<void> {
         const order = this.OrderID_Object;
         if (!order) {
@@ -1946,6 +1989,9 @@ export class DealEntityServer extends DealEntity {
                 `${order.ID} (currently '${from}') and orders refused it: ${verdict.Reason ?? 'no reason given'}. ` +
                 'The deal\'s stage change proceeds (D-OS1).',
             );
+            return;
+        }
+        if (IsBooked(plan.Target) && (await this.holdsConfirmForUnansweredLines(from))) {
             return;
         }
 
