@@ -12,9 +12,11 @@
  * THE PARSER IS THE ONE MJ USES, resolved through `@memberjunction/core-entities-server`'s own
  * dependencies rather than a copy this repo declares, so the version measured is the version that runs.
  *
- * SCOPED TO THE FILES #154 TOUCHED. `bookings-by-period.sql` already fails the same way on `next`
- * (zero select columns) for an unrelated reason; it is reported, not fixed, here. The three period
- * filters #289 moved onto fnBusinessDayOf() are listed too, with the same counts they parsed to before.
+ * SCOPED TO THE FILES #154 TOUCHED. The three period filters #289 moved onto fnBusinessDayOf() are
+ * listed too, with the same counts they parsed to before. `bookings-by-period.sql` failed the same way
+ * (zero select columns, tables named after words in its comments) because its granularity branch was
+ * repeated in the GROUP BY, which reads as three expressions with no commas once the parser keeps every
+ * branch (#417). The branch now sits once, in a CTE.
  */
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -62,6 +64,7 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
         tables: ['vwDealTeamMembers', 'DealRole', 'vwDeals', 'DealStatusType', 'vwPeople', 'Employee'],
         columns: 16,
     },
+    'bookings-by-period.sql': { tables: ['vwDeals', 'DealStatusType', 'closed'], columns: 11 },
 };
 
 describe("MJ's SQL parser reads the business-day queries in full", () => {
