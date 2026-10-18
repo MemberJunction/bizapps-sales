@@ -211,6 +211,9 @@ interface RemoteOperationRouter {
                                 <option [ngValue]="p.ID">{{ ProductOptionLabel(p) }}</option>
                             }
                         </select>
+                        @if (ProductLoadError) {
+                            <span class="mjs-le__error" data-testid="line-product-error">{{ ProductLoadError }}</span>
+                        }
                     </label>
 
                     <div class="mjs-le__row">
@@ -598,6 +601,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     private readonly cdr = inject(ChangeDetectorRef);
 
     public Products: ProductLookup[] = [];
+    /** Set when orders' catalogue could not be read; shown under the product select. */
+    public ProductLoadError: string | null = null;
     /** Each product's catalog price, for the picker label — read from orders, keyed by product id. */
     private readonly productPriceLabels = new Map<string, string>();
     /** The signed-in rep's price-override grant; `'none'` hides the price picker. */
@@ -638,7 +643,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             const persisted = this.Deal?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
             this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
 
-            this.Products = await this.service.LoadProducts();
+            await this.loadProducts();
             await this.loadProductPriceLabels();
             this.OverrideKind = this.resolveOverrideKind();
 
@@ -729,6 +734,24 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         } finally {
             this.Loading = false;
             this.cdr.detectChanges();
+        }
+    }
+
+    /**
+     * Orders' catalogue, or a message saying it could not be read. A failed read leaves the picker
+     * empty but says why, so a rep can tell "nothing to sell" from "the load failed" (#380); the rest of
+     * the dialog still opens, since a saved line can be edited without choosing a new product.
+     */
+    private async loadProducts(): Promise<void> {
+        this.ProductLoadError = null;
+        try {
+            this.Products = await this.service.LoadProducts();
+        } catch (err) {
+            this.Products = [];
+            const reason = err instanceof Error ? err.message : String(err);
+            this.ProductLoadError =
+                `${reason.replace(/\.?\s*$/, '.')} Reload the page and try again; if it persists, an administrator needs to check ` +
+                `access to Orders' products.`;
         }
     }
 

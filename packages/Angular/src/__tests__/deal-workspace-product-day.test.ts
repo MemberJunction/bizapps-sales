@@ -109,3 +109,23 @@ describe('LoadProducts judges availability on the business day', () => {
         expect(config).toHaveBeenCalled();
     });
 });
+
+/**
+ * #380: a failed catalogue read returned an empty list with nothing logged, so the picker looked like a
+ * catalogue with nothing in it. It now throws with orders' reason, for the line editor to show.
+ */
+describe('LoadProducts on a failed read', () => {
+    it("throws with the read's own reason instead of returning an empty list", async () => {
+        vi.spyOn(RunView.prototype, 'RunView').mockResolvedValue(
+            { Success: false, ErrorMessage: 'permission denied on Products', Results: [] } as never,
+        );
+        await expect(new DealWorkspaceService().LoadProducts()).rejects.toThrow(
+            'The product catalogue could not be loaded: permission denied on Products',
+        );
+    });
+
+    it('still returns an empty list when the catalogue really is empty', async () => {
+        captureFilter();
+        await expect(new DealWorkspaceService().LoadProducts()).resolves.toEqual([]);
+    });
+});
