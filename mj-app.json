@@ -27,7 +27,7 @@
       "repository": "https://github.com/MemberJunction/bizapps-accounting"
     },
     "mj-bizapps-orders": {
-      "version": ">=5.30.0 <6.0.0",
+      "version": ">=5.36.0 <6.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-orders"
     },
     "mj-bizapps-contracts": {
