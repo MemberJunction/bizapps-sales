@@ -66,7 +66,8 @@ const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
  * refusal and the workspace's Add hint word for word, so a rep meets one voice across three screens.
  */
 export function DealLockRefusal(kind: OrderLineEditKind): string {
-    return `This deal is closed. Set the status back to Open before ${lockedAction(kind)}.`;
+    const action = lockedAction(kind);
+    return `This deal is closed. Set the status back to Open before ${action}.`;
 }
 
 /**
