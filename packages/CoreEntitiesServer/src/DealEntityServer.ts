@@ -687,9 +687,18 @@ export class DealEntityServer extends DealEntity {
          * tests, which genuinely require the object, stay behind it — and the state tests, which only
          * need the deal's own columns, ask the FK instead.
          */
-        const amountMayHaveMoved =
+        /**
+         * ── AND NEVER ON A LOCKED DEAL (#351) ───────────────────────────────────────────────────────
+         *
+         * `refreshAmountFromOrder` writes `Amount` with raw SQL, past the entity and so past the close
+         * lock. A closed deal's amount is what was agreed at close, so a permitted edit (Description,
+         * NextStep) must not re-copy an order total that moved since. Gated on `_lockedAtSave` like the
+         * stage writers below; the close and the reopen both save while the persisted status is open,
+         * so they still refresh.
+         */
+        const amountMayHaveMoved = !this._lockedAtSave && (
             (!!order && (order.Dirty || order.Lines.Dirty))
-            || (!!this.OrderID && (this.AmountIsComputed === true || this.Amount === null));
+            || (!!this.OrderID && (this.AmountIsComputed === true || this.Amount === null)));
 
         // The stage's forecast defaults, on the same trigger as the three above. Read here, applied
         // inside the scope, for the same reason the others are: work that might not be needed should not
