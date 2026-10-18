@@ -671,7 +671,12 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                         DealName: deal.Name?.trim() || deal.DealNumber || deal.ID,
                         // Read AFTER the save: provisioning happens inside it. See the note above.
                         OrderID: String(deal.OrderID ?? ''),
-                        PipelineID: deal.PipelineID,
+                        /**
+                         * The EFFECTIVE policy's answer, overrides applied, which is the same one
+                         * `planRouting` used to decide the contract (#354). The service used to re-read
+                         * the pipeline's raw policy, so an override split the task from the contract.
+                         */
+                        CreateContract: policy.CreateContract === true,
                         // Set by the routing loop above. Omitting it is what made the contract task link
                         // the deal, and made the service's own fallback message unreachable.
                         ContractID: deal.ContractID ?? undefined,
