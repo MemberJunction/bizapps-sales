@@ -12,7 +12,7 @@
  * THE PARSER IS THE ONE MJ USES, resolved through `@memberjunction/core-entities-server`'s own
  * dependencies rather than a copy this repo declares, so the version measured is the version that runs.
  *
- * SCOPED TO THE FILES #154 TOUCHED, plus the three the dashboard's filter bar changed
+ * SCOPED TO THE BUSINESS-DAY QUERIES (bc-aidp-next-golive#168), plus the three the dashboard's filter bar changed
  * (bc-aidp-next-golive#350): a Nunjucks `{% else %}` in a select list, or STRING_AGG's WITHIN GROUP,
  * each made the full parse of those fall back to the regex reader with zero columns, and these pins are
  * what found it. The three period filters #289 moved onto fnBusinessDayOf() are listed too, with the
