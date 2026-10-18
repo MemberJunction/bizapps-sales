@@ -729,6 +729,16 @@ returns whichever copy was created first. The runner prints `MJ core instances -
 copies. A copy left over means a package's declared range does not accept the version the sibling builds:
 check that sibling out at a version inside the range. It needs Node 22.15 or 23.5+ (`module.registerHooks`).
 
+The runner and the scripts are held to the range sales' packages declare, not to the repo root's (which
+declares none), so a sibling build older than that range is set aside for sales' own copy and listed as a
+warning (sales#372).
+
+**Several checkouts of one sibling repo beside this one** (a folder of worktrees): set
+`BIZAPPS_<APP>_REPO` (`BIZAPPS_COMMON_REPO`, `BIZAPPS_TASKS_REPO`, …, the variables `scripts/rebuild-db.sh`
+reads; a path relative to this checkout or absolute) to the checkout each run tests. Without it, a package
+more than one checkout carries is taken from none of them, and the runner stops before any check, naming
+the checkouts and the variable (sales#456). Other checkouts of bizapps-sales are never loaded as siblings.
+
 The packages `pnpm-workspace.yaml` overrides (`common-entities`, `common-ng`, `common-activity-sync`) are the
 exception, as they are in sales' own install: every importer is held to the override's range, so it gets
 the common checkout's build even when its own range asks for something else. The runner lists each range
