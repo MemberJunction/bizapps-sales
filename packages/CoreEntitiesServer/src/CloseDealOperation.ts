@@ -783,7 +783,16 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         let lossReasonName: string | null = null;
 
         if (target.IsLost) {
-            const lossReasonID = input.LossReasonID ?? deal.LossReasonID;
+            /**
+             * THE CALLER'S REASON, NEVER THE ONE THE ROW HAPPENS TO CARRY (#400).
+             *
+             * `LossReasonID` and `LossNotes` are ordinary fields on an OPEN deal, so a reason typed
+             * weeks ago, or left from an earlier close, used to satisfy this check for a caller who
+             * chose nothing. The close runs only from an open status (a locked one is refused above),
+             * so the row's values never describe THIS loss. A caller that means the stored values
+             * passes them, as the status-field trigger in `DealEntityServer` does.
+             */
+            const lossReasonID = input.LossReasonID ?? null;
             if (!lossReasonID) {
                 issues.push(issue('deal', 'A loss reason is required to close a deal as lost.', 'LossReasonID'));
             } else {
@@ -794,8 +803,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  * method already fetches is what keeps `stampClose` from needing a lookup of its own.
                  *
                  * It is read HERE rather than from `deal.LossReason` because the id being closed with is
-                 * `input.LossReasonID ?? deal.LossReasonID`: when the caller supplies one, the
-                 * denormalized name still describes the reason the deal used to carry, not this one.
+                 * the caller's: the denormalized name describes whatever reason the deal used to carry,
+                 * not this one.
                  */
                 const view = provider as unknown as IRunViewProvider;
                 const r = await view.RunView(
@@ -808,7 +817,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     user,
                 );
                 const row = (r.Results ?? [])[0] as { RequiresNotes?: boolean; Name?: string } | undefined;
-                const notes = input.LossNotes ?? deal.LossNotes;
+                const notes = input.LossNotes ?? null;
                 if (r.Success && row?.RequiresNotes === true && !notes?.trim()) {
                     issues.push(issue('deal', 'This loss reason requires notes explaining the loss.', 'LossNotes'));
                 }
@@ -1655,7 +1664,7 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              *
              * It stayed set on a REOPENED deal, which is wrong twice over. The form shows "LOSS REASON"
              * on a deal that is Open -- a deal that has not been lost does not have a reason for being
-             * lost. And `validateClose` reads `input.LossReasonID ?? deal.LossReasonID`, so the stale
+             * lost. And `validateClose` then read `input.LossReasonID ?? deal.LossReasonID`, so the stale
              * value SATISFIED the next close: measured on this host, a deal closed Lost with a reason,
              * reopened, then closed Lost again supplying NO reason succeeded silently and re-used
              * `Price`. golive#205 asks that "Lost should require a loss reason" and `close-deal.CD8`
@@ -1682,12 +1691,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * this would then null it -- leaving the text only in an event the rep never sees. Two
              * correct changes combining into the silent loss both were written against.
              *
-             * The bypass argument does not rescue it either. `validate()` reads
-             * `input.LossNotes ?? deal.LossNotes`, so a stale note can satisfy a `RequiresNotes`
-             * reason -- but that is the SAME `??` fallback as the reason's, and clearing on reopen
-             * closes one route into a fallback rather than the fallback. It is ticketed separately and
-             * fixes both halves; clearing here would cost a rep their text and buy a partial fix of
-             * something already scheduled.
+             * The bypass argument does not rescue it either. `validate()` reads the caller's
+             * `LossNotes` only (#400), so a stale note on the row cannot satisfy a `RequiresNotes`
+             * reason; clearing here would cost a rep their text and buy nothing.
              *
              * The reason earned its clearing on evidence -- a measured, silent validation bypass on a
              * field a rep cannot correct by hand because it is frozen. Free text they can overwrite is
