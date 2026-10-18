@@ -52,7 +52,7 @@ describe('ResolveDealLockState on a status row that is absent', () => {
         const lock = await ResolveDealLockState('aaaaaaaa-0000-4000-8000-00000000dead');
 
         expect(lock.Notice).toContain('could not be found');
-        expect(lock.Notice).toContain('Deal Status');
+        expect(lock.Notice).toContain('Only Status,');
         expect(lock.Notice).toContain('set the status to an open one');
     });
 

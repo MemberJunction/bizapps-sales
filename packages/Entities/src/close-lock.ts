@@ -136,7 +136,12 @@ const DEAL_FIELD_LABELS: Readonly<Record<string, string>> = {
     LeadSourceTypeID: 'Lead Source',
     CampaignID: 'Campaign',
     LossNotes: 'Loss Notes',
-    DealStatusTypeID: 'Deal Status',
+    // The two below match the relabels in metadata/entity-fields/.deal-field-labels.json, which set
+    // them on the virtual name fields (DealStatusType, ForecastCategoryType) the form reads. A test
+    // pins every override to that file, so a relabel there cannot leave a notice naming a field the
+    // form no longer shows (#387).
+    DealStatusTypeID: 'Status',
+    ForecastCategoryTypeID: 'Forecast Category',
     // The close stamps, named in the refusal a direct write gets (#252).
     ClosedByUserID: 'Closed By',
 };
@@ -181,7 +186,7 @@ export function DealFieldLabel(fieldName: string): string {
  * and `Sales.ReopenDeal`, which the form's status control routes to. So the field IS editable to a
  * person and IS NOT writable by a raw save, and one set cannot say both.
  *
- * The notice describes what a PERSON can do, so it is the one that carries Deal Status.
+ * The notice describes what a PERSON can do, so it is the one that carries the status.
  *
  * It takes `isLost` because the set it wraps does: golive#206 keeps Loss Notes editable on a lost
  * deal and frozen on a won one, so the notice must name it on one and not the other.
