@@ -932,6 +932,17 @@ const FIELD_STYLES = `
     .mjs-field select:disabled, .mjs-reopen__field select:disabled {
         opacity: 0.7; cursor: not-allowed;
     }
+    /* A required field left empty (#416). The Pipeline control carries MJ's required-empty modifier,
+       but MJ styles that modifier only on its own input classes, so on this native select it drew
+       nothing and the rep learned the field was required when the save failed. Same colour and focus
+       tint as the shared control's rule. */
+    .mjs-field .mj-forms-field--required-empty select {
+        border-bottom-color: var(--mj-status-error);
+    }
+    .mjs-field .mj-forms-field--required-empty select:focus {
+        border-bottom-color: var(--mj-status-error);
+        background: color-mix(in srgb, var(--mj-status-error) 5%, var(--mj-bg-surface));
+    }
     /* A money field the panel drew itself. It carries .mj-forms-field-value too, so the size, colour
        and row height are the shared control's rather than a second opinion about them; this adds only
        what money specifically wants -- figures of equal width, so a column of amounts lines up. */
