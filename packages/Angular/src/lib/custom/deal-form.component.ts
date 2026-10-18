@@ -71,6 +71,13 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     public IsWon = false;
 
+    /**
+     * The persisted status row no longer exists (#402). The deal is locked, but its status may be set
+     * to an open one, which is how the server lets the orphan be repaired; the Status control and
+     * `Validate()` read this so the form offers that one write and nothing else.
+     */
+    public IsStatusMissing = false;
+
     public override async ngOnInit(): Promise<void> {
         await super.ngOnInit();
         await this.resolveDealState();
@@ -123,6 +130,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;
+        this.IsStatusMissing = lock.IsStatusMissing;
     }
 
     /**
@@ -231,7 +239,9 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         }
 
         const editable = DealFieldsEditableWhileLocked(this.IsLost);
-        const frozen = this.record.Fields.filter((f) => f.Dirty && !editable.has(f.Name));
+        // The status repair the server allows on a deal whose status row is gone (#402).
+        const statusRepair = (name: string): boolean => this.IsStatusMissing && name === 'DealStatusTypeID';
+        const frozen = this.record.Fields.filter((f) => f.Dirty && !editable.has(f.Name) && !statusRepair(f.Name));
         if (frozen.length === 0) {
             return result;
         }

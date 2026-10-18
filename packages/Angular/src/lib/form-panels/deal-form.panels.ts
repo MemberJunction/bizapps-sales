@@ -1714,7 +1714,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
 
                                  A CLOSING STATUS, never a list of names: a deployment can rename Won,
                                  and this one already has TWO losing statuses. -->
-                            @if (CurrentStatusIsClosing && !PendingReopenStatusID) {
+                            @if (StatusIsMissing) {
+                                <small class="mjs-field__hint">Missing. This deal's status no longer exists. Pick an open status and save to repair it.</small>
+                            } @else if (CurrentStatusIsClosing && !PendingReopenStatusID) {
                                 <small class="mjs-field__hint">Closed. Pick an open status to reopen it, or use Reopen on the Close panel.</small>
                             } @else if (!CurrentStatusIsClosing) {
                                 <small class="mjs-field__hint">Open. Pick a closing status to close the deal, or use Close on the Close panel.</small>
@@ -1976,7 +1978,9 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public get SelectableStatuses(): DealStatusOption[] {
         // A CLOSED deal may only move to a non-locking status, and that move is a reopen. Offering it
         // another closing status would be neither a close nor a reopen, and the server has no path for it.
-        if (this.CurrentStatusIsClosing) {
+        // A deal whose status row is gone may only move to an open one too: the server refuses a close
+        // from a status it cannot read (#402).
+        if (this.CurrentStatusIsClosing || this.StatusIsMissing) {
             return this.statuses().filter((s) => !s.LocksDeal);
         }
         return this.statuses();
@@ -2012,8 +2016,22 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public get StatusIsEditable(): boolean {
         if (this.Busy) return false;                               // one in flight
         if (this.statuses().length === 0) return false;                 // list never resolved
+        if (this.StatusIsMissing) return true;                          // the repair, see below
         if (this.Record?.IsSaved && !this.currentStatus) return false;  // status not in the active list
         return true;
+    }
+
+    /**
+     * The deal's status row no longer exists, as the form's lock resolver reports it (#402).
+     *
+     * The deal is locked and the notice says to set the status to an open one. The server allows
+     * exactly that write (`DealEntityServer.checkCloseLock`'s status repair), so the control is
+     * offered with the open statuses only. Not to be confused with a status the list merely does not
+     * contain -- a DEACTIVATED row still exists, says whether it locks, and stays read-only here.
+     */
+    public get StatusIsMissing(): boolean {
+        const form = this.FormComponent as unknown as { IsStatusMissing?: boolean } | undefined;
+        return this.Record?.IsSaved === true && form?.IsStatusMissing === true;
     }
 
     public SetStatus(id: string | null): void {

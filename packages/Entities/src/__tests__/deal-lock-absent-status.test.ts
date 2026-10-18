@@ -37,6 +37,17 @@ describe('ResolveDealLockState on a status row that is absent', () => {
         expect(lock.IsWon).toBe(false);
     });
 
+    it('marks the status as missing, so a surface can offer the repair the notice names (#402)', async () => {
+        expect((await ResolveDealLockState('aaaaaaaa-0000-4000-8000-00000000dead')).IsStatusMissing).toBe(true);
+    });
+
+    it('does not mark a status row that exists as missing, locked or not', async () => {
+        results = { Success: true, Results: [{ LocksDeal: true, Name: 'Won', IsLost: false, IsWon: true }] };
+        expect((await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000002')).IsStatusMissing).toBe(false);
+        results = { Success: true, Results: [{ LocksDeal: false, Name: 'Open', IsLost: false, IsWon: false }] };
+        expect((await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000001')).IsStatusMissing).toBe(false);
+    });
+
     it('says why, and names the way out', async () => {
         const lock = await ResolveDealLockState('aaaaaaaa-0000-4000-8000-00000000dead');
 
