@@ -110,6 +110,7 @@ import {
     EffectiveTermStart,
     HasExplicitTermStart as StoresOwnTermStart,
     PricedLineListAmount,
+    IsSubscriptionProduct,
     ResolveDealLockState,
     RoundDiscountPercent,
     RecordDiscountConcession,
@@ -792,7 +793,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     public OnProductChange(productID: string | null): void {
         this.SchedulePrice();   // a priced input changed — ask Orders again
         if (!this.Working) return;
-        this.clearServicePeriodLeavingLineSource(productID);
+        this.clearServicePeriodForProductChange(productID);
         this.Working.ProductID = productID ?? '';
         const product = this.Products.find((p) => p.ID === productID) ?? null;
         if (product) {
@@ -1023,14 +1024,29 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     }
 
     /**
-     * A window typed for a product that needed one says nothing about the product replacing it. Left
-     * on an event line it stops orders stamping the event's dates (`applyEventServicePeriod` skips a
-     * line that already has either date), and left on a subscription line it reads as a term start.
+     * Dates stated for the product being left say nothing about the one replacing it, so both columns
+     * are cleared unless the new product can use them. Left on an event line they stop orders stamping
+     * the event's dates (`applyEventServicePeriod` skips a line that already has either date), and the
+     * confirm then fails for want of a service period.
+     *
+     * Two cases clear:
+     * · Leaving a product the rep dates (`Line` source) for one that is not: the window would read as
+     *   a term start on a subscription, or block an event's dates.
+     * · Moving to a product in the catalogue that is not a subscription (#374): a term start cannot
+     *   carry over. Leaving a subscription reports `Subscription`, not `Line`, so the first case never
+     *   caught it. Both dates go, because orders' guard is `Start || End`.
+     *
+     * A window moving between two dated products is kept, and nothing is cleared for a product the
+     * catalogue does not list, since whether it is a subscription is unknown.
      */
-    private clearServicePeriodLeavingLineSource(nextProductID: string | null): void {
+    private clearServicePeriodForProductChange(nextProductID: string | null): void {
         if (!this.Working) return;
-        const was = this.ServicePeriodSourceFor(this.Working.ProductID);
-        if (was !== 'Line' || this.ServicePeriodSourceFor(nextProductID) === 'Line') return;
+        const leavingDated = this.ServicePeriodSourceFor(this.Working.ProductID) === 'Line';
+        const enteringDated = this.ServicePeriodSourceFor(nextProductID) === 'Line';
+        if (leavingDated && enteringDated) return;
+        const next = this.Products.find((p) => p.ID === nextProductID) ?? null;
+        const enteringNonSubscription = !!next && !IsSubscriptionProduct(next);
+        if (!leavingDated && !enteringNonSubscription) return;
         this.Working.ServicePeriodStart = null;
         this.Working.ServicePeriodEnd = null;
     }
