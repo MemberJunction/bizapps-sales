@@ -56,7 +56,7 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
         tables: ['vwDeals', 'DealStatusType', 'Pipeline', 'PipelineStage', 'ForecastCategoryType'],
         columns: 39,
     },
-    'slippage.sql': { tables: ['RecordChange', 'Entity', 'slips', 'vwDeals', 'DealStatusType'], columns: 17 },
+    'slippage.sql': { tables: ['RecordChange', 'Entity', 'slips', 'moves', 'vwDeals', 'DealStatusType'], columns: 17 },
     'stage-conversion-and-dwell.sql': { tables: ['DealStageEvent', 'Deal', 'Pipeline', 'PipelineStage'], columns: 16 },
     'forecast-history.sql': { tables: ['ForecastSnapshot', 'Company', 'Pipeline', 'Employee'], columns: 15 },
     // #438: the list of owner rows held by a Person, new and not a business-day query, held to the same bar.
