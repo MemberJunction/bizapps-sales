@@ -1,9 +1,9 @@
 /**
- * @fileoverview Deal form — the close lock, and whether the cached amount can still be trusted.
+ * @fileoverview Deal form — the close lock.
  *
- * This class adds the two things a *form* is the right place for: refusing an edit the server will
- * refuse, and saying out loud when a number on screen is stale. Lines, products and the roster are
- * edited by the panels contributed onto this form (`form-panels/`).
+ * This class adds the one thing a *form* is the right place for: refusing an edit the server will
+ * refuse. Lines, products and the roster are edited by the panels contributed onto this form
+ * (`form-panels/`).
  *
  * ── THE CLOSE LOCK ──────────────────────────────────────────────────────────────────────────────
  *
@@ -18,30 +18,19 @@
  * The lock is keyed on the PERSISTED status, matching the server: a deal being closed right now still has
  * an open status in the database, and reading the in-memory value would make a deal impossible to close.
  *
- * ── THE STALE AMOUNT ────────────────────────────────────────────────────────────────────────────
+ * ── THE NOTICES ARE THE HEADER'S, NOT THIS CLASS'S ──────────────────────────────────────────────
  *
- * `Deal.Amount` is a CACHED ANSWER from Orders, stamped with `AmountIsComputed` / `AmountComputedAt` /
- * `AmountSourceHash`. Sales never recomputes it — this form does not add, multiply or round anything. It
- * only COMPARES the cached figure with the order's current total: if they differ, the number on screen
- * no longer describes the order it claims to, and the form says so.
- *
- * That comparison is not pricing. It is the difference between showing a number and vouching for one.
- *
- * It compares the NUMBER, not a timestamp, and `amount-freshness.ts` records why: the timestamp test
- * asked whether a line had been touched, and closing a deal touches every line without moving a price —
- * so every Won deal warned forever about an amount it was simultaneously forbidden to change
- * (golive#230).
+ * The lock notice and the stale-amount notice are worked out and shown by the deal header
+ * (`deal-hero.panel.ts`). This class used to work out both as well, and its template showed neither,
+ * so every open and every save of a deal with an order ran a second order-total read for nothing
+ * (#386).
  *
  * @module @mj-biz-apps/sales-ng
  */
 import { Component } from '@angular/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
-import {
-    DealFieldsEditableWhileLocked,
-    ResolveDealAmountFreshness,
-    ResolveDealLockState,
-} from '@mj-biz-apps/sales-entities';
+import { DealFieldsEditableWhileLocked, ResolveDealLockState } from '@mj-biz-apps/sales-entities';
 import type { ValidationResult } from '@memberjunction/core';
 import { RunView } from '@memberjunction/core';
 
@@ -78,12 +67,6 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     public IsWon = false;
 
-    /** Shown when locked, so the greyed-out-ness the form cannot render is at least explained. */
-    public LockNotice: string | null = null;
-
-    /** Set when `Deal.Amount` no longer matches its order's total. Null when trustworthy, absent or locked. */
-    public StaleAmountNotice: string | null = null;
-
     public override async ngOnInit(): Promise<void> {
         await super.ngOnInit();
         await this.resolveDealState();
@@ -113,10 +96,9 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         this.RecordRefreshed.subscribe(() => { void this.resolveDealState(); });
     }
 
-    /** The lock and the amount warning, resolved together — they are read together. */
+    /** The lock, then a repaint: the panels read `IsLocked`, `IsLost` and `IsWon` off this instance. */
     private async resolveDealState(): Promise<void> {
         await this.resolveCloseLock();
-        await this.resolveAmountFreshness();
         this.cdr?.detectChanges();
     }
 
@@ -137,32 +119,6 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;
-        this.LockNotice = lock.Notice;
-    }
-
-    /**
-     * Compares the cached amount against the order it claims to describe. No arithmetic.
-     *
-     * The rule lives in `ResolveDealAmountFreshness` so this form and the deal hero cannot answer it
-     * differently — the same reason `ResolveDealLockState` is shared. Read that file's header for why
-     * this is no longer a timestamp comparison (golive#230).
-     *
-     * ORDER MATTERS: `resolveCloseLock()` runs first in `ngOnInit`, so `IsLocked` is settled before it
-     * is passed here. A locked deal never warns.
-     */
-    private async resolveAmountFreshness(): Promise<void> {
-        this.StaleAmountNotice = null;
-        if (!this.record?.Get?.('ID')) {
-            return;
-        }
-
-        const freshness = await ResolveDealAmountFreshness({
-            IsLocked: this.IsLocked,
-            AmountIsComputed: this.record.Get('AmountIsComputed') as boolean | null | undefined,
-            Amount: this.record.Get('Amount') as number | string | null | undefined,
-            OrderID: this.record.Get('OrderID') as string | null | undefined,
-        });
-        this.StaleAmountNotice = freshness.Notice;
     }
 
     /**
