@@ -508,7 +508,7 @@ export class DealEntityServer extends DealEntity {
          * Runs BEFORE any transaction opens: a refused save should cost nothing.
          */
         if (this.IsSaved && !this._reopenInProgress) {
-            const refusal = await this.checkCloseLock();
+            const refusal = await this.checkCloseLock(transition?.Kind === 'Reopen');
             if (refusal) {
                 return this.refuseSave(refusal);
             }
@@ -2606,7 +2606,13 @@ export class DealEntityServer extends DealEntity {
         return false;
     }
 
-    private async checkCloseLock(): Promise<string | null> {
+    /**
+     * @param reopening this save also sets the status back to an open one (#390). The reopen runs after
+     * the save, against the committed row, so a frozen field edited alongside it is still refused; the
+     * message then says to save the status change first rather than telling the caller to do what they
+     * just did.
+     */
+    private async checkCloseLock(reopening = false): Promise<string | null> {
         const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
         if (!persistedStatusID) {
             return null;
@@ -2733,7 +2739,28 @@ export class DealEntityServer extends DealEntity {
                 `${named} cannot be changed until the status is set to an open one.`
             );
         }
+        if (reopening) {
+            return DealEntityServer.reopenWithEditsRefusal(named);
+        }
         return `This deal is closed. ${named} cannot be changed until the status is set back to Open.`;
+    }
+
+    /**
+     * The refusal when one save reopens the deal AND changes a frozen field (#390).
+     *
+     * ── WHY THE EDIT IS REFUSED RATHER THAN APPLIED AFTER THE REOPEN ─────────────────────────────
+     *
+     * The reopen runs after `super.Save()` because `Sales.ReopenDeal` loads and saves its own copy of
+     * this row. Writing the frozen field first would put it on a deal that is still closed, and leave it
+     * there if the reopen then failed. Running the reopen first would need this object reloaded and the
+     * caller's edits replayed mid-save, with a reopened deal and no edits if the replay failed. Two
+     * saves are the honest order, so the message asks for exactly that.
+     */
+    private static reopenWithEditsRefusal(named: string): string {
+        return (
+            `This deal is closed, and ${named} cannot be changed in the same save that reopens it. ` +
+            'Save the status change on its own first, then make the edit. Nothing was changed.'
+        );
     }
 
     /**
