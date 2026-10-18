@@ -162,7 +162,7 @@
                   </button>
                   <button type="button" class="queue" (click)="SetInspect('noowner')">
                     <span class="qico"><i class="fa-solid fa-user-slash" aria-hidden="true"></i></span>
-                    <span class="qbody" title="Open deals where no one on the deal team holds the owner role"><b>No owner</b><span class="muted">Open deals with no owner on the deal team</span></span>
+                    <span class="qbody" title="Open deals where no employee on the deal team holds the owner role. A person who is not an employee in that role does not count as the owner"><b>No owner</b><span class="muted">Open deals with no employee in the owner role</span></span>
                     <span class="qcount">{{ SilentCount }}</span>
                   </button>
                   <button type="button" class="queue" (click)="SetInspect('commit')">

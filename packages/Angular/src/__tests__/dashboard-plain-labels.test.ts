@@ -62,7 +62,7 @@ describe('the Sales dashboard names no columns', () => {
     it('finds the copy it is checking', () => {
         // Without this, a parser that matched nothing would pass every test below.
         const copy = dashboardCopy();
-        expect(copy).toContain('Open deals with no owner on the deal team');
+        expect(copy).toContain('Open deals with no employee in the owner role');
         expect(getterLiterals('InspectLabel')).toContain('Open deals marked for commit');
     });
 
