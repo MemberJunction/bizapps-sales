@@ -35,6 +35,27 @@ export function InForecast(deals: readonly DealRosterRow[]): DealRosterRow[] {
 }
 
 /**
+ * The rail badge's count: open deals in the forecast past their expected close date, across the whole
+ * book.
+ *
+ * The badge sits in the rail, outside the dashboard, so the dashboard's filter bar must not move it.
+ * With no filter set the summary's count already describes the whole book and is used as is. With a
+ * filter set the summary is narrowed, so the count comes from the board's roster instead, which the
+ * filter bar never narrows. The period plays no part: a deal past its close date is past it whatever
+ * period is selected.
+ */
+export function BookSlippedCount(
+    boardDeals: readonly DealRosterRow[],
+    summaryCount: number | null | undefined,
+    filtered: boolean,
+): number {
+    if (!filtered && summaryCount != null) {
+        return summaryCount;
+    }
+    return InForecast(boardDeals).filter((d) => d.IsPastExpectedClose).length;
+}
+
+/**
  * The summary the headline tiles may show: none while the roster is refused (bizapps-sales#137).
  *
  * Tiles reduced from `Sales: Dashboard Summary` above an empty roster is two figures disagreeing with

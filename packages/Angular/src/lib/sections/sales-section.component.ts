@@ -103,6 +103,7 @@ import type {
 import {
     CloseBuckets,
     ClosingSoon,
+    BookSlippedCount,
     FilterInspect,
     InForecast,
     TileSummary,
@@ -996,8 +997,8 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     public get Badges(): SalesNavBadges {
-        // The summary's count when it ran, the list's length otherwise.
-        return { Slipped: this.summary?.PastExpectedCloseCount ?? FilterInspect(this.dashboardDeals, 'slipped').length };
+        // The whole book's count, whatever the filter bar holds: the badge is outside the dashboard.
+        return { Slipped: BookSlippedCount(this.Deals, this.summary?.PastExpectedCloseCount, HasFilters(this.Filters)) };
     }
 
     /** The default list: open deals expected to close in the next 30 days, soonest first. */
