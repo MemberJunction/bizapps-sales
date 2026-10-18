@@ -2,7 +2,9 @@
  * @fileoverview The finance tasks a won deal raises — S-US2 (#34) and S-US3 (#35).
  *
  * On Closed Won both pipelines raise an **order-review** task against the deal's embedded order, and a
- * B2B deal additionally raises a **contract-processing** task. Finance reviews the order, corrects it and
+ * B2B deal additionally raises a **contract-processing** task. A pipeline whose policy sets
+ * `CloseWonTasks.RaiseOrderReviewTask: false` skips the order-review task, for a host where orders
+ * reviews by trigger instead (bc-aidp-next-golive#320 §5). Finance reviews the order, corrects it and
  * advances it; that advance is what triggers invoicing, so the task is the control on money leaving the
  * building — not a reminder.
  *
@@ -151,6 +153,12 @@ export interface CloseWonTaskInput {
     Assignee?: CloseWonTaskAssignee;
     AssignedByPersonID?: string;
     DueAt?: Date;
+    /**
+     * Whether the order-review task is raised. Absent means yes, which is what every close did before
+     * this existed. The close operation sets it from the policy's `CloseWonTasks.RaiseOrderReviewTask`
+     * through {@link RaisesOrderReviewTask}.
+     */
+    RaiseOrderReviewTask?: boolean;
 }
 
 /** Which of the two tasks a result row describes. A discriminator in this code, not a row in a table. */
@@ -211,6 +219,17 @@ export interface CloseWonTasksPolicyConfig {
      * to the default rather than producing an invalid date.
      */
     DueInDays?: number | null;
+    /**
+     * Whether a won deal raises the ORDER_REVIEW task. Omit, or set true, to raise it, as every
+     * deployment always has (S-US2). Set `false` on a host whose orders app reviews by trigger
+     * (bc-aidp-next-golive#320 §5): there an order a deal created confirms without review, and orders
+     * raises its own review task when one is due, so this task asks finance to review an order nobody
+     * needs to. The contract-processing task is unaffected.
+     *
+     * Only the boolean `false` switches it off. Anything else, a string `"false"` included, keeps the
+     * task: a mistyped policy should over-review, not quietly drop the control.
+     */
+    RaiseOrderReviewTask?: boolean | null;
 }
 
 /**
@@ -297,6 +316,14 @@ export function ReadCloseWonTaskConfig(policy: unknown): CloseWonTasksPolicyConf
     return holder?.CloseWonTasks ?? {};
 }
 
+/**
+ * Whether a policy's close-won task configuration raises the order-review task: true unless
+ * `RaiseOrderReviewTask` is the boolean `false`. See {@link CloseWonTasksPolicyConfig.RaiseOrderReviewTask}.
+ */
+export function RaisesOrderReviewTask(config: CloseWonTasksPolicyConfig | null | undefined): boolean {
+    return config?.RaiseOrderReviewTask !== false;
+}
+
 interface PolicyCreateContract {
     CreateContract?: boolean;
 }
@@ -308,7 +335,8 @@ export class CloseWonTaskService {
     /**
      * Raises the tasks a won deal owes, and reports what it raised.
      *
-     * Order-review always; contract-processing when the pipeline's policy says so. Never throws for a
+     * Order-review unless the input switches it off; contract-processing when the pipeline's policy
+     * says so. Never throws for a
      * business reason — a caller mid-close wants a report it can fold into its own, not an exception that
      * loses the task it did manage to create.
      */
@@ -320,21 +348,29 @@ export class CloseWonTaskService {
         const result: CloseWonTaskResult = { Success: true, Tasks: [], Issues: [] };
 
         /**
+         * THE ORDER-REVIEW TASK IS SWITCHED OFF ON THIS PIPELINE, so neither the task nor the missing-order
+         * issue below applies: that issue explains a task that was not raised, and here none was due.
+         * Not reported as an issue either. It is configuration, and an issue on every close would be one
+         * nobody can act on.
+         */
+        const raiseOrderReview = input.RaiseOrderReviewTask !== false;
+
+        /**
          * NO ORDER, NO ORDER-REVIEW TASK. The order is embedded on the deal from creation, so an empty
          * OrderID means something upstream did not happen — and a task pointing at nothing is a work
          * item finance opens to find an empty page. Report it and create nothing.
          */
-        if (!input.OrderID) {
+        if (raiseOrderReview && !input.OrderID) {
             result.Issues.push(
                 'The deal has no order, so no order-review task was created. The order is created with the '
                     + 'deal, so this means the deal predates that or its order was never written.',
             );
             result.Success = false;
         }
-        const orderReviewTypeID = input.OrderID
+        const orderReviewTypeID = (raiseOrderReview && input.OrderID)
             ? await this.resolveTaskType(CODE_ORDER_REVIEW, provider, contextUser, result)
             : null;
-        const orderReview = (input.OrderID && orderReviewTypeID) ? await this.raise(
+        const orderReview = (raiseOrderReview && input.OrderID && orderReviewTypeID) ? await this.raise(
             'OrderReview',
             {
                 Name: `Review order for ${input.DealName}`,
