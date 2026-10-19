@@ -92,6 +92,12 @@ describe('a move', () => {
         board.DealStatusTypes = [{ ID: 'WON', LocksDeal: true } as (typeof board.DealStatusTypes)[number]];
         expect(board.MoveTargets(board.Columns, row)).toEqual([]);
     });
+
+    it('offers nothing on a closed deal that sits in an ordinary column', () => {
+        const row = { ...deal(), IsOpen: false } as DealRosterRow;
+        const board = mount(row);
+        expect(board.MoveTargets(board.Columns, row)).toEqual([]);
+    });
 });
 
 describe('the idle flag', () => {

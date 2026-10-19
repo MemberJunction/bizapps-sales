@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ValidationResult } from '@memberjunction/core';
+import { mjBizAppsSalesPipelineEntity } from '@mj-biz-apps/sales-entities';
 
-import { CloseWonPolicyProblem } from '../PipelineEntityServer.js';
+import { CloseWonPolicyProblem, PipelineEntityServer } from '../PipelineEntityServer.js';
 
 /**
  * A PIPELINE'S CLOSE WON POLICY IS CHECKED WHEN IT IS SAVED (bizapps-sales#448).
@@ -53,5 +55,60 @@ describe('CloseWonPolicyProblem', () => {
 
     it('accepts null for any key', () => {
         expect(CloseWonPolicyProblem('{"CreateContract":null,"TermMonths":null,"SubscriptionLinesTo":null}')).toBeNull();
+    });
+});
+
+/**
+ * `Validate()` is what refuses the save: MJ writes only when its result is a success. `Object.create`
+ * holds the entity without metadata, the way `StageBelongsToPipeline` does, so everything the method
+ * reads is shadowed below, and the generated field checks are stubbed to pass.
+ */
+describe('PipelineEntityServer.Validate', () => {
+    const RETIRED = '{"OrderState":"Draft"}';
+
+    function pipeline(opts: { IsSaved: boolean; policyDirty: boolean; CloseWonPolicy: string | null }) {
+        const instance = Object.create(PipelineEntityServer.prototype) as PipelineEntityServer;
+        Object.defineProperty(instance, 'IsSaved', { value: opts.IsSaved });
+        Object.defineProperty(instance, 'CloseWonPolicy', { value: opts.CloseWonPolicy });
+        Object.defineProperty(instance, 'GetFieldByName', {
+            value: (name: string) => (name === 'CloseWonPolicy' ? { Dirty: opts.policyDirty } : undefined),
+        });
+        return instance;
+    }
+
+    beforeEach(() => {
+        vi.spyOn(mjBizAppsSalesPipelineEntity.prototype, 'Validate').mockImplementation(() => {
+            const result = new ValidationResult();
+            result.Success = true;
+            return result;
+        });
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('refuses a new pipeline whose policy the close would not honour', () => {
+        const result = pipeline({ IsSaved: false, policyDirty: true, CloseWonPolicy: RETIRED }).Validate();
+        expect(result.Success).toBe(false);
+        expect(result.Errors.map((e) => e.Source)).toEqual(['CloseWonPolicy']);
+        expect(result.Errors[0].Message).toContain('"OrderState"');
+    });
+
+    it('refuses a saved pipeline when the save changes the policy to one the close would not honour', () => {
+        const result = pipeline({ IsSaved: true, policyDirty: true, CloseWonPolicy: RETIRED }).Validate();
+        expect(result.Success).toBe(false);
+        expect(result.Errors).toHaveLength(1);
+    });
+
+    it('passes a save of a saved pipeline that leaves an older policy as it was', () => {
+        const result = pipeline({ IsSaved: true, policyDirty: false, CloseWonPolicy: RETIRED }).Validate();
+        expect(result.Success).toBe(true);
+        expect(result.Errors).toHaveLength(0);
+    });
+
+    it('passes a new pipeline with a valid policy', () => {
+        const result = pipeline({ IsSaved: false, policyDirty: true, CloseWonPolicy: '{"CreateContract":true}' }).Validate();
+        expect(result.Success).toBe(true);
     });
 });

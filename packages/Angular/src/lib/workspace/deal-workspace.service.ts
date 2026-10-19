@@ -289,6 +289,14 @@ export function StageEntryDays(events: readonly StageEventRow[], deals: readonly
 }
 
 /**
+ * Whether a successful read returned fewer rows than matched its filter. A row cap reports success
+ * and returns the first N, so `Success` alone cannot tell a short read from a complete one.
+ */
+export function IsTruncatedRead(result: { Results?: readonly unknown[] | null; TotalRowCount?: number | null }): boolean {
+    return result.TotalRowCount != null && (result.Results?.length ?? 0) < result.TotalRowCount;
+}
+
+/**
  * The business day an instant fell on, `YYYY-MM-DD`. A stage change is a moment, so a zone decides
  * its day, the same one that decides what day it is now.
  */
@@ -493,7 +501,7 @@ export class DealWorkspaceService {
      * its stage since it was created (a new deal's first stage records no event). A deal whose newest
      * event names a different stage is left out rather than guessed.
      *
-     * "Open" is the status's `IsOpen` FLAG. Throws when either read fails, so the caller can say the
+     * "Open" is the status's `IsOpen` FLAG. Throws when either read fails or comes back short, so the caller can say the
      * flags are unavailable instead of showing none.
      */
     public async LoadStageEntries(): Promise<Map<string, string>> {
@@ -505,12 +513,18 @@ export class DealWorkspaceService {
         }
         const openDeals = `SELECT ID FROM [${deal.SchemaName}].[${deal.BaseView}] WHERE DealStatusTypeID IN `
             + `(SELECT ID FROM [${status.SchemaName}].[${status.BaseView}] WHERE IsOpen = 1)`;
+        // IgnoreMaxRows: both entities carry a UserViewMaxRows cap, and a capped event read drops a
+        // deal's newest event, so the deal would date from its creation and be flagged as long idle.
         const [events, deals] = await new RunView().RunViews([
-            { EntityName: E_STAGE_EVENT, ExtraFilter: `DealID IN (${openDeals})`, OrderBy: 'ChangedAt DESC', ResultType: 'simple', Fields: ['DealID', 'ToStageID', 'ChangedAt'] },
-            { EntityName: E_DEAL, ExtraFilter: `ID IN (${openDeals})`, ResultType: 'simple', Fields: ['ID', 'PipelineStageID', '__mj_CreatedAt'] },
+            { EntityName: E_STAGE_EVENT, ExtraFilter: `DealID IN (${openDeals})`, OrderBy: 'ChangedAt DESC', ResultType: 'simple', Fields: ['DealID', 'ToStageID', 'ChangedAt'], IgnoreMaxRows: true },
+            { EntityName: E_DEAL, ExtraFilter: `ID IN (${openDeals})`, ResultType: 'simple', Fields: ['ID', 'PipelineStageID', '__mj_CreatedAt'], IgnoreMaxRows: true },
         ]);
         if (!events?.Success || !deals?.Success) {
             throw new Error(events?.ErrorMessage || deals?.ErrorMessage || 'The deals\' stage history could not be read.');
+        }
+        // A read that still came back short is unknown history, not old history: flag nothing.
+        if (IsTruncatedRead(events) || IsTruncatedRead(deals)) {
+            throw new Error('The deals\' stage history came back incomplete.');
         }
         return StageEntryDays(
             (events.Results ?? []) as StageEventRow[],

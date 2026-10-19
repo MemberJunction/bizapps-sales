@@ -487,11 +487,12 @@ export class DealBoardComponent {
 
     /**
      * The stages a card's "Move to stage" control offers: every column of its pipeline but its own and
-     * the closing ones, which a move must not reach (see the class header). A card already in a closing
-     * column offers none: a closed deal is locked, and it reopens from the deal form.
+     * the closing ones, which a move must not reach (see the class header). A closed deal offers none,
+     * whatever column it sits in: it is locked, and it reopens from the deal form. A closing column's
+     * stage is optional, so a won or lost deal can sit in an ordinary column; `IsOpen` decides.
      */
     public MoveTargets(columns: readonly BoardColumn[], deal: DealRosterRow): BoardColumn[] {
-        if (columns.some((c) => c.IsClosing && c.StageID === deal.PipelineStageID)) {
+        if (!deal.IsOpen || columns.some((c) => c.IsClosing && c.StageID === deal.PipelineStageID)) {
             return [];
         }
         return columns.filter((c) => !c.IsClosing && c.StageID !== deal.PipelineStageID);

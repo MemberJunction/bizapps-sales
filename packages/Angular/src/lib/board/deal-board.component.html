@@ -141,7 +141,7 @@
                 class="db-card"
                 cdkDrag
                 [cdkDragData]="deal"
-                [cdkDragDisabled]="Moving"
+                [cdkDragDisabled]="Moving || !deal.IsOpen"
                 (click)="OpenCard(deal)">
 
                 <button type="button" class="db-card__name" [attr.aria-label]="'Open ' + deal.Name"

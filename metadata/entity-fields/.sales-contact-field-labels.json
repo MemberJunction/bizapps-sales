@@ -52,7 +52,7 @@
   },
   {
     "fields": {
-      "DisplayName": "Seniority Level",
+      "DisplayName": "Seniority",
       "AutoUpdateDisplayName": false
     },
     "primaryKey": {

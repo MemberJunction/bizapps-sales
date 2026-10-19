@@ -188,23 +188,14 @@
       "SeniorityLevelID is the live field: it is inherited from Common's People (bizapps-common v5.45.x)",
       "and points at the shared SeniorityLevel type table that every app reads. Seniority is sales' older",
       "free-text column; no sales code reads it. It leaves the generated form (the column and its data stay),",
-      "and SeniorityLevelID takes the plain label. SeniorityLevelID has no virtual name field on Sales",
-      "Contacts, so its own DisplayName is what renders. As above, the form changes on the next CodeGen run."
+      "and SeniorityLevelID takes the plain label, set on its row in .sales-contact-field-labels.json so one",
+      "file owns that field's label. As above, the form changes on the next CodeGen run."
     ],
     "fields": {
       "IncludeInGeneratedForm": false
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=Seniority"
-    }
-  },
-  {
-    "fields": {
-      "DisplayName": "Seniority",
-      "AutoUpdateDisplayName": false
-    },
-    "primaryKey": {
-      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=SeniorityLevelID"
     }
   }
 ]
