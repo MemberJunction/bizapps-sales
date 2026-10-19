@@ -49,23 +49,57 @@ const DEAL_TERMS: ContractsUpdateFromDealSeamInput = {
     AnnualIncreasePctOverride: 4,
 };
 
-/** A provider holding one contract, or none when `row` is null. */
-function providerWith(row: Record<string, unknown> | null, saveResult = true) {
+/** The contract type's renewal defaults, as contracts' own seed would fill them. */
+const TYPE_DEFAULTS: Record<string, unknown> = { AutoRenew: false, CancellationWindowDays: 30, AnnualIncreasePercent: 3 };
+
+/**
+ * A provider holding one contract, or none when `row` is null.
+ *
+ * The first object handed out is that contract. Any later one is a fresh contract, which is what the
+ * refresh asks for when it needs contracts to seed a field the deal no longer states; `seeding: false`
+ * makes it a contracts build without the seed methods.
+ */
+function providerWith(row: Record<string, unknown> | null, saveResult = true, opts: { seeding?: boolean } = {}) {
     const sets: Record<string, unknown> = {};
+    const scratch: { sets: Record<string, unknown>; marked: string[]; saves: number }[] = [];
     let saves = 0;
+    let handedOut = 0;
     const provider = {
         Entities: [],
         async GetEntityObject() {
+            if (handedOut++ === 0) {
+                return {
+                    InnerLoad: async () => row !== null,
+                    Get: (k: string) => (k in sets ? sets[k] : row?.[k] ?? null),
+                    Set: (k: string, v: unknown) => { sets[k] = v; },
+                    LatestResult: { CompleteMessage: 'refused by contracts' },
+                    async Save() { saves++; return saveResult; },
+                };
+            }
+            const fresh = { sets: {} as Record<string, unknown>, marked: [] as string[], saves: 0 };
+            scratch.push(fresh);
             return {
-                InnerLoad: async () => row !== null,
-                Get: (k: string) => row?.[k] ?? null,
-                Set: (k: string, v: unknown) => { sets[k] = v; },
-                LatestResult: { CompleteMessage: 'refused by contracts' },
-                async Save() { saves++; return saveResult; },
+                NewRecord: () => true,
+                Get: (k: string) => fresh.sets[k] ?? null,
+                Set: (k: string, v: unknown) => { fresh.sets[k] = v; },
+                async Save() { fresh.saves++; return true; },
+                ...(opts.seeding === false
+                    ? {}
+                    : {
+                          MarkRenewalFieldEdited: (field: string) => { fresh.marked.push(field); },
+                          async SeedRenewalDefaultsFromType() {
+                              for (const [field, value] of Object.entries(TYPE_DEFAULTS)) {
+                                  if (!fresh.marked.includes(field)) {
+                                      fresh.sets[field] = value;
+                                  }
+                              }
+                              return true;
+                          },
+                      }),
             };
         },
     };
-    return { provider: provider as never, sets, saves: () => saves };
+    return { provider: provider as never, sets, saves: () => saves, scratch };
 }
 
 beforeEach(() => {
@@ -91,6 +125,47 @@ describe('LiveContractsSeam.UpdateContractFromDeal', () => {
             CancellationWindowDays: 15,
             AnnualIncreasePercent: 4,
         });
+    });
+
+    it('gives an override the deal cleared the contract type\'s default, not the previous close\'s number', async () => {
+        const { provider, sets, saves, scratch } = providerWith({
+            ID: CONTRACT_ID,
+            ContractNumber: 'CT-0007',
+            ContractTypeID: 'type-1',
+            ExecutedDate: null,
+            CancellationWindowDays: 15,
+            AnnualIncreasePercent: 9,
+        });
+        const cleared = { ...DEAL_TERMS, CancellationNoticeDaysOverride: null, AnnualIncreasePctOverride: null };
+        const result = await new LiveContractsSeam(USER, provider).UpdateContractFromDeal(cleared);
+
+        expect(result.Success).toBe(true);
+        expect(sets.CancellationWindowDays).toBe(30);
+        expect(sets.AnnualIncreasePercent).toBe(3);
+        expect(sets.AutoRenew, 'a stated No is the deal\'s answer, not a gap').toBe(true);
+        expect(saves()).toBe(1);
+
+        expect(scratch).toHaveLength(1);
+        expect(scratch[0].sets.ContractTypeID).toBe('type-1');
+        expect(scratch[0].marked).toEqual(['AutoRenew']);
+        expect(scratch[0].saves, 'the seed runs on a contract that is never saved').toBe(0);
+    });
+
+    it('clears an override the deal cleared when this contracts build cannot seed, as a create would', async () => {
+        const { provider, sets } = providerWith(
+            { ID: CONTRACT_ID, ContractNumber: 'CT-0007', ExecutedDate: null, AnnualIncreasePercent: 9 },
+            true,
+            { seeding: false },
+        );
+        await new LiveContractsSeam(USER, provider).UpdateContractFromDeal({ ...DEAL_TERMS, AnnualIncreasePctOverride: null });
+        expect(sets.AnnualIncreasePercent).toBeNull();
+        expect(sets.CancellationWindowDays).toBe(15);
+    });
+
+    it('asks contracts for nothing when the deal states every renewal term', async () => {
+        const { provider, scratch } = providerWith({ ID: CONTRACT_ID, ContractNumber: 'CT-0007', ExecutedDate: null });
+        await new LiveContractsSeam(USER, provider).UpdateContractFromDeal(DEAL_TERMS);
+        expect(scratch).toHaveLength(0);
     });
 
     it('never rewrites which agreement this is: type, company, customer and provenance stay', async () => {
@@ -169,11 +244,11 @@ type Executor = {
     ): Promise<SalesCloseIssue[]>;
 };
 
-/** Drive the close's contract route for a deal that already names a contract. */
-async function closeAgain(update: ContractsUpdateSeamResult) {
+/** Drive the close's contract route; the deal names `contractID` (the default) or no contract at all. */
+async function closeAgain(update: ContractsUpdateSeamResult, contractID: string | null = CONTRACT_ID) {
     const seam = new FakeSeam(update);
     SetDownstreamSeam(seam);
-    const deal: Record<string, unknown> = { ID: 'deal-1', ContractID: CONTRACT_ID, CompanyID: 'company-1', AccountID: 'account-1' };
+    const deal: Record<string, unknown> = { ID: 'deal-1', ContractID: contractID, CompanyID: 'company-1', AccountID: 'account-1' };
     const plan: SalesCloseRoutingResult = { Target: 'Contract', Planned: true, Executed: false, LineCount: 0 };
     const op = new CloseDealOperation() as unknown as Executor;
     let issues: SalesCloseIssue[] = [];
@@ -233,6 +308,20 @@ describe('the close reuses the contract a re-closed deal already names', () => {
         expect(r.plan.Executed).toBe(false);
         expect(r.plan.Reason).toContain('not installed');
         expect(r.deal.ContractID).toBe(CONTRACT_ID);
+        expect(r.issues).toEqual([]);
+    });
+});
+
+describe('the first close Won creates the contract', () => {
+    afterEach(() => ResetDownstreamSeam());
+
+    it('creates one and stamps it onto a deal that names none', async () => {
+        const r = await closeAgain({ Success: true }, null);
+
+        expect(r.seam.Calls).toEqual(['Create']);
+        expect(r.deal.ContractID).toBe('NEW-CONTRACT');
+        expect(r.plan.Executed).toBe(true);
+        expect(r.plan.RecordID).toBe('NEW-CONTRACT');
         expect(r.issues).toEqual([]);
     });
 });

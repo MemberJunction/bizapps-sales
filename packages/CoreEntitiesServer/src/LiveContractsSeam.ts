@@ -62,6 +62,9 @@ const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_CONTRACT_TYPE = 'MJ_BizApps_Contracts: Contract Types';
 const E_CONTRACT_ORDER = 'MJ_BizApps_Contracts: Contract Orders';
 
+/** The renewal fields a deal can state (`setNegotiatedTerms`). `RenewalNoticeDays` is not one of them. */
+const DEAL_RENEWAL_FIELDS = ['AutoRenew', 'CancellationWindowDays', 'AnnualIncreasePercent'] as const;
+
 /** Sales' own, needed only to name the CREATING entity in contracts' polymorphic provenance pair. */
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 
@@ -241,8 +244,10 @@ export class LiveContractsSeam {
      *     carries a warning that the deal and the signed contract may now differ.
      *   · UNREADABLE or gone: `Unreadable`, so the close refuses rather than guessing.
      *
-     * Type defaults are not re-seeded: contracts seeds unsaved records only, so a renewal field the deal
-     * no longer states keeps the value the contract already holds.
+     * A renewal field the deal no longer states goes back to what a create would give it, the contract
+     * type's default, rather than keeping the number the previous close wrote. Otherwise a rep who
+     * cleared a 9% uplift to mean "use the standard" would re-close onto a contract still saying 9%.
+     * See `reseedUnstatedTerms()`.
      */
     public async UpdateContractFromDeal(input: ContractsUpdateFromDealSeamInput): Promise<ContractsUpdateSeamResult> {
         if (!ContractsIsInstalled()) {
@@ -276,7 +281,8 @@ export class LiveContractsSeam {
         }
 
         try {
-            this.applyDealTerms(contract, input);
+            const stated = this.applyDealTerms(contract, input);
+            await this.reseedUnstatedTerms(contract, stated);
             if (!(await contract.Save())) {
                 return {
                     Success: false,
@@ -288,6 +294,33 @@ export class LiveContractsSeam {
         } catch (err) {
             LogError(`LiveContractsSeam.UpdateContractFromDeal failed for deal ${input.DealID}: ${err}`);
             return { Success: false, ContractID: input.ContractID, Message: `Could not refresh contract ${number}: ${String(err)}` };
+        }
+    }
+
+    /**
+     * On a refresh, give each deal-sourced renewal field the deal no longer states the value a create
+     * would have given it (#278).
+     *
+     * Contracts seeds unsaved records only (`SeedRenewalDefaultsFromType` returns early on a saved one),
+     * so the seed runs on a scratch, never-saved contract of the same type with the same fields marked
+     * as stated, and the unstated fields are copied across. Contracts still decides every default;
+     * sales copies its answer, as the create keeps it. Where this contracts build cannot seed, the
+     * scratch holds null and so does the refreshed field, which is also what a create saves there.
+     *
+     * `RenewalNoticeDays` is left alone: the deal never sources it, so a value on the contract was put
+     * there by contracts or by someone reading the paper.
+     */
+    private async reseedUnstatedTerms(contract: BaseEntity, stated: readonly string[]): Promise<void> {
+        const unstated = DEAL_RENEWAL_FIELDS.filter((field) => !stated.includes(field));
+        if (unstated.length === 0) {
+            return;
+        }
+        const scratch = await this.provider.GetEntityObject<BaseEntity>(E_CONTRACT, this.user);
+        scratch.NewRecord();
+        scratch.Set('ContractTypeID', contract.Get('ContractTypeID'));
+        await this.seedTypeDefaults(scratch, stated);
+        for (const field of unstated) {
+            contract.Set(field, scratch.Get(field) ?? null);
         }
     }
 
