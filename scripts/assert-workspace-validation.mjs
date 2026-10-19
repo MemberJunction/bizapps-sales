@@ -1,19 +1,17 @@
 /**
- * Gate: the workspace's validation projection — pane attribution, and what blocks a save.
+ * Gate: the deal validation projection's pane attribution, and no Angular component writing a stage's
+ * defaults onto a deal.
  *
- * ── WHY THIS GATE EXISTS, AND WHY BOTH DEFECTS IT COVERS WERE INVISIBLE ─────────────────────────
+ * ── WHY THIS GATE EXISTS ─────────────────────────────────────────────────────────────────────────
  *
- * Two confirmed defects lived here, and neither was reachable by any integration check, because both
- * are in code that only a BROWSER path exercises:
+ * `parseChildSource` anchored the collection on `[A-Za-z]+`, and `EmbeddedRecord.prefixError` now
+ * emits `OrderID_Object.Lines[3].Quantity`. Neither `_` nor `.` matches, so every order-line error fell
+ * through to the default pane with a null row index. No integration check reaches it, because only a
+ * browser path runs `ProjectValidation` (today `DealWorkspaceService.Save`, which the board calls).
  *
- *   1. `parseChildSource` anchored the collection on `[A-Za-z]+`, and `EmbeddedRecord.prefixError` now
- *      emits `OrderID_Object.Lines[3].Quantity`. Neither `_` nor `.` matches, so every order-line error
- *      fell through to the default pane with a null row index: Save disabled, the Lines badge reading 0,
- *      no row marked, and the message shown on Party info.
- *
- *   2. A refused discount did not block the save. The refusal lived in a map the template read and
- *      `CanSave` never consulted, so a rep typed `0.5`, saw the refusal, and saved a line still holding
- *      `0.10`.
+ * This gate also asserted what blocks a save in the deal workspace: a refused discount, a line with no
+ * product, a declined line removal. Those functions had no caller but the workspace and went with it
+ * (#291); the deal line editor's `CanSave` and its vitest suites cover the same rules there.
  *
  * ── RUN ON THE BUILT MODULE, NOT A COPY OF ITS LOGIC ────────────────────────────────────────────
  *
@@ -22,19 +20,12 @@
  * underneath it. A gate that re-implements the thing it checks agrees with itself forever.
  *
  * A plain node script because this repo has no unit-test runner installed — `test:unit` names vitest,
- * which is not a dependency. Adding one to assert three functions would be more infrastructure than the
+ * which is not a dependency. Adding one to assert one function would be more infrastructure than the
  * thing being asserted.
  *
  * Usage: node scripts/assert-workspace-validation.mjs
  */
-import {
-    DiscountRefusalIssues,
-    MergeValidation,
-    ProjectValidation,
-    UnlinkedLineIssues,
-    ShouldRefuseLineRemoval,
-    LineRemovalRefusedIssues,
-} from '../packages/Angular/dist/lib/workspace/deal-workspace.validation.js';
+import { ProjectValidation } from '../packages/Angular/dist/lib/workspace/deal-workspace.validation.js';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
 
@@ -96,45 +87,6 @@ console.log('\n  pane attribution — where a child error lands\n');
     ok('a plain field error is not treated as a child', projected.Issues[0]?.RowIndex, null);
 }
 
-console.log('\n  what blocks a save\n');
-
-{
-    const clean = { IsValid: true, Issues: [] };
-    const warning = [{ Section: 'lines', Field: null, RowIndex: null, Severity: 'warning', Message: 'fyi' }];
-    const refusal = DiscountRefusalIssues([{ RowIndex: 2, Reason: 'Is 0.5 half a percent or fifty?' }]);
-
-    ok('a refusal is produced as an ERROR', refusal[0]?.Severity, 'error');
-    ok('on the lines pane', refusal[0]?.Section, 'lines');
-    ok('against the row that caused it', refusal[0]?.RowIndex, 2);
-
-    ok('warnings alone leave the deal saveable', MergeValidation(clean, warning, []).IsValid, true);
-
-    /**
-     * THE ASSERTION THAT WOULD HAVE CAUGHT DEFECT 2. A refused discount must make the deal unsaveable.
-     * Before the fix this read `true`, and the quote went out at the wrong number.
-     */
-    ok('a REFUSED DISCOUNT makes it unsaveable', MergeValidation(clean, warning, refusal).IsValid, false);
-
-    ok(
-        'and an already-invalid deal stays invalid',
-        MergeValidation({ IsValid: false, Issues: [] }, [], []).IsValid,
-        false,
-    );
-
-    // Blocking issues come first: `SaveBlockedReason` shows the first error, and a rep reading a
-    // disabled Save wants the reason it is disabled rather than an unrelated advisory.
-    const merged = MergeValidation(clean, warning, refusal);
-    ok('blocking issues are ordered before warnings', merged.Issues[0]?.Severity, 'error');
-
-    // A refusal whose row has since been removed still blocks. Losing the marker is acceptable;
-    // letting the save through is not.
-    ok(
-        'a refusal with no row still blocks',
-        MergeValidation(clean, [], DiscountRefusalIssues([{ RowIndex: null, Reason: 'x' }])).IsValid,
-        false,
-    );
-}
-
 console.log('\n  one writer for the stage defaults\n');
 
 /**
@@ -189,123 +141,6 @@ console.log('\n  one writer for the stage defaults\n');
             ].join('\n'),
         );
     }
-}
-
-
-/**
- * ── A LINE WITH NO PRODUCT: THE THIRD DEFECT OF THE SAME SHAPE ──────────────────────────────────
- *
- * `OrderLine.ProductID` is `UNIQUEIDENTIFIER NOT NULL` with a real FK — verified in orders' migration
- * and on the host, where 0 of 63 lines carry a null. `AddLine()` calls `order.Lines.Create()`, sets
- * `CompanyID`, and never touches `ProductID`. So the most ordinary gesture in the pane — click Add,
- * click Save — put a null into a NOT NULL column and answered the rep with a database constraint name.
- *
- * That is the KI-20 shape exactly: a normal action, a raw SQL error, and nothing on screen that says
- * which row or why. It blocks now, attributed to the line.
- *
- * WHY THESE ASSERTIONS AND NOT A REMOVED PICKER OPTION. Removing `— not linked —` would assert the
- * state was never legal. It is: a new line is unlinked before the picker is ever opened, so removing
- * the option only removes the LABEL for a state the rep is already in, leaving a blank select on an
- * unsaveable row. The option stays (relabelled to an instruction) and the save is refused instead.
- *
- * These assertions still matter if somebody removes the option later — they are about the refusal, not
- * about the dropdown, and they would go red the day the block is dropped either way.
- */
-console.log('\n  a line with no product blocks the save, on its own row\n');
-{
-    const issues = UnlinkedLineIssues([{ ProductID: null }]);
-    ok('one unlinked line yields exactly one issue', issues.length, 1);
-    ok('attributed to the LINES pane, not the default one', issues[0]?.Section, 'lines');
-    ok('and to the field that owns it', issues[0]?.Field, 'ProductID');
-    ok('and to the ROW, so the grid can mark it', issues[0]?.RowIndex, 0);
-    ok('as an ERROR — a NOT NULL column is not an advisory', issues[0]?.Severity, 'error');
-    // The message is what a rep reads INSTEAD of a constraint name, so it is asserted for content
-    // rather than mere presence: it must say what to do and must not leak SQL.
-    const msg = String(issues[0]?.Message ?? '');
-    ok('the message tells the rep what to do', /choose a product/i.test(msg), true);
-    ok('and names no constraint, table or column', /FK_|NOT NULL|OrderLine|ProductID/.test(msg), false);
-}
-
-{
-    // The row index is the whole point of attribution: the SECOND line's issue must not land on the first.
-    const issues = UnlinkedLineIssues([{ ProductID: 'p1' }, { ProductID: null }, { ProductID: 'p3' }]);
-    ok('only the unlinked line is flagged', issues.length, 1);
-    ok('and it is flagged at ITS index, not the first', issues[0]?.RowIndex, 1);
-}
-
-{
-    const issues = UnlinkedLineIssues([{ ProductID: 'p1' }, { ProductID: 'p2' }]);
-    ok('a fully linked order raises nothing', issues.length, 0);
-    // Empty string and undefined are the same absence as null -- a picker that writes '' would
-    // otherwise slip through and hit the same constraint.
-    ok('an empty-string product is still unlinked', UnlinkedLineIssues([{ ProductID: '' }]).length, 1);
-    ok('an absent product key is still unlinked', UnlinkedLineIssues([{}]).length, 1);
-}
-
-{
-    // And that it actually reaches IsValid, which is what CanSave reads. The refused-discount defect
-    // was exactly this: an issue the template rendered and the save never consulted.
-    const merged = MergeValidation(
-        { IsValid: true, Issues: [] }, [], UnlinkedLineIssues([{ ProductID: null }]),
-    );
-    ok('an unlinked line makes the projection invalid', merged.IsValid, false);
-    ok('and the issue survives the merge', merged.Issues.length, 1);
-    const clean = MergeValidation({ IsValid: true, Issues: [] }, [], UnlinkedLineIssues([{ ProductID: 'p' }]));
-    ok('a linked line leaves it valid', clean.IsValid, true);
-}
-
-/**
- * ──── KI-20: A DECLINED LINE REMOVAL ────
- *
- * Two claims that pull in opposite directions, so both are asserted.
- *
- * A saved line must REFUSE removal, because staging it costs the rep the entire save rather than just the
- * removal. A line that was never saved must NOT refuse: it has no row to delete and nothing for orders'
- * renumbering to collide with, so refusing it would invent a limitation the defect does not impose.
- *
- * THE DISTINCTION THAT MATTERS IS SHOWN VERSUS ACTUALLY REFUSED. A version that rendered this message and
- * removed the line anyway would look identical on screen and lose the row silently. That is why the
- * decision is its own pure function rather than a branch inside a click handler: ShouldRefuseLineRemoval
- * is the half that has to be true, and it is asserted directly instead of inferred from a message.
- */
-console.log(`\n  KI-20: a saved line refuses removal; an unsaved one does not\n`);
-{
-    ok('a SAVED line refuses removal', ShouldRefuseLineRemoval({ IsSaved: true }), true);
-    ok('an UNSAVED line does NOT — nothing to delete, nothing to collide',
-       ShouldRefuseLineRemoval({ IsSaved: false }), false);
-    // Absent state must not silently refuse -- that would block a legal removal on bad input.
-    ok('a null line does not refuse', ShouldRefuseLineRemoval(null), false);
-    ok('an undefined line does not refuse', ShouldRefuseLineRemoval(undefined), false);
-}
-
-{
-    const issues = LineRemovalRefusedIssues([{ RowIndex: 2 }]);
-    ok('one declined removal yields exactly one issue', issues.length, 1);
-    ok('attributed to the LINES pane', issues[0]?.Section, 'lines');
-    ok('and to the ROW, so the grid can mark it', issues[0]?.RowIndex, 2);
-    ok('with no single field blamed — the row is the subject', issues[0]?.Field, null);
-
-    // THE SEVERITY IS THE POINT. An error would disable Save and cost the rep every other edit, which is
-    // the outcome this refusal exists to avoid rather than reproduce.
-    ok('severity is WARNING, not error', issues[0]?.Severity, 'warning');
-
-    const msg = String(issues[0]?.Message ?? '');
-    ok('the message says what the rep CAN do instead', /change its product or quantity/i.test(msg), true);
-    ok('and that a newly added line can still be removed', /just added/i.test(msg), true);
-    ok(
-        'and it leaks no constraint, table or column name',
-        /UQ_|UNIQUE|constraint|OrderLine|LineNumber|OrderHeaderID|violation/i.test(msg),
-        false,
-    );
-}
-
-{
-    // And it must NOT block the save, asserted through the projection CanSave actually reads.
-    const merged = MergeValidation(
-        { IsValid: true, Issues: [] }, LineRemovalRefusedIssues([{ RowIndex: 0 }]), [],
-    );
-    ok('a declined removal leaves the deal SAVEABLE', merged.IsValid, true);
-    ok('while still reporting the reason', merged.Issues.length, 1);
 }
 
 console.log(

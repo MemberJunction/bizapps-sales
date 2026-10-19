@@ -45,7 +45,8 @@ as a written question rather than becoming a GitHub issue.
 | D-30 | Should the forecast measures get their own sanity checks, and where? | Owner of the queries |
 | D-34 | Rename `Pipeline.RequiresDealLines`, or correct its description. | Sales |
 
-DN-19's remaining work is tracked in GitHub as #202 and #207.
+DN-19's sales workarounds are removed (#207): MJ 6.1.6 sends the written key on an IsA create. What
+remains is #202.
 
 ## Status of every entry
 
@@ -1341,9 +1342,11 @@ goes on reporting its own. That happens on every create. It looked intermittent 
 usually recovers the real row by its name, and binds nothing only when its reload has not caught up.
 `SalesContact` and `Person` have the same shape.
 
-**Meanwhile**, sales binds only an id it can show exists, else the one row with that name, else nothing
-(`create-related-unverified-id.test.ts`), and the server refuses a deal whose customer does not exist.
-Removing those workarounds once MJ's 6.1 line sends the key is #207. A new deal that still will not save
+**Workaround removed (#207).** Sales used to rebind an inline-created customer or contact to the key it
+was written under (the deal form's party fields), and to bind only an id it could show exists (the deal
+workspace, since deleted in #291). Both are gone because MJ 6.1.6 sends the written key on an IsA create,
+so the key the browser reports is the one in the database. The server still refuses a deal whose
+customer does not exist, which also covers a pick from a stale list. A new deal that still will not save
 after an inline create is #202.
 
 ---

@@ -1,19 +1,9 @@
 /**
  * @fileoverview S-US9's surface — a deal's activities in chronological order, plus logging one.
  *
- * ── WHY THIS IS NOT A WORKSPACE PANE ────────────────────────────────────────────────────────────
+ * A standalone component, so the deal form's Activity panel and any other host can mount it.
  *
- * `DEAL_WORKSPACE_PANES` keys are `DealWorkspaceSection` values, and that union is what
- * `ProjectValidation()` tags issues with so a pane can badge its own error count. An activity timeline
- * has no validation state — it is a record of what happened, not a part of the draft being composed — so
- * adding `'activity'` to that union would mean widening a type the whole validation layer reads in order
- * to describe a section that can never carry an issue.
- *
- * It is a standalone component instead, which also keeps the merge surface to one line in the
- * workspace template. That was a constraint worth designing around rather than working against: another
- * instance is editing `deal-workspace.*` in the same window.
- *
- * ── AND WHY IT READS FOR ITSELF ─────────────────────────────────────────────────────────────────
+ * ── WHY IT READS FOR ITSELF ─────────────────────────────────────────────────────────────────
  *
  * `ActivityReader` lives in `sales-core-entities-server`, and an Angular component must not import a
  * server package — that is the layering, and it is also how a server-only dependency ends up in a

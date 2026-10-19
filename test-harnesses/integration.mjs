@@ -716,6 +716,9 @@ for (const request of requested) {
      * A check that needs an app its bundle does not require (WT10 and WT14 sit in close-won-tasks but
      * need contracts) names it in `RequiresApp`. Left out like a bundle whose app is not present: listed
      * with the reason, NOT counted as skipped, because nothing chose not to run it.
+     *
+     * Only this runner reads `RequiresApp`. Another driver of the registry reaches the check, so each such
+     * check guards itself as well; `pnpm run test:integration` is the supported runner.
      */
     const leftOut = all.filter((c) => c.RequiresApp && !linkedApps.has(c.RequiresApp));
     const eligible = all.filter((c) => !leftOut.includes(c));

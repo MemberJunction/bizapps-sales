@@ -111,7 +111,9 @@
   {
     "fields": {
       "AllowUserSearchAPI": false,
-      "AutoUpdateAllowUserSearchAPI": false
+      "AutoUpdateAllowUserSearchAPI": false,
+      "AllowUpdateAPI": false,
+      "AllowDeleteAPI": false
     },
     "primaryKey": {
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Stage Events"

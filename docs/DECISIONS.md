@@ -9,7 +9,7 @@ decision without its reasoning gets re-litigated by the next person, or silently
 assumes it was an accident.
 
 **IDs.** This file holds `D1`–`D7` (the S1 rulings, no hyphen), `I1`–`I10`, and the prefixed series
-`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY` and `D-ST`. `D-3`, `D-4` and `D-6` are the master
+`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY`, `D-ST` and `D-SE`. `D-3`, `D-4` and `D-6` are the master
 plan's IDs; their rulings here are D2, D5 and "Master plan D-6". `DN-n` and every other `D-n`
 are in [`DECISIONS-NEEDED.md`](../DECISIONS-NEEDED.md), which also lists what is still open. A bare `Dn`
 cited as orders' (`D6/D7`, `D8`, `D53`) is orders' own log.
@@ -787,5 +787,31 @@ and every caller (form, import, agent, raw `BaseEntity.Save()`) takes the same p
 reason demands notes, a contract or order write fails) leaves the caller's other edits committed and the
 status unchanged. The save returns false with a message naming both halves. The close itself stays
 transactional; a half-done close is not among the outcomes.
+
+---
+
+## D-SE1 — Stage events are append-only on the server and in the API, not only in the form (#348)
+
+**Decision (the app's owner, 2026-10-16):** `DealStageEvent` refuses an update and a delete in two
+places. `DealStageEventEntityServer` refuses them in `Save()` and `Delete()`, so an Action, an agent or a
+raw `BaseEntity.Save()` cannot rewrite one. The entity's `AllowUpdateAPI` and `AllowDeleteAPI` are off
+(`metadata/entities/.entities.json`), so the GraphQL API has no update or delete mutation for it.
+Inserts are unaffected: `DealEntityServer.appendStageEvent` is the only writer and always creates a new
+row. The stale `spUpdateDealStageEvent` and `spDeleteDealStageEvent` procedures stay in the database;
+dropping them would need a migration and gains nothing once nothing calls them.
+
+**Why the entity-level flag is right here when D-RRC5 rejected the field-level one.** D-RRC5 turned
+down `AllowUpdateAPI = 0` on four `DealLine` columns because that flag takes the columns out of the
+`spCreate` / `spUpdate` parameters, which would have locked out the one caller that must write them.
+A stage event has no such caller. Nothing legitimately updates or deletes one, and the entity-level
+flags leave `spCreate` and the insert path alone. With the flags off, CodeGen drops the update and
+delete mutations, and MemberJunction's own `Save()` and `Delete()` refuse them as well. The server
+subclass is kept beside the flags because it explains the refusal in this app's terms, and because the
+rule should not depend on a metadata row a host may not have pushed or may turn back on.
+
+**What the form does.** `DealStageEventFormComponentExtended` already refuses edit mode. The refusal
+message is `DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE` in `sales-entities` so the form can share it.
+
+Pinned by `DealStageEventEntityServer.test.ts` and integration check `board-move.BD7`.
 
 ---

@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@mj-biz-apps/sales-entities"><img alt="npm" src="https://img.shields.io/npm/v/@mj-biz-apps/sales-entities?style=flat-square&label=npm" /></a>
-  <img alt="MJ Version" src="https://img.shields.io/badge/MemberJunction-6.1.5%2B-blue?style=flat-square" />
+  <img alt="MJ Version" src="https://img.shields.io/badge/MemberJunction-6.1.6%2B-blue?style=flat-square" />
   <img alt="Angular" src="https://img.shields.io/badge/Angular-21-DD0031?style=flat-square&logo=angular&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white" />
   <img alt="SQL Server" src="https://img.shields.io/badge/SQL%20Server-CC2927?style=flat-square&logo=microsoftsqlserver&logoColor=white" />
@@ -76,7 +76,7 @@ code; and provenance is immutable. CI enforces the first two with the money and 
 
 ## Dependencies
 
-Sales runs inside an MJ host at 6.1.5 or a later 6.x release and depends on five other BizApps apps.
+Sales runs inside an MJ host at 6.1.6 or a later 6.x release and depends on five other BizApps apps.
 The version ranges are in [`mj-app.json`](mj-app.json) (`mjVersionRange` and `dependencies`).
 
 | App | What sales uses it for |

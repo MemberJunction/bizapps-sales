@@ -72,6 +72,23 @@ function requireTasks(ctx: Ctx): void {
     );
 }
 
+/**
+ * Refuses a check that closes onto a contract-creating pipeline when contracts is absent.
+ *
+ * `RequiresApp: 'contracts'` leaves such a check out, but only under the Sales runner
+ * (`test-harnesses/integration.mjs`). Any other driver reaches the check, and the close would then take
+ * the stub contracts seam and fail as if the product were broken. Kept local rather than imported from
+ * `close-won-contract.checks.ts`, because importing that module registers its bundle.
+ */
+function requireContracts(ctx: Ctx): void {
+    Assert(
+        !!ProviderOf(ctx).Entities.find((e) => e.Name === E_CONTRACT),
+        'bizapps-contracts entities are NOT registered on this host, and this check closes onto a '
+            + 'contract-creating pipeline. Run it against a stack that includes contracts, through '
+            + '`pnpm run test:integration`, which leaves it out when contracts is absent.',
+    );
+}
+
 async function rows(ctx: Ctx, entity: string, filter: string): Promise<Record<string, unknown>[]> {
     const r = await new RunView().RunView({ EntityName: entity, ExtraFilter: filter, ResultType: 'simple' }, ctx.User);
     Assert(r.Success, `reading ${entity} failed — ${r.ErrorMessage}`);
@@ -737,6 +754,7 @@ export const CloseWonTasksChecks: SalesCheck[] = [
                  * active rows. The check asserts the tasks carry the types CONFIGURED, never which types
                  * they are -- the same discipline as WT1.
                  */
+                requireContracts(ctx);
                 requireTasks(ctx);
 
                 // A closeable deal: open, on a contract-creating pipeline, and carrying its order.
@@ -1068,6 +1086,7 @@ export const CloseWonTasksChecks: SalesCheck[] = [
                  * Delete `ContractID: deal.ContractID ?? undefined` from the task input literal in
                  * `CloseDealOperation`. This check goes red; WT4 and WT5 stay green.
                  */
+                requireContracts(ctx);
                 requireTasks(ctx);
                 const { dealID, contractID } = await closeWonOnContractPipeline(ctx, { stripOrder: false });
 

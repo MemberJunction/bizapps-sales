@@ -211,7 +211,21 @@ the thing it names is broken?"** The incidents behind rules 5–8: `docs/history
 - Never add `__mj_CreatedAt`/`__mj_UpdatedAt` columns or FK indexes — CodeGen does both.
 - **Author for PostgreSQL from day one.** Production is PG; keep the T-SQL converter-friendly and
   avoid reserved words as column names (this is why `ForecastSnapshot` has `CommitAmount`, not
-  `Commit`). No migration has a PostgreSQL counterpart yet (#197).
+  `Commit`). Newer migrations ship a counterpart in `migrations-pg/`; the older ones lack one (#197).
+- **A migration that ALTERs an existing column (length, type, nullability) syncs that entity's
+  fields itself.** `omitRecurringScriptsFromLog` is `true` in `mj.config.cjs`, so CodeGen no longer
+  captures the reconcilers it runs every pass (#345); without a sync, every host installed from
+  migrations keeps the old length, type or nullability in `EntityField`. After the entity's view
+  refresh, add the entity-scoped call:
+  `EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', @EntityIDs='<entity ID>', @IncludedSchemaNames='${flyway:defaultSchema}';`
+  Never the schema-wide form, and never `spDeleteUnneededEntityFields`: a shipped prune runs on
+  entities the migration never touched. In CI, `.github/scripts/check-migration-column-sync.mjs` fails a
+  new migration that alters a column without the scoped call, or that carries the schema-wide one.
+- **Known gap: CodeGen leaves regenerated CRUD procs out of the run log on a length-only change.** It
+  regenerates the procedures but writes nothing to `migrations/codegen/`, so the migration would ship
+  without them. Capture them with a temporary `forceRegeneration` block in `mj.config.cjs` (`enabled`,
+  `spUpdate`/`spCreate`, and an `entityWhereClause` naming that entity), copy the output into the
+  migration, and never commit the block.
 - `CONFIRM_DROP=<database> scripts/rebuild-db.sh` drops and rebuilds a local database from migrations:
   MJ core, then common, tasks, accounting, orders and contracts from sibling checkouts, then sales.
   It names the database to DESTROY; there is no default. It applies every migration as shipped and
@@ -265,7 +279,7 @@ while trusting things it does not:
 2. **`pnpm run test:money-gate`** — sales records intent; orders computes the number.
 3. **`pnpm run build`** — all turbo tasks including the Angular Explorer.
 4. **`pnpm run test:discount-gate`** — percent vs fraction, both directions.
-5. **`pnpm run test:validation-gate`** — pane attribution, and what blocks a save.
+5. **`pnpm run test:validation-gate`** — pane attribution, and no component writing a stage's defaults.
 6. **`python3 scripts/assert-no-comment-drift.py`** — a documented column that is not returned.
 7. **`npm run test:spec-gate`** — Playwright specs typecheck (it does NOT run them).
 8. **Unit tests**, guarded on any existing.

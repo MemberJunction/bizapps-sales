@@ -14,10 +14,10 @@
 import { ChangeDetectorRef, Component, ViewChild, ViewEncapsulation, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { BaseEntity, CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions, type RunViewParams } from '@memberjunction/core';
+import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions, type RunViewParams } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
-import { BaseFormPanel, BaseFormsModule, type FormContext, type FormNavigationEvent } from '@memberjunction/ng-base-forms';
+import { BaseFormPanel, BaseFormsModule, type FormContext } from '@memberjunction/ng-base-forms';
 import {
     EntityViewerModule,
     type AfterDataLoadEventArgs,
@@ -693,66 +693,6 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     }
 
     /**
-     * Hands a field's navigation request to the form, after making an inline create bind the key the
-     * new customer or contact was actually written under.
-     *
-     * ── WHY THE FIELD'S OWN BINDING IS NOT ENOUGH ON MJ 6.1.x (issue #202) ──────────────────────
-     *
-     * A party field's "Create new" footer opens the related entity's form and, on save, selects the
-     * record with `created.Get(<primary key>)`. `SalesAccount` and `SalesContact` are IsA children, and
-     * on MJ 6.1.x a create over GraphQL writes both rows under a key the SERVER mints while `Get('ID')`
-     * keeps returning the key the browser minted, which was never written. The deal is then bound to a
-     * customer that does not exist, and `DealEntityServer.missingPartyRefusal()` refuses the save.
-     * `PrimaryKey` reads the child's own key field, which the save response re-hydrates with the
-     * written value — the same read the deal workspace switched to for issue #188.
-     *
-     * Once MJ sends the key on an IsA create, both reads agree and the rebind is a no-op.
-     */
-    public OnFieldNavigate(event: FormNavigationEvent, fieldName: string): void {
-        if (event.Kind !== 'create-related' || !isCreatedPartyField(fieldName)) {
-            this.FormComponent.OnFormNavigate(event);
-            return;
-        }
-        const complete = event.Complete;
-        this.FormComponent.OnFormNavigate({
-            ...event,
-            Complete: (created: BaseEntity | null) => {
-                complete(created);
-                if (created) {
-                    this.bindWrittenPartyKey(fieldName, created);
-                }
-            },
-        });
-    }
-
-    /**
-     * Points the party field at the key the created record was written under, when the field's own
-     * binding chose a different one. An explicit switch, as in the workspace's `CreateRelated`, so this
-     * can only ever write the field the rep created from.
-     */
-    private bindWrittenPartyKey(fieldName: CreatedPartyField, created: BaseEntity): void {
-        const deal = this.Record;
-        const keyField = deal?.EntityInfo?.Fields?.find((f) => f.Name === fieldName)?.RelatedEntityFieldName;
-        const written = keyField ? created.PrimaryKey.GetValueByFieldName(keyField) : null;
-        if (!deal || written == null || written === '') {
-            return;
-        }
-        const id = String(written);
-        const differs = (current: string | null): boolean => current?.toLowerCase() !== id.toLowerCase();
-        switch (fieldName) {
-            case 'AccountID':
-                if (differs(deal.AccountID)) deal.AccountID = id;
-                break;
-            case 'PrimaryContactID':
-                if (differs(deal.PrimaryContactID)) deal.PrimaryContactID = id;
-                break;
-            case 'BillingContactID':
-                if (differs(deal.BillingContactID)) deal.BillingContactID = id;
-                break;
-        }
-    }
-
-    /**
      * Persist whatever the user has typed, so the reload that follows an operation cannot discard it.
      *
      * ── WHAT THIS FIXES (#73 review) ────────────────────────────────────────────────────────────
@@ -815,18 +755,6 @@ const CREATION_PARTY_FIELDS: readonly string[] = ['AccountID', 'PrimaryContactID
 
 /** The contact fields an account's defaults fill (#254), which the panels rebuild after a fill. */
 const CREATION_PARTY_CONTACT_FIELDS: readonly string[] = ['PrimaryContactID', 'BillingContactID'];
-
-/**
- * The deal's foreign keys whose related entity is an IsA child (`SalesAccount` extends Organization,
- * `SalesContact` extends Person), so an inline create through them needs the rebind in
- * `MJSDealFieldPanel.OnFieldNavigate`.
- */
-const CREATED_PARTY_FIELDS = ['AccountID', 'PrimaryContactID', 'BillingContactID'] as const;
-type CreatedPartyField = (typeof CREATED_PARTY_FIELDS)[number];
-
-function isCreatedPartyField(fieldName: string): fieldName is CreatedPartyField {
-    return (CREATED_PARTY_FIELDS as readonly string[]).includes(fieldName);
-}
 
 /**
  * The PIPELINE fields a rep chooses while creating, borrowed by the Overview the same way.
@@ -1574,7 +1502,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                            (ValueChange)="OnFieldValueChange($event)" (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
+                            (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                         <!-- What a save will write here from the stage just picked (sales#247). Text
                              only: the server stays the one writer of these two fields. -->
                         @if (EditMode && StageMoveHint(f.name); as hint) {
@@ -1923,14 +1851,11 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     }
 
     /**
-     * Choosing a pipeline also chooses which stages exist, so it cannot be a plain field binding —
-     * the same sentence `deal-workspace.component.ts` carries above `SelectPipeline`, and the reason
-     * the form had this bug while the workspace did not.
+     * Choosing a pipeline also chooses which stages exist, so it cannot be a plain field binding.
      *
-     * `CompanyID` is NOT set here, unlike the workspace's version. `DealEntityServer` forces it from
-     * the pipeline on every save, ignoring whatever a caller supplies, so writing it here would be
-     * stating something this form has no standing to know. The workspace sets it only so its own
-     * header can display it before the round trip.
+     * `CompanyID` is NOT set here. `DealEntityServer` forces it from the pipeline on every save,
+     * ignoring whatever a caller supplies, so writing it here would be stating something this form has
+     * no standing to know.
      */
     public SetPipeline(pipelineID: string | null): void {
         if (!this.Record) return;
@@ -2417,7 +2342,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                            (ValueChange)="OnFieldValueChange($event)" (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
+                            (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
                 @if (AccountDefaultsError()) {
@@ -2511,7 +2436,7 @@ const COMMERCIAL_FIELDS: DealFieldSpec[] = [
                         } @else {
                             <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                                (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
+                                (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                         }
                     </div>
                 }
@@ -2729,7 +2654,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FieldFormContext(f)" [LinkType]="f.link ?? 'None'"
-                            (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
+                            (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
             </div>
@@ -2933,7 +2858,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                            (Navigate)="OnFieldNavigate($event, f.name)"></mj-form-field>
+                            (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
             </div>

@@ -29,6 +29,21 @@
 -- DATE DIMENSION: RecordChange.ChangedAt — when the slip was RECORDED, which is the only date that
 -- answers "how much slipped this month". The dates being moved FROM and TO are reported as values.
 --
+-- THE PERIOD IS IN BUSINESS DAYS (#289). ChangedAt is a DATETIMEOFFSET and PeriodStart/PeriodEnd are
+-- date-only, so comparing them directly put both bounds at UTC midnight: a slip recorded on the last
+-- evening of the period (after 6 PM Central, 7 PM in daylight time) fell out, and one from the evening
+-- before the period fell in. Each bound is now judged on `[__mj_BizAppsCommon].[fnBusinessDayOf]()`,
+-- the business day of the instant — a function, not an inline `AT TIME ZONE`, which MJ's SQL parser
+-- cannot read (see deal-cycle-time.sql). The padded UTC range beside it (a day before the start, two
+-- after the end) is wider than any zone offset and only lets an index on ChangedAt narrow the scan.
+--
+-- EVERY JSON_VALUE SITS INSIDE `CASE WHEN ISJSON(...) = 1`. SQL Server does not evaluate a WHERE
+-- clause left to right: the plan may run JSON_VALUE before the ISJSON test or the join to Deals has
+-- removed a row. RecordChange holds ChangesJSON that is not JSON — MJ core's own migrations leave
+-- entries cut off at 4,000 characters, and orders writes some too — and one such row anywhere in the
+-- table failed the whole query with Msg 13609. A CASE is evaluated in order, so the guard holds
+-- whatever plan is chosen.
+--
 -- POSITIVE DAYS = SLIPPED LATER, which is the case people mean. A negative figure is a deal PULLED
 -- FORWARD and is kept rather than filtered, because a report that only ever shows bad news is one
 -- people learn to discount.
@@ -51,20 +66,25 @@ WITH slips AS (
          */
         TRY_CONVERT(UNIQUEIDENTIFIER, SUBSTRING(rc.RecordID, CHARINDEX('|', rc.RecordID) + 1, 36)) AS DealID,
         rc.ChangedAt,
-        TRY_CONVERT(DATE, JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.oldValue')) AS FromDate,
-        TRY_CONVERT(DATE, JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.newValue')) AS ToDate
+        TRY_CONVERT(DATE, CASE WHEN ISJSON(rc.ChangesJSON) = 1
+                               THEN JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.oldValue') END) AS FromDate,
+        TRY_CONVERT(DATE, CASE WHEN ISJSON(rc.ChangesJSON) = 1
+                               THEN JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.newValue') END) AS ToDate
     FROM [__mj].RecordChange rc
     INNER JOIN [__mj].Entity e
             ON e.ID = rc.EntityID
            AND e.Name = 'MJ_BizApps_Sales: Deals'
     WHERE rc.Type = 'Update'
       AND ISJSON(rc.ChangesJSON) = 1
-      AND JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.field') IS NOT NULL
+      AND CASE WHEN ISJSON(rc.ChangesJSON) = 1
+               THEN JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.field') END IS NOT NULL
       {% if PeriodStart %}
-      AND rc.ChangedAt >= {{ PeriodStart | sqlString }}
+      AND rc.ChangedAt >= DATEADD(day, -1, {{ PeriodStart | sqlString }})
+      AND [__mj_BizAppsCommon].[fnBusinessDayOf](rc.ChangedAt) >= {{ PeriodStart | sqlString }}
       {% endif %}
       {% if PeriodEnd %}
-      AND rc.ChangedAt <= {{ PeriodEnd | sqlString }}
+      AND rc.ChangedAt < DATEADD(day, 2, {{ PeriodEnd | sqlString }})
+      AND [__mj_BizAppsCommon].[fnBusinessDayOf](rc.ChangedAt) <= {{ PeriodEnd | sqlString }}
       {% endif %}
 )
 SELECT

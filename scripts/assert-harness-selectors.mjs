@@ -23,8 +23,9 @@
  * Computed to a fixpoint, so a component used only by a dead one is dead too. A hand-kept list of dead
  * components would be right until the next removal, which is the failure this gate exists to catch.
  *
- * Declarations in a dead component's files do not count. The workspace's own templates still declare
- * `close-open` and `.dw-field`; counting them would certify the exact references that broke.
+ * Declarations in a dead component's files do not count. The deal workspace's templates (deleted in
+ * #291) declared `close-open` and `.dw-field`; counting them would have certified the exact references
+ * that broke.
  *
  * Comments in harness files are stripped before scanning, so prose about the removed UI is allowed.
  *

@@ -15,17 +15,13 @@
  *
  * ── WHY IT IS BUILT HERE RATHER THAN REUSED ─────────────────────────────────────────────────────
  *
- * `deal-form.component.ts` opens by saying composing a deal is the deal WORKSPACE's job and that
- * duplicating it here would give us two surfaces that must agree forever. That reasoning was right when
- * it was written and no longer applies: commit `9d6ef9e` ("Replace the in-rail deal workspace with
- * Explorer OpenEntityRecord") unmounted `mjs-deal-workspace`, and nothing has rendered it since —
- * the selector appears in no template anywhere in the repo. So its line editor, and with it D-DL2's
- * guarantee, has been unreachable code since 2026-08-31, and the deal FORM is the only live surface.
+ * Lines used to be composed in the deal workspace. Commit `9d6ef9e` ("Replace the in-rail deal
+ * workspace with Explorer OpenEntityRecord") unmounted it, and it was later deleted (#291), so the deal
+ * FORM is the only surface that edits lines.
  *
- * There is therefore no second surface to disagree with. What this must not do is re-derive the RULES,
- * and it does not: product eligibility, the percent/fraction discount conversion and the term-start
- * question all come from `@mj-biz-apps/sales-entities`, the same helpers the workspace called. Only the
- * markup is new.
+ * What this must not do is re-derive the RULES, and it does not: product eligibility, the
+ * percent/fraction discount conversion and the term-start question all come from
+ * `@mj-biz-apps/sales-entities`. Only the markup is local.
  *
  * ── WHAT IT DELIBERATELY DOES NOT OFFER ─────────────────────────────────────────────────────────
  *
@@ -1329,8 +1325,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
      *
      * THIS BECAME POSSIBLE ONLY RECENTLY. Orders did not drain `Lines.Removed` at all, so a removal was
      * silently dropped and then, once it started refusing, cost the rep every other edit staged beside
-     * it. Sales carried a blanket refusal for that (`ShouldRefuseLineRemoval`, still in the unmounted
-     * workspace). The orders fix landed with golive#187, and `save-deal.SD6` is the tripwire that said
+     * it. Sales carried a blanket refusal for that (`ShouldRefuseLineRemoval`, deleted with the deal
+     * workspace in #291). The orders fix landed with golive#187, and `save-deal.SD6` is the tripwire that said
      * so.
      *
      * It emits `Saved` rather than a removal-specific event: what the panel has to do afterwards is
