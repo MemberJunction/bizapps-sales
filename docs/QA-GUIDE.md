@@ -62,9 +62,9 @@ exist" on core metadata, which reads like a broken migration rather than a versi
 If sales' `.env` carries `GRAPHQL_PORT=4141`, ignore it: sales ships no API, and the API you connect to
 is the host's.
 
-`MJ_BASE_ENCRYPTION_KEY` is not set in local dev. You will see a boxed
-`ENCRYPTION KEY VALIDATION FAILED` warning at API and test startup. It is **expected and non-fatal** —
-nothing in sales uses an encrypted field. Ignore it.
+Set `MJ_BASE_ENCRYPTION_KEY` in `.env` (`openssl rand -base64 32`; see `.env.example`). Without it you
+see a boxed `ENCRYPTION KEY VALIDATION FAILED` warning at API and test startup. It is non-fatal:
+nothing in sales uses an encrypted field.
 
 ### Servers, ports and login
 
@@ -318,7 +318,7 @@ the screen disagree, the spec is the reference.
 7. **The dashboard does not re-query when you navigate back to it.** Close a deal, return to Dashboard,
    and the tiles still show the pre-close numbers. **Press refresh (top right)** and they correct — the
    close did happen, only the reading is old.
-8. **The encryption-key warning at startup** is expected (§2).
+8. **The encryption-key warning at startup** means `MJ_BASE_ENCRYPTION_KEY` is unset (§2).
 9. **`ForecastSnapshot` columns are `*Amount`-suffixed** (`CommitAmount`, not `Commit`) — `COMMIT` is
    reserved in T-SQL and Postgres (D6).
 10. **The Playwright specs run slowly** against a development-mode Explorer: the suite takes about 34
