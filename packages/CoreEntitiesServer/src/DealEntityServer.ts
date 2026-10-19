@@ -618,7 +618,7 @@ export class DealEntityServer extends DealEntity {
          * after its order existed kept billing the old person. Not on a locked deal: a closed deal's
          * order is the record of what was sold, and the close lock already refuses these fields there.
          */
-        const orderBillTo = this._lockedAtSave ? null : this.planOrderBillTo();
+        const orderBillTo = this.planOrderBillTo();
 
         /**
          * AND WHAT IT OWES THE APPEND-ONLY LOG — snapshotted here, for the same reason.
@@ -1101,24 +1101,7 @@ export class DealEntityServer extends DealEntity {
             if (work.needsStatusDefault && !this.DealStatusTypeID) {
                 this.DealStatusTypeID = await this.defaultOpeningStatusID();
             }
-            /**
-             * The delta, not the total: a refusal RECORDED BY THIS SAVE is what tells the recovery to
-             * stand down. Comparing against zero would also catch a warning left by an earlier save on
-             * the same entity instance.
-             */
-            /**
-             * BEFORE the stage's order status: a stage that confirms the order books it, and a booked
-             * order refuses a bill-to change, so the party has to be in place first or the order books
-             * against the person the deal just stopped billing.
-             */
-            if (work.orderBillTo) {
-                await this.applyOrderBillTo(work.orderBillTo);
-            }
-            const warningsBeforePlan = this.OrderStatusWarnings.length;
-            if (work.stageOrder) {
-                await this.applyStageOrderStatus(work.stageOrder);
-            }
-            await this.recoverOrderOnReopen(this.OrderStatusWarnings.length > warningsBeforePlan);
+            await this.applyOrderWork(work.orderBillTo, work.stageOrder);
 
             const saved = await super.Save(options);
             if (!saved) {
@@ -1879,6 +1862,29 @@ export class DealEntityServer extends DealEntity {
     }
 
     /**
+     * What this save asks of the deal's order, in the order it has to happen.
+     *
+     * The bill-to goes BEFORE the stage's order status: a stage that confirms the order books it, and a
+     * booked order refuses a bill-to change, so the party has to be in place first or the order books
+     * against the person the deal just stopped billing (#319).
+     */
+    private async applyOrderWork(orderBillTo: OrderBillToPlan | null, stageOrder: StageOrderPlan | null): Promise<void> {
+        if (orderBillTo) {
+            await this.applyOrderBillTo(orderBillTo);
+        }
+        /**
+         * The delta, not the total: a refusal RECORDED BY THIS SAVE is what tells the recovery to stand
+         * down. Comparing against zero would also catch a warning left by an earlier save on the same
+         * entity instance.
+         */
+        const warningsBeforePlan = this.OrderStatusWarnings.length;
+        if (stageOrder) {
+            await this.applyStageOrderStatus(stageOrder);
+        }
+        await this.recoverOrderOnReopen(this.OrderStatusWarnings.length > warningsBeforePlan);
+    }
+
+    /**
      * Applies the plan to the deal's order, and NEVER lets a refusal reach the caller as a failure.
      *
      * ── WHY THE TRANSITION IS CHECKED BEFORE IT IS ATTEMPTED ──
@@ -1972,9 +1978,10 @@ export class DealEntityServer extends DealEntity {
      * every save that does not touch these three fields.
      *
      * Only an existing deal with an order: a new deal's order is provisioned from the current values.
+     * Never on a locked deal: a closed deal's order is the record of what was sold.
      */
     private planOrderBillTo(): OrderBillToPlan | null {
-        if (!this.IsSaved || !this.OrderID) {
+        if (this._lockedAtSave || !this.IsSaved || !this.OrderID) {
             return null;
         }
         const previous = (field: string): string | null =>
