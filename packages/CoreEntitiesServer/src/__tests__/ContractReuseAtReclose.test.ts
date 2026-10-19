@@ -10,6 +10,7 @@
  * is `close-won-contract.CT9`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 import type {
     ContractsCreateFromDealSeamInput,
     ContractsSeamResult,
@@ -323,5 +324,82 @@ describe('the first close Won creates the contract', () => {
         expect(r.plan.Executed).toBe(true);
         expect(r.plan.RecordID).toBe('NEW-CONTRACT');
         expect(r.issues).toEqual([]);
+    });
+});
+
+/**
+ * The unreadable-contract refusal, through `InternalExecute` rather than the route alone.
+ *
+ * The route test above shows `CloseRefusal` leaves `execute`; what makes the close all-or-none is the
+ * catch in `InternalExecute` that rolls the transaction back before turning the refusal into an issue.
+ * Every database read is stubbed at the operation's private seams, the same way
+ * `CloseDateBusinessDay.test.ts` drives a won close. The close against a database is `CT9`.
+ */
+describe('Sales.CloseDeal rolls back a close refused over an unreadable contract', () => {
+    const WON = { ID: 'won', IsWon: true, IsLost: false, IsClosed: true, LocksDeal: true };
+
+    afterEach(() => {
+        ResetDownstreamSeam();
+        vi.restoreAllMocks();
+    });
+
+    async function closeThroughOperation() {
+        const calls: string[] = [];
+        const seam = new FakeSeam({ Success: false, Unreadable: true, Message: 'contract could not be read' });
+        SetDownstreamSeam(seam);
+        vi.spyOn(BusinessTimeZoneEngine.prototype, 'Config').mockResolvedValue(undefined);
+
+        const deal: Record<string, unknown> = {
+            ID: 'deal-1',
+            ContractID: CONTRACT_ID,
+            CompanyID: 'company-1',
+            AccountID: 'account-1',
+            DealStatusTypeID: null,
+            Load: async () => true,
+            Save: async () => {
+                calls.push('Save');
+                return true;
+            },
+            BeginClose: async <T>(body: () => Promise<T>): Promise<T> => body(),
+        };
+        const provider = {
+            GetEntityObject: async () => deal,
+            BeginTransaction: async () => { calls.push('BeginTransaction'); },
+            CommitTransaction: async () => { calls.push('CommitTransaction'); },
+            RollbackTransaction: async () => { calls.push('RollbackTransaction'); },
+        };
+
+        const op = new CloseDealOperation() as unknown as Record<string, unknown> & {
+            InternalExecute(
+                input: unknown,
+                provider: unknown,
+                user: unknown,
+            ): Promise<{ Success: boolean; Issues: SalesCloseIssue[] }>;
+        };
+        op.loadStatusFlags = async () => WON;
+        op.validate = async () => ({ Issues: [], LossReasonName: null, RenewalNextTerm: [] });
+        op.resolvePolicy = async () => ({ CreateContract: true });
+        op.planRouting = async () => [{ Target: 'Contract', Planned: true, Executed: false, LineCount: 0 }];
+        op.resolveClosing = async () => ({ StageID: null, Probability: 100, ForecastCategoryTypeID: null, Issues: [] });
+
+        const result = await op.InternalExecute({ DealID: 'deal-1', DealStatusTypeID: WON.ID }, provider, USER);
+        return { calls, seam, deal, result };
+    }
+
+    it('rolls the transaction back and never commits or saves the deal', async () => {
+        const r = await closeThroughOperation();
+
+        expect(r.calls).toEqual(['BeginTransaction', 'RollbackTransaction']);
+        expect(r.seam.Calls, 'no second contract may be created in its place').toEqual(['Update']);
+        expect(r.deal.ContractID).toBe(CONTRACT_ID);
+    });
+
+    it("reports the refusal as the contract's error, not as 'the deal could not be closed'", async () => {
+        const r = await closeThroughOperation();
+
+        expect(r.result.Success).toBe(false);
+        expect(r.result.Issues).toEqual([
+            expect.objectContaining({ Field: 'ContractID', Severity: 'error', Message: 'contract could not be read' }),
+        ]);
     });
 });
