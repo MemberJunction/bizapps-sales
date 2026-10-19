@@ -216,7 +216,8 @@ the thing it names is broken?"** The incidents behind rules 5–8: `docs/history
   refresh, add the entity-scoped call:
   `EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', @EntityIDs='<entity ID>', @IncludedSchemaNames='${flyway:defaultSchema}';`
   Never the schema-wide form, and never `spDeleteUnneededEntityFields`: a shipped prune runs on
-  entities the migration never touched.
+  entities the migration never touched. In CI, `.github/scripts/check-migration-column-sync.mjs` fails a
+  new migration that alters a column without the scoped call, or that carries the schema-wide one.
 - **Known gap: CodeGen leaves regenerated CRUD procs out of the run log on a length-only change.** It
   regenerates the procedures but writes nothing to `migrations/codegen/`, so the migration would ship
   without them. Capture them with a temporary `forceRegeneration` block in `mj.config.cjs` (`enabled`,
