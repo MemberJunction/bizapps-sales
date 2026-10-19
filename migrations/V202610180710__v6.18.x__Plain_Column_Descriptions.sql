@@ -23,6 +23,13 @@
 --     estimate stored as an exact figure later gets treated as fact.
 --   * ForecastSnapshot.CommitAmount is not named Commit because COMMIT is
 --     reserved in T-SQL and PostgreSQL.
+--   * Deal.PaymentMethod is a label only; no code may branch on it. Payment
+--     method becomes orders' vocabulary when code needs it, not a copy here.
+--   * Deal.StandardAgreementModified is not derived from ContractVariances: an
+--     empty variances field means nothing was written down, not that nothing
+--     was negotiated (also in downstream-seams.ts).
+-- DealPaymentSchedule.DisplayOrder's old text said the server re-sequences it on
+-- every save; no code does, so that claim is dropped rather than kept.
 --
 -- Every property updated here already exists, so each call is an update.
 -- EntityField.Description and Entity.Description follow on the next CodeGen run

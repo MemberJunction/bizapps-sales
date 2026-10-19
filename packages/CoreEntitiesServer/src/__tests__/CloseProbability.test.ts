@@ -237,3 +237,25 @@ describe('reopenLanding: where a reopened deal goes', () => {
         expect(op.reopenLanding(null, { FromStageID: 'SIGNED' }, 'signed').StageMoves).toBe(false);
     });
 });
+
+describe('reopenProbability: the probability a reopened deal takes', () => {
+    type Restorer = {
+        reopenProbability(
+            undone: { ProbabilityAtTransition: number | null } | null,
+            currentProbability: number | null,
+        ): number | null;
+    };
+    const op = Object.create(ReopenDealOperation.prototype) as Restorer;
+
+    it('restores the probability the close event stamped', () => {
+        expect(op.reopenProbability({ ProbabilityAtTransition: 40 }, 100)).toBe(40);
+    });
+
+    it('goes back to no probability when the deal had none before the close', () => {
+        expect(op.reopenProbability({ ProbabilityAtTransition: null }, 100)).toBeNull();
+    });
+
+    it('keeps the current probability when no close event was found', () => {
+        expect(op.reopenProbability(null, 100)).toBe(100);
+    });
+});
