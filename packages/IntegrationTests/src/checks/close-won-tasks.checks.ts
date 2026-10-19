@@ -23,6 +23,7 @@ import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '
 import {
     CloseWonTaskService,
     CloseDealOperation,
+    NO_ORDER_ISSUE_PREFIX,
     ResolveTaskTypeColumn,
     type CloseWonTaskInput,
 } from '@mj-biz-apps/sales-core-entities-server';
@@ -847,11 +848,14 @@ export const CloseWonTasksChecks: SalesCheck[] = [
                 const contractTasks = await rows(ctx, E_TASK, `TypeID = '${ID_CONTRACT_PROCESSING}'`);
                 Assert(contractTasks.length >= 1, 'a contract-creating policy must also raise the contract task');
 
-                // Fully configured means nothing to complain about.
+                // Fully configured means nothing to complain about. An `info` note is not a complaint:
+                // a contracts release without order links reports the pending link that way on every
+                // won close, and that says nothing about the tasks this check is for.
+                const problems = out!.Issues.filter((i) => i.Severity !== 'info');
                 AssertEqual(
-                    out!.Issues.length,
+                    problems.length,
                     0,
-                    `a fully configured close should report no issues — got ${JSON.stringify(out!.Issues)}`,
+                    `a fully configured close should report no errors or warnings — got ${JSON.stringify(problems)}`,
                 );
             }),
     },
@@ -1020,8 +1024,13 @@ export const CloseWonTasksChecks: SalesCheck[] = [
                  * half that lied: a close that reports "no order" while creating one is worse than a
                  * close that quietly does nothing, since the message sends whoever reads it looking in
                  * the wrong place.
+                 *
+                 * Matched on the task service's own wording, imported so a rewording cannot leave this
+                 * filter matching nothing. A bare "has no order" also matches the pending contract-link
+                 * note ("…has no order links yet"), which a won close reports on any contracts release
+                 * without order links.
                  */
-                const noOrderWarnings = out.Issues.filter((i) => /has no order/i.test(i.Message ?? ''));
+                const noOrderWarnings = out.Issues.filter((i) => (i.Message ?? '').startsWith(NO_ORDER_ISSUE_PREFIX));
                 AssertEqual(
                     noOrderWarnings.length,
                     0,

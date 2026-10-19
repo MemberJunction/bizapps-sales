@@ -113,6 +113,7 @@ export type {
  */
 export * from './DealLockOrderLineVeto.js';
 export * from './DealNotWonConfirmVeto.js';
+export * from './DealOrderLink.js';
 export * from './forecast/ForecastSource.js';
 export * from './forecast/FixtureForecastSource.js';
 export * from './forecast/QueryForecastSource.js';

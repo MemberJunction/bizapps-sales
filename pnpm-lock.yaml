@@ -287,11 +287,11 @@ importers:
         specifier: 5.30.0
         version: 5.30.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
       '@mj-biz-apps/tasks-core':
-        specifier: 1.4.1
-        version: 1.4.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+        specifier: 1.7.0
+        version: 1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
       '@mj-biz-apps/tasks-entities':
-        specifier: 1.4.1
-        version: 1.4.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+        specifier: 1.7.0
+        version: 1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
@@ -354,9 +354,36 @@ importers:
         specifier: ^6.17.0
         version: link:../Server
     devDependencies:
+      '@mj-biz-apps/accounting-core-entities-server':
+        specifier: '>=0.22.0 <1.0.0'
+        version: 0.22.0(@memberjunction/actions@6.1.6)(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/generic-database-provider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@memberjunction/global@6.1.6)(@memberjunction/integration-engine@6.1.6)(@memberjunction/sqlserver-dataprovider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))(@mj-biz-apps/tasks-core@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))(@mj-biz-apps/tasks-entities@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/accounting-engine-base':
+        specifier: '>=0.22.0 <1.0.0'
+        version: 0.22.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/accounting-entities':
+        specifier: '>=0.22.0 <1.0.0'
+        version: 0.22.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/accounting-server':
+        specifier: 0.22.0
+        version: 0.22.0(e48d4c82f835045417f05f88eefc9653)
+      '@mj-biz-apps/common-server':
+        specifier: 5.50.1
+        version: 5.50.1(2bd90c28cede099abe45431dc88a851c)
+      '@mj-biz-apps/contracts-core-entities-server':
+        specifier: '>=0.7.3 <1.0.0'
+        version: 0.7.3(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@memberjunction/sqlserver-dataprovider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))
+      '@mj-biz-apps/contracts-entities':
+        specifier: '>=0.7.3 <1.0.0'
+        version: 0.7.3(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/orders-core-entities-server':
+        specifier: ^5.30.0
+        version: 5.30.0(254382dc9818e40eb1e813da300becc1)
+      '@mj-biz-apps/orders-server':
+        specifier: 5.30.0
+        version: 5.30.0(fa81ce2be049a0e62199ccfad527a851)
       '@mj-biz-apps/tasks-entities':
-        specifier: ^1.4.1
-        version: 1.4.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+        specifier: ^1.7.0
+        version: 1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
@@ -415,6 +442,7 @@ packages:
   '@angular/animations@21.1.3':
     resolution: {integrity: sha512-UADMncDd9lkmIT1NPVFcufyP5gJHMPzxNaQpojiGrxT1aT8Du30mao0KSrB4aTwcicv6/cdD5bZbIyg+FL6LkQ==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
+    deprecated: '@angular/animations is deprecated. Use `animate.enter` and `animate.leave` instead. For more information see: https://v22.angular.dev/guide/animations.'
     peerDependencies:
       '@angular/core': 21.1.3
 
@@ -2776,6 +2804,34 @@ packages:
   '@mixmark-io/domino@2.2.0':
     resolution: {integrity: sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==}
 
+  '@mj-biz-apps/accounting-actions@0.22.0':
+    resolution: {integrity: sha512-zyfZm1D5CeMrZcWXCenayn85BgFvzwH3YMMeiOytFhsZhwWiAUsICZDphi5tJNUVQlvA2+3fa6CzqUSWy+6dOQ==}
+    peerDependencies:
+      '@memberjunction/actions': ^6.1.5
+      '@memberjunction/actions-base': ^6.1.5
+      '@memberjunction/actions-bizapps-accounting': ^6.1.5
+      '@memberjunction/ai': ^6.1.5
+      '@memberjunction/aiengine': ^6.1.5
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/core-entities': ^6.1.5
+      '@memberjunction/core-entities-server': ^6.1.5
+      '@memberjunction/global': ^6.1.6
+      '@mj-biz-apps/common-entities': ^5.50.1
+
+  '@mj-biz-apps/accounting-core-entities-server@0.22.0':
+    resolution: {integrity: sha512-xcbz+9zEHIznYMSyKqmL+zd5AyusmOsCW+fyZmrngyLf0QG+d7QYHXHjyjDgoDeNGdv8CvKCEZEVhHcdOhzL5w==}
+    peerDependencies:
+      '@memberjunction/actions': ^6.1.5
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/core-entities': ^6.1.5
+      '@memberjunction/generic-database-provider': ^6.1.5
+      '@memberjunction/global': ^6.1.6
+      '@memberjunction/integration-engine': ^6.1.5
+      '@memberjunction/sqlserver-dataprovider': ^6.1.5
+      '@mj-biz-apps/common-entities': ^5.50.1
+      '@mj-biz-apps/tasks-core': ^1.4.1
+      '@mj-biz-apps/tasks-entities': ^1.4.1
+
   '@mj-biz-apps/accounting-engine-base@0.22.0':
     resolution: {integrity: sha512-Dq6ZLRO81NyAfsS6gmOS5/IkRY6OuQUT+Ufwh1u0nBR/5WJxy4dZWT96jFbDTr49E7pCI4v84nYUrxBugmmvcQ==}
     peerDependencies:
@@ -2814,12 +2870,42 @@ packages:
       '@mj-biz-apps/common-ng': ^5.50.1
       rxjs: ^7.8.2
 
+  '@mj-biz-apps/accounting-server@0.22.0':
+    resolution: {integrity: sha512-EEmo0G96MaasaKvUVv7mkhSlRS6JFlNDc1YOSjN9OACCAaL/qIdWPHD9KuJawTyKdqkpLF93ohO7bWBPKPraPw==}
+    peerDependencies:
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/global': ^6.1.6
+      '@memberjunction/server': ^6.1.5
+      '@memberjunction/sqlserver-dataprovider': ^6.1.5
+      '@mj-biz-apps/common-entities': ^5.50.1
+      '@mj-biz-apps/common-server': ^5.50.2
+
+  '@mj-biz-apps/common-actions@5.50.1':
+    resolution: {integrity: sha512-wJsifOXxG4avH9VjHvLXfWKAAwjIHbrIsTB+vgVlVJUFRBAyeJwHpzWaurdnifIGpGHG/EC350+nd+cs6Hib5g==}
+    peerDependencies:
+      '@memberjunction/actions': ^6.1.0-edge.6
+      '@memberjunction/actions-base': ^6.1.0-edge.6
+      '@memberjunction/ai': ^6.1.0-edge.6
+      '@memberjunction/aiengine': ^6.1.0-edge.6
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/core-entities': ^6.1.0-edge.6
+      '@memberjunction/core-entities-server': ^6.1.0-edge.6
+      '@memberjunction/global': ^6.1.6
+
   '@mj-biz-apps/common-activity-sync@5.50.1':
     resolution: {integrity: sha512-EjN6wTxX6gmX/X/ip38j18watwghL7FFuGXxpNalKdSL2dbMuQGXOFK7HJpv8fGIkwlu93HeZxG5GWBlNxawsA==}
     peerDependencies:
       '@memberjunction/communication-types': ^6.1.0-edge.6
       '@memberjunction/core': ^6.1.6
       '@memberjunction/credentials': ^6.1.0-edge.6
+      '@memberjunction/global': ^6.1.6
+
+  '@mj-biz-apps/common-core-entities-server@5.50.1':
+    resolution: {integrity: sha512-tMjm/qHANGgf/zcOvfTqTltOTquRJXKAYYv45o5f+z0fOXeOv7lUhutPLrBw4vczCYYjqoEe4qVNdD2+NToBtg==}
+    peerDependencies:
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/core-entities': ^6.1.0-edge.6
+      '@memberjunction/generic-database-provider': ^6.1.0-edge.6
       '@memberjunction/global': ^6.1.6
 
   '@mj-biz-apps/common-entities@5.50.1':
@@ -2847,6 +2933,66 @@ packages:
       '@memberjunction/ng-link-directives': ^6.1.0-edge.6
       '@memberjunction/ng-shared': ^6.1.0-edge.6
       '@memberjunction/ng-ui-components': ^6.1.0-edge.6
+
+  '@mj-biz-apps/common-server@5.50.1':
+    resolution: {integrity: sha512-3AQlnDKH9/iXuZ3d1/UuMFjAFr+kKsHGgGcWBHxU0VW46fktRUKaK88d7K8WXJ7JjZyxL2c5KfRRfTlO+lxsSw==}
+    peerDependencies:
+      '@memberjunction/actions': ^6.1.0-edge.6
+      '@memberjunction/actions-base': ^6.1.0-edge.6
+      '@memberjunction/communication-types': ^6.1.0-edge.6
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/core-entities': ^6.1.0-edge.6
+      '@memberjunction/credentials': ^6.1.0-edge.6
+      '@memberjunction/encryption': ^6.1.0-edge.6
+      '@memberjunction/global': ^6.1.6
+      '@memberjunction/server': ^6.1.0-edge.6
+      '@memberjunction/sqlserver-dataprovider': ^6.1.0-edge.6
+
+  '@mj-biz-apps/contracts-core-entities-server@0.7.3':
+    resolution: {integrity: sha512-O+5jo+elbLBrBYtq1gkLYItR9fIchWqdi8X9gkMHwBytcl/JKpyzD1+RHAOFD4GBcEFamSSz/lHLgGujFAEiug==}
+    peerDependencies:
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/core-entities': ^6.1.5
+      '@memberjunction/global': ^6.1.6
+      '@memberjunction/sqlserver-dataprovider': ^6.1.5
+
+  '@mj-biz-apps/contracts-entities@0.7.3':
+    resolution: {integrity: sha512-0upMsMmredfq5jXeQ5oAldcmWmdUVWpCNW0kMzZZnkMjVfYOMm/TJacyrI6TfLKdmt63P1q7bsP3KYMP0WcncQ==}
+    peerDependencies:
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/global': ^6.1.6
+
+  '@mj-biz-apps/orders-actions@5.30.0':
+    resolution: {integrity: sha512-EM6TibGCKpHgJt4jygc7kiAg9h3wZckw6GH+OxonsXojyYqtl/932j+jEZoTPgFF6BRFyoXRc8SfBcyVMtqIbg==}
+    peerDependencies:
+      '@memberjunction/actions': ^6.1.5
+      '@memberjunction/actions-base': ^6.1.5
+      '@memberjunction/ai': ^6.1.5
+      '@memberjunction/aiengine': ^6.1.5
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/core-entities': ^6.1.5
+      '@memberjunction/core-entities-server': ^6.1.5
+      '@memberjunction/global': ^6.1.6
+      '@memberjunction/templates': ^6.1.5
+
+  '@mj-biz-apps/orders-core-entities-server@5.30.0':
+    resolution: {integrity: sha512-mJ0nGcKS/NXNTr9bRGbZHFYG0DNnz5dNb8tNHI/JtJ4wxyqRp1S+Vzk3wcn7ZwPQ9aGyWaUkjhXZrI90vnkTNw==}
+    peerDependencies:
+      '@memberjunction/communication-engine': ^6.1.5
+      '@memberjunction/communication-types': ^6.1.5
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/core-entities': ^6.1.5
+      '@memberjunction/core-entities-server': ^6.1.5
+      '@memberjunction/generic-database-provider': ^6.1.5
+      '@memberjunction/global': ^6.1.6
+      '@memberjunction/integration-engine': ^6.1.5
+      '@memberjunction/integration-engine-base': ^6.1.5
+      '@memberjunction/sqlserver-dataprovider': ^6.1.5
+      '@mj-biz-apps/accounting-core-entities-server': '>=0.21.0'
+      '@mj-biz-apps/accounting-engine-base': '>=0.21.0'
+      '@mj-biz-apps/common-entities': ^5.50.1
+      '@mj-biz-apps/tasks-core': '>=1.4.1'
+      '@mj-biz-apps/tasks-entities': '>=1.4.1 <2.0.0'
 
   '@mj-biz-apps/orders-entities@5.30.0':
     resolution: {integrity: sha512-gXaBOYU3yRnGw3qBkEzgWENAmGWlWnZQoya1gye4MP8CxirO8qIj5tn3W9bLxKLb1HJ2ej1Y5qKTfUpQ0OQ2CQ==}
@@ -2884,14 +3030,29 @@ packages:
       '@mj-biz-apps/common-ng': ^5.50.1
       zone.js: ^0.16.0
 
-  '@mj-biz-apps/tasks-core@1.4.1':
-    resolution: {integrity: sha512-rX2Uivq33HhxwybkyJwYk6T4HX2fNkGSggTADL9h8KXcHCAxL6UnWq63ePPC+nTPj1UnfGwJRPe90+7Pcx8qpA==}
+  '@mj-biz-apps/orders-server@5.30.0':
+    resolution: {integrity: sha512-7sux8b02hAv8HluMUM6HT2dy8OrnLkn5A1uEGwPGrW6R+bx4wi2aWdQ69bgh+CEiwRB/8d4N70inHADfFqZOhg==}
+    peerDependencies:
+      '@memberjunction/actions': ^6.1.5
+      '@memberjunction/actions-base': ^6.1.5
+      '@memberjunction/core': ^6.1.6
+      '@memberjunction/generic-database-provider': ^6.1.5
+      '@memberjunction/global': ^6.1.6
+      '@memberjunction/server': ^6.1.5
+      '@memberjunction/server-extensions-core': ^6.1.5
+      '@memberjunction/templates': ^6.1.5
+      '@mj-biz-apps/accounting-engine-base': '>=0.21.0'
+      '@mj-biz-apps/accounting-entities': '>=0.21.0'
+      '@mj-biz-apps/accounting-server': '>=0.21.0'
+
+  '@mj-biz-apps/tasks-core@1.7.0':
+    resolution: {integrity: sha512-74wxSvCHa7hnGiFW/8moyNymVb6ORrLYxtWLt9oZUGcs5Cs2PhvHFZcnVvtyBvIlV8LrtMdu9BlBvnnbi1aoQA==}
     peerDependencies:
       '@memberjunction/core': ^6.1.6
       '@memberjunction/global': ^6.1.6
 
-  '@mj-biz-apps/tasks-entities@1.4.1':
-    resolution: {integrity: sha512-eAJZVolAR8JcCX/BUlicdCRXVejr2blQT3rrA7NQBM+hM4DDiNYrnlY9i5LfCseD2T0lR0i/b06+O+UeIwwXpQ==}
+  '@mj-biz-apps/tasks-entities@1.7.0':
+    resolution: {integrity: sha512-OT07HX+4XdDx2vb1VSJaRaOzuER34Jw6xjWnUH0bTCsgchmPr9HMTSwv/WQjwEl38/UMhjBn8DWGYNYCuULliA==}
     peerDependencies:
       '@memberjunction/core': ^6.1.6
       '@memberjunction/global': ^6.1.6
@@ -4016,11 +4177,6 @@ packages:
   acorn-walk@8.3.5:
     resolution: {integrity: sha512-HEHNfbars9v4pgpW6SO1KSPkfoS0xVOM/9UzkJltjlsHZmJasxg8aXkuZa7SMf8vKGIBhpUsPluQSqhJFCqebw==}
     engines: {node: '>=0.4.0'}
-
-  acorn@8.18.0:
-    resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
-    engines: {node: '>=0.4.0'}
-    hasBin: true
 
   acorn@8.19.0:
     resolution: {integrity: sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw==}
@@ -5533,6 +5689,7 @@ packages:
 
   glob@7.2.3:
     resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
+    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
 
   globby@11.1.0:
     resolution: {integrity: sha512-jhIXaOzy1sb8IyocaruWSn1TjmnBVs8Ayhcy83rmxNJ8q2uWKCAj3CnJY+KpGSXCueAPc0i05kVvVKtP1t9S3g==}
@@ -5792,6 +5949,7 @@ packages:
 
   inflight@1.0.6:
     resolution: {integrity: sha512-k92I/b08q4wvFscXCLvqfsHCrjrF7yiXsQuIVvVE7N82W3+aqpzuUdBbfhWcy/FZR3/4IgflMgKLOsvPDrGCJA==}
+    deprecated: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
 
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
@@ -6557,11 +6715,6 @@ packages:
     resolution: {integrity: sha512-Tz09sEL2EEuv5fFowm419c1+a/jSMiBjI9gHxVLrVdbUkkNUUfjsVYs9pVZu5oCon/kmRh9TfLEObFtkVxmY0w==}
     engines: {node: '>=8.0.0'}
 
-  nanoid@3.3.19:
-    resolution: {integrity: sha512-Y2tUNy4ouw6tq5oDSKeQYGOyhkUBhNOcGV/02KC+6kd9eDGqdZd++mjMiIDilrBYvjEnCYvVtsuHCuP+okSfug==}
-    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
-    hasBin: true
-
   nanoid@3.3.20:
     resolution: {integrity: sha512-uKdg2G3GNCKQn9byYOpxbGqrT2fGO5KRt5J/8b3pok8rT6qxGWF6hxMyJiEYtAf+FVyYuD9hRaDqX5uPFYJ4ZQ==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -7039,10 +7192,6 @@ packages:
   postcss-media-query-parser@0.2.3:
     resolution: {integrity: sha512-3sOlxmbKcSHMjlUXQZKQ06jOswE7oVkXPxmZdoB1r5l0q6gTFTQSHxNxOrCccElbW7dxNytifNEo8qidX2Vsig==}
 
-  postcss@8.5.28:
-    resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
-    engines: {node: ^10 || ^12 || >=14}
-
   postcss@8.5.29:
     resolution: {integrity: sha512-49cGhUbXj8Qenv0iTMxA1cFBzxXoctpC9Ujd77t1WcbJIr6nF/eI7g/8MgxrYldFRuAXvja7xQRwavoW7kgrxQ==}
     engines: {node: ^10 || ^12 || >=14}
@@ -7280,6 +7429,7 @@ packages:
 
   rimraf@2.7.1:
     resolution: {integrity: sha512-uWjbaKIK3T1OSVptzX7Nl6PvQ3qAGtKEtVRjRuazjfL3Bx5eI409VZSqgND+4UNnmzLVdPj9FqFJNPqBZFve4w==}
+    deprecated: Rimraf versions prior to v4 are no longer supported
     hasBin: true
 
   rimraf@5.0.10:
@@ -8085,6 +8235,7 @@ packages:
   whatwg-encoding@3.1.1:
     resolution: {integrity: sha512-6qN4hJdMwfYBtE3YBTTHhoeuUrDBPZmbQaxWAqSALV/MeEnR5z1xd8UKud2RAkFoPkmB+hli1TZSnyi84xz1vQ==}
     engines: {node: '>=18'}
+    deprecated: Use @exodus/bytes instead for a more spec-conformant and faster implementation
 
   whatwg-fetch@3.6.20:
     resolution: {integrity: sha512-EqhiFU6daOA8kpjOWTL0olhVOF3i7OrFzSYiGsEMB8GcXS+RrzauAERX65xMeNWVqxA6HXH2m69Z9LaKKdisfg==}
@@ -16264,6 +16415,42 @@ snapshots:
 
   '@mixmark-io/domino@2.2.0': {}
 
+  '@mj-biz-apps/accounting-actions@0.22.0(7d479f1f9d5cac5363f11367e5dea9e0)':
+    dependencies:
+      '@memberjunction/actions': 6.1.6
+      '@memberjunction/actions-base': 6.1.6
+      '@memberjunction/actions-bizapps-accounting': 6.1.6
+      '@memberjunction/ai': 6.1.6
+      '@memberjunction/aiengine': 6.1.6(encoding@0.1.13)(typescript@5.9.3)
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/core-entities': 6.1.6
+      '@memberjunction/core-entities-server': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)
+      '@memberjunction/global': 6.1.6
+      '@mj-biz-apps/accounting-core-entities-server': 0.22.0(@memberjunction/actions@6.1.6)(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/generic-database-provider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@memberjunction/global@6.1.6)(@memberjunction/integration-engine@6.1.6)(@memberjunction/sqlserver-dataprovider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))(@mj-biz-apps/tasks-core@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))(@mj-biz-apps/tasks-entities@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - '@memberjunction/generic-database-provider'
+      - '@memberjunction/integration-engine'
+      - '@memberjunction/sqlserver-dataprovider'
+      - '@mj-biz-apps/tasks-core'
+      - '@mj-biz-apps/tasks-entities'
+
+  '@mj-biz-apps/accounting-core-entities-server@0.22.0(@memberjunction/actions@6.1.6)(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/generic-database-provider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@memberjunction/global@6.1.6)(@memberjunction/integration-engine@6.1.6)(@memberjunction/sqlserver-dataprovider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))(@mj-biz-apps/tasks-core@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))(@mj-biz-apps/tasks-entities@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))':
+    dependencies:
+      '@memberjunction/actions': 6.1.6
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/core-entities': 6.1.6
+      '@memberjunction/generic-database-provider': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@memberjunction/global': 6.1.6
+      '@memberjunction/integration-engine': 6.1.6
+      '@memberjunction/sqlserver-dataprovider': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@mj-biz-apps/accounting-engine-base': 0.22.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/accounting-entities': 0.22.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/tasks-core': 1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/tasks-entities': 1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+
   '@mj-biz-apps/accounting-engine-base@0.22.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))':
     dependencies:
       '@memberjunction/core': 6.1.6
@@ -16307,6 +16494,43 @@ snapshots:
       ag-grid-community: 35.3.1
       rxjs: 7.8.2
 
+  '@mj-biz-apps/accounting-server@0.22.0(e48d4c82f835045417f05f88eefc9653)':
+    dependencies:
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/global': 6.1.6
+      '@memberjunction/server': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@aws-sdk/credential-providers@3.1109.0)(@azure/identity@4.13.1)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(playwright@1.62.1)(socks@2.8.9)(typescript@5.9.3)
+      '@memberjunction/sqlserver-dataprovider': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@mj-biz-apps/accounting-actions': 0.22.0(7d479f1f9d5cac5363f11367e5dea9e0)
+      '@mj-biz-apps/accounting-core-entities-server': 0.22.0(@memberjunction/actions@6.1.6)(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/generic-database-provider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@memberjunction/global@6.1.6)(@memberjunction/integration-engine@6.1.6)(@memberjunction/sqlserver-dataprovider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))(@mj-biz-apps/tasks-core@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))(@mj-biz-apps/tasks-entities@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/accounting-entities': 0.22.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/common-server': 5.50.1(2bd90c28cede099abe45431dc88a851c)
+      class-validator: 0.14.4
+    transitivePeerDependencies:
+      - '@memberjunction/actions'
+      - '@memberjunction/actions-base'
+      - '@memberjunction/actions-bizapps-accounting'
+      - '@memberjunction/ai'
+      - '@memberjunction/aiengine'
+      - '@memberjunction/core-entities'
+      - '@memberjunction/core-entities-server'
+      - '@memberjunction/generic-database-provider'
+      - '@memberjunction/integration-engine'
+      - '@mj-biz-apps/tasks-core'
+      - '@mj-biz-apps/tasks-entities'
+
+  '@mj-biz-apps/common-actions@5.50.1(@memberjunction/actions-base@6.1.6)(@memberjunction/actions@6.1.6)(@memberjunction/ai@6.1.6)(@memberjunction/aiengine@6.1.6(encoding@0.1.13)(typescript@5.9.3))(@memberjunction/core-entities-server@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3))(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)':
+    dependencies:
+      '@memberjunction/actions': 6.1.6
+      '@memberjunction/actions-base': 6.1.6
+      '@memberjunction/ai': 6.1.6
+      '@memberjunction/aiengine': 6.1.6(encoding@0.1.13)(typescript@5.9.3)
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/core-entities': 6.1.6
+      '@memberjunction/core-entities-server': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)
+      '@memberjunction/global': 6.1.6
+      zod: 3.25.76
+
   '@mj-biz-apps/common-activity-sync@5.50.1(@memberjunction/communication-types@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/credentials@6.1.6)(@memberjunction/global@6.1.6)':
     dependencies:
       '@memberjunction/communication-types': 6.1.6
@@ -16314,6 +16538,18 @@ snapshots:
       '@memberjunction/credentials': 6.1.6
       '@memberjunction/global': 6.1.6
       '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+
+  '@mj-biz-apps/common-core-entities-server@5.50.1(@memberjunction/communication-types@6.1.6)(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/credentials@6.1.6)(@memberjunction/generic-database-provider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@memberjunction/global@6.1.6)':
+    dependencies:
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/core-entities': 6.1.6
+      '@memberjunction/generic-database-provider': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@memberjunction/global': 6.1.6
+      '@mj-biz-apps/common-activity-sync': 5.50.1(@memberjunction/communication-types@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/credentials@6.1.6)(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+    transitivePeerDependencies:
+      - '@memberjunction/communication-types'
+      - '@memberjunction/credentials'
 
   '@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)':
     dependencies:
@@ -16340,6 +16576,75 @@ snapshots:
       '@memberjunction/ng-shared': 6.1.6(b14ec32a77e1d61aee8a0029e59eeb48)
       '@memberjunction/ng-ui-components': 6.1.6(9b98b40171c6d483928873e5336cbf97)
       '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+
+  '@mj-biz-apps/common-server@5.50.1(2bd90c28cede099abe45431dc88a851c)':
+    dependencies:
+      '@memberjunction/actions': 6.1.6
+      '@memberjunction/actions-base': 6.1.6
+      '@memberjunction/communication-types': 6.1.6
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/core-entities': 6.1.6
+      '@memberjunction/credentials': 6.1.6
+      '@memberjunction/encryption': 6.1.6(typescript@5.9.3)
+      '@memberjunction/global': 6.1.6
+      '@memberjunction/server': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@aws-sdk/credential-providers@3.1109.0)(@azure/identity@4.13.1)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(playwright@1.62.1)(socks@2.8.9)(typescript@5.9.3)
+      '@memberjunction/sqlserver-dataprovider': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@mj-biz-apps/common-actions': 5.50.1(@memberjunction/actions-base@6.1.6)(@memberjunction/actions@6.1.6)(@memberjunction/ai@6.1.6)(@memberjunction/aiengine@6.1.6(encoding@0.1.13)(typescript@5.9.3))(@memberjunction/core-entities-server@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3))(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/common-activity-sync': 5.50.1(@memberjunction/communication-types@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/credentials@6.1.6)(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/common-core-entities-server': 5.50.1(@memberjunction/communication-types@6.1.6)(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/credentials@6.1.6)(@memberjunction/generic-database-provider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+      class-validator: 0.14.4
+    transitivePeerDependencies:
+      - '@memberjunction/ai'
+      - '@memberjunction/aiengine'
+      - '@memberjunction/core-entities-server'
+      - '@memberjunction/generic-database-provider'
+
+  '@mj-biz-apps/contracts-core-entities-server@0.7.3(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@memberjunction/sqlserver-dataprovider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))':
+    dependencies:
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/core-entities': 6.1.6
+      '@memberjunction/global': 6.1.6
+      '@memberjunction/sqlserver-dataprovider': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@mj-biz-apps/contracts-entities': 0.7.3(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+
+  '@mj-biz-apps/contracts-entities@0.7.3(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)':
+    dependencies:
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/global': 6.1.6
+      zod: 3.25.76
+
+  '@mj-biz-apps/orders-actions@5.30.0(@memberjunction/actions-base@6.1.6)(@memberjunction/actions@6.1.6)(@memberjunction/ai@6.1.6)(@memberjunction/aiengine@6.1.6(encoding@0.1.13)(typescript@5.9.3))(@memberjunction/core-entities-server@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3))(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@memberjunction/templates@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))':
+    dependencies:
+      '@memberjunction/actions': 6.1.6
+      '@memberjunction/actions-base': 6.1.6
+      '@memberjunction/ai': 6.1.6
+      '@memberjunction/aiengine': 6.1.6(encoding@0.1.13)(typescript@5.9.3)
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/core-entities': 6.1.6
+      '@memberjunction/core-entities-server': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)
+      '@memberjunction/global': 6.1.6
+      '@memberjunction/templates': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      zod: 3.25.76
+
+  '@mj-biz-apps/orders-core-entities-server@5.30.0(254382dc9818e40eb1e813da300becc1)':
+    dependencies:
+      '@memberjunction/communication-engine': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@memberjunction/communication-types': 6.1.6
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/core-entities': 6.1.6
+      '@memberjunction/core-entities-server': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)
+      '@memberjunction/generic-database-provider': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@memberjunction/global': 6.1.6
+      '@memberjunction/integration-engine': 6.1.6
+      '@memberjunction/integration-engine-base': 6.1.6
+      '@memberjunction/sqlserver-dataprovider': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@mj-biz-apps/accounting-core-entities-server': 0.22.0(@memberjunction/actions@6.1.6)(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/generic-database-provider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@memberjunction/global@6.1.6)(@memberjunction/integration-engine@6.1.6)(@memberjunction/sqlserver-dataprovider@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))(@mj-biz-apps/tasks-core@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))(@mj-biz-apps/tasks-entities@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/accounting-engine-base': 0.22.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/common-entities': 5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/orders-entities': 5.30.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/tasks-core': 1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/tasks-entities': 1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
 
   '@mj-biz-apps/orders-entities@5.30.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))':
     dependencies:
@@ -16380,13 +16685,47 @@ snapshots:
       ag-grid-community: 35.3.1
       zone.js: 0.16.2
 
-  '@mj-biz-apps/tasks-core@1.4.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)':
+  '@mj-biz-apps/orders-server@5.30.0(fa81ce2be049a0e62199ccfad527a851)':
+    dependencies:
+      '@memberjunction/actions': 6.1.6
+      '@memberjunction/actions-base': 6.1.6
+      '@memberjunction/core': 6.1.6
+      '@memberjunction/generic-database-provider': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@memberjunction/global': 6.1.6
+      '@memberjunction/server': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@aws-sdk/credential-providers@3.1109.0)(@azure/identity@4.13.1)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(playwright@1.62.1)(socks@2.8.9)(typescript@5.9.3)
+      '@memberjunction/server-extensions-core': 6.1.6
+      '@memberjunction/templates': 6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@mj-biz-apps/accounting-engine-base': 0.22.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/accounting-entities': 0.22.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      '@mj-biz-apps/accounting-server': 0.22.0(e48d4c82f835045417f05f88eefc9653)
+      '@mj-biz-apps/orders-actions': 5.30.0(@memberjunction/actions-base@6.1.6)(@memberjunction/actions@6.1.6)(@memberjunction/ai@6.1.6)(@memberjunction/aiengine@6.1.6(encoding@0.1.13)(typescript@5.9.3))(@memberjunction/core-entities-server@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3))(@memberjunction/core-entities@6.1.6)(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@memberjunction/templates@6.1.6(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76))
+      '@mj-biz-apps/orders-core-entities-server': 5.30.0(254382dc9818e40eb1e813da300becc1)
+      '@mj-biz-apps/orders-entities': 5.30.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)(@mj-biz-apps/common-entities@5.50.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6))
+      body-parser: 2.3.0
+      class-validator: 0.14.4
+    transitivePeerDependencies:
+      - '@memberjunction/ai'
+      - '@memberjunction/aiengine'
+      - '@memberjunction/communication-engine'
+      - '@memberjunction/communication-types'
+      - '@memberjunction/core-entities'
+      - '@memberjunction/core-entities-server'
+      - '@memberjunction/integration-engine'
+      - '@memberjunction/integration-engine-base'
+      - '@memberjunction/sqlserver-dataprovider'
+      - '@mj-biz-apps/accounting-core-entities-server'
+      - '@mj-biz-apps/common-entities'
+      - '@mj-biz-apps/tasks-core'
+      - '@mj-biz-apps/tasks-entities'
+      - supports-color
+
+  '@mj-biz-apps/tasks-core@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)':
     dependencies:
       '@memberjunction/core': 6.1.6
       '@memberjunction/global': 6.1.6
-      '@mj-biz-apps/tasks-entities': 1.4.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
+      '@mj-biz-apps/tasks-entities': 1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)
 
-  '@mj-biz-apps/tasks-entities@1.4.1(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)':
+  '@mj-biz-apps/tasks-entities@1.7.0(@memberjunction/core@6.1.6)(@memberjunction/global@6.1.6)':
     dependencies:
       '@memberjunction/core': 6.1.6
       '@memberjunction/global': 6.1.6
@@ -17606,9 +17945,7 @@ snapshots:
 
   acorn-walk@8.3.5:
     dependencies:
-      acorn: 8.18.0
-
-  acorn@8.18.0: {}
+      acorn: 8.19.0
 
   acorn@8.19.0: {}
 
@@ -17854,7 +18191,7 @@ snapshots:
       domhandler: 5.0.3
       htmlparser2: 10.1.0
       picocolors: 1.1.1
-      postcss: 8.5.28
+      postcss: 8.5.29
       postcss-media-query-parser: 0.2.3
 
   before-after-hook@3.0.2: {}
@@ -20357,8 +20694,6 @@ snapshots:
     dependencies:
       lru.min: 1.1.4
 
-  nanoid@3.3.19: {}
-
   nanoid@3.3.20: {}
 
   nanoid@5.1.16: {}
@@ -20824,12 +21159,6 @@ snapshots:
   possible-typed-array-names@1.1.0: {}
 
   postcss-media-query-parser@0.2.3: {}
-
-  postcss@8.5.28:
-    dependencies:
-      nanoid: 3.3.19
-      picocolors: 1.1.1
-      source-map-js: 1.2.2
 
   postcss@8.5.29:
     dependencies:
@@ -21773,7 +22102,7 @@ snapshots:
       '@tsconfig/node14': 1.0.3
       '@tsconfig/node16': 1.0.4
       '@types/node': 22.20.1
-      acorn: 8.18.0
+      acorn: 8.19.0
       acorn-walk: 8.3.5
       arg: 4.1.3
       create-require: 1.1.1

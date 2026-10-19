@@ -64,7 +64,7 @@ import {
 import { DealEntityServer } from './DealEntityServer.js';
 import { OrdersIsInstalled } from './orders-availability.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
-import { CloseWonTaskDueAt, CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
+import { CloseWonTaskDueAt, CloseWonTaskService, RaisesOrderReviewTask, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
 import {
     AnswerAsNextTerm,
     FindUnansweredSubscriptionLines,
@@ -699,6 +699,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                                   RoleID: cfg.AssigneeRoleID ?? undefined,
                               }
                             : undefined,
+                        // Off only where the policy says `false` (golive#320 §5); absent keeps the task.
+                        RaiseOrderReviewTask: RaisesOrderReviewTask(cfg),
                     },
                     provider,
                     user,
