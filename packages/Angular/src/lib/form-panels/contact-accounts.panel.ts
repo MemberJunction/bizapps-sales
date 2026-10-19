@@ -30,7 +30,9 @@ const SECTION = 'accounts';
         entity: MJS_ENTITIES.SalesContact,
         slot: 'after-related',
         sortKey: 60,
-        relatedEntity: MJS_ENTITIES.SalesAccount,
+        // No `relatedEntity`: naming Sales Accounts there claims every relationship to it, and the
+        // form then hides its own default primary and billing contact sections. This panel reads
+        // Relationship rows, not a foreign key, so it claims nothing.
         contributionKey: SECTION,
         inclusion: 'Primary',
     },
