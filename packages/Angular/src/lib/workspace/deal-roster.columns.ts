@@ -74,8 +74,8 @@ export function AssertRosterColumns(rows: Record<string, unknown>[]): asserts ro
     const missing = MissingRosterColumns(rows[0]);
     if (missing.length) {
         throw new Error(
-            `Sales: Deal Roster returned no ${missing.join(', ')} column. The query definition in this ` +
-                'database is older than the installed Sales app; apply the app\'s latest migrations.',
+            `The deal list is missing the ${missing.join(', ')} column, because the query in this ` +
+                'database is older than the installed Sales app. Ask an administrator to apply the Sales app\'s latest migrations.',
         );
     }
 }

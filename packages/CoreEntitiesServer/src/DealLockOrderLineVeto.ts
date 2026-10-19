@@ -105,7 +105,7 @@ export class DealLockOrderLineVeto implements OrderLineEditVeto {
             // Throwing is the seam's way of saying "could not tell"; the caller turns it into a
             // refusal that names the fault. Returning null here would allow the edit instead.
             LogError(`DealLockOrderLineVeto: could not read the deal for order ${orderID}: ${result.ErrorMessage}`);
-            throw new Error(`the deal behind this order could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
+            throw new Error(`The deal behind this order could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
         }
         const row = (result.Results ?? [])[0];
         return row ? { DealID: row.ID, DealStatusTypeID: row.DealStatusTypeID ?? null } : null;
@@ -132,7 +132,7 @@ export class DealLockOrderLineVeto implements OrderLineEditVeto {
         );
         if (!result.Success) {
             LogError(`DealLockOrderLineVeto: could not read status ${statusID}: ${result.ErrorMessage}`);
-            throw new Error(`the deal's status could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
+            throw new Error(`The deal's status could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
         }
         const row = (result.Results ?? [])[0];
         // A status row that is absent is not a lock. The deal points at a status that does not exist,

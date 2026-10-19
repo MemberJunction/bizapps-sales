@@ -1469,7 +1469,7 @@ export class DealWorkspaceComponent implements OnInit {
         const status = this.Lookups.DealStatusTypes.find((s) => (wantWon ? s.IsWon : s.IsLost));
         if (!status) {
             this.Fail(
-                `No active status carries Is${wantWon ? 'Won' : 'Lost'}. Seed the deal status types first.`,
+                `No active deal status is marked as ${wantWon ? 'won' : 'lost'}, so the deal cannot be closed. Ask an administrator to set up the deal statuses.`,
             );
             return;
         }
@@ -1501,7 +1501,7 @@ export class DealWorkspaceComponent implements OnInit {
                 input,
             );
             if (!envelope.Success) {
-                this.Fail(envelope.ErrorMessage ?? 'Sales.CloseDeal could not be reached.');
+                this.Fail(envelope.ErrorMessage ?? 'The server did not respond, so the deal was not closed. Check your connection and try again.');
                 return;
             }
             const out = envelope.Output;
@@ -1534,7 +1534,7 @@ export class DealWorkspaceComponent implements OnInit {
             return;
         }
         if (!this.ReopenReason.trim()) {
-            this.Fail('A reason is required to reopen a deal — it is recorded on the stage event.');
+            this.Fail('Enter a reason to reopen the deal. It is kept in the deal\'s stage history.');
             return;
         }
 
@@ -1578,7 +1578,7 @@ export class DealWorkspaceComponent implements OnInit {
             >('Sales.ReopenDeal', { DealID: deal.ID, Reason: this.ReopenReason.trim() });
 
             if (!envelope.Success) {
-                this.Fail(envelope.ErrorMessage ?? 'Sales.ReopenDeal could not be reached.');
+                this.Fail(envelope.ErrorMessage ?? 'The server did not respond, so the deal was not reopened. Check your connection and try again.');
                 return;
             }
             const out = envelope.Output;

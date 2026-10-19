@@ -138,7 +138,7 @@ export class PipelineStageEntityServer extends mjBizAppsSalesPipelineStageEntity
             this.ContextCurrentUser,
         );
         if (!r.Success) {
-            throw new Error(`reading deal statuses failed: ${r.ErrorMessage}`);
+            throw new Error(`The deal statuses could not be read: ${r.ErrorMessage}`);
         }
         return new Map(
             (r.Results ?? []).map((row) => [
@@ -161,7 +161,7 @@ export class PipelineStageEntityServer extends mjBizAppsSalesPipelineStageEntity
             this.ContextCurrentUser,
         );
         if (!statuses.Success) {
-            throw new Error(`reading deal statuses failed: ${statuses.ErrorMessage}`);
+            throw new Error(`The deal statuses could not be read: ${statuses.ErrorMessage}`);
         }
         const ids = (statuses.Results ?? []).map((row) => `'${String(row.ID)}'`);
         if (ids.length === 0) {
@@ -179,7 +179,7 @@ export class PipelineStageEntityServer extends mjBizAppsSalesPipelineStageEntity
             this.ContextCurrentUser,
         );
         if (!stages.Success) {
-            throw new Error(`reading the pipeline's stages failed: ${stages.ErrorMessage}`);
+            throw new Error(`The pipeline's stages could not be read: ${stages.ErrorMessage}`);
         }
         return (stages.Results ?? []).length > 0;
     }
@@ -192,7 +192,7 @@ export class PipelineStageEntityServer extends mjBizAppsSalesPipelineStageEntity
         try {
             return await check();
         } catch (err) {
-            return `could not check whether this pipeline keeps a won and a lost stage: ${err}`;
+            return `Nothing was saved, because it could not be checked whether this pipeline would still have an active won and lost stage. Try again. Details: ${err}`;
         }
     }
 

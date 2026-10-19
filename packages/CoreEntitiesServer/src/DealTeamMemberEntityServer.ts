@@ -115,7 +115,10 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
         } catch (err) {
             // Fail closed on a READ failure, the same way the stage/pipeline check does: a lookup that
             // errored proves nothing, and the message names the lookup rather than the row.
-            return this.refuseSave(`could not check this row's role against the deal's team: ${err}`);
+            return this.refuseSave(
+                `This team member's role could not be checked against the rest of the deal team, so ` +
+                    `nothing was saved. Try again. Details: ${err}`,
+            );
         }
         if (refusal) {
             return this.refuseSave(refusal);
@@ -185,7 +188,7 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
             this.ContextCurrentUser,
         );
         if (!roleRead.Success) {
-            throw new Error(`could not read the deal role: ${roleRead.ErrorMessage}`);
+            throw new Error(`The deal role could not be read: ${roleRead.ErrorMessage}`);
         }
         return (roleRead.Results ?? [])[0] ?? null;
     }
@@ -249,7 +252,7 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
             this.ContextCurrentUser,
         );
         if (!held.Success) {
-            throw new Error(`could not check the deal's existing ${role.Name ?? 'role'} rows: ${held.ErrorMessage}`);
+            throw new Error(`The deal's existing ${role.Name ?? 'role'} team members could not be read: ${held.ErrorMessage}`);
         }
         const existing = (held.Results ?? [])[0];
         if (!existing) {

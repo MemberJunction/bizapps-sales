@@ -112,7 +112,7 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
             // logs nothing, so the operator sees a blocked confirm and no reason for it. The sibling veto
             // logs here for the same reason.
             LogError(`DealNotWonConfirmVeto: could not read the deal for order ${orderID}: ${result.ErrorMessage}`);
-            throw new Error(`the deal behind this order could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
+            throw new Error(`The deal behind this order could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
         }
         return (result.Results ?? []).map((row) => ({
             DealID: row.ID,
@@ -153,7 +153,7 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
         );
         if (!result.Success) {
             LogError(`DealNotWonConfirmVeto: could not read status ids ${list}: ${result.ErrorMessage}`);
-            throw new Error(`the deal's status could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
+            throw new Error(`The deal's status could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
         }
         return new Set((result.Results ?? []).filter((row) => row.IsWon === true).map((row) => row.ID));
     }

@@ -136,10 +136,10 @@ async function readSource(user: UserInfo): Promise<SourceRead> {
         return refusal('PARTIAL', `Could not read pipelines or companies: ${failed?.ErrorMessage ?? 'no result'}`);
     }
     if (defaults.Results.length === 0) {
-        return refusal('NO_DEFAULT', 'No active pipeline is marked IsDefault, so there is nothing to copy.');
+        return refusal('NO_DEFAULT', 'No active pipeline is marked as the default, so there is nothing to copy. Mark one pipeline as the default, then try again.');
     }
     if (defaults.Results.length > 1) {
-        return refusal('AMBIGUOUS_DEFAULT', `${defaults.Results.length} active pipelines are marked IsDefault; mark one.`);
+        return refusal('AMBIGUOUS_DEFAULT', `${defaults.Results.length} active pipelines are marked as the default. Leave exactly one marked as the default, then try again.`);
     }
     const pipeline = defaults.Results[0] as BaseEntity;
     const stages = await readStages(String(pipeline.Get('ID')), user);
