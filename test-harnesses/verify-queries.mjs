@@ -101,6 +101,8 @@ const QUERIES = [
     ['Sales: Dashboard Summary', { CompanyIDs: [company?.CompanyID], PipelineIDs: [pipeline?.PipelineID], ...WIDE }],
     ['Sales: Win Rate by Count and Value', { CompanyIDs: [company?.CompanyID], PipelineIDs: [pipeline?.PipelineID], ...WIDE }],
     ['Sales: Deal Roster', { CompanyIDs: [company?.CompanyID], PipelineIDs: [pipeline?.PipelineID], OwnerEmployeeIDs: [owner?.OwnerEmployeeID] }],
+    // The Board's read (bc-aidp-next-golive#351): the filter lists with the period as a closed-deal window.
+    ['Sales: Deal Roster', { CompanyIDs: [company?.CompanyID], PipelineIDs: [pipeline?.PipelineID], ClosedSince: '2000-01-01', ClosedUntil: '2099-12-31' }],
 ];
 
 // Aggregates return a row over an empty set, so "rows came back" does not prove the joins were

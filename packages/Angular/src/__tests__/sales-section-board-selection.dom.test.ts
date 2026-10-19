@@ -4,7 +4,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { TestBed } from '@angular/core/testing';
 import { Metadata } from '@memberjunction/core';
 
-import { DealBoardComponent } from '../lib/board/deal-board.component';
+import { BoardPipelines, DealBoardComponent } from '../lib/board/deal-board.component';
+import type { MJLeftNavItem } from '@memberjunction/ng-ui-components';
 import type { DealRosterRow } from '../lib/workspace/deal-workspace.service';
 import {
     configureSection,
@@ -26,7 +27,12 @@ import {
  * test can read them off the element.
  */
 
-type BoardElement = HTMLElement & { SelectedPipelineID?: string | null; SelectedCompanyID?: string | null };
+type BoardElement = HTMLElement & {
+    SelectedPipelineID?: string | null;
+    Deals?: DealRosterRow[];
+    CompanyIDs?: readonly string[];
+    PipelineIDs?: readonly string[];
+};
 
 let service: StubService;
 
@@ -51,7 +57,6 @@ describe('the board selection, owned by the section', () => {
     it('survives the header Refresh, which rebuilds the board', async () => {
         const fixture = await mount('board');
         const section = fixture.componentInstance;
-        section.BoardCompanyID = 'company-2';
         section.BoardPipelineID = 'pipeline-2';
         const before = board(fixture);
 
@@ -61,7 +66,6 @@ describe('the board selection, owned by the section', () => {
         expect(after, 'the board is back').not.toBeNull();
         expect(after, 'a full refresh rebuilds it').not.toBe(before);
         expect(after?.SelectedPipelineID).toBe('pipeline-2');
-        expect(after?.SelectedCompanyID).toBe('company-2');
     });
 
     it('re-reads quietly after a drag, keeping the same board and no spinner', async () => {
@@ -85,36 +89,94 @@ describe('the board selection, owned by the section', () => {
     });
 });
 
-describe('the board reports a choice to the section', () => {
-    /** Built with `Object.create`: the subject is two methods and their emitters, not the template. */
-    function boardWith(pipelines: Array<{ ID: string; CompanyID: string }>) {
+describe('the filter bar carries over between the Dashboard and the Board (bc-aidp-next-golive#351)', () => {
+    const row = (id: string): DealRosterRow => ({ ID: id }) as DealRosterRow;
+
+    it('gives the Board the filters picked on the Dashboard, and the deals read with them', async () => {
+        const fixture = await mount('dashboard');
+        const section = fixture.componentInstance;
+        service.LoadRoster.mockResolvedValue([row('deal-acme')]);
+
+        section.ToggleFilter('CompanyIDs', 'company-2');
+        section.ToggleFilter('PipelineIDs', 'pipeline-2');
+        await vi.waitFor(() => expect(section.PeriodLoading).toBe(false));
+        section.OnNav({ id: 'board' } as MJLeftNavItem);
+        fixture.detectChanges();
+
+        const b = board(fixture);
+        expect(b?.CompanyIDs).toEqual(['company-2']);
+        expect(b?.PipelineIDs).toEqual(['pipeline-2']);
+        expect(b?.Deals?.map((d) => d.ID)).toEqual(['deal-acme']);
+    });
+
+    it('keeps a filter picked on the Board when moving back to the Dashboard', async () => {
+        const fixture = await mount('board');
+        const section = fixture.componentInstance;
+        section.ToggleFilter('OwnerEmployeeIDs', 'E1');
+        section.OnNav({ id: 'dashboard' } as MJLeftNavItem);
+
+        expect(section.Filters.OwnerEmployeeIDs).toEqual(['E1']);
+        expect(section.CurrentUrlState.Owners).toEqual(['E1']);
+        expect(section.CurrentUrlState.Page).toBeNull();
+    });
+
+    it('mounts one filter bar, on the page that shows it', async () => {
+        const fixture = await mount('board');
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelectorAll('mjs-sales-filter-bar')).toHaveLength(1);
+        expect(visiblePage(fixture).querySelector('mjs-sales-filter-bar')).not.toBeNull();
+
+        fixture.componentInstance.OnNav({ id: 'list' } as MJLeftNavItem);
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelectorAll('mjs-sales-filter-bar'), 'All deals keeps its grid filters').toHaveLength(0);
+    });
+});
+
+describe('the Board tabs (bc-aidp-next-golive#351)', () => {
+    const P = (ID: string, CompanyID: string, IsDefault = false) => ({
+        ID, Name: ID, Code: ID, CompanyID, CompanyName: CompanyID, IsDefault, DisplayRank: 0,
+    });
+    const PIPELINES = [P('p-b1', 'company-b'), P('p-a1', 'company-a', true), P('p-a2', 'company-a')];
+
+    it('offers every pipeline with no filter, default company first', () => {
+        expect(BoardPipelines(PIPELINES, [], []).map((p) => p.ID)).toEqual(['p-a1', 'p-a2', 'p-b1']);
+    });
+
+    it("offers the selling companies' pipelines, or the picked pipelines", () => {
+        expect(BoardPipelines(PIPELINES, ['company-b'], []).map((p) => p.ID)).toEqual(['p-b1']);
+        expect(BoardPipelines(PIPELINES, [], ['P-B1', 'p-a2']).map((p) => p.ID)).toEqual(['p-a2', 'p-b1']);
+        expect(BoardPipelines(PIPELINES, ['company-a'], ['p-b1'])).toEqual([]);
+    });
+
+    function boardWith(selected: string | null, companyIDs: string[], pipelineIDs: string[]) {
         const b = Object.create(DealBoardComponent.prototype) as DealBoardComponent;
         Object.assign(b, {
-            Pipelines: pipelines,
-            Stages: [],
-            SelectedPipelineID: null,
-            SelectedCompanyID: null,
-            SelectedPipelineIDChange: { emit: vi.fn() },
-            SelectedCompanyIDChange: { emit: vi.fn() },
-            cdr: { detectChanges: vi.fn() },
+            Pipelines: PIPELINES,
+            Stages: [{ ID: 's1', PipelineID: 'p-a2' }, { ID: 's2', PipelineID: 'p-b1' }],
+            CompanyIDs: companyIDs,
+            PipelineIDs: pipelineIDs,
+            SelectedPipelineID: selected,
         });
         return b;
     }
 
-    it('emits the pipeline a rep picks', () => {
-        const b = boardWith([]);
-        b.SelectPipeline('pipeline-2');
-        expect(b.SelectedPipelineIDChange.emit).toHaveBeenCalledWith('pipeline-2');
+    it('shows the chosen tab while the filters allow it, else the first tab with stages', () => {
+        expect(boardWith('p-b1', [], []).ActivePipelineID).toBe('p-b1');
+        expect(boardWith('p-b1', ['company-a'], []).ActivePipelineID, 'ruled out by the company filter').toBe('p-a2');
+        expect(boardWith(null, [], ['p-b1']).ActivePipelineID).toBe('p-b1');
     });
 
-    it('emits the company, and clears a pipeline that belongs to another company', () => {
-        const b = boardWith([
-            { ID: 'pipeline-1', CompanyID: 'company-1' },
-            { ID: 'pipeline-2', CompanyID: 'company-2' },
-        ]);
-        b.SelectedPipelineID = 'pipeline-1';
-        b.SelectCompany('company-2');
-        expect(b.SelectedCompanyIDChange.emit).toHaveBeenCalledWith('company-2');
-        expect(b.SelectedPipelineIDChange.emit).toHaveBeenCalledWith(null);
+    it('names the company on a tab only when the tabs span companies', () => {
+        expect(boardWith(null, [], []).TabLabel(PIPELINES[0])).toBe('p-b1 (company-b)');
+        expect(boardWith(null, ['company-a'], []).TabLabel(PIPELINES[1])).toBe('p-a1');
+    });
+});
+
+describe('the board reports a choice to the section', () => {
+    it('emits the pipeline a rep picks', () => {
+        const b = Object.create(DealBoardComponent.prototype) as DealBoardComponent;
+        Object.assign(b, { SelectedPipelineIDChange: { emit: vi.fn() }, cdr: { detectChanges: vi.fn() } });
+        b.SelectPipeline('pipeline-2');
+        expect(b.SelectedPipelineIDChange.emit).toHaveBeenCalledWith('pipeline-2');
     });
 });

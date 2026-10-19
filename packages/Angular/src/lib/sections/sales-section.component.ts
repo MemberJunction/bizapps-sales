@@ -66,7 +66,6 @@ import {
 import type { ResourceData } from '@memberjunction/core-entities';
 import {
     MJButtonDirective,
-    MJFilterPopoverComponent,
     MJLeftNavComponent,
     MJLeftNavContentComponent,
     MJPageBodyComponent,
@@ -135,13 +134,13 @@ import {
     PipelineOptionsFor,
     PipelinesWithinCompanies,
     SameFilters,
-    SelectionLabel,
     SortedOptions,
     ToggleID,
     type DashboardFilters,
     type FilterOption,
 } from '../pages/dashboard-filters';
 import { PipelineCompanies, PipelineLabel } from '../data/company-pipelines';
+import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState } from './sales-filter-bar.component';
 
 /**
  * The account entity, for opening a customer as its own Explorer tab.
@@ -199,9 +198,6 @@ interface AttentionRow {
     Count: number | null;
 }
 
-/** Which filter-bar list a control edits. */
-export type FilterKind = keyof DashboardFilters;
-
 @Component({
     selector: 'mjs-sales-section',
     standalone: true,
@@ -215,7 +211,7 @@ export type FilterKind = keyof DashboardFilters;
         MJLeftNavComponent,
         MJLeftNavContentComponent,
         MJButtonDirective,
-        MJFilterPopoverComponent,
+        MJSSalesFilterBarComponent,
         DealBoardComponent,
         EntityViewerModule,
     ],
@@ -263,15 +259,21 @@ export class MJSSalesSectionComponent implements OnInit {
     public DetailLoading = true;
     /**
      * Every open deal, and the closed deals closed since the start of the current fiscal quarter
-     * (bizapps-sales#209). The BOARD renders from this, unfiltered, so a pipeline flagged out of the
-     * forecast stays viewable and the dashboard's filter bar does not reach the Board.
+     * (bizapps-sales#209), whatever the filter bar holds. The filter lists' choices (owners, product
+     * companies) and the rail's badge read this, so picking one owner does not hide the others from the
+     * list.
      */
     public Deals: DealRosterRow[] = [];
     /**
-     * The open deals the dashboard's grouped cards read (stage, owner, dates, attention): the deals in
-     * the filter bar's scope, read from `Sales: Deal Roster` with the filters as parameters, less open
-     * deals in pipelines flagged out of the forecast unless the Pipeline filter names them. With no
-     * filter set this is `Deals`, so no second read is made.
+     * The deals in the filter bar's scope (bc-aidp-next-golive#351): every open deal, and the closed
+     * deals closed in the selected period, narrowed by the four lists in `Sales: Deal Roster` itself.
+     * The BOARD renders these. With no filter and the default period this is `Deals`, so no second read
+     * is made.
+     */
+    public BoardDeals: DealRosterRow[] = [];
+    /**
+     * The rows the dashboard's grouped cards read (stage, owner, dates, attention): `BoardDeals`, less
+     * open deals in pipelines flagged out of the forecast unless the Pipeline filter names them.
      */
     private dashboardDeals: DealRosterRow[] = [];
     /** Set when a row could not be opened. Shown verbatim. The roster's refusal is `RosterError`. */
@@ -321,7 +323,6 @@ export class MJSSalesSectionComponent implements OnInit {
      * (see `DealWorkspaceService.LoadFiscalYearStart`), not from the calendar.
      */
     public Period: PeriodKey = DEFAULT_PERIOD;
-    public readonly PeriodOptions = PERIOD_OPTIONS;
     /** The custom range's two days, `YYYY-MM-DD`, read only while `Period` is `custom`. */
     public CustomStart: string | null = null;
     public CustomEnd: string | null = null;
@@ -379,10 +380,9 @@ export class MJSSalesSectionComponent implements OnInit {
     /** The day each open deal entered its stage, for the idle flag (bizapps-sales#450). */
     public StageEnteredOn: ReadonlyMap<string, string> = new Map();
     /**
-     * The board's company and pipeline choice, null for the defaults. Held here rather than on the
-     * board, which is rebuilt on every reload and page switch.
+     * The board's pipeline tab, null for the first. Held here rather than on the board, which is rebuilt
+     * on every reload and page switch. Which pipelines it may be is the filter bar's (#351).
      */
-    public BoardCompanyID: string | null = null;
     public BoardPipelineID: string | null = null;
 
     public async ngOnInit(): Promise<void> {
@@ -395,7 +395,6 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Filters = this.filtersOf(url);
         this.InspectFilter = url.Inspect ?? DEFAULT_INSPECT;
         this.InspectArg = url.InspectArg;
-        this.BoardCompanyID = url.Company;
         this.BoardPipelineID = url.Pipeline;
         this.initialized = true;
         await this.Refresh();
@@ -417,7 +416,6 @@ export class MJSSalesSectionComponent implements OnInit {
             Pipelines: [...this.Filters.PipelineIDs],
             Inspect: this.InspectFilter === DEFAULT_INSPECT ? null : this.InspectFilter,
             InspectArg: this.InspectArg,
-            Company: this.BoardCompanyID,
             Pipeline: this.BoardPipelineID,
         };
     }
@@ -441,7 +439,6 @@ export class MJSSalesSectionComponent implements OnInit {
             return;
         }
         this.Page = this.pageOrDefault(url.Page);
-        this.BoardCompanyID = url.Company;
         this.BoardPipelineID = url.Pipeline;
         const inspect = url.Inspect ?? DEFAULT_INSPECT;
         const inspectChanged = inspect !== this.InspectFilter || url.InspectArg !== this.InspectArg;
@@ -456,8 +453,8 @@ export class MJSSalesSectionComponent implements OnInit {
         this.CustomStart = url.PeriodStart;
         this.CustomEnd = url.PeriodEnd;
         if (filtersChanged || periodChanged) {
-            // The figures re-read also re-filters the deal list.
-            void this.reloadFigures(filtersChanged);
+            // The figures re-read also re-reads the Board's deals and re-filters the deal list.
+            void this.reloadFigures();
         } else if (inspectChanged) {
             void this.refreshInspectView().then(() => this.cdr.detectChanges());
         }
@@ -478,12 +475,6 @@ export class MJSSalesSectionComponent implements OnInit {
                 this.UrlStateChange.emit(state);
             }
         });
-    }
-
-    /** The Board's company filter changed. */
-    public OnBoardCompany(companyID: string | null): void {
-        this.BoardCompanyID = companyID;
-        this.emitUrlState();
     }
 
     /** The Board's pipeline tab changed. */
@@ -588,8 +579,8 @@ export class MJSSalesSectionComponent implements OnInit {
         const [roster, summary, scoped] = await Promise.all([
             this.loadRoster(() => this.service.LoadRoster(this.BoardClosedWindow.Start)),
             this.service.LoadDashboardSummary(window, filters),
-            // The filter bar's deals, narrowed by the roster query. Unfiltered, the board's roster serves.
-            HasFilters(filters) ? this.loadRoster(() => this.service.LoadRoster(null, filters, true)) : Promise.resolve(null),
+            // The filter bar's deals. On the default period with no filter, the first read serves.
+            this.readsOwnScope(window, filters) ? this.loadRoster(() => this.readScope(window, filters)) : Promise.resolve(null),
         ]);
         if (token !== this.refreshToken) {
             return;
@@ -597,7 +588,7 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Deals = roster ?? [];
         // A period or filter picked while this was out has already read its own figures; these are stale.
         if (figures === this.figuresKey()) {
-            this.applyDashboardRows(scoped ?? this.Deals, filters);
+            this.applyScopedRows(scoped ?? this.Deals, filters);
             this.summary = TileSummary(summary, this.RosterError);
         }
         this.Message = '';
@@ -657,11 +648,29 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     /**
-     * The dashboard's grouped cards read `rows`: the filter bar's deals. Open deals in pipelines flagged
-     * out of the forecast are left out, as `Sales: Dashboard Summary` leaves them out, unless the
+     * True when the filter bar's deals need a read of their own: a filter is set, or the period's closed
+     * deals are not the current quarter's that the first read carries.
+     */
+    private readsOwnScope(window: PeriodWindow, filters: DashboardFilters): boolean {
+        const first = this.BoardClosedWindow;
+        return HasFilters(filters) || window.Start !== first.Start || window.End !== first.End;
+    }
+
+    /**
+     * The filter bar's deals: every open deal, and those closed in the period, narrowed by the lists
+     * (bc-aidp-next-golive#351). The period bounds only the closed rows: the Board shows every open deal.
+     */
+    private readScope(window: PeriodWindow, filters: DashboardFilters): Promise<DealRosterRow[]> {
+        return this.service.LoadRoster(window.Start, filters, window.End);
+    }
+
+    /**
+     * The filter bar's deals land. The Board shows them all; the dashboard's grouped cards leave out open
+     * deals in pipelines flagged out of the forecast, as `Sales: Dashboard Summary` does, unless the
      * Pipeline filter names pipelines, which includes them there too.
      */
-    private applyDashboardRows(rows: readonly DealRosterRow[], filters: DashboardFilters): void {
+    private applyScopedRows(rows: readonly DealRosterRow[], filters: DashboardFilters): void {
+        this.BoardDeals = [...rows];
         this.dashboardDeals = filters.PipelineIDs.length ? [...rows] : InForecast(rows);
     }
 
@@ -701,16 +710,21 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     /**
-     * The closed deals the board shows: those closed in the current fiscal quarter, whatever period the
-     * dashboard has selected (bizapps-sales#209).
+     * The closed deals the first roster read carries: those closed in the current fiscal quarter
+     * (bizapps-sales#209). On the default period this is also what the Board shows; another period reads
+     * its own (bc-aidp-next-golive#351).
      */
     public get BoardClosedWindow(): PeriodWindow {
         return ResolvePeriod('quarter', this.FiscalStart.Start, BusinessToday());
     }
 
-    /** "from Jul 1, 2026" — the board's closed-deal bound, for its header. */
-    public get BoardClosedLabel(): string {
-        return FormatWindow({ ...this.BoardClosedWindow, End: null });
+    /** What the Board's columns hold, for its header: open deals, and the period's closed ones. */
+    public get BoardScope(): string {
+        const window = this.Window;
+        if (window.Start === null && window.End === null) {
+            return 'Open deals, and every closed deal';
+        }
+        return `Open deals, and deals closed ${FormatWindow(window)}`;
     }
 
     /** "Jul 1, 2026 – Sep 30, 2026" — the bounds spelled out. */
@@ -743,7 +757,7 @@ export class MJSSalesSectionComponent implements OnInit {
         }
         this.Period = option.Key;
         this.emitUrlState();
-        await this.reloadFigures(false);
+        await this.reloadFigures();
     }
 
     /** A custom range's date picker changed. Empty is no bound on that side. */
@@ -751,23 +765,23 @@ export class MJSSalesSectionComponent implements OnInit {
         this.CustomStart = start || null;
         this.CustomEnd = end || null;
         this.emitUrlState();
-        await this.reloadFigures(false);
+        await this.reloadFigures();
     }
 
     /** Reads the current figures again after a failure (bizapps-sales#371). */
     public RetryPeriod(): Promise<void> {
-        return this.reloadFigures(HasFilters(this.Filters));
+        return this.reloadFigures();
     }
 
     /**
-     * Re-reads what the period and the filters bound: the summary, the win rate and, when the filters
-     * changed, the filter bar's deals. Then re-filters the deal list.
+     * Re-reads what the period and the filters bound: the summary, the win rate and the filter bar's
+     * deals, which the Board and the grouped cards read. Then re-filters the deal list.
      *
      * EVERY RESPONSE IS CHECKED AGAINST THE SELECTION THAT IS CURRENT WHEN IT LANDS. Two changes in
      * quick succession put two sets of reads in flight and nothing orders the replies; a superseded
      * one is discarded rather than applied late.
      */
-    private async reloadFigures(rereadDeals: boolean): Promise<void> {
+    private async reloadFigures(): Promise<void> {
         const token = ++this.periodToken;
         this.PeriodLoading = true;
         this.PeriodError = null;
@@ -778,14 +792,12 @@ export class MJSSalesSectionComponent implements OnInit {
             const [summary, winRate, scoped] = await Promise.all([
                 this.service.LoadDashboardSummary(window, filters),
                 this.service.LoadWinRate(window, filters),
-                rereadDeals && HasFilters(filters) ? this.service.LoadRoster(null, filters, true) : Promise.resolve(null),
+                this.readsOwnScope(window, filters) ? this.readScope(window, filters) : Promise.resolve(null),
             ]);
             if (token !== this.periodToken) {
                 return;
             }
-            if (rereadDeals) {
-                this.applyDashboardRows(scoped ?? this.Deals, filters);
-            }
+            this.applyScopedRows(scoped ?? this.Deals, filters);
             this.summary = TileSummary(summary, this.RosterError);
             this.WinRateError = null;
             this.applyWinRate(winRate);
@@ -866,22 +878,29 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     /** True when "My deals" is exactly the owner filter. */
-    public get MyDealsOn(): boolean {
+    private get myDealsOn(): boolean {
         const me = this.MyEmployeeID;
         return !!me && this.Filters.OwnerEmployeeIDs.length === 1 && HasID(this.Filters.OwnerEmployeeIDs, me);
     }
 
-    /** How many choices a filter list has picked; 0 is "All". */
-    public FilterCount(kind: FilterKind): number {
-        return this.Filters[kind].length;
-    }
-
-    public IsFiltered(kind: FilterKind, id: string): boolean {
-        return HasID(this.Filters[kind], id);
-    }
-
-    public FilterLabel(kind: FilterKind, options: readonly FilterOption[]): string {
-        return SelectionLabel(this.Filters[kind], options);
+    /** What the filter bar shows, on whichever page renders it. */
+    public get FilterBarState(): SalesFilterBarState {
+        return {
+            Period: this.Period,
+            CustomStart: this.CustomStart,
+            CustomEnd: this.CustomEnd,
+            WindowLabel: this.WindowLabel,
+            PeriodTooltip: this.PeriodTooltip,
+            Filters: this.Filters,
+            Options: {
+                CompanyIDs: this.CompanyOptions,
+                ProductCompanyIDs: this.ProductCompanyOptions,
+                PipelineIDs: this.PipelineOptions,
+                OwnerEmployeeIDs: this.OwnerOptions,
+            },
+            MyEmployeeID: this.MyEmployeeID,
+            NoLinesLeftOut: this.NoLinesLeftOut,
+        };
     }
 
     /** A checkbox in a filter list changed. */
@@ -898,7 +917,7 @@ export class MJSSalesSectionComponent implements OnInit {
     public ToggleMyDeals(): void {
         const me = this.MyEmployeeID;
         if (me) {
-            this.setFilters({ ...this.Filters, OwnerEmployeeIDs: this.MyDealsOn ? [] : [me] });
+            this.setFilters({ ...this.Filters, OwnerEmployeeIDs: this.myDealsOn ? [] : [me] });
         }
     }
 
@@ -910,7 +929,7 @@ export class MJSSalesSectionComponent implements OnInit {
         }
         this.Filters = filters;
         this.emitUrlState();
-        void this.reloadFigures(true);
+        void this.reloadFigures();
     }
 
     /**

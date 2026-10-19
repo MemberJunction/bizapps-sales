@@ -178,6 +178,16 @@ WHERE 1 = 1
   AND (ISNULL(st.IsClosed, 0) = 0
        OR COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) >= {{ ClosedSince | sqlString }})
   {% endif %}
+  /**
+   * CLOSED DEALS UP TO A DATE; EVERY OTHER DEAL ALWAYS (bc-aidp-next-golive#351). The other end of
+   * `ClosedSince`: the Board bounds its closed columns by the section's period, and a period can end
+   * before today (last quarter, last year, a custom range). `PeriodEnd` cannot serve, because it
+   * windows open deals too, and the Board shows every open deal whatever the period.
+   */
+  {% if ClosedUntil %}
+  AND (ISNULL(st.IsClosed, 0) = 0
+       OR COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) <= {{ ClosedUntil | sqlString }})
+  {% endif %}
   {% if PeriodEnd %}
   AND COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) <= {{ PeriodEnd | sqlString }}
   {% endif %}

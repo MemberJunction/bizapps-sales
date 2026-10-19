@@ -1,17 +1,21 @@
 /**
  * @fileoverview What the Sales section keeps in the tab's query params (bizapps-sales#371).
  *
- * Page, reporting period (and a custom range's dates), the dashboard's filter bar
- * (bc-aidp-next-golive#350), the deal list's slice, and the Board's company and pipeline. A reload or
- * a shared link opens the section where it was left rather than on Dashboard with every default.
+ * Page, reporting period (and a custom range's dates), the filter bar (bc-aidp-next-golive#350), the
+ * deal list's slice, and the Board's pipeline tab. A reload or a shared link opens the section where it
+ * was left rather than on Dashboard with every default.
  *
  * A null field (or an empty list) is the DEFAULT, and a default is left out of the URL, so a section on
  * its defaults has a clean address. Every param is checked against the values the section offers: a
  * hand-edited or stale link falls back to the default for that field rather than selecting something
  * that does not exist. Record IDs are checked by the page that uses them against what it loaded.
  *
- * The filter lists are comma-separated IDs. The Board's `company` and `pipeline` are separate from the
- * dashboard's lists: the Board shows one company and one pipeline at a time.
+ * The filter lists are comma-separated IDs, stored once for the whole section: the Dashboard and the
+ * Board read the same ones, so a link copied on either page opens the other with the same filters
+ * (bc-aidp-next-golive#351). `pipeline` is only the Board's tab, which of the pipelines the filters allow
+ * it is showing: the Board draws one pipeline's stages at a time. The Board kept a `company` of its own
+ * before the shared filters; that param is no longer read, and is always written empty so an old link
+ * loses it.
  *
  * @module @mj-biz-apps/sales-ng
  */
@@ -25,7 +29,7 @@ export interface SalesUrlState {
     /** A custom range's first and last day, `YYYY-MM-DD`. Read only with Period `custom`. */
     PeriodStart: string | null;
     PeriodEnd: string | null;
-    /** The dashboard's filter bar. Empty is "All". */
+    /** The filter bar, shared by the Dashboard and the Board. Empty is "All". */
     Companies: string[];
     ProductCompanies: string[];
     Owners: string[];
@@ -33,7 +37,7 @@ export interface SalesUrlState {
     Inspect: InspectKey | null;
     /** The deal list's argument: a stage ID for `stage`, an owner for `owner`. */
     InspectArg: string | null;
-    Company: string | null;
+    /** The Board's pipeline tab. */
     Pipeline: string | null;
 }
 
@@ -49,9 +53,11 @@ const PARAM = {
     Pipelines: 'pipelines',
     Inspect: 'inspect',
     InspectArg: 'inspectArg',
-    Company: 'company',
     Pipeline: 'pipeline',
 } as const;
+
+/** The Board's own company before the shared filters (bc-aidp-next-golive#351). Written empty, never read. */
+const RETIRED_COMPANY_PARAM = 'company';
 
 type ListField = 'Companies' | 'ProductCompanies' | 'Owners' | 'Pipelines';
 const LIST_FIELDS: readonly ListField[] = ['Companies', 'ProductCompanies', 'Owners', 'Pipelines'];
@@ -68,7 +74,6 @@ export const DEFAULT_SALES_URL_STATE: SalesUrlState = {
     Pipelines: [],
     Inspect: null,
     InspectArg: null,
-    Company: null,
     Pipeline: null,
 };
 
@@ -93,7 +98,6 @@ export function ParseSalesUrlState(params: Record<string, string>, pages: readon
         Inspect: inspect,
         // An argument means something only on a slice that takes one.
         InspectArg: inspect === 'stage' || inspect === 'owner' ? id(params[PARAM.InspectArg]) : null,
-        Company: id(params[PARAM.Company]),
         Pipeline: id(params[PARAM.Pipeline]),
     };
 }
@@ -112,7 +116,7 @@ export function SalesUrlParams(state: SalesUrlState): Record<string, string | nu
         [PARAM.Pipelines]: list(state.Pipelines),
         [PARAM.Inspect]: state.Inspect,
         [PARAM.InspectArg]: state.InspectArg,
-        [PARAM.Company]: state.Company,
+        [RETIRED_COMPANY_PARAM]: null,
         [PARAM.Pipeline]: state.Pipeline,
     };
 }

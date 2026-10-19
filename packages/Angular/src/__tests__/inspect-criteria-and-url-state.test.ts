@@ -151,9 +151,14 @@ describe('the section URL state (bizapps-sales#371)', () => {
     const pages = ['dashboard', 'list', 'board'];
 
     it('reads known values and drops unknown ones', () => {
-        expect(ParseSalesUrlState({ page: 'board', period: 'year', inspect: 'slipped', company: 'c1', pipeline: 'p1' }, pages))
-            .toEqual({ ...DEFAULT_SALES_URL_STATE, Page: 'board', Period: 'year', Inspect: 'slipped', Company: 'c1', Pipeline: 'p1' });
+        expect(ParseSalesUrlState({ page: 'board', period: 'year', inspect: 'slipped', pipeline: 'p1' }, pages))
+            .toEqual({ ...DEFAULT_SALES_URL_STATE, Page: 'board', Period: 'year', Inspect: 'slipped', Pipeline: 'p1' });
         expect(ParseSalesUrlState({ page: 'nope', period: 'decade', inspect: 'x', company: ' ' }, pages)).toEqual(DEFAULT_SALES_URL_STATE);
+    });
+
+    it("ignores the Board's retired company, and writes it empty so an old link loses it (bc-aidp-next-golive#351)", () => {
+        expect(ParseSalesUrlState({ page: 'board', company: 'c1' }, pages)).toEqual({ ...DEFAULT_SALES_URL_STATE, Page: 'board' });
+        expect(SalesUrlParams({ ...DEFAULT_SALES_URL_STATE, Page: 'board' }).company).toBeNull();
     });
 
     it('writes every key, null for a default, so a default leaves the URL', () => {

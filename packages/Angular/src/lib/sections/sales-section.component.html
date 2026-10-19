@@ -42,52 +42,16 @@
         <!-- ═════════════════════════ DASHBOARD ═════════════════════════ -->
         <div class="wrap wrap--dashboard" [hidden]="Page !== 'dashboard'">
           <!--
-            The filter bar (bc-aidp-next-golive#350): period, then the four lists. Every figure below
-            reads them; the queries apply them. The fiscal year basis is the Period dropdown's tooltip,
-            because a period whose boundaries are invisible is a figure that looks settled while meaning
-            something else. Refresh and New deal stay in the page header, where every Sales page has them.
+            The filter bar (bc-aidp-next-golive#350): one component, shared with the Board (#351), reading
+            the section's selection. Every figure below reads it; the queries apply it. Refresh and New
+            deal stay in the page header, where every Sales page has them.
           -->
           <div class="sechead">
             <h2>Dashboard</h2>
           </div>
-          <div class="filterbar" role="group" aria-label="Dashboard filters">
-            <label class="filterbar__period" [title]="PeriodTooltip">
-              <span class="filterbar__label">Period</span>
-              <select #periodSelect class="filterbar__select" data-testid="sales-period" aria-label="Reporting period"
-                      (change)="SetPeriod(periodSelect.value)">
-                @for (option of PeriodOptions; track option.Key) {
-                  <option [value]="option.Key" [selected]="option.Key === Period">{{ option.Label }}</option>
-                }
-              </select>
-            </label>
-            <span class="muted filterbar__window" data-testid="sales-period-window">{{ WindowLabel }}</span>
-            @if (Period === 'custom') {
-              <!-- Native date inputs, the control MJ's filter builder uses for a date rule. -->
-              <span class="filterbar__range">
-                <input #rangeFrom type="date" class="filterbar__date" aria-label="From" data-testid="sales-period-from"
-                       [value]="CustomStart ?? ''" (change)="SetCustomRange(rangeFrom.value, rangeTo.value)">
-                <span class="muted">to</span>
-                <input #rangeTo type="date" class="filterbar__date" aria-label="To" data-testid="sales-period-to"
-                       [value]="CustomEnd ?? ''" (change)="SetCustomRange(rangeFrom.value, rangeTo.value)">
-              </span>
-            }
-            <ng-container *ngTemplateOutlet="filterList; context: { kind: 'CompanyIDs', label: 'Selling company', options: CompanyOptions, testid: 'sales-filter-company' }"></ng-container>
-            <ng-container *ngTemplateOutlet="filterList; context: { kind: 'ProductCompanyIDs', label: 'Product company', options: ProductCompanyOptions, testid: 'sales-filter-product-company' }"></ng-container>
-            <ng-container *ngTemplateOutlet="filterList; context: { kind: 'PipelineIDs', label: 'Pipeline', options: PipelineOptions, testid: 'sales-filter-pipeline' }"></ng-container>
-            <ng-container *ngTemplateOutlet="filterList; context: { kind: 'OwnerEmployeeIDs', label: 'Deal owner', options: OwnerOptions, testid: 'sales-filter-owner' }"></ng-container>
-            @if (MyEmployeeID) {
-              <button type="button" class="filterbar__mine" data-testid="sales-my-deals"
-                      [class.is-selected]="MyDealsOn" [attr.aria-pressed]="MyDealsOn" (click)="ToggleMyDeals()">
-                <i class="fa-solid fa-user" aria-hidden="true"></i> My deals
-              </button>
-            }
-            @if (NoLinesLeftOut) {
-              <span class="filterbar__chip" data-testid="sales-filter-no-lines"
-                    title="A deal matches a product company through the products on its lines. These deals have no products yet.">
-                {{ NoLinesLeftOut }} {{ NoLinesLeftOut === 1 ? 'deal' : 'deals' }} with no products left out
-              </span>
-            }
-          </div>
+          @if (Page === 'dashboard') {
+            <ng-container *ngTemplateOutlet="filterBar"></ng-container>
+          }
 
           @if (PeriodError) {
             <!-- A failed period or filter change says why and offers the same read again (bizapps-sales#371). -->
@@ -300,23 +264,18 @@
           }
         </div>
 
-        <!-- One filter-bar list: a popover of checkboxes. Its button says what is picked, "All" for none. -->
-        <ng-template #filterList let-kind="kind" let-label="label" let-options="options" let-testid="testid">
-          <mj-filter-popover [Label]="label + ': ' + FilterLabel(kind, options)" [ActiveCount]="FilterCount(kind)"
-                             [ShowClearAll]="FilterCount(kind) !== 0" (ClearAllRequested)="ClearFilter(kind)"
-                             [attr.data-testid]="testid">
-            <div class="filterlist" role="group" [attr.aria-label]="label">
-              @if (!options.length) {
-                <span class="muted">Nothing to choose from yet.</span>
-              }
-              @for (option of options; track option.ID) {
-                <label class="filterlist__item">
-                  <input type="checkbox" [checked]="IsFiltered(kind, option.ID)" (change)="ToggleFilter(kind, option.ID)">
-                  <span>{{ option.Name }}</span>
-                </label>
-              }
-            </div>
-          </mj-filter-popover>
+        <!--
+          The filter bar, mounted only on the page that shows it, so one copy is in the page at a time.
+          The selection is the section's, so moving between pages keeps it (bc-aidp-next-golive#351).
+        -->
+        <ng-template #filterBar>
+          <mjs-sales-filter-bar
+            [State]="FilterBarState"
+            (PeriodChange)="SetPeriod($event)"
+            (CustomRangeChange)="SetCustomRange($event.Start, $event.End)"
+            (FilterToggled)="ToggleFilter($event.Kind, $event.ID)"
+            (FilterCleared)="ClearFilter($event)"
+            (MyDealsToggled)="ToggleMyDeals()"></mjs-sales-filter-bar>
         </ng-template>
 
         <!-- ═════════════════════════ ALL DEALS ═════════════════════════ -->
@@ -354,8 +313,11 @@
         <div class="wrap wrap--board" [hidden]="Page !== 'board'">
           <div class="sechead">
             <h2>Board</h2>
-            <span class="muted" data-testid="sales-board-scope">Open deals, and deals closed {{ BoardClosedLabel }}</span>
+            <span class="muted" data-testid="sales-board-scope">{{ BoardScope }}</span>
           </div>
+          @if (Page === 'board') {
+            <ng-container *ngTemplateOutlet="filterBar"></ng-container>
+          }
 
           @if (Loading || DetailLoading) {
             <mj-loading></mj-loading>
@@ -369,15 +331,18 @@
           } @else if (LookupsError) {
             <!-- The columns ARE the stages, so without them there is no board to draw. -->
             <ng-container *ngTemplateOutlet="partFailed; context: { heading: 'The pipelines and stages could not be loaded.', reason: LookupsError, retry: 'all' }"></ng-container>
+          } @else if (PeriodError) {
+            <!-- The cards for this selection did not load; the last selection's would be wrong under it. -->
+            <ng-container *ngTemplateOutlet="partFailed; context: { heading: 'The deals for this selection could not be loaded.', reason: PeriodError, retry: 'period' }"></ng-container>
           } @else if (Page === 'board') {
             <mjs-deal-board
-              [Deals]="Deals"
+              [Deals]="BoardDeals"
               [Pipelines]="Pipelines"
               [Stages]="Stages"
               [DealStatusTypes]="DealStatusTypes"
               [StageEnteredOn]="StageEnteredOn"
-              [SelectedCompanyID]="BoardCompanyID"
-              (SelectedCompanyIDChange)="OnBoardCompany($event)"
+              [CompanyIDs]="Filters.CompanyIDs"
+              [PipelineIDs]="Filters.PipelineIDs"
               [SelectedPipelineID]="BoardPipelineID"
               (SelectedPipelineIDChange)="OnBoardPipeline($event)"
               (DealOpened)="OpenDeal($event)"

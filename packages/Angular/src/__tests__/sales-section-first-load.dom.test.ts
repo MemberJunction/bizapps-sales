@@ -5,6 +5,7 @@ import { TestBed } from '@angular/core/testing';
 import { Metadata, type EntityInfo } from '@memberjunction/core';
 
 import type { DealDashboardSummary } from '../lib/workspace/deal-workspace.service';
+import { NO_FILTERS } from '../lib/pages/dashboard-filters';
 import {
     configureSection,
     initSectionTestEnvironment,
@@ -95,28 +96,45 @@ describe('the roster read', () => {
         expect(service.LoadRoster).toHaveBeenCalledWith('2026-07-01');
     });
 
-    it('is not re-read, and the board scope does not move, when the period changes', async () => {
+    it("follows the period on the Board: another period reads that period's closed deals (bc-aidp-next-golive#351)", async () => {
         const fixture = await mountSection('board');
+        const scope = () => visiblePage(fixture).querySelector('[data-testid="sales-board-scope"]')?.textContent?.trim();
+        expect(scope()).toBe('Open deals, and deals closed Jul 1, 2026 – Sep 30, 2026');
+
+        await fixture.componentInstance.SetPeriod('lastquarter');
+        fixture.detectChanges();
+        expect(service.LoadRoster).toHaveBeenLastCalledWith('2026-04-01', NO_FILTERS, '2026-06-30');
+        expect(scope()).toBe('Open deals, and deals closed Apr 1, 2026 – Jun 30, 2026');
+
         await fixture.componentInstance.SetPeriod('alltime');
         fixture.detectChanges();
+        expect(service.LoadRoster).toHaveBeenLastCalledWith(null, NO_FILTERS, null);
+        expect(scope()).toBe('Open deals, and every closed deal');
+    });
 
-        expect(service.LoadRoster).toHaveBeenCalledTimes(1);
-        const scope = visiblePage(fixture).querySelector('[data-testid="sales-board-scope"]');
-        expect(scope?.textContent?.trim()).toBe('Open deals, and deals closed from Jul 1, 2026');
+    it('is not re-read for the Board when the period goes back to the default', async () => {
+        const fixture = await mountSection('board');
+        await fixture.componentInstance.SetPeriod('alltime');
+        await fixture.componentInstance.SetPeriod('quarter');
+
+        // The first read, then All time's; the default quarter reuses the first.
+        expect(service.LoadRoster).toHaveBeenCalledTimes(2);
     });
 });
 
 describe('a filter bar choice (bc-aidp-next-golive#350)', () => {
-    it('reads the filtered deals, figures and win rate with the lists as parameters, and leaves the board alone', async () => {
+    it('reads the filtered deals, figures and win rate with the lists as parameters', async () => {
         const fixture = await mountSection();
         fixture.componentInstance.ToggleFilter('CompanyIDs', 'C1');
         await vi.waitFor(() => expect(service.LoadRoster).toHaveBeenCalledTimes(2));
 
         const filters = { CompanyIDs: ['C1'], ProductCompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: [] };
-        expect(service.LoadRoster).toHaveBeenLastCalledWith(null, filters, true);
+        // Open deals, and those closed in the period, narrowed by the lists: the Board's cards and the
+        // dashboard's grouped cards read the same rows (bc-aidp-next-golive#351).
+        expect(service.LoadRoster).toHaveBeenLastCalledWith('2026-07-01', filters, '2026-09-30');
         expect(service.LoadDashboardSummary).toHaveBeenLastCalledWith(expect.anything(), filters);
         expect(service.LoadWinRate).toHaveBeenLastCalledWith(expect.anything(), filters);
-        // The board's own read is untouched: its first call is still the only unfiltered one.
+        // The unfiltered read the filter lists' choices come from is untouched.
         expect(service.LoadRoster.mock.calls.filter((c) => c.length === 1)).toHaveLength(1);
     });
 

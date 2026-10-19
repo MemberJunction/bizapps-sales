@@ -25,6 +25,8 @@ function fieldNamesIn(text: string): string[] {
 
 const HTML = readFileSync(new URL('../lib/sections/sales-section.component.html', import.meta.url), 'utf8');
 const TS = readFileSync(new URL('../lib/sections/sales-section.component.ts', import.meta.url), 'utf8');
+/** The filter bar, its own component since the Board shares it (bc-aidp-next-golive#351). */
+const BAR_HTML = readFileSync(new URL('../lib/sections/sales-filter-bar.component.html', import.meta.url), 'utf8');
 
 /**
  * What a user reads on the dashboard page: text between tags and `title` values. Comments, Angular
@@ -123,6 +125,6 @@ describe('the dashboard says it in the words the forecast is read in (bc-aidp-ne
 
     it('moves the fiscal year line into the Period tooltip', () => {
         expect(HTML).not.toContain('period__basis');
-        expect(HTML).toContain('[title]="PeriodTooltip"');
+        expect(BAR_HTML).toContain('[title]="State.PeriodTooltip"');
     });
 });

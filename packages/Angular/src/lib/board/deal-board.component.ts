@@ -56,14 +56,8 @@ import { FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { DealWorkspaceService, DEFAULT_DISPLAY_CURRENCY, type DealRosterRow } from '../workspace/deal-workspace.service';
 import { BusinessToday, DayLabel, UtcDatePart } from '../pages/dashboard-dates';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
-import {
-    CompanyLabel,
-    CompanyOfPipeline,
-    DefaultCompanyID,
-    PipelineCompanies,
-    PipelinesForCompany,
-    type PipelineCompany,
-} from '../data/company-pipelines';
+import { OrderPipelinesByCompany, PipelineLabel, type CompanyPipeline } from '../data/company-pipelines';
+import { HasID } from '../pages/dashboard-filters';
 
 /**
  * A `DATE` column's day, as a value the `date` pipe can format with `'UTC'` (bc-aidp-next-golive#168).
@@ -224,6 +218,21 @@ export interface BoardColumn {
     NonePriced: boolean;
 }
 
+/**
+ * The pipelines the Board offers as tabs (bc-aidp-next-golive#351): those the section's filter bar
+ * allows, in picker order. The Pipeline list when it names any; else the selling companies' pipelines;
+ * else every pipeline, including those flagged out of the forecast, which the Board still shows.
+ */
+export function BoardPipelines<T extends CompanyPipeline>(
+    pipelines: readonly T[],
+    companyIDs: readonly string[],
+    pipelineIDs: readonly string[],
+): T[] {
+    return OrderPipelinesByCompany(pipelines).filter(
+        (p) => (!companyIDs.length || HasID(companyIDs, p.CompanyID)) && (!pipelineIDs.length || HasID(pipelineIDs, p.ID)),
+    );
+}
+
 @Component({
     selector: 'mjs-deal-board',
     standalone: true,
@@ -253,6 +262,14 @@ export class DealBoardComponent {
     @Output() public readonly StageMoved = new EventEmitter<void>();
 
     /**
+     * The filter bar's Selling company and Pipeline lists, owned by the section and shared with the
+     * Dashboard (bc-aidp-next-golive#351). Empty is "All". They decide which pipelines are tabs; the deals
+     * themselves arrive already narrowed by every filter.
+     */
+    @Input() public CompanyIDs: readonly string[] = [];
+    @Input() public PipelineIDs: readonly string[] = [];
+
+    /**
      * The pipeline tab's choice; null until a rep picks one. Owned by the section and bound two-way,
      * because the section tears this board down on every reload, and a choice held only here reset to
      * the first pipeline after each drag.
@@ -263,52 +280,29 @@ export class DealBoardComponent {
     public Message: string | null = null;
     public Moving = false;
 
+    /** The tabs: the pipelines the filter bar allows, in picker order. See {@link BoardPipelines}. */
+    public get TabPipelines(): PipelineLookup[] {
+        return BoardPipelines(this.Pipelines, this.CompanyIDs, this.PipelineIDs);
+    }
+
     /**
-     * The company filter's choice; null until a rep picks one, which means the default company. Owned
-     * by the section for the same reason as `SelectedPipelineID`.
+     * The pipeline actually in view: the chosen tab while the filters still allow it, else the first
+     * tab that has any stages. A chosen pipeline the filters have since ruled out is not shown.
      */
-    @Input() public SelectedCompanyID: string | null = null;
-    @Output() public readonly SelectedCompanyIDChange = new EventEmitter<string | null>();
-
-    /** Every company that owns a pipeline, default company first (#327). */
-    public get Companies(): PipelineCompany[] {
-        return PipelineCompanies(this.Pipelines);
-    }
-
-    /** The company in view — the chosen one, or the default pipeline's company. */
-    public get ActiveCompanyID(): string | null {
-        return this.SelectedCompanyID ?? DefaultCompanyID(this.Pipelines);
-    }
-
-    /** The tabs: the active company's pipelines, in picker order. */
-    public get CompanyPipelines(): PipelineLookup[] {
-        return PipelinesForCompany(this.Pipelines, this.ActiveCompanyID);
-    }
-
-    /** The pipeline actually in view — the chosen one, or the company's first that has any stages. */
     public get ActivePipelineID(): string | null {
-        if (this.SelectedPipelineID) {
+        const pipelines = this.TabPipelines;
+        if (this.SelectedPipelineID && pipelines.some((p) => p.ID === this.SelectedPipelineID)) {
             return this.SelectedPipelineID;
         }
-        const pipelines = this.CompanyPipelines;
         const withStages = pipelines.find((p) => this.Stages.some((s) => s.PipelineID === p.ID));
         return withStages?.ID ?? pipelines[0]?.ID ?? null;
     }
 
-    /** A new company drops a pipeline that belongs to the old one; the company's first takes over. */
-    public SelectCompany(companyID: string | null): void {
-        this.SelectedCompanyID = companyID;
-        this.SelectedCompanyIDChange.emit(companyID);
-        if (CompanyOfPipeline(this.Pipelines, this.SelectedPipelineID) !== companyID) {
-            this.SelectedPipelineID = null;
-            this.SelectedPipelineIDChange.emit(null);
-        }
-        this.Message = null;
-        this.cdr.detectChanges();
-    }
-
-    public CompanyText(company: PipelineCompany): string {
-        return CompanyLabel(company);
+    /** A tab's text: with more than one selling company among the tabs, the company too. */
+    public TabLabel(pipeline: Pick<PipelineLookup, 'Name' | 'CompanyName'>): string {
+        const tabs = this.TabPipelines;
+        const companies = new Set(tabs.map((p) => String(p.CompanyID).toLowerCase()));
+        return companies.size > 1 ? PipelineLabel(pipeline) : pipeline.Name;
     }
 
     /**

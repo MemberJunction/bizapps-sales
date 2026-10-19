@@ -596,10 +596,10 @@ export class DealWorkspaceService {
      * CustomerName, PipelineStage). Mapping here keeps both audiences served and means renaming a
      * column on either side is a one-file change.
      *
-     * `closedSince` drops closed deals that closed before it; open deals always come back
-     * (bizapps-sales#209). Omitted, every deal comes back. `filters` narrows the rows by the
-     * dashboard's filter bar in the query itself (bc-aidp-next-golive#350), and `openOnly` returns
-     * open deals only, which is all the dashboard's grouped cards read.
+     * `closedSince` drops closed deals that closed before it, and `closedUntil` those that closed after
+     * it; open deals always come back (bizapps-sales#209, bc-aidp-next-golive#351). Omitted, every deal
+     * comes back. `filters` narrows the rows by the section's filter bar in the query itself
+     * (bc-aidp-next-golive#350).
      *
      * THROWS WHEN THE QUERY FAILS, rather than returning an empty roster. An empty roster reads as a
      * database with no deals. The likeliest failure once `closedSince` is passed is a host whose query
@@ -609,11 +609,11 @@ export class DealWorkspaceService {
     public async LoadRoster(
         closedSince?: string | null,
         filters: DashboardFilters = NO_FILTERS,
-        openOnly = false,
+        closedUntil: string | null = null,
     ): Promise<DealRosterRow[]> {
         const extra: Record<string, string> = {};
         if (closedSince) extra['ClosedSince'] = closedSince;
-        if (openOnly) extra['OpenOnly'] = 'true';
+        if (closedUntil) extra['ClosedUntil'] = closedUntil;
         const parameters = queryParameters(undefined, filters, extra);
         const [result, codes] = await Promise.all([
             new RunQuery().RunQuery({

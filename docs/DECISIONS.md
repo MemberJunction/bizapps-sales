@@ -848,3 +848,23 @@ deal list under the tiles is filtered with the same predicate on the server, so 
 agree. The forecast snapshot and `Sales: Forecast by Category` are unchanged.
 
 ---
+
+## D-BOARD2 — The Board reads the section's filter bar, and its period bounds the closed columns
+
+**Ruling (bc-aidp-next-golive#351):** the Dashboard and the Board share one filter bar and one selection,
+held by the Sales section and kept in its URL. Changing a filter on either page changes it on the other,
+and a link copied on one opens the other with the same filters. On the Board:
+
+- **Period bounds the closed columns only.** A closed deal shows when it closed in the period; every open
+  deal shows whatever the period, as before. This reverses bizapps-sales#209's rule that the Board
+  always shows the current fiscal quarter's closed deals. The default period is still This quarter, so
+  the Board looks the same until someone picks another period; All time loads every closed deal.
+- **Selling company and Pipeline decide the tabs.** The Board draws one pipeline's stages at a time. Its
+  tabs are the picked pipelines, else the picked companies' pipelines, else every pipeline; with one,
+  the tabs are hidden. The Board's own Company picker is gone.
+- **Pipeline "All" includes pipelines flagged out of the forecast**, as the Board always has. The
+  Dashboard leaves them out of its figures; that difference is about forecasting, not about which deals
+  exist, so it stays.
+- **The Inspect slice stays Dashboard-only**, and All deals keeps its own grid filters.
+
+---

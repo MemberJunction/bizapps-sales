@@ -33,6 +33,15 @@ describe('LoadRoster', () => {
         expect(calls[1].Parameters).toBeUndefined();
     });
 
+    it("passes ClosedUntil, the Board's period end, with the filter lists (bc-aidp-next-golive#351)", async () => {
+        const calls = recordRunQuery({ Success: true, Results: [] });
+        const filters = { CompanyIDs: ['C1'], ProductCompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: [] };
+
+        await new DealWorkspaceService().LoadRoster('2026-04-01', filters, '2026-06-30');
+
+        expect(calls[0].Parameters).toEqual({ ClosedSince: '2026-04-01', ClosedUntil: '2026-06-30', CompanyIDs: ['C1'] });
+    });
+
     it('throws with the reason when the query fails, rather than returning an empty roster', async () => {
         // What MJ answers when a host's query definition predates the parameter.
         recordRunQuery({ Success: false, ErrorMessage: "Unknown parameter: 'ClosedSince'" });

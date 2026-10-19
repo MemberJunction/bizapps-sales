@@ -7,32 +7,31 @@
 -->
 <div class="db">
 
-  <!-- Pipeline switcher. A pipeline defines the stages, so this is the board's one real control. -->
+  <!--
+    Pipeline switcher. A pipeline defines the stages, so the Board shows one at a time. Which pipelines
+    are tabs is the filter bar's (bc-aidp-next-golive#351); with only one allowed there is nothing to
+    switch, and its name is shown instead.
+  -->
   <div class="db-bar">
-    <!-- Company first, then its pipelines (#327). Hidden when one company owns every pipeline. -->
-    @if (Companies.length > 1) {
-      <label class="db-bar__label" for="db-company">Company</label>
-      <select id="db-company" class="db-company" data-testid="db-pipeline-company"
-              [ngModel]="ActiveCompanyID" (ngModelChange)="SelectCompany($event)">
-        @for (c of Companies; track c.CompanyID) {
-          <option [ngValue]="c.CompanyID">{{ CompanyText(c) }}</option>
-        }
-      </select>
-    }
+    @let tabs = TabPipelines;
     <span class="db-bar__label">Pipeline</span>
-    <div class="db-bar__pipes" role="tablist" aria-label="Pipeline">
-      @for (pipeline of CompanyPipelines; track pipeline.ID) {
-        <button
-          type="button"
-          role="tab"
-          class="db-pipe"
-          [class.db-pipe--on]="pipeline.ID === ActivePipelineID"
-          [attr.aria-selected]="pipeline.ID === ActivePipelineID"
-          (click)="SelectPipeline(pipeline.ID)">
-          {{ pipeline.Name }}
-        </button>
-      }
-    </div>
+    @if (tabs.length > 1) {
+      <div class="db-bar__pipes" role="tablist" aria-label="Pipeline" data-testid="db-pipeline-tabs">
+        @for (pipeline of tabs; track pipeline.ID) {
+          <button
+            type="button"
+            role="tab"
+            class="db-pipe"
+            [class.db-pipe--on]="pipeline.ID === ActivePipelineID"
+            [attr.aria-selected]="pipeline.ID === ActivePipelineID"
+            (click)="SelectPipeline(pipeline.ID)">
+            {{ TabLabel(pipeline) }}
+          </button>
+        }
+      </div>
+    } @else if (tabs.length === 1) {
+      <span class="db-bar__one" data-testid="db-pipeline-one">{{ tabs[0].Name }}</span>
+    }
     @if (Moving) {
       <span class="db-bar__busy"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Moving…</span>
     }
