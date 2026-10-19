@@ -40,6 +40,14 @@ Open defects are GitHub issues, not documents: [bizapps-sales issues](https://gi
 | [`scripts/dev/README.md`](../scripts/dev/README.md) | The development-only seeds | Current |
 | [`.claude/skills/report-issue/SKILL.md`](../.claude/skills/report-issue/SKILL.md) | The `/report-issue` skill for filing bugs | Current |
 
+## Plans
+
+Work that is designed but not built. A plan becomes current documentation when it ships.
+
+| Document | What it is for | Status |
+|---|---|---|
+| [`docs/plans/DEAL-CHANGE-NOTIFICATIONS.md`](plans/DEAL-CHANGE-NOTIFICATIONS.md) | Notifying a deal's team when the deal materially changes: triggers, the global → deal type → contributor type settings, MJ Templates for the messages | Proposed; after go-live |
+
 ## Metadata
 
 | Document | What it is for | Status |
