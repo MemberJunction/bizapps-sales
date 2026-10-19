@@ -45,10 +45,12 @@
  * cached `Deal.Amount` is refreshed on the DEAL's next save, and until then the stale-amount notice
  * (golive#230) says so in as many words -- which is exactly what that notice is for.
  *
- * Unit price and line total are READ-ONLY displays, priced by orders. A discount is expressed as a
- * PERCENT and never as an amount (D-DL2 — `DiscountAmount` is an input channel that reads 0 exactly
- * when a percentage discount exists, so showing it would be a lie). Nothing here multiplies, discounts,
- * prorates, sums or rounds: the read-only figures are whatever orders last wrote.
+ * Unit price and line total are READ-ONLY displays, priced by orders. A discount is STORED as a
+ * percent, never on `DiscountAmount` (D-DL2 — that column is an input channel that reads 0 exactly
+ * when a percentage discount exists). The rep may TYPE it in dollars (D-DL2, revised): the amount is
+ * converted to a percent of orders' list amount by `DiscountAmountToPercent` and lands on
+ * `DiscountPct`, so the precision, bounds and concession rules are the percent's. Nothing here
+ * multiplies, discounts, prorates, sums or rounds: the read-only figures are whatever orders last wrote.
  *
  * ── CHOOSING AMONG ORDERS' OWN PRICES (golive#270) ──────────────────────────────────────────────
  *
@@ -100,12 +102,14 @@ import {
 } from '@mj-biz-apps/orders-ng';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
+    DiscountAmountToPercent,
     DiscountFractionToPercent,
     DiscountNeedsConcession,
     DiscountPercentToFraction,
     DiscountReasonCategories,
     EffectiveTermStart,
     HasExplicitTermStart as StoresOwnTermStart,
+    PricedLineListAmount,
     ResolveDealLockState,
     RoundDiscountPercent,
     RecordDiscountConcession,
@@ -154,6 +158,8 @@ interface PriceOrderOutput {
         ProductID: string;
         UnitPrice: number;
         LineTotalNet: number;
+        /** The line's whole discount as orders priced it; with the net it gives the list amount. */
+        DiscountAmount?: number | null;
         /** What the rules say for the line regardless of a pinned price — the picker's Default row. */
         Default?: LineEngineDefault | null;
     }>;
@@ -218,18 +224,50 @@ interface RemoteOperationRouter {
                                    [disabled]="IsLocked" [title]="BlockedReason" />
                         </label>
 
-                        <label class="mjs-le__field">
-                            <span class="mjs-le__label">Discount %</span>
-                            <!-- Percent in, FRACTION stored. step is 0.01 because that is what
-                                 OrderLine.DiscountPct DECIMAL(7,4) holds: a hundredth of one percent.
-                                 The conversion refuses an ambiguous value rather than guessing. -->
-                            <input type="number" data-testid="line-discount" min="0" max="100" step="0.01"
-                                   [ngModel]="DiscountPercent" (ngModelChange)="SetDiscountPercent($event)"
-                                   [disabled]="IsLocked" [title]="BlockedReason" />
+                        <div class="mjs-le__field">
+                            <div class="mjs-le__label-row">
+                                <label class="mjs-le__label" [for]="DiscountUnit === 'Percent' ? 'mjs-le-discount' : 'mjs-le-discount-amount'">
+                                    Discount {{ DiscountUnit === 'Percent' ? '%' : '$' }}
+                                </label>
+                                <!-- The rep states the discount in whichever unit the signed form uses.
+                                     A dollar amount is converted to the percent the line stores. -->
+                                <div class="mjs-le__unit" role="group" aria-label="Discount unit">
+                                    <button type="button" data-testid="line-discount-unit-percent"
+                                            [class.is-selected]="DiscountUnit === 'Percent'"
+                                            [attr.aria-pressed]="DiscountUnit === 'Percent'"
+                                            [disabled]="IsLocked" (click)="SetDiscountUnit('Percent')">%</button>
+                                    <button type="button" data-testid="line-discount-unit-amount"
+                                            [class.is-selected]="DiscountUnit === 'Amount'"
+                                            [attr.aria-pressed]="DiscountUnit === 'Amount'"
+                                            [disabled]="IsLocked" (click)="SetDiscountUnit('Amount')">$</button>
+                                </div>
+                            </div>
+                            @if (DiscountUnit === 'Percent') {
+                                <!-- Percent in, FRACTION stored. step is 0.01 because that is what
+                                     OrderLine.DiscountPct DECIMAL(7,4) holds: a hundredth of one percent.
+                                     The conversion refuses an ambiguous value rather than guessing. -->
+                                <input id="mjs-le-discount" type="number" data-testid="line-discount" min="0" max="100" step="0.01"
+                                       [ngModel]="DiscountPercent" (ngModelChange)="SetDiscountPercent($event)"
+                                       [disabled]="IsLocked" [title]="BlockedReason" />
+                            } @else {
+                                <!-- Dollars off the whole line, converted to a percent of orders' list
+                                     amount and stored as DiscountPct, so the percent rules still apply. -->
+                                <input id="mjs-le-discount-amount" type="number" data-testid="line-discount-amount" min="0" step="0.01"
+                                       [ngModel]="DiscountAmountInput" (ngModelChange)="SetDiscountAmount($event)"
+                                       [disabled]="IsLocked" [title]="BlockedReason" />
+                                @if (!DiscountRefusal && DiscountAmountInput !== null && ListAmount !== null) {
+                                    <small class="mjs-le__hint" data-testid="line-discount-derived">
+                                        {{ DiscountPercent }}% of {{ Money(ListAmount) }}
+                                        @if (DiscountAmountRounded) {
+                                            · held to 0.01%, so Orders discounts {{ Money(PricedDiscount) }}
+                                        }
+                                    </small>
+                                }
+                            }
                             @if (DiscountRefusal) {
                                 <span class="mjs-le__error">{{ DiscountRefusal }}</span>
                             }
-                        </label>
+                        </div>
                     </div>
 
                     <!-- A RAISED DISCOUNT IS A CONCESSION, and orders will not confirm the order
@@ -502,6 +540,18 @@ interface RemoteOperationRouter {
             background: var(--mj-status-error, #b3261e); color: #fff; border-color: transparent;
         }
         .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+        .mjs-le__label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .mjs-le__unit {
+            display: inline-flex; border: 1px solid var(--mj-border-default);
+            border-radius: var(--mj-radius-md, 8px); overflow: hidden;
+        }
+        .mjs-le__unit button {
+            border: 0; background: var(--mj-bg-surface); color: var(--mj-text-muted); cursor: pointer;
+            font: inherit; font-size: var(--mj-text-xs); font-weight: 700; padding: 2px 10px;
+        }
+        .mjs-le__unit button + button { border-left: 1px solid var(--mj-border-default); }
+        .mjs-le__unit button.is-selected { background: var(--mj-brand-primary); color: #fff; }
+        .mjs-le__unit button[disabled] { opacity: .55; cursor: not-allowed; }
         .mjs-le__choices { display: flex; gap: var(--mj-space-2, 8px); flex-wrap: wrap; }
         .mjs-le__choice.is-selected {
             border-color: var(--mj-brand-primary); color: var(--mj-brand-primary);
@@ -851,6 +901,61 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         this.Working.DiscountPct = converted.Fraction;
     }
 
+    /* ── A discount stated in dollars ─────────────────────────────────────────── */
+
+    /** The unit the rep types the discount in. The line stores a percent either way. */
+    public DiscountUnit: 'Percent' | 'Amount' = 'Percent';
+    /** The dollar discount as typed, while the unit is Amount. Never stored: the line keeps the percent. */
+    public DiscountAmountInput: number | null = null;
+
+    public SetDiscountUnit(unit: 'Percent' | 'Amount'): void {
+        if (this.IsLocked || unit === this.DiscountUnit) return;
+        this.DiscountUnit = unit;
+        this.DiscountRefusal = null;
+        // A discounted line opens the amount box on orders' figure for its current percent.
+        this.DiscountAmountInput = unit === 'Amount' && this.DiscountPercent > 0 ? this.pricedDiscount : null;
+        // The conversion needs orders' list amount, so a line nobody has priced yet is priced now.
+        if (unit === 'Amount' && this.pricedTotal === null) this.SchedulePrice();
+    }
+
+    public SetDiscountAmount(amount: number | null): void {
+        this.DiscountAmountInput = amount === null || amount === undefined || String(amount) === '' ? null : Number(amount);
+        this.applyDiscountAmount();
+    }
+
+    /**
+     * Turns the typed amount into the percent the line stores, by the shared conversion. Run again
+     * after each reprice, because a new quantity or product changes the list amount the dollars are a
+     * share of; the dollars are what the rep stated, so they hold and the percent follows.
+     */
+    private applyDiscountAmount(): void {
+        if (!this.Working || this.DiscountUnit !== 'Amount') return;
+        const converted = DiscountAmountToPercent(this.DiscountAmountInput, this.ListAmount);
+        if (!converted.Ok) {
+            this.DiscountRefusal = converted.Reason;
+            return;
+        }
+        this.DiscountRefusal = null;
+        if (converted.Fraction === (this.Working.DiscountPct ?? 0)) return;
+        this.Working.DiscountPct = converted.Fraction;
+        this.SchedulePrice();   // a priced input changed — ask Orders again
+    }
+
+    /** The line's amount before any discount, as orders last priced it. Null until it has. */
+    public get ListAmount(): number | null {
+        return PricedLineListAmount(this.pricedTotal, this.pricedDiscount);
+    }
+
+    public get PricedDiscount(): number | null {
+        return this.pricedDiscount;
+    }
+
+    /** Whether orders' discount differs from the typed dollars, because the percent is held to 0.01%. */
+    public get DiscountAmountRounded(): boolean {
+        return !this.pricePending && this.pricedDiscount !== null && this.DiscountAmountInput !== null &&
+            this.pricedDiscount !== this.DiscountAmountInput;
+    }
+
     /**
      * Whether this line offers a term start at all — orders' own test, via the shared rule: the product
      * carries a `SubscriptionTypeID`, which is what decides whether confirm builds a term for the line.
@@ -998,6 +1103,9 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     public Pricing = false;
     private pricedUnit: number | null = null;
     private pricedTotal: number | null = null;
+    private pricedDiscount: number | null = null;
+    /** Set from the moment a reprice is scheduled until its answer lands, so a stale answer is not quoted. */
+    private pricePending = false;
     public PricingNote: string | null = null;
     private priceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1043,7 +1151,11 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
      */
     public SchedulePrice(): void {
         if (this.priceTimer) clearTimeout(this.priceTimer);
-        this.priceTimer = setTimeout(() => { void this.refreshPrice(); }, 350);
+        this.pricePending = true;
+        this.priceTimer = setTimeout(() => {
+            this.priceTimer = null;
+            void this.refreshPrice();
+        }, 350);
     }
 
     /**
@@ -1064,8 +1176,10 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (!line?.ProductID || !companyID) {
             this.pricedUnit = null;
             this.pricedTotal = null;
+            this.pricedDiscount = null;
             this.EngineDefault = undefined;
             this.PricingNote = null;
+            this.pricePending = false;
             this.cdr.detectChanges();
             return;
         }
@@ -1107,20 +1221,26 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             if (!row) {
                 this.pricedUnit = null;
                 this.pricedTotal = null;
+                this.pricedDiscount = null;
                 this.EngineDefault = undefined;
                 this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
                 return;
             }
             this.pricedUnit = row.UnitPrice;
             this.pricedTotal = row.LineTotalNet;
+            this.pricedDiscount = row.DiscountAmount ?? 0;
             this.EngineDefault = row.Default;
+            this.applyDiscountAmount();
         } catch {
             this.pricedUnit = null;
             this.pricedTotal = null;
+            this.pricedDiscount = null;
             this.EngineDefault = undefined;
             this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
         } finally {
             this.Pricing = false;
+            // A reprice scheduled while this one was in flight is still pending.
+            this.pricePending = this.priceTimer !== null;
             this.cdr.detectChanges();
         }
     }

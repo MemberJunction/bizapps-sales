@@ -9,7 +9,7 @@ decision without its reasoning gets re-litigated by the next person, or silently
 assumes it was an accident.
 
 **IDs.** This file holds `D1`–`D7` (the S1 rulings, no hyphen), `I1`–`I10`, and the prefixed series
-`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY` and `D-SE`. `D-3`, `D-4` and `D-6` are the master
+`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY`, `D-ST` and `D-SE`. `D-3`, `D-4` and `D-6` are the master
 plan's IDs; their rulings here are D2, D5 and "Master plan D-6". `DN-n` and every other `D-n`
 are in [`DECISIONS-NEEDED.md`](../DECISIONS-NEEDED.md), which also lists what is still open. A bare `Dn`
 cited as orders' (`D6/D7`, `D8`, `D53`) is orders' own log.
@@ -562,9 +562,17 @@ The workspace converts, and that conversion is the kind of thing worth a check o
 
 ---
 
-## D-DL2 — The rep states a discount as a PERCENT only, and never as an amount
+## D-DL2 — A discount is stored as a PERCENT, and the `DiscountAmount` column is never bound
 
-**S-US4 is explicit that no price field is enterable by the rep.** The deal-workspace line grid had an
+> **Revised twice; read to the end.** The original ruling, below, made no price field enterable and
+> took discounts as a percent only. Two later revisions narrow it: a rep holding
+> `MJ.BizApps.Orders.Price.OverrideAny` may type a custom amount on a deal line
+> ([Choosing a price on a deal line](#choosing-a-price-on-a-deal-line-golive270-revised)), and any rep
+> may type a discount in dollars, which is converted to and stored as a percent
+> ([Typing a discount in dollars](#typing-a-discount-in-dollars-revision)). What still holds:
+> `OrderLine.DiscountAmount` is never bound or written, and a discount is stored as a percent.
+
+**As first ruled: S-US4 is explicit that no price field is enterable by the rep.** The deal-workspace line grid had an
 editable `DiscountAmount` currency input beside the percent one — inherited from `DealLine`, where the two
 coexisted deliberately: the order form template speaks in amounts, the pricing engine takes a percent, and
 `DealLine` transcribed both. That reasoning died with the table. The amount input is removed; the percent
@@ -627,6 +635,28 @@ What keeps it controlled is what controls the same amount on the order line:
   are stored where the order shows them after Closed Won. Nothing is copied.
 
 The discount stays percent-only: the `DiscountAmount` reasoning above is unchanged.
+
+### Typing a discount in dollars (revision)
+
+**Revision: the line editor's discount accepts a dollar amount as well as a percent.** This removes the
+cost stated above ("less $500" on a signed form had to be converted by hand). It does not reopen the
+`DiscountAmount` column: the dollars are an entry, never stored.
+
+- **Stored as a percent.** `DiscountAmountToPercent` (`discount-conversion.ts`, the one place a discount
+  is converted) turns the dollars into a percent of the line's list amount, held to 0.01% and to 0–100%,
+  and the editor writes it to `DiscountPct`. From there it is a percent like any other: the same
+  concession reason on a raise, the same approval, the same pricing.
+- **The list amount is orders' figure.** It is read back from orders' `Orders.PriceOrder` answer as net
+  plus discount (`PricedLineListAmount`), the inverse of orders' own list − net derivation. Sales does not
+  multiply quantity by price for it, and a tier's stored extended amount is included.
+- **Precision is shown, not hidden.** A hundredth of a percent can move the booked discount a few cents off
+  the typed amount ($500 off $3,333 records 15.00%, which orders prices as $499.95). The editor shows the
+  derived percent and, when they differ, the figure orders will book.
+- **No ambiguity refusal on a derived percent.** The `(0, 1)` refusal (D-DL1) guards a typed percent that
+  might already be a fraction. A percent computed from dollars has one reading, so $1 off $240 records
+  0.42%.
+- **The dollars hold through a reprice.** A new quantity or product changes the list amount; the editor
+  re-derives the percent from the typed dollars, since the dollars are what the rep stated.
 
 ---
 
@@ -711,6 +741,52 @@ golive#232 was filed about.
 `ForecastSnapshotJob`'s `CurrentMonthPeriod()` is untouched. A fiscal start being readable makes D-28
 answerable, but changing the snapshot's period changes what every stored row means and has its own
 integration checks. That is a separate decision; D-28 records the new fact.
+
+---
+
+## D-ST1 — A save that moves a deal's status into or out of a locking status runs the close or the reopen
+
+**Ruling** (bc-aidp-next-golive#205; built in sales PRs #68 and #73): when any save moves
+`Deal.DealStatusTypeID` from a non-locking status to one with `DealStatusType.LocksDeal = 1`, the deal
+entity server runs `Sales.CloseDeal`; a move the other way runs `Sales.ReopenDeal`. A status write that
+cannot run its flow is refused. Code: `DealEntityServer.planStatusTransition` and
+`runStatusTransition`; pinned by `close-deal.CD26` and `close-deal.CD27`.
+
+**What it reverses.** The earlier design had the operations drive the entity and nothing else: a close
+or reopen happened only through `Sales.CloseDeal` / `Sales.ReopenDeal`, and #68 refused a bare status
+write into a locking status. #205 showed the cost. Setting Status to Won on the form locked the deal with
+no stage event, contract or finance tasks, and the lock then refused every later status write, so the
+deal could not be reopened. Refusing the write closed that hole but left a form user, an importer and an
+agent with no way to close a deal by its status. Running the flow serves both: the close is the real one,
+and every caller (form, import, agent, raw `BaseEntity.Save()`) takes the same path.
+
+**How it runs.**
+
+- **Before the close lock.** A reopen is a status write on a locked deal. With the lock first, it is
+  refused before anything sees it as a reopen (`close-deal.CD27`).
+- **The status is put back, then the flow runs after the save.** The operation loads and saves its own
+  copy of the deal. If this save wrote the status too, the two would race over one row. So the field is
+  reverted, the ordinary save commits the caller's other edits, and the flow runs against the committed
+  row. `DealStatusTypeID` stays out of `DEAL_FIELDS_EDITABLE_WHILE_LOCKED`: the field is reached through
+  the flow, never by writing it.
+- **Declared transitions are skipped.** `Sales.CloseDeal` and `Sales.ReopenDeal` call
+  `DeclareTransition` before their own save, so that save does not re-enter the flow.
+- **No reopen reason is required.** The reopen records a fixed sentence as its reason, so the audit
+  trail still says how the deal was reopened (#205; master plan §7.3).
+
+**Refusals before anything is written.**
+
+- A Lost close with no `LossReasonID`: the operation would refuse it every time, so the save refuses up
+  front instead of committing the other edits first.
+- A target status that cannot be read: neither guess is safe. Read as locking, it would close a deal
+  nobody asked to close; read as open, it would write a locking status with no close behind it.
+- A prior status with no row, moving to a locking status: nothing says whether the deal is already
+  closed, and a second close would create a second contract.
+
+**Trade-off accepted.** A close or reopen that fails after the save (a downstream route declines, a loss
+reason demands notes, a contract or order write fails) leaves the caller's other edits committed and the
+status unchanged. The save returns false with a message naming both halves. The close itself stays
+transactional; a half-done close is not among the outcomes.
 
 ---
 

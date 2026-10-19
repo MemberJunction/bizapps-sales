@@ -18,7 +18,7 @@
  *      rebuilds before it measures anything.
  *
  * Before any of this, an interrupted run left its mutant in the working tree and in `dist/`, and
- * `test-harnesses/playwright/README.md` records three such strandings that read as unrelated test
+ * `test-harnesses/MUTATION-RUNS.md` records three such strandings that read as unrelated test
  * failures.
  *
  * ── THE MARKER IS ALSO HOW A LIVE RUN IS TOLD APART FROM A STRANDED ONE ────────────────────────

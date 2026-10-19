@@ -167,6 +167,25 @@ packages:
   - 'bizapps-sales/packages/*'
   - 'bizapps-contracts'          # ⚠ was MISSING here; step 6 cannot run without it
   - 'bizapps-contracts/packages/*'
+# pnpm 10 runs a dependency's install scripts only when it is listed here; anything left out installs
+# without its native build and fails later at run time. Same list as this repo's pnpm-workspace.yaml.
+onlyBuiltDependencies:
+  - '@apollo/protobufjs'
+  - '@google/genai'
+  - '@parcel/watcher'
+  - '@zoom/rtms'
+  - browser-tabs-lock
+  - core-js
+  - core-js-pure
+  - esbuild
+  - isolated-vm
+  - lmdb
+  - msgpackr-extract
+  - oracledb
+  - protobufjs
+  - rete
+  - sharp
+  - tesseract.js
 ```
 
 **Every member is listed explicitly, and contracts is the reason.** This block used to end with

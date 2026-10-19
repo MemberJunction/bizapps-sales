@@ -1983,11 +1983,6 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     }
 
     /**
-     * A closed deal's status is not editable here. Reopening is the audited way back, and offering the
-     * field would be the mirror of the defect this change closes: a status write that unlocks a deal
-     * without the reopen having run.
-     */
-    /**
      * EDITABLE ON A LOCKED DEAL TOO, which is golive#205 D9 and #206 item 3 asking for the same thing:
      * "Deal Status should stay editable so the deal can be set back to Open, which is how a closed deal
      * is reopened."
@@ -2958,13 +2953,6 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         return this.currentStatus?.LocksDeal === true;
     }
 
-    /**
-     * `Sales.ReopenDeal` REQUIRES a reason — §7.3 makes undoing a lock explainable, and CD10 pins it.
-     *
-     * Worth stating because golive#205 asks for the opposite ("No reopen reason should be required in
-     * this path"). Refusing here rather than letting the operation refuse keeps the round trip off a
-     * request that cannot succeed, and matches how the workspace's reopen behaves.
-     */
     /**
      * Confirmable as soon as the panel is open. The reason is NOT part of this test, for the same
      * reason it is not on the Pipeline panel -- see the module-level {@link ReopenReasonOrDefault}.

@@ -77,8 +77,9 @@ watches for this; it is a heuristic, not a proof.
   take the order total (sales never sums lines). A typed figure survives only on a header-only deal.
 - An override price on a line is an **input** to orders' pricing, never a replacement for the totals
   orders computes on top of it.
-- A rep enters a discount as a **percent**; `OrderLine.DiscountPct` stores a **fraction**. Convert only
-  in `packages/Entities/src/discount-conversion.ts` (`pnpm run test:discount-gate`), never at a call
+- A rep enters a discount as a **percent** or a **dollar amount**; `OrderLine.DiscountPct` stores a
+  **fraction** either way (dollars become a percent of orders' list amount). Convert only in
+  `packages/Entities/src/discount-conversion.ts` (`pnpm run test:discount-gate`), never at a call
   site (D-DL2).
 - Closing does not create or price a second order. The deal's own order changes status when the deal
   enters a stage that names one (`PipelineStage.OrderStatusOnEntry`).
@@ -154,7 +155,8 @@ conflict list. When merging feature branches together, record the head you actua
   reach the `claude.exe` that is your own parent. Anything else belongs to another session.
 - **`ps -W` prints no command-line arguments**, so it can never find a run by script name. Use
   `Get-CimInstance Win32_Process` (it has `CommandLine` and `ParentProcessId`).
-- If you cannot establish ownership, **do not kill it.** Say what you see and ask.
+- If you cannot establish ownership, **do not kill it.** Say what you see and ask. The full procedure:
+  `test-harnesses/MUTATION-RUNS.md`.
 - **A Bash call that hits its ten-minute ceiling DETACHES the process; it does not kill it.** A run that
   seems stuck is most likely queued on the suite lock behind your own orphan.
 - The stranded-mutation recovery (`git checkout --` plus a rebuild) is **destructive against a live
@@ -171,7 +173,8 @@ Most defects here were **a claim that was true when somebody checked it, and sta
 stopped being true.** Make the check happen where the claim is USED, not where it was made:
 
 * Do not index a collection and then assert which row it is — **find the row, then assert about it.**
-* Run the anchor validator **after** an edit, not before. Before tells you the state you are leaving.
+* Check a mutant's anchor **after** an edit, not before. Before tells you the state you are leaving
+  (`test-harnesses/MUTATION-RUNS.md`).
 * **Filter, do not count.** `exactly one link` is a statement about today's data; `the link to the ORDER`
   is a statement about the requirement.
 * A guard keyed on a **cause** survives a new code path; one keyed on a **threshold** does not.
