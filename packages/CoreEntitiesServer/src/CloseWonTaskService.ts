@@ -263,6 +263,9 @@ export function ResolveTaskTypeColumn(provider: IMetadataProvider): 'Code' | 'Na
  */
 export const DEFAULT_DUE_IN_DAYS = 5;
 
+/** How the no-order issue begins. Checks find that issue by this text, so it stays in one place. */
+export const NO_ORDER_ISSUE_PREFIX = 'The deal has no order';
+
 /**
  * The due date for work created by a close: the close's business day plus `dueInDays`, stored as UTC
  * midnight of that day.
@@ -362,7 +365,7 @@ export class CloseWonTaskService {
          */
         if (raiseOrderReview && !input.OrderID) {
             result.Issues.push(
-                'The deal has no order, so no order-review task was created. The order is created with the '
+                `${NO_ORDER_ISSUE_PREFIX}, so no order-review task was created. The order is created with the `
                     + 'deal, so this means the deal predates that or its order was never written.',
             );
             result.Success = false;
