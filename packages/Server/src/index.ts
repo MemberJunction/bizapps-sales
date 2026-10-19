@@ -19,6 +19,7 @@ import '@mj-biz-apps/sales-core-entities-server';
 import {
     LoadDealLockOrderLineVeto,
     LoadDealNotWonConfirmVeto,
+    LoadDealOrderLink,
     LoadSalesCoreEntitiesServer,
 } from '@mj-biz-apps/sales-core-entities-server';
 import { LoadCaptureForecastSnapshotAction } from './custom/forecast-snapshot.action.js';
@@ -88,6 +89,13 @@ export function LoadBizAppsSalesServer(): void {
      * sitting Open. Same seam shape, same package reasoning as the note above.
      */
     LoadDealNotWonConfirmVeto();
+
+    /**
+     * And which deal created an order (bc-aidp-next-golive#320 §5), so orders' review-by-trigger can
+     * let a deal order confirm without the review a hand-entered one gets. The seam ships in
+     * orders-entities 5.36.0; on an older orders this registers nothing and logs that it did not.
+     */
+    LoadDealOrderLink();
 
     LoadCaptureForecastSnapshotAction();
     LoadLogActivityAction();
