@@ -471,7 +471,7 @@ describe('the reopen actually reaches the screen', () => {
 describe('what an operation reported outlives the mode it was started in', () => {
     const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
     const statusField = (() => {
-        const start = source.indexOf('<label class="mj-forms-field-label">Status</label>');
+        const start = source.indexOf('<label class="mj-forms-field-label" [attr.for]="EditMode ? FieldIdPrefix + \'-status\' : null">Status</label>');
         return source.slice(start, source.indexOf('</mj-collapsible-panel>', start));
     })();
 
@@ -496,13 +496,29 @@ describe('what an operation reported outlives the mode it was started in', () =>
 describe('the status hints point at this control, not away from it', () => {
     const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
     const statusField = (() => {
-        const start = source.indexOf('<label class="mj-forms-field-label">Status</label>');
+        const start = source.indexOf('<label class="mj-forms-field-label" [attr.for]="EditMode ? FieldIdPrefix + \'-status\' : null">Status</label>');
         return source.slice(start, source.indexOf('</mj-collapsible-panel>', start));
     })();
     const hints = [...statusField.matchAll(/class="mjs-field__hint">([^<]+)</g)].map((m) => m[1].trim());
 
-    it('has one hint for each side of the lock', () => {
-        expect(hints.length, 'a closed-deal hint and an open-deal hint').toBe(2);
+    it('has one hint for each side of the lock, and one for an unsaved deal', () => {
+        expect(hints.length, 'an unsaved-deal hint, a closed-deal hint and an open-deal hint').toBe(3);
+    });
+
+    it('does not call an UNSAVED deal open or offer a Close it cannot have yet', () => {
+        /**
+         * A new deal shows "— choose —" for Status, and the Close panel offers Close only after the
+         * first save. The open-deal hint said both "Open." and "use Close on the Close panel" to it.
+         * The unsaved branch has to come first, or the open-deal hint still wins on a new deal.
+         */
+        const unsaved = hints.find((h) => h.startsWith('No status yet.'));
+        expect(unsaved, 'an unsaved-deal hint').toBeDefined();
+        expect(unsaved).toMatch(/saves as open/);
+        expect(unsaved).toMatch(/after saving/);
+        const unsavedAt = statusField.indexOf('@if (!Record.IsSaved)');
+        const openAt = statusField.indexOf('Open. Pick a closing status');
+        expect(unsavedAt, 'the unsaved branch').toBeGreaterThan(-1);
+        expect(unsavedAt, 'the unsaved branch is checked before the open-deal hint').toBeLessThan(openAt);
     });
 
     it('tells an OPEN deal it can close from here', () => {

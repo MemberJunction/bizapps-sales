@@ -10,16 +10,82 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { Component } from '@angular/core';
+import { Component, Directive, DoCheck, signal } from '@angular/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
 import type { AfterDataLoadEventArgs } from '@memberjunction/ng-entity-viewer';
-import type { BaseEntity, RunViewParams } from '@memberjunction/core';
+import { RunView, type BaseEntity, type RunViewParams } from '@memberjunction/core';
 import { CommonModule } from '@angular/common';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 
 const EMPTY_STATE_STYLES =
     '.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }';
+
+/** Reads whether a row exists in an entity by ID. A seam so the gate tests without a provider. */
+export type PartyRowReader = (entityName: string, id: string) => Promise<boolean | null>;
+
+/**
+ * Whether the Sales Account or Sales Contact row exists for this ID: true, false, or null when the read
+ * failed. IsA means it shares the Organization's or Person's ID, so one read by ID answers it.
+ */
+export async function SalesPartyRowExists(entityName: string, id: string): Promise<boolean | null> {
+    const result = await new RunView().RunView<{ ID: string }>({
+        EntityName: entityName,
+        ExtraFilter: `ID = '${id.replace(/'/g, "''")}'`,
+        ResultType: 'simple',
+        Fields: ['ID'],
+    });
+    if (!result?.Success) return null;
+    return (result.Results ?? []).length > 0;
+}
+
+/**
+ * ── NEW IS OFFERED ONLY WHERE A DEAL CAN BE SAVED ─────────────────────────────────────────────
+ *
+ * The Deals panel shows on every Organization and Person, and its New pre-fills the record's ID as
+ * the deal's customer or contact. The server accepts only Sales Accounts and Sales Contacts, so on a
+ * record that is neither the rep filled in a deal that could not be saved. The panel reads once per
+ * record whether the sales row exists, hides New when it does not, and says why. Until the read
+ * answers, New stays hidden; a read that FAILS leaves New shown, and the server's refusal then names
+ * the case.
+ */
+@Directive()
+abstract class SalesPartyDealsPanel extends BaseFormPanel<BaseEntity> implements DoCheck {
+    /** The sales entity that extends this record (IsA). */
+    protected abstract readonly SalesEntity: string;
+
+    /** True when New may be offered, false when the record is not set up for sales, null while unknown. */
+    public readonly CanCreateDeal = signal<boolean | null>(null);
+
+    /** Replaced in tests. */
+    public ReadPartyRow: PartyRowReader = SalesPartyRowExists;
+
+    private checkedID: string | null = null;
+
+    public ngDoCheck(): void {
+        if (this.recordID() !== this.checkedID) {
+            void this.CheckSalesParty();
+        }
+    }
+
+    /** Reads once per record ID; a later ID starts a new read and the earlier answer is discarded. */
+    public async CheckSalesParty(): Promise<void> {
+        const id = this.recordID();
+        if (id === this.checkedID) return;
+        this.checkedID = id;
+        this.CanCreateDeal.set(null);
+        if (!id) return;
+        const exists = await this.ReadPartyRow(this.SalesEntity, id);
+        if (this.checkedID === id) {
+            this.CanCreateDeal.set(exists !== false);
+        }
+    }
+
+    private recordID(): string | null {
+        const raw = this.Record?.IsSaved ? this.Record.Get?.('ID') : null;
+        return raw ? String(raw) : null;
+    }
+}
 
 const ORG_SECTION = 'deals';
 const PERSON_SECTION = 'deals';
@@ -52,9 +118,13 @@ const TEAM_SECTION = 'deal-team';
             [FormContext]="FormContext"
             [DefaultExpanded]="false">
             @if (Record.IsSaved) {
+                @if (CanCreateDeal() === false) {
+                    <p class="mjs-deal-empty" data-testid="party-deals-not-sales">Not a sales customer. Add it as an account to create deals.</p>
+                }
                 <mj-explorer-entity-data-grid
                     [Params]="Params"
                     [NewRecordValues]="NewValues"
+                    [ShowNewButton]="CanCreateDeal() === true"
                     [AllowLoad]="FormComponent.IsSectionExpanded(SectionKey)"
                     [ShowToolbar]="true"
                     (Navigate)="FormComponent.OnFormNavigate($event)"
@@ -67,9 +137,10 @@ const TEAM_SECTION = 'deal-team';
     `,
     styles: [EMPTY_STATE_STYLES],
 })
-export class MJSOrganizationDealsPanel extends BaseFormPanel<BaseEntity> {
+export class MJSOrganizationDealsPanel extends SalesPartyDealsPanel {
     public readonly DealEntity = MJS_ENTITIES.Deal;
     public readonly SectionKey = ORG_SECTION;
+    protected readonly SalesEntity = MJS_ENTITIES.SalesAccount;
     /**
      * `AccountID` points at Sales Accounts, an IsA child of Organizations. TPT means the child
      * ID equals the Organization ID, so filtering Deal.AccountID to this org's ID is correct
@@ -115,9 +186,13 @@ export class MJSOrganizationDealsPanel extends BaseFormPanel<BaseEntity> {
             [FormContext]="FormContext"
             [DefaultExpanded]="false">
             @if (Record.IsSaved) {
+                @if (CanCreateDeal() === false) {
+                    <p class="mjs-deal-empty" data-testid="party-deals-not-sales">Not a sales contact. Add them as a contact to create deals.</p>
+                }
                 <mj-explorer-entity-data-grid
                     [Params]="Params"
                     [NewRecordValues]="NewValues"
+                    [ShowNewButton]="CanCreateDeal() === true"
                     [AllowLoad]="FormComponent.IsSectionExpanded(SectionKey)"
                     [ShowToolbar]="true"
                     (Navigate)="FormComponent.OnFormNavigate($event)"
@@ -130,9 +205,10 @@ export class MJSOrganizationDealsPanel extends BaseFormPanel<BaseEntity> {
     `,
     styles: [EMPTY_STATE_STYLES],
 })
-export class MJSPersonDealsPanel extends BaseFormPanel<BaseEntity> {
+export class MJSPersonDealsPanel extends SalesPartyDealsPanel {
     public readonly DealEntity = MJS_ENTITIES.Deal;
     public readonly SectionKey = PERSON_SECTION;
+    protected readonly SalesEntity = MJS_ENTITIES.SalesContact;
     /**
      * Primary/Billing contact FKs point at Sales Contacts (IsA of People). TPT: contact ID = person ID.
      */

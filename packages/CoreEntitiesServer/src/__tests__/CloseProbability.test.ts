@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { CloseDealOperation } from '../CloseDealOperation.js';
+import { CloseDealOperation, ReopenDealOperation } from '../CloseDealOperation.js';
 
 const WON = { ID: 'won', IsWon: true, IsLost: false, IsClosed: true, LocksDeal: true };
 const LOST = { ID: 'lost', IsWon: false, IsLost: true, IsClosed: true, LocksDeal: true };
@@ -192,5 +192,70 @@ describe('stampClose writes the resolved figures', () => {
         expect(deal.PipelineStageID).toBe('proposal');
         expect(deal.Probability).toBe(50);
         expect(deal.ForecastCategoryTypeID).toBe('fc-best');
+    });
+});
+
+describe('reopenLanding: where a reopened deal goes', () => {
+    type Landing = {
+        reopenLanding(
+            requestedStageID: string | null,
+            undone: { FromStageID: string | null } | null,
+            currentStageID: string | null,
+        ): { StageID: string | null; StageMoves: boolean; ClearsStage: boolean };
+    };
+    const op = Object.create(ReopenDealOperation.prototype) as Landing;
+
+    it('clears the stage of a deal that had none before the close', () => {
+        expect(op.reopenLanding(null, { FromStageID: null }, 'signed')).toEqual({
+            StageID: null,
+            StageMoves: true,
+            ClearsStage: true,
+        });
+    });
+
+    it('restores the stage the close event left', () => {
+        expect(op.reopenLanding(null, { FromStageID: 'proposal' }, 'signed')).toEqual({
+            StageID: 'proposal',
+            StageMoves: true,
+            ClearsStage: false,
+        });
+    });
+
+    it('takes the stage the caller named over the close event', () => {
+        expect(op.reopenLanding('discovery', { FromStageID: null }, 'signed').StageID).toBe('discovery');
+    });
+
+    it('leaves the stage alone when no close event was found', () => {
+        expect(op.reopenLanding(null, null, 'signed')).toEqual({ StageID: null, StageMoves: false, ClearsStage: false });
+    });
+
+    it('has nothing to clear when the close left the deal without a stage', () => {
+        expect(op.reopenLanding(null, { FromStageID: null }, null).ClearsStage).toBe(false);
+    });
+
+    it('does not count a restore into the current stage as a move, in any case', () => {
+        expect(op.reopenLanding(null, { FromStageID: 'SIGNED' }, 'signed').StageMoves).toBe(false);
+    });
+});
+
+describe('reopenProbability: the probability a reopened deal takes', () => {
+    type Restorer = {
+        reopenProbability(
+            undone: { ProbabilityAtTransition: number | null } | null,
+            currentProbability: number | null,
+        ): number | null;
+    };
+    const op = Object.create(ReopenDealOperation.prototype) as Restorer;
+
+    it('restores the probability the close event stamped', () => {
+        expect(op.reopenProbability({ ProbabilityAtTransition: 40 }, 100)).toBe(40);
+    });
+
+    it('goes back to no probability when the deal had none before the close', () => {
+        expect(op.reopenProbability({ ProbabilityAtTransition: null }, 100)).toBeNull();
+    });
+
+    it('keeps the current probability when no close event was found', () => {
+        expect(op.reopenProbability(null, 100)).toBe(100);
     });
 });

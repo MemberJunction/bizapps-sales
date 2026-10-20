@@ -171,12 +171,13 @@ test.describe('lifecycle — create, price, advance, close won', () => {
          * The Stage select offers only THIS pipeline's stages since golive#291, and the pick is by the
          * option's ID rather than its text -- so the stage no longer has to be the only active one
          * carrying its name. The move is still confirmed by ID from the database rather than trusted
-         * from the pick.
+         * from the pick. A stage whose status locks is not offered, so the pick is an open one.
          */
         const quoting = await QueryOne<{ ID: string; Name: string }>(`
             SELECT TOP 1 s.ID, s.Name FROM __mj_BizAppsSales.PipelineStage s
+              JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = s.DealStatusTypeID
              WHERE s.PipelineID = (SELECT PipelineID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}')
-               AND s.IsActive = 1 AND s.OrderStatusOnEntry = 'Quoted'
+               AND s.IsActive = 1 AND s.OrderStatusOnEntry = 'Quoted' AND t.LocksDeal = 0
              ORDER BY s.DisplayOrder`);
         expect(
             quoting?.Name,

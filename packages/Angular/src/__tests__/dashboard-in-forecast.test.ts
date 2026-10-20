@@ -20,6 +20,7 @@ function row(over: Partial<DealRosterRow>): DealRosterRow {
         IsWon: false,
         IncludeInCommit: false,
         IncludeInBestCase: false,
+        IncludeInPipeline: true,
         ActualCloseDate: null,
         PipelineIncludeInForecast: true,
         ...over,

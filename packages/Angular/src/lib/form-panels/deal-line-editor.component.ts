@@ -73,8 +73,9 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { A11yModule } from '@angular/cdk/a11y';
 import { Metadata } from '@memberjunction/core';
 import { FormsModule } from '@angular/forms';
 import {
@@ -97,6 +98,7 @@ import {
 import {
     ContinuationStartFrom,
     GetExistingHolding,
+    MJODatePipe,
     MJOLinePricePickerComponent,
     type MJOExistingHolding,
 } from '@mj-biz-apps/orders-ng';
@@ -118,8 +120,9 @@ import {
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
+import { FormatDealMoney } from './deal-money';
 
-/** `<input type="date">` wants `yyyy-MM-dd`, and nothing else renders. */
+/** `<input type="date">` wants `yyyy-MM-dd`, and nothing else renders; `mjoDate` reads the same day value. */
 function toDateInput(d: Date | string | null | undefined): string | null {
     if (!d) return null;
     const iso = d instanceof Date
@@ -176,10 +179,14 @@ interface RemoteOperationRouter {
 @Component({
     selector: 'mjs-deal-line-editor',
     standalone: true,
-    imports: [CommonModule, FormsModule, MJOLinePricePickerComponent],
+    imports: [CommonModule, FormsModule, A11yModule, MJOLinePricePickerComponent, MJODatePipe],
     template: `
         <div class="mjs-le__scrim" (click)="Cancel()"></div>
-        <div class="mjs-le" role="dialog" aria-modal="true" data-testid="line-editor" [attr.aria-label]="Title">
+        <!-- Keyboard (#371 item 3): focus is trapped inside while open, Escape cancels, the first
+             field takes focus once the line has loaded, and focus returns to the opener on close
+             (ngOnDestroy). -->
+        <div class="mjs-le" role="dialog" aria-modal="true" data-testid="line-editor" [attr.aria-label]="Title"
+             tabindex="-1" cdkTrapFocus (keydown.escape)="OnEscape($event)">
             <header class="mjs-le__head">
                 <h2>{{ Title }}</h2>
                 <button type="button" class="mjs-le__x" (click)="Cancel()" aria-label="Close">
@@ -222,6 +229,9 @@ interface RemoteOperationRouter {
                             <input type="number" data-testid="line-quantity" min="1" step="1" [ngModel]="Working.Quantity"
                                    (ngModelChange)="SetQuantity($event)"
                                    [disabled]="IsLocked" [title]="BlockedReason" />
+                            @if (QuantityInvalid) {
+                                <span class="mjs-le__error" data-testid="line-quantity-error">{{ QuantityInvalidMessage }}</span>
+                            }
                         </label>
 
                         <div class="mjs-le__field">
@@ -318,14 +328,25 @@ interface RemoteOperationRouter {
                     }
 
                     @if (ShowTermStart) {
-                        <label class="mjs-le__field">
-                            <span class="mjs-le__label">Term start</span>
-                            <input type="date" data-testid="line-term-start" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
-                                   [disabled]="IsLocked" [title]="BlockedReason" />
-                            @if (!HasExplicitTermStart) {
-                                <small class="mjs-le__hint">order date</small>
-                            }
-                        </label>
+                        @if (TermStartFollowsHolding && Holding; as holding) {
+                            <!-- Orders starts an added term the day after the existing coverage ends,
+                                 whatever the line states, so the start it will use is shown, not offered.
+                                 The line's own start is kept for a switch back to a new subscription. -->
+                            <div class="mjs-le__field" data-testid="line-term-start-continuation">
+                                <span class="mjs-le__label">Term start</span>
+                                <span class="mjs-le__ro-val">{{ HoldingContinuationStart | mjoDate }}</span>
+                                <small class="mjs-le__hint">next term of {{ holding.SubscriptionNumber }}</small>
+                            </div>
+                        } @else {
+                            <label class="mjs-le__field">
+                                <span class="mjs-le__label">Term start</span>
+                                <input type="date" data-testid="line-term-start" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
+                                       [disabled]="IsLocked" [title]="BlockedReason" />
+                                @if (!HasExplicitTermStart) {
+                                    <small class="mjs-le__hint">order date</small>
+                                }
+                            </label>
+                        }
                     }
 
                     <!-- SERVICE PERIOD: the product's recognition type earns over a window and nothing
@@ -364,7 +385,7 @@ interface RemoteOperationRouter {
                             <span class="mjs-le__label">Existing subscription</span>
                             <span class="mjs-le__muted">
                                 The customer already holds {{ holding.SubscriptionNumber }} for this product
-                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd }}) }.
+                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd | mjoDate }}) }.
                             </span>
                             <div class="mjs-le__choices">
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-extend"
@@ -373,7 +394,7 @@ interface RemoteOperationRouter {
                                         [disabled]="IsLocked" [title]="BlockedReason"
                                         (click)="SetSubscriptionAction('ExtendExisting')">
                                     Add as next term
-                                    @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart }}) }
+                                    @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart | mjoDate }}) }
                                 </button>
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-new"
                                         [class.is-selected]="Working.SubscriptionAction === 'CreateNew'"
@@ -471,6 +492,7 @@ interface RemoteOperationRouter {
         .mjs-le__scrim {
             position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 1000;
         }
+        .mjs-le:focus { outline: none; }
         .mjs-le {
             position: fixed; z-index: 1001; top: 50%; left: 50%; transform: translate(-50%, -50%);
             width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto;
@@ -561,7 +583,7 @@ interface RemoteOperationRouter {
         }
     `],
 })
-export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
+export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     /**
      * The DEAL whose order this line belongs to.
      *
@@ -595,6 +617,10 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
 
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
+    private readonly host = inject(ElementRef<HTMLElement>);
+    /** What had focus when the dialog opened, so closing it can hand focus back. */
+    private readonly opener: HTMLElement | null =
+        typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     public Products: ProductLookup[] = [];
     /** Each product's catalog price, for the picker label — read from orders, keyed by product id. */
@@ -728,7 +754,39 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         } finally {
             this.Loading = false;
             this.cdr.detectChanges();
+            this.focusFirstField();
         }
+    }
+
+    /** Focus the dialog itself while it loads, so the trap and Escape work from the first frame. */
+    public ngAfterViewInit(): void {
+        this.dialogElement()?.focus();
+    }
+
+    /** Escape cancels, unless a save is in flight; the X and Cancel buttons are disabled then too. */
+    public OnEscape(event: Event): void {
+        event.stopPropagation();
+        if (!this.Saving) {
+            this.Cancel();
+        }
+    }
+
+    private dialogElement(): HTMLElement | null {
+        const root = this.host?.nativeElement as HTMLElement | undefined;
+        return root?.querySelector<HTMLElement>('.mjs-le') ?? null;
+    }
+
+    /**
+     * The first enabled control in the body, or the dialog when there is none (a locked line, a
+     * failed load). Run after the loaded body has rendered.
+     */
+    private focusFirstField(): void {
+        const dialog = this.dialogElement();
+        if (!dialog) return;
+        const first = dialog.querySelector<HTMLElement>(
+            '.mjs-le__body select:not([disabled]), .mjs-le__body input:not([disabled]), .mjs-le__body textarea:not([disabled])',
+        );
+        (first ?? dialog).focus();
     }
 
     public ProductOptionLabel(p: ProductLookup): string {
@@ -837,6 +895,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             this.Applicable = [];
             return;
         }
+        // Not asked for a quantity the rep has not entered; Save is blocked until they do.
+        if (this.QuantityInvalid) return;
         const productID = String(line.ProductID);
         try {
             await LoadOrdersEngine(Metadata.Provider, user);
@@ -1062,14 +1122,23 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         this.cdr.detectChanges();
     }
 
-    /** Where the existing coverage ends, for the prompt. */
+    /** Where the existing coverage ends, for the prompt: a `yyyy-MM-dd` day, displayed with `mjoDate`. */
     public get HoldingCoverageEnd(): string | null {
         return toDateInput(this.Holding?.LatestTermEnd ?? null);
     }
 
-    /** The start an extension would get: the day after the existing coverage ends. */
+    /** The start an extension would get: the day after the existing coverage ends, as `yyyy-MM-dd`. */
     public get HoldingContinuationStart(): string | null {
         return toDateInput(ContinuationStartFrom(this.Holding));
+    }
+
+    /**
+     * Whether Term start shows the continuation start instead of an input: "Add as next term" is
+     * chosen and the start is known. Orders' `SubscriptionBehavior.Decide` starts an extension at the
+     * end of the existing coverage over any stated start, so an editable date here would be ignored.
+     */
+    public get TermStartFollowsHolding(): boolean {
+        return this.Working?.SubscriptionAction === 'ExtendExisting' && !!this.HoldingContinuationStart;
     }
 
     public SetSubscriptionAction(action: 'ExtendExisting' | 'CreateNew'): void {
@@ -1077,9 +1146,9 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         this.Working.SubscriptionAction = action;
     }
 
+    /** A figure in the deal's currency, with cents (#371 items 4 and 5). */
     public Money(n: number | null | undefined): string {
-        if (n == null || !Number.isFinite(Number(n))) return '—';
-        return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+        return FormatDealMoney(n, this.Deal?.CurrencyID, 'cents') || '—';
     }
 
     /* ── What the line comes to, answered by Orders (S2) ─────────────────────────── */
@@ -1111,10 +1180,12 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
 
     /** Orders' answer when there is one, otherwise whatever the saved line already carries. */
     public get DisplayUnitPrice(): number | null {
+        if (this.QuantityInvalid) return null;
         return this.pricedUnit ?? (this.Working?.UnitPrice as number | null | undefined) ?? null;
     }
 
     public get DisplayLineTotal(): number | null {
+        if (this.QuantityInvalid) return null;
         return this.pricedTotal ?? (this.Working?.LineTotalNet as number | null | undefined) ?? null;
     }
 
@@ -1134,6 +1205,23 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             clearTimeout(this.priceTimer);
             this.priceTimer = null;
         }
+        // Back to whatever opened the dialog, if it is still on the page (#371 item 3).
+        if (this.opener?.isConnected) {
+            this.opener.focus();
+        }
+    }
+
+    public get QuantityInvalidMessage(): string { return 'Enter a quantity greater than 0.'; }
+
+    /**
+     * Blank, zero, negative or not a number. Fractions are legal: orders stores `DECIMAL(18,4)` and
+     * forbids only zero, and a deal line expresses no reversal. The input's `min` limits only the
+     * spinner, so a cleared or typed value reaches here as 0 or a negative.
+     */
+    public get QuantityInvalid(): boolean {
+        if (!this.Working) return false;
+        const q = this.Working.Quantity as number | null | undefined;
+        return q == null || !Number.isFinite(Number(q)) || Number(q) <= 0;
     }
 
     /** Quantity is a priced input, so it cannot be a plain two-way binding. */
@@ -1183,6 +1271,15 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             this.cdr.detectChanges();
             return;
         }
+        // No price for a quantity the rep did not enter: never a one-unit figure in its place.
+        if (this.QuantityInvalid) {
+            this.pricedUnit = null;
+            this.pricedTotal = null;
+            this.EngineDefault = undefined;
+            this.PricingNote = this.QuantityInvalidMessage;
+            this.cdr.detectChanges();
+            return;
+        }
 
         this.Pricing = true;
         this.PricingNote = null;
@@ -1200,7 +1297,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                     OrderDate: this.IsoOrNull(order?.OrderDate),
                     Lines: [{
                         ProductID: String(line.ProductID),
-                        Quantity: Number(line.Quantity) || 1,
+                        Quantity: Number(line.Quantity),
                         // A picked price PINS the line, as it will on the order's save; otherwise orders
                         // resolves it.
                         UnitPrice: IsLinePriceOverridden(line, this.EngineDefault) ? Number(line.UnitPrice) : null,
@@ -1256,6 +1353,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (this.IsLocked) return false;
         return (
             !!this.Working?.ProductID &&
+            !this.QuantityInvalid &&
             !this.DiscountRefusal &&
             !!this.Deal?.OrderID_Object &&
             !LineNeedsOverrideReason(this.Working, this.EngineDefault) &&
@@ -1295,6 +1393,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (this.IsLocked) return 'This deal is closed. Set the status back to Open before changing what was sold.';
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
+        if (this.QuantityInvalid) return this.QuantityInvalidMessage;
         if (LineNeedsOverrideReason(this.Working, this.EngineDefault)) return 'Enter a reason for the price override.';
         if (this.MissingDiscountReason) return 'Choose a category and enter a reason for the discount.';
         if (this.ServicePeriodBackwards) return 'Set a service end on or after the service start.';
@@ -1441,12 +1540,32 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
      * attached to the order — and the next save of that order would try to write it. `Remove()` is the
      * collection's own withdrawal (never a splice), which is what the workspace uses for the same
      * reason.
+     *
+     * Cancelling an EXISTING line must undo its edit. `Working` is the live line in the order's
+     * collection, not a copy, and MJ rolls a dirty embedded line up into the deal's `Dirty`; left as
+     * it was, the deal's next save would write the cancelled values to the order. `Revert()` puts
+     * every field back to its last-saved value, which also covers a refused save followed by Cancel.
+     *
+     * A `Notice` means the line IS saved and the dialog is only holding open on what happens next, so
+     * every close (X, scrim) reports the save as Done does: the panel refreshes its cards and the
+     * deal's Amount. Checked first, so a saved line is never reverted.
      */
     public Cancel(): void {
-        if (this.IsNewLine && this.Working) {
-            this.Deal?.OrderID_Object?.Lines.Remove(this.Working);
-            this.IsNewLine = false;
+        if (this.Notice) {
+            this.Saved.emit();
+            return;
         }
+        if (this.Working) {
+            if (this.IsNewLine) {
+                this.Deal?.OrderID_Object?.Lines.Remove(this.Working);
+                this.IsNewLine = false;
+            } else {
+                this.Working.Revert();
+            }
+        }
+        this.DiscountCategory = null;
+        this.DiscountReason = '';
+        this.DiscountRefusal = null;
         this.Closed.emit();
     }
 }
