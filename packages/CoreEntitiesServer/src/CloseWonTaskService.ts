@@ -2,7 +2,9 @@
  * @fileoverview The finance tasks a won deal raises — S-US2 (#34) and S-US3 (#35).
  *
  * On Closed Won both pipelines raise an **order-review** task against the deal's embedded order, and a
- * B2B deal additionally raises a **contract-processing** task. Finance reviews the order, corrects it and
+ * B2B deal additionally raises a **contract-processing** task. A pipeline whose policy sets
+ * `CloseWonTasks.RaiseOrderReviewTask: false` skips the order-review task, for a host where orders
+ * reviews by trigger instead (bc-aidp-next-golive#320 §5). Finance reviews the order, corrects it and
  * advances it; that advance is what triggers invoicing, so the task is the control on money leaving the
  * building — not a reminder.
  *
@@ -152,6 +154,12 @@ export interface CloseWonTaskInput {
     Assignee?: CloseWonTaskAssignee;
     AssignedByPersonID?: string;
     DueAt?: Date;
+    /**
+     * Whether the order-review task is raised. Absent means yes, which is what every close did before
+     * this existed. The close operation sets it from the policy's `CloseWonTasks.RaiseOrderReviewTask`
+     * through {@link RaisesOrderReviewTask}.
+     */
+    RaiseOrderReviewTask?: boolean;
 }
 
 /** Which of the two tasks a result row describes. A discriminator in this code, not a row in a table. */
@@ -220,6 +228,17 @@ export interface CloseWonTasksPolicyConfig {
      * to the default rather than producing an invalid date.
      */
     DueInDays?: number | null;
+    /**
+     * Whether a won deal raises the ORDER_REVIEW task. Omit, or set true, to raise it, as every
+     * deployment always has (S-US2). Set `false` on a host whose orders app reviews by trigger
+     * (bc-aidp-next-golive#320 §5): there an order a deal created confirms without review, and orders
+     * raises its own review task when one is due, so this task asks finance to review an order nobody
+     * needs to. The contract-processing task is unaffected.
+     *
+     * Only the boolean `false` switches it off. Anything else, a string `"false"` included, keeps the
+     * task: a mistyped policy should over-review, not quietly drop the control.
+     */
+    RaiseOrderReviewTask?: boolean | null;
 }
 
 /**
@@ -253,8 +272,12 @@ export function ResolveTaskTypeColumn(provider: IMetadataProvider): 'Code' | 'Na
  */
 export const DEFAULT_DUE_IN_DAYS = 5;
 
+/** How the no-order issue begins. Checks find that issue by this text, so it stays in one place. */
+export const NO_ORDER_ISSUE_PREFIX = 'The deal has no order';
+
 /**
- * The due date for work created by a close, in UTC.
+ * The due date for work created by a close: the close's business day plus `dueInDays`, stored as UTC
+ * midnight of that day.
  *
  * ── THE ARITHMETIC IS DELIBERATELY DONE THIS WAY, AND THERE IS A CAUTIONARY TALE ────────────────
  *
@@ -268,19 +291,49 @@ export const DEFAULT_DUE_IN_DAYS = 5;
  * same shape as the bug being fixed here — a due-date feature made inert by a null — and it is the reason
  * this returns a date at all rather than leaving the column empty and the feature untested.
  *
- * Truncated to UTC midnight, like `Deal.ActualCloseDate`: a due DATE is a day, and stamping 23:47 makes
- * "due today" depend on the reader's timezone.
+ * ── COUNTED FROM THE BUSINESS DAY OF THE CLOSE, NOT ITS UTC DAY (bc-aidp-next-golive#168) ─────────
+ *
+ * `closeDay` is `Deal.ActualCloseDate`: the business day the deal closed on, in the shape a `DATE`
+ * column delivers it (UTC midnight of that day), so its UTC parts ARE the business day. The result is
+ * the same shape, UTC midnight of that day plus N — a due DATE is a day, and stamping 23:47 makes "due
+ * today" depend on the reader's timezone.
+ *
+ * Do NOT pass `ClosedAt`. It is an instant, and its UTC day is the NEXT day for a close in the evening
+ * Central (from 6 PM, 7 PM in daylight time): a deal closed at 9:30 PM CDT on 30 September has
+ * `ActualCloseDate` 30 September, and a task counted from `ClosedAt` fell due on 6 October rather than
+ * 5 October — one day later than the close date plus `DueInDays`.
+ *
+ * ── WHY UTC MIDNIGHT, ALTHOUGH `Task.DueAt` IS A DATETIMEOFFSET ─────────────────────────────────
+ *
+ * Because that is what a hand-made task due the same day holds. bizapps-tasks' edit panel picks a due
+ * date with `<input type="date">` and saves the `YYYY-MM-DD` through `entity.Set('DueAt', ...)`, which
+ * MJ stores as `new Date('2026-10-05')`, UTC midnight; it reads the value back with
+ * `toISOString().split('T')[0]`. Stamping the END of the business day instead (`DayEndUtc`) was
+ * considered on #154 and rejected: 23:59:59 CDT on 5 October is 04:59:59Z on the 6th, so that panel
+ * would show 6 October and an untouched save would move the task there. Close-won tasks therefore
+ * behave exactly like hand-made ones. The tasks app displays `DueAt` in the viewer's zone and ages it
+ * against the instant (`DueAt < GETUTCDATE()`), so west of Greenwich every task due on a day — hand-made
+ * or close-won — shows the previous day and turns overdue that evening; that is the tasks app's
+ * convention to fix, for all tasks at once, not something sales can correct for its own rows.
  */
-export function CloseWonTaskDueAt(closedAt: Date, dueInDays?: number | null): Date {
+export function CloseWonTaskDueAt(closeDay: Date, dueInDays?: number | null): Date {
     const days = Number.isFinite(dueInDays) ? Number(dueInDays) : DEFAULT_DUE_IN_DAYS;
     return new Date(
-        Date.UTC(closedAt.getUTCFullYear(), closedAt.getUTCMonth(), closedAt.getUTCDate() + days),
+        Date.UTC(closeDay.getUTCFullYear(), closeDay.getUTCMonth(), closeDay.getUTCDate() + days),
     );
 }
 
 export function ReadCloseWonTaskConfig(policy: unknown): CloseWonTasksPolicyConfig {
     const holder = policy as { CloseWonTasks?: CloseWonTasksPolicyConfig } | null | undefined;
     return holder?.CloseWonTasks ?? {};
+}
+
+/**
+ * Whether a policy's close-won task configuration raises the order-review task: true unless
+ * `RaiseOrderReviewTask` is the boolean `false`. See {@link CloseWonTasksPolicyConfig.RaiseOrderReviewTask}.
+ */
+export function RaisesOrderReviewTask(config: CloseWonTasksPolicyConfig | null | undefined): boolean {
+    return config?.RaiseOrderReviewTask !== false;
 }
 
 interface PolicyCreateContract {
@@ -306,7 +359,8 @@ export class CloseWonTaskService {
     /**
      * Raises the tasks a won deal owes, and reports what it raised.
      *
-     * Order-review always; contract-processing when the pipeline's policy says so. Never throws for a
+     * Order-review unless the input switches it off; contract-processing when the pipeline's policy
+     * says so. Never throws for a
      * business reason — a caller mid-close wants a report it can fold into its own, not an exception that
      * loses the task it did manage to create.
      */
@@ -318,21 +372,29 @@ export class CloseWonTaskService {
         const result: CloseWonTaskResult = { Success: true, Tasks: [], Issues: [] };
 
         /**
+         * THE ORDER-REVIEW TASK IS SWITCHED OFF ON THIS PIPELINE, so neither the task nor the missing-order
+         * issue below applies: that issue explains a task that was not raised, and here none was due.
+         * Not reported as an issue either. It is configuration, and an issue on every close would be one
+         * nobody can act on.
+         */
+        const raiseOrderReview = input.RaiseOrderReviewTask !== false;
+
+        /**
          * NO ORDER, NO ORDER-REVIEW TASK. The order is embedded on the deal from creation, so an empty
          * OrderID means something upstream did not happen — and a task pointing at nothing is a work
          * item finance opens to find an empty page. Report it and create nothing.
          */
-        if (!input.OrderID) {
+        if (raiseOrderReview && !input.OrderID) {
             result.Issues.push(
-                'The deal has no order, so no order-review task was created. The order is created with the '
+                `${NO_ORDER_ISSUE_PREFIX}, so no order-review task was created. The order is created with the `
                     + 'deal, so this means the deal predates that or its order was never written.',
             );
             result.Success = false;
         }
-        const orderReviewTypeID = input.OrderID
+        const orderReviewTypeID = (raiseOrderReview && input.OrderID)
             ? await this.resolveTaskType(CODE_ORDER_REVIEW, provider, contextUser, result)
             : null;
-        const orderReview = (input.OrderID && orderReviewTypeID) ? await this.raise(
+        const orderReview = (raiseOrderReview && input.OrderID && orderReviewTypeID) ? await this.raise(
             'OrderReview',
             {
                 Name: `Review order for ${input.DealName}`,
@@ -795,6 +857,39 @@ export class CloseWonTaskService {
             return null;
         }
 
+        /**
+         * AND THE RECORD HAS TO BE THERE (bc-aidp-next-golive#326).
+         *
+         * `TaskAssignment.AssigneeRecordID` is polymorphic, so there is no foreign key and the database
+         * cannot refuse a row pointing at nobody. On QA fourteen close-won tasks carried a People id that
+         * is not in People -- the id the seeded policy used to ship -- and every one read as assigned
+         * while no queue held them. That is the worse of the two failures: an unrouted task at least
+         * reads as unrouted, and the Issue above says so.
+         *
+         * Checked by READING the row, not by validating the id's shape. A well-formed id for a person
+         * who was never seeded is exactly the case that caused this.
+         */
+        const present = await this.assigneeExists(input.Assignee!.EntityName, input.Assignee!.RecordID, contextUser);
+        if (present === false) {
+            result.Issues.push(
+                `The ${kind} task was created but NOT routed: the configured assignee `
+                    + `'${input.Assignee!.RecordID}' does not exist in ${input.Assignee!.EntityName}. `
+                    + "Point CloseWonTasks.AssigneeRecordID on the pipeline's CloseWonPolicy at a real record.",
+            );
+            return null;
+        }
+        if (present === null) {
+            /**
+             * COULD NOT TELL, so route anyway and say so. A transient read failure must not quietly stop
+             * routing a deployment that is configured correctly -- that would trade this defect for a
+             * worse one. Routing is what happens today; the Issue is what is new.
+             */
+            result.Issues.push(
+                `The ${kind} task's assignee could not be verified before routing; if it is wrong, the `
+                    + 'task will look assigned to nobody.',
+            );
+        }
+
         try {
             const assignment = await this.assignments.assignToTask(
                 {
@@ -806,9 +901,72 @@ export class CloseWonTaskService {
                 },
                 contextUser,
             );
+            /**
+             * AND THE WRITE HAS TO HAVE LANDED (bc-aidp-next-golive#326 — the "or to no one" half).
+             *
+             * tasks' `assignToTask` calls `Save()` without reading its result and returns the entity
+             * either way, so a REFUSED write comes back looking like a successful one: `NewRecord()`
+             * has already put an id on it, this method would hand that id back, and the task records
+             * an AssignmentID with no TaskAssignment row behind it. Nine Order Review tasks on QA are
+             * in exactly that state — the issue's title calls it "assigned to no one", and it is
+             * invisible precisely because the id looks fine.
+             *
+             * `IsSaved` is `_everSaved`, stamped only where a save actually applies, so it stays
+             * false after a refusal. Reporting the task UNROUTED is the honest answer: the work exists
+             * and nobody holds it. The fix in tasks is theirs to make; this stops us reporting a
+             * routing that did not happen.
+             */
+            if (!assignment?.IsSaved) {
+                const why = assignment?.LatestResult?.CompleteMessage ?? 'the write was refused without a reason';
+                LogError(`CloseWonTaskService: the ${kind} assignment did not save for task ${taskID}: ${why}`);
+                result.Issues.push(
+                    `The ${kind} task was created but NOT routed: the assignment did not save (${why}).`,
+                );
+                return null;
+            }
             return assignment.Get('ID') as string;
         } catch (err) {
             result.Issues.push(`The ${kind} task was created but could not be routed: ${String(err)}`);
+            return null;
+        }
+    }
+
+    /**
+     * Whether the assignee record exists: true, false, or NULL for "could not tell".
+     *
+     * Three states rather than two, because the caller treats them differently -- see the note at the
+     * call site. `ResultType: 'count_only'` so this asks the database a question about existence
+     * rather than loading a person nobody reads.
+     *
+     * AND NOT THROUGH THE INJECTED PROVIDER, which the note above `route`'s entity lookup might lead a
+     * reader to expect. That note is about the entity REGISTRY: resolving an EntityID from one provider
+     * and writing it through another is how an assignment ends up pointing at the wrong entity. This
+     * read resolves no id -- it asks whether a row is there -- and the row it asks about is a person who
+     * pre-dates the close, not something the injected provider has just written and only it can see. So
+     * `new RunView()` is used here, the same form every other read in this package takes. If the global
+     * provider cannot answer, that is the NULL case: the route goes ahead and says it could not tell.
+     */
+    private async assigneeExists(
+        entityName: string,
+        recordID: string,
+        contextUser: UserInfo,
+    ): Promise<boolean | null> {
+        try {
+            const view = await new RunView().RunView(
+                {
+                    EntityName: entityName,
+                    ExtraFilter: `ID = '${recordID.replace(/'/g, "''")}'`,
+                    ResultType: 'count_only',
+                },
+                contextUser,
+            );
+            if (!view.Success) {
+                LogError(`CloseWonTaskService: assignee check failed on ${entityName}: ${view.ErrorMessage}`);
+                return null;
+            }
+            return (view.TotalRowCount ?? 0) > 0;
+        } catch (err) {
+            LogError(`CloseWonTaskService: assignee check threw on ${entityName}: ${String(err)}`);
             return null;
         }
     }

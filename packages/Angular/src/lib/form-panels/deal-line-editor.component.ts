@@ -15,17 +15,13 @@
  *
  * ── WHY IT IS BUILT HERE RATHER THAN REUSED ─────────────────────────────────────────────────────
  *
- * `deal-form.component.ts` opens by saying composing a deal is the deal WORKSPACE's job and that
- * duplicating it here would give us two surfaces that must agree forever. That reasoning was right when
- * it was written and no longer applies: commit `9d6ef9e` ("Replace the in-rail deal workspace with
- * Explorer OpenEntityRecord") unmounted `mjs-deal-workspace`, and nothing has rendered it since —
- * the selector appears in no template anywhere in the repo. So its line editor, and with it D-DL2's
- * guarantee, has been unreachable code since 2026-08-31, and the deal FORM is the only live surface.
+ * Lines used to be composed in the deal workspace. Commit `9d6ef9e` ("Replace the in-rail deal
+ * workspace with Explorer OpenEntityRecord") unmounted it, and it was later deleted (#291), so the deal
+ * FORM is the only surface that edits lines.
  *
- * There is therefore no second surface to disagree with. What this must not do is re-derive the RULES,
- * and it does not: product eligibility, the percent/fraction discount conversion and the term-start
- * question all come from `@mj-biz-apps/sales-entities`, the same helpers the workspace called. Only the
- * markup is new.
+ * What this must not do is re-derive the RULES, and it does not: product eligibility, the
+ * percent/fraction discount conversion and the term-start question all come from
+ * `@mj-biz-apps/sales-entities`. Only the markup is local.
  *
  * ── WHAT IT DELIBERATELY DOES NOT OFFER ─────────────────────────────────────────────────────────
  *
@@ -49,10 +45,12 @@
  * cached `Deal.Amount` is refreshed on the DEAL's next save, and until then the stale-amount notice
  * (golive#230) says so in as many words -- which is exactly what that notice is for.
  *
- * Unit price and line total are READ-ONLY displays, priced by orders. A discount is expressed as a
- * PERCENT and never as an amount (D-DL2 — `DiscountAmount` is an input channel that reads 0 exactly
- * when a percentage discount exists, so showing it would be a lie). Nothing here multiplies, discounts,
- * prorates, sums or rounds: the read-only figures are whatever orders last wrote.
+ * Unit price and line total are READ-ONLY displays, priced by orders. A discount is STORED as a
+ * percent, never on `DiscountAmount` (D-DL2 — that column is an input channel that reads 0 exactly
+ * when a percentage discount exists). The rep may TYPE it in dollars (D-DL2, revised): the amount is
+ * converted to a percent of orders' list amount by `DiscountAmountToPercent` and lands on
+ * `DiscountPct`, so the precision, bounds and concession rules are the percent's. Nothing here
+ * multiplies, discounts, prorates, sums or rounds: the read-only figures are whatever orders last wrote.
  *
  * ── CHOOSING AMONG ORDERS' OWN PRICES (golive#270) ──────────────────────────────────────────────
  *
@@ -64,6 +62,15 @@
  * save refuses a flagged line without one. The picker's list, its default and the figures beside it
  * all come from orders; this file only passes them through.
  *
+ * ── A DISCOUNT IS RECORDED AS A CONCESSION (golive#305) ─────────────────────────────────────────
+ *
+ * Discount % writes `OrderLine.DiscountPct`, and orders' confirm gate holds the order until an
+ * Approved Price concession covers it. So a discount that goes UP asks for a reason here, and once
+ * the order has saved the line, the reason is recorded as that concession. Orders values it and
+ * decides it: inside the rep's Sales Authority it is Approved on save, outside it the rep is told the
+ * order waits for approval. A failure to record it does not undo the saved line; the rep is told the
+ * confirm will be held until one is recorded.
+ *
  * @module @mj-biz-apps/sales-ng
  */
 import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
@@ -72,6 +79,7 @@ import { Metadata } from '@memberjunction/core';
 import { FormsModule } from '@angular/forms';
 import {
     AsDateValue,
+    HoldingSubscriberFor,
     IsLinePriceOverridden,
     LineNeedsOverrideReason,
     ListApplicablePrices,
@@ -83,18 +91,30 @@ import {
     type ApplicablePrice,
     type LineEngineDefault,
     type PriceOverrideKind,
+    type ServicePeriodSource,
     type mjBizAppsOrdersOrderLineEntity as OrderLineEntity,
 } from '@mj-biz-apps/orders-entities';
-import { MJOLinePricePickerComponent } from '@mj-biz-apps/orders-ng';
+import {
+    ContinuationStartFrom,
+    GetExistingHolding,
+    MJOLinePricePickerComponent,
+    type MJOExistingHolding,
+} from '@mj-biz-apps/orders-ng';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
+    DiscountAmountToPercent,
     DiscountFractionToPercent,
+    DiscountNeedsConcession,
     DiscountPercentToFraction,
+    DiscountReasonCategories,
     EffectiveTermStart,
     HasExplicitTermStart as StoresOwnTermStart,
+    PricedLineListAmount,
     ResolveDealLockState,
     RoundDiscountPercent,
+    RecordDiscountConcession,
     ShouldOfferTermStart,
+    type DiscountReasonCategory,
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
@@ -138,6 +158,8 @@ interface PriceOrderOutput {
         ProductID: string;
         UnitPrice: number;
         LineTotalNet: number;
+        /** The line's whole discount as orders priced it; with the net it gives the list amount. */
+        DiscountAmount?: number | null;
         /** What the rules say for the line regardless of a pinned price — the picker's Default row. */
         Default?: LineEngineDefault | null;
     }>;
@@ -202,19 +224,79 @@ interface RemoteOperationRouter {
                                    [disabled]="IsLocked" [title]="BlockedReason" />
                         </label>
 
-                        <label class="mjs-le__field">
-                            <span class="mjs-le__label">Discount %</span>
-                            <!-- Percent in, FRACTION stored. step is 0.01 because that is what
-                                 OrderLine.DiscountPct DECIMAL(7,4) holds: a hundredth of one percent.
-                                 The conversion refuses an ambiguous value rather than guessing. -->
-                            <input type="number" data-testid="line-discount" min="0" max="100" step="0.01"
-                                   [ngModel]="DiscountPercent" (ngModelChange)="SetDiscountPercent($event)"
-                                   [disabled]="IsLocked" [title]="BlockedReason" />
+                        <div class="mjs-le__field">
+                            <div class="mjs-le__label-row">
+                                <label class="mjs-le__label" [for]="DiscountUnit === 'Percent' ? 'mjs-le-discount' : 'mjs-le-discount-amount'">
+                                    Discount {{ DiscountUnit === 'Percent' ? '%' : '$' }}
+                                </label>
+                                <!-- The rep states the discount in whichever unit the signed form uses.
+                                     A dollar amount is converted to the percent the line stores. -->
+                                <div class="mjs-le__unit" role="group" aria-label="Discount unit">
+                                    <button type="button" data-testid="line-discount-unit-percent"
+                                            [class.is-selected]="DiscountUnit === 'Percent'"
+                                            [attr.aria-pressed]="DiscountUnit === 'Percent'"
+                                            [disabled]="IsLocked" (click)="SetDiscountUnit('Percent')">%</button>
+                                    <button type="button" data-testid="line-discount-unit-amount"
+                                            [class.is-selected]="DiscountUnit === 'Amount'"
+                                            [attr.aria-pressed]="DiscountUnit === 'Amount'"
+                                            [disabled]="IsLocked" (click)="SetDiscountUnit('Amount')">$</button>
+                                </div>
+                            </div>
+                            @if (DiscountUnit === 'Percent') {
+                                <!-- Percent in, FRACTION stored. step is 0.01 because that is what
+                                     OrderLine.DiscountPct DECIMAL(7,4) holds: a hundredth of one percent.
+                                     The conversion refuses an ambiguous value rather than guessing. -->
+                                <input id="mjs-le-discount" type="number" data-testid="line-discount" min="0" max="100" step="0.01"
+                                       [ngModel]="DiscountPercent" (ngModelChange)="SetDiscountPercent($event)"
+                                       [disabled]="IsLocked" [title]="BlockedReason" />
+                            } @else {
+                                <!-- Dollars off the whole line, converted to a percent of orders' list
+                                     amount and stored as DiscountPct, so the percent rules still apply. -->
+                                <input id="mjs-le-discount-amount" type="number" data-testid="line-discount-amount" min="0" step="0.01"
+                                       [ngModel]="DiscountAmountInput" (ngModelChange)="SetDiscountAmount($event)"
+                                       [disabled]="IsLocked" [title]="BlockedReason" />
+                                @if (!DiscountRefusal && DiscountAmountInput !== null && ListAmount !== null) {
+                                    <small class="mjs-le__hint" data-testid="line-discount-derived">
+                                        {{ DiscountPercent }}% of {{ Money(ListAmount) }}
+                                        @if (DiscountAmountRounded) {
+                                            · held to 0.01%, so Orders discounts {{ Money(PricedDiscount) }}
+                                        }
+                                    </small>
+                                }
+                            }
                             @if (DiscountRefusal) {
                                 <span class="mjs-le__error">{{ DiscountRefusal }}</span>
                             }
-                        </label>
+                        </div>
                     </div>
+
+                    <!-- A RAISED DISCOUNT IS A CONCESSION, and orders will not confirm the order
+                         until one is approved. The reason is asked for here so it can be recorded
+                         the moment the line is saved. -->
+                    @if (NeedsDiscountReason) {
+                        <div class="mjs-le__row">
+                            <label class="mjs-le__field">
+                                <span class="mjs-le__label">Discount reason category</span>
+                                <select data-testid="line-discount-category" [(ngModel)]="DiscountCategory"
+                                        [disabled]="IsLocked">
+                                    <option [ngValue]="null" disabled>Choose one</option>
+                                    @for (c of ReasonCategories; track c) {
+                                        <option [ngValue]="c">{{ c }}</option>
+                                    }
+                                </select>
+                            </label>
+                            <label class="mjs-le__field">
+                                <span class="mjs-le__label">Discount reason</span>
+                                <textarea data-testid="line-discount-reason" rows="2" [(ngModel)]="DiscountReason"
+                                          [disabled]="IsLocked"
+                                          placeholder="Why value is given away on this line"></textarea>
+                            </label>
+                        </div>
+                        <small class="mjs-le__hint">
+                            Inside your Sales Authority the discount is approved when you save. Outside it, the
+                            order cannot be confirmed until an approver approves it.
+                        </small>
+                    }
 
                     @if (ShowPricePicker) {
                         <div class="mjs-le__field">
@@ -246,6 +328,73 @@ interface RemoteOperationRouter {
                         </label>
                     }
 
+                    <!-- SERVICE PERIOD: the product's recognition type earns over a window and nothing
+                         else dates this line (orders' ServicePeriodSource is 'Line'). Orders refuses to
+                         confirm the order until both dates are set, so they are asked for here. -->
+                    @if (ShowServicePeriod) {
+                        <div class="mjs-le__field" role="group" aria-label="Service period" data-testid="line-service-period">
+                            <div class="mjs-le__row">
+                                <label class="mjs-le__field">
+                                    <span class="mjs-le__label">Service start</span>
+                                    <input type="date" data-testid="line-service-start" [ngModel]="ServicePeriodInput('Start')"
+                                           (ngModelChange)="SetServicePeriod('Start', $event)"
+                                           [disabled]="IsLocked" [title]="BlockedReason" />
+                                </label>
+                                <label class="mjs-le__field">
+                                    <span class="mjs-le__label">Service end</span>
+                                    <input type="date" data-testid="line-service-end" [ngModel]="ServicePeriodInput('End')"
+                                           (ngModelChange)="SetServicePeriod('End', $event)"
+                                           [disabled]="IsLocked" [title]="BlockedReason" />
+                                </label>
+                            </div>
+                            @if (ServicePeriodBackwards) {
+                                <small class="mjs-le__error">The service end is before the start.</small>
+                            } @else if (ServicePeriodMissing) {
+                                <small class="mjs-le__hint">Both dates are needed before the order can be confirmed.</small>
+                            }
+                        </div>
+                    }
+
+                    <!-- The customer already holds this product (golive #318): the same question the
+                         order line asks. Unanswered, Close Won refuses the deal, except on a renewal
+                         deal, which adds the line as the next term. -->
+                    @if (Holding; as holding) {
+                        <div class="mjs-le__field" role="group" data-testid="line-subscription-choice"
+                             [attr.aria-label]="'Existing subscription ' + holding.SubscriptionNumber">
+                            <span class="mjs-le__label">Existing subscription</span>
+                            <span class="mjs-le__muted">
+                                The customer already holds {{ holding.SubscriptionNumber }} for this product
+                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd }}) }.
+                            </span>
+                            <div class="mjs-le__choices">
+                                <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-extend"
+                                        [class.is-selected]="Working.SubscriptionAction === 'ExtendExisting'"
+                                        [attr.aria-pressed]="Working.SubscriptionAction === 'ExtendExisting'"
+                                        [disabled]="IsLocked" [title]="BlockedReason"
+                                        (click)="SetSubscriptionAction('ExtendExisting')">
+                                    Add as next term
+                                    @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart }}) }
+                                </button>
+                                <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-new"
+                                        [class.is-selected]="Working.SubscriptionAction === 'CreateNew'"
+                                        [attr.aria-pressed]="Working.SubscriptionAction === 'CreateNew'"
+                                        [disabled]="IsLocked" [title]="BlockedReason"
+                                        (click)="SetSubscriptionAction('CreateNew')">
+                                    New subscription (keeps this line's dates)
+                                </button>
+                            </div>
+                            <small class="mjs-le__hint" [class.mjs-le__error]="!Working.SubscriptionAction">
+                                @if (Working.SubscriptionAction === 'CreateNew') {
+                                    Starts a separate subscription on this line's term start.
+                                } @else if (Working.SubscriptionAction === 'ExtendExisting') {
+                                    Adds a term to {{ holding.SubscriptionNumber }}, starting the day after its coverage ends.
+                                } @else {
+                                    Not chosen. Close Won asks for this, unless the deal is a renewal, which adds it as the next term.
+                                }
+                            </small>
+                        </div>
+                    }
+
                     <!-- PRICED BY ORDERS, NEVER ENTERED HERE. This is the whole point of the issue:
                          sales states intent, orders states price. -->
                     <div class="mjs-le__readonly">
@@ -271,8 +420,15 @@ interface RemoteOperationRouter {
                     @if (Error) { <p class="mjs-le__error">{{ Error }}</p> }
                 </div>
 
+                @if (Notice) { <p class="mjs-le__notice" data-testid="line-notice">{{ Notice }}</p> }
+
                 <!-- Confirm LEFT, cancel RIGHT (CLAUDE.md). -->
                 <footer class="mjs-le__foot">
+                    @if (Notice) {
+                        <!-- The line is saved; the rep has read what happens next. -->
+                        <button type="button" class="mjs-le__btn mjs-le__btn--primary" data-testid="line-done"
+                                (click)="Saved.emit()">Done</button>
+                    } @else {
                     <button type="button" class="mjs-le__btn mjs-le__btn--primary" data-testid="line-save"
                             [disabled]="!CanSave || Saving" (click)="Save()">
                         {{ Saving ? 'Saving…' : 'Save' }}
@@ -280,6 +436,7 @@ interface RemoteOperationRouter {
                     <button type="button" class="mjs-le__btn" [disabled]="Saving" (click)="Cancel()">Cancel</button>
                     @if (!CanSave && !Saving) {
                         <span class="mjs-le__muted">{{ BlockedReason }}</span>
+                    }
                     }
                     <!--
                          REMOVE SITS APART FROM THE PAIR ABOVE, pushed right by its own margin. Confirm
@@ -318,7 +475,7 @@ interface RemoteOperationRouter {
             position: fixed; z-index: 1001; top: 50%; left: 50%; transform: translate(-50%, -50%);
             width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto;
             display: flex; flex-direction: column;
-            background: var(--mj-bg-surface-card); color: var(--mj-text-default);
+            background: var(--mj-bg-surface-card); color: var(--mj-text-primary);
             border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-xl, 16px);
             box-shadow: var(--mj-shadow-lg, 0 12px 32px rgba(0, 0, 0, .22));
         }
@@ -331,33 +488,38 @@ interface RemoteOperationRouter {
             border: 0; background: transparent; cursor: pointer; color: var(--mj-text-muted);
             font-size: var(--mj-text-lg); padding: 4px 8px; border-radius: var(--mj-radius-md, 8px);
         }
-        .mjs-le__x:hover { background: var(--mj-bg-surface-hover); color: var(--mj-text-default); }
+        .mjs-le__x:hover { background: var(--mj-bg-surface-hover); color: var(--mj-text-primary); }
         .mjs-le__body {
             padding: var(--mj-space-5); display: flex; flex-direction: column; gap: var(--mj-space-4);
         }
         .mjs-le__row { display: flex; gap: var(--mj-space-4); flex-wrap: wrap; }
         .mjs-le__row > .mjs-le__field { flex: 1 1 180px; }
         .mjs-le__field { display: flex; flex-direction: column; gap: 4px; }
+        .mjs-le__notice {
+            margin: 0 var(--mj-space-5) var(--mj-space-3); padding: var(--mj-space-3);
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md, 8px);
+            background: var(--mj-bg-surface-sunken);
+        }
         .mjs-le__label {
             font-size: var(--mj-text-xs); text-transform: uppercase; letter-spacing: .04em;
             color: var(--mj-text-muted); font-weight: 700;
         }
-        .mjs-le__field input, .mjs-le__field select {
+        .mjs-le__field input, .mjs-le__field select, .mjs-le__field textarea {
             padding: 8px 10px; border: 1px solid var(--mj-border-default);
             border-radius: var(--mj-radius-md, 8px); background: var(--mj-bg-surface);
-            color: var(--mj-text-default); font: inherit; width: 100%;
+            color: var(--mj-text-primary); font: inherit; width: 100%;
         }
         .mjs-le__readonly {
             display: flex; gap: var(--mj-space-5); flex-wrap: wrap; align-items: flex-start;
             padding: var(--mj-space-4); border-radius: var(--mj-radius-md, 8px);
-            background: var(--mj-bg-surface-subtle, var(--mj-bg-surface-hover));
+            background: var(--mj-bg-surface-hover);
         }
         .mjs-le__readonly > div { display: flex; flex-direction: column; gap: 4px; }
         .mjs-le__ro-val { font-weight: 650; font-variant-numeric: tabular-nums; }
         .mjs-le__readonly .mjs-le__muted { flex: 1 1 100%; margin: 0; }
         .mjs-le__muted { color: var(--mj-text-muted); font-size: var(--mj-text-sm); }
         .mjs-le__hint { color: var(--mj-text-muted); font-size: var(--mj-text-xs); }
-        .mjs-le__error { color: var(--mj-text-danger, #b3261e); font-size: var(--mj-text-sm); }
+        .mjs-le__error { color: var(--mj-status-error-text); font-size: var(--mj-text-sm); }
         .mjs-le__foot {
             display: flex; align-items: center; gap: var(--mj-space-3);
             padding: var(--mj-space-4) var(--mj-space-5); border-top: 1px solid var(--mj-border-subtle);
@@ -366,10 +528,10 @@ interface RemoteOperationRouter {
         .mjs-le__btn {
             padding: 8px 16px; border-radius: var(--mj-radius-md, 8px); cursor: pointer; font: inherit;
             font-weight: 600; border: 1px solid var(--mj-border-default);
-            background: var(--mj-bg-surface); color: var(--mj-text-default);
+            background: var(--mj-bg-surface); color: var(--mj-text-primary);
         }
         .mjs-le__btn--primary {
-            background: var(--mj-color-primary, #1268cf); border-color: var(--mj-color-primary, #1268cf);
+            background: var(--mj-brand-primary); border-color: var(--mj-brand-primary);
             color: #fff;
         }
         .mjs-le__btn[disabled] { opacity: .55; cursor: not-allowed; }
@@ -378,6 +540,22 @@ interface RemoteOperationRouter {
             background: var(--mj-status-error, #b3261e); color: #fff; border-color: transparent;
         }
         .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+        .mjs-le__label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .mjs-le__unit {
+            display: inline-flex; border: 1px solid var(--mj-border-default);
+            border-radius: var(--mj-radius-md, 8px); overflow: hidden;
+        }
+        .mjs-le__unit button {
+            border: 0; background: var(--mj-bg-surface); color: var(--mj-text-muted); cursor: pointer;
+            font: inherit; font-size: var(--mj-text-xs); font-weight: 700; padding: 2px 10px;
+        }
+        .mjs-le__unit button + button { border-left: 1px solid var(--mj-border-default); }
+        .mjs-le__unit button.is-selected { background: var(--mj-brand-primary); color: #fff; }
+        .mjs-le__unit button[disabled] { opacity: .55; cursor: not-allowed; }
+        .mjs-le__choices { display: flex; gap: var(--mj-space-2, 8px); flex-wrap: wrap; }
+        .mjs-le__choice.is-selected {
+            border-color: var(--mj-brand-primary); color: var(--mj-brand-primary);
+        }
         @media (max-width: 480px) {
             .mjs-le__row { flex-direction: column; }
         }
@@ -428,6 +606,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     /** The rules' answer for this line, from the last `Orders.PriceOrder`. Undefined until one reports it. */
     public EngineDefault: LineEngineDefault | null | undefined = undefined;
     public Working: OrderLineEntity | null = null;
+    /** The live subscription the line's customer already holds for its product, or null. */
+    public Holding: MJOExistingHolding | null = null;
     public Loading = true;
     public Saving = false;
     public Error: string | null = null;
@@ -435,6 +615,14 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     public DiscountRefusal: string | null = null;
     /** Whether this dialog created the line, so cancelling must take it back off the collection. */
     private IsNewLine = false;
+
+    /** The `DiscountPct` the line carried when it was last saved — what a raise is measured from. */
+    private savedDiscountPct: number | null = null;
+    private reasonCategories: DiscountReasonCategory[] | null = null;
+    public DiscountCategory: DiscountReasonCategory | null = null;
+    public DiscountReason = '';
+    /** What the rep must know after a save that recorded, or failed to record, a concession. */
+    public Notice: string | null = null;
 
     public get Title(): string { return this.LineID ? 'Edit line' : 'Add a product'; }
 
@@ -527,6 +715,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                 // legal value rather than at the one the database refuses.
                 this.Working.Quantity = 1;
             }
+            this.savedDiscountPct = this.Working.DiscountPct ?? null;
+            void this.refreshHolding();
             if (this.ShowPricePicker) {
                 // The picker's Default row needs orders' answer before anything is changed, and its list
                 // needs the applicable prices; a saved line otherwise opens with Default disabled.
@@ -602,15 +792,18 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     public OnProductChange(productID: string | null): void {
         this.SchedulePrice();   // a priced input changed — ask Orders again
         if (!this.Working) return;
+        this.clearServicePeriodLeavingLineSource(productID);
         this.Working.ProductID = productID ?? '';
         const product = this.Products.find((p) => p.ID === productID) ?? null;
         if (product) {
             this.Working.CompanyID = product.CompanyID;
         }
-        // The previous product's default and named prices say nothing about this one.
+        // The previous product's default, named prices and subscription answer say nothing about this one.
         this.EngineDefault = undefined;
         this.Applicable = [];
+        this.Working.SubscriptionAction = null;
         void this.refreshApplicable();
+        void this.refreshHolding();
         this.cdr.detectChanges();
     }
 
@@ -708,6 +901,61 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         this.Working.DiscountPct = converted.Fraction;
     }
 
+    /* ── A discount stated in dollars ─────────────────────────────────────────── */
+
+    /** The unit the rep types the discount in. The line stores a percent either way. */
+    public DiscountUnit: 'Percent' | 'Amount' = 'Percent';
+    /** The dollar discount as typed, while the unit is Amount. Never stored: the line keeps the percent. */
+    public DiscountAmountInput: number | null = null;
+
+    public SetDiscountUnit(unit: 'Percent' | 'Amount'): void {
+        if (this.IsLocked || unit === this.DiscountUnit) return;
+        this.DiscountUnit = unit;
+        this.DiscountRefusal = null;
+        // A discounted line opens the amount box on orders' figure for its current percent.
+        this.DiscountAmountInput = unit === 'Amount' && this.DiscountPercent > 0 ? this.pricedDiscount : null;
+        // The conversion needs orders' list amount, so a line nobody has priced yet is priced now.
+        if (unit === 'Amount' && this.pricedTotal === null) this.SchedulePrice();
+    }
+
+    public SetDiscountAmount(amount: number | null): void {
+        this.DiscountAmountInput = amount === null || amount === undefined || String(amount) === '' ? null : Number(amount);
+        this.applyDiscountAmount();
+    }
+
+    /**
+     * Turns the typed amount into the percent the line stores, by the shared conversion. Run again
+     * after each reprice, because a new quantity or product changes the list amount the dollars are a
+     * share of; the dollars are what the rep stated, so they hold and the percent follows.
+     */
+    private applyDiscountAmount(): void {
+        if (!this.Working || this.DiscountUnit !== 'Amount') return;
+        const converted = DiscountAmountToPercent(this.DiscountAmountInput, this.ListAmount);
+        if (!converted.Ok) {
+            this.DiscountRefusal = converted.Reason;
+            return;
+        }
+        this.DiscountRefusal = null;
+        if (converted.Fraction === (this.Working.DiscountPct ?? 0)) return;
+        this.Working.DiscountPct = converted.Fraction;
+        this.SchedulePrice();   // a priced input changed — ask Orders again
+    }
+
+    /** The line's amount before any discount, as orders last priced it. Null until it has. */
+    public get ListAmount(): number | null {
+        return PricedLineListAmount(this.pricedTotal, this.pricedDiscount);
+    }
+
+    public get PricedDiscount(): number | null {
+        return this.pricedDiscount;
+    }
+
+    /** Whether orders' discount differs from the typed dollars, because the percent is held to 0.01%. */
+    public get DiscountAmountRounded(): boolean {
+        return !this.pricePending && this.pricedDiscount !== null && this.DiscountAmountInput !== null &&
+            this.pricedDiscount !== this.DiscountAmountInput;
+    }
+
     /**
      * Whether this line offers a term start at all — orders' own test, via the shared rule: the product
      * carries a `SubscriptionTypeID`, which is what decides whether confirm builds a term for the line.
@@ -738,6 +986,97 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         this.Working.ServicePeriodStart = value ? new Date(`${value}T00:00:00Z`) : null;
     }
 
+    /* ── Service period on lines nothing else dates ─────────────────────────────── */
+
+    /**
+     * Whether the rep has to state this line's service period: orders' own rule, so the deal asks for
+     * exactly the lines the order's Confirm refuses without one. Event and subscription lines are
+     * dated by orders at confirm and are not asked.
+     */
+    public get ShowServicePeriod(): boolean {
+        return !!this.Working?.ProductID && this.ServicePeriodSourceFor(this.Working.ProductID) === 'Line';
+    }
+
+    public ServicePeriodInput(end: 'Start' | 'End'): string | null {
+        return toDateInput(end === 'Start' ? this.Working?.ServicePeriodStart : this.Working?.ServicePeriodEnd);
+    }
+
+    /** An emptied control clears that end of the window. */
+    public SetServicePeriod(end: 'Start' | 'End', value: string): void {
+        this.SchedulePrice();   // a priced input changed — ask Orders again
+        if (!this.Working) return;
+        const date = value ? new Date(`${value}T00:00:00Z`) : null;
+        if (end === 'Start') this.Working.ServicePeriodStart = date;
+        else this.Working.ServicePeriodEnd = date;
+    }
+
+    /** Refused at save; the line's own validation and CK_OrderLine_ServicePeriod would refuse it too. */
+    public get ServicePeriodBackwards(): boolean {
+        const start = this.Working?.ServicePeriodStart;
+        const end = this.Working?.ServicePeriodEnd;
+        return this.ShowServicePeriod && !!start && !!end && new Date(end).getTime() < new Date(start).getTime();
+    }
+
+    /** Not a save blocker: orders only needs the dates at confirm, and a deal is often quoted before they are known. */
+    public get ServicePeriodMissing(): boolean {
+        return this.ShowServicePeriod && (!this.Working?.ServicePeriodStart || !this.Working?.ServicePeriodEnd);
+    }
+
+    /**
+     * A window typed for a product that needed one says nothing about the product replacing it. Left
+     * on an event line it stops orders stamping the event's dates (`applyEventServicePeriod` skips a
+     * line that already has either date), and left on a subscription line it reads as a term start.
+     */
+    private clearServicePeriodLeavingLineSource(nextProductID: string | null): void {
+        if (!this.Working) return;
+        const was = this.ServicePeriodSourceFor(this.Working.ProductID);
+        if (was !== 'Line' || this.ServicePeriodSourceFor(nextProductID) === 'Line') return;
+        this.Working.ServicePeriodStart = null;
+        this.Working.ServicePeriodEnd = null;
+    }
+
+    /** `NotRequired` until orders' cache has loaded, which is orders' own answer for an unknown product. */
+    private ServicePeriodSourceFor(productID: string | null | undefined): ServicePeriodSource {
+        return productID ? OrdersEngine.Instance.ServicePeriodSource(productID) : 'NotRequired';
+    }
+
+    /* ── The customer already holds this product (golive #318) ─────────────────────── */
+
+    /**
+     * The subscription this line would extend at confirm, read with orders' rule so the deal and the
+     * order screen ask about the same lines. Renewal lines and one-time products are not asked. A failed
+     * read hides the question; Close Won still asks, because it reads the same rule on the server.
+     */
+    private async refreshHolding(): Promise<void> {
+        const line = this.Working;
+        const subscriber = line ? HoldingSubscriberFor(line, this.Deal?.OrderID_Object ?? null) : null;
+        if (!line?.ProductID || line.RenewsSubscriptionID || !this.SelectedProduct?.SubscriptionTypeID || !subscriber) {
+            this.Holding = null;
+            this.cdr.detectChanges();
+            return;
+        }
+        const productID = String(line.ProductID);
+        const holding = await GetExistingHolding(productID, subscriber.OrganizationID, subscriber.PersonID);
+        // A reply for a product the rep has since moved off is dropped rather than shown.
+        if (this.Working?.ProductID === productID) this.Holding = holding;
+        this.cdr.detectChanges();
+    }
+
+    /** Where the existing coverage ends, for the prompt. */
+    public get HoldingCoverageEnd(): string | null {
+        return toDateInput(this.Holding?.LatestTermEnd ?? null);
+    }
+
+    /** The start an extension would get: the day after the existing coverage ends. */
+    public get HoldingContinuationStart(): string | null {
+        return toDateInput(ContinuationStartFrom(this.Holding));
+    }
+
+    public SetSubscriptionAction(action: 'ExtendExisting' | 'CreateNew'): void {
+        if (this.IsLocked || !this.Working) return;
+        this.Working.SubscriptionAction = action;
+    }
+
     public Money(n: number | null | undefined): string {
         if (n == null || !Number.isFinite(Number(n))) return '—';
         return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
@@ -764,6 +1103,9 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
     public Pricing = false;
     private pricedUnit: number | null = null;
     private pricedTotal: number | null = null;
+    private pricedDiscount: number | null = null;
+    /** Set from the moment a reprice is scheduled until its answer lands, so a stale answer is not quoted. */
+    private pricePending = false;
     public PricingNote: string | null = null;
     private priceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -809,7 +1151,11 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
      */
     public SchedulePrice(): void {
         if (this.priceTimer) clearTimeout(this.priceTimer);
-        this.priceTimer = setTimeout(() => { void this.refreshPrice(); }, 350);
+        this.pricePending = true;
+        this.priceTimer = setTimeout(() => {
+            this.priceTimer = null;
+            void this.refreshPrice();
+        }, 350);
     }
 
     /**
@@ -830,8 +1176,10 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (!line?.ProductID || !companyID) {
             this.pricedUnit = null;
             this.pricedTotal = null;
+            this.pricedDiscount = null;
             this.EngineDefault = undefined;
             this.PricingNote = null;
+            this.pricePending = false;
             this.cdr.detectChanges();
             return;
         }
@@ -873,20 +1221,26 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             if (!row) {
                 this.pricedUnit = null;
                 this.pricedTotal = null;
+                this.pricedDiscount = null;
                 this.EngineDefault = undefined;
                 this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
                 return;
             }
             this.pricedUnit = row.UnitPrice;
             this.pricedTotal = row.LineTotalNet;
+            this.pricedDiscount = row.DiscountAmount ?? 0;
             this.EngineDefault = row.Default;
+            this.applyDiscountAmount();
         } catch {
             this.pricedUnit = null;
             this.pricedTotal = null;
+            this.pricedDiscount = null;
             this.EngineDefault = undefined;
             this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
         } finally {
             this.Pricing = false;
+            // A reprice scheduled while this one was in flight is still pending.
+            this.pricePending = this.priceTimer !== null;
             this.cdr.detectChanges();
         }
     }
@@ -904,8 +1258,25 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             !!this.Working?.ProductID &&
             !this.DiscountRefusal &&
             !!this.Deal?.OrderID_Object &&
-            !LineNeedsOverrideReason(this.Working, this.EngineDefault)
+            !LineNeedsOverrideReason(this.Working, this.EngineDefault) &&
+            !this.MissingDiscountReason &&
+            !this.ServicePeriodBackwards
         );
+    }
+
+    /** Whether the discount went up since the line was saved, so it needs a concession behind it. */
+    public get NeedsDiscountReason(): boolean {
+        return !!this.Working && DiscountNeedsConcession(this.savedDiscountPct, this.Working.DiscountPct);
+    }
+
+    /** Orders' concession reason categories, read from its entity metadata when first shown. */
+    public get ReasonCategories(): DiscountReasonCategory[] {
+        this.reasonCategories ??= DiscountReasonCategories();
+        return this.reasonCategories;
+    }
+
+    private get MissingDiscountReason(): boolean {
+        return this.NeedsDiscountReason && (!this.DiscountCategory || !this.DiscountReason.trim());
     }
 
     /**
@@ -925,6 +1296,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
         if (LineNeedsOverrideReason(this.Working, this.EngineDefault)) return 'Enter a reason for the price override.';
+        if (this.MissingDiscountReason) return 'Choose a category and enter a reason for the discount.';
+        if (this.ServicePeriodBackwards) return 'Set a service end on or after the service start.';
         return this.DiscountRefusal ?? '';
     }
 
@@ -936,7 +1309,7 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
      * golive#206 item 1 names deleting alongside adding and editing.
      */
     public get CanRemove(): boolean {
-        return !!this.LineID && !this.IsLocked && !!this.Deal?.OrderID_Object;
+        return !!this.LineID && !this.IsLocked && !!this.Deal?.OrderID_Object && !this.Notice;
     }
 
     /** Two-step, because removing a product a rep meant to keep costs them a re-entry. */
@@ -952,8 +1325,8 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
      *
      * THIS BECAME POSSIBLE ONLY RECENTLY. Orders did not drain `Lines.Removed` at all, so a removal was
      * silently dropped and then, once it started refusing, cost the rep every other edit staged beside
-     * it. Sales carried a blanket refusal for that (`ShouldRefuseLineRemoval`, still in the unmounted
-     * workspace). The orders fix landed with golive#187, and `save-deal.SD6` is the tripwire that said
+     * it. Sales carried a blanket refusal for that (`ShouldRefuseLineRemoval`, deleted with the deal
+     * workspace in #291). The orders fix landed with golive#187, and `save-deal.SD6` is the tripwire that said
      * so.
      *
      * It emits `Saved` rather than a removal-specific event: what the panel has to do afterwards is
@@ -1018,6 +1391,12 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
                 return;
             }
             this.IsNewLine = false;
+            const notice = await this.recordDiscountConcession();
+            if (notice) {
+                // The line IS saved. Hold the dialog open on what happens next; Done reports the save.
+                this.Notice = notice;
+                return;
+            }
             this.Saved.emit();
         } catch (err) {
             this.Error = err instanceof Error ? err.message : String(err);
@@ -1025,6 +1404,34 @@ export class MJSDealLineEditorComponent implements OnInit, OnDestroy {
             this.Saving = false;
             this.cdr.detectChanges();
         }
+    }
+
+    /**
+     * Records a raised discount as the Price concession orders' confirm gate holds on. Runs after the
+     * order's save, because a concession names a persisted line and orders values it from what that
+     * line stores. Returns what the rep must be told, or null when the discount was approved.
+     */
+    private async recordDiscountConcession(): Promise<string | null> {
+        if (!this.Working || !this.NeedsDiscountReason || !this.DiscountCategory) return null;
+        const outcome = await RecordDiscountConcession({
+            OrderLineID: this.Working.ID,
+            ReasonCategory: this.DiscountCategory,
+            Reason: this.DiscountReason,
+        });
+        this.savedDiscountPct = this.Working.DiscountPct ?? null;
+        if (!outcome.Recorded) {
+            return (
+                `The line is saved, but its discount could not be recorded for approval: ${outcome.Message} ` +
+                `The order cannot be confirmed until a concession covering the discount is approved.`
+            );
+        }
+        if (outcome.AwaitingApproval) {
+            return (
+                'The line is saved. Its discount is outside your Sales Authority and is waiting for approval; ' +
+                'the order cannot be confirmed until it is approved.'
+            );
+        }
+        return null;
     }
 
     /**

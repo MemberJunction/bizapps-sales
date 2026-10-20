@@ -23,13 +23,14 @@ import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '
 import {
     CloseWonTaskService,
     CloseDealOperation,
+    NO_ORDER_ISSUE_PREFIX,
     ResolveTaskTypeColumn,
     type CloseWonTaskInput,
 } from '@mj-biz-apps/sales-core-entities-server';
 import type { SalesCloseDealOutput, mjBizAppsSalesPipelineEntity } from '@mj-biz-apps/sales-entities';
 import type { mjBizAppsTasksTaskTypeEntity } from '@mj-biz-apps/tasks-entities';
 
-import { InRolledBackTransaction, ProviderOf, TxOne } from '../fixture.js';
+import { InRolledBackTransaction, ProviderOf, TxOne, type SalesCheck } from '../fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -68,6 +69,23 @@ function requireTasks(ctx: Ctx): void {
         'bizapps-tasks entities are NOT registered on this host, so these checks cannot prove anything. '
             + 'Run this bundle only against a stack that includes tasks. (Reporting a pass here would be a '
             + 'vacuous one.)',
+    );
+}
+
+/**
+ * Refuses a check that closes onto a contract-creating pipeline when contracts is absent.
+ *
+ * `RequiresApp: 'contracts'` leaves such a check out, but only under the Sales runner
+ * (`test-harnesses/integration.mjs`). Any other driver reaches the check, and the close would then take
+ * the stub contracts seam and fail as if the product were broken. Kept local rather than imported from
+ * `close-won-contract.checks.ts`, because importing that module registers its bundle.
+ */
+function requireContracts(ctx: Ctx): void {
+    Assert(
+        !!ProviderOf(ctx).Entities.find((e) => e.Name === E_CONTRACT),
+        'bizapps-contracts entities are NOT registered on this host, and this check closes onto a '
+            + 'contract-creating pipeline. Run it against a stack that includes contracts, through '
+            + '`pnpm run test:integration`, which leaves it out when contracts is absent.',
     );
 }
 
@@ -255,7 +273,7 @@ async function closeWonOnContractPipeline(
     return { dealID, out: out!, contractID: stamped.ContractID };
 }
 
-export const CloseWonTasksChecks: NamedCheck[] = [
+export const CloseWonTasksChecks: SalesCheck[] = [
     {
         Id: 'close-won-tasks.WT1',
         Name: 'WT1: an order-review task is created, typed as asked, and linked to the ORDER',
@@ -538,6 +556,96 @@ export const CloseWonTasksChecks: NamedCheck[] = [
             }),
     },
     {
+        Id: 'close-won-tasks.WT17',
+        Name: 'WT17: an assignee that is NOT A RECORD leaves the task unrouted, not falsely routed',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE DEFECT golive#326 WAS FILED FOR, AT THE LEVEL IT HAPPENED.
+                 *
+                 * WT7 above covers the assignee being UNSET. This covers it being SET to an id that is
+                 * not a record — the state QA was actually in, because the seeded policy named a People
+                 * id no migration creates. `TaskAssignment.AssigneeRecordID` is polymorphic, so there is
+                 * no foreign key and the row inserts happily: fourteen tasks read as assigned while no
+                 * queue held them, which is worse than unrouted, because unrouted says so.
+                 *
+                 * The unit suite pins the decision. Only a live database can show that no assignment ROW
+                 * is written — the thing a reader of the tasks app would have seen.
+                 */
+                requireTasks(ctx);
+                const input = await baseInput(ctx, false);
+                const ghost = 'c0ffee00-0000-4000-a000-00000000dead';
+                const present = await rows(ctx, E_PEOPLE, `ID = '${ghost}'`);
+                AssertEqual(present.length, 0, 'setup: the ghost id must not be a real person, or this proves nothing');
+                input.Assignee = { EntityName: E_PEOPLE, RecordID: ghost };
+
+                const out = await service.CreateCloseWonTasks(input, ProviderOf(ctx), ctx.User);
+
+                AssertEqual(out.Tasks.length, 1, 'the task is still created — the work exists either way');
+                const review = out.Tasks[0];
+                AssertEqual(review.AssignmentID, null, 'and is reported as unrouted rather than assigned');
+
+                const assigns = await rows(ctx, E_TASK_ASSIGNMENT, `TaskID = '${review.TaskID}'`);
+                AssertEqual(assigns.length, 0, 'NO assignment row may point at a record that is not there');
+
+                const issues = out.Issues.join(' ');
+                Assert(
+                    issues.includes(ghost),
+                    `the issue must name the id that is wrong — got ${JSON.stringify(out.Issues)}`,
+                );
+                Assert(
+                    issues.includes('AssigneeRecordID'),
+                    'and the config key to change, so the reader knows where to go',
+                );
+            }),
+    },
+    {
+        Id: 'close-won-tasks.WT18',
+        Name: 'WT18: an assignment whose WRITE is refused leaves the task unrouted, not falsely routed',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * THE OTHER HALF OF golive#326's TITLE: "or to no one".
+                 *
+                 * WT7 covers an assignee that is unset and WT17 one that is not a record. This covers the
+                 * third shape, and it is the one nothing reported: tasks' `assignToTask` calls `Save()`
+                 * without reading its result and returns the entity either way, so a REFUSED write came
+                 * back looking like a success -- `NewRecord()` had already put an id on it. The task
+                 * recorded an AssignmentID with no TaskAssignment row behind it, which is exactly the
+                 * nine Order Review tasks on QA that have no assignment at all.
+                 *
+                 * The refusal is arranged through a real constraint rather than a stub:
+                 * `FK_TaskAssignment_Role` means a RoleID that is not a TaskRole cannot be inserted. So
+                 * the service runs for real, the database refuses the row for its own reasons, and what
+                 * is asserted is what the service does about it.
+                 */
+                requireTasks(ctx);
+                const input = await baseInput(ctx, false);
+                const ghostRole = 'c0ffee00-0000-4000-a000-00000000b0b1';
+                Assert(
+                    (await rows(ctx, E_TASK_ROLE, `ID = '${ghostRole}'`)).length === 0,
+                    'setup: the role id must not exist, or the write would succeed and prove nothing',
+                );
+                input.Assignee = { ...input.Assignee!, RoleID: ghostRole };
+
+                const out = await service.CreateCloseWonTasks(input, ProviderOf(ctx), ctx.User);
+
+                AssertEqual(out.Tasks.length, 1, 'the task is still created');
+                const review = out.Tasks[0];
+                AssertEqual(review.AssignmentID, null, 'and is NOT reported as routed');
+
+                const assigns = await rows(ctx, E_TASK_ASSIGNMENT, `TaskID = '${review.TaskID}'`);
+                AssertEqual(assigns.length, 0, 'no assignment row exists — which is the point');
+
+                Assert(
+                    out.Issues.some((i) => i.includes('did not save')),
+                    `the issue must say the write did not land — got ${JSON.stringify(out.Issues)}`,
+                );
+            }),
+    },
+    {
         Id: 'close-won-tasks.WT8',
         Name: 'WT8: a deal with no order raises NO order-review task, and says why',
         RequiresMutation: true,
@@ -632,6 +740,8 @@ export const CloseWonTasksChecks: NamedCheck[] = [
         Id: 'close-won-tasks.WT10',
         Name: 'WT10: closing a deal as WON raises the tasks through Sales.CloseDeal, end to end',
         RequiresMutation: true,
+        // Closes onto a contract-creating pipeline, so it needs contracts installed, not only tasks.
+        RequiresApp: 'contracts',
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 /**
@@ -644,6 +754,7 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                  * active rows. The check asserts the tasks carry the types CONFIGURED, never which types
                  * they are -- the same discipline as WT1.
                  */
+                requireContracts(ctx);
                 requireTasks(ctx);
 
                 // A closeable deal: open, on a contract-creating pipeline, and carrying its order.
@@ -737,11 +848,14 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                 const contractTasks = await rows(ctx, E_TASK, `TypeID = '${ID_CONTRACT_PROCESSING}'`);
                 Assert(contractTasks.length >= 1, 'a contract-creating policy must also raise the contract task');
 
-                // Fully configured means nothing to complain about.
+                // Fully configured means nothing to complain about. An `info` note is not a complaint:
+                // a contracts release without order links reports the pending link that way on every
+                // won close, and that says nothing about the tasks this check is for.
+                const problems = out!.Issues.filter((i) => i.Severity !== 'info');
                 AssertEqual(
-                    out!.Issues.length,
+                    problems.length,
                     0,
-                    `a fully configured close should report no issues — got ${JSON.stringify(out!.Issues)}`,
+                    `a fully configured close should report no errors or warnings — got ${JSON.stringify(problems)}`,
                 );
             }),
     },
@@ -910,8 +1024,13 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                  * half that lied: a close that reports "no order" while creating one is worse than a
                  * close that quietly does nothing, since the message sends whoever reads it looking in
                  * the wrong place.
+                 *
+                 * Matched on the task service's own wording, imported so a rewording cannot leave this
+                 * filter matching nothing. A bare "has no order" also matches the pending contract-link
+                 * note ("…has no order links yet"), which a won close reports on any contracts release
+                 * without order links.
                  */
-                const noOrderWarnings = out.Issues.filter((i) => /has no order/i.test(i.Message ?? ''));
+                const noOrderWarnings = out.Issues.filter((i) => (i.Message ?? '').startsWith(NO_ORDER_ISSUE_PREFIX));
                 AssertEqual(
                     noOrderWarnings.length,
                     0,
@@ -948,6 +1067,8 @@ export const CloseWonTasksChecks: NamedCheck[] = [
         Id: 'close-won-tasks.WT14',
         Name: 'WT14: the contract-processing task links the CONTRACT, not the deal',
         RequiresMutation: true,
+        // Closes onto a contract-creating pipeline, so it needs contracts installed, not only tasks.
+        RequiresApp: 'contracts',
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 /**
@@ -965,6 +1086,7 @@ export const CloseWonTasksChecks: NamedCheck[] = [
                  * Delete `ContractID: deal.ContractID ?? undefined` from the task input literal in
                  * `CloseDealOperation`. This check goes red; WT4 and WT5 stay green.
                  */
+                requireContracts(ctx);
                 requireTasks(ctx);
                 const { dealID, contractID } = await closeWonOnContractPipeline(ctx, { stripOrder: false });
 

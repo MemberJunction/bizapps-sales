@@ -18,7 +18,7 @@
  *
  * 40 proves the rows landed. Reopening is where the form can fail in ways nothing else sees:
  *
- *   · the lines grid never loads, so a saved deal opens showing no products and the rep re-adds them;
+ *   · the lines never load, so a saved deal opens showing no products and the rep re-adds them;
  *   · a date comes back as a `Date` and the `<input type="date">` renders BLANK — no error, and the
  *     next save writes the blank over a real value;
  *   · a removal takes the row off the screen but not off the order — the editor removes through
@@ -67,15 +67,15 @@ interface LineKey {
     Quantity: number;
 }
 
-/** The AG Grid rows of the "What's being sold" panel on the active form. */
+/** The line cards of the "What's being sold" panel on the active form. */
 function lineRows(page: Page): Locator {
     return DealForm(page)
         .locator('.mj-forms-panel[data-section-key="lines"]')
-        .locator('.ag-center-cols-container .ag-row:visible');
+        .locator('[data-testid="deal-line"]:visible');
 }
 
 /**
- * Opens a saved line in the restricted line editor by double-clicking its grid row.
+ * Opens a saved line in the restricted line editor by double-clicking its card.
  *
  * Local to this spec (and duplicated in 40) because `lib/deal-form.ts` has no row-level line helper
  * yet. Waits for the product select, which renders only once the editor has loaded the line.
@@ -120,10 +120,10 @@ async function boundProductID(editor: Locator): Promise<string> {
 }
 
 /**
- * Every grid row's product and quantity, read through the editor each row opens.
+ * Every line card's product and quantity, read through the editor each card opens.
  *
- * Found by opening each row rather than by reading grid text: which columns the lines grid shows is
- * view configuration, and a product label is not an identity. The editor loads the saved line, so what
+ * Found by opening each card rather than by reading card text: what a card shows is display
+ * choice, and a product label is not an identity. The editor loads the saved line, so what
  * it binds is what the database returned.
  */
 async function linesOnScreen(page: Page): Promise<LineKey[]> {
@@ -192,7 +192,7 @@ test.describe('deal form — the round trip', () => {
             // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
             // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
             await RevealInForm(page, lineRows(page).first());
-            await expect(lineRows(page), 'both lines must come back — an empty grid means the lines never loaded')
+            await expect(lineRows(page), 'both lines must come back — no cards means the lines never loaded')
                 .toHaveCount(2, { timeout: 30_000 });
 
             const shown = await linesOnScreen(page);
@@ -244,7 +244,7 @@ test.describe('deal form — the round trip', () => {
             await editor.locator('[data-testid="line-remove-confirm"]').click();
             await expect(editor, 'the editor must close once the removal saves').toBeHidden({ timeout: 30_000 });
 
-            await expect(lineRows(page), 'the grid must drop to one line').toHaveCount(1, { timeout: 30_000 });
+            await expect(lineRows(page), 'the cards must drop to one line').toHaveCount(1, { timeout: 30_000 });
             await shot(page, '41-04-removed');
         });
 

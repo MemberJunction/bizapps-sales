@@ -22,6 +22,10 @@
  * thing it is testing. It now runs safely against a dirty tree, which is also when you most want it —
  * the moment a check is written is the moment to ask whether it can fail.
  *
+ * An interrupted run cleans up too: a signal restores the source and rebuilds, and a run killed past
+ * any handler is recovered by the next start. See `mutation-run.mjs`, which also refuses to start
+ * while another run is live in this tree.
+ *
  * USAGE
  *   node test-harnesses/mutate-checks.mjs                 # every mutation
  *   node test-harnesses/mutate-checks.mjs M-OS1 M-CD4     # only these
@@ -52,11 +56,10 @@
  * Each mutation runs the WHOLE suite, not one bundle, so a mutation that breaks something unintended
  * shows up instead of hiding. Budget roughly 70 seconds each.
  */
-import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, readFileSync, writeFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { copyFileSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { restore, startMutationRun } from './mutation-run.mjs';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
@@ -485,8 +488,8 @@ const MUTATIONS = [
       to: 'this._lockedAtSave ? null : await this.planStageDefaults()',
       note: 'a reopen loses the probability a human set, and disagrees with its own provenance row' },
 
-    // THE CREATE GUARD ON THE STAGE LOG. A new deal whose stage is set twice -- what NewDeal() plus a
-    // rep's choice does -- looked like a MOVE, because the first assignment becomes the OldValue.
+    // THE CREATE GUARD ON THE STAGE LOG. A new deal whose stage is set twice -- what the deal workspace's
+    // NewDeal() plus a rep's choice did -- looked like a MOVE, because the first assignment becomes the OldValue.
     { id: 'M-ST4', file: DES, expect: ['SD30'],
       from: 'if (!this.IsSaved) {\n            return null;\n        }\n\n        const priorStageID',
       to: 'if (false) {\n            return null;\n        }\n\n        const priorStageID',
@@ -761,7 +764,7 @@ const MUTATIONS = [
     //    a vocabulary nobody has seeded yet, and no check can prove it until someone seeds an
     //    open-and-locking status. Recorded rather than dropped, so the next reader knows it was measured
     //    and why it cannot fall.
-    { id: 'M-DS3', file: DES, expect: [],
+    { id: 'M-DS3', file: DES, expect: [], expectMiss: true,
       from: "                ExtraFilter: 'IsActive = 1 AND IsOpen = 1 AND LocksDeal = 0',",
       to: "                ExtraFilter: 'IsActive = 1 AND IsOpen = 1',",
       note: 'the locking guard is dropped -- EXPECTED TO MISS on seeded data; it guards vocabulary that does not exist yet' },
@@ -828,6 +831,17 @@ const MUTATIONS = [
       from: "contract.Set('HasModifications', input.StandardAgreementModified === true);",
       to: "contract.Set('HasModifications', false);",
       note: 'the rep answered and the contract ignores it' },
+
+    // CT8's two mutants, one per claim. Without the seed, the fields the deal left unset stay NULL;
+    // without the AutoRenew mark, the type's Yes overwrites the deal's No.
+    { id: 'M-CT4', file: LCS, expect: ['CT8'],
+      from: '            await seedable.SeedRenewalDefaultsFromType();',
+      to: '            void seedable;',
+      note: 'the seam never asks contracts for the type defaults' },
+    { id: 'M-CT5', file: LCS, expect: ['CT8'],
+      from: "        stated.push('AutoRenew');",
+      to: '',
+      note: "the deal's Auto-renew answer is left open for the type default to overwrite" },
 
     // THE SECOND HOP of the same wiring, and a different question: does anything notice if the close
     // stops REPORTING the flag? First time it was asked, NOTHING DID -- fifty checks green while a
@@ -926,6 +940,19 @@ const MUTATIONS = [
       note: 'the month boundary is read in the host timezone, so a snapshot lands in the previous period' }
 ];
 
+/**
+ * AN EMPTY `expect` MUST SAY IT IS ON PURPOSE.
+ *
+ * The hit test is `expect.every(...)`, which is true for an empty list, so a mutant that declared no
+ * target printed OK on every run whatever the suite did. A mutant that is EXPECTED to miss now says so
+ * with `expectMiss: true` and gets its own verdict; an empty `expect` without it is refused here.
+ */
+const undeclared = MUTATIONS.filter((m) => m.expect.length === 0 && !m.expectMiss);
+if (undeclared.length) {
+    console.error(`\n✖ empty expect without expectMiss: ${undeclared.map((m) => m.id).join(', ')}\n`);
+    process.exit(2);
+}
+
 const wanted = new Set(process.argv.slice(2).filter((a) => !a.startsWith('--')));
 
 /**
@@ -949,8 +976,21 @@ if (wanted.size) {
     }
 }
 if (process.argv.includes('--list')) {
-    for (const m of MUTATIONS) console.log(`${m.id.padEnd(8)} ${m.file.padEnd(56)} expect ${m.expect.join(',')}`);
+    for (const m of MUTATIONS) {
+        console.log(`${m.id.padEnd(8)} ${m.file.padEnd(56)} ${m.expectMiss ? 'expected to miss' : `expect ${m.expect.join(',')}`}`);
+    }
     process.exit(0);
+}
+
+/**
+ * One mutant's line verdict. An expected-miss mutant has no target to fell, so OK and MISS mean nothing
+ * for it: it reports EXPECTED-MISS while nothing falls, and UNEXPECTED-HIT once something does -- the
+ * sign that the vocabulary it waits for has been seeded and the declaration needs a real `expect`.
+ */
+function verdict(m, failed, incomplete, hit) {
+    if (incomplete) return 'INCOMPLETE';
+    if (m.expectMiss) return failed.length ? 'UNEXPECTED-HIT' : 'EXPECTED-MISS';
+    return hit ? 'OK' : 'MISS';
 }
 
 const FAIL_RE = /^ {2,}✖ ([A-Z]+\d+):/gmu;
@@ -981,6 +1021,8 @@ const TALLY_RE = /(\d+) passed,\s+(\d+) failed,\s+(\d+) skipped/;
  * lock for an hour is a worse neighbour than one that queues.
  */
 async function withSuiteLock(label, fn) {
+    // A seamed suite never touches the database, so there is nothing to serialise.
+    if (run.commands.testSeamed) return await fn(false);
     let sql;
     let pool = null;
     try {
@@ -1034,7 +1076,8 @@ async function withSuiteLock(label, fn) {
     }
 }
 
-const safety = mkdtempSync(join(tmpdir(), 'mj-mutate-'));
+const run = await startMutationRun(REPO);
+const safety = run.safety;
 const results = [];
 
 /**
@@ -1075,15 +1118,6 @@ function distFingerprint(srcRel) {
     return createHash('sha256').update(readFileSync(p)).digest('hex');
 }
 
-/** Restores from the byte-for-byte copy and PROVES it. Never `git checkout`. */
-function restore(abs, backup) {
-    copyFileSync(backup, abs);
-    if (readFileSync(abs, 'utf8') !== readFileSync(backup, 'utf8')) {
-        console.error(`\n✖ RESTORE FAILED for ${abs}\n  The original is still at ${backup} — copy it back by hand before doing anything else.\n`);
-        process.exit(3);
-    }
-}
-
 for (const m of MUTATIONS) {
     if (wanted.size && !wanted.has(m.id)) continue;
 
@@ -1102,6 +1136,7 @@ for (const m of MUTATIONS) {
     // SAFETY FIRST — the copy is taken before a single byte changes.
     const backup = join(safety, `${m.id}-${basename(m.file)}`);
     copyFileSync(abs, backup);
+    run.mutating({ id: m.id, abs, backup });
 
     // Taken BEFORE the edit, so the comparison after the build is against the untouched artefact.
     const distBefore = distFingerprint(m.file);
@@ -1111,10 +1146,10 @@ for (const m of MUTATIONS) {
 
     const started = Date.now();
     try {
-        try {
-            execSync('npm run build:packages', { cwd: REPO, stdio: 'pipe' });
-        } catch (err) {
-            const text = String(err.stdout ?? '') + String(err.stderr ?? '');
+        run.building();
+        const build = await run.exec(run.commands.build);
+        if (build.code !== 0) {
+            const text = build.stdout + build.stderr;
             const lines = text.split('\n').filter((l) => /error/i.test(l)).slice(0, 2);
             console.log(`${m.id.padEnd(7)} BUILD FAILED — ${lines.map((l) => l.trim().slice(0, 100)).join(' | ')}`);
             results.push({ ...m, skipped: 'build' });
@@ -1155,16 +1190,10 @@ for (const m of MUTATIONS) {
          * number that is wrong.
          */
         const CONTENTION_RE = /was deadlocked on lock resources|deadlock victim/i;
-        const runSuiteOnce = (extraEnv = {}) => {
-            try {
-                return execSync('node test-harnesses/integration.mjs', {
-                    cwd: REPO, stdio: 'pipe', encoding: 'utf8',
-                    env: { ...process.env, RUN_MUTATION_TESTS: '1', ...extraEnv },
-                });
-            } catch (err) {
-                // a failing suite exits non-zero, which is the POINT
-                return String(err.stdout ?? '') + String(err.stderr ?? '');
-            }
+        // A failing suite exits non-zero, which is the POINT, so the exit code is not read.
+        const runSuiteOnce = async (extraEnv = {}) => {
+            const suite = await run.exec(run.commands.test, { RUN_MUTATION_TESTS: '1', ...extraEnv });
+            return suite.stdout + suite.stderr;
         };
 
         /**
@@ -1198,7 +1227,7 @@ for (const m of MUTATIONS) {
         await withSuiteLock(m.id, async (held) => {
             const childEnv = held ? { MJ_INTEGRATION_LOCK_HELD_BY_PARENT: '1' } : {};
             for (let attempt = 1; attempt <= 3; attempt++) {
-                out = runSuiteOnce(childEnv);
+                out = await runSuiteOnce(childEnv);
                 if (!CONTENTION_RE.test(out)) break;
                 contended++;
                 if (attempt < 3) {
@@ -1226,12 +1255,13 @@ for (const m of MUTATIONS) {
         const hit = !incomplete && m.expect.every((id) => failed.includes(id));
         results.push({ ...m, failed, tally: tally?.[0], contended, stillContended });
         console.log(
-            `${m.id.padEnd(7)} ${(incomplete ? 'INCOMPLETE' : hit ? 'OK' : 'MISS').padEnd(10)} failed=${(failed.join(',') || '-').padEnd(24)} ` +
+            `${m.id.padEnd(7)} ${verdict(m, failed, incomplete, hit).padEnd(14)} failed=${(failed.join(',') || '-').padEnd(24)} ` +
             `expect=${m.expect.join(',').padEnd(12)} (${tally?.[0] ?? 'NO TALLY'}, ${Math.round((Date.now() - started) / 1000)}s)` +
             (stillContended ? '  ⚠ CONTENDED — result unreliable' : contended ? `  (re-ran ${contended}x after deadlock)` : ''),
         );
     } finally {
         restore(abs, backup);
+        run.restored();
         /**
          * ── AND REBUILD, OR THE MUTANT OUTLIVES THE RUN ─────────────────────────────────────────────
          *
@@ -1248,14 +1278,15 @@ for (const m of MUTATIONS) {
          * A tool whose job is to break things on purpose must not be able to leave them broken. Same
          * principle as the copy-aside restore above; this is the half that was missing.
          */
-        try {
-            execSync('npm run build:packages', { cwd: REPO, stdio: 'pipe' });
-        } catch (err) {
+        const rebuild = await run.exec(run.commands.build);
+        if (rebuild.code === 0) {
+            run.rebuilt();
+        } else {
             console.error(
                 `
   ⚠️  REBUILD AFTER RESTORE FAILED for ${m.id}. dist/ may still hold the mutant — ` +
                 `run \`npm run build\` before trusting anything that reads it.
-${String(err.stdout ?? err)}`,
+${rebuild.stdout}${rebuild.stderr}`,
             );
         }
     }
@@ -1291,13 +1322,22 @@ if (collateral.length) {
         + `not aimed at them and may not be on their path: ${collateral.sort().join(', ')}`,
     );
 }
-const missed = ran.filter((r) => !r.expect.every((id) => r.failed.includes(id)));
+const missed = ran.filter((r) => !r.expectMiss && !r.expect.every((id) => r.failed.includes(id)));
 if (missed.length) {
     console.log('\n  MISSES — read these, they are usually findings and not retries:');
     for (const m of missed) console.log(`    ${m.id}: expected ${m.expect.join(',')}, got ${m.failed.join(',') || 'nothing'}`);
 }
+const expectedMisses = ran.filter((r) => r.expectMiss && r.failed.length === 0);
+if (expectedMisses.length) {
+    console.log(`\n  expected to miss, and did (not counted as proven): ${expectedMisses.map((r) => r.id).join(', ')}`);
+}
+const unexpectedHits = ran.filter((r) => r.expectMiss && r.failed.length > 0);
+if (unexpectedHits.length) {
+    console.log('\n  UNEXPECTED HITS — declared to miss but felled checks; give them a real `expect`:');
+    for (const m of unexpectedHits) console.log(`    ${m.id}: got ${m.failed.join(',')}`);
+}
 const skipped = results.filter((r) => r.skipped);
 if (skipped.length) console.log(`\n  skipped: ${skipped.map((r) => `${r.id} (${r.skipped})`).join(', ')}`);
 
-if (existsSync(safety)) rmSync(safety, { recursive: true, force: true });
-process.exit(missed.length || skipped.length ? 1 : 0);
+run.finish();
+process.exit(missed.length || unexpectedHits.length || skipped.length ? 1 : 0);

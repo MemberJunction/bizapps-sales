@@ -8,8 +8,8 @@
  * test. A guaranteed teardown that does not depend on the UI being healthy is what makes the harness
  * genuinely re-runnable, which B4 asks for.
  *
- * Safe by construction: it only ever touches rows whose Name starts with the loud PW-VERIFY prefix.
- * It cannot delete real data, and its deletes are ordered child-first so the FKs never block it.
+ * It only touches rows named with one of the harness prefixes in PREFIXES below, spares the seeded
+ * DEAL-90* deals, and orders its deletes child-first so the FKs never block it.
  *
  * Usage:  node lib/cleanup.mjs [--quiet]
  */
@@ -155,8 +155,8 @@ INSERT INTO @inner (P) VALUES ${PREFIXES.map((x) => `(N'%${x}%')`).join(', ')};
  * cleanup step nobody was watching.
  *
  * So the demo set is named and excluded rather than trusted to not collide. DEAL-90% is the seeded
- * range and it is stable -- these are the seven rows every measurement in docs/DEMO-INVENTORY.md is
- * counted against. Belt and braces with the print below: the exclusion stops the known-precious rows,
+ * range and it is stable -- these are the seven deals scripts/seed-demo-data.sh seeds. Belt and
+ * braces with the print below: the exclusion stops the known-precious rows,
  * and the print lets a human stop the unknown ones.
  */
 DECLARE @keep TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);

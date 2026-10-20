@@ -18,8 +18,7 @@ type DealFieldSpec = { name: string };
  * sales' Explorer specs already cannot run against this host, and a criterion whose only proof is a spec
  * that cannot execute is an unproven criterion.
  *
- * The Overview panel is instantiated through `Object.create` rather than Angular DI, matching
- * `deal-workspace-product.test.ts`: `Health` reads exactly one instance field (`Record`) and one getter
+ * The Overview panel is instantiated through `Object.create` rather than Angular DI: `Health` reads exactly one instance field (`Record`) and one getter
  * on itself, so standing up an injector would add ceremony without adding assurance.
  *
  * The Pipeline panel is constructed normally, because it has to be: `Fields` is an instance property
@@ -283,7 +282,7 @@ describe('creating a deal, on the section it opens on', () => {
         // Pipeline and Pipeline Stage are dedicated controls since golive#291 and render outside this
         // list; `the pipeline and stage controls` below is what keeps them from simply disappearing.
         expect(names(pipeline(false))).toEqual([
-            'DealTypeID', 'AccountID', 'PrimaryContactID', 'BillingContactID',
+            'DealTypeID', 'ExpectedCloseDate', 'AccountID', 'PrimaryContactID', 'BillingContactID',
         ]);
     });
 
@@ -317,7 +316,7 @@ describe('creating a deal, on the section it opens on', () => {
 
     it('puts everything back once the deal is saved', () => {
         expect(names(pipeline(true))).toEqual([
-            'DealTypeID', 'ForecastCategoryTypeID', 'Probability',
+            'DealTypeID', 'ForecastCategoryTypeID', 'Probability', 'ExpectedCloseDate',
         ]);
         expect(names(party(true))).toEqual([
             'AccountID', 'CompanyID', 'OwnerEmployeeID', 'PrimaryContactID', 'BillingContactID',

@@ -72,7 +72,7 @@ export interface ContractsCreateFromDealSeamInput {
      *
      * -- THE NAME SAYS `Code`, AND TODAY IT IS MATCHED ON `Name`. READ THIS BEFORE RENAMING IT. --
      *
-     * `ContractType` has no `Code` column as of contracts `origin/next` @ d2f64e3; it is identified by
+     * `ContractType` has no `Code` column in contracts v2; it is identified by
      * `Name` (unique) plus a fixed seeded UUID. So `LiveContractsSeam` probes the metadata and matches
      * on whichever identifier contracts actually offers, and says which one it used in the message it
      * returns -- the answer is never ambiguous at the call site.
@@ -86,9 +86,9 @@ export interface ContractsCreateFromDealSeamInput {
      * `Sales.CloseDeal` remote-operation contract and appears in generated code. Not worth doing to
      * describe a state that is meant to be temporary.
      *
-     * WHATEVER VALUE GOES HERE MUST NAME A TYPE THAT STANDS ALONE. A type whose
-     * `ParentStatusRequirement` is `'Required'` -- Change Order -- is refused by contracts' own
-     * validation when nothing names its parent, and a close-won has no parent contract to give it.
+     * WHATEVER VALUE GOES HERE MUST NAME A TYPE THAT STANDS ALONE. A type with `MustBeChild = 1`
+     * -- Change Order -- is refused by contracts' own validation when nothing names its parent, and a
+     * close-won has no parent contract to give it.
      */
     ContractTypeCode?: string | null;
     TermMonths?: number | null;
@@ -125,12 +125,30 @@ export interface ContractsCreateFromDealSeamInput {
     CommittedAmount?: number | null;
 }
 
+/**
+ * A won deal that already carries a contract, closed again after a reopen (#278). The same deal-sourced
+ * fields as a create, aimed at the contract the deal names, so one deal never produces two agreements.
+ */
+export interface ContractsUpdateFromDealSeamInput extends ContractsCreateFromDealSeamInput {
+    /** The contract the deal already names — sales' `Deal.ContractID`. */
+    ContractID: string;
+}
+
 /** Renewal path: used INSTEAD of CreateFromDeal when `DealType.RequiresRenewalSource` is set (§7.2). */
 export interface ContractsRenewTermSeamInput {
     /** The contract being renewed — sales' `Deal.RenewsContractID`. */
     ContractID: string;
     DealID: string;
     TermMonths?: number | null;
+}
+
+/**
+ * Link the order a won deal carries to the contract the close produced (contracts#77). Contracts copies
+ * the contract's renewal terms to the subscriptions that order creates.
+ */
+export interface ContractsLinkOrderSeamInput {
+    ContractID: string;
+    OrderID: string;
 }
 
 /** What either contracts call returns. */
@@ -140,6 +158,28 @@ export interface ContractsSeamResult {
     /** The contract's status on creation — `Draft`, the status that fires nothing. See above. */
     Status?: string | null;
     Message?: string | null;
+    /**
+     * Set with `Success: false` when the call could not run YET and will be retried on its own, so the
+     * caller reports it as a note rather than a problem. Absent means a refusal.
+     */
+    Pending?: boolean;
+}
+
+/** What `UpdateContractFromDeal` returns: the common shape, plus what the close reports about reuse. */
+export interface ContractsUpdateSeamResult extends ContractsSeamResult {
+    /** The reused contract's number, for the note the close reports. */
+    ContractNumber?: string | null;
+    /**
+     * The contract is signed (`ExecutedDate` set), so nothing was written. `Success` is still true:
+     * the contract is reused as it stands, and `Message` carries the warning that the deal and the
+     * signed paper may differ.
+     */
+    Signed?: boolean;
+    /**
+     * The contract the deal names could not be read or no longer exists. The close refuses rather than
+     * creating a second contract or stamping one nobody can see.
+     */
+    Unreadable?: boolean;
 }
 
 /** What the orders call returns. */
@@ -177,7 +217,13 @@ export interface IDownstreamSeam {
      * because a renewal User Story is coming and the route is the shape it will land in.
      */
     CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult>;
+    /**
+     * Reuse the contract a re-closed deal already names (#278). Unsigned: rewrite the deal-sourced
+     * fields `CreateContractFromDeal` sets. Signed: write nothing and return a warning.
+     */
+    UpdateContractFromDeal(input: ContractsUpdateFromDealSeamInput): Promise<ContractsUpdateSeamResult>;
     RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult>;
+    LinkOrderToContract(input: ContractsLinkOrderSeamInput): Promise<ContractsSeamResult>;
 }
 
 /**
@@ -202,6 +248,16 @@ export class StubDownstreamSeam implements IDownstreamSeam {
         };
     }
 
+    public async UpdateContractFromDeal(input: ContractsUpdateFromDealSeamInput): Promise<ContractsUpdateSeamResult> {
+        this.Attempts.push({ Target: 'ContractUpdate', Payload: input });
+        return {
+            Success: false,
+            Message:
+                'The deal\'s contract was not refreshed: bizapps-contracts is not installed in this ' +
+                'deployment, so its entities cannot be resolved.',
+        };
+    }
+
     public async RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult> {
         this.Attempts.push({ Target: 'ContractRenewal', Payload: input });
         return {
@@ -209,6 +265,16 @@ export class StubDownstreamSeam implements IDownstreamSeam {
             Message:
                 'The renewal route was planned but not executed: bizapps-contracts is not installed in ' +
                 'this deployment, so its entities cannot be resolved.',
+        };
+    }
+
+    public async LinkOrderToContract(input: ContractsLinkOrderSeamInput): Promise<ContractsSeamResult> {
+        this.Attempts.push({ Target: 'ContractOrder', Payload: input });
+        return {
+            Success: false,
+            Message:
+                'The order was not linked to the contract: bizapps-contracts is not installed in this ' +
+                'deployment, so its entities cannot be resolved.',
         };
     }
 }

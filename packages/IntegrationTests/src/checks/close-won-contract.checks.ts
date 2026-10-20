@@ -1,5 +1,5 @@
 /**
- * @fileoverview `close-won-contract` — CT1 and CT4, against contracts' v2 schema.
+ * @fileoverview `close-won-contract` — CT1 and CT4–CT10, against contracts' v2 schema.
  *
  * ── HOW THIS BUNDLE GOT HERE, BECAUSE THE HISTORY IS THE ARGUMENT ───────────────────────────────
  *
@@ -34,17 +34,20 @@ import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '
 import { ContractsIsInstalled, LiveContractsSeam, OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
 import {
     SalesCloseDealOperation,
+    SalesReopenDealOperation,
     type SalesCloseDealInput,
     type SalesCloseDealOutput,
+    type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 
-import { E_DEAL, InRolledBackTransaction, ProviderOf, ResolveSalesFixture, TxOne } from '../fixture.js';
+import { E_DEAL, InRolledBackTransaction, ProviderOf, ResolveSalesFixture, TxOne, type SalesCheck } from '../fixture.js';
 import { SeedDealOnPipeline } from './close-won-order.fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_CONTRACT_TYPE = 'MJ_BizApps_Contracts: Contract Types';
+const E_CONTRACT_ORDER = 'MJ_BizApps_Contracts: Contract Orders';
 
 /** Refuses the run when contracts is absent, instead of quietly passing. */
 function requireContracts(): void {
@@ -106,7 +109,12 @@ async function anyContractTypeName(ctx: Ctx): Promise<string> {
  * payload and what contracts does with it. That a contract is PLANNED at all is `close-deal.CD1`'s job,
  * and a check going through the close would fail for either reason.
  */
-async function createContract(ctx: Ctx, typeName: string | null, modified?: boolean) {
+async function createContract(
+    ctx: Ctx,
+    typeName: string | null,
+    modified?: boolean,
+    terms: { AutoRenew?: boolean; CancellationNoticeDaysOverride?: number | null } = {},
+) {
     const f = await ResolveSalesFixture(ctx);
     const seam = new LiveContractsSeam(ctx.User, ProviderOf(ctx));
     return seam.CreateContractFromDeal({
@@ -117,6 +125,7 @@ async function createContract(ctx: Ctx, typeName: string | null, modified?: bool
         AccountID: f.AccountID,
         StartDate: '2026-09-01',
         ...(modified === undefined ? {} : { StandardAgreementModified: modified }),
+        ...terms,
     });
 }
 
@@ -137,6 +146,14 @@ async function closeDeal(ctx: Ctx, input: SalesCloseDealInput): Promise<SalesClo
     return output as SalesCloseDealOutput;
 }
 
+async function reopenDeal(ctx: Ctx, dealID: string): Promise<SalesReopenDealOutput> {
+    const op = new SalesReopenDealOperation();
+    const result = await op.Execute({ DealID: dealID, Reason: 'CT9: reopen and close again' }, { provider: ProviderOf(ctx), user: ctx.User });
+    const output = (result as { Output?: SalesReopenDealOutput })?.Output;
+    Assert(!!output, `Sales.ReopenDeal returned no Output envelope: ${JSON.stringify(result).slice(0, 300)}`);
+    return output as SalesReopenDealOutput;
+}
+
 function requireOrdersToo(): void {
     Assert(
         OrdersIsInstalled(),
@@ -145,7 +162,59 @@ function requireOrdersToo(): void {
     );
 }
 
-export const CloseWonContractChecks: NamedCheck[] = [
+/**
+ * Closes a seeded deal Won, reopens it and closes it Won again, asserting the second close reused the
+ * first close's contract (#278). Returns the contract and the deal's order, for the link half.
+ */
+async function closeReopenClose(ctx: Ctx): Promise<{ ContractID: string; OrderID: string }> {
+    const f = await ResolveSalesFixture(ctx);
+    const seeded = await SeedDealOnPipeline(ctx, f, {
+        PipelineID: f.ContractPolicyPipelineID,
+        StageID: f.ContractPolicyStageID,
+        CompanyID: f.PipelineCompanyID,
+        LineCount: 1,
+    });
+
+    const first = await closeDeal(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+    Assert(first.Success, `the first close failed: ${JSON.stringify(first.Issues)}`);
+    const firstRoute = first.Routing?.find((r) => r.Target === 'Contract');
+    Assert(firstRoute?.Executed === true, `the first close created no contract — reason: ${firstRoute?.Reason ?? '(no Contract route)'}`);
+    const before = await TxOne<{ ContractID: string | null; OrderID: string | null }>(
+        ctx, `SELECT ContractID, OrderID FROM __mj_BizAppsSales.Deal WHERE ID = '${seeded.DealID}'`,
+    );
+    Assert(!!before.ContractID, 'the first close stamped a contract on the deal');
+    Assert(!!before.OrderID, 'the deal carries its order');
+
+    const reopened = await reopenDeal(ctx, seeded.DealID);
+    Assert(reopened.Success, `the reopen failed: ${JSON.stringify(reopened.Issues)}`);
+
+    const second = await closeDeal(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+    Assert(second.Success, `the second close failed: ${JSON.stringify(second.Issues)}`);
+    const secondRoute = second.Routing?.find((r) => r.Target === 'Contract');
+    Assert(
+        secondRoute?.Executed === true,
+        `the second close did not reuse the contract — reason: ${secondRoute?.Reason ?? '(no Contract route)'}`,
+    );
+    AssertEqual(
+        String(secondRoute?.RecordID ?? '').toLowerCase(),
+        String(before.ContractID).toLowerCase(),
+        'the second close reports the contract the deal already named',
+    );
+
+    const after = await TxOne<{ ContractID: string | null }>(
+        ctx, `SELECT ContractID FROM __mj_BizAppsSales.Deal WHERE ID = '${seeded.DealID}'`,
+    );
+    AssertEqual(
+        String(after.ContractID ?? '').toLowerCase(),
+        String(before.ContractID).toLowerCase(),
+        'Deal.ContractID is unchanged by the second close',
+    );
+    const contracts = await rows(ctx, E_CONTRACT, `CreatingRecordID = '${seeded.DealID}'`);
+    AssertEqual(contracts.length, 1, 'the deal has exactly one contract after closing Won twice');
+    return { ContractID: String(before.ContractID), OrderID: String(before.OrderID) };
+}
+
+export const CloseWonContractChecks: SalesCheck[] = [
     {
         Id: 'close-won-contract.CT1',
         Name: 'CT1: the seam creates a contract, and CONTRACTS mints its number',
@@ -377,6 +446,95 @@ export const CloseWonContractChecks: NamedCheck[] = [
                     published.some((t) => String(t.ID).toLowerCase() === String(contract.ContractTemplateID).toLowerCase()),
                     'and it is a Published, usable one',
                 );
+            }),
+    },
+    {
+        Id: 'close-won-contract.CT8',
+        Name: 'CT8: the type\'s renewal defaults fill what the deal left unset, and never what it stated',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * bizapps-contracts#97. Contracts applies its type defaults only when the creator asks,
+                 * so the seam marks what the deal stated and then asks. The type is given all four
+                 * defaults here, inside the rolled-back transaction, so the result does not depend on the
+                 * host's seed data.
+                 *
+                 * The deal states Auto-renew = No (by omission, which the seam sends as No) and a
+                 * cancellation window. Both must survive, the type's Yes included. The deal says nothing
+                 * about the notice period or the uplift, so those come from the type.
+                 */
+                requireContracts();
+                const [type] = await rows(ctx, E_CONTRACT_TYPE, `Status = 'Active' AND MustBeChild = 0`);
+                Assert(!!type, 'contracts has no standalone active contract type, so the seam has nothing to resolve');
+
+                const typeEntity = await ProviderOf(ctx).GetEntityObject<BaseEntity>(E_CONTRACT_TYPE, ctx.User);
+                const key = new CompositeKey();
+                key.KeyValuePairs.push({ FieldName: 'ID', Value: String(type.ID) });
+                Assert(await typeEntity.InnerLoad(key), 'the contract type reloads');
+                Assert(
+                    typeEntity.Fields.some((f) => f.Name === 'DefaultRenewalNoticeDays'),
+                    'this contracts build has no ContractType renewal defaults, so there is nothing to seed',
+                );
+                typeEntity.Set('DefaultAutoRenew', true);
+                typeEntity.Set('DefaultRenewalNoticeDays', 45);
+                typeEntity.Set('DefaultCancellationWindowDays', 20);
+                typeEntity.Set('DefaultAnnualIncreasePercent', 3);
+                Assert(await typeEntity.Save(), `the type defaults could not be set — ${typeEntity.LatestResult?.CompleteMessage}`);
+
+                const result = await createContract(ctx, String(type.Name), undefined, { CancellationNoticeDaysOverride: 10 });
+                Assert(result.Success, `the contract was not created — ${result.Message}`);
+
+                const [contract] = await rows(ctx, E_CONTRACT, `ID = '${result.ContractID}'`);
+                AssertEqual(contract?.AutoRenew, false, 'the deal\'s No stands against the type\'s Yes');
+                AssertEqual(contract?.CancellationWindowDays, 10, 'the negotiated cancellation window stands');
+                AssertEqual(contract?.RenewalNoticeDays, 45, 'the notice period the deal left unset comes from the type');
+                AssertEqual(Number(contract?.AnnualIncreasePercent), 3, 'the uplift the deal left unset comes from the type');
+            }),
+    },
+    {
+        Id: 'close-won-contract.CT9',
+        Name: 'CT9: close Won, reopen, close Won again — one contract, the same ContractID',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * #278. The second close used to create a second contract and overwrite `Deal.ContractID`,
+                 * leaving the first with nothing pointing at it. The close now reuses the contract the
+                 * deal names.
+                 *
+                 * Contracts are counted by `CreatingRecordID` = this deal, never across the table, so the
+                 * check is about this deal's fixture alone. The order link is CT10's: it needs a contracts
+                 * build with order links, and this half does not.
+                 */
+                requireContracts();
+                requireOrdersToo();
+                await closeReopenClose(ctx);
+            }),
+    },
+    {
+        Id: 'close-won-contract.CT10',
+        Name: 'CT10: close Won, reopen, close Won again — the order is linked to the contract once',
+        RequiresMutation: true,
+        // Order links (Contract Orders) arrive in a contracts release newer than any installed today.
+        RequiresApp: 'contract-order-links',
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * #278's other half. The link is found by contract AND order, which is the pair a
+                 * duplicate would repeat. The runner leaves this check out where contracts has no order
+                 * links; the assertion below is for any other driver of the registry, which ignores
+                 * `RequiresApp` and must not pass here vacuously.
+                 */
+                requireContracts();
+                requireOrdersToo();
+                Assert(
+                    new Metadata().Entities.some((e) => e.Name === E_CONTRACT_ORDER),
+                    'this contracts build has no order links (Contract Orders), so the link cannot be asserted',
+                );
+                const { ContractID, OrderID } = await closeReopenClose(ctx);
+                const links = await rows(ctx, E_CONTRACT_ORDER, `ContractID = '${ContractID}' AND OrderID = '${OrderID}'`);
+                AssertEqual(links.length, 1, 'the order is linked to the contract once, not once per close');
             }),
     },
 ];

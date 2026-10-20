@@ -1,17 +1,14 @@
 /**
- * @fileoverview All data access for the deal workspace, so the component itself does none.
+ * @fileoverview Data access for the Sales section, the board and the deal line editor: the lookup
+ * lists, the roster, a deal load and save, the product catalogue, the fiscal year start and the
+ * dashboard figures.
  *
- * The workspace component stays presentational: it takes lookups and a `DealEntity`, and asks this
- * service to save it. That split is copied from bizapps-contracts, and the payoff is that the surface can
- * be rendered and reasoned about without a provider behind it.
+ * Named for the deal workspace, the surface it was written for. That component is deleted (#291); the
+ * section, the board and the line editor kept the reads and the save they share with it.
  *
- * WHAT CHANGED WITH RELATED RECORD COLLECTIONS. This service used to build a `DealDraft` — a UI-side
- * model with its own line and instalment arrays — and send it through the `Sales.SaveDeal` remote
- * operation, because the entity a browser held had no child collections to save. It does now, so the
- * service hands out the real entity and its children, and saving is `deal.Save()`. The two places that
- * needed care are both here rather than in the component: LOADING the collections exactly once
- * ({@link DealWorkspaceService.LoadDeal}) and forcing a full write-out on save
- * ({@link DealWorkspaceService.Save}).
+ * A deal's related-record collections save with it: saving is `deal.Save()`. The two places that need
+ * care are both here: LOADING the collections exactly once ({@link DealWorkspaceService.LoadDeal}) and
+ * forcing a full write-out on save ({@link DealWorkspaceService.Save}).
  *
  * @module @mj-biz-apps/sales-ng
  */
@@ -19,6 +16,7 @@ import { Injectable } from '@angular/core';
 import { EntitySaveOptions, LogError, LogStatus, Metadata, RunQuery, RunView, RunViewParams, type RunViewResult } from '@memberjunction/core';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 
+import { OrderPipelinesByCompany } from '../data/company-pipelines';
 import { AssertRosterColumns } from './deal-roster.columns';
 
 import {
@@ -87,6 +85,8 @@ export interface DealDashboardSummary {
     TotalCount: number;
     PastExpectedCloseCount: number;
     WonCount: number;
+    /** The amounts of the deals `WonCount` counts: the forecast stack's Closed segment. */
+    WonAmount: number;
     /** How much of the open figure the orders engine priced, and how much a person typed. */
     OpenPricedAmount: number;
     OpenStatedAmount: number;
@@ -184,202 +184,195 @@ export interface DealSaveOutcome {
 }
 
 /** Row shapes as they come back from RunView with `ResultType: 'simple'`. */
-interface PipelineRow { ID: string; Name: string; CompanyID: string; Company: string | null }
+interface PipelineRow { ID: string; Name: string; Code: string; CompanyID: string; Company: string | null; IsDefault: boolean; DisplayRank: number }
 interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null }
 interface NamedRow { ID: string; Name: string }
 interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean; LocksDeal: boolean }
 interface LossReasonRow extends NamedRow { RequiresNotes: boolean }
-interface ContactRow { ID: string; FirstName: string | null; LastName: string | null; Email: string | null }
-interface EmployeeRow { ID: string; FirstLast: string | null }
+export interface ContactRow {
+    ID: string;
+    FirstName: string | null;
+    LastName: string | null;
+    Email: string | null;
+    DisplayNameAndEmail: string | null;
+}
+
 /**
- * The collections the workspace edits, named once.
+ * A contact's label in the `Contacts` lookup list: "Name (email)", the same text the deal form's
+ * contact picker shows (#254). A native select can only jump to an option by its first letters, so
+ * the email cannot be searched here, but it tells two people with the same name apart.
+ *
+ * `DisplayNameAndEmail` comes from vwSalesContacts. The fallbacks cover a row without it.
+ */
+export function ContactOptionLabel(c: ContactRow): string {
+    return (
+        c.DisplayNameAndEmail?.trim() ||
+        [c.FirstName, c.LastName].filter(Boolean).join(' ').trim() ||
+        c.Email ||
+        '(unnamed contact)'
+    );
+}
+interface EmployeeRow { ID: string; FirstLast: string | null }
+
+/** One named lookup list. */
+export type LookupKey = keyof DealWorkspaceLookups;
+
+/** How one lookup list is read, and where its rows land. */
+interface LookupRead {
+    Params: RunViewParams;
+    Apply: (rows: unknown[], into: DealWorkspaceLookups) => void;
+}
+
+/** Typed constructor for a {@link LookupRead}: rows of `T` mapped and assigned. */
+function lookupRead<T>(params: RunViewParams, apply: (rows: T[], into: DealWorkspaceLookups) => void): LookupRead {
+    return { Params: params, Apply: (rows, into) => apply(rows as T[], into) };
+}
+
+/**
+ * Every lookup list, keyed by the field it fills.
+ *
+ * A `Record` over {@link LookupKey}, so a field added to `DealWorkspaceLookups` without a read here does
+ * not compile. Callers ask for lists by name, and the params and the results are built from the same
+ * key array, so a position cannot drift between them.
+ */
+const LOOKUP_READS: Record<LookupKey, LookupRead> = {
+    Pipelines: lookupRead<PipelineRow>(
+        { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'] },
+        (rows, into) => {
+            // Grouped by company, default company first (#327): the same order the form and the board use.
+            into.Pipelines = OrderPipelinesByCompany(rows.map<PipelineLookup>((p) => ({
+                ID: p.ID,
+                Name: p.Name,
+                Code: p.Code ?? '',
+                CompanyID: p.CompanyID,
+                CompanyName: p.Company ?? null,
+                IsDefault: !!p.IsDefault,
+                DisplayRank: Number(p.DisplayRank ?? 0),
+            })));
+        },
+    ),
+    Stages: lookupRead<StageRow>(
+        { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'] },
+        (rows, into) => {
+            into.Stages = rows.map<StageLookup>((s) => ({
+                ID: s.ID, Name: s.Name, PipelineID: s.PipelineID, DisplayOrder: s.DisplayOrder,
+                Probability: s.Probability, ForecastCategoryTypeID: s.ForecastCategoryTypeID,
+                DealStatusTypeID: s.DealStatusTypeID ?? null,
+            }));
+        },
+    ),
+    DealTypes: lookupRead<NamedRow>(
+        { EntityName: E_DEAL_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+        (rows, into) => {
+            into.DealTypes = rows.map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        },
+    ),
+    // The FLAGS come back with the status, because the dashboard counts open/won deals and the
+    // only permitted way to decide either is to read the flag. Comparing a status name is what
+    // the vocabulary gate forbids, and it also breaks the moment somebody renames "Won".
+    DealStatusTypes: lookupRead<StatusRow>(
+        { EntityName: E_STATUS_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsOpen', 'IsClosed', 'IsWon', 'IsLost', 'LocksDeal'] },
+        (rows, into) => {
+            into.DealStatusTypes = rows.map<DealStatusLookup>((r) => ({
+                ID: r.ID,
+                Name: r.Name,
+                IsOpen: r.IsOpen === true,
+                IsClosed: r.IsClosed === true,
+                IsWon: r.IsWon === true,
+                IsLost: r.IsLost === true,
+                LocksDeal: r.LocksDeal === true,
+            }));
+        },
+    ),
+    ForecastCategoryTypes: lookupRead<NamedRow>(
+        { EntityName: E_FORECAST_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+        (rows, into) => {
+            into.ForecastCategoryTypes = rows.map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        },
+    ),
+    // KI-8: a Deal row cannot resolve its own account or contact name, because both FKs point at
+    // IsA CHILDREN whose Name lives on the parent and CodeGen generates no lookup join through
+    // that edge. So they are loaded here and resolved client-side. This is the reason the
+    // customer-context header exists as a lookup rather than a field on the deal.
+    Accounts: lookupRead<NamedRow>(
+        { EntityName: E_ACCOUNT, ExtraFilter: 'IsActive = 1', OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+        (rows, into) => {
+            into.Accounts = rows.map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        },
+    ),
+    Contacts: lookupRead<ContactRow>(
+        {
+            EntityName: E_CONTACT,
+            OrderBy: 'LastName ASC',
+            ResultType: 'simple',
+            Fields: ['ID', 'FirstName', 'LastName', 'Email', 'DisplayNameAndEmail'],
+        },
+        (rows, into) => {
+            into.Contacts = rows.map<DealLookup>((c) => ({ ID: c.ID, Name: ContactOptionLabel(c) }));
+        },
+    ),
+    Employees: lookupRead<EmployeeRow>(
+        { EntityName: E_EMPLOYEE, ExtraFilter: 'Active = 1', OrderBy: 'LastName ASC', ResultType: 'simple', Fields: ['ID', 'FirstLast'] },
+        (rows, into) => {
+            into.Employees = rows.map<DealLookup>((e) => ({ ID: e.ID, Name: e.FirstLast ?? '(unnamed employee)' }));
+        },
+    ),
+    // Loss reasons, for the close panel. `RequiresNotes` travels with them because the panel decides
+    // whether LossNotes is mandatory from the FLAG on the chosen row. The close panel cannot demand a
+    // reason it has no list to offer, and an empty dropdown fails as a TIMEOUT rather than as a
+    // missing list, which is a slow way to find out.
+    LossReasons: lookupRead<LossReasonRow>(
+        { EntityName: E_LOSS_REASON, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'RequiresNotes'] },
+        (rows, into) => {
+            into.LossReasons = rows.map<LossReasonLookup>((r) => ({ ID: r.ID, Name: r.Name, RequiresNotes: r.RequiresNotes === true }));
+        },
+    ),
+};
+
+/** Every lookup list: what `LoadLookups` reads when no keys are passed. */
+export const ALL_LOOKUP_KEYS = Object.keys(LOOKUP_READS) as LookupKey[];
+
+/**
+ * The lists the Sales section reads: the board's columns and the status pill. Accounts, contacts,
+ * employees and loss reasons were the deal workspace's pickers, and accounts and contacts grow with the
+ * customer base, so the section does not load them.
+ */
+export const SECTION_LOOKUP_KEYS: readonly LookupKey[] = ['Pipelines', 'Stages', 'DealStatusTypes'];
+/**
+ * The collections a deal load reads, named once.
  *
  * Passed to `LoadRelatedRecords` so the load is EXPLICIT about what it wants rather than taking
  * "everything declared". A collection added to the entity later should not start being fetched by a
  * surface that does not render it.
  */
 // 'Lines' is NOT here: the deal holds none. Its order's lines arrive with the embedded order.
-const WORKSPACE_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
+const DEAL_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
 
 @Injectable({ providedIn: 'root' })
 export class DealWorkspaceService {
     /**
-     * Loads every picker's contents in ONE round trip.
-     *
-     * `RunViews` (plural) rather than nine awaited `RunView` calls — the house rule against querying in
-     * a loop applies just as much to a fixed list of nine as to an unbounded one.
+     * The named lookup lists, in one `RunViews` batch. Defaults to every list;
+     * the Sales section passes {@link SECTION_LOOKUP_KEYS}. Lists not asked for stay empty.
      */
-    /**
-     * The human-facing NUMBER of a record a close routed to.
-     *
-     * `SalesCloseRoutingResult.RecordID` is an ID; a user needs the number orders or contracts minted.
-     * Soft-resolved by target so the workspace degrades to showing nothing rather than erroring when the
-     * downstream app is not installed — the routing result already explains that case in its own words.
-     *
-     * This is a READ of the downstream record's own value. Nothing is computed here; see the money rule.
-     */
-    public async LookupRoutedRecordNumber(target: string, recordID: string): Promise<string | null> {
-        const map: Record<string, { Entity: string; Field: string }> = {
-            Order: { Entity: 'MJ_BizApps_Orders: Order Headers', Field: 'OrderNumber' },
-            Contract: { Entity: 'MJ_BizApps_Contracts: Contracts', Field: 'ContractNumber' },
-        };
-        const spec = map[target];
-        if (!spec) {
-            return null;
-        }
-        try {
-            const r = await new RunView().RunView<Record<string, unknown>>({
-                EntityName: spec.Entity,
-                ExtraFilter: `ID = '${recordID.replace(/'/g, "''")}'`,
-                ResultType: 'simple',
-                Fields: ['ID', spec.Field],
-            });
-            const row = r?.Success ? (r.Results ?? [])[0] : undefined;
-            const value = row?.[spec.Field];
-            return typeof value === 'string' && value.length ? value : null;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Whether a record with this id is in the database: `true`, `false`, or `null` when no read
-     * succeeded.
-     *
-     * Retried because a record just created can be missing from the first read after its save. The
-     * last attempt is trusted: `false` means the id was never written, not that the read was early.
-     * A malformed id is `false` without a read, so it never reaches the filter.
-     */
-    public async RecordExists(entityName: string, id: string, attempts = 3, delayMs = 400): Promise<boolean | null> {
-        if (!/^[0-9a-fA-F-]{36}$/.test(id)) {
-            return false;
-        }
-        let answered = false;
-        for (let attempt = 1; attempt <= attempts; attempt++) {
-            const r = await new RunView().RunView<{ ID: string }>({
-                EntityName: entityName,
-                ExtraFilter: `ID = '${id}'`,
-                ResultType: 'simple',
-                Fields: ['ID'],
-            });
-            if (r?.Success) {
-                if ((r.Results ?? []).length > 0) {
-                    return true;
-                }
-                answered = true;
-            }
-            if (attempt < attempts) {
-                await new Promise((resolve) => setTimeout(resolve, delayMs));
-            }
-        }
-        return answered ? false : null;
-    }
-
-    public async LoadLookups(): Promise<DealWorkspaceLookups> {
-        const rv = new RunView();
-        const params: RunViewParams[] = [
-            { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'CompanyID', 'Company'] },
-            { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'] },
-            { EntityName: E_DEAL_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
-            // The FLAGS come back with the status, because the dashboard counts open/won deals and the
-            // only permitted way to decide either is to read the flag. Comparing a status name is what
-            // the vocabulary gate forbids, and it also breaks the moment somebody renames "Won".
-            { EntityName: E_STATUS_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'IsOpen', 'IsClosed', 'IsWon', 'IsLost', 'LocksDeal'] },
-            { EntityName: E_FORECAST_TYPE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
-            // KI-8: a Deal row cannot resolve its own account or contact name, because both FKs point at
-            // IsA CHILDREN whose Name lives on the parent and CodeGen generates no lookup join through
-            // that edge. So they are loaded here and resolved client-side. This is the reason the
-            // customer-context header exists as a lookup rather than a field on the deal.
-            { EntityName: E_ACCOUNT, ExtraFilter: 'IsActive = 1', OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
-            { EntityName: E_CONTACT, OrderBy: 'LastName ASC', ResultType: 'simple', Fields: ['ID', 'FirstName', 'LastName', 'Email'] },
-            { EntityName: E_EMPLOYEE, ExtraFilter: 'Active = 1', OrderBy: 'LastName ASC', ResultType: 'simple', Fields: ['ID', 'FirstLast'] },
-            // Index 9 — loss reasons, for the close panel. `RequiresNotes` travels with them because the
-            // panel decides whether LossNotes is mandatory from the FLAG on the chosen row.
-            { EntityName: E_LOSS_REASON, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'RequiresNotes'] },
-        ];
-
-        const results = await rv.RunViews(params);
-
-        /**
-         * `RunViews` answers POSITIONALLY, and hand-typed indexes drift the moment a query is added or
-         * removed. This file has already been bitten by it: a picker that read as EMPTY because every
-         * index after an insertion point was off by one -- which looks like "no rows", not like a bug.
-         * Deleting the Deal Line Types query above would have shifted four more.
-         *
-         * So the order is declared ONCE and every reader asks by NAME. Adding a query means adding its
-         * name here beside the param; nothing else moves.
-         */
-        const ORDER = [
-            'Pipelines', 'Stages', 'DealTypes', 'DealStatusTypes', 'ForecastCategoryTypes',
-            'Accounts', 'Contacts', 'Employees', 'LossReasons',
-        ] as const;
-        const at = (key: (typeof ORDER)[number]): number => ORDER.indexOf(key);
-        if (results && results.length !== ORDER.length) {
-            // Each block below already degrades on its own, so this is not fatal -- but a mismatch means
-            // ORDER and `params` have drifted apart, and every picker past the drift is reading the
-            // wrong query. Say so rather than let it be discovered as an empty dropdown.
-            LogError(
-                `DealWorkspaceService.LoadLookups: ${results.length} result(s) for ${ORDER.length} ` +
-                'named lookups -- ORDER and the params array have drifted.',
-            );
+    public async LoadLookups(keys: readonly LookupKey[] = ALL_LOOKUP_KEYS): Promise<DealWorkspaceLookups> {
+        const results = await new RunView().RunViews(keys.map((key) => LOOKUP_READS[key].Params));
+        if (results && results.length !== keys.length) {
+            // Each list below already degrades on its own, so this is not fatal -- but a mismatch means
+            // results cannot be matched to the lists asked for. Say so rather than let it be discovered
+            // as an empty dropdown.
+            LogError(`DealWorkspaceService.LoadLookups: ${results.length} result(s) for ${keys.length} named lookups.`);
         }
         const lookups = EmptyLookups();
-
         // RunViews does not throw; an unsuccessful view yields an empty list rather than an exception,
-        // so each block checks Success independently. A missing picker degrades that one control
+        // so each list checks Success independently. A missing picker degrades that one control
         // instead of blanking the whole surface.
-        const rows = <T>(index: number): T[] => {
+        keys.forEach((key, index) => {
             const r = results?.[index];
-            return r?.Success ? ((r.Results ?? []) as T[]) : [];
-        };
-
-        lookups.Pipelines = rows<PipelineRow>(at('Pipelines')).map<PipelineLookup>((p) => ({
-            ID: p.ID, Name: p.Name, CompanyID: p.CompanyID, CompanyName: p.Company ?? null,
-        }));
-        lookups.Stages = rows<StageRow>(at('Stages')).map<StageLookup>((s) => ({
-            ID: s.ID, Name: s.Name, PipelineID: s.PipelineID, DisplayOrder: s.DisplayOrder,
-            Probability: s.Probability, ForecastCategoryTypeID: s.ForecastCategoryTypeID,
-            DealStatusTypeID: s.DealStatusTypeID ?? null,
-        }));
-        lookups.DealTypes = rows<NamedRow>(at('DealTypes')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
-        lookups.DealStatusTypes = rows<StatusRow>(at('DealStatusTypes')).map<DealStatusLookup>((r) => ({
-            ID: r.ID,
-            Name: r.Name,
-            IsOpen: r.IsOpen === true,
-            IsClosed: r.IsClosed === true,
-            IsWon: r.IsWon === true,
-            IsLost: r.IsLost === true,
-            LocksDeal: r.LocksDeal === true,
-        }));
-        lookups.ForecastCategoryTypes = rows<NamedRow>(at('ForecastCategoryTypes')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
-        // Index 9 — the loss reasons queried above. The close panel cannot demand a reason it has no
-        // list to offer, and an empty dropdown fails as a TIMEOUT rather than as a missing list, which
-        // is a slow way to find out.
-        lookups.LossReasons = rows<LossReasonRow>(at('LossReasons')).map<LossReasonLookup>((r) => ({
-            ID: r.ID, Name: r.Name, RequiresNotes: r.RequiresNotes === true,
-        }));
-        lookups.Accounts = rows<NamedRow>(at('Accounts')).map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
-        lookups.Contacts = rows<ContactRow>(at('Contacts')).map<DealLookup>((c) => ({
-            ID: c.ID,
-            Name: [c.FirstName, c.LastName].filter(Boolean).join(' ').trim() || c.Email || '(unnamed contact)',
-        }));
-        lookups.Employees = rows<EmployeeRow>(at('Employees')).map<DealLookup>((e) => ({
-            ID: e.ID, Name: e.FirstLast ?? '(unnamed employee)',
-        }));
-
+            LOOKUP_READS[key].Apply(r?.Success ? (r.Results ?? []) : [], lookups);
+        });
         return lookups;
     }
 
-    /**
-     * The deal roster — what the dashboard and the list both read.
-     *
-     * ONE `RunViews` call for deals AND accounts. The account read exists only to resolve customer
-     * names (KI-8); doing it per row would be the "never query in a loop" rule broken in the most
-     * expensive possible place.
-     *
-     * Returns an empty array on failure rather than throwing, because a roster that cannot load should
-     * render as an empty list with a message, not take the whole section down.
-     */
     /**
      * The deal roster, from the `Sales: Deal Roster` MJ Query.
      *
@@ -400,15 +393,23 @@ export class DealWorkspaceService {
      * (DealName, AccountName, StageName); DealRosterRow names them for a component (Name,
      * CustomerName, PipelineStage). Mapping here keeps both audiences served and means renaming a
      * column on either side is a one-file change.
+     *
+     * `closedSince` drops closed deals that closed before it; open deals always come back
+     * (bizapps-sales#209). Omitted, every deal comes back.
+     *
+     * THROWS WHEN THE QUERY FAILS, rather than returning an empty roster. An empty roster reads as a
+     * database with no deals. The likeliest failure once `closedSince` is passed is a host whose query
+     * definition predates the parameter, which MJ refuses as an unknown parameter; the section shows the
+     * reason instead of an empty dashboard.
      */
-    public async LoadRoster(): Promise<DealRosterRow[]> {
+    public async LoadRoster(closedSince?: string | null): Promise<DealRosterRow[]> {
         const result = await new RunQuery().RunQuery({
             QueryName: 'Sales: Deal Roster',
             CategoryPath: 'Sales',
+            ...(closedSince ? { Parameters: { ClosedSince: closedSince } } : {}),
         });
         if (!result?.Success) {
-            LogError(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
-            return [];
+            throw new Error(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
         }
         const rows = (result.Results ?? []) as Record<string, unknown>[];
         // Throws on a query definition older than this mapper, rather than letting bool() read the
@@ -553,16 +554,8 @@ export class DealWorkspaceService {
         return result?.Success ? (result.Results ?? []) : [];
     }
 
-    /** A blank deal, ready to bind to. Its collections start empty and are never loaded — there is nothing to load. */
-    public async NewDeal(): Promise<DealEntity> {
-        const md = new Metadata();
-        const deal = await md.GetEntityObject<DealEntity>(E_DEAL);
-        deal.NewRecord();
-        return deal;
-    }
-
     /**
-     * Reads an existing deal and everything the workspace shows — header, schedule, roster, and the
+     * Reads an existing deal and its collections — header, schedule, roster, and the
      * lines, which belong to the deal's embedded order rather than to the deal.
      *
      * THIS IS THE ONLY PLACE THE COLLECTIONS ARE LOADED, and that is a data-loss guard rather than a
@@ -583,7 +576,7 @@ export class DealWorkspaceService {
             return null;
         }
 
-        await deal.LoadRelatedRecords(...WORKSPACE_COLLECTIONS);
+        await deal.LoadRelatedRecords(...DEAL_COLLECTIONS);
 
         // A collection only reports IsLoaded once its rows actually arrived, so this catches the silent
         // failure above. An empty deal and an unreadable one must never look the same.
@@ -594,7 +587,7 @@ export class DealWorkspaceService {
         /**
          * THE LINES LIVE ON THE ORDER, so they need a load of their own.
          *
-         * `WORKSPACE_COLLECTIONS` covers the deal's OWN collections; the embedded order is a separate
+         * `DEAL_COLLECTIONS` covers the deal's OWN collections; the embedded order is a separate
          * entity instance and its `Lines` is declared `Load: 'explicit'` just like the deal's are. Nothing
          * populates it lazily, so without this a saved deal with lines opens showing NONE -- and reads as
          * a deal nobody has quoted yet.
@@ -650,10 +643,10 @@ export class DealWorkspaceService {
      * nothing beneath it, which is exactly what the retired `Sales.SaveDeal` operation existed to
      * guarantee.
      *
-     * `IgnoreDirtyState` is deliberate and load-bearing: without it, a child that is loaded and unchanged
-     * contributes no work, which is normally right — but this surface re-sequences `DisplayOrder` from
-     * array position on every add and remove, so a row that merely MOVED is clean by field-comparison and
-     * would keep its old position in the database.
+     * `IgnoreDirtyState` was set for the deal workspace (deleted, #291), which re-sequenced
+     * `DisplayOrder` from array position on every add and remove, so a row that merely MOVED was clean
+     * by field-comparison and would have kept its old position. The board, the remaining caller, changes
+     * only the stage, so for it the flag rewrites unchanged children. Kept until that is measured.
      *
      * A record the server refuses for being invalid is an ORDINARY outcome, reported through `Validation`
      * rather than `ErrorMessage`. Only a transport or database failure produces the latter.
@@ -686,8 +679,8 @@ export class DealWorkspaceService {
                 };
             }
 
-            // The SAME instance now carries the server's IDs, so the surface keeps editing the record it
-            // just created rather than a rebuilt copy — the job `ApplySaveResult` used to do by hand.
+            // The SAME instance now carries the server's IDs, so a caller keeps the record it just
+            // saved rather than a rebuilt copy.
             return {
                 Success: true,
                 DealID: deal.ID,
@@ -840,6 +833,7 @@ export class DealWorkspaceService {
             TotalCount: num(row['TotalCount']),
             PastExpectedCloseCount: num(row['PastExpectedCloseCount']),
             WonCount: num(row['WonCount']),
+            WonAmount: num(row['WonAmount']),
             OpenPricedAmount: num(row['OpenPricedAmount']),
             OpenStatedAmount: num(row['OpenStatedAmount']),
             OpenNoAmountCount: num(row['OpenNoAmountCount']),

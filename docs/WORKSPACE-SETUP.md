@@ -6,11 +6,21 @@ re-deriving how it fits together.
 **What it gets you:** six repos joined into one pnpm workspace, one database carrying all six schemas, and
 a close-won deal that produces a real, priced, ledger-posted order.
 
-Every step below was executed end to end on **2026-08-16** against a fresh clone set and an empty
-database. Where a step needed a manual touch, that is called out rather than smoothed over — those are the
-parts that will cost you time otherwise.
+**Status, checked 2026-10-11.** This procedure was last run end to end on **2026-08-16**, with MJ `next`
+at 6.1.0-edge.x: 38/38 integration checks and an 11/11 smoke on a stack built from an empty database.
+Parts were re-measured on 2026-08-25, and §5's sequence has never been run start to finish in one pass. No
+later end-to-end run is recorded. Where a step needed a manual touch, that is called out.
 
-Verified result: **38/38 integration checks and an 11/11 end-to-end smoke, on a stack built from nothing.**
+Since then:
+
+- The app moved to MemberJunction's 6.1 LTS line: `mj-app.json` requires `>=6.1.5 <7.0.0`, and the
+  packages declare `^6.1.5`. MJ's `next` is now the 6.2 edge line (§1).
+- Test hosts have been built another way: each sibling app checked out on its own beside this repo, mostly
+  at a release tag, and installed separately rather than joined into one workspace. #161 records how those
+  hosts were built and what they needed.
+- On those hosts `next` passed 148 of 150 integration checks on 2026-10-08 and 2026-10-09. CO5 fails
+  there (#211). AC19 fails on every host since 2026-09-15, because its fixture date is now in the past
+  (#161). Each sibling checkout loads its own copy of MJ core (#200).
 
 ---
 
@@ -29,7 +39,7 @@ The real host was fine. Cost: a wrong diagnosis and a needless re-seed.
 |---|---|---|---|
 | **`MJ_V6_Host`** | `/c/v6/MJ` | **API 4143**, Explorer **4341** | The **demo/recording** stack. Orders installed (~50 tables). Contracts **present as of 2026-08-25** — a contract was created here during close-won testing; this line previously said absent. Seven `DEAL-900x` deals, all lines carrying real catalogue `ProductID`s. |
 | **`MJ_V6_Repro`** | `/c/v6repro/*` (7 members) | nothing running by default | The **isolated schema/CodeGen** stack, and the **only** one with contracts (~10 tables) as well as orders. The only place the contract-gated bundles can prove anything. |
-| **`MJ_BizAppsSales_V6`** | `/c/v6/bizapps-sales` | API 4141 *(configured)* | **Sales-only** — no orders schema, no contracts. Which makes it the honest test of a standalone host: the default gate must be green here, and the downstream-gated bundles must refuse *loudly*. |
+| **`MJ_BizAppsSales_V6`** | `/c/v6/bizapps-sales` | API 4141 *(configured)* | **Sales-only** — no orders schema, no contracts. Which makes it the real test of a standalone host: the default gate must be green here, and the downstream-gated bundles must refuse *loudly*. |
 | **`MJ_BizAppsSales`** | `/c/Dev/MJ/bizapps-sales` | API 4141 *(configured)* | The **original pre-workspace** dev database. Predates the product-picker work, so its demo lines carry names with no `ProductID`. Nothing current depends on it. |
 
 Also present and easy to mistake for the above: **`MJ_V6_QA`** (orders, no contracts), `MJ_E2E_Combined`,
@@ -120,47 +130,22 @@ for r in bizapps-common bizapps-accounting bizapps-orders bizapps-contracts biza
 done
 ```
 
-> #### ⚠ EVERY REPO COMES FROM `next` NOW — and two of these lines used to say otherwise
->
-> * **bizapps-sales** used to require `feature/embed-order-on-deal`, because `next` trailed the current
->   line by 272 commits and predated the embedded-order redesign entirely. **PR #25 merged that branch
->   into `next` on 2026-08-25**, so the special case is gone. The commit count in this warning had
->   already been corrected from 222 to 242 as the branch moved; a branch name pinned in a document goes
->   stale on every push, which is the reason for landing it rather than documenting around it.
-> * **bizapps-tasks** must come from **`next`**, and the line that used to sit here said the opposite.
->   It read: *"one commit AHEAD of `next` on `feature/closewon-task-types`, and that commit is what
->   close-won task creation needs."* One commit ahead was true. It was also **11 commits BEHIND**, and
->   those eleven carry `V202608200800__v1.2.x_TaskType_Code_Statuses_Workflow_Hooks.sql`, which creates
->   `TaskType.Code`. Sales' own `metadata/task-types` keys on `Code`, so cloning tasks the way this
->   document used to say makes sales' metadata push fail outright:
->
->   ```
->   Field "Code" does not exist on entity "MJ_BizApps_Tasks: Task Types"   x2
->   ✗ Validation failed with 2 error(s)
->   ```
->
->   Measured 2026-08-25 on a fresh install, then measured again after applying tasks@`next`: the column
->   appears and `metadata/task-types — 2 created` succeeds. The one commit `feature/closewon-task-types`
->   is ahead by (`cddd76b`) changes a single file, adding those two task types to **tasks'** metadata --
->   rows that `metadata/task-types/.task-types.json` here says tasks *"deliberately does not carry"*,
->   because sales owns them under Amith's 2026-08-20 ruling. So the branch is not merely stale, its one
->   contribution duplicates rows this app is responsible for.
->
-> Branch names are recorded here rather than left as "use the current branch", because a tester has no
-> way to know which that is. But a recorded branch name goes stale silently, which is exactly what
-> happened above -- so check a claim like this against the migration that actually creates the column
-> you need, not against the note. `git log --all --oneline -S "<column>" -- migrations/` settles it.
+MJ's `next` is now the 6.2 edge line (6.2.0-edge.3 on 2026-10-11), a prerelease that `^6.1.5` does not
+match. This app targets MJ's 6.1 LTS line: `mj-app.json` requires `>=6.1.5 <7.0.0`, the packages declare
+`^6.1.5`, and MJ's source for that line is the `lts/6.1` branch (tag `v6.1.5`). No run of these steps
+against either is recorded; they were last run with MJ `next` at 6.1.0-edge.x.
 
-`bizapps-tasks` is **not optional**, even though nothing you test touches tasks directly: accounting has a
-hard foreign key into it, and orders has one into accounting. Leave it out and orders' migration fails on a
+`bizapps-tasks` is **not optional**: sales' `mj-app.json` declares it, the `close-won-tasks` bundle needs
+it, accounting has a hard foreign key into it, and orders has one into accounting. Leave it out and orders' migration fails on a
 foreign key three apps away from where you are looking.
 
 ## 2. Bootstrap the CLI — the one genuinely awkward step
 
-> ⚠️ **MJ's `next` cannot `pnpm install` on its own.** `MJ/packages/MJAPI` declares
-> `@mj-biz-apps/accounting-server: workspace:*`, so MJ now assumes it is *inside* the joined workspace. But
-> the tool that creates the joined workspace is MJ's own CLI. That is a genuine chicken-and-egg, and it is
-> the single step you cannot copy-paste your way through.
+> ⚠️ **Why this bootstrap exists.** When this was written, `MJ/packages/MJAPI` declared
+> `@mj-biz-apps/accounting-server: workspace:*`, so MJ could not `pnpm install` outside the joined
+> workspace, and the tool that creates that workspace is MJ's own CLI. No MJ `package.json` declares an
+> `@mj-biz-apps/*` package now (checked 2026-10-11 on `next`, and MJAPI's on `lts/6.1`), so that reason is
+> gone. Installing MJ on its own to build the CLI has not been tried here.
 
 Write a minimal parent workspace by hand, install, and build the CLI:
 
@@ -182,6 +167,25 @@ packages:
   - 'bizapps-sales/packages/*'
   - 'bizapps-contracts'          # ⚠ was MISSING here; step 6 cannot run without it
   - 'bizapps-contracts/packages/*'
+# pnpm 10 runs a dependency's install scripts only when it is listed here; anything left out installs
+# without its native build and fails later at run time. Same list as this repo's pnpm-workspace.yaml.
+onlyBuiltDependencies:
+  - '@apollo/protobufjs'
+  - '@google/genai'
+  - '@parcel/watcher'
+  - '@zoom/rtms'
+  - browser-tabs-lock
+  - core-js
+  - core-js-pure
+  - esbuild
+  - isolated-vm
+  - lmdb
+  - msgpackr-extract
+  - oracledb
+  - protobufjs
+  - rete
+  - sharp
+  - tesseract.js
 ```
 
 **Every member is listed explicitly, and contracts is the reason.** This block used to end with
@@ -256,16 +260,10 @@ notice and is harmless.
 
 ## 3b. ALTERNATIVE — installing from PUBLISHED packages
 
-> ## ✅ VERIFIED 2026-08-25 — rehearsed against the live registry
->
-> This section was written before the packages existed, as a hypothesis. It has now been **executed**
-> against the real registry, in a clean directory outside any workspace, with all five packages live at
-> `5.1.0`. Two of the four risks it named turned out to be non-issues; the other two are recorded
-> honestly below as still-untested. The measured results are inlined throughout — where a claim below
-> says *measured*, it was.
->
-> One correction to the reasoning above: the sequence is right, but step 2 is **not sufficient on its
-> own** and step 3 is not optional. That was already stated; the run confirms it.
+> Rehearsed once, on 2026-08-25, against the registry with sales 5.1.0 on MJ 6.1.0-edge.3: the packages
+> installed into an empty directory, and no MJ host was started. Sales is at 6.13.0 now and declares
+> MemberJunction as a peer dependency (`^6.1.5`), so the host supplies MJ; that combination has not been
+> rehearsed.
 
 ### THE APP SHIPS THROUGH TWO CHANNELS, AND ONLY ONE OF THEM IS NPM
 
@@ -294,86 +292,40 @@ six apps from source. Installing published packages into an existing MJ host rem
 
 Sections 4, 5 and 6 do not change. They are the repository half, and they are the same either way.
 
-### The sequence, as reasoned
+### The sequence
 
 ```bash
-# 1. An MJ host at a version satisfying mj-app.json's mjVersionRange (>=6.1.0-edge.2 <7.0.0).
-#    NOTE: MJ core's `latest` on npm is still 5.51.1 -- the v6 line is a PRERELEASE, so THE HOST must
-#    be installed explicitly by version, not by tag. This does NOT apply to the step-2 install below:
-#    sales' own `^6.1.0-edge.3` ranges resolve to 6.1.0-edge.3 unaided (measured 2026-08-25).
+# 1. An MJ host at a version satisfying mj-app.json's mjVersionRange (>=6.1.5 <7.0.0): the 6.1 LTS
+#    line, which is MJ core's `latest` on npm (6.1.5 on 2026-10-11). Sales' packages declare
+#    MemberJunction as a peer dependency (^6.1.5), so the host supplies it.
 
 # 2. The four runtime packages into that host:
-npm install @mj-biz-apps/sales-server @mj-biz-apps/sales-ng             @mj-biz-apps/sales-entities @mj-biz-apps/sales-actions
+npm install @mj-biz-apps/sales-server @mj-biz-apps/sales-ng @mj-biz-apps/sales-entities @mj-biz-apps/sales-actions
 
-# 3. Clone THIS repository anyway, for the database half:
-git clone --branch next https://github.com/MemberJunction/bizapps-sales.git
+# 3. Clone THIS repository anyway, for the database half, at the tag of the version step 2 installed:
+git clone --branch v<installed version> https://github.com/MemberJunction/bizapps-sales.git   # e.g. v6.13.0
 ```
 
 Then run **sections 4, 5 and 6 exactly as written**, from the clone — migrate in the documented order,
-seed, build and verify. Section 6's build step becomes unnecessary for
-sales itself, since its code arrives compiled.
+seed, build and verify. Section 6's build step becomes unnecessary for sales itself, since its code
+arrives compiled.
+
+**Clone the tag, not `next`.** Each release is tagged (`v6.13.0` is the latest on 2026-10-11), and npm
+records no `gitHead` for these packages, so the tag is what ties a published version to its migrations.
+`next` can be ahead of the last release.
 
 The server and client packages carry `"role": "bootstrap"` with `startupExport`
 `LoadBizAppsSalesServer` / `LoadBizAppsSalesClient`, so the host must load them at startup the way it
-does for the other apps — MJAPI's startup log lists them as *"Loaded Open App server package"*.
+does for the other apps — MJAPI's startup log lists them as *"Loaded Open App server package"*. If it
+does not, the KI-21 failure shape applies.
 
-### What was actually wrong — measured, not reasoned
-
-The four risks this section originally named, each with the result of running it. Rehearsed
-2026-08-25 in an empty directory (`npm init -y`, then the step-2 install verbatim), with **no
-workspace, no symlinks and no `node_modules` inherited from anywhere**.
-
-* **Version resolution — NOT A PROBLEM. The worry was unfounded.** The concern was that MJ's `latest`
-  being `5.51.1` would make `^6.1.0-edge.3` pull the wrong major. It does not: npm resolved every MJ
-  package to `6.1.0-edge.3` exactly. A caret range whose base is a prerelease still only matches
-  within that major, and the prerelease comparator sits on the same `6.1.0` tuple, so `5.51.1` is
-  never a candidate. Measured:
-
-  ```
-  @memberjunction/core                    6.1.0-edge.3
-  @memberjunction/global                  6.1.0-edge.3
-  @memberjunction/core-entities           6.1.0-edge.3
-  @memberjunction/sqlserver-dataprovider  6.1.0-edge.3
-  @memberjunction/actions-base            6.1.0-edge.3
-  ```
-
-  843 packages installed, exit 0. npm prints a run of `ERESOLVE overriding peer dependency` **warnings**
-  — they are warnings, the install succeeds, and no `--legacy-peer-deps` or `--force` was needed.
-  Siblings arrive transitively: `orders-entities@5.1.0`, `common-entities@5.35.1`, `tasks-*@1.3.0`.
-
-* **Which repository revision — NOT A PROBLEM, and now provable.** The original worry was that
-  installing `5.1.0` while cloning a newer `next` would pair code with mismatched schema. It does not
-  today: every published file was compared byte-for-byte against a local build of `origin/next`
-  @ `e40c460`, and **all 178 files in all five packages are identical** —
-  `sales-ng` 90, `sales-core-entities-server` 52, `sales-entities` 20, `sales-server` 12,
-  `sales-actions` 4. Zero differing, zero extra.
-
-  ⚠️ **This is a fact about today, not a guarantee.** `npm publish` recorded **no `gitHead`** in any of
-  the five packages, so provenance cannot be read back out of the registry — the only way to check the
-  pairing is the byte comparison above. Re-run it whenever `next` moves without a republish:
-
-  ```bash
-  # from a directory where the published packages are installed
-  cmp -s node_modules/@mj-biz-apps/sales-entities/dist/index.js          /path/to/bizapps-sales/packages/Entities/dist/index.js && echo MATCH || echo DIVERGED
-  ```
-
-* **`mjVersionRange` enforcement — STILL UNTESTED.** Nothing in this rehearsal exercised it, because
-  nothing installed the app *as an Open App* — the packages were installed as plain npm dependencies.
-  The range is `>=6.1.0-edge.2 <7.0.0` and it does admit the `6.1.0-edge.3` that npm actually
-  resolves, so the two are at least consistent. Whether a host rejects or ignores a mismatch is
-  unknown.
-
-* **Startup registration — PARTIALLY TESTED.** The bootstrap exports exist and are importable from the
-  published artifacts, which is the half that can be checked without a host:
-  `LoadBizAppsSalesServer` is exported by `sales-server`; `sales-entities` exposes 104 exports and
-  `sales-core-entities-server` 144. What is **not** tested is whether an MJ host actually calls them at
-  startup. If it does not, the KI-21 failure shape applies and deals fail looking like a permissions
-  problem.
+Not tested here: whether a host enforces `mjVersionRange`, and whether it calls the bootstrap exports at
+startup.
 
 ### One thing to know before you smoke-test
 
-`@mj-biz-apps/sales-server` **reads MJ configuration at import time**, so importing it with no config
-present throws before any of your code runs:
+Measured on 5.1.0 in the rehearsal: `@mj-biz-apps/sales-server` **reads MJ configuration at import
+time**, so importing it with no config present throws before any of your code runs:
 
 ```
 No config file found, using DEFAULT_SERVER_CONFIG
@@ -385,16 +337,6 @@ This is MJ core's config loader, **not a sales defect** — the other three pack
 no config at all. A real host always has a config, so this only bites a bare `node -e "import(...)"`
 smoke test. Drop an `mj.config.cjs` next to it and the import succeeds (9 exports). Worth knowing
 because the error names database fields and reads like a connectivity failure, which it is not.
-
-### What this rehearsal did NOT cover
-
-Stated so nobody reads the green banner as broader than it is:
-
-* No MJ host was started, so nothing exercised Open App discovery, `mjVersionRange`, or startup
-  bootstrap invocation.
-* No UI was loaded from the published `sales-ng`; only its bundle contents were compared.
-* The database half was built the normal way, from this repository — **section 3b changes nothing
-  about sections 4–6**, and those remain the tested path.
 
 ---
 
@@ -433,13 +375,13 @@ done
 
 Everything should read `behind=0`. If it does not, fix that before filing anything.
 
-### MJ published 6.1.0-edge.3 and MJ next are NOT the same code
+### A local MJ build and a published one can share a version number and differ
 
-The nastiest one. MJ has not bumped its version since publishing `edge.3`, so the registry tarball
-and the local `next` build **share a version number and differ in content**. pnpm cannot tell them
+The nastiest one. When MJ's `next` has not bumped its version since its last publish, the registry
+tarball and the local build **share a version number and differ in content**, and pnpm cannot tell them
 apart. A package that does not *declare* `@memberjunction/global` directly --
 `orders-core-entities-server`, for one -- resolves it by hoisting and can get the registry copy,
-which lacks exports its code imports:
+which lacks exports its code imports (measured 2026-08-25):
 
 ```
 error TS2305: Module "@memberjunction/global" has no exported member EscapeSQLString
@@ -450,8 +392,8 @@ error TS2305: Module "@memberjunction/core-entities" has no exported member Base
 Both were set and both were measured; neither applies when the version literally matches and the
 package is not a declared dependency.
 
-Make local-wins unconditional in the generated root `/c/v6/package.json` -- an override per
-`@memberjunction/*` package (306 here, so generate it):
+Make local-wins unconditional in the generated root `package.json` -- one override per
+`@memberjunction/*` package (generate the list):
 
 ```json
 { "pnpm": { "overrides": { "@memberjunction/global": "workspace:*" } } }
@@ -483,29 +425,31 @@ sqlcmd -S localhost,1433 -U sa -P "$PW" -C -Q "CREATE DATABASE MJ_QA;"
 Give **every** repo a `.env` pointing at it (`DB_DATABASE=MJ_QA`, plus host/port/credentials). Then migrate
 in this order — it is the dependency order, and it is not negotiable:
 
-| # | Repo | Command | Expect |
+| # | Repo | Command | Expect (measured 2026-10-13) |
 |---|---|---|---|
-| 1 | MJ | `node packages/MJCLI/bin/run.js migrate` | ~52 applied |
-| 2 | common | `… migrate --schema __mj_BizAppsCommon --dir ./migrations` | 11 |
-| 3 | tasks | `… migrate --schema __mj_BizAppsTasks --dir ./migrations` | 4 |
-| 4 | accounting | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 2 |
-| 5 | orders | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 9 |
-| 6 | **contracts** | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 1 — **see the warning below** |
-| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | **4** — see below |
+| 1 | MJ v6.1.5 | `node packages/MJCLI/bin/run.js migrate` | 89 applied |
+| 2 | common 5.50.1 | `… migrate --schema __mj_BizAppsCommon --dir ./migrations` | 37 |
+| 3 | tasks 1.7.0 | `… migrate --schema __mj_BizAppsTasks --dir ./migrations` | 9 |
+| 4 | accounting 0.22.0 | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 23 |
+| 5 | orders 5.30.0 | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 73 |
+| 6 | **contracts** 0.7.3 | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 9 |
+| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 20 |
 
-> ⚠️ **Contracts migrates LAST, and does not currently install on a fresh database.** It FKs into
-> common, tasks, orders AND accounting — the full stack — so nothing else may follow it. More
-> importantly its baseline hardcodes other apps' entity UUIDs and fails on any machine but the one its
-> CodeGen ran on. Read `docs/KNOWN-ISSUES.md` **KI-13** before attempting it: the first error names the
-> wrong table, and three of the six broken references fail *silently* as a column-count mismatch that
-> breaks every insert. Always column-diff contracts' ten entities after installing.
+The counts are for the versions named, which are the ones this repo's lockfile resolves (contracts,
+accounting and `orders-core-entities-server` through `packages/IntegrationTests`' devDependencies). Another version of a sibling applies a different number;
+what matters is that each step reports no failure.
 
-> ⚠️ **Sales applies FOUR migrations, not two.** The baseline pair (`B…Schema`, `V…Tables_and_Objects`)
-> was joined on 2026-08-21 by `V202608211200__…DealStageEvent_Amount_Provenance` and
-> `V202608211201__…Refresh_DealStageEvent_View`. This table said 2 until it was measured against a
-> genuinely empty database.
+> ⚠️ **Contracts migrates after common, and before sales.** Contracts 0.7.3's migrations reference only
+> MJ core (`__mj`) and common (`__mj_BizAppsCommon`), so any position after common works; it stays at 6
+> to keep one order for everyone. Sales must follow it: sales' metadata points `Deal.ContractID` at
+> contracts' Contract entity. Contracts 0.7.x installs on a fresh database in this order
+> (measured 2026-10-06, 2026-10-08 and 2026-10-13). **KI-13** records the earlier baseline that hardcoded other apps'
+> entity UUIDs and did not install; read it if you are installing a contracts release older than 0.7.
+
+> ⚠️ **Re-measure these counts against an empty database when you change them.** This table once
+> said sales applies 2 while it applied 4, and it now applies 15.
 >
-> That staleness has the same cause as a known issue worth reading: **an applied migration in this repo
+> Stale counts here have the same cause as a known issue worth reading: **an applied migration in this repo
 > can be silently rewritten.** `V202608042101` has been edited four times since it applied on 2026-08-13
 > at checksum 666373835, and those two Aug 21 migrations went on applying cleanly without Flyway ever
 > objecting to the changed checksum. So the file on disk and the file that built a long-lived database
@@ -522,77 +466,14 @@ after step 6 the database already has all ~500 entities registered (20 sales, 49
 tasks, 10 common). If you find yourself about to run CodeGen to "register entities", stop — something else
 is wrong.
 
-> ### ⚠ BUT SOME FIELDS ARE NOT REGISTERED, AND THIS SENTENCE USED TO CLAIM OTHERWISE
->
-> This paragraph read *"No CodeGen run is needed"* without qualification. **That is false for FIELDS**, and
-> the way it fails is expensive to diagnose, so it is worth the detail.
->
-> Several orders migrations add a column and deliberately leave its `EntityField` row to CodeGen.
-> `bizapps-orders/migrations/V202608101200__v0.1.x__Pricing_driver_class.sql` says so in its own header:
->
-> > *"registering them as `EntityField` rows is CodeGen's job. The generated SQL is deliberately NOT
-> > shipped alongside … Migrate, then generate."*
->
-> So a database built from migrations alone ends up with `__mj.EntityField` **short of what the views
-> actually expose**. Measured 2026-08-25 on a fresh all-`next` install (`MJ_Sales_Latest`): **10 columns
-> across 6 orders entities**, four of them on entities **sales writes** —
->
-> | Entity | Missing from `EntityField` |
-> |---|---|
-> | `Order Headers` | `Origin`, `SourceCheckoutWidgetID`, `SourceCheckoutWidget` |
-> | `Order Lines` | `RootReversesOrderLineID` |
-> | `Products` | `RootSuccessorProductID` |
-> | `Product Types` | `PricingDriverClass` |
-> | `Subscriptions` | `RootMigratesFromSubscriptionID`, `RootMigratesToSubscriptionID` |
-> | `Payment Headers` | `RootReversesPaymentHeaderID` |
-> | `Checkout Sessions` | `Distribution` |
->
-> **The failure does not mention metadata.** Saving any affected entity builds `@ResultTable` from
-> `EntityField` and then does `INSERT INTO @ResultTable EXEC sp<Create|Update><Entity>`. The proc returns
-> the *view's* columns, so the counts differ and SQL Server says:
->
-> ```
-> Column name or number of supplied values does not match table definition.
-> ```
->
-> …followed by several hundred lines of generated SQL. Nothing in it points at `EntityField`. If you are
-> reading that error, run the query below before anything else.
->
-> **Why the demo host never showed this:** `MJ_V6_Host` has had CodeGen run on it and measures **0 drift**.
-> Only a *fresh* install exhibits it — which is exactly what QA does.
->
-> **Detect it** (returns nothing when clean):
->
-> ```sql
-> SELECT e.Name, c.name AS MissingField
-> FROM __mj.Entity e
-> JOIN sys.views v ON v.name = e.BaseView
-> JOIN sys.schemas s ON s.schema_id = v.schema_id AND s.name = e.SchemaName
-> JOIN sys.columns c ON c.object_id = v.object_id
-> WHERE NOT EXISTS (SELECT 1 FROM __mj.EntityField ef WHERE ef.EntityID = e.ID AND ef.Name = c.name)
-> ORDER BY e.Name, c.column_id;
-> ```
->
-> **Fixing it requires running CodeGen. No SQL shortcut exists — this was tested.**
->
-> The obvious-looking fix does **not** work:
->
-> ```sql
-> -- Run on MJ_Sales_Latest 2026-08-25. Drift stayed at exactly 10.
-> EXEC __mj.spUpdateExistingEntitiesFromSchema      @ExcludedSchemaNames = 'sys,staging';
-> EXEC __mj.spUpdateExistingEntityFieldsFromSchema  @ExcludedSchemaNames = 'sys,staging', @EntityIDs = NULL;
-> ```
->
-> `spUpdateExistingEntityFieldsFromSchema` filters on `AND ef.ID IS NOT NULL` — it updates existing rows
-> and cannot create missing ones. Neither can `MJ/migrations/R__RefreshMetadata.sql`, which runs those two
-> plus `spUpdateSchemaInfoFromDatabase` and `spDeleteUnneededEntityFields` — all update-or-delete.
->
-> New `EntityField` rows are created only by CodeGen's `createNewEntityFieldsFromSchema()` in
-> `CodeGenLib/src/Database/manage-metadata.ts`. See **KI-28** for the full detail and for why this needs
-> Amith rather than a local decision.
->
-> Pushing orders' `metadata/entity-fields` does **not** fix this — checked on `origin/next`, that directory
-> holds only the two embedded-field overrides and none of the ten.
+> **The same now holds for fields.** A database built from migrations alone used to be short of
+> `EntityField` rows that only CodeGen creates, and every save on an affected orders entity failed with
+> *"Column name or number of supplied values does not match table definition"*, followed by several
+> hundred lines of generated SQL that never mention `EntityField` (KI-28). Orders folded those rows into
+> its migrations on 2026-08-25, and on fresh hosts built from the October releases the drift query in
+> §5(a) returned nothing (#161). If it returns rows on your host, only CodeGen creates the missing rows:
+> `spUpdateExistingEntityFieldsFromSchema` and MJ's `R__RefreshMetadata.sql` update or delete existing
+> rows and cannot add one.
 
 ## 5. Seed, in this order
 
@@ -646,24 +527,15 @@ is wrong.
 # steps and their order are right; treat the SEQUENCE as reasoned until someone rebuilds from empty
 # and confirms it, then delete this paragraph.
 # Three things changed from the version this file used to carry, and each was a hard failure:
-#   1. CodeGen now runs FIRST. Without it the orders push in (b) fails outright -- see KI-28.
+#   1. The EntityField drift check now runs FIRST, and CodeGen only if it finds rows. Drift made
+#      the orders push in (b) fail outright -- see KI-28.
 #   2. bizapps-common is pushed. It was missing entirely, costing the six ActivityType codes.
 #   3. The catalogue is seeded BEFORE the demo data, not after. Reversed, every deal is
 #      provisioned with no product to embed and comes up with no order.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 
-# a. CODEGEN, for orders and common. Migrate, then generate.
+# a. CHECK FOR ENTITYFIELD DRIFT. CodeGen only if this returns rows.
 #
-#    Several orders migrations add a column and leave its EntityField row to CodeGen; common's
-#    activity tables are not registered as entities at all. Skip this and step (b) dies with
-#    "Column name or number of supplied values does not match table definition" -- several hundred
-#    lines of generated SQL naming neither EntityField nor the column. KI-28 has the full detail.
-#
-#    Each app's mj.config.cjs excludes every schema but its own, so these are scoped, not global.
-cd C:\ws\bizapps-orders && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/run.js codegen
-cd C:\ws\bizapps-common && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/run.js codegen
-
-#    Verify before continuing -- this must return NOTHING:
 #      SELECT e.Name, c.name FROM __mj.Entity e
 #        JOIN sys.views v ON v.name = e.BaseView
 #        JOIN sys.schemas s ON s.schema_id = v.schema_id AND s.name = e.SchemaName
@@ -671,17 +543,25 @@ cd C:\ws\bizapps-common && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/r
 #       WHERE NOT EXISTS (SELECT 1 FROM __mj.EntityField ef
 #                          WHERE ef.EntityID = e.ID AND ef.Name = c.name);
 #
+#    On hosts migrated with the sibling versions in §4 it returns NOTHING (measured 2026-10-06 and
+#    2026-10-08): those migrations now ship the EntityField rows they used to leave to CodeGen. Older
+#    orders migrations added a column and left its EntityField row to CodeGen, and common's activity
+#    tables were not registered as entities at all. On such a host step (b) dies with
+#    "Column name or number of supplied values does not match table definition" -- several hundred
+#    lines of generated SQL naming neither EntityField nor the column. KI-28 has the full detail.
+#
+#    If it returns rows, run CodeGen for the app that owns them, then re-run the query. Each app's
+#    mj.config.cjs excludes every schema but its own, so these are scoped, not global.
+cd C:\ws\bizapps-orders && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/run.js codegen
+cd C:\ws\bizapps-common && DB_DATABASE=<your-db> node ../MJ/packages/MJCLI/bin/run.js codegen
+
 #    ⚠ CodeGen also REWRITES that repo's generated TypeScript, against the database you point it at.
 #    Point it at an under-provisioned one and it will happily replace good generated code with worse
 #    (it dropped OrderHeader.Lines here and broke the workspace build). Discard those file changes
-#    afterwards -- `git checkout -- .` in that repo -- which is what Amith means by "discard CodeGen
-#    output". The DATABASE rows are what you came for; the files are a side effect.
+#    afterwards (`git checkout -- .` in that repo). The DATABASE rows are what you came for; the files
+#    are a side effect.
 
 # b. app metadata — type tables, remote operations, and (for sales) the form chrome
-#
-#    --exclude queries USED TO BE REQUIRED here and no longer is (KI-25, fixed 2026-08-25). If you are
-#    reading an older copy of this file, drop that flag: the queries seed with everything else now, and
-#    excluding them costs you the dashboard.
 cd C:\ws\bizapps-sales      && node ../MJ/packages/MJCLI/bin/run.js sync push --dir metadata
 cd C:\ws\bizapps-accounting && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <currencies, gl-account-roles, journal-entry-types>
 cd C:\ws\bizapps-orders     && node ../MJ/packages/MJCLI/bin/run.js sync push --dir <product/revrec/subscription types, remote-operations + categories, journal-entry-types, payment & charge types>
@@ -697,9 +577,11 @@ cd C:\ws\bizapps-common     && node ../MJ/packages/MJCLI/bin/run.js sync push --
 # c. sales dev data — companies, pipelines, accounts, contacts
 cd C:\ws\bizapps-sales && bash scripts/seed-dev-data.sh
 
-# d. orders catalogue, then the six accounting/pricing layers. BEFORE the demo data.
-sqlcmd … -i scripts/dev/seed-orders-catalog.sql
-sqlcmd … -i scripts/dev/seed-revenue-stack.sql
+# d. orders catalogue and the six accounting/pricing layers: NOTHING TO RUN BY HAND.
+#    seed-demo-data.sh in (e) runs seed-orders-catalog.sql, seed-revenue-stack.sql and
+#    seed-contract-template.sql itself, after it has moved the pipelines onto their final companies.
+#    Run by hand before that, the catalogue lands on a company that is about to stop owning any
+#    pipeline (the script's own comment explains it).
 ```
 
 > ### e. THEN the demo data — last, because it embeds what the catalogue provides
@@ -738,8 +620,7 @@ sqlcmd … -i scripts/dev/seed-revenue-stack.sql
 > rule.** `sync push` **writes back into the files you point it at** — `PushService` assigns
 > `record.primaryKey = newPrimaryKey` after creating a record and writes it to the source file via
 > `JsonWriteHelper.writeOrderedRecordData`. Point it at another app's `metadata/` and you dirty that
-> repo's working tree with generated IDs; point it at a copy and the writeback lands in the copy. This is
-> what Amith means by *"discard CodeGen or mj sync output"*.
+> repo's working tree with generated IDs; point it at a copy and the writeback lands in the copy.
 >
 > **`--dry-run` will report lookup failures that a real push does not have.** Dry run does not create
 > records, so any cross-directory reference — `remote-operations` → `remote-operation-categories` here —
@@ -766,11 +647,14 @@ pnpm exec turbo run build --filter "@mj-biz-apps/orders-core-entities-server..."
                           --filter "@mj-biz-apps/accounting-core-entities-server..." --continue
 
 cd C:\ws\bizapps-sales
-RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs                     # 30/30
-RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs product-picker      #  5/5
-RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs close-won-handoff   #  5/5
+RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs                     # every bundle whose app is installed
+RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs product-picker      # one bundle: 5
+RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs close-won-order     # 5
 # RUN_MUTATION_TESTS=1 node test-harnesses/smoke-close-won.mjs               # ⚠ SEE BELOW -- 5/11
 ```
+
+Each bundle's check count, and the app it needs, is in `scripts/expected-check-counts.json`: 160 checks
+across 11 bundles when every sibling app is installed.
 
 > ### ⚠ `smoke-close-won.mjs` IS ROTTED. It is commented out above, and 11/11 was never re-measured.
 >
@@ -828,6 +712,28 @@ declares, and the workspace does not hoist `@mj-biz-apps/*` to the parent. Both 
 the smoke script resolve siblings by scanning neighbouring repos for a matching package name; if you write
 new tooling, do the same, and **never swallow the failure** — a sibling that is present but fails to load
 must not read as "not installed".
+
+**Sibling checkouts share this checkout's MJ core; no relinking.** When the repos are checked out side by
+side, each with its own `pnpm install` rather than joined into one workspace, every checkout has its own
+`node_modules`. Without help the process then loads one `@memberjunction/core` per checkout, even when all
+lock the same version (four on 2026-10-09: sales, accounting 0.21.2, orders 5.29.0, contracts 0.7.2, all
+on 6.1.5), and checks fail with errors such as `IsFieldReadableByUser is not a function` or
+`BindProvider is not a function`. `test-harnesses/one-mj-core.mjs` prevents it: the integration runner,
+`seed-demo-lines.mjs` and every harness that uses `importSibling` resolve a sibling's `@memberjunction/*`
+imports from this checkout. Every `@mj-biz-apps/*` import, this checkout's own included, resolves to the
+sibling checkout that builds the package whenever the importing package's declared range accepts that
+version, so each BizApps package loads once. Without that, one package can load at several versions (three
+`accounting-engine-base` copies on 2026-10-09), and a singleton such as `AccountingEngineBase.Instance`
+returns whichever copy was created first. The runner prints `MJ core instances -> 1` and
+`BizApps packages loaded more than once -> 0`, and stops before any check if either is higher, naming the
+copies. A copy left over means a package's declared range does not accept the version the sibling builds:
+check that sibling out at a version inside the range. It needs Node 22.15 or 23.5+ (`module.registerHooks`).
+
+The packages `pnpm-workspace.yaml` overrides (`common-entities`, `common-ng`, `common-activity-sync`) are the
+exception, as they are in sales' own install: every importer is held to the override's range, so it gets
+the common checkout's build even when its own range asks for something else. The runner lists each range
+it set aside as a warning before the checks. With common 5.50.1, orders 5.30.0 (pins `common-entities`
+5.49.0) and accounting 0.21.2 (`^5.50.2`) beside sales, both of those are on that list (sales#231).
 
 **A regenerated class manifest can want a package the host has not linked.** MJAPI's and MJExplorer's
 `prestart` run `mj codegen manifest`, which walks whatever is linked in the workspace *at that moment* and

@@ -56,19 +56,15 @@ function linesPanelBlock(): string {
 }
 
 describe('the deal form never opens the generic Order Line form', () => {
-    it('turns the grid New button off', () => {
-        // Was `[ShowNewButton]="!IsLocked"` — on for every open deal, which is most of them.
-        expect(linesPanelBlock()).toMatch(/\[ShowNewButton\]="false"/);
+    it('lists lines as cards, not an Order Line grid whose New and double-click reach the generic form', () => {
+        // The grid's New and row double-click both routed to the generic form; the cards have neither.
+        expect(linesPanelBlock()).not.toMatch(/<mj-explorer-entity-data-grid/);
+        expect(linesPanelBlock()).toMatch(/<mjs-deal-line-cards/);
     });
 
-    it('turns double-click navigation off', () => {
-        // The other half. With this left on, a row double-click still routes to the generic form
-        // even though New no longer does — the tester reached it both ways.
-        expect(linesPanelBlock()).toMatch(/\[NavigateOnDoubleClick\]="false"/);
-    });
-
-    it('routes a row double-click into the restricted editor instead', () => {
-        expect(linesPanelBlock()).toMatch(/\(AfterRowDoubleClick\)="EditLine\(\$event\)"/);
+    it('routes Add and a line edit into the restricted editor', () => {
+        expect(linesPanelBlock()).toMatch(/\(Add\)="AddLine\(\)"/);
+        expect(linesPanelBlock()).toMatch(/\(Edit\)="EditLine\(\$event\)"/);
     });
 
     it('mounts the restricted editor, not a link to the entity form', () => {
@@ -102,15 +98,19 @@ describe('the restricted editor offers intent, never a price', () => {
         expect(EDITOR).not.toMatch(/ngModel\]?="[^"]*LineTotalNet/);
     });
 
-    it('offers a discount as a PERCENT and never as an amount (D-DL2)', () => {
-        expect(editorTemplate()).toMatch(/Discount %/);
+    it('offers a discount as a percent or in dollars, and never binds the DiscountAmount column (D-DL2)', () => {
+        const template = editorTemplate();
+        expect(template).toMatch(/data-testid="line-discount"/);
+        expect(template).toMatch(/data-testid="line-discount-amount"/);
         // `OrderLine.DiscountAmount` reads 0 exactly when a percentage discount exists, so binding it
-        // would show a rep "0" next to a real 10% discount.
-        expect(editorTemplate()).not.toMatch(/DiscountAmount/);
+        // would show a rep "0" next to a real 10% discount. Typed dollars are converted to a percent
+        // and stored on DiscountPct; the column itself is never on screen.
+        expect(template).not.toMatch(/Working\??\.DiscountAmount/);
+        expect(EDITOR).not.toMatch(/Working\??\.DiscountAmount\s*=/);
     });
 
     it('offers exactly the four fields the deal workspace allowed', () => {
-        for (const field of ['Product', 'Quantity', 'Discount %', 'Term start']) {
+        for (const field of ['Product', 'Quantity', 'Discount', 'Term start']) {
             expect(editorTemplate(), `the editor must offer ${field}`).toContain(field);
         }
     });
@@ -140,6 +140,8 @@ describe('the editor reuses the shared rules rather than restating them', () => 
         for (const rule of [
             'DiscountPercentToFraction',
             'DiscountFractionToPercent',
+            'DiscountAmountToPercent',
+            'PricedLineListAmount',
             'ShouldOfferTermStart',
             'EffectiveTermStart',
         ]) {

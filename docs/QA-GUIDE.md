@@ -3,8 +3,8 @@
 How to stand up bizapps-sales and test it. Written for a tester who has not run this app before.
 
 **Read §6 "Known limitations" before filing anything.** Several behaviours that look like bugs are
-deliberate and documented — an absent section, or a downstream that does nothing because its app is not
-installed, is this app working correctly.
+deliberate — an absent section, or a downstream that does nothing because its app is not installed, is
+this app working correctly.
 
 ---
 
@@ -22,32 +22,19 @@ covers only what a tester needs afterwards.
 | Node | **≥ 18** | `package.json` engines |
 | pnpm | **10.33.0** | `packageManager`; always install from the **workspace root**, never inside a member |
 | SQL Server | 2019+ | Local dev target is SQL Server |
-| MJ core | **`6.1.4`** (the `lts-6.1` release) | Must satisfy `mj-app.json`'s `mjVersionRange`: `>=6.1.4 <7.0.0`, AND match the packages, which ask for `^6.1.4` in all seven manifests. The floor is the LTS release because the accounting packages sales depends on require at least `6.1.0-edge.7`; an edge.5 core loads but fails at the first accounting read. The note below explains the earlier prerelease floors |
-| bizapps-common | workspace member | Required — Sales' accounts and contacts are IS-A children of common's Organization and Person |
-| bizapps-orders | workspace member | **REQUIRED.** A deal cannot be SAVED without it — the save provisions an embedded `OrderHeader` in orders' schema. `mj-app.json` declares it a hard dependency |
-| bizapps-contracts | workspace member | Optional for CRUD; **required for close-won to create a contract.** A contract has been created on `MJ_V6_Host`, so it is installable there |
+| MJ core | **6.1.5** (the 6.1 LTS release) | `mj-app.json`'s `mjVersionRange` is `>=6.1.5 <7.0.0`; all seven manifests ask for `^6.1.5`, and the lockfile resolves 6.1.5 |
 
-### What each sibling unlocks
+### Sibling apps
 
-> #### ⚠ SALES DOES NOT RUN STANDALONE. This section used to say it did.
->
-> It read *"Sales runs standalone… Neither state is a bug."* **That is false and following it produces a
-> host on which nothing works.** `DealLine` is retired; a deal now carries an **embedded `OrderHeader`**
-> provisioned inside `DealEntityServer.Save()`, and the lines live on that order in ORDERS' schema.
->
-> * **A deal cannot be SAVED without bizapps-orders** — not "features degrade": the save reaches for
->   `MJ_BizApps_Orders: Order Headers` and there is nothing to resolve.
-> * **Every check bundle requires orders**, `save-deal` and `close-deal` included.
-> * `WORKSPACE-SETUP.md` §8 retracted this months ago and this guide was never updated. If the two
->   ever disagree again, §8 is the one that has been maintained.
+`mj-app.json` declares five sibling apps:
 
-Linking a sibling beyond orders switches features from inert to live:
-
-| Without | With |
-|---|---|
-| Close-won routes no CONTRACT downstream, and records why | Close-won creates a contract as well as the order |
-
-Orders is not in that table on purpose: without it there is no deal to have features about.
+| App | Range | What sales needs it for |
+|---|---|---|
+| bizapps-common | `>=5.49.0 <6.0.0` | Accounts and contacts are IS-A children of common's Organization and Person; activities live in common's tables |
+| bizapps-tasks | `>=1.2.0 <2.0.0` | A won close raises the order-review and contract-processing tasks |
+| bizapps-accounting | `>=0.2.0 <1.0.0` | Orders books orders through accounting's engine |
+| bizapps-orders | `>=5.26.0 <6.0.0` | **A deal cannot be saved without it.** The save provisions the deal's embedded `OrderHeader`, and the deal's lines live on that order |
+| bizapps-contracts | `>=0.1.1 <1.0.0` | A won close on a pipeline whose policy creates a contract (B2B) creates one. Without contracts the close still succeeds and records why no contract was made |
 
 ### The workspace CLI rule
 
@@ -62,68 +49,45 @@ pnpm run mj -- <command>
 
 ## 2. Configuration
 
-Sales' repo-root `.env` is read by migrations and the test harnesses. The MJ host has its own `.env` for
-the API.
-
-```dotenv
-# ── Database ────────────────────────────────────────────────────────────────
-DB_PLATFORM=sqlserver
-DB_HOST=localhost
-DB_PORT=1433
-DB_DATABASE=<your QA database>
-DB_USERNAME=sa
-DB_PASSWORD=<password>
-DB_TRUST_SERVER_CERTIFICATE=true
-
-# CodeGen connects separately — the same credentials are fine locally.
-CODEGEN_DB_USERNAME=sa
-CODEGEN_DB_PASSWORD=<password>
-
-# ── MJ core ─────────────────────────────────────────────────────────────────
-MJ_CORE_SCHEMA=__mj
-MJ_CORE_VERSION=v6.1.4
-```
+Sales' repo-root `.env` is read by migrations, the seeds and the test harnesses. The MJ host has its own
+`.env` for the API. Copy [`.env.example`](../.env.example) to `.env` and fill in the database block;
+it lists every variable the repo reads, with what each is for. For QA, also set
+`MJ_CORE_VERSION=v6.1.5`.
 
 `MJ_CORE_VERSION` pins the MJ core the migrations expect. It must match what `@memberjunction/*`
-actually resolved to in the workspace — a database behind the packages driving it fails with
-"column does not exist" on core metadata, which reads like a broken migration rather than a version skew.
+resolved to in the workspace — a database behind the packages driving it fails with "column does not
+exist" on core metadata, which reads like a broken migration rather than a version skew.
+`scripts/rebuild-db.sh` reads it from the installed MJ CLI when it is unset.
 
-> **Sales' `.env` also contains `GRAPHQL_PORT=4141`. Ignore it.** It is vestigial: sales no longer ships
-> its own API (the `apps/` importers were retired), so nothing reads that value. The API you connect to
-> is the **host's**, on the port below.
+If sales' `.env` carries `GRAPHQL_PORT=4141`, ignore it: sales ships no API, and the API you connect to
+is the host's.
 
-`MJ_BASE_ENCRYPTION_KEY` is not set in local dev. You will see a boxed
-`ENCRYPTION KEY VALIDATION FAILED` warning at API and test startup. It is **expected and non-fatal** —
-nothing in sales uses an encrypted field. Ignore it.
+Set `MJ_BASE_ENCRYPTION_KEY` in `.env` (`openssl rand -base64 32`; see `.env.example`). Without it you
+see a boxed `ENCRYPTION KEY VALIDATION FAILED` warning at API and test startup. It is non-fatal:
+nothing in sales uses an encrypted field.
 
-### Ports
+### Servers, ports and login
 
-| Service | Port |
-|---|---|
-| Host MJAPI (GraphQL) | **4143** |
-| Host MJExplorer | **4341** |
+Both servers belong to the MJ host. Start them, and set up their login, as the host's own docs describe
+(in MJ, `packages/MJExplorer/README.md` covers Explorer). The ports this repo assumes:
 
-> #### Why `mjVersionRange` looks odd
->
-> It reads `>=6.1.0-edge.2 <7.0.0` rather than the tidier `>=6.0.0 <7.0.0`, and the difference is not
-> cosmetic. **Semver excludes a prerelease from a range unless some comparator shares its exact
-> `major.minor.patch` tuple.** `6.1.0-edge.3` has tuple `6.1.0`, so comparators at `6.0.0` and `7.0.0`
-> cannot admit it:
->
-> ```
-> satisfies('6.1.0-edge.3', '>=6.0.0 <7.0.0')                      -> false
-> satisfies('6.1.0-edge.3', '>=6.0.0 <7.0.0', {includePrerelease}) -> true
-> satisfies('6.1.0-edge.3', '>=6.1.0-edge.2 <7.0.0')               -> true
-> ```
->
-> The old range therefore REJECTED the core we run, and `>=6.0.0-0 <7.0.0` does not fix it either --
-> the prerelease comparator has to sit on the 6.1.0 tuple. Raised by Madhav; measured here rather than
-> taken on faith. `bizapps-common`, `bizapps-tasks` and `bizapps-contracts` already use this exact
-> form, so this brings sales into line rather than inventing something.
+| Service | Port | Notes |
+|---|---|---|
+| MJAPI (GraphQL) | **4143** | MJAPI reads its port from `GRAPHQL_PORT` in the host's `.env` |
+| MJExplorer | **4341** | Not MJ's default: MJ's own `npm start` for Explorer serves on 4201 |
 
-**MJExplorer must serve on 4341.** The MSAL redirect URI is pre-registered in Entra for that origin; on
-any other port the login round-trip fails. If 4341 is busy, stop whatever holds it rather than changing
-the port.
+The Playwright harness uses the same defaults (`test-harnesses/playwright/lib/env.ts`) and takes
+overrides; see its README.
+
+**Which identity provider you get.** `ng serve` uses Explorer's `development` configuration
+(`packages/MJExplorer/angular.json` in MJ), which replaces `environment.ts` with
+`environment.development.ts`. Both files are gitignored in MJ and written per developer, so the provider
+is whatever `AUTH_TYPE` says in your `environment.development.ts`. For a human login it must name a
+provider your account can sign in to.
+
+**The redirect origin.** MJ's MSAL and Auth0 providers redirect to `window.location.origin`, so the
+identity provider must accept the origin Explorer serves on (`http://localhost:4341` here) as a redirect
+URI. Which origins it accepts is set in the identity provider, not in this repo.
 
 ---
 
@@ -147,80 +111,58 @@ creating one, and the UI is unexercisable without deals. What you get:
   **`RequiresDealLines` no longer means what its name says.** `DealLine` is retired (D-DL1); the column
   survived the table. It now means "this pipeline's deals leave the EMBEDDED ORDER empty" — a D2C deal
   still provisions an `OrderHeader`, it just carries no lines, and its `Amount` is typed rather than
-  returned by orders. That is explained nowhere else except inside `scripts/seed-demo-data.sh`, which is
-  not where a tester looks. **A D2C deal showing no product lines is correct, not a bug.**
+  returned by orders. **A D2C deal showing no product lines is correct, not a bug.**
 - **9 pipeline stages**, 3 sales accounts, 4 sales contacts
 - **7 deals** — one won, one lost with a loss reason, five open — across both pipelines and two selling
   companies, with product lines, a payment schedule, deal team members, a buying committee, stage
   history and a forecast snapshot
 
-Only some deals carry product lines — both Northwind deals on B2B, and `DEAL-9007` on the order-only
-pipeline. Line-dependent surfaces correctly show nothing for the others.
+Five deals carry order lines priced by orders — `DEAL-9001`, `-9002`, `-9003`, `-9005` and `-9006`, all
+on B2B (`scripts/seed-demo-lines.mjs`, which `seed-demo-data.sh` runs at the end). The two D2C deals,
+`DEAL-9004` and `DEAL-9007`, carry a stated amount and no lines.
 
 ---
 
 ## 4. Automated checks (run these before manual testing)
 
 ```bash
-pnpm run verify                                   # SEVEN static gates, then the build (6/6)
-pnpm run test:integration                         # live-DB checks — runs ALL of them
-pnpm run test:coverage-gate                       # asserts the run actually covered what it claims
+pnpm run verify               # 10 steps: six static gates, the build, unit tests, two gates on the built modules
+pnpm run test:coverage-gate   # runs the live-DB integration suite, then checks every expected check ran
 ```
 
-**The prefix is gone, and that is the fix rather than a simplification.** This used to read
-`RUN_MUTATION_TESTS=1 pnpm run test:integration`. Every check is `RequiresMutation`, so without that flag
-the runner skipped nearly all of them — and `RUN_MUTATION_TESTS=1 ...` is **sh syntax**. In PowerShell
-or `cmd`, which is what most people here are actually typing into, the prefix does not set anything.
-
-`test:integration` now passes `--mutations` itself, so **the documented command runs the whole suite on
-every shell.** If you need a deliberately narrow run, that is now the thing you opt into:
-`MJ_ALLOW_SKIPPED=1 node test-harnesses/integration.mjs`.
-
-> #### ⚠ If you see `7 passed, 0 failed, 125 skipped`, the suite did NOT pass
->
-> That output used to come with a green tick and exit 0, which reads as "everything is fine" and is the
-> opposite of what happened: 125 checks never ran. It now exits non-zero and says so. **A run that
-> reports mostly-skipped is not a pass** — and it no longer pretends to be.
-
-**Run the coverage gate after the suite, and trust it over the tally.** It reads the log the suite
-writes and fails if fewer checks ran than this host should have run — the failure a green
-"0 failed" hides. It is the second line of defence: the runner now refuses a skipped run itself, and the
-gate is what catches a run that was complete but covered the wrong bundles.
-
-| Bundle | Checks | Requires |
-|---|---|---|
-| `save-deal` (SD1–SD16) + `close-deal` (CD1–CD14) | **30** | — (the default gate) |
-| `product-picker` (PP1–PP5) | 5 | orders linked |
-| `close-won-handoff` (CW1–CW4) | 4 | orders linked |
-| `close-won-d2c` (D1–D4) | 4 | orders linked |
-| `close-won-contract` (CT1–CT4) | 4 | contracts linked |
-| **Total, fully linked** | **46** | |
-
-**You do not invoke the conditional bundles yourself.** `test:integration` adapts to what is linked: it
-runs 30 on a sales-only host and all 46 when orders and contracts are both present, and the coverage
-gate expects exactly that. So the count you see *is* the coverage this host can prove.
-
-Run one on its own only when narrowing something down:
+**`test:coverage-gate` runs the suite itself**, so there is no need to run `test:integration` first. It
+fails if fewer checks ran than this host should have run — the failure a green "0 failed" hides. To
+judge a run you already have, pass its log; the gate refuses a log older than the source it would judge:
 
 ```bash
-pnpm run test:integration close-won-d2c
+node scripts/assert-check-count.mjs test-harnesses/.integration-log.txt
 ```
 
-Invoked that way on a host whose app is absent, a conditional bundle **fails loudly with a named
-precondition**. That is correct and is not a product failure — it is the bundle refusing to report a
-pass it cannot back up.
+The bundles, their check counts and the sibling app each needs are in
+`scripts/expected-check-counts.json`. The runner and the gate both read that file.
+
+`pnpm run test:integration` runs the suite on its own: every bundle whose sibling app is linked, with
+every check — it passes `--mutations` itself, so the command is the same on every shell. A run that
+skips checks exits non-zero; for a deliberately narrow run use
+`MJ_ALLOW_SKIPPED=1 node test-harnesses/integration.mjs`. To narrow something down, run one bundle or
+one check:
+
+```bash
+pnpm run test:integration close-won-contract
+pnpm run test:integration save-deal.SD9
+```
+
+A bundle run on a host where its app is absent **fails with a named precondition**. That is the bundle
+refusing to report a pass it cannot back up, not a product failure.
 
 There is also a Playwright harness driving the real Explorer UI
 (`test-harnesses/playwright/README.md`). It needs a one-time interactive login and is deliberately not
 in CI:
 
 ```bash
-PW_FORCE_LOGIN=1 pnpm run test:explorer:auth   # opens a browser; complete the login
+pnpm run test:explorer:auth   # opens a browser; complete the login
 pnpm run test:explorer
 ```
-
-`PW_FORCE_LOGIN=1` forces a headed window and ignores any stored session. Use it whenever a session has
-expired — otherwise the setup runs headless against a dead session and waits for a login nobody can see.
 
 ---
 
@@ -232,72 +174,127 @@ Log in at `http://localhost:4341`. Two applications exist and this confuses peop
 - **`/app/mjbizappssales`** — the CodeGen entity browser, one generated CRUD form per table. Useful for
   checking raw data, not the product.
 
-`/app/sales` opens on a **Deals section** with a left rail: **Dashboard · All deals · Workspace**.
+Each scenario names the Playwright spec it mirrors (`test-harnesses/playwright/specs/`). When a step and
+the screen disagree, the spec is the reference.
 
-### 5.1 Dashboard
-1. Open **Dashboard**. Expect KPI tiles (open pipeline, open deals, past expected close, won), a
-   "closing soonest" table and the roster.
-2. **Amounts are stored values, summed.** Sales computes nothing — a tile is a `SUM` of `Deal.Amount` as
-   recorded. Do not expect it to recompute from lines.
-3. ✅ Tiles render numbers, not blanks or `NaN`; no console errors.
+### 5.1 The Sales section — `50-sales-shell`
+1. Open `/app/sales`. The **Deals** section opens with a left rail: **Dashboard · All deals · Board**.
+   There is no Workspace item.
+2. The header carries a refresh button and **New deal**.
+3. ✅ The section renders (an unregistered section mounts a blank tab with no error), and the console
+   is clean.
 
-### 5.2 All deals
-1. Open **All deals**. Expect the seeded demo deals.
-2. Each row resolves a **customer name**, not a bare GUID.
-3. Click a row → it opens that deal in the **Workspace**.
-4. Click the **customer name** → it opens that account as its own **Explorer tab**, and the workspace
-   stays where it was.
-5. ✅ Row click lands in the workspace; customer click opens a record tab without losing your place.
+### 5.2 Dashboard — `75-dashboard`
+1. Open **Dashboard**. Four tiles: Open pipeline, Open deals, Past expected close, Won.
+2. The period selector starts on **This quarter**, and the Won tile's footnote names the dates it counted.
+3. Switch to **All time**. Won becomes the count of every won deal; the three open-deal tiles do not
+   change.
+4. Below the tiles: Forecast stack, Stage mix, Needs a person, Close-date buckets, Commit by owner, Win
+   rate, and an **Inspect** grid. Clicking a tile, a queue or a bucket filters Inspect; **Clear** resets it.
+5. **Amounts are stored values, summed.** Sales computes nothing — Open pipeline is a `SUM` of
+   `Deal.Amount` as recorded. Do not expect it to recompute from lines.
+6. ✅ The tiles match the database (the spec computes them from the `IsOpen` / `IsWon` flags); no console
+   errors.
 
-### 5.3 Create a deal
-1. **Workspace** → **New deal**.
-2. A deal requires a **name** and a **pipeline**; Save stays disabled until both are set.
-3. Choosing a pipeline populates its stages and sets the selling company.
-4. Save → expect a success message and a `DEAL-{n}` number.
-5. Reopen it from the roster → **every value must survive the round-trip**, dates included.
-6. ✅ Saved deal appears in All deals; reopening shows exactly what you entered.
+### 5.3 All deals — `50-sales-shell`
+1. Open **All deals**. The grid lists the seeded deals.
+2. Double-click a row: the deal opens in its own Explorer tab on the **Deal form**. A single click only
+   selects the row.
+3. Return to the Sales tab: the section is still there.
+4. ✅ Rows render their values; a double-click opens the Deal form.
 
-### 5.4 Workspace panes
-Five inner panes: **Party info · Product lines · Payment schedule · Terms · Variances**.
-1. Visit each; fields render and accept input.
-2. Add two product lines and two instalments, switch panes and back — **the rows must survive**.
-3. Remove a line, save, reopen — the line is gone from the database, not just the screen.
-4. Tab badges show **error counts only**; warnings deliberately do not badge.
-5. ✅ No pane is blank; nothing is lost on a pane switch.
+### 5.4 Create a deal — `40-deal-form`, `50-sales-shell`
+1. **New deal** opens an unsaved Deal form in a new Explorer tab.
+2. Set Name, Pipeline, Account and an open status, then save. The first save gives the deal its
+   embedded order.
+3. Edit again and fill the rest of the header across the Pipeline, Commercial, Motion and Close panels:
+   deal type, term in months, execution date, contract variances, annual increase override. Save.
+4. Reopen the deal: every value is still there, dates included, and Pipeline and Account show names,
+   not GUIDs.
+5. ✅ Each typed value reaches its column (the spec reads the database, not the form).
 
-### 5.5 Product picker *(requires orders)*
-1. Open a B2B deal → **Product lines** → add a line and open the product picker.
-2. It lists that company's **active** products within their availability window — products belonging to
-   another company, or discontinued, draft, EOL, or outside their dates, must not appear.
-3. Pick one, set a quantity, save, reopen — the product sticks.
-4. ✅ The picker is filtered, not a full catalog dump. Without orders it shows nothing and does not error.
+### 5.5 Product lines — `40-deal-form`, `41-deal-roundtrip`, `78-line-removal-tripwire`, `79-embedded-order-refresh`, `80-cross-company-products`, `82-term-start`
+1. On a saved B2B deal open **What's being sold** → **Add a product**. The line editor opens.
+2. Pick a product and a quantity, then save the line. Unit price and line total come back from orders as
+   read-only figures, not inputs.
+3. On a deal created moments ago, without reloading, add its first line: it lands on the deal's own
+   order, and no second order appears (79).
+4. The product picker also offers active products owned by another company; a line for one books to the
+   product's company, not the deal's (80-cross).
+5. Double-click a saved line → **Remove** → confirm. Reopen the deal: that line is gone from the order,
+   the other line remains with its quantity, and it is renumbered to line 1 (41, 78).
+6. A subscription product's line shows a **term start** that defaults to the order date and says so;
+   set a date and the hint goes; empty it and the order date returns. A one-time line shows no term
+   start (82). The seed makes Platform — Standard Seat a subscription product only when orders'
+   subscription types have been pushed (`scripts/dev/seed-orders-catalog.sql`); Premium Seat is one-time.
+7. On a closed deal, Add a product is replaced by a sentence saying why lines cannot change.
+8. ✅ Lines carry engine prices; removals and the order survive a reopen.
 
-### 5.6 Close a deal
-1. Open an open B2B deal with product lines → close it as **won**.
-2. Expect the deal to lock, a stage event to be written, and — with orders linked — a **real order** to
-   be created, numbered and priced by orders.
-3. Close another as **lost** with no loss reason → **must be refused**, naming `LossReasonID`. Pick a
-   reason flagged as requiring notes and supply none → refused, naming `LossNotes`.
-4. On a closed deal: editing the **name** must be refused; editing **Description** must succeed. Fields
-   that cannot be edited should render read-only rather than inviting an edit that will fail.
-5. Reopen with no reason → refused. With a reason → unlocks, and the close event survives.
-6. ✅ Refusals are specific; the lock is real; the reopen is recorded and the history is never rewritten.
+### 5.6 Stage and pipeline — `74-stage-belongs-to-pipeline`, `70-lifecycle`
+1. The **Stage** control offers only the stages of the deal's own pipeline.
+2. Change the pipeline: a stage from the old pipeline is cleared, and it stays cleared after the save.
+3. Move an open deal into a stage that declares an order status — on B2B, Proposal, Negotiation and
+   Signed declare `Quoted`. The deal's order takes that status.
+4. ✅ The stage list follows the pipeline; the order follows the stage.
 
-### 5.7 Downstream routing
-Which downstream a won deal produces is driven by the **pipeline's policy**, never by its name.
+### 5.7 Close and reopen — `60-close-deal`, `71-lost-and-reopen`, `70-lifecycle`
+1. Open a saved, open B2B deal with a line → **Close** panel → **Close this deal**. Choose a won status →
+   **Close deal**.
+2. The header shows a **Locked** chip, and Name and Pipeline stay read-only in edit mode. A stage event
+   is appended with the amount and probability the deal held on the way out.
+3. The panel reports the outcome, including any downstream step that did not happen. On B2B a won close
+   creates a contract numbered by contracts (with contracts installed) and the finance tasks; the order
+   is left unchanged and editable. The order is created at the deal's first save, not at close.
+4. Close another deal as lost: **Close deal** stays disabled until a loss reason is chosen, and a reason
+   that requires notes also asks for loss notes. The deal's order becomes `Voided` (71).
+5. On a closed deal, **Reopen this deal** (the reason is optional) → **Reopen deal**. The deal unlocks,
+   a reopen event is appended, and the close event remains. The order takes the status its restored
+   stage declares, or the reopen says why it could not (71).
+6. ✅ Refusals happen before the round trip; the lock is real; history is appended, never rewritten.
 
-| Deal | Result |
-|---|---|
-| B2B with one-time lines | Order, confirmed and posted to the ledger |
-| B2B with recurring lines | Contract *(requires contracts — see §6.2)* |
-| D2C with lines | Order in **Draft** — numbered and priced, deliberately not ledger-posted |
-| Header-only deal, no lines | **Nothing**, and the stage event records that. Correct, not a failure |
+### 5.8 The lock, per record tab — `73-lock-across-tabs`
+1. Open a closed deal and an open deal in two Explorer tabs and switch between them.
+2. ✅ The closed deal shows the Locked chip and a frozen Name; the open one shows no chip and stays
+   editable.
 
-✅ The routing outcome is recorded in the stage-event notes either way.
+### 5.9 Board — `80-board-drag`
+1. Open **Board** and pick a pipeline from the switcher. Columns are the pipeline's stages, closing
+   stages included.
+2. Drag an open deal's card to another non-closing stage. Each drag appends a permanent stage event, so
+   use a deal you created.
+3. ✅ The stage changes, exactly one stage event is appended carrying the probability and amount the
+   deal held before the move, and the order takes the new stage's declared status.
+4. A closing column carries a lock icon titled "Deals cannot be moved here. Close a deal from the deal
+   form."
+5. ✅ A drop onto a closing column is refused, and no stage event records a move into it.
 
-### 5.8 Regression sweep
+### 5.10 Activity — `70-activity-timeline`
+1. Open an open deal that has an account and a primary contact → **Activity** → **Log activity**.
+2. Choose a type (Call, Meeting, Note or Email), enter a subject and notes → **Log it**.
+3. ✅ The form closes without an error and the activity appears in the list beneath. One `Activity` row
+   is written, with `LoggedByUserID` set, linked to the deal and to the deal's account and primary
+   contact.
+4. On a closed deal the Activity panel still renders, and logging works as on an open one.
+
+### 5.11 Deal team and owner — `76-team-roster-owner-stamp`
+1. A deal's owner comes from its **Internal team** row with the Owner / AE role. With none, the Overview
+   says "No owner assigned".
+2. Save the Owner / AE team row (from the Internal team grid or its own record): the deal's owner is
+   stamped from it.
+3. With the deal already open while the owner changes elsewhere, open its Internal team section: the
+   Overview stops saying "No owner assigned".
+4. ✅ The owner follows the roster without a hand edit.
+
+### 5.12 Inline create — `72-inline-create`
+1. On a new deal, type a name that does not exist into the **Account** field and choose its **Create**
+   option. A dialog opens with the new account's form; save it.
+2. ✅ The Account field shows the new name, and the saved deal holds that account. Creating a second
+   one replaces the first.
+
+### 5.13 Regression sweep
 - Reload every page — no console errors.
-- Check one surface in dark mode; colours are semantic tokens, so nothing should be unreadable.
+- At a short window (1100 × 617), the deal's header card shows all of its content after a save and in
+  edit mode (`42-hero-short-window`).
 - Confirm no page shows a raw GUID where a name belongs.
 
 ---
@@ -306,51 +303,35 @@ Which downstream a won deal produces is driven by the **pipeline's policy**, nev
 
 1. **A downstream that is not installed does nothing, deliberately.** Sales checks what is present and
    records the reason rather than inventing a record ID or faking success.
-2. **Contracts is not currently installable on a fresh database.** Its baseline hardcodes other apps'
-   entity UUIDs, which are minted per database (`docs/KNOWN-ISSUES.md` KI-13). Until that is fixed
-   upstream, the contract route is inert in any freshly-provisioned environment. Sales' side is built and
-   tested; it activates when contracts can be deployed.
-3. **These sections do not exist yet, by decision** — a pipeline/kanban board, a forecasting roll-up
-   beyond the dashboard tiles, an in-app Setup/configuration section, and Accounts and Contacts list
-   sections. Configuration records (pipelines, stages, types, loss reasons) are edited through
-   `/app/mjbizappssales`. They are absent rather than stubbed.
-4. **No team-editing surface.** A deal's owner is set from Party info; adding and removing other team
-   members is not yet exposed in the workspace.
-5. **The Activity spine EXISTS — this entry used to say it did not.** bizapps-common ships six Activity
-   tables and Sales has a 23-check `activities` bundle covering ingest, relevance, dedupe, watermarks and
-   sync-connection failure handling. Live Outlook mail has been ingested against `MJ_V6_Host` and linked
-   to a seeded deal. What is still true is narrower: **the CLOSE FLOW does not write an activity**, and
-   there is no timeline SURFACE in the deal workspace yet. Ingest is real; the UI for it is not.
-6. **Contract renewal is wired but unproven end-to-end.** The renewal seam is implemented; no renewal
-   flow has been exercised against a live contract.
-7. **Sales never computes money.** No total is derived, no discount applied, no tax, no proration. Every
+2. **Sections not built, by decision.** The app has one section, Deals (`sales-nav.model.ts`); Accounts,
+   Forecasting and Setup sections do not exist. Configuration records (pipelines, stages, types, loss
+   reasons) are edited through `/app/mjbizappssales`.
+3. **Closing a deal writes no Activity.** The close is recorded as a stage event; activities are logged
+   from the Activity panel (§5.10).
+4. **A won renewal creates no contract.** For a deal type flagged `RequiresRenewalSource`, the close
+   reports the contract route as not executed and gives the reason (`LiveContractsSeam.ts`).
+5. **Sales never computes money.** No total is derived, no discount applied, no tax, no proration. Every
    figure is either transcribed from a signed document or returned by orders. **An amount not matching
    the lines is not a bug** — `Deal.Amount` is a cached answer with provenance (`AmountIsComputed`,
    `AmountComputedAt`, `AmountSourceHash`) and may legitimately be stale.
-8. **No quota/attainment, no territory routing.** Deferred by decision (`docs/DECISIONS.md` D2, D3).
-9. **The deal number is not shown in the workspace after a save.** It exists and is on the record; it is
-   rendered only in the **All deals** roster. Do not wait for it to appear on the deal you just saved
-   (`docs/KNOWN-ISSUES.md` KI-15).
-10. **The dashboard does not re-query when you navigate back to it.** Close a deal, return to Dashboard,
-    and the tiles still show the pre-close numbers. **Press refresh (top right)** and they correct
-    instantly — the close did happen, only the reading is old (KI-16).
-11. **The encryption-key warning at startup** is expected (§2).
-12. **`ForecastSnapshot` columns are `*Amount`-suffixed** (`CommitAmount`, not `Commit`) — `COMMIT` is
-    reserved in T-SQL and Postgres (D6).
-13. **The Playwright demo-tour specs run slowly** against a development-mode Explorer build
-    (`docs/KNOWN-ISSUES.md` KI-12). Behaviour is correct; the budgets assume a production build.
-14. **An upstream risk, not a sales bug:** `AllowMultipleSubtypes` is `false` on common's `Person` and
-    `Organization`. Sales is currently the only app extending them, so it works today; a second app
-    doing so would mis-chain. The fix belongs in bizapps-common (`docs/KNOWN-ISSUES.md` KI-1).
+6. **No quota/attainment, no territory routing.** Deferred by decision (`docs/DECISIONS.md` D2, D3).
+7. **The dashboard does not re-query when you navigate back to it.** Close a deal, return to Dashboard,
+   and the tiles still show the pre-close numbers. **Press refresh (top right)** and they correct — the
+   close did happen, only the reading is old.
+8. **The encryption-key warning at startup** means `MJ_BASE_ENCRYPTION_KEY` is unset (§2).
+9. **`ForecastSnapshot` columns are `*Amount`-suffixed** (`CommitAmount`, not `Commit`) — `COMMIT` is
+   reserved in T-SQL and Postgres (D6).
+10. **The Playwright specs run slowly** against a development-mode Explorer: the suite takes about 34
+    minutes at one worker (`test-harnesses/playwright/run-suite.sh`).
 
 ---
 
 ## 7. Filing a bug
 
-Include:
+Use the repository's **Bug report** issue form, and include:
 
 - branch and commit (`git log --oneline -1`)
-- which siblings were linked (orders? contracts?) — it changes what is expected
+- which siblings were linked (common, tasks, accounting, orders, contracts) — it changes what is expected
 - whether `pnpm run verify` was green, and the integration counts from §4
 - the browser console output
 - which application you were in (`/app/sales` vs `/app/mjbizappssales`)

@@ -1,19 +1,9 @@
 /**
  * @fileoverview S-US9's surface — a deal's activities in chronological order, plus logging one.
  *
- * ── WHY THIS IS NOT A WORKSPACE PANE ────────────────────────────────────────────────────────────
+ * A standalone component, so the deal form's Activity panel and any other host can mount it.
  *
- * `DEAL_WORKSPACE_PANES` keys are `DealWorkspaceSection` values, and that union is what
- * `ProjectValidation()` tags issues with so a pane can badge its own error count. An activity timeline
- * has no validation state — it is a record of what happened, not a part of the draft being composed — so
- * adding `'activity'` to that union would mean widening a type the whole validation layer reads in order
- * to describe a section that can never carry an issue.
- *
- * It is a standalone component instead, which also keeps the merge surface to one line in the
- * workspace template. That was a constraint worth designing around rather than working against: another
- * instance is editing `deal-workspace.*` in the same window.
- *
- * ── AND WHY IT READS FOR ITSELF ─────────────────────────────────────────────────────────────────
+ * ── WHY IT READS FOR ITSELF ─────────────────────────────────────────────────────────────────
  *
  * `ActivityReader` lives in `sales-core-entities-server`, and an Angular component must not import a
  * server package — that is the layering, and it is also how a server-only dependency ends up in a
@@ -129,7 +119,7 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
                 <ol class="dat__list">
                     @for (row of Rows; track row.ID) {
                         <li class="dat__item">
-                            <div class="dat__when">{{ row.StartedAt | date: 'medium' : 'UTC' }}</div>
+                            <div class="dat__when">{{ row.StartedAt | date: 'medium' }}</div>
                             <div class="dat__body">
                                 <div class="dat__row">
                                     <span class="dat__type">{{ row.TypeName }}</span>
@@ -169,23 +159,23 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
                 font-size: 0.9375rem; color: var(--mj-text-primary);
             }
             .dat__add, .dat__save, .dat__cancel {
-                border: 1px solid var(--mj-border-color); border-radius: 4px;
-                background: var(--mj-surface-raised); color: var(--mj-text-primary);
+                border: 1px solid var(--mj-border-default); border-radius: 4px;
+                background: var(--mj-bg-surface); color: var(--mj-text-primary);
                 padding: 5px 11px; font-size: 0.8125rem; cursor: pointer;
             }
-            .dat__save { background: var(--mj-accent-primary); color: var(--mj-text-inverse); border-color: transparent; }
+            .dat__save { background: var(--mj-brand-primary); color: var(--mj-brand-on-primary); border-color: var(--mj-brand-primary); }
             .dat__add:disabled, .dat__save:disabled, .dat__cancel:disabled { opacity: 0.55; cursor: default; }
             .dat__form {
                 display: flex; flex-wrap: wrap; gap: 10px;
-                border: 1px solid var(--mj-border-color); border-radius: 4px;
-                padding: 12px; background: var(--mj-surface-sunken);
+                border: 1px solid var(--mj-border-default); border-radius: 4px;
+                padding: 12px; background: var(--mj-bg-surface-sunken);
             }
             .dat__field { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; flex: 1 1 160px; }
             .dat__field--wide { flex: 1 1 100%; }
             .dat__field span { color: var(--mj-text-secondary); }
             .dat__field input, .dat__field select, .dat__field textarea {
-                border: 1px solid var(--mj-border-color); border-radius: 3px;
-                background: var(--mj-surface-raised); color: var(--mj-text-primary);
+                border: 1px solid var(--mj-border-default); border-radius: 3px;
+                background: var(--mj-bg-surface); color: var(--mj-text-primary);
                 padding: 5px 7px; font: inherit; font-size: 0.8125rem;
             }
             .dat__actions { display: flex; gap: 8px; flex: 1 1 100%; }
@@ -194,7 +184,7 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
             .dat__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
             .dat__item {
                 display: flex; gap: 12px;
-                border-left: 2px solid var(--mj-border-color); padding-left: 12px;
+                border-left: 2px solid var(--mj-border-default); padding-left: 12px;
             }
             .dat__when {
                 flex: 0 0 auto; font-size: 0.75rem; color: var(--mj-text-muted);
@@ -204,7 +194,7 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
             .dat__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
             .dat__type { font-size: 0.75rem; color: var(--mj-text-secondary); text-transform: uppercase; letter-spacing: 0.06em; }
             .dat__badge { font-size: 0.6875rem; color: var(--mj-text-muted); display: inline-flex; align-items: center; gap: 4px; }
-            .dat__badge--sync { color: var(--mj-accent-primary); }
+            .dat__badge--sync { color: var(--mj-brand-primary); }
             .dat__subject { font-size: 0.875rem; color: var(--mj-text-primary); }
             .dat__notes { margin: 0; font-size: 0.8125rem; color: var(--mj-text-secondary); white-space: pre-wrap; }
         `,

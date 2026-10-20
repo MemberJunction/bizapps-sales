@@ -1,27 +1,16 @@
-# `metadata/entities/` — form chrome
+# `metadata/entities/` — form chrome and search settings
 
-One column, on rows CodeGen already created: `Entity.Configuration`, carrying the JSON that decides how a
-generated form is laid out.
+Nothing here creates an `Entity` row; CodeGen creates one per table. Two files fill in columns on those
+rows:
 
-## ⚠️ COMMITTED BUT NOT YET APPLIED
-
-**`.form-chrome.json` cannot be pushed against the MJ version this repo currently pins.** `__mj.Entity`
-has no `Configuration` column on that version and `MJ: Entities` has no such registered field, so a push
-fails on a field that does not exist.
-
-Form chrome arrives in two upstream MJ migrations:
-
-- `V202608141412__v6.1.x__Entity_And_EntityRelationship_Configuration.sql` — adds the columns
-- `V202608151200__v6.1.x__Form_Chrome_Rules.sql` — the ranking rules
-
-Both are newer than our pin. **These files are authored, reviewed and committed so they apply the moment
-MJ is upgraded** — the work is done, only the push is waiting. Do not delete them as "unused"; run:
-
-```bash
-npm run mj -- sync push --dir metadata
-```
-
-once the host has those migrations, and verify in the Explorer rather than assuming.
+- `.form-chrome.json` — `Entity.Configuration`, the JSON that decides how a generated form is laid out.
+  The rest of this README is about it.
+- `.entities.json` — which entities and fields the user search API covers (`AllowUserSearchAPI`,
+  `IncludeInUserSearchAPI`), with the `AutoUpdate*` flags off so CodeGen leaves them as set. On `Deals`
+  it also sets `BaseViewGenerated: false` and `GeneratedBaseViewName: vwDealsGenerated`, the layered
+  base view `V202609202353__v6.4.0__Predictive_Deal_Win_Fields.sql` creates. On `Deal Stage Events` it
+  sets `AllowUpdateAPI` and `AllowDeleteAPI` to false: stage events are append-only (`docs/DECISIONS.md`
+  D-SE1).
 
 ## What is set, and why only these knobs
 
@@ -30,9 +19,9 @@ once the host has those migrations, and verify in the Explorer rather than assum
 `metadata/entity-relationships/.form-chrome.json` sets `inclusion` (`Primary` | `More` | `None`) and
 `FormRole` per relationship.
 
-**Twenty of the twenty-two Sales entities are configured here.** Layout is metadata; it does not belong
-in a component. `Deal Lines` and `Deal Stage Events` stay at the generated default because they are
-child records opened from a parent, not composing surfaces. `Deals` is first-class: `Layout: left-nav`.
+**Every Sales entity except `Deal Stage Events` is configured here.** Layout is metadata; it does not
+belong in a component. `Deal Stage Events` stays at the generated default because it is a child record
+opened from a parent, not a composing surface. `Deals` is first-class: `Layout: left-nav`.
 
 **Ruled 2026-08-31: the Deal form is the deal.** The in-app workspace tab is retired (same antipattern
 Orders and Accounting already left). Opening a deal is `NavigationService.OpenEntityRecord`. The form
@@ -50,4 +39,5 @@ CodeGen's and quietly break the next CodeGen run.
 **Sales Contacts is the form that justifies the relationship file.** A contact parents `Deals` twice — as
 primary contact and as billing contact — and without explicit `inclusion` both render as grids titled
 "Deals", side by side, indistinguishable. Pipeline Stages has the same shape with `Deal Stage Events`
-(`ToStageID` and `FromStageID`). Those four entries are the ones to preserve if this file is ever trimmed.
+(`ToStageID` and `FromStageID`). Those four entries are the ones to preserve if the relationship file is
+ever trimmed.

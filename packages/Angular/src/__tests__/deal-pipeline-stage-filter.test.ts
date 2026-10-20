@@ -34,10 +34,15 @@ const B2B = 'p-b2b';
 const D2C = 'p-d2c';
 const LEGACY = 'p-legacy';
 
+const HOME = 'c-home';
+const OTHER = 'c-other';
+const OTHER_B2B = 'p-other-b2b';
+
 const PIPELINES: PipelineOption[] = [
-    { ID: B2B, Name: 'B2B' },
-    { ID: D2C, Name: 'D2C' },
-    { ID: LEGACY, Name: 'Sidecar Legacy Pipeline' },
+    { ID: B2B, Name: 'B2B', Code: 'B2B', CompanyID: HOME, CompanyName: 'Home', IsDefault: true, DisplayRank: 10 },
+    { ID: D2C, Name: 'D2C', Code: 'D2C', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 20 },
+    { ID: LEGACY, Name: 'Sidecar Legacy Pipeline', Code: 'LEGACY', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 30 },
+    { ID: OTHER_B2B, Name: 'B2B', Code: 'B2B', CompanyID: OTHER, CompanyName: 'Other', IsDefault: false, DisplayRank: 10 },
 ];
 
 const STAGES: PipelineStageOption[] = [
@@ -182,5 +187,38 @@ describe('the template uses the dedicated controls', () => {
     it('no longer lists either as a generic field spec', () => {
         expect(source).not.toContain("{ name: 'PipelineStageID', type: 'textbox'");
         expect(source).not.toContain("{ name: 'PipelineID', type: 'textbox'");
+    });
+});
+
+/**
+ * #327: the Company control narrows the Pipeline list, and choosing a company moves the deal to that
+ * company's first pipeline through the same path a pipeline pick takes, so a stale stage is cleared.
+ */
+describe('the company filter over the pipeline list', () => {
+    it('offers the deal\'s own company\'s pipelines, each labelled with its company', () => {
+        const panel = panelWith(OTHER_B2B);
+        expect(panel.SelectedCompanyID).toBe(OTHER);
+        expect(panel.PipelineOptions.map((p) => panel.PipelineText(p))).toEqual(['B2B (Other)']);
+    });
+
+    it('opens a new deal on the default company', () => {
+        const panel = panelWith(null, null, false);
+        expect(panel.SelectedCompanyID).toBe(HOME);
+        expect(panel.PipelineOptions.map((p) => p.ID)).toEqual([B2B, D2C, LEGACY]);
+    });
+
+    it('lists companies default first', () => {
+        expect(panelWith(B2B).CompanyOptions.map((c) => c.CompanyID)).toEqual([HOME, OTHER]);
+    });
+
+    it('moves the deal to the company\'s first pipeline and clears the old stage', () => {
+        const panel = panelWith(B2B, 's-qual');
+        panel.SetCompany(OTHER);
+        expect(panel.Record?.PipelineID).toBe(OTHER_B2B);
+        expect(panel.Record?.PipelineStageID).toBeNull();
+    });
+
+    it('reads the current pipeline with its company when not editing', () => {
+        expect(panelWith(OTHER_B2B).CurrentPipelineName).toBe('B2B (Other)');
     });
 });

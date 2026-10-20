@@ -1,5 +1,108 @@
 # @mj-biz-apps/sales-integration-tests
 
+## 6.18.0
+
+### Patch Changes
+
+- Updated dependencies [7041a49]
+- Updated dependencies [769158a]
+- Updated dependencies [6e77e8f]
+- Updated dependencies [0cd81c5]
+- Updated dependencies [20e1899]
+- Updated dependencies [7c5daa9]
+  - @mj-biz-apps/sales-entities@6.18.0
+  - @mj-biz-apps/sales-core-entities-server@6.18.0
+  - @mj-biz-apps/sales-server@6.18.0
+
+## 6.17.0
+
+### Patch Changes
+
+- Updated dependencies [2018641]
+- Updated dependencies [7b134f9]
+  - @mj-biz-apps/sales-entities@6.17.0
+  - @mj-biz-apps/sales-core-entities-server@6.17.0
+  - @mj-biz-apps/sales-server@6.17.0
+
+## 6.16.0
+
+### Patch Changes
+
+- Updated dependencies [17ff470]
+- Updated dependencies [966e18b]
+- Updated dependencies [fc1f0aa]
+- Updated dependencies [c8c11b3]
+- Updated dependencies [3d02df4]
+- Updated dependencies [2cc414f]
+- Updated dependencies [1738cb0]
+- Updated dependencies [2925963]
+- Updated dependencies [e475d61]
+- Updated dependencies [3929ba8]
+- Updated dependencies [5623093]
+- Updated dependencies [0b93b39]
+- Updated dependencies [bcc41d7]
+- Updated dependencies [91e3f43]
+- Updated dependencies [a43114c]
+  - @mj-biz-apps/sales-entities@6.16.0
+  - @mj-biz-apps/sales-core-entities-server@6.16.0
+  - @mj-biz-apps/sales-server@6.16.0
+
+## 6.15.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.15.2
+- @mj-biz-apps/sales-entities@6.15.2
+- @mj-biz-apps/sales-server@6.15.2
+
+## 6.15.1
+
+### Patch Changes
+
+- Updated dependencies [19ecdc2]
+  - @mj-biz-apps/sales-core-entities-server@6.15.1
+  - @mj-biz-apps/sales-server@6.15.1
+  - @mj-biz-apps/sales-entities@6.15.1
+
+## 6.15.0
+
+### Patch Changes
+
+- Updated dependencies [dbacb4c]
+  - @mj-biz-apps/sales-core-entities-server@6.15.0
+  - @mj-biz-apps/sales-server@6.15.0
+  - @mj-biz-apps/sales-entities@6.15.0
+
+## 6.14.0
+
+### Patch Changes
+
+- b3691c6: Requires bizapps-orders 5.30.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.30.0`, `mj-app.json` `>=5.30.0`). That release exports `FindUnansweredHeldLines` and `HoldingSubscriberFor`, which the Close Won check uses. orders 5.30.0 needs MemberJunction 6.1.5, so the `@memberjunction/*` ranges and `mjVersionRange` floor at 6.1.5. The lockfile resolves bizapps-accounting 0.22.0, which orders-ng 5.30.0 requires.
+- Updated dependencies [ed649bb]
+- Updated dependencies [089e4d7]
+- Updated dependencies [65ae0b7]
+- Updated dependencies [900cdb0]
+- Updated dependencies [bb6025d]
+- Updated dependencies [ced96e0]
+- Updated dependencies [b3691c6]
+- Updated dependencies [c5d7b0b]
+- Updated dependencies [9a57950]
+- Updated dependencies [5d4c5f3]
+  - @mj-biz-apps/sales-core-entities-server@6.14.0
+  - @mj-biz-apps/sales-entities@6.14.0
+  - @mj-biz-apps/sales-server@6.14.0
+
+## 6.13.0
+
+### Patch Changes
+
+- Updated dependencies [29675ee]
+- Updated dependencies [2e66781]
+- Updated dependencies [86030e7]
+  - @mj-biz-apps/sales-core-entities-server@6.13.0
+  - @mj-biz-apps/sales-entities@6.13.0
+  - @mj-biz-apps/sales-server@6.13.0
+
 ## 6.12.3
 
 ### Patch Changes

@@ -79,7 +79,7 @@ describe('ResolveFiscalYearStart', () => {
         // app was not installed. Whatever the wording, it must not assert absence.
         const text = DescribeFiscalBasis({ Start: CALENDAR_YEAR_START, Basis: 'pending' });
         expect(text.length).toBeGreaterThan(0);
-        expect(text).not.toMatch(/not installed|no company profile|disagree/i);
+        expect(text).not.toMatch(/not installed|no company profile|different fiscal years/i);
     });
 
     it('is never itself the PENDING basis — that state belongs to the caller, not to the resolver', () => {

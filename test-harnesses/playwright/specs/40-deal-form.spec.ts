@@ -80,15 +80,15 @@ test.afterAll(async () => {
 /** The panels a rep composes a deal through. Keys are the panels' `SectionKey`s in `deal-form.panels.ts`. */
 const WORKING_PANELS = ['pipeline', 'party', 'commercial', 'lines', 'motion', 'close'] as const;
 
-/** The AG Grid rows of the "What's being sold" panel on the active form. */
+/** The line cards of the "What's being sold" panel on the active form. */
 function lineRows(page: Page): Locator {
     return DealForm(page)
         .locator('.mj-forms-panel[data-section-key="lines"]')
-        .locator('.ag-center-cols-container .ag-row:visible');
+        .locator('[data-testid="deal-line"]:visible');
 }
 
 /**
- * Opens a saved line in the restricted line editor by double-clicking its grid row.
+ * Opens a saved line in the restricted line editor by double-clicking its card.
  *
  * Local to this spec (and duplicated in 41) because `lib/deal-form.ts` has no row-level line helper
  * yet. Waits for the product select, which renders only once the editor has loaded the line.
@@ -201,7 +201,7 @@ test.describe('deal form — Phase 1 definition of done', () => {
              */
             const count = await AddLines(page, orderID, 2);
             expect(count, 'both lines must reach the embedded order').toBe(2);
-            await expect(lineRows(page), 'and both must show on the lines grid').toHaveCount(2, { timeout: 30_000 });
+            await expect(lineRows(page), 'and both must show as line cards').toHaveCount(2, { timeout: 30_000 });
             await shot(page, '40-03-lines');
         });
 

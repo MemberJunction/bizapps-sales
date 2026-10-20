@@ -2,9 +2,11 @@
 # Detects case-sensitivity mismatches between pnpm-lock.yaml and git
 # macOS is case-insensitive; Linux CI (GitHub Actions) is case-sensitive
 
-echo "Validating pnpm-lock.yaml for case-sensitivity issues..."
+set -uo pipefail
 
-LOCKFILE="${1:-pnpm-lock.yaml}"
+LOCKFILE=pnpm-lock.yaml
+
+echo "Validating $LOCKFILE for case-sensitivity issues..."
 
 # A missing or unreadable lockfile is NOT "no issues found". Without this guard the extraction
 # below came back empty, the loop ran zero times, and the script closed with "No case-sensitivity
@@ -12,7 +14,7 @@ LOCKFILE="${1:-pnpm-lock.yaml}"
 # fail-open-quietly shape the sibling guards in this directory are written against, and it is
 # reachable here for a mundane reason: this repo has no lockfile until the first `pnpm install`.
 if [ ! -f "$LOCKFILE" ]; then
-  echo "::error::'$LOCKFILE' not found (resolved from $(pwd)). This gate validated nothing; it has not passed. Run 'pnpm install' to generate it, or pass the correct path."
+  echo "::error::'$LOCKFILE' not found (resolved from $(pwd)). This gate validated nothing; it has not passed. Run 'pnpm install' to generate it."
   exit 1
 fi
 
@@ -30,7 +32,7 @@ PATHS=$(sed -n '/^importers:/,/^[a-zA-Z]/p' "$LOCKFILE" \
 
 # Every workspace package.json git actually tracks, enumerated ONCE with no pathspec filtering.
 #
-# ⚠️ THIS LIST IS THE FIX. The inherited version of this script (bizapps-caliber, bizapps-tasks, bizapps-common and
+# ⚠️ THIS LIST IS THE FIX. The inherited version of this script (bizapps-caliber, bizapps-tasks and
 # BlueCypress/SaaS all still carry it) looked for the case-variant with
 #     git ls-files "$path*/package.json" | grep -i "^$path/package.json$"
 # and that can never match: a git PATHSPEC GLOB is case-sensitive regardless of core.ignorecase, so
@@ -60,7 +62,7 @@ done
 
 if [ ${#MISMATCHES[@]} -gt 0 ]; then
   echo ""
-  echo "::error::Found ${#MISMATCHES[@]} case mismatch(es) in pnpm-lock.yaml"
+  echo "::error::Found ${#MISMATCHES[@]} case mismatch(es) in $LOCKFILE"
   echo ""
   for m in "${MISMATCHES[@]}"; do echo "  $m"; done
   echo ""
@@ -71,8 +73,8 @@ if [ ${#MISMATCHES[@]} -gt 0 ]; then
   echo "To fix:"
   echo "  1. Check actual casing: git ls-files packages/ | grep -i <package>"
   echo "  2. Rename via temp: mv packages/Path packages/temp && mv packages/temp packages/path"
-  echo "  3. Regenerate lockfile: rm pnpm-lock.yaml && pnpm install"
+  echo "  3. Regenerate lockfile: rm $LOCKFILE && pnpm install"
   exit 1
 fi
 
-echo "No case-sensitivity issues found in pnpm-lock.yaml"
+echo "No case-sensitivity issues found in $LOCKFILE"

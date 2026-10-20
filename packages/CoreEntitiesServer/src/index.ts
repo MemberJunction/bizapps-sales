@@ -46,6 +46,8 @@
  */
 export * from './DealEntityServer.js';
 export * from './DealTeamMemberEntityServer.js';
+export * from './PipelineStageEntityServer.js';
+export * from './DealStageEventEntityServer.js';
 export * from './CloseDealOperation.js';
 
 /**
@@ -56,6 +58,7 @@ export * from './orders-availability.js';
 
 /** The REAL contracts handoff — selected automatically when contracts' entities are registered. */
 export * from './LiveContractsSeam.js';
+export * from './ContractOrderRelink.js';
 
 /**
  * The finance tasks a won deal raises (S-US2 #34, S-US3 #35).
@@ -109,6 +112,8 @@ export type {
  * scheduled job calls.
  */
 export * from './DealLockOrderLineVeto.js';
+export * from './DealNotWonConfirmVeto.js';
+export * from './DealOrderLink.js';
 export * from './forecast/ForecastSource.js';
 export * from './forecast/FixtureForecastSource.js';
 export * from './forecast/QueryForecastSource.js';
@@ -121,9 +126,17 @@ export * from './forecast/ForecastSnapshotJob.js';
 export * from './finance-exceptions/FinanceExceptionBridge.js';
 export * from './finance-exceptions/WonDealOrderDetector.js';
 
+/**
+ * PER-COMPANY PIPELINES (#327). Copies the default pipeline and its stages onto every company that
+ * lacks one; the `Sales.CopyDefaultPipelineToCompanies` Action calls it.
+ */
+export * from './pipelines/CopyDefaultPipeline.js';
+
 import { LoadActivitySyncEngine } from '@mj-biz-apps/common-activity-sync';
 import { DealEntityServer } from './DealEntityServer.js';
 import { DealTeamMemberEntityServer } from './DealTeamMemberEntityServer.js';
+import { PipelineStageEntityServer } from './PipelineStageEntityServer.js';
+import { DealStageEventEntityServer } from './DealStageEventEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 
@@ -139,7 +152,7 @@ import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 export function LoadSalesCoreEntitiesServer(): void {
     LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
+    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, PipelineStageEntityServer, DealStageEventEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }

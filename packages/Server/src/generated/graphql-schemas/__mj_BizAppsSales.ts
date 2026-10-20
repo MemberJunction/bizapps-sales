@@ -439,7 +439,7 @@ export class mjBizAppsSalesBuyingRoleTypeResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Deal Contact Roles
 //****************************************************************************
-@ObjectType({ description: `The buying committee on the CUSTOMER side: which contact plays which role on this deal. A junction rather than a field on SalesContact because one contact holds different roles on different deals.` })
+@ObjectType({ description: "The buying committee on the CUSTOMER side: which contact plays which role on this deal. A junction rather than a field on SalesContact because one contact holds different roles on different deals." })
 export class mjBizAppsSalesDealContactRole_ {
     @Field() 
     @MaxLength(36)
@@ -474,7 +474,7 @@ export class mjBizAppsSalesDealContactRole_ {
     Deal?: string;
         
     @Field({nullable: true}) 
-    @MaxLength(704)
+    @MaxLength(753)
     SalesContact?: string;
         
     @Field({nullable: true}) 
@@ -633,7 +633,7 @@ export class mjBizAppsSalesDealContactRoleResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Deal Payment Schedules
 //****************************************************************************
-@ObjectType({ description: `The EXCEPTION payment schedule for a deal. THE ABSENCE OF ROWS IS THE COMMON CASE and that is the design: the standard term is 100% payable on execution, so a deal on standard terms carries no rows here and rows exist only where something else was negotiated. Storing the default on every deal would let a later change to "default" silently rewrite history, and would turn "did this deal negotiate payment terms?" into arithmetic instead of a row count. This app does NOT check that the schedule sums to the deal amount — that is computing money, and the authoritative total lives in orders.` })
+@ObjectType({ description: "The EXCEPTION payment schedule for a deal. THE ABSENCE OF ROWS IS THE COMMON CASE and that is the design: the standard term is 100% payable on execution, so a deal on standard terms carries no rows here and rows exist only where something else was negotiated. Storing the default on every deal would let a later change to \"default\" silently rewrite history, and would turn \"did this deal negotiate payment terms?\" into arithmetic instead of a row count. This app does NOT check that the schedule sums to the deal amount — that is computing money, and the authoritative total lives in orders." })
 export class mjBizAppsSalesDealPaymentSchedule_ {
     @Field() 
     @MaxLength(36)
@@ -646,14 +646,14 @@ export class mjBizAppsSalesDealPaymentSchedule_ {
     @Field({nullable: true}) 
     PaymentDate?: Date;
         
-    @Field(() => Float, {nullable: true, description: `The instalment amount as agreed. Unconstrained in sign: a refund or credit instalment is legitimately negative, and this table records what was agreed rather than asserting a shape for it.`}) 
+    @Field(() => Float, {nullable: true, description: "The instalment amount as agreed. Unconstrained in sign: a refund or credit instalment is legitimately negative, and this table records what was agreed rather than asserting a shape for it."}) 
     Amount?: number;
         
     @Field({nullable: true}) 
     @MaxLength(1000)
     Description?: string;
         
-    @Field(() => Int, {nullable: true, description: `Explicit ordering, because instalment order is not always date order — "on execution" and "on signature of SOW 2" can share a date or have none yet. Server-maintained and re-sequenced on every save, mirroring how accounting re-sequences JournalEntryLine.LineNumber.`}) 
+    @Field(() => Int, {nullable: true, description: "Explicit ordering, because instalment order is not always date order — \"on execution\" and \"on signature of SOW 2\" can share a date or have none yet. Server-maintained and re-sequenced on every save, mirroring how accounting re-sequences JournalEntryLine.LineNumber."}) 
     DisplayOrder?: number;
         
     @Field() 
@@ -818,7 +818,7 @@ export class mjBizAppsSalesDealPaymentScheduleResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Deal Roles
 //****************************************************************************
-@ObjectType({ description: `The roles internal people hold on a deal (Owner/AE, Sales Engineer, SDR, Executive Sponsor, Partner Manager, CS Lead).` })
+@ObjectType({ description: "The roles internal people hold on a deal (Owner/AE, Sales Engineer, SDR, Executive Sponsor, Partner Manager, CS Lead)." })
 export class mjBizAppsSalesDealRole_ {
     @Field() 
     @MaxLength(36)
@@ -835,10 +835,10 @@ export class mjBizAppsSalesDealRole_ {
     @Field({nullable: true}) 
     Description?: string;
         
-    @Field(() => Boolean, {nullable: true, description: `Identifies the role that DEFINES ownership. Exactly one team member per deal may hold a role with this flag, enforced server-side, and Deal.OwnerEmployeeID is the denormalized stamp of whoever does.`}) 
+    @Field(() => Boolean, {nullable: true, description: "Identifies the role that DEFINES ownership. Exactly one team member per deal may hold a role with this flag, enforced server-side, and Deal.OwnerEmployeeID is the denormalized stamp of whoever does."}) 
     IsOwnerRole?: boolean;
         
-    @Field(() => Boolean, {nullable: true, description: `Whether two people may hold this role on one deal. Two sales engineers, yes; two owners, no. Enforced server-side FROM THIS FLAG, never hardcoded against a role name.`}) 
+    @Field(() => Boolean, {nullable: true, description: "Whether two people may hold this role on one deal. Two sales engineers, yes; two owners, no. Enforced server-side FROM THIS FLAG, never hardcoded against a role name."}) 
     AllowsMultiplePerDeal?: boolean;
         
     @Field(() => Float, {nullable: true}) 
@@ -1177,7 +1177,7 @@ export class mjBizAppsSalesDealSequenceResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Deal Stage Events
 //****************************************************************************
-@ObjectType({ description: `APPEND-ONLY transition log, never edited. The source for stage conversion, velocity, dwell time, slippage and skipped-stage analysis. Stamping the amount and probability AT each transition is what lets historical roll-ups reconstruct correctly after a deal\'s amount changes.` })
+@ObjectType({ description: "APPEND-ONLY transition log, never edited. The source for stage conversion, velocity, dwell time, slippage and skipped-stage analysis. Stamping the amount and probability AT each transition is what lets historical roll-ups reconstruct correctly after a deal's amount changes." })
 export class mjBizAppsSalesDealStageEvent_ {
     @Field() 
     @MaxLength(36)
@@ -1207,16 +1207,16 @@ export class mjBizAppsSalesDealStageEvent_ {
     @MaxLength(36)
     ChangedByUserID?: string;
         
-    @Field({nullable: true, description: `The ORIGINAL time of the transition, not the row's insert time. A distinct column rather than a reliance on __mj_CreatedAt because the HubSpot import must preserve historical timestamps — a 2023 transition has to land as 2023.`}) 
+    @Field({nullable: true, description: "The ORIGINAL time of the transition, not the row's insert time. A distinct column rather than a reliance on __mj_CreatedAt because the HubSpot import must preserve historical timestamps — a 2023 transition has to land as 2023."}) 
     ChangedAt?: Date;
         
     @Field(() => Int, {nullable: true}) 
     DaysInPreviousStage?: number;
         
-    @Field(() => Float, {nullable: true, description: `Deal.Amount as it stood at this transition. Point-in-time truth: "what did we think the forecast was on the 1st" is unanswerable from Deal alone once amounts change.`}) 
+    @Field(() => Float, {nullable: true, description: "Deal.Amount as it stood at this transition. Point-in-time truth: \"what did we think the forecast was on the 1st\" is unanswerable from Deal alone once amounts change."}) 
     AmountAtTransition?: number;
         
-    @Field(() => Boolean, {nullable: true, description: `Whether AmountAtTransition came from the orders engine (1) or was stated by a person (0). NULL means the transition was recorded before this was tracked — it is not backfillable, because Deal.AmountIsComputed describes the deal as it is now, not as it was at the close.`}) 
+    @Field(() => Boolean, {nullable: true, description: "Whether AmountAtTransition came from the orders engine (1) or was stated by a person (0). NULL means the transition was recorded before this was tracked — it is not backfillable, because Deal.AmountIsComputed describes the deal as it is now, not as it was at the close."}) 
     AmountAtTransitionIsComputed?: boolean;
         
     @Field(() => Float, {nullable: true}) 
@@ -1308,58 +1308,6 @@ export class CreatemjBizAppsSalesDealStageEventInput {
     RestoreContext___?: RestoreContextInput;
 }
     
-
-//****************************************************************************
-// INPUT TYPE for MJ_BizApps_Sales: Deal Stage Events
-//****************************************************************************
-@InputType()
-export class UpdatemjBizAppsSalesDealStageEventInput {
-    @Field()
-    ID: string;
-
-    @Field({ nullable: true })
-    DealID?: string;
-
-    @Field({ nullable: true })
-    FromStageID?: string | null;
-
-    @Field({ nullable: true })
-    ToStageID?: string | null;
-
-    @Field({ nullable: true })
-    FromDealStatusTypeID?: string | null;
-
-    @Field({ nullable: true })
-    ToDealStatusTypeID?: string | null;
-
-    @Field({ nullable: true })
-    ChangedByUserID?: string | null;
-
-    @Field({ nullable: true })
-    ChangedAt?: Date;
-
-    @Field(() => Int, { nullable: true })
-    DaysInPreviousStage?: number | null;
-
-    @Field(() => Float, { nullable: true })
-    AmountAtTransition?: number | null;
-
-    @Field(() => Boolean, { nullable: true })
-    AmountAtTransitionIsComputed?: boolean | null;
-
-    @Field(() => Float, { nullable: true })
-    ProbabilityAtTransition?: number | null;
-
-    @Field({ nullable: true })
-    Notes?: string | null;
-
-    @Field(() => [KeyValuePairInput], { nullable: true })
-    OldValues___?: KeyValuePairInput[];
-
-    @Field(() => RestoreContextInput, { nullable: true })
-    RestoreContext___?: RestoreContextInput;
-}
-    
 //****************************************************************************
 // RESOLVER for MJ_BizApps_Sales: Deal Stage Events
 //****************************************************************************
@@ -1427,35 +1375,18 @@ export class mjBizAppsSalesDealStageEventResolver extends ResolverBase {
         return this.CreateRecord('MJ_BizApps_Sales: Deal Stage Events', input, provider, userPayload, pubSub)
     }
         
-    @Mutation(() => mjBizAppsSalesDealStageEvent_)
-    async UpdatemjBizAppsSalesDealStageEvent(
-        @Arg('input', () => UpdatemjBizAppsSalesDealStageEventInput) input: UpdatemjBizAppsSalesDealStageEventInput,
-        @Ctx() { providers, userPayload }: AppContext,
-        @PubSub() pubSub: PubSubEngine
-    ) {
-        const provider = GetReadWriteProvider(providers);
-        return this.UpdateRecord('MJ_BizApps_Sales: Deal Stage Events', input, provider, userPayload, pubSub);
-    }
-    
-    @Mutation(() => mjBizAppsSalesDealStageEvent_)
-    async DeletemjBizAppsSalesDealStageEvent(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
-        const provider = GetReadWriteProvider(providers);
-        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
-        return this.DeleteRecord('MJ_BizApps_Sales: Deal Stage Events', key, options, provider, userPayload, pubSub);
-    }
-    
 }
 
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Deal Status Types
 //****************************************************************************
-@ObjectType({ description: `The OUTCOME vocabulary for deals (Open, Won, Lost, Abandoned, On Hold ...). Behaviour comes from the flags on this row, NEVER from the Name — Sales.CloseDeal is named for the outcome type rather than a hardcoded "won" precisely so it can resolve everything from IsWon/IsLost/LocksDeal. Renaming a status is a metadata change with no code impact.` })
+@ObjectType({ description: "The OUTCOME vocabulary for deals (Open, Won, Lost, Abandoned, On Hold ...). Behaviour comes from the flags on this row, NEVER from the Name — Sales.CloseDeal is named for the outcome type rather than a hardcoded \"won\" precisely so it can resolve everything from IsWon/IsLost/LocksDeal. Renaming a status is a metadata change with no code impact." })
 export class mjBizAppsSalesDealStatusType_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field({nullable: true, description: `Stable identifier the engine and metadata seeds key on. Renaming Name is cosmetic; renaming Code changes an identifier.`}) 
+    @Field({nullable: true, description: "Stable identifier the engine and metadata seeds key on. Renaming Name is cosmetic; renaming Code changes an identifier."}) 
     @MaxLength(40)
     Code?: string;
         
@@ -1478,7 +1409,7 @@ export class mjBizAppsSalesDealStatusType_ {
     @Field(() => Boolean, {nullable: true}) 
     IsLost?: boolean;
         
-    @Field(() => Boolean, {nullable: true, description: `When 1, a deal in this status FREEZES: the header (except Description and NextStep), its lines and its team members become immutable, enforced in DealEntityServer.Save() — not in the UI, so an Action, an agent or a raw BaseEntity.Save() hits the same wall. Mirrors journal-entry immutability in accounting, and for the same reason: the deal is now the provenance of a contract and an order.`}) 
+    @Field(() => Boolean, {nullable: true, description: "When 1, a deal in this status FREEZES: the header (except Description and NextStep), its lines and its team members become immutable, enforced in DealEntityServer.Save() — not in the UI, so an Action, an agent or a raw BaseEntity.Save() hits the same wall. Mirrors journal-entry immutability in accounting, and for the same reason: the deal is now the provenance of a contract and an order."}) 
     LocksDeal?: boolean;
         
     @Field(() => Int, {nullable: true}) 
@@ -1675,7 +1606,7 @@ export class mjBizAppsSalesDealStatusTypeResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Deal Team Members
 //****************************************************************************
-@ObjectType({ description: `The internal people on a deal and the role each holds — the SINGLE SOURCE OF TRUTH for deal membership, INCLUDING the owner (the member whose DealRole has IsOwnerRole = 1). WATCH THE ATTRIBUTION DOUBLE-COUNT: a deal with an AE, an SE and an SDR has three rows, so summing Deal.Amount across this table triple-counts the deal. Every by-rep rollup must either filter to the owner role or weight by AttributionPct.` })
+@ObjectType({ description: "The internal people on a deal and the role each holds — the SINGLE SOURCE OF TRUTH for deal membership, INCLUDING the owner (the member whose DealRole has IsOwnerRole = 1). WATCH THE ATTRIBUTION DOUBLE-COUNT: a deal with an AE, an SE and an SDR has three rows, so summing Deal.Amount across this table triple-counts the deal. Every by-rep rollup must either filter to the owner role or weight by AttributionPct." })
 export class mjBizAppsSalesDealTeamMember_ {
     @Field() 
     @MaxLength(36)
@@ -1685,11 +1616,11 @@ export class mjBizAppsSalesDealTeamMember_ {
     @MaxLength(36)
     DealID?: string;
         
-    @Field({nullable: true, description: `The internal rep, as an MJ Employee. Exactly one of EmployeeID / PersonID is set. Employee is the common case.`}) 
+    @Field({nullable: true, description: "The internal rep, as an MJ Employee. Exactly one of EmployeeID / PersonID is set. Employee is the common case."}) 
     @MaxLength(36)
     EmployeeID?: string;
         
-    @Field({nullable: true, description: `A NON-EMPLOYEE team member — a partner rep or contractor — as a common.Person. Exactly one of EmployeeID / PersonID is set (D-6). Needed because Partner Manager is a seeded DealRole and an Employee row cannot express someone outside the company.`}) 
+    @Field({nullable: true, description: "A NON-EMPLOYEE team member — a partner rep or contractor — as a common.Person. Exactly one of EmployeeID / PersonID is set (D-6). Needed because Partner Manager is a seeded DealRole and an Employee row cannot express someone outside the company."}) 
     @MaxLength(36)
     PersonID?: string;
         
@@ -1697,7 +1628,7 @@ export class mjBizAppsSalesDealTeamMember_ {
     @MaxLength(36)
     DealRoleID?: string;
         
-    @Field(() => Float, {nullable: true, description: `This member's share of the deal for by-rep rollups. When any member of a deal has a value set, the app validates that active members sum to 100. Leave NULL to fall back to owner-role attribution.`}) 
+    @Field(() => Float, {nullable: true, description: "This member's share of the deal for by-rep rollups. When any member of a deal has a value set, the app validates that active members sum to 100. Leave NULL to fall back to owner-role attribution."}) 
     AttributionPct?: number;
         
     @Field({nullable: true}) 
@@ -1727,7 +1658,7 @@ export class mjBizAppsSalesDealTeamMember_ {
     Employee?: string;
         
     @Field({nullable: true}) 
-    @MaxLength(201)
+    @MaxLength(250)
     Person?: string;
         
     @Field({nullable: true}) 
@@ -2123,7 +2054,7 @@ export class mjBizAppsSalesDealTypeResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Deals
 //****************************************************************************
-@ObjectType({ description: `A deal (opportunity). Amount is a CACHED answer from Orders.PreviewOrder carrying its own provenance, never a locally computed total — this app performs no pricing arithmetic of any kind. Closing a deal is a transaction that CREATES a contract and/or orders, not a notification that someone should.` })
+@ObjectType({ description: "A deal (opportunity). Amount is a CACHED answer from Orders.PreviewOrder carrying its own provenance, never a locally computed total — this app performs no pricing arithmetic of any kind. Closing a deal is a transaction that CREATES a contract and/or orders, not a notification that someone should." })
 export class mjBizAppsSalesDeal_ {
     @Field() 
     @MaxLength(36)
@@ -2161,28 +2092,28 @@ export class mjBizAppsSalesDeal_ {
     @MaxLength(36)
     PrimaryContactID?: string;
         
-    @Field({nullable: true, description: `The contact who receives the invoice, which is routinely NOT the person negotiating. NULL means the billing contact IS the primary contact — a real default, not "unknown" — so an AD never types the same name twice and changing the primary contact leaves no stale billing copy.`}) 
+    @Field({nullable: true, description: "The contact who receives the invoice, which is routinely NOT the person negotiating. NULL means the billing contact IS the primary contact — a real default, not \"unknown\" — so an AD never types the same name twice and changing the primary contact leaves no stale billing copy."}) 
     @MaxLength(36)
     BillingContactID?: string;
         
-    @Field({nullable: true, description: `The SELLING company. Must match Pipeline.CompanyID; enforced by the entity server, since a CHECK cannot reach across the FK to compare them. FK to __mj.Company.`}) 
+    @Field({nullable: true, description: "The SELLING company. Must match Pipeline.CompanyID; enforced by the entity server, since a CHECK cannot reach across the FK to compare them. FK to __mj.Company."}) 
     @MaxLength(36)
     CompanyID?: string;
         
-    @Field({nullable: true, description: `DENORMALIZED, SERVER-MAINTAINED. The Employee holding the role where DealRole.IsOwnerRole = 1, written by DealEntityServer.Save() whenever team membership changes. DealTeamMember is the source of truth; this exists so "my deals" and per-rep boards need no join. NEVER SET THIS DIRECTLY — it will diverge.`}) 
+    @Field({nullable: true, description: "DENORMALIZED, SERVER-MAINTAINED. The Employee holding the role where DealRole.IsOwnerRole = 1, written by DealEntityServer.Save() whenever team membership changes. DealTeamMember is the source of truth; this exists so \"my deals\" and per-rep boards need no join. NEVER SET THIS DIRECTLY — it will diverge."}) 
     @MaxLength(36)
     OwnerEmployeeID?: string;
         
-    @Field(() => Float, {nullable: true, description: `The deal value. A CACHED ANSWER returned by Orders.PreviewOrder for this deal's line set — NOT computed here. For a simple (header-only) deal it is hand-entered and AmountIsComputed is 0. Never sum the order's lines into this column; sales does no arithmetic.`}) 
+    @Field(() => Float, {nullable: true, description: "The deal value. A CACHED ANSWER returned by Orders.PreviewOrder for this deal's line set — NOT computed here. For a simple (header-only) deal it is hand-entered and AmountIsComputed is 0. Never sum the order's lines into this column; sales does no arithmetic."}) 
     Amount?: number;
         
-    @Field(() => Boolean, {nullable: true, description: `1 when Amount came from Orders.PreviewOrder; 0 when a human typed it (a simple, header-only deal). Distinguishes a traceable figure from a stated one.`}) 
+    @Field(() => Boolean, {nullable: true, description: "1 when Amount came from Orders.PreviewOrder; 0 when a human typed it (a simple, header-only deal). Distinguishes a traceable figure from a stated one."}) 
     AmountIsComputed?: boolean;
         
     @Field({nullable: true}) 
     AmountComputedAt?: Date;
         
-    @Field({nullable: true, description: `Fingerprint of the embedded order's line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say the products changed after the amount was calculated, instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month.`}) 
+    @Field({nullable: true, description: "Fingerprint of the embedded order's line set Amount was computed from. Compare it against the current lines to detect a STALE amount, so the UI can say the products changed after the amount was calculated, instead of showing a number nobody can trace. Without this column Amount becomes a hand-edited field within a month."}) 
     @MaxLength(128)
     AmountSourceHash?: string;
         
@@ -2199,19 +2130,19 @@ export class mjBizAppsSalesDeal_ {
     @Field(() => Int, {nullable: true}) 
     TermMonths?: number;
         
-    @Field(() => Int, {nullable: true, description: `Estimated project timeline in WEEKS, from the SOW template. A separate column from TermMonths on purpose: a subscription term is a COMMITMENT that drives renewal dates and escalation, a project estimate is a FORECAST that drives neither. One column plus a unit flag would force every consumer to branch on the unit before using the number.`}) 
+    @Field(() => Int, {nullable: true, description: "Estimated project timeline in WEEKS, from the SOW template. A separate column from TermMonths on purpose: a subscription term is a COMMITMENT that drives renewal dates and escalation, a project estimate is a FORECAST that drives neither. One column plus a unit flag would force every consumer to branch on the unit before using the number."}) 
     EstimatedProjectWeeks?: number;
         
-    @Field({nullable: true, description: `The date the agreement was signed. Deliberately NOT constrained against StartDate: work that begins before signature is common and legitimate, so ordering the two would reject real deals.`}) 
+    @Field({nullable: true, description: "The date the agreement was signed. Deliberately NOT constrained against StartDate: work that begins before signature is common and legitimate, so ordering the two would reject real deals."}) 
     ExecutionDate?: Date;
         
-    @Field({nullable: true, description: `The date service or the subscription actually begins (order-form / SOW start). May precede ExecutionDate for backdated work — see that column.`}) 
+    @Field({nullable: true, description: "The date service or the subscription actually begins (order-form / SOW start). May precede ExecutionDate for backdated work — see that column."}) 
     StartDate?: Date;
         
-    @Field({nullable: true}) 
+    @Field({nullable: true, description: "The day the deal is expected to close. Update it as the date moves; the actual close date is set when the deal is closed."}) 
     ExpectedCloseDate?: Date;
         
-    @Field({nullable: true}) 
+    @Field({nullable: true, description: "The business day the deal closed on, in its company's time zone. Set by closing the deal and cleared by reopening it; it cannot be edited. For when an open deal is expected to close, use Expected Close Date."}) 
     ActualCloseDate?: Date;
         
     @Field(() => Float, {nullable: true}) 
@@ -2236,31 +2167,31 @@ export class mjBizAppsSalesDeal_ {
     @MaxLength(36)
     CampaignID?: string;
         
-    @Field({nullable: true, description: `SOFT reference (no FK) to a bizapps-contracts Contract. The link points DOWN the dependency graph; there is deliberately no Contract.DealID, because it is ONE contract to MANY deals — the original sale, every renewal, every expansion.`}) 
+    @Field({nullable: true, description: "SOFT reference (no FK) to a bizapps-contracts Contract. The link points DOWN the dependency graph; there is deliberately no Contract.DealID, because it is ONE contract to MANY deals — the original sale, every renewal, every expansion."}) 
     @MaxLength(36)
     ContractID?: string;
         
-    @Field({nullable: true, description: `SOFT reference (no FK) to the contract this deal RENEWS. What makes the renewal chain navigable from the sales side without contracts knowing anything about it. Required when DealType.RequiresRenewalSource is set.`}) 
+    @Field({nullable: true, description: "SOFT reference (no FK) to the contract this deal RENEWS. What makes the renewal chain navigable from the sales side without contracts knowing anything about it. Required when DealType.RequiresRenewalSource is set."}) 
     @MaxLength(36)
     RenewsContractID?: string;
         
-    @Field(() => Boolean, {nullable: true, description: `Whether the resulting agreement renews automatically at the end of its term.`}) 
+    @Field(() => Boolean, {nullable: true, description: "Whether the resulting agreement renews automatically at the end of its term."}) 
     AutoRenew?: boolean;
         
-    @Field(() => Float, {nullable: true, description: `An OVERRIDE, and NULL is meaningful: it means "use the standard annual increase", whose default (5%) lives on the contracts ContractType, not here. That is a different fact from "we negotiated a number that happens to equal today's standard", and only the NULL survives a later change to policy. Copying the default in at write time would freeze this year's terms into next year's renewals silently.`}) 
+    @Field(() => Float, {nullable: true, description: "An OVERRIDE, and NULL is meaningful: it means \"use the standard annual increase\", whose default (5%) lives on the contracts ContractType, not here. That is a different fact from \"we negotiated a number that happens to equal today's standard\", and only the NULL survives a later change to policy. Copying the default in at write time would freeze this year's terms into next year's renewals silently."}) 
     AnnualIncreasePctOverride?: number;
         
-    @Field(() => Int, {nullable: true, description: `An OVERRIDE of the standard cancellation-notice period (default 90 days, owned by the contracts ContractType). NULL means "use the standard" — see AnnualIncreasePctOverride for why that distinction is load-bearing.`}) 
+    @Field(() => Int, {nullable: true, description: "An OVERRIDE of the standard cancellation-notice period (default 90 days, owned by the contracts ContractType). NULL means \"use the standard\" — see AnnualIncreasePctOverride for why that distinction is load-bearing."}) 
     CancellationNoticeDaysOverride?: number;
         
-    @Field({nullable: true, description: `PLACEHOLDER LABEL (default ACH), and a string only for as long as nothing branches on it. Payment method becomes vocabulary the moment code cares — ACH and card differ in settlement timing and fees — but ORDERS owns that concept and will expose PaymentType. Pointing at orders' vocabulary later beats standing up a competing copy here and reconciling two. No code may branch on this value.`}) 
+    @Field({nullable: true, description: "PLACEHOLDER LABEL (default ACH), and a string only for as long as nothing branches on it. Payment method becomes vocabulary the moment code cares — ACH and card differ in settlement timing and fees — but ORDERS owns that concept and will expose PaymentType. Pointing at orders' vocabulary later beats standing up a competing copy here and reconciling two. No code may branch on this value."}) 
     @MaxLength(50)
     PaymentMethod?: string;
         
-    @Field(() => Boolean, {nullable: true, description: `Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance's review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated.`}) 
+    @Field(() => Boolean, {nullable: true, description: "Did this deal move off the standard agreement? Asserted by the rep at deal creation, defaulting to no. Copied onto the contract as HasModifications at Closed Won, where it routes finance's review: a true flag means capture each deviation, a false one still means read the document because the rep may have forgotten. NOT derived from ContractVariances — an empty variances field means nothing was written down, which is a different claim from nothing being negotiated."}) 
     StandardAgreementModified?: boolean;
         
-    @Field({nullable: true, description: `Free-text summary of what this deal negotiated AWAY from standard terms — the red-line list, in the AD's own words. The input to a human legal review; nothing should attempt to parse it.`}) 
+    @Field({nullable: true, description: "Free-text summary of what this deal negotiated AWAY from standard terms — the red-line list, in the AD's own words. The input to a human legal review; nothing should attempt to parse it."}) 
     ContractVariances?: string;
         
     @Field({nullable: true}) 
@@ -2273,10 +2204,10 @@ export class mjBizAppsSalesDeal_ {
     @Field({nullable: true}) 
     NextStepDate?: Date;
         
-    @Field({nullable: true}) 
+    @Field({nullable: true, description: "The moment the deal was closed. Set by closing the deal and cleared by reopening it; it cannot be edited. For when an open deal is expected to close, use Expected Close Date."}) 
     ClosedAt?: Date;
         
-    @Field({nullable: true}) 
+    @Field({nullable: true, description: "The user who closed the deal. Set by closing the deal and cleared by reopening it; it cannot be edited."}) 
     @MaxLength(36)
     ClosedByUserID?: string;
         
@@ -2290,14 +2221,14 @@ export class mjBizAppsSalesDeal_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => Float, {nullable: true, description: `0.0000 to 1.0000 probability that the deal will close as Won.`}) 
+    @Field(() => Float, {nullable: true, description: "0.0000 to 1.0000 probability that the deal will close as Won."}) 
     PredictedWinProbability?: number;
         
-    @Field({nullable: true, description: `Categorical priority/risk tier derived from deal win probability: Low, Medium, High, Critical.`}) 
+    @Field({nullable: true, description: "Categorical priority/risk tier derived from deal win probability: Low, Medium, High, Critical."}) 
     @MaxLength(20)
     PredictedWinRiskBand?: string;
         
-    @Field({nullable: true, description: `Timestamp when the deal was last scored by the predictive deal win propensity model.`}) 
+    @Field({nullable: true, description: "Timestamp when the deal was last scored by the predictive deal win propensity model."}) 
     PredictedWinScoredAt?: Date;
         
     @Field({nullable: true}) 
@@ -2321,11 +2252,11 @@ export class mjBizAppsSalesDeal_ {
     Account?: string;
         
     @Field({nullable: true}) 
-    @MaxLength(704)
+    @MaxLength(753)
     PrimaryContact?: string;
         
     @Field({nullable: true}) 
-    @MaxLength(704)
+    @MaxLength(753)
     BillingContact?: string;
         
     @Field({nullable: true}) 
@@ -2784,7 +2715,7 @@ export class mjBizAppsSalesDealResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Forecast Category Types
 //****************************************************************************
-@ObjectType({ description: `How a deal rolls into the forecast (Omitted, Pipeline, Best Case, Commit, Closed). The Include* flags are read directly by the forecast measures; a query that compared a category NAME would be exactly the violation the CI grep exists to catch.` })
+@ObjectType({ description: "How a deal rolls into the forecast (Omitted, Pipeline, Best Case, Commit, Closed). The Include* flags are read directly by the forecast measures; a query that compared a category NAME would be exactly the violation the CI grep exists to catch." })
 export class mjBizAppsSalesForecastCategoryType_ {
     @Field() 
     @MaxLength(36)
@@ -2992,7 +2923,7 @@ export class mjBizAppsSalesForecastCategoryTypeResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Forecast Snapshots
 //****************************************************************************
-@ObjectType({ description: `A point-in-time capture of the forecast, written by a Scheduled Job. Snapshots matter more than the live number: "what did we think on the first of the month" is the question a forecast review actually asks, and it is unanswerable after the fact without them. The live figure reads Deal; the historical one reads this table.` })
+@ObjectType({ description: "A point-in-time capture of the forecast, written by a Scheduled Job. Snapshots matter more than the live number: \"what did we think on the first of the month\" is the question a forecast review actually asks, and it is unanswerable after the fact without them. The live figure reads Deal; the historical one reads this table." })
 export class mjBizAppsSalesForecastSnapshot_ {
     @Field() 
     @MaxLength(36)
@@ -3019,7 +2950,7 @@ export class mjBizAppsSalesForecastSnapshot_ {
     @Field({nullable: true}) 
     CapturedAt?: Date;
         
-    @Field(() => Float, {nullable: true, description: `Total of deals in forecast categories flagged IncludeInCommit as at CapturedAt. Named CommitAmount rather than the plan's Commit because COMMIT is a reserved word in both T-SQL and PostgreSQL, and production is PostgreSQL.`}) 
+    @Field(() => Float, {nullable: true, description: "Total of deals in forecast categories flagged IncludeInCommit as at CapturedAt. Named CommitAmount rather than the plan's Commit because COMMIT is a reserved word in both T-SQL and PostgreSQL, and production is PostgreSQL."}) 
     CommitAmount?: number;
         
     @Field(() => Float, {nullable: true}) 
@@ -3031,7 +2962,7 @@ export class mjBizAppsSalesForecastSnapshot_ {
     @Field(() => Float, {nullable: true}) 
     ClosedAmount?: number;
         
-    @Field({nullable: true, description: `The full breakdown behind the four bucket totals, so a snapshot can be interrogated rather than merely displayed.`}) 
+    @Field({nullable: true, description: "The full breakdown behind the four bucket totals, so a snapshot can be interrogated rather than merely displayed."}) 
     SnapshotJSON?: string;
         
     @Field() 
@@ -3448,7 +3379,7 @@ export class mjBizAppsSalesLeadSourceTypeResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Lifecycle Stage Types
 //****************************************************************************
-@ObjectType({ description: `Where a Person or Organization sits on the journey from stranger to evangelist. This table is what makes "Lead" a STAGE rather than an entity: a lead is a common.Person carrying a LifecycleStageTypeID, not a second identity table for humans.` })
+@ObjectType({ description: "Where a Person or Organization sits on the journey from stranger to evangelist. This table is what makes \"Lead\" a STAGE rather than an entity: a lead is a common.Person carrying a LifecycleStageTypeID, not a second identity table for humans." })
 export class mjBizAppsSalesLifecycleStageType_ {
     @Field() 
     @MaxLength(36)
@@ -3656,7 +3587,7 @@ export class mjBizAppsSalesLifecycleStageTypeResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Loss Reasons
 //****************************************************************************
-@ObjectType({ description: `Why a deal was lost. Loss reason is this app\'s ONLY mandatory field and the friction is deliberate: loss reasons are the highest-value and most consistently-skipped data in any CRM.` })
+@ObjectType({ description: "Why a deal was lost. Loss reason is this app's ONLY mandatory field and the friction is deliberate: loss reasons are the highest-value and most consistently-skipped data in any CRM." })
 export class mjBizAppsSalesLossReason_ {
     @Field() 
     @MaxLength(36)
@@ -3677,7 +3608,7 @@ export class mjBizAppsSalesLossReason_ {
     @MaxLength(100)
     Category?: string;
         
-    @Field(() => Boolean, {nullable: true, description: `When 1, Sales.CloseDeal refuses a close against this reason unless Deal.LossNotes is supplied.`}) 
+    @Field(() => Boolean, {nullable: true, description: "When 1, Sales.CloseDeal refuses a close against this reason unless Deal.LossNotes is supplied."}) 
     RequiresNotes?: boolean;
         
     @Field(() => Boolean, {nullable: true}) 
@@ -3865,7 +3796,7 @@ export class mjBizAppsSalesLossReasonResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Pipeline Stages
 //****************************************************************************
-@ObjectType({ description: `An ordered stage within a pipeline. Stages carry NO IsWon/IsClosed of their own — they point at a DealStatusType that does. That indirection is what makes "Closed Won" a label rather than a behaviour, and lets a pipeline call its winning stage Signed, Booked or Enrolled with no code aware of the difference.` })
+@ObjectType({ description: "An ordered stage within a pipeline. Stages carry NO IsWon/IsClosed of their own — they point at a DealStatusType that does. That indirection is what makes \"Closed Won\" a label rather than a behaviour, and lets a pipeline call its winning stage Signed, Booked or Enrolled with no code aware of the difference." })
 export class mjBizAppsSalesPipelineStage_ {
     @Field() 
     @MaxLength(36)
@@ -3893,7 +3824,7 @@ export class mjBizAppsSalesPipelineStage_ {
     @MaxLength(36)
     ForecastCategoryTypeID?: string;
         
-    @Field({nullable: true, description: `The status a deal takes on when it ENTERS this stage. The stage names the vocabulary; the status carries the behaviour flags.`}) 
+    @Field({nullable: true, description: "The status a deal takes on when it ENTERS this stage. The stage names the vocabulary; the status carries the behaviour flags."}) 
     @MaxLength(36)
     DealStatusTypeID?: string;
         
@@ -3901,19 +3832,19 @@ export class mjBizAppsSalesPipelineStage_ {
     @MaxLength(20)
     OrderStatusOnEntry?: string;
         
-    @Field(() => Int, {nullable: true, description: `Days without activity before the board flags a deal in this stage as rotting.`}) 
+    @Field(() => Int, {nullable: true, description: "Days without activity before the board flags a deal in this stage as rotting."}) 
     RottingDays?: number;
         
     @Field({nullable: true}) 
     EntryCriteria?: string;
         
-    @Field({nullable: true, description: `Declarative JSON predicate evaluated SERVER-SIDE before a deal may leave this stage. A stage that cannot be exited without a signed mutual action plan is a config row, not a code branch.`}) 
+    @Field({nullable: true, description: "Declarative JSON predicate evaluated SERVER-SIDE before a deal may leave this stage. A stage that cannot be exited without a signed mutual action plan is a config row, not a code branch."}) 
     ExitCriteria?: string;
         
     @Field({nullable: true}) 
     RequiredFields?: string;
         
-    @Field({nullable: true, description: `"What good looks like at this stage", shown in the deal workspace. Sales enablement as a config field.`}) 
+    @Field({nullable: true, description: "\"What good looks like at this stage\", shown in the deal workspace. Sales enablement as a config field."}) 
     GuidanceMarkdown?: string;
         
     @Field(() => Boolean, {nullable: true}) 
@@ -4143,13 +4074,13 @@ export class mjBizAppsSalesPipelineStageResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Pipelines
 //****************************************************************************
-@ObjectType({ description: `A sales pipeline, owned by exactly one company. A company may have any number of pipelines; a pipeline may have any number of deals.` })
+@ObjectType({ description: "A sales pipeline, owned by exactly one company. A company may have any number of pipelines; a pipeline may have any number of deals." })
 export class mjBizAppsSalesPipeline_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field({nullable: true, description: `The owning company. NOT NULL by design — this is what makes every forecast and bookings rollup sliceable by company for free, and every deal inherits it. FK to __mj.Company.`}) 
+    @Field({nullable: true, description: "The owning company. NOT NULL by design — this is what makes every forecast and bookings rollup sliceable by company for free, and every deal inherits it. FK to __mj.Company."}) 
     @MaxLength(36)
     CompanyID?: string;
         
@@ -4157,7 +4088,7 @@ export class mjBizAppsSalesPipeline_ {
     @MaxLength(200)
     Name?: string;
         
-    @Field({nullable: true, description: `Stable identifier, unique PER COMPANY rather than globally: two operating companies may each run a pipeline they both call NEWBIZ.`}) 
+    @Field({nullable: true, description: "Stable identifier, unique PER COMPANY rather than globally: two operating companies may each run a pipeline they both call NEWBIZ."}) 
     @MaxLength(40)
     Code?: string;
         
@@ -4172,10 +4103,10 @@ export class mjBizAppsSalesPipeline_ {
     @MaxLength(36)
     DefaultForecastCategoryTypeID?: string;
         
-    @Field(() => Boolean, {nullable: true, description: `Pipeline-level default for whether deals carry catalog lines (priced mode) or are header-only with a hand-entered Amount (simple mode). Overridable per deal. Partner-referral and sponsorship pipelines may never carry lines.`}) 
+    @Field(() => Boolean, {nullable: true, description: "Pipeline-level default for whether deals carry catalog lines (priced mode) or are header-only with a hand-entered Amount (simple mode). Overridable per deal. Partner-referral and sponsorship pipelines may never carry lines."}) 
     RequiresDealLines?: boolean;
         
-    @Field({nullable: true, description: `JSON declaring the DEFAULT outcome of winning a deal in this pipeline: whether to create a contract, which contract type, where subscription lines go, where one-time lines go, and what state the resulting order lands in. A deal may override it; one remote operation (Sales.CloseDeal) reads and executes it. JSON rather than columns because the policy shape is still being learned.`}) 
+    @Field({nullable: true, description: "JSON declaring the DEFAULT outcome of winning a deal in this pipeline: whether to create a contract, which contract type, where subscription lines go, where one-time lines go, and what state the resulting order lands in. A deal may override it; one remote operation (Sales.CloseDeal) reads and executes it. JSON rather than columns because the policy shape is still being learned."}) 
     CloseWonPolicy?: string;
         
     @Field(() => Boolean, {nullable: true}) 
@@ -4193,7 +4124,7 @@ export class mjBizAppsSalesPipeline_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => Boolean, {nullable: true, description: `Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless.`}) 
+    @Field(() => Boolean, {nullable: true, description: "Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless."}) 
     IncludeInForecast?: boolean;
         
     @Field({nullable: true}) 
@@ -4402,9 +4333,9 @@ export class mjBizAppsSalesPipelineResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Sales Accounts
 //****************************************************************************
-@ObjectType({ description: `CRM attributes for an organization we sell to. An IsA extension of __mj_BizAppsCommon.Organization sharing its UUID — the account and the organization ARE one record, so a customer that is also a vendor and a member stays one row in the Organization graph.` })
+@ObjectType({ description: "CRM attributes for an organization we sell to. An IsA extension of __mj_BizAppsCommon.Organization sharing its UUID — the account and the organization ARE one record, so a customer that is also a vendor and a member stays one row in the Organization graph." })
 export class mjBizAppsSalesSalesAccount_ {
-    @Field({description: `Same value as the parent __mj_BizAppsCommon.Organization.ID. The primary key IS the foreign key; this is not a separate surrogate identity.`}) 
+    @Field({description: "Same value as the parent __mj_BizAppsCommon.Organization.ID. The primary key IS the foreign key; this is not a separate surrogate identity."}) 
     @MaxLength(36)
     ID: string;
         
@@ -4424,7 +4355,7 @@ export class mjBizAppsSalesSalesAccount_ {
     @MaxLength(36)
     LeadSourceTypeID?: string;
         
-    @Field({nullable: true, description: `A LABEL, not a routing engine. Territory assignment as a rules engine is a product in its own right and is on the not-doing list.`}) 
+    @Field({nullable: true, description: "A LABEL, not a routing engine. Territory assignment as a rules engine is a product in its own right and is on the not-doing list."}) 
     @MaxLength(100)
     Territory?: string;
         
@@ -4439,11 +4370,11 @@ export class mjBizAppsSalesSalesAccount_ {
     @MaxLength(50)
     IndustryCode?: string;
         
-    @Field({nullable: true, description: `A BAND, not a number, for the same reason as AnnualRevenueBand.`}) 
+    @Field({nullable: true, description: "A BAND, not a number, for the same reason as AnnualRevenueBand."}) 
     @MaxLength(50)
     EmployeeCountBand?: string;
         
-    @Field({nullable: true, description: `A BAND, not a number ("$1M-$5M"), on purpose. A rep's guess stored as an exact figure is false precision that later gets treated as fact.`}) 
+    @Field({nullable: true, description: "A BAND, not a number (\"$1M-$5M\"), on purpose. A rep's guess stored as an exact figure is false precision that later gets treated as fact."}) 
     @MaxLength(50)
     AnnualRevenueBand?: string;
         
@@ -4462,6 +4393,14 @@ export class mjBizAppsSalesSalesAccount_ {
         
     @Field() 
     _mj__UpdatedAt: Date;
+        
+    @Field({nullable: true, description: "Contact a new deal for this account starts with as its Primary Contact. Copied onto a deal only when the deal's Primary Contact is empty; the deal's value stays editable."}) 
+    @MaxLength(36)
+    DefaultPrimaryContactID?: string;
+        
+    @Field({nullable: true, description: "Contact a new deal for this account starts with as its Billing Contact. Copied onto a deal only when the deal's Billing Contact is empty; the deal's value stays editable. Empty means the deal's billing contact follows its primary contact."}) 
+    @MaxLength(36)
+    DefaultBillingContactID?: string;
         
     @Field({nullable: true}) 
     @MaxLength(255)
@@ -4524,6 +4463,14 @@ export class mjBizAppsSalesSalesAccount_ {
     @MaxLength(200)
     LeadSourceType?: string;
         
+    @Field({nullable: true}) 
+    @MaxLength(753)
+    DefaultPrimaryContact?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(753)
+    DefaultBillingContact?: string;
+        
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
         
@@ -4575,6 +4522,12 @@ export class CreatemjBizAppsSalesSalesAccountInput {
 
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
+
+    @Field({ nullable: true })
+    DefaultPrimaryContactID: string | null;
+
+    @Field({ nullable: true })
+    DefaultBillingContactID: string | null;
 
     @Field({ nullable: true })
     Name?: string;
@@ -4663,6 +4616,12 @@ export class UpdatemjBizAppsSalesSalesAccountInput {
 
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
+
+    @Field({ nullable: true })
+    DefaultPrimaryContactID?: string | null;
+
+    @Field({ nullable: true })
+    DefaultBillingContactID?: string | null;
 
     @Field({ nullable: true })
     Name?: string;
@@ -4796,9 +4755,9 @@ export class mjBizAppsSalesSalesAccountResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Sales Contacts
 //****************************************************************************
-@ObjectType({ description: `CRM attributes for a person we sell to. An IsA extension of __mj_BizAppsCommon.Person sharing its UUID. There is deliberately no Lead entity — a lead is a Person at a lifecycle stage.` })
+@ObjectType({ description: "CRM attributes for a person we sell to. An IsA extension of __mj_BizAppsCommon.Person sharing its UUID. There is deliberately no Lead entity — a lead is a Person at a lifecycle stage." })
 export class mjBizAppsSalesSalesContact_ {
-    @Field({description: `Same value as the parent __mj_BizAppsCommon.Person.ID. The primary key IS the foreign key.`}) 
+    @Field({description: "Same value as the parent __mj_BizAppsCommon.Person.ID. The primary key IS the foreign key."}) 
     @MaxLength(36)
     ID: string;
         
@@ -4810,7 +4769,7 @@ export class mjBizAppsSalesSalesContact_ {
     @MaxLength(36)
     LifecycleStageTypeID?: string;
         
-    @Field({nullable: true, description: `The contact's DEFAULT buying role. The role that matters per-deal lives on DealContactRole, because one contact holds different roles on different deals.`}) 
+    @Field({nullable: true, description: "The contact's DEFAULT buying role. The role that matters per-deal lives on DealContactRole, because one contact holds different roles on different deals."}) 
     @MaxLength(36)
     BuyingRoleTypeID?: string;
         
@@ -4915,8 +4874,8 @@ export class mjBizAppsSalesSalesContact_ {
     @MaxLength(200)
     LeadSourceType?: string;
         
-    @Field({nullable: true, description: `The contact's display name, followed by their primary email in brackets when they have one. Derived in vwSalesContacts; this is what lookups to a Sales Contact show instead of a GUID.`}) 
-    @MaxLength(704)
+    @Field({nullable: true, description: "The contact's display name, followed by their primary email in brackets when they have one. Derived in vwSalesContacts; this is what lookups to a Sales Contact show instead of a GUID."}) 
+    @MaxLength(753)
     DisplayNameAndEmail?: string;
         
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })

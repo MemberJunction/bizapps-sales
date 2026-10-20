@@ -43,7 +43,7 @@
       "    Inclusive end of the window. Omit for no upper bound.",
       "    e.g. 2026-12-31",
       "  CapturedOnOrBefore (date)",
-      "    Show the forecast as it stood on or before this timestamp. This is the \"as we saw it then\" filter, distinct from the period filters.",
+      "    Show the forecast as it stood at the end of this business day (snapshots captured on or before it, in the business time zone). This is the \"as we saw it then\" filter, distinct from the period filters.",
       "    e.g. 2026-08-01"
     ],
     "sync": {

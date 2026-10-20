@@ -1,5 +1,166 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.18.0
+
+### Minor Changes
+
+- 6e77e8f: Order review by trigger support (bc-aidp-next-golive#320 §5). Sales now registers `DealOrderLink` with orders' `RegisterOrderDealLink` seam at bootstrap, answering which deal created an order from `Deal.OrderID`, so orders can let a deal order confirm without review. The seam ships in `@mj-biz-apps/orders-entities` 5.36.0; with an older orders the registration is skipped and logged. A pipeline's `CloseWonPolicy.CloseWonTasks.RaiseOrderReviewTask: false` stops a won deal raising the `ORDER_REVIEW` task; absent or `true` keeps it, so existing installs are unchanged.
+- 20e1899: MemberJunction floor raised to 6.1.6, and a batch of non-UX fixes:
+
+  - Breaking for direct importers of `@mj-biz-apps/sales-ng`: the unmounted `DealWorkspaceComponent` and the validation helpers only it used (`DiscountRefusalIssues`, `ShouldRefuseLineRemoval`, `LineRemovalRefusedIssues`, `UnlinkedLineIssues`, `MergeValidation`) are removed (#291). `IDownstreamSeam` gains `UpdateContractFromDeal` (#278).
+  - Closing a reopened Won deal Won again reuses its contract, refreshing unsigned terms, instead of creating a second one (#278).
+  - Changing a deal's contact or account moves its order's bill-to while the order is Draft or Quoted and still bills the previous party (#319).
+  - Deal stage events refuse updates and deletes on the server, and the API no longer offers them (#348).
+  - Slipped Deals, Stage Conversion and Forecast History count whole business days at both period bounds; Slipped Deals no longer fails on audit rows that are not JSON (#289).
+  - The Deal form's inline-create key workaround is removed now that MJ 6.1.6 sends the written key (#207).
+  - CodeGen no longer writes recurring reconcilers, including the field prune, into migrations (#345).
+
+### Patch Changes
+
+- 7c5daa9: The close-won-tasks checks no longer fail when a won close reports the pending contract-link note: WT10 allows `info` notes, and WT13 finds the no-order warning by its exported wording (`NO_ORDER_ISSUE_PREFIX`) instead of a phrase the note also contains. The coverage gate expects all 18 close-won-tasks checks. The bizapps-tasks peer floor is raised to `^1.7.0` to match `mj-app.json`, and the integration tests declare the accounting, common, contracts and orders server packages the harness and demo seed load (`importSibling` now tries those declarations before scanning for sibling checkouts), so a plain install runs them without sibling checkouts. `.env.example` documents `MJ_BASE_ENCRYPTION_KEY`.
+- Updated dependencies [7041a49]
+- Updated dependencies [769158a]
+- Updated dependencies [0cd81c5]
+- Updated dependencies [20e1899]
+  - @mj-biz-apps/sales-entities@6.18.0
+
+## 6.17.0
+
+### Patch Changes
+
+- Updated dependencies [2018641]
+- Updated dependencies [7b134f9]
+  - @mj-biz-apps/sales-entities@6.17.0
+
+## 6.16.0
+
+### Minor Changes
+
+- fc1f0aa: An open deal no longer reads "Closed" because someone typed a date into Actual Close Date (#252). Actual Close Date, Closed At and Closed By are now read-only on the deal form, and the deal save refuses a write to them except from `Sales.CloseDeal` and `Sales.ReopenDeal`. Expected Close Date moved from the Commercial panel to the Pipeline panel, next to stage and probability, and the header labels an open deal's date "Expected close". The close fields carry descriptions saying which date is which.
+- c8c11b3: Close-won tasks stop being routed to somebody who is not there.
+
+  The seeded `CloseWonPolicy` on both pipelines sent every Order Review and Contract Processing task to a People id created in exactly one place: `scripts/seed-demo-data.sh`, where it is the demo's partner rep. A host that ran the demo seed worked; every other host did not. On QA that row never existed, so the tasks read as assigned while no queue held them and the order review control never ran. `TaskAssignment.AssigneeRecordID` is polymorphic, so there is no foreign key and nothing refused the row.
+
+  `CloseWonTaskService` now reads the assignee record before writing the assignment. A record that is not there refuses to route and names the id, the entity and the policy key to fix — an unrouted task at least reads as unrouted. A check that cannot run routes anyway and records that it could not tell, so a transient database problem does not quietly stop routing a deployment that is configured correctly.
+
+  The policy ships with `AssigneeRecordID` null, which is the documented unconfigured state: there is no internal finance person seeded to point at, and per bc-aidp-next-golive#320 the people who hold each role are loaded per deployment. The migration clears the placeholder only where it is still the placeholder, so a deployment that already configured a real person keeps it.
+
+  `Order Review` is also flagged `IsApproval`, so the approvals inbox lists it — its own description calls it the control on money leaving the building. `Contract Processing` is deliberately not flagged: it is work to do rather than a decision to make, and reaches its owner through My Tasks. This raises the declared floor on bizapps-tasks to >=1.7.0, where `TaskType.IsApproval` arrives.
+
+- 5623093: Every company can have its own pipeline, and the pipeline pickers filter by company.
+
+  A deal sells as its pipeline's company, and the app seeds its pipelines on one placeholder company, so a deal for any other company had no pipeline with the current stages. The new `Sales.CopyDefaultPipelineToCompanies` Action copies the default pipeline (the one marked `IsDefault`) and all of its stages onto every company that has no pipeline with the same Code. Each company's copy saves in one transaction, the copies are not marked default, and a second run skips companies that already have the pipeline, so it can run again after a company is added.
+
+  The deal form, the deal workspace and the board gain a Company control that narrows the pipeline list to that company, with the default pipeline's company first. Choosing a company moves the deal to that company's first pipeline. Each pipeline option names its company, for example "B2B (Acme)". Within a company, its copy of the default pipeline comes first and legacy pipelines follow. The control is hidden when one company owns every pipeline.
+
+  The seeded stages now look up their pipeline by ID instead of by Code, because the copies share the Code and MetadataSync resolves a lookup to the first matching row.
+
+  `PipelineOption` (deal form) and `PipelineLookup` (workspace) now carry `Code`, `IsDefault` and `DisplayRank`.
+
+### Patch Changes
+
+- 17ff470: Picking a deal's Primary Contact fills an empty Billing Contact with the same person, and the deal's order bills the Billing Contact.
+
+  The primary contact is usually the person invoiced, but Billing Contact stayed blank, so a rep searched for the same person twice. `DealEntity.Set` now copies a newly chosen Primary Contact into an empty Billing Contact. It runs for the deal form and the deal workspace alike, never overwrites a Billing Contact that is filled in, and the rep can still change or clear it. Loading a deal fills nothing.
+
+  When the server creates a deal's order, `BillToPersonID` now takes the Billing Contact, falling back to the Primary Contact when it is empty. Before, it read only the Primary Contact, so a different Billing Contact never reached the order. Orders already created keep their bill-to person.
+
+- 966e18b: A close now sets the deal's probability and forecast category, and a reopen puts them back.
+
+  A close declares its transition, which switches the stage defaults off, and nothing else wrote the probability, so every won or lost deal kept the figure it had while open. `Sales.CloseDeal` now writes the closing stage's probability and forecast category when that stage's status declares the same outcome, and otherwise 100 for won and 0 for lost from the status flags. The close's stage event still stamps the pre-close value.
+
+  When the pipeline has no active stage for the outcome, the close still succeeds but returns a warning naming the pipeline and the stage the deal stayed in, instead of saying nothing.
+
+  `Sales.ReopenDeal` restores the probability the close event stamped, and the forecast category of the stage the deal returns to, so a reopened deal is not left at 100 in the closed category.
+
+  The D2C pipeline gains the Lost stage it was missing (probability 0, closed forecast category, Voided on entry), matching B2B.
+
+- e475d61: The refusal for a second holder of a single-holder deal role no longer reads "This deal already has a Owner / AE". It now says "This deal already has someone in the Owner / AE role (name)", so the sentence is correct whatever the role is called. The refusal itself is unchanged.
+- 3929ba8: A deal team row in the owner role must name an Employee. Saving one that names a Person is refused with a message pointing to the Employee field, instead of saving and leaving the deal with no owner.
+- 0b93b39: A pipeline can no longer lose its last active won stage or its last active lost stage.
+
+  A close moves a deal into the active stage on its pipeline whose status declares the outcome. A new server-side `PipelineStageEntityServer` refuses a stage save or delete that would take that stage away: deactivating it, giving it a status that does not declare the outcome, moving it to another pipeline, or deleting it, when no other active stage on the pipeline declares the same outcome. The refusal names the pipeline and the outcome.
+
+  Pipelines that never had such a stage are not blocked; a close on them still succeeds and warns that the deal stayed in its stage.
+
+- a43114c: Changing a deal team row's employee no longer fails with a raw SQL constraint error.
+
+  A team member is either an employee or a person, and the table enforces it. Nothing above the database did, so picking a new employee on a row whose Person was filled saved as both and came back as a CHECK constraint error, on the path the duplicate-role refusal tells a user to take.
+
+  A new shared `DealTeamMemberEntity` runs in the browser and on the server. Giving EmployeeID or PersonID a value clears the other, and `Validate()` refuses a row with both or neither with a message naming the fix. `DealTeamMemberEntityServer` now extends it, so its duplicate-role check and owner re-stamp are unchanged.
+
+- Updated dependencies [17ff470]
+- Updated dependencies [fc1f0aa]
+- Updated dependencies [3d02df4]
+- Updated dependencies [1738cb0]
+- Updated dependencies [2925963]
+- Updated dependencies [bcc41d7]
+- Updated dependencies [91e3f43]
+- Updated dependencies [a43114c]
+  - @mj-biz-apps/sales-entities@6.16.0
+
+## 6.15.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.15.2
+
+## 6.15.1
+
+### Patch Changes
+
+- 19ecdc2: The packages' dependencies on each other are caret ranges (`^6.15.0`) instead of exact versions. A host that pins or overrides one package of this app at a later compatible version no longer forces an exact-match copy of its siblings. Changesets keeps the caret and moves its floor on each release.
+  - @mj-biz-apps/sales-entities@6.15.1
+
+## 6.15.0
+
+### Minor Changes
+
+- dbacb4c: An order whose deal is not Won can no longer be confirmed.
+
+  A deal closed Won mints an order. Reopening the deal puts it back to Open — and the order could still be confirmed from the order screen, booking a journal entry, a subscription and twelve recognition entries against a deal sitting Open at 75%. Sales already refuses the reverse: `Sales.ReopenDeal` will not reopen a deal whose order has booked, because the ledger has moved.
+
+  Orders cannot enforce this alone. It does not depend on Sales, and there is no link to follow — `Deal.OrderID` points at the order, while `OrderHeader` carries no `DealID`. So Orders asks through `RegisterOrderConfirmVeto` and this answers, the same shape as the existing line-edit veto.
+
+  Decided by the `IsWon` flag, never by the status name, so a deployment that renames or adds a winning status stays covered. An order no deal points at is allowed without comment: orders are created directly too, and refusing those would make installing Sales break ordinary ordering.
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.15.0
+
+## 6.14.0
+
+### Minor Changes
+
+- ced96e0: Closing a won deal links its order to the contract the close produced (`MJ_BizApps_Contracts: Contract Orders`), so contracts copies the contract's annual increase and carry-discount term to the order's subscriptions (bizapps-contracts#77). `IDownstreamSeam` gains `LinkOrderToContract`. A contracts release without order links is reported as a close warning, not a failure.
+
+### Patch Changes
+
+- ed649bb: A contract created at Closed Won now takes its Contract Type's renewal defaults for every renewal field the deal left unset. The deal's Auto-renew answer and any negotiated cancellation window or uplift still win.
+- 089e4d7: Closed Won finds the contract type a policy names by contracts' `Code` first and its `Name` second,
+  so a policy keeps working before and after contracts adds `ContractType.Code`, and a renamed type no
+  longer stops contract creation once the policy names its code.
+- 900cdb0: A deal line for a product the customer already holds now asks whether it is the next term of that subscription or a new subscription on its own dates, the same choice the order line offers, and saves the answer on the line (`OrderLine.SubscriptionAction`). Close Won refuses a deal while such a line has no answer, with one error per line in the `lines` section, because the close confirms the order and an unanswered line would otherwise be moved to start after the existing coverage ends. On a deal type that requires a renewal source, unanswered lines are answered "next term" inside the close instead of refused. Requires bizapps-orders with `FindUnansweredHeldLines`.
+- bb6025d: The daily forecast snapshot now writes rows. The forecast source factory defaulted to none and nothing replaced it outside tests, so every scheduled `Sales.CaptureForecastSnapshot` run reported success and wrote no `ForecastSnapshot` rows. The default now reads the `Sales: Forecast by Owner` query (exported as `DEFAULT_FORECAST_QUERY`), so each run writes one row per company, pipeline and owner for the current month. The no-source messages now say the default was replaced rather than that the queries do not exist.
+- b3691c6: Requires bizapps-orders 5.30.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.30.0`, `mj-app.json` `>=5.30.0`). That release exports `FindUnansweredHeldLines` and `HoldingSubscriberFor`, which the Close Won check uses. orders 5.30.0 needs MemberJunction 6.1.5, so the `@memberjunction/*` ranges and `mjVersionRange` floor at 6.1.5. The lockfile resolves bizapps-accounting 0.22.0, which orders-ng 5.30.0 requires.
+- c5d7b0b: Ship the `sales` and `sales:write` API scopes with an MJAPI ceiling, so an API key can be granted `Sales.CloseDeal` and `Sales.ReopenDeal` (#186).
+- 5d4c5f3: Correct comments that described contracts v1 and orders' old booked statuses. The close-won route probe reads contracts v2's `MustBeChild`; the two probes built on the removed customer XOR constraint are deleted. The mutation driver gives expected-miss mutants their own verdict instead of a vacuous OK, CI's changeset warning looks at the PR rather than the tree, and the Explorer harness preflight points at the QA guide instead of commands that do not exist.
+- Updated dependencies [65ae0b7]
+- Updated dependencies [ced96e0]
+- Updated dependencies [b3691c6]
+- Updated dependencies [9a57950]
+  - @mj-biz-apps/sales-entities@6.14.0
+
+## 6.13.0
+
+### Patch Changes
+
+- 29675ee: A deal closed through `Sales.CloseDeal` now records `ActualCloseDate` as the business day it closed on, read from `BusinessTimeZoneEngine` for the deal's company, instead of the UTC day (bc-aidp-next-golive#168). Before, a deal closed in the evening Central (from 6 PM, 7 PM in daylight time) was stamped with the next day, so a win on a month's last evening counted in the next month's bookings and win rate. Existing rows are not rewritten. The close-won tasks' `DueAt` now counts `DueInDays` from that business close day (`ActualCloseDate`) rather than from the UTC day of `ClosedAt`. It is still stored as UTC midnight of the due day, the value the tasks app's own date picker stores for a hand-made task due that day, so after a close at 9:30 PM Central on 30 September a five-day task now holds 5 October (`2026-10-05T00:00Z`) where it held 6 October. The tasks app shows and ages `DueAt` in the viewer's zone, so in Central it lists that task as due Oct 4 and overdue from 7 PM that evening, exactly as it does a hand-made task due 5 October; for an evening close that is one day earlier than before, and for a daytime close nothing changes. The contracts seam input also carries `ExecutionDate` and `StartDate` as `YYYY-MM-DD` rather than the server's local rendering of the date.
+- 2e66781: MemberJunction and other BizApps packages are peer dependencies with caret ranges (nothing in `dependencies`), so a host keeps one copy of each. The common, orders and tasks packages moved from `dependencies` to `peerDependencies`; every such peer has an exact `devDependencies` anchor for local builds. Adds `check-dependency-model` to CI.
+- Updated dependencies [2e66781]
+- Updated dependencies [86030e7]
+  - @mj-biz-apps/sales-entities@6.13.0
+
 ## 6.12.3
 
 ### Patch Changes

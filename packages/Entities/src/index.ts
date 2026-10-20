@@ -20,6 +20,12 @@ export * from './generated/remote_operations';
 export * from './deal-entity';
 
 /**
+ * The shared `DealTeamMember` subclass: a team member is an employee or a person, never both. Runs in
+ * the browser and on the server; `DealTeamMemberEntityServer` extends it.
+ */
+export * from './deal-team-member-entity';
+
+/**
  * The typed seams the close flow calls downstream, plus the stub that stands in while neither sibling
  * is reachable. Read the file header before wiring anything: the blockers are recorded there, and the
  * `IsLive` flag is what tells a caller whether a routing result means "created" or only "planned".
@@ -48,6 +54,12 @@ export * from './close-lock';
 export * from './amount-freshness';
 
 /**
+ * The refusal a stage event edit or delete gets, shared by `DealStageEventEntityServer` and the Explorer
+ * form so both say the same thing (#348).
+ */
+export * from './stage-event-append-only';
+
+/**
  * Forces the generated entity subclasses to be loaded. Without an explicit
  * import + call, tree-shaking drops the generated entities because they are not
  * directly referenced. Import and call this from the app bootstrap so the
@@ -56,6 +68,9 @@ export * from './amount-freshness';
 export function LoadGeneratedEntities(): void {
 }
 export * from './discount-conversion.js';
+
+// A deal line's discount as the Price concession orders' confirm gate holds on (golive#305).
+export * from './discount-concession.js';
 
 /** Activity vocabulary — shared, because the deal-activity pane needs the codes too. */
 export * from './activities/activity-vocabulary.js';

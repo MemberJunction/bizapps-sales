@@ -41,6 +41,7 @@
  */
 import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import {
     ChangeDetectorRef,
     Component,
@@ -50,8 +51,33 @@ import {
     inject,
 } from '@angular/core';
 
+import { FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
+
 import { DealWorkspaceService, type DealRosterRow } from '../workspace/deal-workspace.service';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
+import {
+    CompanyLabel,
+    CompanyOfPipeline,
+    DefaultCompanyID,
+    PipelineCompanies,
+    PipelinesForCompany,
+    type PipelineCompany,
+} from '../data/company-pipelines';
+
+/**
+ * A `DATE` column's day, as a value the `date` pipe can format with `'UTC'` (bc-aidp-next-golive#168).
+ *
+ * `ExpectedCloseDate` is a calendar day handed back as UTC midnight, so formatting it in the viewer's
+ * zone shows the PREVIOUS day to anyone west of Greenwich — 30 September read as "Sep 29" in Chicago.
+ * The card now passes `'UTC'`, and this normalises the value first because the roster can deliver a
+ * `Date` OR a string: Angular parses a bare `YYYY-MM-DD` string as LOCAL midnight, which `'UTC'` would
+ * then move back a day for anyone EAST of Greenwich. Through `ToCalendarDay` both shapes become the
+ * same UTC midnight, so one pipe argument is right everywhere.
+ */
+export function DisplayDay(value: string | Date | null | undefined): Date | null {
+    const day = ToCalendarDay(value);
+    return day ? FromCalendarDay(day) : null;
+}
 
 /**
  * The one currency a set of cards shares, or NULL when they do not share one.
@@ -122,7 +148,7 @@ export interface BoardColumn {
 @Component({
     selector: 'mjs-deal-board',
     standalone: true,
-    imports: [CommonModule, CdkDropList, CdkDrag],
+    imports: [CommonModule, FormsModule, CdkDropList, CdkDrag],
     templateUrl: './deal-board.component.html',
     styleUrls: ['./deal-board.component.css'],
 })
@@ -146,13 +172,46 @@ export class DealBoardComponent {
     public Message: string | null = null;
     public Moving = false;
 
-    /** The pipeline actually in view — the chosen one, or the first that has any stages. */
+    /** The company filter's choice; null until a rep picks one, which means the default company. */
+    public SelectedCompanyID: string | null = null;
+
+    /** Every company that owns a pipeline, default company first (#327). */
+    public get Companies(): PipelineCompany[] {
+        return PipelineCompanies(this.Pipelines);
+    }
+
+    /** The company in view — the chosen one, or the default pipeline's company. */
+    public get ActiveCompanyID(): string | null {
+        return this.SelectedCompanyID ?? DefaultCompanyID(this.Pipelines);
+    }
+
+    /** The tabs: the active company's pipelines, in picker order. */
+    public get CompanyPipelines(): PipelineLookup[] {
+        return PipelinesForCompany(this.Pipelines, this.ActiveCompanyID);
+    }
+
+    /** The pipeline actually in view — the chosen one, or the company's first that has any stages. */
     public get ActivePipelineID(): string | null {
         if (this.SelectedPipelineID) {
             return this.SelectedPipelineID;
         }
-        const withStages = this.Pipelines.find((p) => this.Stages.some((s) => s.PipelineID === p.ID));
-        return withStages?.ID ?? this.Pipelines[0]?.ID ?? null;
+        const pipelines = this.CompanyPipelines;
+        const withStages = pipelines.find((p) => this.Stages.some((s) => s.PipelineID === p.ID));
+        return withStages?.ID ?? pipelines[0]?.ID ?? null;
+    }
+
+    /** A new company drops a pipeline that belongs to the old one; the company's first takes over. */
+    public SelectCompany(companyID: string | null): void {
+        this.SelectedCompanyID = companyID;
+        if (CompanyOfPipeline(this.Pipelines, this.SelectedPipelineID) !== companyID) {
+            this.SelectedPipelineID = null;
+        }
+        this.Message = null;
+        this.cdr.detectChanges();
+    }
+
+    public CompanyText(company: PipelineCompany): string {
+        return CompanyLabel(company);
     }
 
     /**
@@ -322,7 +381,7 @@ export class DealBoardComponent {
         if (target.IsClosing) {
             // Belt and braces: `CanDropInto` already refuses this, but a lock is worth two guards.
             this.Message =
-                `"${target.Label}" closes and locks a deal. Open it in the workspace and close it there, ` +
+                `"${target.Label}" closes and locks a deal. Open the deal and close it there, ` +
                 'so the win or loss is recorded deliberately.';
             this.cdr.detectChanges();
             return;
@@ -382,6 +441,8 @@ export class DealBoardComponent {
         return this.Pipelines.find((p) => p.ID === pipelineID)?.Name ?? '—';
     }
 
+    /** Exposed for the card's close date. See {@link DisplayDay}. */
+    public readonly DisplayDay = DisplayDay;
     /** Track by ID so a re-render does not tear down every card. */
     public TrackCard = (_: number, deal: DealRosterRow): string => deal.ID;
     /** Exposed for the template's per-card fallback. See DEFAULT_DISPLAY_CURRENCY. */

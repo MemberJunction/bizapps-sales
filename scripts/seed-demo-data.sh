@@ -138,6 +138,8 @@ DELETE FROM __mj_BizAppsSales.Pipeline        WHERE Code IN ('B2B','D2C','ENT-NE
 -- script already applies to the company below: a record another app still points at is not sales' to
 -- delete. The SalesAccount/SalesContact rows go either way, because those ARE sales' -- it is only the
 -- shared parent that is spared.
+-- The Relationship rows go first: they reference both the demo Persons and Organizations below.
+DELETE FROM __mj_BizAppsCommon.Relationship   WHERE ID IN ('AC111111-0000-4000-A000-000000000001','AC111111-0000-4000-A000-000000000002','AC111111-0000-4000-A000-000000000003');
 DELETE FROM __mj_BizAppsSales.SalesContact    WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
 BEGIN TRY
     DELETE FROM __mj_BizAppsCommon.ContactMethod WHERE PersonID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
@@ -284,6 +286,25 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.SalesContact WHERE ID=@c4)
   INSERT INTO __mj_BizAppsSales.SalesContact (ID, LifecycleStageTypeID, LeadSourceTypeID, Seniority, OptedOutOfOutreach)
     VALUES (@c4, @lcOpp, @lsPart, N'Partner Principal', 0);
 
+-- ==================== WHO WORKS WHERE — what fills an account's Contacts panel ====================
+--
+-- Sales Contacts carry no account column. The account's Contacts panel lists the people on the other
+-- end of an active Common Relationship with it (bizapps-sales#301), so without these rows every
+-- account opens with an empty list. Each contact is linked to the account its deals are on.
+--
+-- Ravi (@c4) is deliberately NOT linked: he is a partner rep (D-6), employed by a partner this seed
+-- does not model, and linking him to a customer would claim he works there.
+DECLARE @rtEmployee UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsCommon.RelationshipType WHERE Name=N'Employee');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsCommon.Relationship WHERE ID='AC111111-0000-4000-A000-000000000001')
+  INSERT INTO __mj_BizAppsCommon.Relationship (ID, RelationshipTypeID, FromPersonID, ToOrganizationID, Title, Status)
+    VALUES ('AC111111-0000-4000-A000-000000000001', @rtEmployee, @c1, @acc1, N'VP Operations', N'Active');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsCommon.Relationship WHERE ID='AC111111-0000-4000-A000-000000000002')
+  INSERT INTO __mj_BizAppsCommon.Relationship (ID, RelationshipTypeID, FromPersonID, ToOrganizationID, Title, Status)
+    VALUES ('AC111111-0000-4000-A000-000000000002', @rtEmployee, @c2, @acc2, N'Director of Plant Systems', N'Active');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsCommon.Relationship WHERE ID='AC111111-0000-4000-A000-000000000003')
+  INSERT INTO __mj_BizAppsCommon.Relationship (ID, RelationshipTypeID, FromPersonID, ToOrganizationID, Title, Status)
+    VALUES ('AC111111-0000-4000-A000-000000000003', @rtEmployee, @c3, @acc3, N'CFO', N'Active');
+
 -- ==================== CONTACT METHOD — what makes the Outlook demo show anything ====================
 --
 -- WITHOUT THIS ROW THE MAIL INGEST WRITES NOTHING, and it fails in the least obvious way: the run
@@ -417,6 +438,31 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe2)
 -- shipped metadata cannot express that: it has one company to work with and no basis for inventing a
 -- second, so demonstrating two is this seed's job.
 UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = @co2 WHERE ID = @pipe2 AND CompanyID <> @co2;
+
+-- ── THE DEMO OWNS ITS OWN FINANCE ASSIGNEE (bc-aidp-next-golive#326) ──────────────────────────
+--
+-- The shipped policy in `metadata/pipelines/` no longer names a person. That id was THIS seed's
+-- partner rep (@c4 above), so on any host without this seed the close-won tasks pointed at somebody
+-- who does not exist -- they read as assigned while no queue held them, which is worse than
+-- unrouted because unrouted says so. The app now ships `AssigneeRecordID: null` and reports an
+-- unrouted task naming the key to set.
+--
+-- Which leaves the demo to say who ITS assignee is, and it cannot do that through the INSERTs
+-- above: both are guarded by IF NOT EXISTS and a metadata push has already created these rows, so
+-- on every host that has one the INSERT never fires. The repoints only move the company. Without
+-- the statement below the demo would raise close-won tasks that route nowhere, and the thing this
+-- seed exists to demonstrate would quietly stop demonstrating it.
+--
+-- MATCHED ON `null`, not applied unconditionally: a host that has already configured a real
+-- finance assignee keeps the one it chose. The spacing matches what the metadata ships -- the
+-- INSERTs above write the same key without a space, and those rows already carry the id.
+UPDATE __mj_BizAppsSales.Pipeline
+   SET CloseWonPolicy = REPLACE(
+           CloseWonPolicy,
+           '"AssigneeRecordID": null',
+           '"AssigneeRecordID": "C0111111-0000-4000-A000-000000000004"')
+ WHERE ID IN (@pipe1, @pipe2)
+   AND CloseWonPolicy LIKE '%"AssigneeRecordID": null%';
 
 DECLARE @t1 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000001';
 DECLARE @t2 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000002';
@@ -762,7 +808,7 @@ cat <<'NEXT'
 Demo data seeded. Remove it again with:
     scripts/seed-demo-data.sh --remove
 
-Walkthrough and talking points: docs/DEMO.md
+Test scenarios that use this data: docs/QA-GUIDE.md section 5
 NEXT
 
 # ── EXIT NON-ZERO IF THE PRICED HALF DID NOT LAND ────────────────────────────────────────────────

@@ -172,7 +172,7 @@ export const mjBizAppsSalesDealContactRoleSchema = z.object({
     SalesContact: z.string().describe(`
         * * Field Name: SalesContact
         * * Display Name: Sales Contact
-        * * SQL Data Type: nvarchar(704)`),
+        * * SQL Data Type: nvarchar(753)`),
     BuyingRoleType: z.string().nullable().describe(`
         * * Field Name: BuyingRoleType
         * * Display Name: Buying Role Type
@@ -577,7 +577,7 @@ export const mjBizAppsSalesDealTeamMemberSchema = z.object({
     Person: z.string().nullable().describe(`
         * * Field Name: Person
         * * Display Name: Person
-        * * SQL Data Type: nvarchar(201)`),
+        * * SQL Data Type: nvarchar(250)`),
     DealRole: z.string().describe(`
         * * Field Name: DealRole
         * * Display Name: Deal Role
@@ -770,11 +770,13 @@ export const mjBizAppsSalesDealSchema = z.object({
     ExpectedCloseDate: z.date().nullable().describe(`
         * * Field Name: ExpectedCloseDate
         * * Display Name: Expected Close Date
-        * * SQL Data Type: date`),
+        * * SQL Data Type: date
+        * * Description: The day the deal is expected to close. Update it as the date moves; the actual close date is set when the deal is closed.`),
     ActualCloseDate: z.date().nullable().describe(`
         * * Field Name: ActualCloseDate
         * * Display Name: Actual Close Date
-        * * SQL Data Type: date`),
+        * * SQL Data Type: date
+        * * Description: The business day the deal closed on, in its company's time zone. Set by closing the deal and cleared by reopening it; it cannot be edited. For when an open deal is expected to close, use Expected Close Date.`),
     Probability: z.number().nullable().describe(`
         * * Field Name: Probability
         * * Display Name: Probability
@@ -862,12 +864,14 @@ export const mjBizAppsSalesDealSchema = z.object({
     ClosedAt: z.date().nullable().describe(`
         * * Field Name: ClosedAt
         * * Display Name: Closed At
-        * * SQL Data Type: datetimeoffset`),
+        * * SQL Data Type: datetimeoffset
+        * * Description: The moment the deal was closed. Set by closing the deal and cleared by reopening it; it cannot be edited. For when an open deal is expected to close, use Expected Close Date.`),
     ClosedByUserID: z.string().nullable().describe(`
         * * Field Name: ClosedByUserID
         * * Display Name: Closed By User ID
         * * SQL Data Type: uniqueidentifier
-        * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)`),
+        * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)
+        * * Description: The user who closed the deal. Set by closing the deal and cleared by reopening it; it cannot be edited.`),
     OrderID: z.string().nullable().describe(`
         * * Field Name: OrderID
         * * Display Name: Order ID
@@ -927,11 +931,11 @@ export const mjBizAppsSalesDealSchema = z.object({
     PrimaryContact: z.string().nullable().describe(`
         * * Field Name: PrimaryContact
         * * Display Name: Primary Contact
-        * * SQL Data Type: nvarchar(704)`),
+        * * SQL Data Type: nvarchar(753)`),
     BillingContact: z.string().nullable().describe(`
         * * Field Name: BillingContact
         * * Display Name: Billing Contact
-        * * SQL Data Type: nvarchar(704)`),
+        * * SQL Data Type: nvarchar(753)`),
     Company: z.string().describe(`
         * * Field Name: Company
         * * Display Name: Company
@@ -1602,6 +1606,18 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    DefaultPrimaryContactID: z.string().nullable().describe(`
+        * * Field Name: DefaultPrimaryContactID
+        * * Display Name: Default Primary Contact ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+        * * Description: Contact a new deal for this account starts with as its Primary Contact. Copied onto a deal only when the deal's Primary Contact is empty; the deal's value stays editable.`),
+    DefaultBillingContactID: z.string().nullable().describe(`
+        * * Field Name: DefaultBillingContactID
+        * * Display Name: Default Billing Contact ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+        * * Description: Contact a new deal for this account starts with as its Billing Contact. Copied onto a deal only when the deal's Billing Contact is empty; the deal's value stays editable. Empty means the deal's billing contact follows its primary contact.`),
     Name: z.string().describe(`
         * * Field Name: Name
         * * Display Name: Name
@@ -1668,6 +1684,14 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Field Name: LeadSourceType
         * * Display Name: Lead Source Type
         * * SQL Data Type: nvarchar(200)`),
+    DefaultPrimaryContact: z.string().nullable().describe(`
+        * * Field Name: DefaultPrimaryContact
+        * * Display Name: Default Primary Contact
+        * * SQL Data Type: nvarchar(753)`),
+    DefaultBillingContact: z.string().nullable().describe(`
+        * * Field Name: DefaultBillingContact
+        * * Display Name: Default Billing Contact
+        * * SQL Data Type: nvarchar(753)`),
 });
 
 export type mjBizAppsSalesSalesAccountEntityType = z.infer<typeof mjBizAppsSalesSalesAccountSchema>;
@@ -1814,7 +1838,7 @@ export const mjBizAppsSalesSalesContactSchema = z.object({
     DisplayNameAndEmail: z.string().describe(`
         * * Field Name: DisplayNameAndEmail
         * * Display Name: Name and Email
-        * * SQL Data Type: nvarchar(704)
+        * * SQL Data Type: nvarchar(753)
         * * Description: The contact's display name, followed by their primary email in brackets when they have one. Derived in vwSalesContacts; this is what lookups to a Sales Contact show instead of a GUID.`),
 });
 
@@ -2289,7 +2313,7 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
     /**
     * * Field Name: SalesContact
     * * Display Name: Sales Contact
-    * * SQL Data Type: nvarchar(704)
+    * * SQL Data Type: nvarchar(753)
     */
     get SalesContact(): string {
         return this.Get('SalesContact');
@@ -2729,6 +2753,18 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
         const compositeKey: CompositeKey = new CompositeKey();
         compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
         return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * MJ_BizApps_Sales: Deal Stage Events - AllowDeleteAPI is set to 0 in the database.  Delete is not allowed, so this method is generated to override the base class method and throw an error. To enable delete for this entity, set AllowDeleteAPI to 1 in the database.
+    * @public
+    * @method
+    * @override
+    * @memberof mjBizAppsSalesDealStageEventEntity
+    * @throws {Error} - Delete is not allowed for MJ_BizApps_Sales: Deal Stage Events, to enable it set AllowDeleteAPI to 1 in the database.
+    */
+    public override async Delete(): Promise<boolean> {
+        throw new Error('Delete is not allowed for MJ_BizApps_Sales: Deal Stage Events, to enable it set AllowDeleteAPI to 1 in the database.');
     }
 
     /**
@@ -3368,7 +3404,7 @@ export class mjBizAppsSalesDealTeamMemberEntity extends BaseEntity<mjBizAppsSale
     /**
     * * Field Name: Person
     * * Display Name: Person
-    * * SQL Data Type: nvarchar(201)
+    * * SQL Data Type: nvarchar(250)
     */
     get Person(): string | null {
         return this.Get('Person');
@@ -3929,6 +3965,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: ExpectedCloseDate
     * * Display Name: Expected Close Date
     * * SQL Data Type: date
+    * * Description: The day the deal is expected to close. Update it as the date moves; the actual close date is set when the deal is closed.
     */
     get ExpectedCloseDate(): Date | null {
         return this.Get('ExpectedCloseDate');
@@ -3941,6 +3978,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: ActualCloseDate
     * * Display Name: Actual Close Date
     * * SQL Data Type: date
+    * * Description: The business day the deal closed on, in its company's time zone. Set by closing the deal and cleared by reopening it; it cannot be edited. For when an open deal is expected to close, use Expected Close Date.
     */
     get ActualCloseDate(): Date | null {
         return this.Get('ActualCloseDate');
@@ -4173,6 +4211,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Field Name: ClosedAt
     * * Display Name: Closed At
     * * SQL Data Type: datetimeoffset
+    * * Description: The moment the deal was closed. Set by closing the deal and cleared by reopening it; it cannot be edited. For when an open deal is expected to close, use Expected Close Date.
     */
     get ClosedAt(): Date | null {
         return this.Get('ClosedAt');
@@ -4186,6 +4225,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     * * Display Name: Closed By User ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)
+    * * Description: The user who closed the deal. Set by closing the deal and cleared by reopening it; it cannot be edited.
     */
     get ClosedByUserID(): string | null {
         return this.Get('ClosedByUserID');
@@ -4320,7 +4360,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     /**
     * * Field Name: PrimaryContact
     * * Display Name: Primary Contact
-    * * SQL Data Type: nvarchar(704)
+    * * SQL Data Type: nvarchar(753)
     */
     get PrimaryContact(): string | null {
         return this.Get('PrimaryContact');
@@ -4329,7 +4369,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     /**
     * * Field Name: BillingContact
     * * Display Name: Billing Contact
-    * * SQL Data Type: nvarchar(704)
+    * * SQL Data Type: nvarchar(753)
     */
     get BillingContact(): string | null {
         return this.Get('BillingContact');
@@ -6117,6 +6157,34 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     }
 
     /**
+    * * Field Name: DefaultPrimaryContactID
+    * * Display Name: Default Primary Contact ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+    * * Description: Contact a new deal for this account starts with as its Primary Contact. Copied onto a deal only when the deal's Primary Contact is empty; the deal's value stays editable.
+    */
+    get DefaultPrimaryContactID(): string | null {
+        return this.Get('DefaultPrimaryContactID');
+    }
+    set DefaultPrimaryContactID(value: string | null) {
+        this.Set('DefaultPrimaryContactID', value);
+    }
+
+    /**
+    * * Field Name: DefaultBillingContactID
+    * * Display Name: Default Billing Contact ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+    * * Description: Contact a new deal for this account starts with as its Billing Contact. Copied onto a deal only when the deal's Billing Contact is empty; the deal's value stays editable. Empty means the deal's billing contact follows its primary contact.
+    */
+    get DefaultBillingContactID(): string | null {
+        return this.Get('DefaultBillingContactID');
+    }
+    set DefaultBillingContactID(value: string | null) {
+        this.Set('DefaultBillingContactID', value);
+    }
+
+    /**
     * * Field Name: Name
     * * Display Name: Name
     * * SQL Data Type: nvarchar(255)
@@ -6308,6 +6376,24 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     */
     get LeadSourceType(): string | null {
         return this.Get('LeadSourceType');
+    }
+
+    /**
+    * * Field Name: DefaultPrimaryContact
+    * * Display Name: Default Primary Contact
+    * * SQL Data Type: nvarchar(753)
+    */
+    get DefaultPrimaryContact(): string | null {
+        return this.Get('DefaultPrimaryContact');
+    }
+
+    /**
+    * * Field Name: DefaultBillingContact
+    * * Display Name: Default Billing Contact
+    * * SQL Data Type: nvarchar(753)
+    */
+    get DefaultBillingContact(): string | null {
+        return this.Get('DefaultBillingContact');
     }
 }
 
@@ -6726,7 +6812,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
     /**
     * * Field Name: DisplayNameAndEmail
     * * Display Name: Name and Email
-    * * SQL Data Type: nvarchar(704)
+    * * SQL Data Type: nvarchar(753)
     * * Description: The contact's display name, followed by their primary email in brackets when they have one. Derived in vwSalesContacts; this is what lookups to a Sales Contact show instead of a GUID.
     */
     get DisplayNameAndEmail(): string {

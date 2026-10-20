@@ -1,5 +1,8 @@
 /**
- * @fileoverview Projects an entity `ValidationResult` onto the workspace's panes.
+ * @fileoverview Projects an entity `ValidationResult` onto the deal workspace's panes.
+ *
+ * The workspace is deleted (#291). `DealWorkspaceService.Save` still returns this projection, and the
+ * board shows its first message when a drag is refused.
  *
  * WHY A PROJECTION EXISTS AT ALL. The rules live on the entity (`DealEntity`, `DealLineEntity`,
  * `DealPaymentScheduleEntity`) so they run in the browser AND on the server. What comes back is MJ's
@@ -28,7 +31,8 @@ import { ValidationErrorType, type ValidationResult } from '@memberjunction/core
  */
 export type DealWorkspaceSection = 'party' | 'lines' | 'schedule' | 'terms' | 'variances';
 
-export type DealWorkspaceSeverity = 'error' | 'warning';
+/** `info` is a note from the server (something pending that needs no action); it never blocks. */
+export type DealWorkspaceSeverity = 'error' | 'warning' | 'info';
 
 /** One problem with the deal, addressed to the part of the UI that can fix it. */
 export interface DealWorkspaceIssue {
@@ -185,184 +189,4 @@ export function ProjectValidation(result: ValidationResult | null): DealWorkspac
     // disagree: a result carrying only warnings has Success true, and a caller that merged results would
     // otherwise have to keep a separate flag in step by hand.
     return { IsValid: !issues.some((i) => i.Severity === 'error'), Issues: issues };
-}
-
-
-/**
- * A refused discount, as a BLOCKING issue on the row that carries it.
- *
- * ── WHY THIS IS NOT A WARNING ───────────────────────────────────────────────────────────────────
- *
- * `SetDiscountPercent` refuses an ambiguous figure — is `0.5` half a percent or fifty? — and leaves the
- * entity holding its previous value. The refusal was recorded in a map the TEMPLATE read, and nothing
- * else. `CanSave` never saw it.
- *
- * So the sequence a rep actually hit was: type `0.5`, see the refusal, and watch the input keep showing
- * `0.5` while the entity still held `0.10`. Save stayed enabled. The quote went out at ten percent,
- * with a screen that had said so nowhere. A hundred-fold discount error is not a crash; it is a number
- * nobody questions.
- *
- * `LineAdvisories` deliberately produces warnings that never gate the save, and folding refusals in
- * there would have kept the bug. These are errors, and `MergeValidation` is what makes them count.
- */
-export function DiscountRefusalIssues(
-    refusals: readonly { RowIndex: number | null; Reason: string }[],
-): DealWorkspaceIssue[] {
-    return refusals.map((r) => ({
-        Section: 'lines' as DealWorkspaceSection,
-        Field: 'DiscountPct',
-        RowIndex: r.RowIndex,
-        Severity: 'error' as const,
-        Message: r.Reason,
-    }));
-}
-
-/**
- * Whether a line removal must be REFUSED rather than staged.
- *
- * ── KI-20: THE REMOVAL CANNOT BE STAGED, SO IT IS DECLINED AT THE GESTURE ──────────────────────────────────────────────
- *
- * `Lines.Remove()` is correct here and always was: the collection records the removal so the row can be
- * DELETED inside the same transaction as the inserts. Orders never performs that delete.
- * `savePendingLines()` iterates `Lines.Items` and never reads `Lines.Removed`, so the deletion does not
- * exist as a step. Separately, orders re-stamps line numbers by array index as the last writer before
- * saving. Together those two facts mean the surviving line is renumbered onto the slot still occupied by
- * the row that was never deleted, and the database refuses the whole statement.
- *
- * The consequence is what decides the shape of this fix: the rep loses the removal AND every other edit
- * staged in the same save — quantity, discount, service period, the lot — and cannot save the deal at
- * all while the removal sits in the collection. There is no way out except discarding the work.
- *
- * So the removal is declined BEFORE it is staged. Blocking at save would turn a database error into a
- * sentence, which is an improvement to the wording and not to the outcome; declining the gesture keeps
- * every other edit saveable and turns an unrecoverable state into a button that says no and why.
- *
- * ── AND ONLY FOR A LINE THAT HAS ACTUALLY BEEN SAVED ──────────────────────────────────────────────────────
- *
- * A line the rep has just added has no row in the database, so there is nothing to delete and nothing
- * for the renumbering to collide with. Removing it is safe, and refusing it would invent a limitation
- * the defect does not impose — punishing the rep for the app's problem in the one case that works.
- * `IsSaved` is the whole test, which is why the decision lives here as a function the gate can assert
- * rather than inline in a click handler where it cannot.
- *
- * The fix belongs in orders and stays there; `save-deal.SD6` is the tripwire that goes red the day it
- * lands, and this refusal is what a rep meets in the meantime.
- */
-/**
- * ⚠️ OBSOLETE SINCE 2026-09-20 — the defect it works around is fixed.
- *
- * This declined every SAVED line because orders' `OrderEntityServer.Save()` never drained
- * `Lines.Removed`: a removal was first dropped silently, then refused outright on a unique-key
- * violation that cost the rep every other edit staged beside it. Declining at the gesture kept the rest
- * of the save working.
- *
- * Orders now drains removals, renumbers the survivors and recomputes the header, with its own
- * `OrderLineRemoval.test.ts` covering both failures. KI-20 is closed, golive#187 is closed, and the
- * deal FORM offers removal through `Lines.Remove()` + `order.Save()`.
- *
- * IT IS ANNOTATED RATHER THAN DELETED, deliberately. Its only caller is the deal workspace, which no
- * template has mounted since 9d6ef9e — so removing it would change the behaviour of a component nobody
- * can reach, and cannot be tested end to end, on a surface whose fate is still open. Whoever settles
- * that question should delete this with it; until then this comment is what stops the next reader
- * concluding, as one did, that sales cannot remove a line.
- */
-export function ShouldRefuseLineRemoval(line: { IsSaved: boolean } | null | undefined): boolean {
-    return !!line?.IsSaved;
-}
-
-/**
- * A declined line removal, as a NON-BLOCKING issue on the row the rep tried to remove.
- *
- * `warning`, not `error`, and that is the entire point rather than a detail. An error would set
- * `IsValid: false` and disable Save, which is the outcome this fix exists to avoid: the rep would be
- * unable to save the edits that are perfectly valid. The removal is the only thing refused, so the
- * removal is the only thing reported, and the save proceeds without it.
- *
- * The message names no constraint, table or column. A rep reading it can act on it — the alternative
- * is the raw violation text, which is what {@link UnlinkedLineIssues} was written to stop showing for
- * the adjacent gesture. Asserted for content in the validation gate, not merely for presence.
- */
-export function LineRemovalRefusedIssues(
-    refusals: readonly { RowIndex: number | null }[],
-): DealWorkspaceIssue[] {
-    return refusals.map((r) => ({
-        Section: 'lines' as DealWorkspaceSection,
-        // Null because the ROW is the subject, not any one of its fields.
-        Field: null,
-        RowIndex: r.RowIndex,
-        Severity: 'warning' as const,
-        Message:
-            'This line is already saved and cannot be removed yet — change its product or quantity '
-            + 'instead. A line you have just added can still be removed before saving.',
-    }));
-}
-
-/**
- * A line that has not been given a product yet, as a blocking issue on its own row.
- *
- * ── WHY VALIDATION AND NOT REMOVING THE PICKER'S "not linked" OPTION ────────────────────────────
- *
- * Both were on the table and they answer different questions. Removing the option asserts that "not
- * linked" was never a legal state; validating asserts it is a state you can be in briefly and cannot
- * save. **The second one is true, and the code says so plainly:** `AddLine()` calls
- * `order.Lines.Create()` and sets `CompanyID` and nothing else — it never touches `ProductID`. So a
- * line is unlinked from the instant the rep clicks Add, before the picker has been opened at all.
- *
- * Removing the option therefore would not remove the state. It would only remove the ability to SEE
- * it: an Angular `<select>` whose model matches no option renders an implicit blank, so the rep would
- * get an empty dropdown with no label saying why, on a row that still cannot be saved. That is a worse
- * screen and the same defect.
- *
- * ── AND WHY IT IS AN ERROR RATHER THAN A WARNING ────────────────────────────────────────────────
- *
- * `OrderLine.ProductID` is `UNIQUEIDENTIFIER NOT NULL` with a real FK. The save does not merely
- * misbehave without it — the database refuses the whole statement, and the rep gets a constraint name.
- * That is the KI-20 shape: an ordinary gesture answered by raw SQL. Blocking here means the Save button
- * is disabled with the reason on the row, which is the same trade the refused-discount fix made one
- * function above.
- *
- * Note this is deliberately NOT a check on whether the product is still SELLABLE. A line quoted before
- * a product was withdrawn keeps a valid `ProductID` and must stay saveable; `ProductLabel()` marks it
- * "(no longer offered)" and that is a hint, not a block. The two rules look adjacent and are opposites:
- * one is about a value being absent, the other about a value being old.
- */
-export function UnlinkedLineIssues(
-    lines: readonly { ProductID?: string | null }[],
-): DealWorkspaceIssue[] {
-    const issues: DealWorkspaceIssue[] = [];
-    lines.forEach((line, index) => {
-        if (!line?.ProductID) {
-            issues.push({
-                Section: 'lines' as DealWorkspaceSection,
-                Field: 'ProductID',
-                RowIndex: index,
-                Severity: 'error' as const,
-                Message: 'Choose a product for this line. A line without one cannot be saved.',
-            });
-        }
-    });
-    return issues;
-}
-
-
-/**
- * Combines the entity's own verdict with warnings and with issues that must BLOCK the save.
- *
- * The component used to assemble this inline as `IsValid: entity.IsValid`, with a comment explaining
- * that advisories are warnings and therefore never change savability. True of advisories, and it is
- * exactly the line a blocking issue has to get past — so the combination now lives here, where the
- * three inputs are named and a gate can assert what happens to each.
- *
- * ORDER OF `Issues` IS NOT COSMETIC: blocking issues come before warnings, because `SaveBlockedReason`
- * shows the FIRST error it finds and a rep reading a disabled Save wants the reason that disabled it.
- */
-export function MergeValidation(
-    entity: DealWorkspaceValidation,
-    warnings: readonly DealWorkspaceIssue[],
-    blocking: readonly DealWorkspaceIssue[],
-): DealWorkspaceValidation {
-    return {
-        IsValid: entity.IsValid && blocking.length === 0,
-        Issues: [...entity.Issues, ...blocking, ...warnings],
-    };
 }

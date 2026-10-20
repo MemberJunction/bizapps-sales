@@ -10,11 +10,12 @@
  */
 import { AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CompositeKey } from '@memberjunction/core';
+import { CompositeKey, Metadata, RunView } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
-import { RegisterClassEx } from '@memberjunction/global';
+import { EscapeSQLString, RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule, FormChromeCoordinator } from '@memberjunction/ng-base-forms';
 import { RelatedChipsComponent, type BizAppsRelatedLink } from '@mj-biz-apps/common-ng';
+import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 import {
     DealEntity,
     IsDealFieldEditableWhileLocked,
@@ -23,6 +24,7 @@ import {
 } from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
+import { DealCloseDay } from './deal-close-day';
 
 
 /**
@@ -231,7 +233,7 @@ function money(n: number | null | undefined): string {
                         <span class="mjs-deal-hero__stat-label">Next step</span>
                         <span class="mjs-deal-hero__next-val">{{ Record.NextStep }}</span>
                         @if (Record.NextStepDate) {
-                            <span class="mjs-deal-hero__next-when">{{ Record.NextStepDate | date: 'd MMM y' }}</span>
+                            <span class="mjs-deal-hero__next-when">{{ Record.NextStepDate | date: 'd MMM y' : 'UTC' }}</span>
                         }
                     </div>
                 }
@@ -387,9 +389,9 @@ function money(n: number | null | undefined): string {
          * would read as an unstyled paragraph.
          */
         .mjs-flag--guide {
-            background: var(--mj-status-info-bg, var(--mj-color-surface-raised));
-            border-left-color: var(--mj-status-info, var(--mj-color-primary));
-            color: var(--mj-status-info-text, var(--mj-color-text-primary));
+            background: var(--mj-status-info-bg, var(--mj-bg-surface-sunken));
+            border-left-color: var(--mj-status-info, var(--mj-brand-primary));
+            color: var(--mj-status-info-text, var(--mj-text-primary));
             margin-top: var(--mj-space-2);
         }
         .mjs-deal-hero--collapsed { padding: 12px 20px; gap: 0; margin-bottom: var(--mj-space-3); }
@@ -417,6 +419,10 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     /** The links last published to the chip row, and the state they were built from. */
     private relatedFor: string | null = null;
     private relatedLinks: BizAppsRelatedLink[] = [];
+    /** The orders that reverse this deal's order, oldest first. Read in {@link resolveReversals}. */
+    private reversalOrderIDs: string[] = [];
+    /** Guards against a slower reversal read for a previous record landing after the form moved on. */
+    private reversalsGeneration = 0;
 
     /**
      * May the deal's Name be typed into right now? (bc-aidp-next-golive#206 item 3)
@@ -444,6 +450,14 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
             try { this.Collapsed = JSON.parse(raw) === true; } catch { this.Collapsed = false; }
         }
         await this.refreshNotices();
+        /**
+         * The business zone, for a legacy `ClosedAt`-only row's close day ({@link CloseStatValue},
+         * golive#168). Idempotent and a no-op once loaded; unconfigured, the engine answers UTC, and
+         * `sales-ng` is lazily loaded, so the boot sequence is not relied on — the Overview panel does
+         * the same. Marked for check because nothing else repaints the stat when it lands.
+         */
+        await BusinessTimeZoneEngine.Instance.Config(false);
+        this.cdr?.markForCheck();
     }
 
     /**
@@ -588,14 +602,18 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         return !!(this.Record?.ClosedAt ?? this.Record?.ActualCloseDate);
     }
 
-    /** "Closed" once it has happened, "Close" while it is still a forecast. */
-    public get CloseStatLabel(): string { return this.IsClosed ? 'Closed' : 'Close'; }
+    /** "Closed" once it has happened, "Expected close" while it is still a forecast (#252). */
+    public get CloseStatLabel(): string { return this.IsClosed ? 'Closed' : 'Expected close'; }
 
-    /** The date it closed on, or the date it is expected to. */
+    /**
+     * The date it closed on, or the date it is expected to.
+     *
+     * The close is the BUSINESS close day ({@link DealCloseDay}), the same one the Overview's labels,
+     * variance and sales cycle use: on a legacy row carrying only `ClosedAt`, that instant's UTC day is
+     * the next day for any close in the Central evening (golive#168).
+     */
     public get CloseStatValue(): string {
-        const when = this.IsClosed
-            ? (this.Record?.ActualCloseDate ?? this.Record?.ClosedAt)
-            : this.Record?.ExpectedCloseDate;
+        const when = this.IsClosed ? DealCloseDay(this.Record) : this.Record?.ExpectedCloseDate;
         if (!when) return '—';
         return new Date(when).toLocaleDateString(undefined, {
             day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
@@ -630,6 +648,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         const state = {
             IsWon: this.IsWon,
             OrderID: this.Record?.OrderID,
+            ReversalOrderIDs: this.reversalOrderIDs,
             ContractID: this.Record?.ContractID,
             RenewsContractID: this.Record?.RenewsContractID,
         };
@@ -661,6 +680,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
 
     private async refreshNotices(): Promise<void> {
         await this.resolveLock();
+        await this.resolveReversals();
         await this.resolveStale();
         this.cdr.detectChanges();
     }
@@ -672,6 +692,37 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;
         this.LockNotice = lock.Notice;
+    }
+
+    /**
+     * The orders that reverse this deal's order, for the Reversal chips (MemberJunction/bizapps-orders#740).
+     *
+     * A REVERSE READ: the reversal holds the id (`ReversesOrderHeaderID`), the deal does not, so the
+     * chip row cannot find them from the deal row alone. Skipped before the win, when the chips are
+     * gated off anyway. A failed read — orders not installed, or the user cannot read orders — leaves
+     * no reversal chips, the same answer the chip row gives a link it cannot resolve.
+     */
+    private async resolveReversals(): Promise<void> {
+        const generation = ++this.reversalsGeneration;
+        const orderID = this.Record?.OrderID;
+        let ids: string[] = [];
+        if (this.IsWon && orderID) {
+            try {
+                const result = await RunView.FromMetadataProvider(this.FormComponent?.ProviderToUse ?? Metadata.Provider).RunView<{ ID: string }>({
+                    EntityName: MJS_FOREIGN_ENTITIES.OrderHeader,
+                    Fields: ['ID'],
+                    ExtraFilter: `ReversesOrderHeaderID = '${EscapeSQLString(String(orderID))}'`,
+                    OrderBy: '__mj_CreatedAt ASC',
+                    ResultType: 'simple',
+                });
+                ids = result?.Success ? (result.Results ?? []).map((r) => r.ID) : [];
+            } catch {
+                ids = [];
+            }
+        }
+        if (generation === this.reversalsGeneration) {
+            this.reversalOrderIDs = ids;
+        }
     }
 
     /**

@@ -65,10 +65,13 @@ import { RegisterClass } from '@memberjunction/global';
 // still belong to orders. Sales never becomes the thing that computes money.
 import { mjBizAppsOrdersOrderHeaderEntity } from '@mj-biz-apps/orders-entities';
 
+import { ContactsFromAccount, type ContactPair } from './account-contact-defaults';
+import { BillingContactFromPrimary } from './billing-contact-default';
 import {
     mjBizAppsSalesDealEntity,
     mjBizAppsSalesDealPaymentScheduleEntity,
 } from './generated/entity_subclasses';
+import { DealTeamMemberEntity } from './deal-team-member-entity';
 
 /** The house default the form pre-fills for a new deal's payment method. */
 export const DEAL_DEFAULT_PAYMENT_METHOD = 'ACH';
@@ -77,6 +80,15 @@ export const DEAL_DEFAULT_PAYMENT_METHOD = 'ACH';
 interface DealRoleIDRow {
     ID: string;
 }
+
+/** The account's default contacts, as the account-defaults lookup selects them. */
+interface AccountContactDefaultsRow {
+    DefaultPrimaryContactID: string | null;
+    DefaultBillingContactID: string | null;
+}
+
+/** A record id the account-defaults lookup may put in a filter. Anything else is refused, not quoted. */
+const GUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**
  * Records a blocking problem. Separated from {@link warn} because only a failure clears
@@ -204,7 +216,7 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
      *
      * Not the round trip. Measured through Angular's dev hooks on a real create: afterwards
      * `deal.OrderID` holds `DA871180-…`, exactly matching the row on disk. The framework already keeps
-     * the promise `DealWorkspaceComponent.Save()` makes — "the same instance now carries the server's
+     * the promise the deal workspace's `Save()` made — "the same instance now carries the server's
      * IDs" — for the FIELD.
      *
      * What it does not carry is the COMPANION. `EmbeddedRecord` gates `Value` on a private `exposed`
@@ -224,7 +236,7 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
      *
      * ── WHY HERE, AND NOT IN THE WORKSPACE ─────────────────────────────────────────────────────────
      *
-     * Fixing `DealWorkspaceComponent.Save()` would fix the one surface that happened to find it. The
+     * Fixing the deal workspace's `Save()` would have fixed the one surface that happened to find it. The
      * board, an Action running client-side, an importer and the next surface nobody has written all reach
      * the same state through plain `entity.Save()`. The entity is where "my FK and my peer agree" belongs,
      * so it is fixed once, for every caller.
@@ -250,6 +262,104 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
             await this.OrderID_LoadObject();
         }
         return saved;
+    }
+
+    /**
+     * ── PICKING A PRIMARY CONTACT FILLS AN EMPTY BILLING CONTACT (#312) ─────────────────────────────
+     *
+     * The rule is {@link BillingContactFromPrimary}; this is where it runs.
+     *
+     * WHY `Set` AND NOT THE `PrimaryContactID` SETTER. The deal form's `mj-form-field` writes through
+     * `Record.Set(FieldName, value)`, which never touches the generated accessor; the deal workspace's
+     * `ngModel` writes through the accessor, which calls `Set`. Overriding `Set` is the one place both
+     * reach, so the two surfaces cannot drift. Loads and `SetMany` hydrate through `SetLocal` and skip
+     * this, so reading a deal from the database never fills anything.
+     *
+     * `Value` is `unknown` because the base signature is untyped and this only forwards it.
+     */
+    public override Set(FieldName: string, Value: unknown): void {
+        if (FieldName !== 'PrimaryContactID') {
+            super.Set(FieldName, Value);
+            return;
+        }
+        const priorPrimary = this.PrimaryContactID;
+        super.Set(FieldName, Value);
+        const billing = BillingContactFromPrimary(priorPrimary, this.PrimaryContactID, this.BillingContactID);
+        if (billing) {
+            super.Set('BillingContactID', billing);
+        }
+    }
+
+    /**
+     * ── CHOOSING AN ACCOUNT FILLS THE DEAL'S EMPTY CONTACTS FROM IT (#254) ────────────────────────
+     *
+     * The rule is {@link ContactsFromAccount}; this reads the account and applies it. The deal form and
+     * the deal workspace call it after the rep changes the account.
+     *
+     * WHY A METHOD THE SURFACES CALL, NOT PART OF `Set`. Filling needs the account's row, which is a
+     * database read, and `Set` cannot wait for one. A read started inside `Set` and left running could
+     * land after the save it was meant to feed, or after the rep had picked a different account.
+     *
+     * BILLING IS WRITTEN BEFORE PRIMARY, so the account's billing default wins over the
+     * primary-fills-billing rule in `Set`. When the account has no billing default, writing the primary
+     * then fills an empty billing contact from it, as picking a primary by hand does.
+     *
+     * @returns the fields it filled; empty when there was nothing to fill, or when the account changed
+     *          while the read was in flight (that account's own call fills from it).
+     */
+    public async FillContactsFromAccount(): Promise<Array<keyof ContactPair>> {
+        const accountID = this.AccountID;
+        if (!accountID) {
+            return [];
+        }
+        const defaults = await this.ReadAccountContactDefaults(accountID);
+        if (this.AccountID?.toLowerCase() !== accountID.toLowerCase()) {
+            return [];
+        }
+        const writes = ContactsFromAccount(
+            { PrimaryContactID: this.PrimaryContactID, BillingContactID: this.BillingContactID },
+            defaults,
+        );
+        const filled: Array<keyof ContactPair> = [];
+        if (writes.BillingContactID) {
+            this.Set('BillingContactID', writes.BillingContactID);
+            filled.push('BillingContactID');
+        }
+        if (writes.PrimaryContactID) {
+            this.Set('PrimaryContactID', writes.PrimaryContactID);
+            filled.push('PrimaryContactID');
+        }
+        return filled;
+    }
+
+    /**
+     * The account's two default contacts. Throws when the read fails, so a caller can say the defaults
+     * were not applied rather than leave the fields empty without a word.
+     *
+     * Protected so tests can stand in for the database.
+     */
+    protected async ReadAccountContactDefaults(accountID: string): Promise<ContactPair> {
+        if (!GUID_PATTERN.test(accountID)) {
+            throw new Error(`DealEntity: the deal's account id "${accountID}" is not a record id.`);
+        }
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await provider.RunView<AccountContactDefaultsRow>(
+            {
+                EntityName: 'MJ_BizApps_Sales: Sales Accounts',
+                ExtraFilter: `ID = '${accountID}'`,
+                ResultType: 'simple',
+                Fields: ['DefaultPrimaryContactID', 'DefaultBillingContactID'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            throw new Error(`DealEntity: could not read the account's default contacts: ${result.ErrorMessage}`);
+        }
+        const row = (result.Results ?? [])[0];
+        return {
+            PrimaryContactID: row?.DefaultPrimaryContactID ?? null,
+            BillingContactID: row?.DefaultBillingContactID ?? null,
+        };
     }
 
     /**
@@ -432,7 +542,7 @@ export class DealPaymentScheduleEntity extends mjBizAppsSalesDealPaymentSchedule
 }
 
 /**
- * Anchor that keeps the three registrations above from being tree-shaken.
+ * Anchor that keeps the shared registrations (these and `DealTeamMemberEntity`) from being tree-shaken.
  *
  * THIS LOOKS POINTLESS AND IS NOT. `@RegisterClass` registers as a side effect of the module being
  * imported, and nothing references these classes by name — so a bundler is entirely correct to elide
@@ -440,7 +550,7 @@ export class DealPaymentScheduleEntity extends mjBizAppsSalesDealPaymentSchedule
  * this file quietly stops applying. Touching the symbols is what keeps the import alive.
  */
 export function LoadSalesDealEntities(): void {
-    const anchors: unknown[] = [DealEntity, DealPaymentScheduleEntity];
+    const anchors: unknown[] = [DealEntity, DealPaymentScheduleEntity, DealTeamMemberEntity];
     if (anchors.length === 0) {
         throw new Error('LoadSalesDealEntities: registration anchors were tree-shaken away.');
     }

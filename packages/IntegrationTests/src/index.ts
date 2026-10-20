@@ -28,7 +28,10 @@
  *   board-move           A stage move appends EXACTLY ONE DealStageEvent, stamped with the values the
  *                        deal held on the way OUT — the provenance a board drag owes (D-BD2). Its writer
  *                        shares one transaction with the stage-order writer and the deal counter; see
- *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters
+ *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters.
+ *                        BD7 proves the event it appends then refuses an edit and a delete (#348)
+ *   pipeline-copy        Every company gets its own copy of the default pipeline and all of its stages,
+ *                        and a second run copies nothing (#327). Needs no sibling app: it saves no deal
  *
  * ⚠️ EVERY BUNDLE REQUIRES bizapps-orders EXCEPT `close-won-contract`, whose single check needs nothing
  * at all — it is asserting an absence. save-deal and close-deal require it too. A deal cannot be
@@ -82,11 +85,13 @@ import './checks/close-won-tasks.checks.js';
 import './checks/activities.checks.js';
 import './checks/forecast.checks.js';
 import './checks/term-start.checks.js';
+import './checks/pipeline-copy.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
 export { ProductPickerChecks } from './checks/product-picker.checks.js';
 export { TermStartChecks } from './checks/term-start.checks.js';
+export { PipelineCopyChecks } from './checks/pipeline-copy.checks.js';
 export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
 export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
 export { BoardMoveChecks } from './checks/board-move.checks.js';

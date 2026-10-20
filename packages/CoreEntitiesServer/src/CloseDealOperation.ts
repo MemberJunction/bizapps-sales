@@ -36,12 +36,14 @@ import { RegisterClass } from '@memberjunction/global';
  * ORDERS' OWN PREDICATE, imported rather than restated -- the same reason
  * `DealEntityServer` imports `CanTransition` from this module.
  *
- * `IsBooked` is `Confirmed | Posted | Fulfilled`, and orders documents it as "journal entries
- * exist and the receivable is real". Writing `status === 'Confirmed'` here instead would be a
- * vocabulary string-comparison against ANOTHER APP'S words -- exactly what the vocabulary gate
- * exists to catch -- and it would also be wrong twice over. See the refusal below.
+ * Orders documents `IsBooked` as "journal entries exist and the receivable is real". Its body is
+ * orders' business: today it is `status === 'Confirmed'`, since orders collapsed its lifecycle to
+ * Draft, Quoted, Confirmed and Voided. Writing that comparison here instead would be a vocabulary
+ * string-comparison against ANOTHER APP'S words -- exactly what the vocabulary gate exists to catch
+ * -- and would go stale the next time orders changes what "booked" means. See the refusal below.
  */
 import { IsBooked } from '@mj-biz-apps/orders-entities';
+import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import {
     SalesCloseDealOperation as SalesCloseDealOperationBase,
     SalesReopenDealOperation as SalesReopenDealOperationBase,
@@ -62,7 +64,13 @@ import {
 import { DealEntityServer } from './DealEntityServer.js';
 import { OrdersIsInstalled } from './orders-availability.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
-import { CloseWonTaskDueAt, CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
+import { CloseWonTaskDueAt, CloseWonTaskService, RaisesOrderReviewTask, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
+import {
+    AnswerAsNextTerm,
+    FindUnansweredSubscriptionLines,
+    SubscriptionChoiceIssue,
+    type UnansweredSubscriptionLine,
+} from './subscription-choice.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
@@ -88,6 +96,28 @@ interface StatusFlags {
 }
 
 /**
+ * Where a close lands and the figures it writes, resolved before the stamp (bc-aidp-next-golive#345).
+ *
+ * `StageID` is null when the caller named no stage and the pipeline has none for this outcome; the deal
+ * then stays where it is and `Issues` says so. `Probability` and `ForecastCategoryTypeID` are null when
+ * the close has nothing to say about them, and the deal keeps its own.
+ */
+interface ResolvedClosing {
+    StageID: string | null;
+    Probability: number | null;
+    ForecastCategoryTypeID: string | null;
+    Issues: SalesCloseIssue[];
+}
+
+/** The parts of a closing stage the close reads: its figures and the outcome its status declares. */
+interface ClosingStageRow {
+    Probability: number | null;
+    ForecastCategoryTypeID: string | null;
+    IsWon: boolean;
+    IsLost: boolean;
+}
+
+/**
  * What validation found, and the one fact it resolved on the way.
  *
  * `validate()` returned a bare issue array until the close event had to name the loss reason. It is the
@@ -98,6 +128,8 @@ interface CloseValidation {
     Issues: SalesCloseIssue[];
     /** The reason's name for the close event's note, or null when this close is not a loss. */
     LossReasonName: string | null;
+    /** A renewal deal's unanswered held-product lines, answered `ExtendExisting` inside the close. */
+    RenewalNextTerm: UnansweredSubscriptionLine[];
 }
 
 /** Defaults applied when a pipeline's policy is silent on a key. */
@@ -119,8 +151,69 @@ const POLICY_DEFAULTS: SalesCloseWonPolicy = {
     OneTimeLinesTo: 'None',
 };
 
+/** A stage's figures and the outcome its status declares, or null when it cannot be read. */
+async function readStage(
+    stageID: string,
+    provider: IMetadataProvider,
+    user: UserInfo,
+): Promise<ClosingStageRow | null> {
+    const view = provider as unknown as IRunViewProvider;
+    const stages = await view.RunView(
+        {
+            EntityName: STAGE_ENTITY,
+            ExtraFilter: `ID = '${stageID}'`,
+            ResultType: 'simple',
+            Fields: ['Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'],
+        },
+        user,
+    );
+    const row = (stages.Success ? (stages.Results ?? [])[0] : undefined) as
+        | { Probability?: number | null; ForecastCategoryTypeID?: string | null; DealStatusTypeID?: string | null }
+        | undefined;
+    if (!row) {
+        return null;
+    }
+
+    let isWon = false;
+    let isLost = false;
+    if (row.DealStatusTypeID) {
+        const statuses = await view.RunView(
+            {
+                EntityName: DEAL_STATUS_ENTITY,
+                ExtraFilter: `ID = '${row.DealStatusTypeID}'`,
+                ResultType: 'simple',
+                Fields: ['IsWon', 'IsLost'],
+            },
+            user,
+        );
+        const status = (statuses.Success ? (statuses.Results ?? [])[0] : undefined) as
+            | { IsWon?: boolean; IsLost?: boolean }
+            | undefined;
+        isWon = status?.IsWon === true;
+        isLost = status?.IsLost === true;
+    }
+
+    return {
+        Probability: row.Probability ?? null,
+        ForecastCategoryTypeID: row.ForecastCategoryTypeID ?? null,
+        IsWon: isWon,
+        IsLost: isLost,
+    };
+}
+
 function issue(Section: SalesCloseIssue['Section'], Message: string, Field: string | null = null): SalesCloseIssue {
     return { Section, Field, Severity: 'error', Message };
+}
+
+/**
+ * A refusal raised inside the close's transaction. Thrown so the transaction rolls back, and reported
+ * as a plain error issue rather than as "the deal could not be closed: Error: ...".
+ */
+class CloseRefusal extends Error {
+    public constructor(message: string, public readonly Field: string | null = null) {
+        super(message);
+        this.name = 'CloseRefusal';
+    }
 }
 
 /**
@@ -173,9 +266,9 @@ function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
  *
  * ── WHY THIS EXISTS WHEN `Routing` ALREADY CARRIES THE REASON ───────────────────────────────────
  *
- * It carries it for anyone who reads `Routing`. The workspace does — `deal-workspace.component.html`
- * renders `— not created: {{ r.Reason }}` on a `--failed` row — so a REP closing a deal already sees
- * the refusal and why. That surface is fine and is not what this is for.
+ * It carries it for anyone who reads `Routing`. The deal workspace did (it rendered
+ * `— not created: {{ r.Reason }}` on a failed row; deleted in #291), so a REP closing a deal there saw
+ * the refusal and why. That is not what this is for.
  *
  * The gap is programmatic. An API client, an agent or an importer that checks `Success` and reads
  * `Issues` — the two fields every other failure mode in this operation reports through — sees
@@ -424,13 +517,20 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              * is the right place for it to fail.
              */
 
+            /**
+             * The stage this close lands in, and the figures it carries. Resolved BEFORE the stamp
+             * because `stampClose` is synchronous and this needs reads, and before the preview so a
+             * preview can say when there is nowhere to land. `input.ClosingStageID` wins when supplied.
+             */
+            const closing = await this.resolveClosing(deal, input, target, provider, user);
+
             if (input.PreviewOnly) {
                 // Nothing written, nothing locked — the caller just wanted to see the consequences.
                 // A refusal IS one of those consequences, so the preview reports it too: a caller that
                 // previews before closing should not learn about it only after committing.
                 return {
                     Success: true,
-                    Issues: routingIssues(routing, true),
+                    Issues: [...closing.Issues, ...routingIssues(routing, true)],
                     IsWon: target.IsWon,
                     IsLost: target.IsLost,
                     Locked: false,
@@ -440,12 +540,24 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 };
             }
 
+            /**
+             * The business zone is loaded BEFORE the transaction, because `stampClose` asks what day it
+             * is and is synchronous. One cached instance-configuration row; a second call is a no-op,
+             * and a missing or unreadable row falls back to UTC with one warning rather than throwing.
+             * Read outside the transaction so a configuration lookup never holds it open.
+             */
+            await BusinessTimeZoneEngine.Instance.Config(false, user, provider);
+
             // ── 4. Execute: one transaction, all-or-none ──────────────────────────
             await db.BeginTransaction();
             transactionOpen = true;
 
+            // Before the deal's save, which is what confirms the order and applies the answer.
+            await AnswerAsNextTerm(validation.RenewalNextTerm);
+
+            const routeIssues: SalesCloseIssue[] = [];
             for (const plan of routing) {
-                await this.execute(plan, deal, policy, provider, user);
+                routeIssues.push(...(await this.execute(plan, deal, policy, provider, user)));
             }
 
             /**
@@ -466,25 +578,18 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              */
             const taskIssues: SalesCloseIssue[] = [];
 
-            /**
-             * The stage this close lands in, resolved BEFORE the stamp because `stampClose` is
-             * synchronous and this needs two reads. `input.ClosingStageID` wins when supplied.
-             */
-            const derivedClosingStageID = input.ClosingStageID
-                ? null
-                : await this.closingStageForOutcome(deal.PipelineID, target, provider, user);
-
             this.stampClose(
                 deal,
                 input,
                 target,
                 routing,
                 user,
-                derivedClosingStageID,
+                closing,
                 validation.LossReasonName,
             );
 
-            if (!(await deal.Save())) {
+            // The close stamps are writable only inside this call (#252); every other save refuses them.
+            if (!(await deal.BeginClose(() => deal.Save()))) {
                 throw new Error(
                     `the deal could not be saved: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
                 );
@@ -493,6 +598,32 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             // The save appended the close's `DealStageEvent` — one row, whether or not the stage moved.
             // Read AFTER it for the same reason `OrderID` is: the row does not exist until then.
             const stageEvent = deal.LastStageEventID;
+
+            /**
+             * TIE THE ORDER TO THE CONTRACT (contracts#77). Both exist by now: the routing loop stamped
+             * `ContractID`, and the order is the deal's own. Contracts copies the contract's renewal terms
+             * (annual increase, whether a discount continues) to the subscriptions that order creates, so
+             * the renewal pass in Orders prices from the paper rather than from hand-entered values.
+             *
+             * A warning, not a failure: the deal closed and both records are right. A missing link only
+             * means the terms have to be set on the subscriptions by hand. A `Pending` link (contracts
+             * too old to have links) is a note: the daily relink adds it after the upgrade.
+             */
+            const linkIssues: SalesCloseIssue[] = [];
+            if (target.IsWon && deal.ContractID && deal.OrderID) {
+                const link = await resolveSeam(user, provider).LinkOrderToContract({
+                    ContractID: deal.ContractID,
+                    OrderID: String(deal.OrderID),
+                });
+                if (!link.Success) {
+                    linkIssues.push({
+                        Section: 'deal',
+                        Field: null,
+                        Severity: link.Pending ? 'info' : 'warning',
+                        Message: link.Message ?? 'The order was not linked to the contract.',
+                    });
+                }
+            }
 
             /**
              * ── THE TASKS RUN **AFTER** THE SAVE, AND THAT IS THE FIX RATHER THAN A TIDY-UP ──────────
@@ -555,9 +686,10 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                          *
                          * Nothing to build there — only to populate. Dated from the close itself rather
                          * than from `new Date()` so the task's clock and the deal's provenance agree, and
-                         * so a close replayed inside a transaction is deterministic.
+                         * so a close replayed inside a transaction is deterministic. Counted from the
+                         * close's BUSINESS day — see closeWonTaskDueAt (golive#168).
                          */
-                        DueAt: CloseWonTaskDueAt(deal.ClosedAt ?? new Date(), cfg.DueInDays),
+                        DueAt: this.closeWonTaskDueAt(deal, cfg.DueInDays),
                         // No task-type IDs: the service resolves both by Code from rows this repo
                         // seeds. What the policy still carries is the part that varies — the assignee.
                         Assignee: cfg.AssigneeRecordID
@@ -567,6 +699,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                                   RoleID: cfg.AssigneeRoleID ?? undefined,
                               }
                             : undefined,
+                        // Off only where the policy says `false` (golive#320 §5); absent keeps the task.
+                        RaiseOrderReviewTask: RaisesOrderReviewTask(cfg),
                     },
                     provider,
                     user,
@@ -597,7 +731,14 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  * written inside `deal.Save()` a few lines further down. So a reader of the array reads
                  * the close in sequence, which is the only ordering that means anything here.
                  */
-                Issues: [...taskIssues, ...orderStatusIssues(deal), ...routingIssues(routing, false)],
+                Issues: [
+                    ...closing.Issues,
+                    ...routeIssues,
+                    ...taskIssues,
+                    ...linkIssues,
+                    ...orderStatusIssues(deal),
+                    ...routingIssues(routing, false),
+                ],
                 IsWon: target.IsWon,
                 IsLost: target.IsLost,
                 Locked: target.LocksDeal,
@@ -614,6 +755,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 } catch (rollbackErr) {
                     LogError(`Sales.CloseDeal: rollback failed: ${rollbackErr}`);
                 }
+            }
+            if (err instanceof CloseRefusal) {
+                return { ...empty, Issues: [issue('deal', err.message, err.Field)] };
             }
             LogError(`Sales.CloseDeal failed: ${err}`);
             return { ...empty, Issues: [issue('deal', `The deal could not be closed: ${err}`)] };
@@ -677,7 +821,36 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             issues.push(issue('party', 'A won deal must be attached to a customer.', 'AccountID'));
         }
 
-        return { Issues: issues, LossReasonName: lossReasonName };
+        const choice = target.IsWon
+            ? await this.subscriptionChoice(deal, provider, user)
+            : { Issues: [], RenewalNextTerm: [] };
+        issues.push(...choice.Issues);
+
+        return { Issues: issues, LossReasonName: lossReasonName, RenewalNextTerm: choice.RenewalNextTerm };
+    }
+
+    /**
+     * Lines for a product the customer already holds that have not said whether they extend it
+     * (golive #318). Refused on an ordinary deal; on a renewal deal they are the next term by
+     * definition, so they are answered that way inside the close instead. See `subscription-choice.ts`
+     * for why this cannot be left to orders' confirm.
+     */
+    private async subscriptionChoice(
+        deal: DealEntityServer,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<{ Issues: SalesCloseIssue[]; RenewalNextTerm: UnansweredSubscriptionLine[] }> {
+        if (!OrdersIsInstalled()) {
+            return { Issues: [], RenewalNextTerm: [] };
+        }
+        const unanswered = await FindUnansweredSubscriptionLines(deal, provider as unknown as IRunViewProvider, user);
+        if (unanswered.length === 0) {
+            return { Issues: [], RenewalNextTerm: [] };
+        }
+        if (await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user)) {
+            return { Issues: [], RenewalNextTerm: unanswered };
+        }
+        return { Issues: unanswered.map(SubscriptionChoiceIssue), RenewalNextTerm: [] };
     }
 
     /* ── Policy (§7.1) ──────────────────────────────────────────────────────── */
@@ -762,17 +935,25 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         return plans;
     }
 
-    /** Attempt one planned route through the seam, recording honestly whether it executed. */
+    /**
+     * Attempt one planned route through the seam, recording honestly whether it executed.
+     *
+     * @returns notes and warnings the route raised beyond its own `Routing` entry.
+     */
     private async execute(
         plan: SalesCloseRoutingResult,
         deal: DealEntityServer,
         policy: SalesCloseWonPolicy,
         provider: IMetadataProvider,
         user: UserInfo,
-    ): Promise<void> {
+    ): Promise<SalesCloseIssue[]> {
         const seam = resolveSeam(user, provider);
 
         if (plan.Target === 'Contract') {
+            // A deal that already names a contract reuses it, before either door below (#278).
+            if (deal.ContractID) {
+                return this.reuseContract(plan, deal, policy, provider, user, seam);
+            }
             // A renewal takes a different door: RenewTerm against the contract being renewed, not a
             // new agreement. Decided by DealType.RequiresRenewalSource — a flag, not a type name.
             const isRenewal = await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user);
@@ -791,21 +972,76 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 // §7.2 step 4: stamp the agreement onto the deal.
                 deal.ContractID = result.ContractID;
             }
-            return;
+            return [];
         }
 
 
         // Subscription materialization has no seam at all yet; the plan already carries its reason.
         plan.Executed = false;
+        return [];
+    }
+
+    /**
+     * The contract route for a deal that already names a contract: closed Won, reopened, closed Won
+     * again (#278).
+     *
+     * Creating a second contract here is what orphaned the first: the deal's `ContractID` was
+     * overwritten and nothing pointed back at the original. So the deal's own contract is reused, and
+     * `ContractID` never changes. The seam refreshes it from the deal while it is unsigned and leaves it
+     * alone once signed; a signed contract comes back as a warning that the deal and the paper may
+     * differ.
+     *
+     * A contract the deal names but nobody can read REFUSES the close, the same way an unreadable
+     * current status does above: creating a new one would orphan it, and stamping it as reused would
+     * claim a record nobody has seen. The refusal is thrown so the transaction rolls back; the catch in
+     * `InternalExecute` turns it into an ordinary error issue.
+     */
+    private async reuseContract(
+        plan: SalesCloseRoutingResult,
+        deal: DealEntityServer,
+        policy: SalesCloseWonPolicy,
+        provider: IMetadataProvider,
+        user: UserInfo,
+        seam: IDownstreamSeam,
+    ): Promise<SalesCloseIssue[]> {
+        const contractID = String(deal.ContractID);
+        const result = await seam.UpdateContractFromDeal({
+            ...(await this.buildContractInput(deal, policy, provider, user)),
+            ContractID: contractID,
+        });
+        if (result.Unreadable) {
+            throw new CloseRefusal(result.Message ?? `Contract ${contractID} could not be read.`, 'ContractID');
+        }
+
+        plan.Executed = result.Success === true;
+        plan.RecordID = result.Success ? contractID : null;
+        plan.Reason = result.Success ? null : result.Message ?? 'not executed';
+        if (!result.Success) {
+            return [];   // reported through `routingIssues`, like any route that did not execute
+        }
+
+        const number = result.ContractNumber || contractID;
+        const issues: SalesCloseIssue[] = [
+            { Section: 'deal', Field: 'ContractID', Severity: 'info', Message: `Reused contract ${number}.` },
+        ];
+        if (result.Signed) {
+            issues.push({
+                Section: 'deal',
+                Field: 'ContractID',
+                Severity: 'warning',
+                Message: result.Message ?? `Contract ${number} is signed and was not changed; the deal may differ from it.`,
+            });
+        }
+        return issues;
     }
 
     /**
      * The stage a close should land in, when the caller did not name one.
      *
-     * ── THE MIRROR OF `priorStageFromCloseEvent`, AND THE OTHER HALF OF DN-18 ───────────────────────
+     * ── THE MIRROR OF `closeEventBeingUndone`, AND THE OTHER HALF OF DN-18 ───────────────────────
      *
      * `CD18` proves a reopen restores the stage the deal came from. It could not help a deal closed
-     * through the browser, because `DealWorkspaceComponent.ConfirmClose()` sends no `ClosingStageID` — so
+     * through the browser, because the deal workspace's `ConfirmClose()` sent no `ClosingStageID` — so
      * no browser-driven close ever moved the stage, every close event recorded
      * `FromStageID === ToStageID`, and the reopen correctly derived the stage the deal was already in.
      * The mechanism was right and the UI could not reach it. `71-lost-and-reopen` is the spec that names
@@ -878,7 +1114,91 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         return row?.ID ? String(row.ID) : null;
     }
 
+    /**
+     * The stage a close lands in, the probability and forecast category it writes, and the warning when
+     * there is nowhere to land (bc-aidp-next-golive#345).
+     *
+     * ── WHY THE CLOSE WRITES THESE ITSELF ──────────────────────────────────────────────────────────
+     *
+     * A close declares its transition, and a declared transition switches the stage defaults off (`CD17`
+     * depends on it: the closing status must win over whatever the stage declares). That left nothing
+     * writing the probability, so a won deal kept the 50 it had in Proposal. The figures still come from
+     * the data, never from a constant chosen here:
+     *
+     *   · the landing stage's own `Probability` and `ForecastCategoryTypeID`, when that stage's status
+     *     declares the SAME outcome as the close — a Won close into a stage whose status is won;
+     *   · otherwise the outcome's flag: 100 for won, 0 for lost. A won deal has no other probability, and
+     *     this is the only answer for a status-only close on a pipeline with no stage for the outcome.
+     *     The forecast category is left as it is in that case: no type-table flag names a closed one.
+     *
+     * The stage's figures are not used when its status contradicts the close (`CD17`'s Lost-into-a-won-
+     * stage pairing), because then they describe the other outcome.
+     *
+     * ── THE WARNING ────────────────────────────────────────────────────────────────────────────────
+     *
+     * A pipeline with no active stage for the outcome still closes (see `closingStageForOutcome`), but the
+     * deal stays in an open stage. That used to be silent. It is now a warning, so the person closing it
+     * and anyone reading `Issues` learn the pipeline is missing a stage.
+     */
+    private async resolveClosing(
+        deal: DealEntityServer,
+        input: SalesCloseDealInput,
+        target: StatusFlags,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<ResolvedClosing> {
+        const stageID = input.ClosingStageID
+            ?? (await this.closingStageForOutcome(deal.PipelineID, target, provider, user));
+        const stage = stageID ? await readStage(stageID, provider, user) : null;
+
+        const stageAgrees = !!stage && stage.IsWon === target.IsWon && stage.IsLost === target.IsLost;
+        const flagProbability = target.IsWon ? 100 : target.IsLost ? 0 : null;
+        const probability = stageAgrees && stage.Probability !== null ? stage.Probability : flagProbability;
+        const forecastCategory = stageAgrees ? stage.ForecastCategoryTypeID : null;
+
+        const issues: SalesCloseIssue[] = [];
+        if (!stageID && (target.IsWon || target.IsLost)) {
+            const outcome = target.IsWon ? 'won' : 'lost';
+            issues.push({
+                Section: 'deal',
+                Field: 'PipelineStageID',
+                Severity: 'warning',
+                Message:
+                    `Closed as ${outcome}, but the ${deal.Pipeline ?? 'deal\'s'} pipeline has no active ${outcome} ` +
+                    `stage, so the deal stayed in ${deal.PipelineStage ?? 'its current stage'}. Add a ${outcome} ` +
+                    'stage to the pipeline so closed deals land in it.',
+            });
+        }
+
+        return {
+            StageID: stageID,
+            Probability: probability,
+            ForecastCategoryTypeID: forecastCategory,
+            Issues: issues,
+        };
+    }
+
     /* ── The close stamp (§7.2 step 6) ──────────────────────────────────────── */
+
+    /**
+     * When a close-won task falls due: `DueInDays` after the BUSINESS day the deal closed on
+     * (bc-aidp-next-golive#168).
+     *
+     * Read from `ActualCloseDate`, which `stampClose` has already set to that day, so the task and the
+     * deal name the same close day. It used to be counted from `ClosedAt`'s UTC day, which is the next
+     * day for any close in the Central evening — the task fell due one day after the close date plus
+     * `DueInDays`. `ToCalendarDay` takes the column's UTC parts whether the saved entity holds a `Date`
+     * or a string. The fallback is only for a deal the stamp somehow left without a close day, and asks
+     * the same question the stamp does.
+     */
+    private closeWonTaskDueAt(
+        deal: { ActualCloseDate: Date | string | null; CompanyID: string },
+        dueInDays: number | null | undefined,
+    ): Date {
+        const closeDay =
+            ToCalendarDay(deal.ActualCloseDate) ?? BusinessTimeZoneEngine.Instance.Today(deal.CompanyID);
+        return CloseWonTaskDueAt(FromCalendarDay(closeDay), dueInDays);
+    }
 
     /**
      * Append the provenance row and stamp the deal.
@@ -897,7 +1217,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         target: StatusFlags,
         routing: SalesCloseRoutingResult[],
         user: UserInfo,
-        derivedClosingStageID: string | null,
+        closing: ResolvedClosing,
         lossReasonName: string | null,
     ): void {
         /**
@@ -909,8 +1229,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
          * one.
          *
          * `DeclareTransition` hands the entity the one thing it could not derive — the routing note — and
-         * leaves the writing to the single writer, which also suppresses the stage defaults so a close's
-         * probability is not re-derived from the stage it lands in. The `From`/`To` stamps come out the
+         * leaves the writing to the single writer, which also suppresses the stage defaults: the close
+         * writes its own probability and forecast category below, from `resolveClosing`. The `From`/`To` stamps come out the
          * same, because the entity reads them from `OldValue`, which is what this method read too.
          *
          * The event id is no longer available here: it exists only once the save has appended the row.
@@ -918,14 +1238,25 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
          */
         deal.DeclareTransition('Close', this.routingNote(routing, input.Notes, lossReasonName));
 
-        // Everything stored is UTC — getUTC*, never local-time getters, for anything persisted.
+        // `ClosedAt` is an instant and is stored as one. `ActualCloseDate` below is a calendar day.
         const now = new Date();
         deal.DealStatusTypeID = target.ID;
         // Derived when the caller named no stage -- see closingStageForOutcome. This is what gives a
         // browser-driven close a stage to move into, and therefore gives the reopen something to restore.
-        const closingStage = input.ClosingStageID ?? derivedClosingStageID;
-        if (closingStage) {
-            deal.PipelineStageID = closingStage;
+        if (closing.StageID) {
+            deal.PipelineStageID = closing.StageID;
+        }
+        /**
+         * The close's own probability and forecast category (bc-aidp-next-golive#345). The declared
+         * transition switches the stage defaults off, so nothing else writes them: before this, every
+         * closed deal kept the figures it had while open. The event above still stamps the pre-close
+         * probability, because the entity reads it from `OldValue`. See `resolveClosing`.
+         */
+        if (closing.Probability !== null) {
+            deal.Probability = closing.Probability;
+        }
+        if (closing.ForecastCategoryTypeID) {
+            deal.ForecastCategoryTypeID = closing.ForecastCategoryTypeID;
         }
         if (input.LossReasonID) {
             deal.LossReasonID = input.LossReasonID;
@@ -935,11 +1266,21 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         }
         deal.ClosedAt = now;
         deal.ClosedByUserID = user.ID;
-        // ActualCloseDate is a DATE, not a datetime: truncate at UTC midnight so a deal closed at
-        // 23:00 UTC does not land in tomorrow's period for a reader in another timezone.
-        deal.ActualCloseDate = new Date(
-            Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-        );
+        /**
+         * ActualCloseDate is a DATE: the BUSINESS day the deal closed on, for the deal's company
+         * (bc-aidp-next-golive#168).
+         *
+         * It used to be the UTC day of `now`, which is a different day for every close in the
+         * evening Central (from 18:00, 19:00 in daylight time). A deal won on the evening of 30
+         * September was stamped 1 October, so the win counted in October's bookings and win rate
+         * rather than September's. `ClosedAt` above is the instant
+         * and stays one; this is the calendar day, so "what day is it" is the business zone's question.
+         *
+         * `FromCalendarDay` hands the day back as UTC midnight, which is the shape a `DATE` column
+         * round-trips as and the shape every reader of it (UTC parts) expects. The engine was loaded
+         * before the transaction opened; unconfigured, it fails open to UTC — the old behaviour.
+         */
+        deal.ActualCloseDate = FromCalendarDay(BusinessTimeZoneEngine.Instance.Today(deal.CompanyID));
     }
 
     /**
@@ -1074,8 +1415,15 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              * reasoning in full; the point here is that a reader of this method should not conclude
              * these land on the agreement.
              */
-            ExecutionDate: deal.ExecutionDate ? String(deal.ExecutionDate) : null,
-            StartDate: deal.StartDate ? String(deal.StartDate) : null,
+            /**
+             * `YYYY-MM-DD`, read from the `DATE` column's UTC parts. `String(date)` produced the
+             * server's local rendering of UTC midnight ("Tue Sep 29 2026 19:00:00 GMT-0500 ..."). That
+             * is not `YYYY-MM-DD`, and on a server west of Greenwich its leading text names the PREVIOUS
+             * day — "Tue Sep 29" for 30 September in Chicago — though `Date.parse` would still recover
+             * the instant.
+             */
+            ExecutionDate: ToCalendarDay(deal.ExecutionDate),
+            StartDate: ToCalendarDay(deal.StartDate),
             // The buying party, so contracts can stamp the customer without looking back at the deal.
             AccountID: deal.AccountID,
             PrimaryContactID: deal.PrimaryContactID,
@@ -1159,22 +1507,20 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              *
              * ── WHY `IsBooked` AND NOT THE TWO OBVIOUS TESTS ────────────────────────────────────
              *
-             * Both alternatives are wrong, in opposite directions, and the data on the host showed it:
-             *
-             *   `Status === 'Confirmed'` UNDER-blocks. The lifecycle runs on to `Posted` and then
-             *   `Fulfilled`, so an equality test lets through precisely the orders whose ledger has
-             *   moved FURTHEST. It is also a string comparison against orders' vocabulary, which is the
-             *   shape rule two forbids.
+             *   `Status === 'Confirmed'` gives the same answer today, because orders' `IsBooked` is
+             *   exactly that comparison. Written here it is a string comparison against orders'
+             *   vocabulary, which is the shape rule two forbids, and it would not follow orders the
+             *   next time its lifecycle changes (it once ran on to `Posted` and `Fulfilled`).
              *
              *   `ConfirmedAt IS NOT NULL` OVER-blocks. That column is a timestamp, and an order that was
              *   confirmed and later VOIDED keeps it forever. Refusing there would block the one case
              *   where the ledger has been SETTLED: orders records a reversal as its own record (D53), so
              *   a voided order is not a live receivable and the deal behind it is safe to reopen.
              *
-             * `IsBooked` is the only one of the three that means "the ledger currently stands", and it
-             * gives the confirmed-then-voided case the right answer for free -- `IsBooked('Voided')` is
-             * false. The two directions are the point: a later "simplification" to
-             * `status === 'Confirmed'` breaks both, and `close-deal.CD23` exists to catch that.
+             * `IsBooked` is orders' own answer to "does the ledger currently stand", and it gives the
+             * confirmed-then-voided case the right answer for free -- `IsBooked('Voided')` is false.
+             * `close-deal.CD24` pins both halves: a booked order refuses the reopen, and a
+             * confirmed-then-voided one does not.
              *
              * ── WHAT IT SAYS, AND WHAT IT DELIBERATELY DOES NOT ─────────────────────────────────
              *
@@ -1201,10 +1547,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * when the peer is not. FK set + peer unresolved is not "no order" — it is "unknown
              * order", and an unknown ledger state cannot be certified safe to reopen.
              *
-             * THE SIBLING CALL SITE ALREADY DECIDED THIS. `DealWorkspaceService.LoadDeal` treats the same
-             * state as a hard failure and refuses to render, on the reasoning that a deal with an
-             * unreadable order must not be shown as a deal with no lines. Two files reading one state and
-             * returning opposite verdicts is the defect; this makes them agree.
+             * THE SAME VERDICT THE DEAL WORKSPACE'S LOADER REACHED (deleted in #291): it treated this
+             * state as a hard failure and refused to render, on the reasoning that a deal with an
+             * unreadable order must not be shown as a deal with no lines.
              */
             if (deal.OrderID && !deal.OrderID_Object) {
                 return {
@@ -1270,9 +1615,30 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * `OrderStatusOnEntry` fire so the order is asked to come back. A status-only close left the
              * stage where it was, so this resolves to the stage the deal is already in and nothing fires.
              */
-            const landingStage = input.StageID ?? (await this.priorStageFromCloseEvent(deal.ID, provider, user));
+            const undone = await this.closeEventBeingUndone(deal.ID, provider, user);
+            const landingStage = input.StageID ?? undone?.FromStageID ?? null;
+            const stageMoves =
+                !!landingStage && landingStage.toLowerCase() !== (deal.PipelineStageID ?? '').toLowerCase();
             if (landingStage) {
                 deal.PipelineStageID = landingStage;
+            }
+
+            /**
+             * THE FIGURES THE CLOSE OVERWROTE (bc-aidp-next-golive#345). The close writes 100 or 0 and,
+             * when it lands in a closing stage, that stage's forecast category. The declared transition
+             * keeps the stage defaults off here too, so the reopen puts them back itself: the probability
+             * from the close event's stamp, and the forecast category from the stage the deal returns to.
+             * The category is only taken when the stage actually moves; a deal that stays where it is
+             * keeps the category it has.
+             */
+            if (undone && undone.ProbabilityAtTransition !== null) {
+                deal.Probability = undone.ProbabilityAtTransition;
+            }
+            if (stageMoves && landingStage) {
+                const landing = await readStage(landingStage, provider, user);
+                if (landing?.ForecastCategoryTypeID) {
+                    deal.ForecastCategoryTypeID = landing.ForecastCategoryTypeID;
+                }
             }
             // The close stamps describe a close that is no longer in effect; clearing them keeps every
             // rollup that tests `ClosedAt IS NOT NULL` honest. The event above preserves the history
@@ -1280,6 +1646,8 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             deal.ClosedAt = null;
             deal.ClosedByUserID = null;
             deal.ActualCloseDate = null;
+            // `ContractID` stays on the deal on purpose: the next close reuses that contract and decides
+            // whether to refresh it (#278).
 
             /**
              * THE LOSS REASON IS A CLOSE STAMP TOO, and leaving it behind was not harmless
@@ -1429,12 +1797,19 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
      * Returns null when there is no close event to read — a deal closed by SQL, an import that wrote no
      * provenance, or a log that was never written. The reopen then leaves the stage alone rather than
      * guessing, which is the same answer as "the caller sent no StageID" and needs no extra branch.
+     *
+     * ── AND THE PROBABILITY THE CLOSE LEFT BEHIND (bc-aidp-next-golive#345) ───────────────────────────
+     *
+     * The close now writes 100 or 0, so a reopen that kept the deal's probability would leave a reopened
+     * deal at 100. The same event stamped the pre-close value in `ProbabilityAtTransition`; the reopen
+     * restores it, which is what "the reopen keeps the probability a human set" (`CD16`) means once the
+     * close no longer leaves it in place.
      */
-    private async priorStageFromCloseEvent(
+    private async closeEventBeingUndone(
         dealID: string,
         provider: IMetadataProvider,
         user: UserInfo,
-    ): Promise<string | null> {
+    ): Promise<{ FromStageID: string | null; ProbabilityAtTransition: number | null } | null> {
         const view = provider as unknown as IRunViewProvider;
 
         const locking = await view.RunView(
@@ -1463,16 +1838,23 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
                 ExtraFilter: `DealID = '${dealID}' AND ToDealStatusTypeID IN (${quoted})`,
                 OrderBy: 'ChangedAt DESC',
                 ResultType: 'simple',
-                Fields: ['FromStageID', 'ChangedAt'],
+                Fields: ['FromStageID', 'ProbabilityAtTransition', 'ChangedAt'],
             },
             user,
         );
         if (!events.Success) {
             return null;
         }
-        const row = (events.Results ?? [])[0] as { FromStageID?: string | null } | undefined;
-        const from = row?.FromStageID;
-        return from ? String(from) : null;
+        const row = (events.Results ?? [])[0] as
+            | { FromStageID?: string | null; ProbabilityAtTransition?: number | null }
+            | undefined;
+        if (!row) {
+            return null;
+        }
+        return {
+            FromStageID: row.FromStageID ? String(row.FromStageID) : null,
+            ProbabilityAtTransition: row.ProbabilityAtTransition ?? null,
+        };
     }
 
     /** The default landing status — chosen by the `IsOpen` FLAG, never by a status name. */

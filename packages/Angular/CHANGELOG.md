@@ -1,5 +1,151 @@
 # @mj-biz-apps/sales-ng
 
+## 6.18.0
+
+### Minor Changes
+
+- 20e1899: MemberJunction floor raised to 6.1.6, and a batch of non-UX fixes:
+
+  - Breaking for direct importers of `@mj-biz-apps/sales-ng`: the unmounted `DealWorkspaceComponent` and the validation helpers only it used (`DiscountRefusalIssues`, `ShouldRefuseLineRemoval`, `LineRemovalRefusedIssues`, `UnlinkedLineIssues`, `MergeValidation`) are removed (#291). `IDownstreamSeam` gains `UpdateContractFromDeal` (#278).
+  - Closing a reopened Won deal Won again reuses its contract, refreshing unsigned terms, instead of creating a second one (#278).
+  - Changing a deal's contact or account moves its order's bill-to while the order is Draft or Quoted and still bills the previous party (#319).
+  - Deal stage events refuse updates and deletes on the server, and the API no longer offers them (#348).
+  - Slipped Deals, Stage Conversion and Forecast History count whole business days at both period bounds; Slipped Deals no longer fails on audit rows that are not JSON (#289).
+  - The Deal form's inline-create key workaround is removed now that MJ 6.1.6 sends the written key (#207).
+  - CodeGen no longer writes recurring reconcilers, including the field prune, into migrations (#345).
+
+### Patch Changes
+
+- 769158a: A deal line's discount can be typed as a dollar amount. The editor converts it to a percent of orders' list amount and stores it on `DiscountPct`, so the percent's precision, bounds and concession rules apply.
+- Updated dependencies [7041a49]
+- Updated dependencies [769158a]
+- Updated dependencies [0cd81c5]
+- Updated dependencies [20e1899]
+  - @mj-biz-apps/sales-entities@6.18.0
+
+## 6.17.0
+
+### Minor Changes
+
+- edc7c8a: The deal form's "What's being sold" panel lists each order line as a card laid out like the order form's line cards: product with SKU and type, quantity, unit price with its named price, an overridden or discount pill, line total, untaxable and other-company chips, and a subscription's term start. Add a product and each line's edit control open the restricted line editor as before; a closed deal shows the cards with neither. `MJSDealLinesPanel.EditLine` now takes the line ID instead of a grid double-click event, and the panel no longer exposes `Params` or `OnDataLoad`.
+
+### Patch Changes
+
+- 6e391fd: The New button on the All deals and Inspect grids now opens a new deal. The section did not handle the grid's create request, so the button did nothing.
+- 4c46f78: The dashboard's Stage mix card draws its bars at their real height again. A bar's percentage height had nothing definite to resolve against, so every bar fell back to its 8px minimum. Stage names now take a fixed two lines (full name on hover), so a long name no longer lifts its bar off the shared baseline.
+- Updated dependencies [2018641]
+- Updated dependencies [7b134f9]
+  - @mj-biz-apps/sales-entities@6.17.0
+
+## 6.16.0
+
+### Minor Changes
+
+- fc1f0aa: An open deal no longer reads "Closed" because someone typed a date into Actual Close Date (#252). Actual Close Date, Closed At and Closed By are now read-only on the deal form, and the deal save refuses a write to them except from `Sales.CloseDeal` and `Sales.ReopenDeal`. Expected Close Date moved from the Commercial panel to the Pipeline panel, next to stage and probability, and the header labels an open deal's date "Expected close". The close fields carry descriptions saying which date is which.
+- 5623093: Every company can have its own pipeline, and the pipeline pickers filter by company.
+
+  A deal sells as its pipeline's company, and the app seeds its pipelines on one placeholder company, so a deal for any other company had no pipeline with the current stages. The new `Sales.CopyDefaultPipelineToCompanies` Action copies the default pipeline (the one marked `IsDefault`) and all of its stages onto every company that has no pipeline with the same Code. Each company's copy saves in one transaction, the copies are not marked default, and a second run skips companies that already have the pipeline, so it can run again after a company is added.
+
+  The deal form, the deal workspace and the board gain a Company control that narrows the pipeline list to that company, with the default pipeline's company first. Choosing a company moves the deal to that company's first pipeline. Each pipeline option names its company, for example "B2B (Acme)". Within a company, its copy of the default pipeline comes first and legacy pipelines follow. The control is hidden when one company owns every pipeline.
+
+  The seeded stages now look up their pipeline by ID instead of by Code, because the copies share the Code and MetadataSync resolves a lookup to the first matching row.
+
+  `PipelineOption` (deal form) and `PipelineLookup` (workspace) now carry `Code`, `IsDefault` and `DisplayRank`.
+
+### Patch Changes
+
+- 93f25f4: A Sales Account now lists its contacts.
+
+  Sales Contacts carry no account column, and Common's Relationships panel is registered on Organizations only, so the Sales Account form showed Details and Deals and nobody who works there. A new Contacts panel on Sales Accounts lists the Sales Contacts on the other end of an active Common Relationship with the account, in either direction and of any relationship type. Rows open the contact. The panel has no New button: a contact created there would get no Relationship row and would not appear in the list it was added to.
+
+  The demo seed now links each demo contact to the account its deals are on (the partner rep is left unlinked), and its teardown removes those rows first.
+
+- 1738cb0: Choosing a deal's account fills its empty Primary and Billing Contact from the account's default contacts.
+
+  `DealEntity.FillContactsFromAccount()` reads the account's `DefaultPrimaryContactID` and `DefaultBillingContactID` and writes each into the deal only when the deal's own field is empty. The rep can still change or clear either. The account's billing default is written first, so it wins over the rule that copies a new Primary Contact into an empty Billing Contact; an account with no billing default leaves that rule to fill billing from the primary. If the account changes while the read is in flight, nothing is written.
+
+  The deal form (the Pipeline panel on a new deal, "Account & people" on a saved one) and the deal workspace both call it after the account changes. A failed read leaves the contacts as they were and says so.
+
+  The deal workspace's contact lists now label each person "Name (email)", the text the deal form's contact picker already shows, so two people with the same name can be told apart.
+
+- 6aabbcb: Deal "What's being sold" grid names its own columns, product first: Product, Quantity, Unit Price, Line Total. It no longer inherits Order Line's default view or a user's saved Order Line columns.
+- 8b881f2: A won deal's header now shows a Reversal chip for each return, cancellation or credit memo of its order, and a reversal order's header shows the deal of the order it reverses. Before, a returned order dropped off the deal and the reversal named no deal (MemberJunction/bizapps-orders#740).
+- 75976c4: The deal activity form's inputs and "Log it" button are visible again in both themes. The activity timeline, deal form, line editor and deal workspace styles used `--mj-*` names MemberJunction does not define, so those rules were dropped; they now use MJ's tokens, and a CI gate rejects any undefined `--mj-*` name.
+- 5ed3389: The deal form's Payment schedule grid lists instalments by payment date.
+
+  The grid asked for no sort, so instalments came back in storage order. It now sorts by payment date, then by Display Order within a date. Undated instalments ("on execution") list first on SQL Server and PostgreSQL alike, which put NULL dates at opposite ends when left to themselves. A rep can still re-sort by clicking a column header. The deal workspace's schedule tab keeps entry order.
+
+  The grid's default columns are now Payment Date, Amount and Description. With none set, it showed the first ten fields, including Deal ID and Display Order. Display Order stays available from the column chooser.
+
+- a5f7d31: The Sales dashboard labels its queues, cards and Inspect grid in plain English instead of column names, with the exact rule in a tooltip. "Commit this period" is now "Commit (open)", since it counts every open Commit deal whatever period is selected.
+- d1c125f: The Sales dashboard's tiles show as soon as the roster and summary land; the win rate, the inspect grid, All Deals and the board each show their own loading state until the rest of the section's reads arrive.
+- fc7de31: The Sales section reads the grids' saved view once per load, alongside its other reads, instead of twice in a row after them; inspect slice clicks no longer read it again.
+- a5da9d8: The deal form's Stage history grid shows names instead of IDs.
+
+  With no default columns set, the grid showed the first ten fields: the deal, stage, status and user IDs. Its default columns are now Changed At, From Stage, To Stage, From Deal Status Type, To Deal Status Type, Changed By User, Days In Previous Stage and Amount At Transition. The ID columns stay available from the column chooser.
+
+- e7ec35c: Deal form: after a saved deal moves to another stage, Probability and Forecast category show what the save will write from the stage, until the rep edits them. Display only; the server still applies the stage's defaults.
+- Updated dependencies [17ff470]
+- Updated dependencies [fc1f0aa]
+- Updated dependencies [3d02df4]
+- Updated dependencies [1738cb0]
+- Updated dependencies [2925963]
+- Updated dependencies [bcc41d7]
+- Updated dependencies [91e3f43]
+- Updated dependencies [a43114c]
+  - @mj-biz-apps/sales-entities@6.16.0
+
+## 6.15.2
+
+### Patch Changes
+
+- 608f181: The deal's line editor asks for a service start and end on a line whose product earns over a period and that orders cannot date from an event or a subscription term, so the order can be confirmed. A window that ends before it starts blocks the save, and changing to a product dated elsewhere clears it.
+  - @mj-biz-apps/sales-entities@6.15.2
+
+## 6.15.1
+
+### Patch Changes
+
+- 19ecdc2: The packages' dependencies on each other are caret ranges (`^6.15.0`) instead of exact versions. A host that pins or overrides one package of this app at a later compatible version no longer forces an exact-match copy of its siblings. Changesets keeps the caret and moves its floor on each release.
+  - @mj-biz-apps/sales-entities@6.15.1
+
+## 6.15.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.15.0
+
+## 6.14.0
+
+### Minor Changes
+
+- 65ae0b7: A discount raised on a deal line is recorded as a Price concession in orders. The Add a product / Edit line dialog asks for a reason category and a reason when Discount % goes up, and after the order saves the line it records the concession: inside the rep's Sales Authority orders approves it on save; outside it the dialog says the order cannot be confirmed until it is approved, and shows orders' refusal when it could not be recorded. New exports from `sales-entities`: `DiscountNeedsConcession`, `DiscountReasonCategories`, `RecordDiscountConcession`. The `@mj-biz-apps/orders-*` floor moves to `^5.22.0`, the first release with the Order Concession entity.
+
+### Patch Changes
+
+- 7d83503: **A customer or contact created from a deal form field is linked under the ID that was actually written.** The "Create new" footer on the deal form's Account, Primary Contact and Billing Contact fields selected the new record with `Get('ID')`, which on MJ 6.1.x returns the browser's unwritten key for an IsA child (`SalesAccount`, `SalesContact`). The deal then pointed at a record that does not exist and the save was refused as "does not exist". The deal field panels now rebind the field to the key from `PrimaryKey`, the same read the deal workspace uses since #188. Fixes #202.
+- e0abd17: Deal form: the Motion panel's Order field no longer opens the draft order. It now shows the order's name as plain text, and edit mode no longer offers it. A won deal still reaches its order from the header chip (bc-aidp-next-golive#331).
+- 900cdb0: A deal line for a product the customer already holds now asks whether it is the next term of that subscription or a new subscription on its own dates, the same choice the order line offers, and saves the answer on the line (`OrderLine.SubscriptionAction`). Close Won refuses a deal while such a line has no answer, with one error per line in the `lines` section, because the close confirms the order and an unanswered line would otherwise be moved to start after the existing coverage ends. On a deal type that requires a renewal source, unanswered lines are answered "next term" inside the close instead of refused. Requires bizapps-orders with `FindUnansweredHeldLines`.
+- b3691c6: Requires bizapps-orders 5.30.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.30.0`, `mj-app.json` `>=5.30.0`). That release exports `FindUnansweredHeldLines` and `HoldingSubscriberFor`, which the Close Won check uses. orders 5.30.0 needs MemberJunction 6.1.5, so the `@memberjunction/*` ranges and `mjVersionRange` floor at 6.1.5. The lockfile resolves bizapps-accounting 0.22.0, which orders-ng 5.30.0 requires.
+- a28718b: The Sales section no longer spins forever when a load request fails. A failed read (a gateway 504, a timeout, a dropped connection) now clears the spinner and shows the reason with a Retry button on the dashboard, All deals and Board pages.
+- 698fa8c: The Sales section no longer loads every account and contact when it opens. It reads only the pipelines, stages and status types the board and the status pill use; the deal workspace still loads every lookup list. `DealWorkspaceService.LoadLookups` takes an optional list of lookup names, and its reads are defined once per name, so a result can no longer land in the wrong list.
+- 47604fc: The Sales section's first load no longer grows with closed-deal history. The roster now holds open deals plus deals closed in the current fiscal quarter. The board shows exactly that and says so in its header. The forecast stack's Closed segment comes from `Sales: Dashboard Summary`'s new `WonAmount`, and the Won inspect list is filtered on the server with the Won tile's own predicate. `Sales: Deal Roster` gains an optional `ClosedSince` parameter. `DealWorkspaceService.LoadRoster` now takes it and throws when the query fails, instead of returning an empty roster.
+- Updated dependencies [65ae0b7]
+- Updated dependencies [ced96e0]
+- Updated dependencies [b3691c6]
+- Updated dependencies [9a57950]
+  - @mj-biz-apps/sales-entities@6.14.0
+
+## 6.13.0
+
+### Patch Changes
+
+- 72e39e1: Date-only fields display the stored day (bc-aidp-next-golive#168). The pipeline board's close date and the deal overview's and hero's next-step date formatted UTC midnight in the viewer's zone, so they showed the day before the stored one west of Greenwich; they now format in UTC. An activity's logged time is an instant and now shows in the viewer's zone rather than UTC. The `Sales: Deal Roster` and `Sales: Dashboard Summary` queries judge "past expected close" against the business day from `fnBusinessToday()` instead of the UTC day, so a deal due today no longer reads as past due in the evening Central (from 6 PM, 7 PM in daylight time), and `Sales: Deal Cycle Time` takes the start day in the business zone to match `ActualCloseDate`, through `[__mj_BizAppsCommon].[fnBusinessDayOf]()` rather than an inline `AT TIME ZONE`, which MemberJunction's SQL parser cannot read. `Sales: Won Deals With Unconfirmed Orders` falls back to `ClosedAt`'s business day, not its UTC day, when `ActualCloseDate` is empty. Both need bizapps-common 5.49.0 or later, which adds `fnBusinessDayOf`; `mj-app.json` now requires it. The deal overview's "Sales cycle" does the same, taking the creation instant's business day rather than its UTC day, so a deal created in the evening no longer reads a day short, or "—" when it also closed that evening. On a legacy deal with only `ClosedAt`, the overview's close date, its close tile and the hero's "Closed" stat now show that business day too, so they agree with the variance and cycle beside them. Cycle time on existing deals can read up to one day longer than before for deals started in the evening, because existing `ActualCloseDate` rows keep their UTC day while the start is now a business day; the measure moves toward the correct value, and no backfill is planned. The query changes are metadata and reach a host through the release's regenerated Metadata_Sync migration.
+- 2e66781: MemberJunction and other BizApps packages are peer dependencies with caret ranges (nothing in `dependencies`), so a host keeps one copy of each. The common, orders and tasks packages moved from `dependencies` to `peerDependencies`; every such peer has an exact `devDependencies` anchor for local builds. Adds `check-dependency-model` to CI.
+- Updated dependencies [2e66781]
+- Updated dependencies [86030e7]
+  - @mj-biz-apps/sales-entities@6.13.0
+
 ## 6.12.3
 
 ### Patch Changes

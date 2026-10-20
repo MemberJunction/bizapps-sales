@@ -28,11 +28,13 @@
 --
 -- ── THE ONE PLACE THE DEFINITIONS COULD DRIFT, AND HOW IT IS PINNED ─────────────────────────────
 --
--- `IsPastExpectedClose` compares against `CAST(SYSUTCDATETIME() AS DATE)`. The component compared
--- against a UTC date string it built with getUTC* getters, for a documented reason: ExpectedCloseDate
--- is a DATE and everything stored is UTC, so a local-time comparison moves the boundary by a day for
--- anyone west of Greenwich. Doing it in SQL removes the client's clock from the question entirely —
--- the server's UTC date is the only one involved.
+-- `IsPastExpectedClose` compares against `bt.Today` from `[__mj_BizAppsCommon].[fnBusinessToday]()`:
+-- the business day, the same "today" the dashboard's client side takes from BusinessTimeZoneEngine.
+-- Doing it in SQL keeps the browser's clock out of the question entirely.
+--
+-- It used to compare against `CAST(SYSUTCDATETIME() AS DATE)`, the UTC day, which rolls over at 6 PM
+-- Central (7 PM in daylight time): every evening a deal due TODAY counted as past its expected close (bc-aidp-next-golive#168).
+-- ExpectedCloseDate itself is a DATE and is compared as one; only "today" needed the zone.
 --
 -- ── THE PERIOD WINDOW APPLIES TO ONE COLUMN, AND IT IS NOT IN THE `WHERE` ──────────────────────
 --
@@ -77,7 +79,7 @@ SELECT
     -- TILE 3 — open, and its expected close date has gone by.
     SUM(CASE WHEN st.IsOpen = 1
               AND d.ExpectedCloseDate IS NOT NULL
-              AND d.ExpectedCloseDate < CAST(SYSUTCDATETIME() AS DATE)
+              AND d.ExpectedCloseDate < bt.Today
              THEN 1 ELSE 0 END)                                                   AS PastExpectedCloseCount,
 
     -- TILE 4 — won, within the selected period. Unbounded when no period is supplied.
@@ -99,6 +101,18 @@ SELECT
               AND d.ActualCloseDate <= {{ PeriodEnd | sqlString }}
               {% endif %}
              THEN 1 ELSE 0 END)                                                   AS WonCount,
+    -- The same deals as WonCount, summed: the forecast stack's Closed segment. A SUM of stored
+    -- answers, not pricing arithmetic. It moved here from the browser so the section need not load
+    -- every won deal to total them (bizapps-sales#209); the predicate is WonCount's, so the tile and
+    -- the segment count the same deals.
+    SUM(CASE WHEN st.IsWon = 1
+              {% if PeriodStart %}
+              AND d.ActualCloseDate >= {{ PeriodStart | sqlString }}
+              {% endif %}
+              {% if PeriodEnd %}
+              AND d.ActualCloseDate <= {{ PeriodEnd | sqlString }}
+              {% endif %}
+             THEN ISNULL(d.Amount, 0) ELSE 0 END)                                 AS WonAmount,
 
     -- Provenance for the open figure, so a tile can say how much of it nobody priced. Not currently
     -- rendered on the dashboard; it is here because the figure and its provenance should travel
@@ -126,6 +140,8 @@ LEFT OUTER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
 INNER JOIN [__mj_BizAppsSales].Pipeline p
         ON p.ID = d.PipelineID
+-- One row: the business day and its SQL zone. See the header.
+CROSS JOIN [__mj_BizAppsCommon].[fnBusinessToday]() AS bt
 WHERE 1 = 1
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}

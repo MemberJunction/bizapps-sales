@@ -8,6 +8,12 @@ Each entry records **what was decided, by whom, and why**. The *why* matters mor
 decision without its reasoning gets re-litigated by the next person, or silently reversed by someone who
 assumes it was an accident.
 
+**IDs.** This file holds `D1`–`D7` (the S1 rulings, no hyphen), `I1`–`I10`, and the prefixed series
+`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY`, `D-ST` and `D-SE`. `D-3`, `D-4` and `D-6` are the master
+plan's IDs; their rulings here are D2, D5 and "Master plan D-6". `DN-n` and every other `D-n`
+are in [`DECISIONS-NEEDED.md`](../DECISIONS-NEEDED.md), which also lists what is still open. A bare `Dn`
+cited as orders' (`D6/D7`, `D8`, `D53`) is orders' own log.
+
 ---
 
 ## 2026-08-20 — the order's status is a property of the STAGE
@@ -125,7 +131,8 @@ separately.
 (ATS, certification) extends `Person` with the flag still `false`, the second app **silently mis-chains
 at runtime** — no error, wrong data.
 
-**Status:** ⚠️ **Open risk, tracked in [`KNOWN-ISSUES.md`](./KNOWN-ISSUES.md).** Not a blocker for sales.
+**Status:** resolved in bizapps-common, whose entity metadata sets `AllowMultipleSubtypes: true` on
+`Person` and `Organization`.
 
 ---
 
@@ -166,7 +173,7 @@ produces a "bookings by rep" total that does not reconcile to the company number
 
 ---
 
-### D5 — Cross-company pipelines: `Pipeline.CompanyID` stays required
+### D5 — Cross-company pipelines (master plan D-4): `Pipeline.CompanyID` stays required
 
 **Decision:** keep `CompanyID` **NOT NULL** on `Pipeline`, as built, mirroring `Order.CompanyID` in
 orders (its D6/D7).
@@ -177,10 +184,6 @@ motions. A deal may still span companies commercially: it lives in one company's
 `DealLine` rows carry their own `CompanyID`, stamped from each product's owning company. That
 materializes into orders with correct per-line ownership, so each line books its own single-company
 journal entry with no extra work here.
-
-**Status:** **confirm-only.** Pending business ratification from Amith / Johanna. **No schema change
-either way** — if they disagree with the commercial shape, that is a reporting-semantics conversation,
-not a migration.
 
 **Ratified 2026-08-26, and the picker now matches it.** Johanna Snider confirmed the commercial
 shape in the Sales channel: every deal is a Blue Cypress deal, and company ownership lives at the
@@ -244,7 +247,7 @@ looks arbitrary later.
 | I9 | `scripts/seed-dev-data.sh` is **not** in `metadata/` | `metadata/` is vocabulary that ships to every environment. A Company / Employee / User is *deployment* data — shipping ours as app metadata would push a fake company into somebody's production database. |
 | I10 | The **vocabulary CI grep** was added at S1, before any server logic exists | A rule introduced alongside the code it constrains gets argued with. A rule that was already green when the code arrived simply holds. See `scripts/assert-no-vocabulary-comparisons.mjs`. |
 
-### D-6 (non-employee team members) — as built
+### Master plan D-6 — non-employee team members, as built
 
 Master plan §15.5 flagged this **schema-blocking** and left it unbuilt. Ruled 2026-08-04: build it.
 
@@ -455,12 +458,29 @@ Investigating the port established that the two `DealStageEvent` append sites in
 `stampClose`'s append, KEEP the reopen append — and guard the new stamp so it does not also fire during
 `BeginReopen`, or reopening double-stamps in the other direction.**
 
-**Not done here.** Nothing on this lineage stamps an ordinary transition yet, so there is no double-write
-to fix today; `Sales.CloseDeal` remains the single writer. KI-9 stands, with this refinement.
+**Done since (2026-08-21).** `DealEntityServer.appendStageEvent` is the single writer of `DealStageEvent`
+(`DECISIONS-NEEDED.md` DN-23). `Sales.CloseDeal` and `Sales.ReopenDeal` declare their transition with
+`DeclareTransition(kind, note)` instead of appending, and the reopen's `REOPENED: <reason>` note travels
+as that declaration's note.
+
+### IDs cited from files that were never committed
+
+Code cites D-CF1 and D-CF3 to D-CF5 as `CLOSE-FLOW-DECISIONS.md`, and D-BD1 and D-BD2 as
+`BOARD-DECISIONS.md`. Neither file reached this repository; D-CF6 to D-CF8 above are the entries that
+were copied here. What each ID refers to, from the code that cites it:
+
+| ID | What the citing code says | Status |
+|---|---|---|
+| D-CF1 | A close commits even when a downstream route is stubbed or refused; the routing intent is recorded and `Executed` comes back false (`downstream-seams.ts`, `close-deal.CD7`) | In force |
+| D-CF3 | The deal-to-order route was a stub | Retired: close-won creates no order, because the order is embedded at deal creation |
+| D-CF4 | The deal-to-contract route was a stub | Retired: `LiveContractsSeam` creates the contract (`close-won-contract.CT1`) |
+| D-CF5 | The close writes no `Activity`, because the Activity spine did not exist | Not done: the spine now exists in bizapps-common, and the close still writes none |
+| D-BD1 | MJ had no generic kanban, so the board lays out its own columns on `@angular/cdk` drag-drop, to be deleted when a generic kanban lands (`deal-board.component.ts`) | In force |
+| D-BD2 | A stage move owes a `DealStageEvent` recording what the deal held on the way out (D-CF8) | Done: `DealEntityServer.appendStageEvent` writes it on every stage move |
 
 ---
 
-## Explorer UX rework (#89) — Phase 1
+## Explorer UX rework (golive#89) — Phase 1
 
 ---
 
@@ -542,9 +562,17 @@ The workspace converts, and that conversion is the kind of thing worth a check o
 
 ---
 
-## D-DL2 — The rep states a discount as a PERCENT only, and never as an amount
+## D-DL2 — A discount is stored as a PERCENT, and the `DiscountAmount` column is never bound
 
-**S-US4 is explicit that no price field is enterable by the rep.** The deal-workspace line grid had an
+> **Revised twice; read to the end.** The original ruling, below, made no price field enterable and
+> took discounts as a percent only. Two later revisions narrow it: a rep holding
+> `MJ.BizApps.Orders.Price.OverrideAny` may type a custom amount on a deal line
+> ([Choosing a price on a deal line](#choosing-a-price-on-a-deal-line-golive270-revised)), and any rep
+> may type a discount in dollars, which is converted to and stored as a percent
+> ([Typing a discount in dollars](#typing-a-discount-in-dollars-revision)). What still holds:
+> `OrderLine.DiscountAmount` is never bound or written, and a discount is stored as a percent.
+
+**As first ruled: S-US4 is explicit that no price field is enterable by the rep.** The deal-workspace line grid had an
 editable `DiscountAmount` currency input beside the percent one — inherited from `DealLine`, where the two
 coexisted deliberately: the order form template speaks in amounts, the pricing engine takes a percent, and
 `DealLine` transcribed both. That reasoning died with the table. The amount input is removed; the percent
@@ -607,6 +635,28 @@ What keeps it controlled is what controls the same amount on the order line:
   are stored where the order shows them after Closed Won. Nothing is copied.
 
 The discount stays percent-only: the `DiscountAmount` reasoning above is unchanged.
+
+### Typing a discount in dollars (revision)
+
+**Revision: the line editor's discount accepts a dollar amount as well as a percent.** This removes the
+cost stated above ("less $500" on a signed form had to be converted by hand). It does not reopen the
+`DiscountAmount` column: the dollars are an entry, never stored.
+
+- **Stored as a percent.** `DiscountAmountToPercent` (`discount-conversion.ts`, the one place a discount
+  is converted) turns the dollars into a percent of the line's list amount, held to 0.01% and to 0–100%,
+  and the editor writes it to `DiscountPct`. From there it is a percent like any other: the same
+  concession reason on a raise, the same approval, the same pricing.
+- **The list amount is orders' figure.** It is read back from orders' `Orders.PriceOrder` answer as net
+  plus discount (`PricedLineListAmount`), the inverse of orders' own list − net derivation. Sales does not
+  multiply quantity by price for it, and a tier's stored extended amount is included.
+- **Precision is shown, not hidden.** A hundredth of a percent can move the booked discount a few cents off
+  the typed amount ($500 off $3,333 records 15.00%, which orders prices as $499.95). The editor shows the
+  derived percent and, when they differ, the figure orders will book.
+- **No ambiguity refusal on a derived percent.** The `(0, 1)` refusal (D-DL1) guards a typed percent that
+  might already be a fraction. A percent computed from dollars has one reading, so $1 off $240 records
+  0.42%.
+- **The dollars hold through a reprice.** A new quantity or product changes the list amount; the editor
+  re-derives the percent from the typed dollars, since the dollars are what the rep stated.
 
 ---
 
@@ -691,5 +741,77 @@ golive#232 was filed about.
 `ForecastSnapshotJob`'s `CurrentMonthPeriod()` is untouched. A fiscal start being readable makes D-28
 answerable, but changing the snapshot's period changes what every stored row means and has its own
 integration checks. That is a separate decision; D-28 records the new fact.
+
+---
+
+## D-ST1 — A save that moves a deal's status into or out of a locking status runs the close or the reopen
+
+**Ruling** (bc-aidp-next-golive#205; built in sales PRs #68 and #73): when any save moves
+`Deal.DealStatusTypeID` from a non-locking status to one with `DealStatusType.LocksDeal = 1`, the deal
+entity server runs `Sales.CloseDeal`; a move the other way runs `Sales.ReopenDeal`. A status write that
+cannot run its flow is refused. Code: `DealEntityServer.planStatusTransition` and
+`runStatusTransition`; pinned by `close-deal.CD26` and `close-deal.CD27`.
+
+**What it reverses.** The earlier design had the operations drive the entity and nothing else: a close
+or reopen happened only through `Sales.CloseDeal` / `Sales.ReopenDeal`, and #68 refused a bare status
+write into a locking status. #205 showed the cost. Setting Status to Won on the form locked the deal with
+no stage event, contract or finance tasks, and the lock then refused every later status write, so the
+deal could not be reopened. Refusing the write closed that hole but left a form user, an importer and an
+agent with no way to close a deal by its status. Running the flow serves both: the close is the real one,
+and every caller (form, import, agent, raw `BaseEntity.Save()`) takes the same path.
+
+**How it runs.**
+
+- **Before the close lock.** A reopen is a status write on a locked deal. With the lock first, it is
+  refused before anything sees it as a reopen (`close-deal.CD27`).
+- **The status is put back, then the flow runs after the save.** The operation loads and saves its own
+  copy of the deal. If this save wrote the status too, the two would race over one row. So the field is
+  reverted, the ordinary save commits the caller's other edits, and the flow runs against the committed
+  row. `DealStatusTypeID` stays out of `DEAL_FIELDS_EDITABLE_WHILE_LOCKED`: the field is reached through
+  the flow, never by writing it.
+- **Declared transitions are skipped.** `Sales.CloseDeal` and `Sales.ReopenDeal` call
+  `DeclareTransition` before their own save, so that save does not re-enter the flow.
+- **No reopen reason is required.** The reopen records a fixed sentence as its reason, so the audit
+  trail still says how the deal was reopened (#205; master plan §7.3).
+
+**Refusals before anything is written.**
+
+- A Lost close with no `LossReasonID`: the operation would refuse it every time, so the save refuses up
+  front instead of committing the other edits first.
+- A target status that cannot be read: neither guess is safe. Read as locking, it would close a deal
+  nobody asked to close; read as open, it would write a locking status with no close behind it.
+- A prior status with no row, moving to a locking status: nothing says whether the deal is already
+  closed, and a second close would create a second contract.
+
+**Trade-off accepted.** A close or reopen that fails after the save (a downstream route declines, a loss
+reason demands notes, a contract or order write fails) leaves the caller's other edits committed and the
+status unchanged. The save returns false with a message naming both halves. The close itself stays
+transactional; a half-done close is not among the outcomes.
+
+---
+
+## D-SE1 — Stage events are append-only on the server and in the API, not only in the form (#348)
+
+**Decision (the app's owner, 2026-10-16):** `DealStageEvent` refuses an update and a delete in two
+places. `DealStageEventEntityServer` refuses them in `Save()` and `Delete()`, so an Action, an agent or a
+raw `BaseEntity.Save()` cannot rewrite one. The entity's `AllowUpdateAPI` and `AllowDeleteAPI` are off
+(`metadata/entities/.entities.json`), so the GraphQL API has no update or delete mutation for it.
+Inserts are unaffected: `DealEntityServer.appendStageEvent` is the only writer and always creates a new
+row. The stale `spUpdateDealStageEvent` and `spDeleteDealStageEvent` procedures stay in the database;
+dropping them would need a migration and gains nothing once nothing calls them.
+
+**Why the entity-level flag is right here when D-RRC5 rejected the field-level one.** D-RRC5 turned
+down `AllowUpdateAPI = 0` on four `DealLine` columns because that flag takes the columns out of the
+`spCreate` / `spUpdate` parameters, which would have locked out the one caller that must write them.
+A stage event has no such caller. Nothing legitimately updates or deletes one, and the entity-level
+flags leave `spCreate` and the insert path alone. With the flags off, CodeGen drops the update and
+delete mutations, and MemberJunction's own `Save()` and `Delete()` refuse them as well. The server
+subclass is kept beside the flags because it explains the refusal in this app's terms, and because the
+rule should not depend on a metadata row a host may not have pushed or may turn back on.
+
+**What the form does.** `DealStageEventFormComponentExtended` already refuses edit mode. The refusal
+message is `DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE` in `sales-entities` so the form can share it.
+
+Pinned by `DealStageEventEntityServer.test.ts` and integration check `board-move.BD7`.
 
 ---

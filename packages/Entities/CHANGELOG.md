@@ -1,5 +1,103 @@
 # @mj-biz-apps/sales-entities
 
+## 6.18.0
+
+### Minor Changes
+
+- 0cd81c5: The 6.18 Metadata_Sync ships the new SQL of Forecast History, Slipped Deals and Stage Conversion and Dwell, which judge their date bounds on the business day and survive RecordChange rows that are not JSON, and sets AllowUpdateAPI and AllowDeleteAPI to false on Deal Stage Events. It has a Postgres counterpart.
+- 20e1899: MemberJunction floor raised to 6.1.6, and a batch of non-UX fixes:
+
+  - Breaking for direct importers of `@mj-biz-apps/sales-ng`: the unmounted `DealWorkspaceComponent` and the validation helpers only it used (`DiscountRefusalIssues`, `ShouldRefuseLineRemoval`, `LineRemovalRefusedIssues`, `UnlinkedLineIssues`, `MergeValidation`) are removed (#291). `IDownstreamSeam` gains `UpdateContractFromDeal` (#278).
+  - Closing a reopened Won deal Won again reuses its contract, refreshing unsigned terms, instead of creating a second one (#278).
+  - Changing a deal's contact or account moves its order's bill-to while the order is Draft or Quoted and still bills the previous party (#319).
+  - Deal stage events refuse updates and deletes on the server, and the API no longer offers them (#348).
+  - Slipped Deals, Stage Conversion and Forecast History count whole business days at both period bounds; Slipped Deals no longer fails on audit rows that are not JSON (#289).
+  - The Deal form's inline-create key workaround is removed now that MJ 6.1.6 sends the written key (#207).
+  - CodeGen no longer writes recurring reconcilers, including the field prune, into migrations (#345).
+
+### Patch Changes
+
+- 7041a49: Dependency ranges are caret: `zod` is `^3.24.4` instead of `~3.24.4`.
+- 769158a: A deal line's discount can be typed as a dollar amount. The editor converts it to a percent of orders' list amount and stores it on `DiscountPct`, so the percent's precision, bounds and concession rules apply.
+
+## 6.17.0
+
+### Minor Changes
+
+- 2018641: The D2C pipeline's Lost stage now finds its pipeline by the seeded pipeline's ID, like every other stage in `metadata/pipeline-stages/`. A lookup by `Code` could attach it to another company's copy of D2C on a later `mj sync push`, since every company's copy shares the Code.
+- 7b134f9: The 6.17 Metadata_Sync ships the D2C Lost stage's pipeline by the seeded pipeline's ID, so a host where an earlier `mj sync push` attached the stage to another company's copy of D2C gets it back on the seeded pipeline. It has a Postgres counterpart.
+
+## 6.16.0
+
+### Minor Changes
+
+- fc1f0aa: An open deal no longer reads "Closed" because someone typed a date into Actual Close Date (#252). Actual Close Date, Closed At and Closed By are now read-only on the deal form, and the deal save refuses a write to them except from `Sales.CloseDeal` and `Sales.ReopenDeal`. Expected Close Date moved from the Commercial panel to the Pipeline panel, next to stage and probability, and the header labels an open deal's date "Expected close". The close fields carry descriptions saying which date is which.
+- 3d02df4: A won close no longer warns that the order was not linked to the contract when the installed bizapps-contracts is too old to have order links.
+
+  That case is not a failure: the deal closed, and the contract and order both exist. The close now reports it as a note ("Contract link pending ... linked automatically once contracts is upgraded"), shown with an info icon and muted text on the Deal form's close and status panels and in the deal workspace. A link that contracts refuses to save is still a warning.
+
+  `SalesCloseSeverity` gains `'info'`: something the close could not do yet that needs nobody's action. It never blocks. `ContractsSeamResult` gains an optional `Pending` flag that a seam sets for that case. Callers that switch on severity should handle `'info'`.
+
+- 2925963: A deal's Internal team grid shows the member, role, attribution and dates instead of ID columns.
+
+  Deal Team Members had no field flagged DefaultInView, so the grid fell back to the first ten fields and showed Deal ID, Employee ID, Person ID and Deal Role ID as GUIDs. The role was visible only as an id. `metadata/entity-fields/.deal-team-member-default-in-view.json` flags Employee, Person, Deal Role, Attribution Pct, Start Date and End Date. Metadata only; no migration.
+
+- bcc41d7: Sales Accounts can name a default primary contact and a default billing contact.
+
+  `SalesAccount` gains two nullable columns, `DefaultPrimaryContactID` and `DefaultBillingContactID`, each a foreign key to `SalesContact`, the same target as the deal's own contact fields. The generated Sales Account entity and form carry them. Nothing reads them yet: filling a deal's empty contacts from its account arrives separately.
+
+- 91e3f43: The 6.16 Metadata_Sync ships what metadata/ changed since 6.15: the Relink Won Deal Orders To Contracts action and its daily job (Active), the Copy Default Pipeline To Companies action, the Lost stage on the default pipeline, default list columns on Deal Payment Schedules, Deal Stage Events and Deal Team Members, the Deal close-stamp descriptions, and the Close Deal and Reopen Deal output contracts. `mj app remove` retires the two actions and the job. The SalesAccount default-contacts migration and this seed have Postgres counterparts.
+
+### Patch Changes
+
+- 17ff470: Picking a deal's Primary Contact fills an empty Billing Contact with the same person, and the deal's order bills the Billing Contact.
+
+  The primary contact is usually the person invoiced, but Billing Contact stayed blank, so a rep searched for the same person twice. `DealEntity.Set` now copies a newly chosen Primary Contact into an empty Billing Contact. It runs for the deal form and the deal workspace alike, never overwrites a Billing Contact that is filled in, and the rep can still change or clear it. Loading a deal fills nothing.
+
+  When the server creates a deal's order, `BillToPersonID` now takes the Billing Contact, falling back to the Primary Contact when it is empty. Before, it read only the Primary Contact, so a different Billing Contact never reached the order. Orders already created keep their bill-to person.
+
+- 1738cb0: Choosing a deal's account fills its empty Primary and Billing Contact from the account's default contacts.
+
+  `DealEntity.FillContactsFromAccount()` reads the account's `DefaultPrimaryContactID` and `DefaultBillingContactID` and writes each into the deal only when the deal's own field is empty. The rep can still change or clear either. The account's billing default is written first, so it wins over the rule that copies a new Primary Contact into an empty Billing Contact; an account with no billing default leaves that rule to fill billing from the primary. If the account changes while the read is in flight, nothing is written.
+
+  The deal form (the Pipeline panel on a new deal, "Account & people" on a saved one) and the deal workspace both call it after the account changes. A failed read leaves the contacts as they were and says so.
+
+  The deal workspace's contact lists now label each person "Name (email)", the text the deal form's contact picker already shows, so two people with the same name can be told apart.
+
+- a43114c: Changing a deal team row's employee no longer fails with a raw SQL constraint error.
+
+  A team member is either an employee or a person, and the table enforces it. Nothing above the database did, so picking a new employee on a row whose Person was filled saved as both and came back as a CHECK constraint error, on the path the duplicate-role refusal tells a user to take.
+
+  A new shared `DealTeamMemberEntity` runs in the browser and on the server. Giving EmployeeID or PersonID a value clears the other, and `Validate()` refuses a row with both or neither with a message naming the fix. `DealTeamMemberEntityServer` now extends it, so its duplicate-role check and owner re-stamp are unchanged.
+
+## 6.15.2
+
+## 6.15.1
+
+## 6.15.0
+
+## 6.14.0
+
+### Minor Changes
+
+- 65ae0b7: A discount raised on a deal line is recorded as a Price concession in orders. The Add a product / Edit line dialog asks for a reason category and a reason when Discount % goes up, and after the order saves the line it records the concession: inside the rep's Sales Authority orders approves it on save; outside it the dialog says the order cannot be confirmed until it is approved, and shows orders' refusal when it could not be recorded. New exports from `sales-entities`: `DiscountNeedsConcession`, `DiscountReasonCategories`, `RecordDiscountConcession`. The `@mj-biz-apps/orders-*` floor moves to `^5.22.0`, the first release with the Order Concession entity.
+- ced96e0: Closing a won deal links its order to the contract the close produced (`MJ_BizApps_Contracts: Contract Orders`), so contracts copies the contract's annual increase and carry-discount term to the order's subscriptions (bizapps-contracts#77). `IDownstreamSeam` gains `LinkOrderToContract`. A contracts release without order links is reported as a close warning, not a failure.
+- 9a57950: The 6.14 Metadata_Sync ships what metadata/ changed since 6.13: the `sales` and `sales:write` API scopes with MJAPI's ceiling for `sales:write`, and the new SQL of Sales: Dashboard Summary (with its WonAmount field), Sales: Deal Roster (with its ClosedSince parameter) and Sales: Forecast History. It has a Postgres counterpart, and `mj app remove` retires the two scopes. The seed is idempotent and safe on a host that already ran `mj sync push`.
+
+### Patch Changes
+
+- b3691c6: Requires bizapps-orders 5.30.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.30.0`, `mj-app.json` `>=5.30.0`). That release exports `FindUnansweredHeldLines` and `HoldingSubscriberFor`, which the Close Won check uses. orders 5.30.0 needs MemberJunction 6.1.5, so the `@memberjunction/*` ranges and `mjVersionRange` floor at 6.1.5. The lockfile resolves bizapps-accounting 0.22.0, which orders-ng 5.30.0 requires.
+
+## 6.13.0
+
+### Minor Changes
+
+- 86030e7: The 6.12 Metadata_Sync ships the query SQL from the business-day fix (bc-aidp-next-golive#168) to hosts: `Sales: Dashboard Summary`, `Sales: Deal Cycle Time`, `Sales: Deal Roster` and `Sales: Won Deals With Unconfirmed Orders` now compare against the business day rather than the UTC day on an installed database, not only on a developer's own. It also moves Deal Roster's `PipelineIncludeInForecast` field to its position in the SELECT. It only updates rows earlier seeds created; nothing new is written to the core schema.
+
+### Patch Changes
+
+- 2e66781: MemberJunction and other BizApps packages are peer dependencies with caret ranges (nothing in `dependencies`), so a host keeps one copy of each. The common, orders and tasks packages moved from `dependencies` to `peerDependencies`; every such peer has an exact `devDependencies` anchor for local builds. Adds `check-dependency-model` to CI.
+
 ## 6.12.3
 
 ## 6.12.2

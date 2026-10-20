@@ -1,5 +1,6 @@
 /**
- * @fileoverview Import a sibling BizApps package by NAME, without declaring a dependency on it.
+ * @fileoverview Import a sibling BizApps package by NAME: a plain import, then the copy
+ * `packages/IntegrationTests` declares, then a built sibling checkout.
  *
  * ── WHY A PLAIN `import` DOES NOT WORK FROM HERE ────────────────────────────────────────────────
  *
@@ -21,16 +22,38 @@
  * FOLDER NAMES ARE NEVER ASSUMED (`EngineBase` vs `engine-base` vs `Entities`) — the `name` in
  * package.json is the only thing matched, so this keeps working when a sibling reorganises.
  */
-import { readdirSync, existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { readdirSync, existsSync, readFileSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { ShareTestedCheckoutPackages } from './one-mj-core.mjs';
+/**
+ * Entries of `dir` that are directories, FOLLOWING SYMLINKS.
+ *
+ * `Dirent.isDirectory()` is false for a symlink, so a sibling linked into the parent (one real checkout
+ * shared by several worktrees, or a per-ref sibling set swapped in by link) was skipped as if absent.
+ */
+export function listDirs(dir) {
+    return readdirSync(dir, { withFileTypes: true })
+        .filter((d) => {
+            if (d.isDirectory()) return true;
+            if (!d.isSymbolicLink()) return false;
+            try {
+                return statSync(join(dir, d.name)).isDirectory();
+            } catch {
+                return false; // a dangling link is not a sibling
+            }
+        })
+        .map((d) => d.name);
+}
 
 /** The built entry point of a sibling package, or null when it is absent or unbuilt. */
 export function resolveSiblingPackage(name, from = process.cwd()) {
     const parent = join(from, '..');
     let repos = [];
     try {
-        repos = readdirSync(parent, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+        repos = listDirs(parent);
     } catch {
         return null;
     }
@@ -39,7 +62,7 @@ export function resolveSiblingPackage(name, from = process.cwd()) {
         if (!existsSync(pkgDir)) continue;
         let subs = [];
         try {
-            subs = readdirSync(pkgDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+            subs = listDirs(pkgDir);
         } catch {
             continue;
         }
@@ -66,7 +89,23 @@ export function resolveSiblingPackage(name, from = process.cwd()) {
  * module. For anything carrying `@RegisterClass` registrations — which is all of these — two copies means
  * two registries and a last-one-wins race that is invisible until something resolves the wrong class.
  */
+/**
+ * The copy `packages/IntegrationTests` declares, when a plain import cannot see it. The harnesses' sibling
+ * packages are devDependencies there, so a clone with no sibling checkouts still resolves them, at the
+ * version the lockfile records. Null when it is not declared or not installed.
+ */
+function resolveDeclared(name) {
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+    try {
+        return createRequire(join(repoRoot, 'packages', 'IntegrationTests', 'package.json')).resolve(name);
+    } catch {
+        return null;
+    }
+}
+
 export async function importSibling(name) {
+    // A sibling checkout must load THIS checkout's MJ core, not its own (sales#200).
+    ShareTestedCheckoutPackages();
     try {
         return await import(name);
     } catch (err) {
@@ -74,7 +113,7 @@ export async function importSibling(name) {
             throw err;
         }
     }
-    const entry = resolveSiblingPackage(name);
+    const entry = resolveDeclared(name) ?? resolveSiblingPackage(name);
     if (!entry) {
         throw new Error(
             `${name} is neither resolvable nor built in a sibling repo. Check it out beside this one and ` +

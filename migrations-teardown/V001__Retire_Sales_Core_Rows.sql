@@ -9,7 +9,7 @@
 -- schema. Without this file they survive a remove, and the next install re-INSERTs the same fixed
 -- UUIDs and fails on a primary-key collision. That is the whole reason the file exists.
 --
--- WHAT IS LISTED BELOW IS ONLY THE ROOTS -- 33 rows, the ones the seed creates that nothing else
+-- WHAT IS LISTED BELOW IS ONLY THE ROOTS -- 38 rows, the ones the seed creates that nothing else
 -- creates. Their children are NOT listed, because listing them is what breaks: a static delete
 -- list only orders rows the SEED made, while a real installation also holds runtime children
 -- (action execution logs, scheduled-job runs, query permissions, tasks) that a pristine canary
@@ -98,16 +98,24 @@ INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-000000000010', 0),  -- Sales: Won Deals With Unconfirmed Orders
     ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-000000000011', 0),  -- Sales: Deal Owners Without a Linked Login
     ('${mjSchema}', 'QueryCategory',           '5A1E5000-0000-4000-A000-000000000001', 0),  -- Sales
+    ('${mjSchema}', 'Action',                  'DD7CEF7B-C75B-42F8-8D7A-45B9503A6D19', 0),  -- Relink Won Deal Orders To Contracts
+    ('${mjSchema}', 'Action',                  '097952C6-0D37-4395-87FD-998AEDD8ECA4', 0),  -- Copy Default Pipeline To Companies
     -- Remote operations. `RemoteOperation.CategoryID` is nullable, so the category is listed
     -- explicitly rather than left to a cascade that would only release the reference.
     ('${mjSchema}', 'RemoteOperation',         'D4F8A162-0002-4E71-B0A8-3F17C5E2D802', 0),  -- Close Deal
     ('${mjSchema}', 'RemoteOperation',         'D4F8A162-0003-4E71-B0A8-3F17C5E2D802', 0),  -- Reopen Deal
     ('${mjSchema}', 'RemoteOperationCategory', 'D4F8A162-9C35-4E71-B0A8-3F17C5E2D801', 0),  -- Deal Lifecycle
+    -- API scopes. APIApplicationScope.ScopeID and APIKeyScope.ScopeID are NOT NULL, so MJAPI's
+    -- ceiling row and any key's grant follow; the child is listed too, since APIScope.ParentID
+    -- is nullable and would otherwise only be released.
+    ('${mjSchema}', 'APIScope',                '038C63C1-2247-47D8-ADFB-594666717C86', 0),  -- sales:write
+    ('${mjSchema}', 'APIScope',                '080F5DDA-E5CD-444A-9D61-1A89AE5DF423', 0),  -- sales
     -- Scheduled jobs. `ScheduledJobRun.ScheduledJobID` is NOT NULL, so the run history follows.
     ('${mjSchema}', 'ScheduledJob',            '5A1E5000-0000-4000-8000-000000000201', 0),  -- Sales -- Activity Sync (hourly) (retired; same reason as the Action row)
     ('__mj_BizAppsCommon', 'ActivitySyncExtension', 'A7C4E2B1-5D83-4F0A-9C1E-6B8D2F4A90C3', 0),  -- Sales.DealLinker
     ('${mjSchema}', 'ScheduledJob',            '5A1E5000-0000-4000-8000-000000000202', 0),  -- Sales -- Forecast Snapshot (daily)
     ('${mjSchema}', 'ScheduledJob',            'FEB6F8D5-17B0-4AE6-BD8A-F0495F7CE36F', 0),  -- Sales -- Won Deals With Unconfirmed Orders (nightly)
+    ('${mjSchema}', 'ScheduledJob',            'B1E51D67-B681-40F7-A2AD-FF84D2C2A6EC', 0),  -- Sales -- Relink Won Deal Orders To Contracts (daily)
     -- bizapps-tasks task types. NOT in our schema and not in core -- the seed reaches into a
     -- SIBLING app's schema, which is why that schema appears in the walk below. See the
     -- consequence noted in the header: `Task.TypeID` is NOT NULL.

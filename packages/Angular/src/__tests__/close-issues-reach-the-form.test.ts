@@ -16,7 +16,7 @@ import { MJSDealClosePanel, MJSDealPipelinePanel } from '../lib/form-panels/deal
  *   1. the operation RETURNS the warnings   -> `close-deal.CD23` (integration), mutation-proven
  *   2. the panel POPULATES its list         -> NOTHING ASSERTED THIS
  *   3. the template RENDERS that list       -> `deal-close-action` asserts the source contains
- *                                              `@if (Message || Issues.length)` and `@for (i of Issues…)`
+ *                                              `@if (Message || Issues.length || InfoNotes.length)` and `@for (i of Issues…)`
  *
  * Link 2 is the one that matters, because a template bound to a field nothing ever fills satisfies
  * BOTH existing assertions perfectly. That is this repo's recurring defect class stated backwards --
@@ -30,7 +30,7 @@ import { MJSDealClosePanel, MJSDealPipelinePanel } from '../lib/form-panels/deal
  * finance task that could not be routed, an order status orders would not take. A handler that only
  * populated the list on `!Success` would look right, pass a failure-path test, and drop every warning
  * on the closes that actually happen. Both panels had exactly that bug once -- `ApplyCloseIssues` ran
- * only on the failure branch -- which is recorded in `deal-workspace.component.ts`.
+ * only on the failure branch -- first recorded in the deal workspace, since deleted (#291).
  *
  * So every check here drives a SUCCESSFUL operation carrying a warning, and the failure path is
  * covered alongside it rather than instead of it.
@@ -51,14 +51,21 @@ const STATUSES: DealStatusOption[] = [
 const CONTRACT_REFUSED = 'Contract was planned but not created: the seam declined.';
 const TASK_UNROUTED = 'The OrderReview task was created but not routed: no finance assignee.';
 
-function providerStub(opts: { operationSucceeds?: boolean; issues?: string[] } = {}): IMetadataProvider {
-    const { operationSucceeds = true, issues = [] } = opts;
+const LINK_PENDING = 'Contract link pending: the installed bizapps-contracts has no order links yet.';
+
+function providerStub(
+    opts: { operationSucceeds?: boolean; issues?: string[]; notes?: string[] } = {},
+): IMetadataProvider {
+    const { operationSucceeds = true, issues = [], notes = [] } = opts;
     return {
         RouteOperation: async () => ({
             Success: true,
             Output: {
                 Success: operationSucceeds,
-                Issues: issues.map((Message) => ({ Message, Section: 'deal', Field: null, Severity: 'warning' })),
+                Issues: [
+                    ...issues.map((Message) => ({ Message, Section: 'deal', Field: null, Severity: 'warning' })),
+                    ...notes.map((Message) => ({ Message, Section: 'deal', Field: null, Severity: 'info' })),
+                ],
                 Routing: [],
             },
         }),
@@ -154,6 +161,16 @@ describe('the Pipeline status field surfaces what the close could not do', () =>
 
         expect(panel.ActionIssues).not.toContain('stale warning from an earlier attempt');
     });
+
+    it('shows an info note apart from the warnings, so a pending link does not read as a problem', async () => {
+        Metadata.Provider = providerStub({ issues: [TASK_UNROUTED], notes: [LINK_PENDING] });
+        const panel = pipelinePanel();
+
+        await panel.ConfirmClose();
+
+        expect(panel.ActionInfoNotes).toEqual([LINK_PENDING]);
+        expect(panel.ActionIssues).toEqual([TASK_UNROUTED]);
+    });
 });
 
 describe('the Close panel surfaces them too', () => {
@@ -176,5 +193,16 @@ describe('the Close panel surfaces them too', () => {
 
         expect(panel.MessageIsError).toBe(true);
         expect(panel.Issues).toContain(CONTRACT_REFUSED);
+    });
+
+    it('shows an info note apart from the warnings', async () => {
+        Metadata.Provider = providerStub({ notes: [LINK_PENDING] });
+        const panel = closePanel();
+
+        await panel.ConfirmClose();
+
+        expect(panel.InfoNotes).toEqual([LINK_PENDING]);
+        expect(panel.Issues).toEqual([]);
+        expect(panel.MessageIsError).toBe(false);
     });
 });

@@ -36,7 +36,12 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
-import { CanTransition, IsEditable } from '@mj-biz-apps/orders-entities';
+import {
+    CanTransition,
+    HostOrderLineEditVeto,
+    IsEditable,
+    type mjBizAppsOrdersOrderLineEntity,
+} from '@mj-biz-apps/orders-entities';
 import {
     DealFieldsEditableWhileLocked,
     StubDownstreamSeam,
@@ -49,8 +54,10 @@ import {
     type SalesReopenDealOutput,
     type DealEntity,
     type mjBizAppsSalesDealEntity,
+    type mjBizAppsSalesPipelineStageEntity,
 } from '@mj-biz-apps/sales-entities';
 import {
+    DealLockRefusal,
     DEFAULT_DUE_IN_DAYS,
     OrdersIsInstalled,
     ResetDownstreamSeam,
@@ -69,6 +76,7 @@ import {
     TxOne,
     type SalesFixture,
 } from '../fixture.js';
+import { SeedDealOnPipeline } from './close-won-order.fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -722,9 +730,8 @@ export const CloseDealChecks: NamedCheck[] = [
                 /**
                  * THE GAP THIS CLOSES IS PROGRAMMATIC, NOT VISUAL.
                  *
-                 * `Routing[].Reason` already carried the refusal, and the workspace already renders it —
-                 * `deal-workspace.component.html` shows `not created: {{ r.Reason }}` on a failed row, so a
-                 * rep sees it. What did not carry it was `Issues`, the field every OTHER failure mode in
+                 * `Routing[].Reason` already carried the refusal, and the deal workspace (since deleted,
+                 * #291) rendered it as `not created: {{ r.Reason }}` on a failed row, so a rep saw it. What did not carry it was `Issues`, the field every OTHER failure mode in
                  * this operation reports through. An API client, an agent or an importer that checks
                  * `Success` and reads `Issues` saw `Success: true` and an empty array on a close whose
                  * contract had been declined.
@@ -770,7 +777,18 @@ export const CloseDealChecks: NamedCheck[] = [
                             + `${warnings.length} warning(s) in Issues: ${JSON.stringify(out.Issues)}`,
                     );
                     for (const r of refused) {
-                        const carried = warnings.find((w) => w.Message.includes(r.Target));
+                        /**
+                         * ANCHORED AT THE START, not `includes` (bc-aidp-next-golive#326).
+                         *
+                         * A route Issue is built as `${Target} was planned but not created: ...`, so it
+                         * LEADS with the target. Every other warning on a close names itself first ("The
+                         * ContractProcessing task was created but NOT routed: ...") -- and that one
+                         * contains the substring "Contract", so a loose match picked the TASK's Issue for
+                         * the Contract route and then compared it against the route's reason. The check
+                         * read as a drift between the two channels when the channels agreed fine; it was
+                         * the matcher that was wrong. Invisible until a close could raise both at once.
+                         */
+                        const carried = warnings.find((w) => w.Message.startsWith(r.Target));
                         Assert(
                             !!carried,
                             `${r.Target} was refused and no Issue names it — a caller reading Issues alone `
@@ -1098,10 +1116,9 @@ export const CloseDealChecks: NamedCheck[] = [
                 );
 
                 /**
-                 * NOT COVERED HERE: that `Lines` is still refused. The fixture deal is provisioned with a
-                 * Draft order carrying no lines, so there is nothing to remove, and adding one needs the
-                 * product fixture this bundle does not build. The order-line guard is #206 item 1 and
-                 * lands with its own check — flagged rather than left to look covered.
+                 * NOT COVERED HERE: that the order's lines are still refused. This deal's order carries
+                 * no lines, so there is nothing to change or remove. CD40 seeds a deal WITH a line and
+                 * proves the order-line lock on its own (#328).
                  */
             }),
     },
@@ -1649,10 +1666,10 @@ export const CloseDealChecks: NamedCheck[] = [
                 const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
                 Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
 
-                const tasks = await TxAll<{ Name: string; DueAt: string | null; ClosedAt: string }>(
+                const tasks = await TxAll<{ Name: string; DueAt: string | null; ActualCloseDate: string }>(
                     ctx,
                     `SELECT t.Name, CONVERT(varchar(33), t.DueAt, 126) AS DueAt,
-                            CONVERT(varchar(33), d.ClosedAt, 126) AS ClosedAt
+                            CONVERT(varchar(10), d.ActualCloseDate, 23) AS ActualCloseDate
                        FROM ${TASKS_SCHEMA}.Task t
                        JOIN ${TASKS_SCHEMA}.TaskLink tl ON tl.TaskID = t.ID
                        JOIN ${SALES_SCHEMA}.Deal d ON d.ID = '${dealID}'
@@ -1668,7 +1685,6 @@ export const CloseDealChecks: NamedCheck[] = [
                         `"${t.Name}" has a NULL due date — every downstream due-date feature is inert for it`,
                     );
                     const due = new Date(String(t.DueAt));
-                    const closed = new Date(String(t.ClosedAt));
                     /**
                      * ── AN EXACT OFFSET, NOT A PLAUSIBLE RANGE. THE RANGE WAS THE BUG ───────────────
                      *
@@ -1684,16 +1700,21 @@ export const CloseDealChecks: NamedCheck[] = [
                      * from a right one; an equality can.
                      */
                     /**
-                     * BOTH SIDES TRUNCATED TO UTC MIDNIGHT BEFORE DIFFERENCING, and the first version of
-                     * this line was wrong in the way the fix's own comment warns about: `DueAt` is a
-                     * midnight DATE while `ClosedAt` is a full timestamp, so subtracting them lost the
-                     * afternoon and a five-day offset measured as four. The check had the day-arithmetic
-                     * bug it was written to catch.
+                     * BOTH SIDES AT UTC MIDNIGHT BEFORE DIFFERENCING, and the first version of this line
+                     * was wrong in the way the fix's own comment warns about: `DueAt` is a midnight DATE
+                     * while `ClosedAt` is a full timestamp, so subtracting them lost the afternoon and a
+                     * five-day offset measured as four. The check had the day-arithmetic bug it was
+                     * written to catch.
+                     *
+                     * MEASURED FROM `ActualCloseDate`, NOT FROM `ClosedAt`'s UTC DAY (golive#168). The
+                     * due date counts from the BUSINESS day of the close, which is what `ActualCloseDate`
+                     * stores. From the evening on in Central (6 PM, 7 PM in daylight time) `ClosedAt`'s UTC
+                     * day is the next day, so a check keyed on it would read a correct five-day offset as
+                     * four whenever this suite runs in the evening.
                      */
-                    const closedMidnight = Date.UTC(
-                        closed.getUTCFullYear(), closed.getUTCMonth(), closed.getUTCDate(),
-                    );
-                    const days = Math.round((due.getTime() - closedMidnight) / 86_400_000);
+                    const closeDay = Date.parse(`${t.ActualCloseDate}T00:00:00Z`);
+                    Assert(Number.isFinite(closeDay), `the deal has no ActualCloseDate (${t.ActualCloseDate})`);
+                    const days = Math.round((due.getTime() - closeDay) / 86_400_000);
                     AssertEqual(
                         days,
                         DEFAULT_DUE_IN_DAYS,
@@ -2117,9 +2138,9 @@ export const CloseDealChecks: NamedCheck[] = [
                  *
                  * `SetOwner()` is a DIFFERENT path and it is refused here, measured: it assigns
                  * `this.OwnerEmployeeID` on the client before saving, so `checkCloseLock` sees a dirty
-                 * frozen field and returns false. The deal workspace's owner picker calls it
-                 * (`deal-workspace.component.ts`), so reassigning an owner there does not work on a
-                 * closed deal even though item 2 says it should. Deliberately NOT asserted here: a check
+                 * frozen field and returns false. The deal workspace's owner picker called it (the
+                 * workspace is deleted, #291), so reassigning an owner there did not work on a closed
+                 * deal even though item 2 says it should. Deliberately NOT asserted here: a check
                  * that pinned the refusal would enshrine the defect. Raised separately instead.
                  */
                 const f = await ResolveSalesFixture(ctx);
@@ -2937,7 +2958,339 @@ export const CloseDealChecks: NamedCheck[] = [
                 AssertEqual(Number(still.N), 1, 'setup: the deal must still be lost when this is asserted');
             }),
     },
+    {
+        Id: 'close-deal.CD36',
+        Name: 'CD36: a WON close writes the winning stage\'s probability and forecast category, and the event keeps the old one',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * ── bc-aidp-next-golive#345 ──────────────────────────────────────────────────────────
+                 *
+                 * A close declares its transition, which switches the stage defaults off, and nothing
+                 * else wrote the probability: a won deal kept the 42 it had while open. The expected
+                 * figures are read from the stage the outcome names rather than hardcoded, so this holds
+                 * on a pipeline whose winning stage carries 95.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const winning = await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsWon = 1');
+                Assert(!!winning, 'the pipeline needs a stage declaring a WON status');
+                const expected = await TxOne<{ Probability: number | null; ForecastCategoryTypeID: string | null }>(
+                    ctx,
+                    `SELECT Probability, ForecastCategoryTypeID FROM ${SALES_SCHEMA}.PipelineStage
+                      WHERE ID = '${winning!.ID}'`,
+                );
+                const PRE_CLOSE = 42;
+                Assert(
+                    Number(expected.Probability ?? 100) !== PRE_CLOSE,
+                    `setup: the winning stage's probability must differ from ${PRE_CLOSE}, or nothing is proven`,
+                );
+
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD36 won probability',
+                );
+                const priced = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await priced.Load(dealID), 'the open deal loads');
+                priced.Probability = PRE_CLOSE;
+                Assert(await priced.Save(), `an open deal accepts a probability — ${priced.LatestResult?.CompleteMessage ?? ''}`);
+                const before = await TxOne<{ ForecastCategoryTypeID: string | null }>(
+                    ctx, `SELECT ForecastCategoryTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+
+                const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+
+                const row = await TxOne<{ Probability: number | null; ForecastCategoryTypeID: string | null }>(
+                    ctx, `SELECT Probability, ForecastCategoryTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(
+                    Number(row.Probability),
+                    Number(expected.Probability ?? 100),
+                    'the won deal carries the winning stage\'s probability (100 by flag if the stage has none)',
+                );
+                if (expected.ForecastCategoryTypeID) {
+                    AssertEqual(
+                        String(row.ForecastCategoryTypeID).toLowerCase(),
+                        String(expected.ForecastCategoryTypeID).toLowerCase(),
+                        'and the winning stage\'s forecast category',
+                    );
+                    Assert(
+                        String(before.ForecastCategoryTypeID ?? '').toLowerCase() !==
+                            String(expected.ForecastCategoryTypeID).toLowerCase(),
+                        'setup: the open deal must not already carry the closing category, or nothing is proven',
+                    );
+                }
+
+                const ev = await TxOne<{ ProbabilityAtTransition: number | null }>(
+                    ctx,
+                    `SELECT ProbabilityAtTransition FROM ${SALES_SCHEMA}.DealStageEvent
+                      WHERE DealID = '${dealID}' AND ToDealStatusTypeID = '${f.WonStatusID}'`,
+                );
+                AssertEqual(
+                    Number(ev.ProbabilityAtTransition),
+                    PRE_CLOSE,
+                    'the close event still stamps the probability the deal carried BEFORE the close',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD37',
+        Name: 'CD37: a LOST close on a pipeline with no losing stage still lands at 0, stays put, and WARNS',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The pipeline's losing stages are switched off inside this check's transaction, which
+                 * is the shape a pipeline missing its stage has. Before bc-aidp-next-golive#345 this
+                 * close succeeded silently with the deal still in an open stage at its open probability.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                await TxExec(
+                    ctx,
+                    `UPDATE s SET s.IsActive = 0
+                       FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.OrderOnlyPolicyPipelineID}' AND t.IsLost = 1`,
+                    'CD37: retire the losing stages inside the rolled-back transaction',
+                );
+                // `stageDeclaring` reads through `TxOne`, which throws on no rows, so the absence is
+                // counted here instead.
+                const remaining = await TxAll<{ ID: string }>(
+                    ctx,
+                    `SELECT s.ID FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.OrderOnlyPolicyPipelineID}' AND s.IsActive = 1 AND t.IsLost = 1`,
+                );
+                AssertEqual(remaining.length, 0, 'setup: the pipeline must have no active losing stage');
+
+                const start = f.OrderOnlyPolicyStageID;
+                const dealID = await openDeal(ctx, f, f.OrderOnlyPolicyPipelineID, start, 'CD37 no losing stage');
+                const priced = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await priced.Load(dealID), 'the open deal loads');
+                priced.Probability = 35;
+                Assert(await priced.Save(), `an open deal accepts a probability — ${priced.LatestResult?.CompleteMessage ?? ''}`);
+
+                const out = await close(ctx, {
+                    DealID: dealID,
+                    DealStatusTypeID: f.LostStatusID,
+                    LossReasonID: f.LossReasonPlainID,
+                });
+                Assert(out.Success, `the close must still succeed: ${JSON.stringify(out.Issues)}`);
+                const warning = out.Issues.find(
+                    (i) => i.Severity === 'warning' && i.Field === 'PipelineStageID' && i.Message.includes('no active lost stage'),
+                );
+                Assert(!!warning, `the close must say the pipeline has no losing stage; Issues: ${JSON.stringify(out.Issues)}`);
+
+                const row = await TxOne<{ Probability: number | null; PipelineStageID: string }>(
+                    ctx, `SELECT Probability, PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(String(row.PipelineStageID).toLowerCase(), start.toLowerCase(), 'the deal stayed where it was');
+                AssertEqual(Number(row.Probability), 0, 'and a lost deal is at 0 from the status flag');
+            }),
+    },
+    {
+        Id: 'close-deal.CD38',
+        Name: 'CD38: a reopen puts back the probability and forecast category the close overwrote',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The close now writes 100 and the closing category, and the reopen's declared transition
+                 * keeps the stage defaults off, so without the restore a reopened deal sat at 100 in the
+                 * CLOSED category. The probability comes back from the close event's stamp; the category
+                 * from the stage the deal returns to.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const start = f.OrderOnlyPolicyStageID;
+                const startStage = await TxOne<{ ForecastCategoryTypeID: string | null }>(
+                    ctx, `SELECT ForecastCategoryTypeID FROM ${SALES_SCHEMA}.PipelineStage WHERE ID = '${start}'`,
+                );
+                const dealID = await openDeal(ctx, f, f.OrderOnlyPolicyPipelineID, start, 'CD38 reopen restores');
+                const HAND_SET = 37;
+                const priced = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await priced.Load(dealID), 'the open deal loads');
+                priced.Probability = HAND_SET;
+                Assert(await priced.Save(), `an open deal accepts a probability — ${priced.LatestResult?.CompleteMessage ?? ''}`);
+
+                Assert((await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID })).Success, 'closed');
+                const closed = await TxOne<{ Probability: number | null }>(
+                    ctx, `SELECT Probability FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(
+                    Number(closed.Probability) !== HAND_SET,
+                    'setup: the close must have changed the probability, or the restore proves nothing',
+                );
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'Customer withdrew the signature.' });
+                Assert(out.Success, `the reopen failed: ${JSON.stringify(out.Issues)}`);
+
+                const row = await TxOne<{ Probability: number | null; ForecastCategoryTypeID: string | null; PipelineStageID: string }>(
+                    ctx,
+                    `SELECT Probability, ForecastCategoryTypeID, PipelineStageID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                AssertEqual(String(row.PipelineStageID).toLowerCase(), start.toLowerCase(), 'the deal is back in its stage');
+                AssertEqual(Number(row.Probability), HAND_SET, 'and back at the probability it had before the close');
+                AssertEqual(
+                    String(row.ForecastCategoryTypeID ?? '').toLowerCase(),
+                    String(startStage.ForecastCategoryTypeID ?? '').toLowerCase(),
+                    'and in the forecast category of the stage it returned to',
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD39',
+        Name: 'CD39: a pipeline cannot lose its last active won stage through a stage save; a second one lets it',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * bc-aidp-next-golive#345. CD37 shows what a close does on a pipeline with no losing
+                 * stage: it stays put and warns. This is the other half: a stage edit cannot put a
+                 * pipeline into that state. Through the entity, so the server-side refusal is what is
+                 * tested, not a form.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const winning = await stageDeclaring(ctx, f.OrderOnlyPolicyPipelineID, 'IsWon = 1');
+                Assert(!!winning, 'the pipeline needs a stage declaring a WON status');
+                const others = await TxOne<{ N: number }>(
+                    ctx,
+                    `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.PipelineStage s
+                       JOIN ${SALES_SCHEMA}.DealStatusType t ON t.ID = s.DealStatusTypeID
+                      WHERE s.PipelineID = '${f.OrderOnlyPolicyPipelineID}' AND s.IsActive = 1 AND t.IsWon = 1
+                        AND s.ID <> '${winning!.ID}'`,
+                );
+                AssertEqual(Number(others.N), 0, 'setup: the won stage must be the pipeline\'s only one');
+
+                const stage = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesPipelineStageEntity>(
+                    'MJ_BizApps_Sales: Pipeline Stages', ctx.User,
+                );
+                Assert(await stage.Load(winning!.ID), 'the won stage loads');
+                stage.IsActive = false;
+                Assert(!(await stage.Save()), 'deactivating the only won stage must be refused');
+                Assert(
+                    (stage.LatestResult?.Message ?? '').includes('no active won stage'),
+                    `the refusal says why; it reads '${stage.LatestResult?.Message}'`,
+                );
+
+                // A second won stage on the same pipeline makes the first one free to go.
+                const spare = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesPipelineStageEntity>(
+                    'MJ_BizApps_Sales: Pipeline Stages', ctx.User,
+                );
+                spare.NewRecord();
+                spare.PipelineID = f.OrderOnlyPolicyPipelineID;
+                spare.Name = 'CD39 second won stage';
+                spare.Code = 'CD39WON';
+                spare.DisplayOrder = 999;
+                spare.Probability = 100;
+                spare.DealStatusTypeID = f.WonStatusID;
+                spare.IsActive = true;
+                Assert(await spare.Save(), `the second won stage saves — ${spare.LatestResult?.CompleteMessage ?? ''}`);
+
+                const again = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesPipelineStageEntity>(
+                    'MJ_BizApps_Sales: Pipeline Stages', ctx.User,
+                );
+                Assert(await again.Load(winning!.ID), 'the won stage loads again');
+                again.IsActive = false;
+                Assert(
+                    await again.Save(),
+                    `with another won stage active, deactivating this one is allowed — ${again.LatestResult?.CompleteMessage ?? ''}`,
+                );
+            }),
+    },
+    {
+        Id: 'close-deal.CD40',
+        Name: 'CD40: a closed deal\'s order lines refuse an edit and a delete, in Sales\' words',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * #328, and the half CD13 leaves open. The deal lock refuses a HEADER edit (CD5), but the
+                 * order's lines are what the contract and the order were derived from, and Orders saves
+                 * them without asking Sales. `DealLockOrderLineVeto` is Sales' answer to Orders' seam;
+                 * this proves the answer reaches a real line save and a real delete, through
+                 * `OrderLineEntityServer`, with nothing mocked.
+                 *
+                 * THE MESSAGE IS ASSERTED, NOT ONLY THE REFUSAL. Orders has refusals of its own, and a
+                 * line on a confirmed order could be refused for an Orders reason with the veto never
+                 * consulted. Sales' sentence in the result is what shows the veto answered.
+                 *
+                 * ORDER LINES ONLY. The order header is not frozen by the deal lock, by decision, so
+                 * nothing here asserts on a header edit.
+                 */
+                Assert(
+                    !!HostOrderLineEditVeto(),
+                    'setup: no order-line veto is registered in this process, so Orders refuses nothing on a ' +
+                        'closed deal. LoadBizAppsSalesServer() registers it; the harness must call it first.',
+                );
+                const f = await ResolveSalesFixture(ctx);
+                const seeded = await SeedDealOnPipeline(ctx, f, {
+                    PipelineID: f.OrderOnlyPolicyPipelineID,
+                    StageID: f.OrderOnlyPolicyStageID,
+                    CompanyID: f.OrderOnlyPolicyCompanyID,
+                    LineCount: 1,
+                });
+
+                const out = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+                Assert(out.Success, `the won close failed: ${JSON.stringify(out.Issues)}`);
+                Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
+
+                const lineRow = await TxOne<{ ID: string; ServicePeriodEnd: Date | string | null }>(
+                    ctx,
+                    `SELECT TOP 1 ID, ServicePeriodEnd FROM ${ORDERS_SCHEMA}.OrderLine
+                      WHERE OrderHeaderID = '${seeded.OrderID}'`,
+                );
+                const lineID = String(lineRow.ID);
+                const endBefore = lineRow.ServicePeriodEnd ? new Date(lineRow.ServicePeriodEnd).toISOString() : null;
+
+                // ── AN EDIT: the line's ServicePeriodEnd, through the line's own save ──────────────
+                const line = await ProviderOf(ctx).GetEntityObject<mjBizAppsOrdersOrderLineEntity>(
+                    E_ORDER_LINE, ctx.User,
+                );
+                Assert(await line.Load(lineID), `the closed deal's order line ${lineID} loads`);
+                const newEnd = endBefore === LOCKED_LINE_END.toISOString() ? LOCKED_LINE_END_ALT : LOCKED_LINE_END;
+                line.ServicePeriodEnd = newEnd;
+                Assert(line.Dirty, 'setup: the edit did not change the line, so a refusal would prove nothing');
+                AssertEqual(await line.Save(), false, 'changing a line on a closed deal must be refused');
+                const editMessage = line.LatestResult?.CompleteMessage ?? '';
+                Assert(
+                    editMessage.includes(DealLockRefusal('update')),
+                    `the edit was refused, but not with Sales' lock message, so the veto may never have been ` +
+                        `asked. The refusal reads: '${editMessage}'`,
+                );
+                const afterEdit = await TxOne<{ ServicePeriodEnd: Date | string | null }>(
+                    ctx, `SELECT ServicePeriodEnd FROM ${ORDERS_SCHEMA}.OrderLine WHERE ID = '${lineID}'`,
+                );
+                AssertEqual(
+                    afterEdit.ServicePeriodEnd ? new Date(afterEdit.ServicePeriodEnd).toISOString() : null,
+                    endBefore,
+                    'and the refused edit left the stored service period end as it was',
+                );
+
+                // ── A DELETE: validation does not run on this path, so it is checked on its own ────
+                const doomed = await ProviderOf(ctx).GetEntityObject<mjBizAppsOrdersOrderLineEntity>(
+                    E_ORDER_LINE, ctx.User,
+                );
+                Assert(await doomed.Load(lineID), `the closed deal's order line ${lineID} loads again`);
+                AssertEqual(await doomed.Delete(), false, 'deleting a line on a closed deal must be refused');
+                const deleteMessage = doomed.LatestResult?.CompleteMessage ?? doomed.LatestResult?.Message ?? '';
+                Assert(
+                    deleteMessage.includes(DealLockRefusal('delete')),
+                    `the delete was refused, but not with Sales' lock message. The refusal reads: '${deleteMessage}'`,
+                );
+                const still = await TxOne<{ N: number }>(
+                    ctx, `SELECT COUNT(*) AS N FROM ${ORDERS_SCHEMA}.OrderLine WHERE ID = '${lineID}'`,
+                );
+                AssertEqual(Number(still.N), 1, 'and the refused delete left the line in place');
+            }),
+    },
 ];
+
+/** Orders' line entity, named here for the same reason as `ORDERS_SCHEMA`. */
+const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
+
+/** A service period end CD40 tries to write on a locked line; the second is used if the line already has the first. */
+const LOCKED_LINE_END = new Date('2030-12-31T00:00:00Z');
+const LOCKED_LINE_END_ALT = new Date('2031-12-31T00:00:00Z');
 
 for (const check of CloseDealChecks) {
     IntegrationCheckRegistry.Instance.Register(check);
