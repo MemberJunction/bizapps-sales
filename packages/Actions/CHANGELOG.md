@@ -1,5 +1,15 @@
 # @mj-biz-apps/sales-actions
 
+## 6.18.0
+
+### Patch Changes
+
+- 7041a49: Dependency ranges are caret: `zod` is `^3.24.4` instead of `~3.24.4`.
+- Updated dependencies [6e77e8f]
+- Updated dependencies [20e1899]
+- Updated dependencies [7c5daa9]
+  - @mj-biz-apps/sales-core-entities-server@6.18.0
+
 ## 6.17.0
 
 ### Patch Changes
