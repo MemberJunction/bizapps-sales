@@ -1,5 +1,13 @@
 # @mj-biz-apps/sales-entities
 
+## 6.19.0
+
+### Minor Changes
+
+- de98c6f: Sales metadata from the #371 UX digest. Deal, Stage history, Buying team, Internal team, Pipeline Stage and Forecast Snapshot fields show readable labels instead of column names (Annual Increase Override (%), Previous Status, Buying Role, Attribution (%), Owner and others). The Deal Stage Event sections on the Pipeline Stage and Deal Status Type forms read "Deals Entering/Leaving This Stage" and "… This Status". The shared `Sales: Pipeline` view sorts open deals first, then by expected close, shows "Expected close" and "Closed on" columns, keeps Closed at as a hidden sort column, and shows probability as a percent. Pipeline Stage Rotting Days describes the Board's idle flag; Entry Criteria and Required Fields leave the generated form, and the Sales Contact form drops the older free-text Seniority. Buying team Influence gives its 0–100 range. The deal roles read "Owner" and "Sales Development Rep (SDR)". Applied with `mj sync push`; the hidden fields and the new section titles appear after CodeGen.
+- c80645a: The 6.19 Metadata_Sync ships what metadata/ changed since 6.18: the new SQL, parameters and fields of the reporting queries behind the Deals dashboard filters and period-bound forecast, the plain-sentence descriptions of the vocabulary rows, actions, remote operations and the forecast snapshot job, and the field labels, default grid columns, form relationships and All deals view. It has a Postgres counterpart.
+- 6c2a165: Sales grids show name and status columns instead of IDs for buying team, forecast snapshots, pipeline stages, accounts and contacts. The Sales Account and Sales Contact forms use plain labels, hide Is Active next to Status, and title their related sections by role. Column, lookup, query and action descriptions are rewritten as plain sentences, with the forecast snapshot job, the D2C pipeline, Close Deal and the forecast period corrected. The deal workspace drops its hardcoded renewal placeholders (removes the exported `STANDARD_ANNUAL_INCREASE_PCT` and `STANDARD_CANCELLATION_NOTICE_DAYS`).
+
 ## 6.18.0
 
 ### Minor Changes
