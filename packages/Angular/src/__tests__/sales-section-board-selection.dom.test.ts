@@ -107,6 +107,13 @@ describe('the filter bar carries over between the Dashboard and the Board (bc-ai
         expect(b?.CompanyIDs).toEqual(['company-2']);
         expect(b?.PipelineIDs).toEqual(['pipeline-2']);
         expect(b?.Deals?.map((d) => d.ID)).toEqual(['deal-acme']);
+        // The Board's deals are the read made with those filters and the period's both bounds.
+        expect(section.Window.End, 'the default period has an end').not.toBeNull();
+        expect(service.LoadRoster).toHaveBeenLastCalledWith(
+            section.Window.Start,
+            { CompanyIDs: ['company-2'], ProductCompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: ['pipeline-2'] },
+            section.Window.End,
+        );
     });
 
     it('keeps a filter picked on the Board when moving back to the Dashboard', async () => {
@@ -164,6 +171,11 @@ describe('the Board tabs (bc-aidp-next-golive#351)', () => {
         expect(boardWith('p-b1', [], []).ActivePipelineID).toBe('p-b1');
         expect(boardWith('p-b1', ['company-a'], []).ActivePipelineID, 'ruled out by the company filter').toBe('p-a2');
         expect(boardWith(null, [], ['p-b1']).ActivePipelineID).toBe('p-b1');
+    });
+
+    it('selects the chosen tab whatever the case of its ID, and answers with the pipeline\'s own ID', () => {
+        expect(boardWith('P-B1', [], []).ActivePipelineID).toBe('p-b1');
+        expect(boardWith('P-B1', [], ['p-b1']).ActivePipelineID).toBe('p-b1');
     });
 
     it('names the company on a tab only when the tabs span companies', () => {

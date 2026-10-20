@@ -577,7 +577,7 @@ export class MJSSalesSectionComponent implements OnInit {
         };
 
         const [roster, summary, scoped] = await Promise.all([
-            this.loadRoster(() => this.service.LoadRoster(this.BoardClosedWindow.Start)),
+            this.loadRoster(() => this.readScope(this.BoardClosedWindow, NO_FILTERS)),
             this.service.LoadDashboardSummary(window, filters),
             // The filter bar's deals. On the default period with no filter, the first read serves.
             this.readsOwnScope(window, filters) ? this.loadRoster(() => this.readScope(window, filters)) : Promise.resolve(null),
@@ -710,9 +710,9 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     /**
-     * The closed deals the first roster read carries: those closed in the current fiscal quarter
-     * (bizapps-sales#209). On the default period this is also what the Board shows; another period reads
-     * its own (bc-aidp-next-golive#351).
+     * The closed deals the first roster read carries: those closed in the current fiscal quarter, both
+     * ends bounded (bizapps-sales#209). On the default period this is also what the Board shows, so the
+     * Board's header and its cards agree; another period reads its own (bc-aidp-next-golive#351).
      */
     public get BoardClosedWindow(): PeriodWindow {
         return ResolvePeriod('quarter', this.FiscalStart.Start, BusinessToday());

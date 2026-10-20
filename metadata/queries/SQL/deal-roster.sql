@@ -183,6 +183,8 @@ WHERE 1 = 1
    * `ClosedSince`: the Board bounds its closed columns by the section's period, and a period can end
    * before today (last quarter, last year, a custom range). `PeriodEnd` cannot serve, because it
    * windows open deals too, and the Board shows every open deal whatever the period.
+   *
+   * A closed deal with neither close date is left out here too: nothing says when it closed.
    */
   {% if ClosedUntil %}
   AND (ISNULL(st.IsClosed, 0) = 0

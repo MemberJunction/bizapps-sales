@@ -88,12 +88,13 @@ afterEach(() => {
 });
 
 describe('the roster read', () => {
-    it("asks only for closed deals from the current fiscal quarter's start", async () => {
+    it('asks only for closed deals in the current fiscal quarter, both ends bounded', async () => {
         await mountSection();
 
-        // One read: with no filter set, the dashboard's grouped cards read the board's roster.
+        // One read: with no filter set, the dashboard's grouped cards read the board's roster. The upper
+        // bound is what the Board's header says ("Jul 1, 2026 – Sep 30, 2026").
         expect(service.LoadRoster).toHaveBeenCalledTimes(1);
-        expect(service.LoadRoster).toHaveBeenCalledWith('2026-07-01');
+        expect(service.LoadRoster).toHaveBeenCalledWith('2026-07-01', NO_FILTERS, '2026-09-30');
     });
 
     it("follows the period on the Board: another period reads that period's closed deals (bc-aidp-next-golive#351)", async () => {
@@ -135,7 +136,7 @@ describe('a filter bar choice (bc-aidp-next-golive#350)', () => {
         expect(service.LoadDashboardSummary).toHaveBeenLastCalledWith(expect.anything(), filters);
         expect(service.LoadWinRate).toHaveBeenLastCalledWith(expect.anything(), filters);
         // The unfiltered read the filter lists' choices come from is untouched.
-        expect(service.LoadRoster.mock.calls.filter((c) => c.length === 1)).toHaveLength(1);
+        expect(service.LoadRoster.mock.calls.filter((c) => c[1] === NO_FILTERS)).toHaveLength(1);
     });
 
     it("puts the filter's lists in the deal list's criteria", async () => {

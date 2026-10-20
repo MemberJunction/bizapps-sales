@@ -288,11 +288,16 @@ export class DealBoardComponent {
     /**
      * The pipeline actually in view: the chosen tab while the filters still allow it, else the first
      * tab that has any stages. A chosen pipeline the filters have since ruled out is not shown.
+     *
+     * The choice is matched ignoring case, as the tabs are (a GUID in a URL may come back lower-cased),
+     * and the pipeline's own ID is returned, so the tab highlight and the columns match it.
      */
     public get ActivePipelineID(): string | null {
         const pipelines = this.TabPipelines;
-        if (this.SelectedPipelineID && pipelines.some((p) => p.ID === this.SelectedPipelineID)) {
-            return this.SelectedPipelineID;
+        const selected = this.SelectedPipelineID;
+        const chosen = selected ? pipelines.find((p) => HasID([selected], p.ID)) : undefined;
+        if (chosen) {
+            return chosen.ID;
         }
         const withStages = pipelines.find((p) => this.Stages.some((s) => s.PipelineID === p.ID));
         return withStages?.ID ?? pipelines[0]?.ID ?? null;

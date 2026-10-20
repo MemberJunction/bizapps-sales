@@ -861,7 +861,8 @@ and a link copied on one opens the other with the same filters. On the Board:
   the Board looks the same until someone picks another period; All time loads every closed deal.
 - **Selling company and Pipeline decide the tabs.** The Board draws one pipeline's stages at a time. Its
   tabs are the picked pipelines, else the picked companies' pipelines, else every pipeline; with one,
-  the tabs are hidden. The Board's own Company picker is gone.
+  there are no tabs and that pipeline's name is shown in their place. The Board's own Company picker is
+  gone.
 - **Pipeline "All" includes pipelines flagged out of the forecast**, as the Board always has. The
   Dashboard leaves them out of its figures; that difference is about forecasting, not about which deals
   exist, so it stays.
