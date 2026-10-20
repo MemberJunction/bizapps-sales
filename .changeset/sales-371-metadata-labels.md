@@ -1,5 +1,0 @@
----
-"@mj-biz-apps/sales-entities": minor
----
-
-Sales metadata from the #371 UX digest. Deal, Stage history, Buying team, Internal team, Pipeline Stage and Forecast Snapshot fields show readable labels instead of column names (Annual Increase Override (%), Previous Status, Buying Role, Attribution (%), Owner and others). The Deal Stage Event sections on the Pipeline Stage and Deal Status Type forms read "Deals Entering/Leaving This Stage" and "… This Status". The shared `Sales: Pipeline` view sorts open deals first, then by expected close, shows "Expected close" and "Closed on" columns, keeps Closed at as a hidden sort column, and shows probability as a percent. Pipeline Stage Rotting Days describes the Board's idle flag; Entry Criteria and Required Fields leave the generated form, and the Sales Contact form drops the older free-text Seniority. Buying team Influence gives its 0–100 range. The deal roles read "Owner" and "Sales Development Rep (SDR)". Applied with `mj sync push`; the hidden fields and the new section titles appear after CodeGen.
