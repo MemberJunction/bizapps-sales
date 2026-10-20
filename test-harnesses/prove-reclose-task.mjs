@@ -14,6 +14,8 @@
  */
 import 'dotenv/config';
 import sql from 'mssql';
+import { pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
 
 const DB = process.env.DB_DATABASE;
 let pass = 0, fail = 0;
@@ -37,7 +39,18 @@ const user = UserCache.Users.find((u) => u?.Type?.trim().toLowerCase() === 'owne
 
 // Tasks' own server classes, or ClassFactory resolves a bare BaseEntity and nothing mints a task.
 await importSibling('@mj-biz-apps/tasks-server').then((m) => m.LoadBizAppsTasksServer?.());
-const { CloseWonTaskService, CloseWonTaskDueAt } = await importSibling('@mj-biz-apps/sales-core-entities-server');
+/**
+ * SALES' OWN PACKAGE IS IMPORTED DIRECTLY, NOT THROUGH `importSibling`.
+ *
+ * That helper resolves SIBLING checkouts, and since #231 it deliberately refuses to hand a sibling
+ * this checkout's copy — so asking it for this repo's own package returns a module without this
+ * repo's exports, and `CloseWonTaskDueAt` comes back `undefined`. The failure surfaces as
+ * "CloseWonTaskDueAt is not a function" a few lines later, which reads like a rename rather than a
+ * resolution problem. `prove-confirm-veto-save.mjs` already imports its own package this way.
+ */
+const { CloseWonTaskService, CloseWonTaskDueAt } = await import(
+    pathToFileURL(resolve('packages/CoreEntitiesServer/dist/index.js')).href
+);
 
 // A real deal with a real order behind it — the fixture is the live data, not an invention.
 const target = (await pool.request().query(`
