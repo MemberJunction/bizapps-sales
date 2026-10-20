@@ -17,9 +17,12 @@
  * the IDs is the honest resolution: it keeps the name comparison out of the engine entirely rather than
  * hiding one behind a helper.
  *
- * The one thing it does decide is whether the contract task is raised, and that comes from the pipeline's
- * `CloseWonPolicy.CreateContract` **flag** — the same policy the close operation already reads. A B2B
- * pipeline is not "the one called B2B"; it is the one whose policy says it creates a contract.
+ * It does not decide whether the contract task is raised either. The caller passes the EFFECTIVE
+ * policy's `CreateContract` **flag** — the pipeline's `CloseWonPolicy` with the close's
+ * `PolicyOverrides` applied — so the task and the contract follow the same answer (#354). This service
+ * used to re-read the raw pipeline policy, so an override could create a contract with no task, or
+ * raise a task with no contract. A B2B pipeline is still not "the one called B2B"; it is the one whose
+ * policy says it creates a contract.
  *
  * ── IT IS WIRED INTO THE CLOSE ──────────────────────────────────────────────────────────────────
  *
@@ -44,7 +47,6 @@ import {
 import { TaskAssignmentService, TaskOrchestrationService } from '@mj-biz-apps/tasks-core';
 import type { mjBizAppsTasksTaskLinkEntity } from '@mj-biz-apps/tasks-entities';
 
-const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_TASK_LINK = 'MJ_BizApps_Tasks: Task Links';
 const E_CONTRACT = 'MJ_BizApps_Contracts: Contracts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
@@ -68,7 +70,7 @@ const E_TASK_TYPE = 'MJ_BizApps_Tasks: Task Types';
  * -- AND WHY THIS IS NOT A VOCABULARY COMPARISON --
  *
  * Nothing branches on these. They are looked up, they yield an ID, and no behaviour anywhere asks
- * which type a task has -- the contract task is still decided by `CloseWonPolicy.CreateContract`, a
+ * which type a task has -- the contract task is still decided by the effective `CreateContract`, a
  * flag. A code is a stable identifier that survives renaming the display Name, which is the property
  * a NAME comparison lacks and the whole reason the column exists.
  */
@@ -124,8 +126,12 @@ export interface CloseWonTaskInput {
     DealName: string;
     /** The deal's embedded order. The order-review task hangs off this. */
     OrderID: string;
-    /** Read for its `CloseWonPolicy.CreateContract` flag — never for its name. */
-    PipelineID: string;
+    /**
+     * Whether the close creates a contract: the EFFECTIVE policy's `CreateContract` flag, overrides
+     * applied (#354). Raises the contract-processing task when true. Required, so every caller states
+     * the answer rather than this service re-deriving it from the pipeline.
+     */
+    CreateContract: boolean;
     /**
      * The contract the B2B task hangs off, when one has been created.
      *
@@ -327,10 +333,6 @@ export function RaisesOrderReviewTask(config: CloseWonTasksPolicyConfig | null |
     return config?.RaiseOrderReviewTask !== false;
 }
 
-interface PolicyCreateContract {
-    CreateContract?: boolean;
-}
-
 export class CloseWonTaskService {
     private readonly orchestration = new TaskOrchestrationService();
     private readonly assignments = new TaskAssignmentService();
@@ -338,8 +340,8 @@ export class CloseWonTaskService {
     /**
      * Raises the tasks a won deal owes, and reports what it raised.
      *
-     * Order-review unless the input switches it off; contract-processing when the pipeline's policy
-     * says so. Never throws for a
+     * Order-review unless the input switches it off; contract-processing when the close's effective
+     * policy creates a contract. Never throws for a
      * business reason — a caller mid-close wants a report it can fold into its own, not an exception that
      * loses the task it did manage to create.
      */
@@ -396,7 +398,7 @@ export class CloseWonTaskService {
             result.Tasks.push(orderReview);
         }
 
-        if (await this.policyRaisesContractTask(input.PipelineID, contextUser, result)) {
+        if (input.CreateContract === true) {
             const contractTypeID = await this.resolveTaskType(
                 CODE_CONTRACT_PROCESSING,
                 provider,
@@ -826,50 +828,6 @@ export class CloseWonTaskService {
         } catch (err) {
             LogError(`CloseWonTaskService: assignee check threw on ${entityName}: ${String(err)}`);
             return null;
-        }
-    }
-
-    /**
-     * Whether this pipeline's policy raises a contract task.
-     *
-     * `CloseWonPolicy.CreateContract` is a FLAG on a JSON policy column — the same one the close operation
-     * branches on. Reading the flag rather than the pipeline's name is what lets a deployment rename its
-     * pipelines, or add a third, without touching this file.
-     */
-    private async policyRaisesContractTask(
-        pipelineID: string,
-        contextUser: UserInfo,
-        result: CloseWonTaskResult,
-    ): Promise<boolean> {
-        const rv = new RunView();
-        const view = await rv.RunView<{ CloseWonPolicy: string | null }>(
-            {
-                EntityName: E_PIPELINE,
-                ExtraFilter: `ID = '${pipelineID}'`,
-                ResultType: 'simple',
-                Fields: ['CloseWonPolicy'],
-            },
-            contextUser,
-        );
-        if (!view.Success) {
-            result.Issues.push(`The pipeline's policy could not be read: ${view.ErrorMessage}`);
-            result.Success = false;
-            return false;
-        }
-
-        const raw = (view.Results ?? [])[0]?.CloseWonPolicy;
-        if (!raw) {
-            // No policy is a legitimate state — it means the pipeline raises no contract, not an error.
-            return false;
-        }
-
-        try {
-            const policy = JSON.parse(raw) as PolicyCreateContract;
-            return policy.CreateContract === true;
-        } catch (err) {
-            result.Issues.push(`The pipeline's CloseWonPolicy is not valid JSON: ${String(err)}`);
-            result.Success = false;
-            return false;
         }
     }
 }

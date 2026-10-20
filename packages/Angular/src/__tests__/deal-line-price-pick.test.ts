@@ -166,6 +166,33 @@ describe('a picked price needs a reason', () => {
         expect(editor({ working: line({ overridden: true, reason: 'Band 2', unitPrice: 80 }) }).e.ProductLockedByPrice).toBe(true);
         expect(editor().e.ProductLockedByPrice).toBe(false);
     });
+
+    /**
+     * #408: a rep without an override grant has no price picker, so "put the price back on Default"
+     * named a control they do not have. They are told the line has a special price and who can change it.
+     */
+    it('names the remedy only to a rep who has the picker', () => {
+        const overridden = () => line({ overridden: true, reason: 'Band 2', unitPrice: 80 });
+        expect(editor({ overrideKind: 'list', working: overridden() }).e.ProductSelectTitle)
+            .toBe('Put the price back on Default before changing the product.');
+        const withoutGrant = editor({ overrideKind: 'none', working: overridden() }).e.ProductSelectTitle;
+        expect(withoutGrant).toContain('special price');
+        expect(withoutGrant).toContain('Someone who can override prices');
+        expect(withoutGrant).not.toContain('Put the price back');
+    });
+
+    it('lets the lock outrank the price, and says nothing extra on a line at its default', () => {
+        const overridden = line({ overridden: true, reason: 'Band 2', unitPrice: 80 });
+        const locked = editor({ locked: true, working: overridden }).e;
+        expect(locked.ProductSelectTitle).toBe(locked.BlockedReason);
+        const plain = editor().e;
+        expect(plain.ProductSelectTitle).toBe(plain.BlockedReason);
+    });
+
+    it('binds the product select title to that rule', () => {
+        const select = SOURCE.slice(SOURCE.indexOf('data-testid="line-product"'), SOURCE.indexOf('</select>'));
+        expect(select).toContain('[title]="ProductSelectTitle"');
+    });
 });
 
 describe('the product list names each price', () => {

@@ -73,6 +73,7 @@ import {
 } from '@mj-biz-apps/sales-entities';
 
 import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
+import { FindUnansweredSubscriptionLines } from './subscription-choice.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 
@@ -537,7 +538,7 @@ export class DealEntityServer extends DealEntity {
          * Runs BEFORE any transaction opens: a refused save should cost nothing.
          */
         if (this.IsSaved && !this._reopenInProgress) {
-            const refusal = await this.checkCloseLock();
+            const refusal = await this.checkCloseLock(transition?.Kind === 'Reopen');
             if (refusal) {
                 return this.refuseSave(refusal);
             }
@@ -724,9 +725,18 @@ export class DealEntityServer extends DealEntity {
          * tests, which genuinely require the object, stay behind it — and the state tests, which only
          * need the deal's own columns, ask the FK instead.
          */
-        const amountMayHaveMoved =
+        /**
+         * ── AND NEVER ON A LOCKED DEAL (#351) ───────────────────────────────────────────────────────
+         *
+         * `refreshAmountFromOrder` writes `Amount` with raw SQL, past the entity and so past the close
+         * lock. A closed deal's amount is what was agreed at close, so a permitted edit (Description,
+         * NextStep) must not re-copy an order total that moved since. Gated on `_lockedAtSave` like the
+         * stage writers below; the close and the reopen both save while the persisted status is open,
+         * so they still refresh.
+         */
+        const amountMayHaveMoved = !this._lockedAtSave && (
             (!!order && (order.Dirty || order.Lines.Dirty))
-            || (!!this.OrderID && (this.AmountIsComputed === true || this.Amount === null));
+            || (!!this.OrderID && (this.AmountIsComputed === true || this.Amount === null)));
 
         // The stage's forecast defaults, on the same trigger as the three above. Read here, applied
         // inside the scope, for the same reason the others are: work that might not be needed should not
@@ -2033,7 +2043,8 @@ export class DealEntityServer extends DealEntity {
      * ── THE UNSAVED ORDER ──
      *
      * A new deal's order has not been written yet, so there is nothing to transition and nothing to
-     * roll back: setting `Status` means it is INSERTED in that state by the graph a moment later.
+     * roll back: setting `Status` means it is INSERTED in that state by the graph a moment later. A
+     * booking status still waits on {@link holdsConfirmForUnansweredLines} first, as on a saved order.
      */
     private async applyStageOrderStatus(plan: StageOrderPlan): Promise<void> {
         const order = this.OrderID_Object;
@@ -2044,11 +2055,63 @@ export class DealEntityServer extends DealEntity {
         }
 
         if (!order.IsSaved) {
+            if (IsBooked(plan.Target) && (await this.holdsConfirmForUnansweredLines(order.Status))) {
+                return;
+            }
             order.Status = plan.Target;
             this.stampBookingDate(plan.Target);
             return;
         }
+        await this.applyStageOrderStatusToSavedOrder(order, plan);
+    }
 
+    /**
+     * A stage that books the order asks the question Close Won asks (#426).
+     *
+     * Confirm turns a subscription line whose customer already holds the product into the next term
+     * of that subscription unless the line says otherwise, and Close Won refuses a deal with such a
+     * line unanswered (`subscription-choice.ts`). A stage whose `OrderStatusOnEntry` books the order
+     * reached the same confirm without that check, so it extended subscriptions nobody was asked
+     * about. Same rule, same lines: orders' `FindUnansweredHeldLines`.
+     *
+     * The order is held back with a warning rather than the save refused, as for any other order-side
+     * reason (D-OS1). Close Won has already refused or answered these lines by the time it gets here,
+     * so on a close this finds none. A read that fails holds the confirm too: an unanswered line cannot
+     * be ruled out, and confirming would decide it.
+     *
+     * @returns true when the confirm was held back and a warning recorded.
+     */
+    private async holdsConfirmForUnansweredLines(from: string): Promise<boolean> {
+        let labels: string[];
+        try {
+            const user = this.ContextCurrentUser;
+            if (!user) throw new Error('no user to read the lines as');
+            const view = this.ProviderToUse as unknown as IRunViewProvider;
+            const unanswered = await FindUnansweredSubscriptionLines(this, view, user);
+            labels = unanswered.map(({ Line }) => `${Line.LineNumber} (${Line.Product?.trim() || 'this product'})`);
+        } catch (err) {
+            this._orderStatusWarnings.push(
+                `The deal moved stage, but its order stayed ${from}: whether any line extends a subscription the ` +
+                `customer already holds could not be read (${err instanceof Error ? err.message : String(err)}). ` +
+                'The stage change was kept.',
+            );
+            return true;
+        }
+        if (labels.length === 0) return false;
+        this._orderStatusWarnings.push(
+            `The deal moved stage, but its order stayed ${from}: ${labels.length === 1 ? 'line' : 'lines'} ` +
+            `${labels.join(', ')} ${labels.length === 1 ? 'is' : 'are'} for a product the customer already holds. ` +
+            'Open each one and choose whether it is the next term of that subscription or a new subscription, ' +
+            'then confirm the order. The stage change was kept.',
+        );
+        return true;
+    }
+
+    /** The stage's order status on an order already in the database: a transition, in its own scope. */
+    private async applyStageOrderStatusToSavedOrder(
+        order: NonNullable<DealEntityServer['OrderID_Object']>,
+        plan: StageOrderPlan,
+    ): Promise<void> {
         const from = order.Status;
         if (from === plan.Target) {
             return;   // already there; a no-op write would only dirty the row
@@ -2065,6 +2128,9 @@ export class DealEntityServer extends DealEntity {
                 `${order.ID} (currently '${from}') and orders refused it: ${verdict.Reason ?? 'no reason given'}. ` +
                 'The deal\'s stage change proceeds (D-OS1).',
             );
+            return;
+        }
+        if (IsBooked(plan.Target) && (await this.holdsConfirmForUnansweredLines(from))) {
             return;
         }
 
@@ -2800,7 +2866,13 @@ export class DealEntityServer extends DealEntity {
         return false;
     }
 
-    private async checkCloseLock(): Promise<string | null> {
+    /**
+     * @param reopening this save also sets the status back to an open one (#390). The reopen runs after
+     * the save, against the committed row, so a frozen field edited alongside it is still refused; the
+     * message then says to save the status change first rather than telling the caller to do what they
+     * just did.
+     */
+    private async checkCloseLock(reopening = false): Promise<string | null> {
         const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
         if (!persistedStatusID) {
             return null;
@@ -2927,7 +2999,28 @@ export class DealEntityServer extends DealEntity {
                 `${named} cannot be changed until the status is set to an open one.`
             );
         }
+        if (reopening) {
+            return DealEntityServer.reopenWithEditsRefusal(named);
+        }
         return `This deal is closed. ${named} cannot be changed until the status is set back to Open.`;
+    }
+
+    /**
+     * The refusal when one save reopens the deal AND changes a frozen field (#390).
+     *
+     * ── WHY THE EDIT IS REFUSED RATHER THAN APPLIED AFTER THE REOPEN ─────────────────────────────
+     *
+     * The reopen runs after `super.Save()` because `Sales.ReopenDeal` loads and saves its own copy of
+     * this row. Writing the frozen field first would put it on a deal that is still closed, and leave it
+     * there if the reopen then failed. Running the reopen first would need this object reloaded and the
+     * caller's edits replayed mid-save, with a reopened deal and no edits if the replay failed. Two
+     * saves are the honest order, so the message asks for exactly that.
+     */
+    private static reopenWithEditsRefusal(named: string): string {
+        return (
+            `This deal is closed, and ${named} cannot be changed in the same save that reopens it. ` +
+            'Save the status change on its own first, then make the edit. Nothing was changed.'
+        );
     }
 
     /**
